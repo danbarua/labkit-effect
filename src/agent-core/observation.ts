@@ -41,14 +41,23 @@ export const ModelPart = Schema.Union([
 ]);
 export type ModelPart = typeof ModelPart.Type;
 
-/**
- * How a tool call ended: the tool ran and succeeded or failed, or a policy vetoed the call before
- * it ran. Each holds what the tool, or the policy, reported.
- */
+/** Why a tool call failed. Code that only needs to know whether a call succeeded ignores it. */
+export const ToolFailure = Schema.Union([
+  /** The tool ran and reported an error. */
+  Schema.TaggedStruct("Reported", { error: Received }),
+  /** No tool has the name the model called. */
+  Schema.TaggedStruct("NotFound", {}),
+  /** The tool did not accept the input it was given. */
+  Schema.TaggedStruct("InputRejected", { problem: FailureText }),
+  /** A policy vetoed the call before it ran, for the reason it gave. */
+  Schema.TaggedStruct("Vetoed", { reason: Received }),
+]);
+export type ToolFailure = typeof ToolFailure.Type;
+
+/** How a tool call ended: it succeeded, with the tool's output, or it failed, for a reason. */
 export const ToolOutcome = Schema.Union([
   Schema.TaggedStruct("Succeeded", { output: Received }),
-  Schema.TaggedStruct("Failed", { error: Received }),
-  Schema.TaggedStruct("Vetoed", { reason: Received }),
+  Schema.TaggedStruct("Failed", { reason: ToolFailure }),
 ]);
 export type ToolOutcome = typeof ToolOutcome.Type;
 

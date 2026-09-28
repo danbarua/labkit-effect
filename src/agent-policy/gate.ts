@@ -35,7 +35,7 @@ function vetoed(request: Reviewed, reason: Received): Observation {
     case "RequestModelResponse":
       return { _tag: "ModelVetoed", turn: request.turn, reason };
     case "RunTool":
-      return { _tag: "ToolEnded", call: request.call, outcome: { _tag: "Vetoed", reason } };
+      return { _tag: "ToolEnded", call: request.call, outcome: { _tag: "Failed", reason: { _tag: "Vetoed", reason } } };
     default:
       return request satisfies never;
   }

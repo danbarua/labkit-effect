@@ -2,13 +2,12 @@
  * Two tools for trying the loop: `add` sums two numbers, `echo` returns its text. The catalog and
  * the runner are defined together, so a tool offered to the model is a tool that runs.
  *
- * A call that cannot run fails with a JSON error the model can act on: a `code`, a `message`, and
- * what to call instead. An unknown tool name gets the catalog; input that does not fit gets the
- * tool's input schema and what was given.
+ * A call that cannot run fails with the reason: no tool has the name (`NotFound`), or the input
+ * does not fit (`InputRejected`). How that reads to the model is the provider adapter's business.
  */
 
 import { Effect, Layer, type Schema } from "effect";
-import { ToolName } from "../agent-core/names.ts";
+import { FailureText, ToolName } from "../agent-core/names.ts";
 import type { ToolOutcome } from "../agent-core/observation.ts";
 import { ToolRunner, type ToolSpec } from "./contracts.ts";
 import { parseJson, receivedJson } from "./received.ts";
@@ -49,38 +48,21 @@ export const smolCatalog: ReadonlyArray<ToolSpec> = tools.map(({ name, descripti
   input,
 }));
 
-const failed = (error: Schema.Json): ToolOutcome => ({ _tag: "Failed", error: receivedJson(error) });
-
-function notFound(name: ToolName): ToolOutcome {
-  return failed({
-    code: "tool_not_found",
-    message: `No tool is named "${name}".`,
-    tools: tools.map((tool) => ({ name: tool.name, input_schema: tool.input })),
-  });
-}
-
-function invalidInput(tool: SmolTool, message: string, given: Schema.Json | undefined): ToolOutcome {
-  return failed({
-    code: "invalid_input",
-    message,
-    tool: tool.name,
-    input_schema: tool.input,
-    ...(given === undefined ? {} : { given }),
-  });
-}
+const rejected = (problem: string): ToolOutcome => ({
+  _tag: "Failed",
+  reason: { _tag: "InputRejected", problem: FailureText.make(problem) },
+});
 
 function run(name: ToolName, input: Parameters<ToolRunner["Service"]["run"]>[1]): ToolOutcome {
   const tool = tools.find((candidate) => candidate.name === name);
-  if (tool === undefined) return notFound(name);
+  if (tool === undefined) return { _tag: "Failed", reason: { _tag: "NotFound" } };
   const parsed = parseJson(input);
-  if ("reason" in parsed) return invalidInput(tool, `The input could not be read: ${parsed.reason}.`, undefined);
+  if ("reason" in parsed) return rejected(`The input could not be read: ${parsed.reason}.`);
   const given = parsed.value;
   if (typeof given !== "object" || given === null || Array.isArray(given))
-    return invalidInput(tool, `${name} takes an object.`, given);
+    return rejected(`${name} takes an object.`);
   const ran = tool.run(given as Schema.JsonObject);
-  return "output" in ran
-    ? { _tag: "Succeeded", output: receivedJson(ran.output) }
-    : invalidInput(tool, ran.misfit, given);
+  return "output" in ran ? { _tag: "Succeeded", output: receivedJson(ran.output) } : rejected(ran.misfit);
 }
 
 export const SmolToolRunner = Layer.succeed(ToolRunner, {

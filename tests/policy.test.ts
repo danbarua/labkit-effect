@@ -64,7 +64,7 @@ test("a denied tool is vetoed before the person is asked; another tool waits for
     { _tag: "Requested", request: runTool("c2", "ls") },
   ]);
   expect(outputs as unknown).toEqual([
-    { _tag: "Observe", observation: { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Vetoed", reason: json({ denied: "rm" }) } } },
+    { _tag: "Observe", observation: { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Failed", reason: { _tag: "Vetoed", reason: json({ denied: "rm" }) } } } },
     { _tag: "Ask", key: "tool:c2", asks: json({ question: "run?", tool: "ls" }) },
   ]);
 });
@@ -82,7 +82,7 @@ test("the person's answer lets the waiting call continue, or vetoes it", () => {
   ]);
   expect(no.at(-1) as unknown).toEqual({
     _tag: "Observe",
-    observation: { _tag: "ToolEnded", call: "c2", outcome: { _tag: "Vetoed", reason: json({ person: "not on main" }) } },
+    observation: { _tag: "ToolEnded", call: "c2", outcome: { _tag: "Failed", reason: { _tag: "Vetoed", reason: json({ person: "not on main" }) } } },
   });
 });
 

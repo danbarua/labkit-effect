@@ -1,5 +1,8 @@
 import { afterAll, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Logger, type Schema } from "effect";
+import { ModelName, ProviderName, ToolName, TurnId } from "../src/agent-core/names.ts";
+import { ModelClient, ToolRunner } from "../src/agent-effect/contracts.ts";
+import { receivedJson } from "../src/agent-effect/received.ts";
 import type { Observation } from "../src/agent-core/observation.ts";
 import { BoringModelProvider, CountingTurns } from "../src/agent-effect/boring.ts";
 import { HttpModelClient } from "../src/agent-effect/http-model-client.ts";
@@ -80,5 +83,53 @@ test("a call with input that does not fit tells the model what the tool takes an
       input_schema: smolCatalog[0]?.input,
       given: { a: "2" },
     },
+  });
+});
+
+test("the runner reports why a call failed, and formats nothing", async () => {
+  const run = (name: string, input: unknown) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        return yield* (yield* ToolRunner).run(ToolName.make(name), receivedJson(input as Schema.Json));
+      }).pipe(Effect.provide(SmolToolRunner)),
+    );
+  expect(await run("___read_", { path: "a.ts" })).toEqual({ _tag: "Failed", reason: { _tag: "NotFound" } });
+  expect((await run("add", { a: "2" })) as unknown).toEqual({
+    _tag: "Failed",
+    reason: { _tag: "InputRejected", problem: "add needs two numbers, a and b." },
+  });
+});
+
+test("the client logs the max_tokens it supplies, and why", async () => {
+  const logged: Array<{ level: string; message: unknown }> = [];
+  const capture = Logger.make((options) => {
+    logged.push({ level: options.logLevel, message: options.message });
+  });
+  const provider = scripted({ name: "add", input: { a: 1, b: 2 } });
+  servers.push(provider.server);
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const client = yield* ModelClient;
+      yield* client.respond(
+        {
+          provider: ProviderName.make("boring"),
+          model: ModelName.make("boring-1"),
+          endpoint: new URL("/v1/messages", provider.server.url),
+        },
+        { system: undefined, tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "hi" }] }] },
+        TurnId.make("turn-1"),
+      );
+    }).pipe(Effect.provide(Layer.mergeAll(HttpModelClient, Logger.layer([capture])))),
+  );
+  expect(logged).toContainEqual({
+    level: "Info",
+    message: [
+      "model.request.max_tokens_supplied",
+      {
+        turn: "turn-1",
+        max_tokens: 1024,
+        reason: "the Messages API requires max_tokens and the context sets no output limit",
+      },
+    ],
   });
 });

@@ -103,7 +103,7 @@ test("input queued when a turn fails is dropped, and no turn starts until the ne
 test("a tool result for a call nobody made is recorded, and changes nothing", () => {
   const session = started();
   const before = session.state;
-  const stray = observe(session, { _tag: "ToolEnded", call: "c9", outcome: { _tag: "Failed", error: json("?") } });
+  const stray = observe(session, { _tag: "ToolEnded", call: "c9", outcome: { _tag: "Failed", reason: { _tag: "Reported", error: json("?") } } });
   expect(session.state).toEqual(before);
   expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "ObservationNotExpected", observation: stray } });
 });
@@ -114,7 +114,7 @@ test("a vetoed call settles the batch and the model is asked again", () => {
   const vetoed = observe(session, {
     _tag: "ToolEnded",
     call: "c1",
-    outcome: { _tag: "Vetoed", reason: json({ rule: "no test runs on main" }) },
+    outcome: { _tag: "Failed", reason: { _tag: "Vetoed", reason: json({ rule: "no test runs on main" }) } },
   });
   expect(tags(session.journal.filter((fact) => fact.seq > vetoed))).toEqual(["ModelAsked"]);
   expect(session.requests.map((request) => request._tag)).toEqual([
