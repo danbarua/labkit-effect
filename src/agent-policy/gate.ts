@@ -69,54 +69,80 @@ export function emptyGate<State>(): GateState<State> {
   return { waiting: new Map() };
 }
 
+function holding<State>(
+  held: GateState<State>,
+  key: RequestKey,
+  entry: { readonly request: Reviewed; readonly state: State },
+): GateState<State> {
+  return { waiting: new Map([...held.waiting, [key, entry]]) };
+}
+
+function releasing<State>(held: GateState<State>, key: RequestKey): GateState<State> {
+  return { waiting: new Map([...held.waiting].filter(([waiting]) => waiting !== key)) };
+}
+
+/** The gate after the policy reviewing `key` took `step`. */
+function settle<State>(
+  held: GateState<State>,
+  key: RequestKey,
+  request: Reviewed,
+  step: PolicyStep<State>,
+): GateStep<State> {
+  switch (step._tag) {
+    case "Waiting":
+      return {
+        gate: holding(held, key, { request, state: step.state }),
+        outputs: step.asks === undefined ? [] : [{ _tag: "Ask", key, asks: step.asks }],
+      };
+    case "Decided":
+      switch (step.verdict._tag) {
+        case "Continue":
+          return { gate: releasing(held, key), outputs: [{ _tag: "Forward", request }] };
+        case "Veto":
+          return {
+            gate: releasing(held, key),
+            outputs: [{ _tag: "Observe", observation: vetoed(request, step.verdict.reason) }],
+          };
+        default:
+          return step.verdict satisfies never;
+      }
+    default:
+      return step satisfies never;
+  }
+}
+
 export function gate<State>(
   policy: Policy<State>,
   held: GateState<State>,
   input: GateInput,
 ): GateStep<State> {
-  const waiting = new Map(held.waiting);
-  const outputs: Array<GateOutput> = [];
-  const settle = (key: RequestKey, request: Reviewed, step: PolicyStep<State>): void => {
-    switch (step._tag) {
-      case "Waiting":
-        waiting.set(key, { request, state: step.state });
-        if (step.asks !== undefined) outputs.push({ _tag: "Ask", key, asks: step.asks });
-        return;
-      case "Decided":
-        waiting.delete(key);
-        switch (step.verdict._tag) {
-          case "Continue":
-            outputs.push({ _tag: "Forward", request });
-            return;
-          case "Veto":
-            outputs.push({ _tag: "Observe", observation: vetoed(request, step.verdict.reason) });
-            return;
-          default:
-            return step.verdict satisfies never;
-        }
-      default:
-        return step satisfies never;
-    }
-  };
-
   switch (input._tag) {
     case "Requested": {
       const request = input.request;
-      if (request._tag === "StartTurn") outputs.push({ _tag: "Forward", request });
-      else settle(keyOf(request), request, policy.start(request));
-      break;
+      return request._tag === "StartTurn"
+        ? { gate: held, outputs: [{ _tag: "Forward", request }] }
+        : settle(held, keyOf(request), request, policy.start(request));
     }
     case "Answered": {
-      const held = waiting.get(input.key);
-      if (held !== undefined)
-        settle(input.key, held.request, policy.receive(held.state, { _tag: "Answered", answer: input.answer }));
-      break;
+      const waiting = held.waiting.get(input.key);
+      return waiting === undefined
+        ? { gate: held, outputs: [] }
+        : settle(
+            held,
+            input.key,
+            waiting.request,
+            policy.receive(waiting.state, { _tag: "Answered", answer: input.answer }),
+          );
     }
     case "Tick":
-      for (const [key, held] of [...waiting]) settle(key, held.request, policy.receive(held.state, input.message));
-      break;
+      return [...held.waiting].reduce<GateStep<State>>(
+        (done, [key, waiting]) => {
+          const next = settle(done.gate, key, waiting.request, policy.receive(waiting.state, input.message));
+          return { gate: next.gate, outputs: [...done.outputs, ...next.outputs] };
+        },
+        { gate: held, outputs: [] },
+      );
     default:
-      input satisfies never;
+      return input satisfies never;
   }
-  return { gate: { waiting }, outputs };
 }

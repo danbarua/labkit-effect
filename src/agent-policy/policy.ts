@@ -56,38 +56,27 @@ export interface EveryState {
  * policy lets it continue. A waiting policy holds the ones after it.
  */
 export function every(policies: ReadonlyArray<Policy<unknown>>): Policy<EveryState> {
+  const decided: PolicyStep<EveryState> = { _tag: "Decided", verdict: { _tag: "Continue" } };
+  /** The combined step after the policy at `index` took `step`. */
   const from = (request: EffectRequest, index: number, step: PolicyStep<unknown>): PolicyStep<EveryState> => {
-    let at = index;
-    let current = step;
-    for (;;) {
-      switch (current._tag) {
-        case "Waiting":
-          return {
-            _tag: "Waiting",
-            state: { request, index: at, state: current.state },
-            asks: current.asks,
-          };
-        case "Decided":
-          switch (current.verdict._tag) {
-            case "Veto":
-              return current;
-            case "Continue": {
-              at += 1;
-              const next = policies[at];
-              if (next === undefined) return current;
-              current = next.start(request);
-              break;
-            }
-            default:
-              return current.verdict satisfies never;
+    switch (step._tag) {
+      case "Waiting":
+        return { _tag: "Waiting", state: { request, index, state: step.state }, asks: step.asks };
+      case "Decided":
+        switch (step.verdict._tag) {
+          case "Veto":
+            return step;
+          case "Continue": {
+            const next = policies[index + 1];
+            return next === undefined ? step : from(request, index + 1, next.start(request));
           }
-          break;
-        default:
-          return current satisfies never;
-      }
+          default:
+            return step.verdict satisfies never;
+        }
+      default:
+        return step satisfies never;
     }
   };
-  const decided: PolicyStep<EveryState> = { _tag: "Decided", verdict: { _tag: "Continue" } };
   return {
     start: (request) => {
       const first = policies[0];
@@ -95,7 +84,9 @@ export function every(policies: ReadonlyArray<Policy<unknown>>): Policy<EverySta
     },
     receive: (held, message) => {
       const policy = policies[held.index];
-      return policy === undefined ? decided : from(held.request, held.index, policy.receive(held.state, message));
+      return policy === undefined
+        ? decided
+        : from(held.request, held.index, policy.receive(held.state, message));
     },
   };
 }

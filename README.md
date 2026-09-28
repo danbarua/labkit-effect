@@ -20,7 +20,8 @@ The domain core of a coding harness, and the layers around it.
 | `src/agent-policy/` | Whether an effect request continues, is vetoed, or waits. See its `MODEL.md`. | `Schema` from `effect`, `agent-core` |
 | `src/agent-effect/` | The layer around them: contracts as Effect services, adapters, the loop. | anything |
 
-`bun run check:core` enforces the imports of the first two and C5.
+`bun run check:core` enforces, in the first two: their imports, C5, and pure functions (no `let`,
+no loops, no call that changes a value in place).
 
 ## Commands
 
