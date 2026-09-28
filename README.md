@@ -20,12 +20,15 @@ The domain core of a coding harness, and the layers around it.
 | `src/agent-policy/` | Whether an effect request continues, is vetoed, or waits. See its `MODEL.md`. | `Schema` from `effect`, `agent-core` |
 | `src/agent-effect/` | The layer around them: contracts as Effect services, adapters, the loop. | anything |
 
-`bun run check:core` enforces, in the first two: their imports, C5, and pure functions (no `let`,
-no loops, no call that changes a value in place).
+In the first two, `bun run lint` (oxlint, with Effect's recommended preset and the rules in
+`scripts/oxlint/abstract-layers.js`) enforces their imports and pure functions (no `let`, no loops,
+no call that changes a value in place), and refuses the `string` type and an unbranded
+`Schema.String`. `bun run check:brands` asks the TypeScript checker that every schema there decodes
+to a type with no unbranded string, however it is built.
 
 ## Commands
 
 ```sh
 bun install
-bun run check       # typecheck, check:core, tests
+bun run check       # typecheck, lint, check:brands, tests
 ```

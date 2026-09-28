@@ -3,14 +3,17 @@
   "module": "index.ts",
   "type": "module",
   "scripts": {
-    "prepare": "effect-tsgo patch",
+    "prepare": "effect-tsgo patch --oxlint",
     "typecheck": "tsc --noEmit -p .",
-    "check:core": "bun scripts/check-core.ts",
-    "check": "bun run typecheck && bun run check:core && bun test"
+    "check": "bun run typecheck && bun run lint && bun run check:brands && bun test",
+    "lint": "oxlint --type-aware",
+    "check:brands": "bun scripts/check-brands.ts"
   },
   "devDependencies": {
     "@effect/tsgo": "^0.46.1",
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "oxlint": "1.85.0",
+    "oxlint-tsgolint": "7.0.2003"
   },
   "peerDependencies": {
     "typescript": "^7"

@@ -278,7 +278,7 @@ export const AnthropicModelClient = Layer.succeed(ModelClient, {
         provider: target.provider,
         model: target.model,
         parts: (content as ReadonlyArray<Json>).map(part),
-        stop: StopReason.make(typeof stop_reason === "string" ? stop_reason : String(stop_reason)),
+        stop: StopReason.make(typeof stop_reason === "string" ? stop_reason : JSON.stringify(stop_reason ?? null)),
         metadata: receivedJson(metadata),
       };
       return outcome;
