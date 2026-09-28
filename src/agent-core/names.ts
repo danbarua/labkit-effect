@@ -29,9 +29,13 @@ export type ProviderName = typeof ProviderName.Type;
 export const ModelName = Schema.String.pipe(Schema.brand("ModelName"));
 export type ModelName = typeof ModelName.Type;
 
-/** Text a user wrote. */
-export const UserText = Schema.String.pipe(Schema.brand("UserText"));
-export type UserText = typeof UserText.Type;
+/** The name of an agent that can send input to a session. */
+export const AgentName = Schema.String.pipe(Schema.brand("AgentName"));
+export type AgentName = typeof AgentName.Type;
+
+/** The text of an input to a session, from whichever source sent it. */
+export const InputText = Schema.String.pipe(Schema.brand("InputText"));
+export type InputText = typeof InputText.Type;
 
 /** Text a model wrote as its answer. */
 export const ModelText = Schema.String.pipe(Schema.brand("ModelText"));
@@ -56,3 +60,11 @@ export type FailureText = typeof FailureText.Type;
 /** The position of a fact in its session's journal, starting at 1. */
 export const Seq = Schema.Int.pipe(Schema.brand("Seq"));
 export type Seq = typeof Seq.Type;
+
+/** A count of turns started in a session. */
+export const TurnCount = Schema.Int.pipe(Schema.brand("TurnCount"));
+export type TurnCount = typeof TurnCount.Type;
+
+/** A time in milliseconds, from a clock the caller chooses. */
+export const Millis = Schema.Finite.pipe(Schema.brand("Millis"));
+export type Millis = typeof Millis.Type;

@@ -34,17 +34,43 @@ Status: **open** means Dan has not settled it. **Proposal** means the wording is
 
 ## Rules
 
-- R1. An Observation is recorded as received. Every part of it is in the Fact. Leaving a part out
-  is a Decision, and is recorded as one. (Proposal.)
+- R1. A recorded Observation is kept as received. Every part of it is in the Fact. Leaving a part
+  out is a Decision, and is recorded as one. (Proposal.)
 - R2. A decoder for a model response maps every received part to a part in the Observation. A part
   the decoder does not recognise becomes an `Unrecognised` part holding what was received.
 - R3. For every machine state and every Observation kind, the machine produces a stated result.
   An Observation the current state does not expect produces the Decision `ObservationNotExpected`.
   The compiler checks this: every `switch` over a union ends in `satisfies never`.
 - R4. A live view and a view built after reload are the same function applied to the same facts.
+- R5. The journal is read strictly: a fact with a field this build does not know is refused, not
+  stripped. Effect Schema strips unknown fields by default.
+
+## Input during a turn
+
+Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool calls."
+
+- I1. Input arrives from the user, the system (a wake-up, a scheduled prompt), or another agent,
+  at any time.
+- I2. Input that arrives while no turn is under way starts a turn (Decision `TurnStarted`) with
+  every queued input.
+- I3. Input that arrives during a turn is queued. It is given to the turn (Decision
+  `InputDelivered`) at the next point between steps: when every call of a tool batch has settled,
+  or when the model gives a final answer. The model is then asked again.
+- I4. A turn ends (Decision `TurnAnswered`) on a final answer with no input queued. (Dan chose this.)
+- I5. The sender can cancel a queued input (Observation `InputCancelled`). Cancelling an input
+  already given to a turn is recorded as `ObservationNotExpected`.
+- I6. A turn that fails leaves its queued input queued; the next input starts a turn with all of it.
+  (Proposal.)
+
+## Captured observations
+
+Streamed partial model output is side-band information for display, like a progress bar: a
+captured observation, not recorded (Dan). `throttle.ts` is a machine that releases captured items
+in batches at most once per interval; time is an input, so it also serves tests.
 
 ## Open questions
 
-- Q1. Streamed partial model output: is each chunk an Observation, recorded? Not decided.
-- Q2. Is starting a turn a Decision, or does a user message start one by definition? The code has
-  it as a Decision (`TurnStarted`).
+- Q2. Dan: starting a turn is a harness decision; in the chat-completions shape it looks like the
+  user's. The session's state ("a turn is under way") is a Fact. The code records `TurnStarted` as a
+  Decision, so it is a Fact under T4. Is that the reading Dan intends?
+- Q3. I6: should a failed turn's queued input start the next turn at once, rather than wait?

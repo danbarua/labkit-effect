@@ -1,21 +1,24 @@
 /**
- * Observations: what reaches the harness from outside, recorded as received.
+ * Observations: what reaches the harness from outside. A recorded observation is kept as
+ * received; a captured observation is passed on for display and not kept.
  */
 
 import { Schema } from "effect";
 import {
+  AgentName,
   CallId,
   FailureText,
+  InputText,
   ModelName,
   ModelText,
   ProviderName,
+  Seq,
   SessionId,
   StopReason,
   ThinkingSignature,
   ThinkingText,
   ToolName,
   TurnId,
-  UserText,
 } from "./names.ts";
 
 /** Whether a tool call waits for the user's permission. */
@@ -24,6 +27,14 @@ export type PermissionMode = typeof PermissionMode.Type;
 
 export const Configuration = Schema.Struct({ permission: PermissionMode });
 export type Configuration = typeof Configuration.Type;
+
+/** Who sent an input: the user, the system (a wake-up, a scheduled prompt), or another agent. */
+export const InputSource = Schema.Union([
+  Schema.TaggedStruct("User", {}),
+  Schema.TaggedStruct("System", {}),
+  Schema.TaggedStruct("Agent", { agent: AgentName }),
+]);
+export type InputSource = typeof InputSource.Type;
 
 /** One part of a model's response. */
 export const ModelPart = Schema.Union([
@@ -42,11 +53,14 @@ export const ToolOutcome = Schema.Union([
 ]);
 export type ToolOutcome = typeof ToolOutcome.Type;
 
+/** Observations recorded as facts. */
 export const Observation = Schema.Union([
-  /** A user opened a session with a configuration. */
+  /** A session was opened with a configuration. */
   Schema.TaggedStruct("SessionOpened", { session: SessionId, configuration: Configuration }),
-  /** A user wrote a message. */
-  Schema.TaggedStruct("UserWrote", { text: UserText }),
+  /** An input arrived. It can arrive at any time, including while a turn is under way. */
+  Schema.TaggedStruct("InputArrived", { from: InputSource, text: InputText }),
+  /** The input recorded at `input`, still queued, was cancelled by its sender. */
+  Schema.TaggedStruct("InputCancelled", { input: Seq }),
   /**
    * A model responded. `parts` are the response's parts in the order received; `metadata` is
    * everything else the provider sent with it (usage, identifiers), as received.
@@ -70,3 +84,10 @@ export const Observation = Schema.Union([
   Schema.TaggedStruct("ToolEnded", { call: CallId, outcome: ToolOutcome }),
 ]);
 export type Observation = typeof Observation.Type;
+
+/** Observations captured for display and not recorded. */
+export const CapturedObservation = Schema.Union([
+  /** Part of a model response while it is still arriving, as received. */
+  Schema.TaggedStruct("ModelStreamed", { turn: TurnId, chunk: Schema.Json }),
+]);
+export type CapturedObservation = typeof CapturedObservation.Type;
