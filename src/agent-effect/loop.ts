@@ -59,7 +59,7 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
 
   /** What a request is about, for its log lines. */
   const about = (request: EffectRequest, world: World): Record<string, unknown> => {
-    const turn = world.session._tag === "InTurn" ? { turn: world.session.turn } : {};
+    const turn = world.inbox._tag === "Serving" ? { turn: world.inbox.turn } : {};
     switch (request._tag) {
       case "StartTurn":
         return { inputs: request.inputs };

@@ -35,7 +35,6 @@ export const Decision = Schema.Union([
   Schema.TaggedStruct("ModelAsked", { turn: TurnId, through: Seq }),
   /**
    * Inputs queued during `turn` were discarded because the turn ended other than by an answer.
-   * Recorded before `TurnEnded`.
    */
   Schema.TaggedStruct("InputDropped", { turn: TurnId, inputs: Inputs }),
   /** The turn ended. The session is idle until the next input arrives. */

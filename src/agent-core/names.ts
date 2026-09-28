@@ -65,6 +65,10 @@ export type Seq = typeof Seq.Type;
 export const Inputs = Schema.NonEmptyArray(Seq);
 export type Inputs = typeof Inputs.Type;
 
+/** A step's place in its turn, starting at 1. */
+export const StepIndex = Schema.Int.pipe(Schema.brand("StepIndex"));
+export type StepIndex = typeof StepIndex.Type;
+
 /** A time in milliseconds, from a clock the caller chooses. */
 export const Millis = Schema.Finite.pipe(Schema.brand("Millis"));
 export type Millis = typeof Millis.Type;

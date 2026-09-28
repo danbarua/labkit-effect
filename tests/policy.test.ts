@@ -133,7 +133,7 @@ test("a vetoed model request ends the turn, recorded with the policy's reason", 
   expect(session.journal.at(-1)).toMatchObject({
     decision: { _tag: "TurnEnded", turn: "turn-1", ending: { _tag: "Vetoed", reason: json({ budget: "80% of the month used" }) } },
   });
-  expect(session.world.session).toMatchObject({ _tag: "Idle" });
+  expect(session.world.inbox).toMatchObject({ _tag: "Idle" });
 });
 
 test("starting a turn is forwarded without review", () => {

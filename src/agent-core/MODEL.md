@@ -1,6 +1,6 @@
 # agent-core
 
-A session: inputs arrive, turns run, the model is asked, tools are called. The core records what it
+Inputs arrive, turns run, the model is asked, tools are called. The core records what it
 observes and what it decides, and sends requests for effects. It does not carry them out, and it
 does not decide whether they happen.
 
@@ -32,11 +32,12 @@ Status: **open** means Dan has not settled it. **Proposal** means the wording is
   outcome's two cases.
 - R5. Every `switch` over a union ends in `satisfies never`, so a new kind of observation or decision
   does not compile until every machine handles it.
-- R6. The core is a session machine, a machine per turn, and a machine per tool call. Each is a
-  table from (state kind, message kind) to a transition or "ignored"; whether a message is acted
-  on depends on the two kinds alone. The router delivers an observation to the machine its fields
-  address. An observation a machine does not act on is recorded as `ObservationNotExpected`; one
-  addressed to a turn or call no machine exists for, as `ObservationUndelivered`.
+- R6. The core is machines that pass messages: an inbox, a conversation turn per turn, a turn step
+  per model request, and a call per tool call. Each is a table from (state kind, message kind) to a
+  transition or "ignored"; whether a message is acted on depends on the two kinds alone. The router
+  delivers an observation to the machine its fields address. An observation a machine does not act
+  on is recorded as `ObservationNotExpected`; one addressed to a turn or call no machine exists
+  for, as `ObservationUndelivered`.
 - R7. The view built as each fact is recorded is the view built from all the facts at once.
 
 ## Input during a turn
@@ -45,7 +46,8 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
 
 - I1. Input arrives from the user, the system (a wake-up, a scheduled prompt), or another agent,
   at any time.
-- I2. Input that arrives while the session is idle leads to a turn. The core decides when and with
+- I2. Input that arrives while no turn is under way leads to a turn (the rule for when is
+  Claude's, not specified). The core decides when and with
   which inputs (Decision `TurnRequested`, request `StartTurn`); an adapter starts the turn, chooses
   its identity, and reports it (Observation `TurnStarted`). Input that arrives while a turn is
   starting is queued for that turn's next step.
@@ -57,7 +59,7 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
 - I5. The sender can cancel a queued input (Observation `InputCancelled`). Cancelling an input
   that is no longer queued changes nothing.
 - I6. A turn that ends other than by an answer (`Failed`, `Vetoed`) drops its queued input
-  (Decision `InputDropped`, recorded before `TurnEnded`). No turn is under way until the next input
+  (Decision `InputDropped`). No turn is under way until the next input
   arrives. (Dan: "There is no 'next turn', until stimulus is received.")
 
 ## Decisions and effects
@@ -91,7 +93,7 @@ then continues").
   fails leaves what it carried unseen. The view holds `seenThrough` and `sentThrough`, and
   `unseen(view)` lists the inputs and tool outcomes (vetoes included) the model has not seen.
 - S3. `ModelFailed` means the request failed after whatever the layers around the core do first:
-  retries with back-off, another model or provider. The turn ends and the session is idle until
+  retries with back-off, another model or provider. The turn ends, and no turn is under way until
   the next input. That turn's first request carries the input and everything still unseen.
 
 ## Captured observations
