@@ -1,9 +1,22 @@
-/** Context assembly on its own: a request in, an assembled context out. */
+/** Context assembly on its own: the services it needs, provided by test layers; an assembled context out. */
 
 import { expect, test } from "bun:test";
 import { Effect, Layer, Logger } from "effect";
 import { TestClock } from "effect/testing";
-import { type AssembleContext, assemble, type ModelChoice, type Providers } from "../src/agent-context/assemble.ts";
+import {
+  assemble,
+  Conversation,
+  type ModelChoice,
+  type ModelSelector,
+  ModelSelectors,
+  type NoticeProvider,
+  Notices,
+  type SystemPromptProvider,
+  SystemPrompts,
+  type ToolCatalog,
+  ToolCatalogs,
+} from "../src/agent-context/assemble.ts";
+import type { ContextMessage } from "../src/agent-effect/contracts.ts";
 import { logKeys } from "../src/agent-context/log-keys.ts";
 import {
   BoringSystemPromptProvider,
@@ -23,38 +36,55 @@ const model = (name: string, contextWindow: number): ModelChoice => ({
 const small = model("boring-500k", 500_000);
 const large = model("boring-1m", 1_000_000);
 
-const providers: Providers = {
+/** The providers, one of each kind, as layers; a test replaces the ones it varies. */
+interface Setup {
+  readonly systemPrompts: ReadonlyArray<SystemPromptProvider>;
+  readonly toolCatalogs: ReadonlyArray<ToolCatalog>;
+  readonly notices: ReadonlyArray<NoticeProvider>;
+  readonly modelSelectors: readonly [ModelSelector, ...ReadonlyArray<ModelSelector>];
+}
+
+const oneOfEach: Setup = {
   systemPrompts: [BoringSystemPromptProvider],
   toolCatalogs: [BoringToolCatalog],
   notices: [SystemTimeNoticeProvider],
   modelSelectors: [FixedModelSelector(small), ContextWindowAwareModelSelector(large)],
 };
 
-const conversation = (text: string): AssembleContext => ({
-  messages: [{ role: "user", parts: [{ _tag: "Text", text }] }],
-});
+const conversation = (text: string): ReadonlyArray<ContextMessage> => [
+  { role: "user", parts: [{ _tag: "Text", text }] },
+];
 
-/** Runs assembly at a fixed time, collecting what it logs. */
-const run = (with_: Providers, request: AssembleContext) => {
+/** Runs assembly at a fixed time over `messages`, collecting what it logs. */
+const run = (setup: Setup, messages: ReadonlyArray<ContextMessage>) => {
   const logged: Array<unknown> = [];
   const capture = Logger.make((options) => {
     logged.push(options.message);
   });
+  const layers = Layer.mergeAll(
+    Layer.succeed(Conversation, { messages: Effect.succeed(messages) }),
+    Layer.succeed(SystemPrompts, setup.systemPrompts),
+    Layer.succeed(ToolCatalogs, setup.toolCatalogs),
+    Layer.succeed(Notices, setup.notices),
+    Layer.succeed(ModelSelectors, setup.modelSelectors),
+    TestClock.layer(),
+    Logger.layer([capture]),
+  );
   return Effect.runPromise(
     Effect.gen(function* () {
       yield* TestClock.setTime(Date.parse("2026-09-28T12:00:00.000Z"));
-      return yield* assemble(with_, request);
-    }).pipe(Effect.provide(Layer.mergeAll(TestClock.layer(), Logger.layer([capture])))),
+      return yield* assemble;
+    }).pipe(Effect.provide(layers)),
   ).then((assembled) => ({ assembled, logged }));
 };
 
 test("one provider of each kind: the conversation passes through, each provider's output is in place", async () => {
-  const request = conversation("Ping?");
-  const { assembled, logged } = await run(providers, request);
+  const messages = conversation("Ping?");
+  const { assembled, logged } = await run(oneOfEach, messages);
   expect(assembled as unknown).toEqual({
     system: ["You are a helpful assistant."],
     tools: [{ name: "echo", description: 'Answers "PONG".', input: { type: "object", properties: {} } }],
-    messages: request.messages,
+    messages,
     notices: ["The current time is 2026-09-28T12:00:00.000Z."],
     model: small,
   });
@@ -64,8 +94,8 @@ test("one provider of each kind: the conversation passes through, each provider'
 test("the outputs of providers of one kind are appended in the order the providers are listed", async () => {
   const { assembled } = await run(
     {
-      ...providers,
-      systemPrompts: [BoringSystemPromptProvider, { system: () => Effect.succeed(["Answer briefly."]) }],
+      ...oneOfEach,
+      systemPrompts: [BoringSystemPromptProvider, { system: Effect.succeed(["Answer briefly."]) }],
       toolCatalogs: [BoringToolCatalog, BoringToolCatalog],
     },
     conversation("Ping?"),
@@ -75,7 +105,7 @@ test("the outputs of providers of one kind are appended in the order the provide
 });
 
 test("a conversation estimated not to fit the 500k model goes to the 1M model, and the move is logged", async () => {
-  const { assembled, logged } = await run(providers, conversation("x".repeat(2_400_000)));
+  const { assembled, logged } = await run(oneOfEach, conversation("x".repeat(2_400_000)));
   expect(assembled.model).toEqual(large);
   expect(logged).toEqual([
     [

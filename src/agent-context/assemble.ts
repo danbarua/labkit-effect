@@ -1,19 +1,15 @@
 /**
- * Context assembly: takes the conversation so far and produces what the model is sent next, for
- * whatever sends it on. Each kind of content comes from an ordered list of providers, and their
- * outputs are appended in order. The model is chosen last, because a selector may choose by the
- * size of what was assembled.
+ * Context assembly: produces what the model is sent next. Each kind of content comes from an
+ * ordered list of providers, and their outputs are appended in order. The model is chosen last,
+ * because a selector may choose by the size of what was assembled.
+ *
+ * Where each part comes from is a service: the conversation so far, and one ordered list of
+ * providers per kind. Layers supply them.
  */
 
-import { Effect } from "effect";
-import type { ContextMessage, ToolSpec } from "../agent-effect/contracts.ts";
+import { Context, Effect } from "effect";
 import type { ModelName, ProviderName } from "../agent-core/names.ts";
-
-/** What assembly is asked to assemble. */
-export interface AssembleContext {
-  /** The conversation so far, in order, as the sender gives it. */
-  readonly messages: ReadonlyArray<ContextMessage>;
-}
+import type { ContextMessage, ToolSpec } from "../agent-effect/contracts.ts";
 
 /** A model a request can go to, and how much context it takes. */
 export interface ModelChoice {
@@ -38,15 +34,15 @@ export interface AssembledContext extends Contents {
 }
 
 export interface SystemPromptProvider {
-  readonly system: (request: AssembleContext) => Effect.Effect<ReadonlyArray<string>>;
+  readonly system: Effect.Effect<ReadonlyArray<string>>;
 }
 
 export interface ToolCatalog {
-  readonly tools: (request: AssembleContext) => Effect.Effect<ReadonlyArray<ToolSpec>>;
+  readonly tools: Effect.Effect<ReadonlyArray<ToolSpec>>;
 }
 
 export interface NoticeProvider {
-  readonly notices: (request: AssembleContext) => Effect.Effect<ReadonlyArray<string>>;
+  readonly notices: Effect.Effect<ReadonlyArray<string>>;
 }
 
 /**
@@ -57,43 +53,48 @@ export interface ModelSelector {
   readonly select: (contents: Contents, chosen: ModelChoice | undefined) => Effect.Effect<ModelChoice>;
 }
 
-export interface Providers {
-  readonly systemPrompts: ReadonlyArray<SystemPromptProvider>;
-  readonly toolCatalogs: ReadonlyArray<ToolCatalog>;
-  readonly notices: ReadonlyArray<NoticeProvider>;
-  /** At least one, so there is always a model. */
-  readonly modelSelectors: readonly [ModelSelector, ...ReadonlyArray<ModelSelector>];
-}
+/** The conversation so far, in order. */
+export class Conversation extends Context.Service<
+  Conversation,
+  { readonly messages: Effect.Effect<ReadonlyArray<ContextMessage>> }
+>()("agent-context/Conversation") {}
 
-const appended = <A>(
-  providers: ReadonlyArray<(request: AssembleContext) => Effect.Effect<ReadonlyArray<A>>>,
-  request: AssembleContext,
-): Effect.Effect<ReadonlyArray<A>> =>
-  Effect.forEach(providers, (provide) => provide(request)).pipe(Effect.map((outputs) => outputs.flat()));
+export class SystemPrompts extends Context.Service<SystemPrompts, ReadonlyArray<SystemPromptProvider>>()(
+  "agent-context/SystemPrompts",
+) {}
 
-export const assemble = (providers: Providers, request: AssembleContext): Effect.Effect<AssembledContext> =>
-  Effect.gen(function* () {
-    const contents: Contents = {
-      system: yield* appended(
-        providers.systemPrompts.map((provider) => provider.system),
-        request,
-      ),
-      tools: yield* appended(
-        providers.toolCatalogs.map((catalog) => catalog.tools),
-        request,
-      ),
-      messages: request.messages,
-      notices: yield* appended(
-        providers.notices.map((provider) => provider.notices),
-        request,
-      ),
-    };
-    const [first, ...rest] = providers.modelSelectors;
-    const initial = yield* first.select(contents, undefined);
-    const model = yield* Effect.reduce(
-      rest,
-      (): ModelChoice => initial,
-      (chosen: ModelChoice, selector: ModelSelector) => selector.select(contents, chosen),
-    );
-    return { ...contents, model };
-  });
+export class ToolCatalogs extends Context.Service<ToolCatalogs, ReadonlyArray<ToolCatalog>>()(
+  "agent-context/ToolCatalogs",
+) {}
+
+export class Notices extends Context.Service<Notices, ReadonlyArray<NoticeProvider>>()("agent-context/Notices") {}
+
+/** At least one, so there is always a model. */
+export class ModelSelectors extends Context.Service<
+  ModelSelectors,
+  readonly [ModelSelector, ...ReadonlyArray<ModelSelector>]
+>()("agent-context/ModelSelectors") {}
+
+const appended = <A>(outputs: ReadonlyArray<Effect.Effect<ReadonlyArray<A>>>): Effect.Effect<ReadonlyArray<A>> =>
+  Effect.forEach(outputs, (output) => output).pipe(Effect.map((all) => all.flat()));
+
+export const assemble: Effect.Effect<
+  AssembledContext,
+  never,
+  Conversation | SystemPrompts | ToolCatalogs | Notices | ModelSelectors
+> = Effect.gen(function* () {
+  const contents: Contents = {
+    system: yield* appended((yield* SystemPrompts).map((provider) => provider.system)),
+    tools: yield* appended((yield* ToolCatalogs).map((catalog) => catalog.tools)),
+    messages: yield* (yield* Conversation).messages,
+    notices: yield* appended((yield* Notices).map((provider) => provider.notices)),
+  };
+  const [first, ...rest] = yield* ModelSelectors;
+  const initial = yield* first.select(contents, undefined);
+  const model = yield* Effect.reduce(
+    rest,
+    (): ModelChoice => initial,
+    (chosen: ModelChoice, selector: ModelSelector) => selector.select(contents, chosen),
+  );
+  return { ...contents, model };
+});

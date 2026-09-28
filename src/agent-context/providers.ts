@@ -16,25 +16,23 @@ import type {
 import { logKeys } from "./log-keys.ts";
 
 export const BoringSystemPromptProvider: SystemPromptProvider = {
-  system: () => Effect.succeed(["You are a helpful assistant."]),
+  system: Effect.succeed(["You are a helpful assistant."]),
 };
 
 /** One tool, `echo`, which answers "PONG". */
 export const BoringToolCatalog: ToolCatalog = {
-  tools: () =>
-    Effect.succeed([
-      {
-        name: ToolName.make("echo"),
-        description: 'Answers "PONG".',
-        input: { type: "object", properties: {} },
-      },
-    ]),
+  tools: Effect.succeed([
+    {
+      name: ToolName.make("echo"),
+      description: 'Answers "PONG".',
+      input: { type: "object", properties: {} },
+    },
+  ]),
 };
 
 /** A notice of the current time, from the clock the program runs with. */
 export const SystemTimeNoticeProvider: NoticeProvider = {
-  notices: () =>
-    DateTime.now.pipe(Effect.map((now) => [`The current time is ${DateTime.formatIso(now)}.`])),
+  notices: DateTime.now.pipe(Effect.map((now) => [`The current time is ${DateTime.formatIso(now)}.`])),
 };
 
 /** Always the same model. */
