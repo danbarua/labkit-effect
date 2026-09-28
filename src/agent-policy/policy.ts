@@ -7,21 +7,20 @@
 
 import { Schema } from "effect";
 import { Millis } from "../agent-core/names.ts";
+import { Received } from "../agent-core/received.ts";
 import type { EffectRequest } from "../agent-core/request.ts";
-
-export type Json = Schema.Json;
 
 export const Verdict = Schema.Union([
   Schema.TaggedStruct("Continue", {}),
   /** The effect does not happen. `reason` is passed to the core as the policy gave it. */
-  Schema.TaggedStruct("Veto", { reason: Schema.Json }),
+  Schema.TaggedStruct("Veto", { reason: Received }),
 ]);
 export type Verdict = typeof Verdict.Type;
 
 /** What a waiting policy can be sent. */
 export const PolicyMessage = Schema.Union([
   /** An answer to what the policy asked for while waiting, as the answerer gave it. */
-  Schema.TaggedStruct("Answered", { answer: Schema.Json }),
+  Schema.TaggedStruct("Answered", { answer: Received }),
   /** The clock reached `at`. */
   Schema.TaggedStruct("Tick", { at: Millis }),
 ]);
@@ -36,7 +35,7 @@ export type PolicyStep<State> =
   | {
       readonly _tag: "Waiting";
       readonly state: State;
-      readonly asks: Json | undefined;
+      readonly asks: Received | undefined;
     };
 
 export interface Policy<State> {

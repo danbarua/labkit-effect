@@ -10,6 +10,7 @@ import { Effect, Layer, type Schema } from "effect";
 import { CallId, FailureText, ModelText, StopReason, ToolName } from "../agent-core/names.ts";
 import type { ModelPart, Observation, ToolOutcome } from "../agent-core/observation.ts";
 import { type ContextPart, type ModelContext, ModelClient, type Target } from "./contracts.ts";
+import { asText, parseJson, receivedJson } from "./received.ts";
 import type { TurnId } from "../agent-core/names.ts";
 
 type Json = Schema.Json;
@@ -22,11 +23,11 @@ type Outcome = Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" }>;
 function resultContent(outcome: ToolOutcome): { content: string; is_error?: true } {
   switch (outcome._tag) {
     case "Succeeded":
-      return { content: typeof outcome.output === "string" ? outcome.output : JSON.stringify(outcome.output) };
+      return { content: asText(outcome.output) };
     case "Failed":
-      return { content: outcome.failure, is_error: true };
+      return { content: asText(outcome.error), is_error: true };
     case "Vetoed":
-      return { content: `The call was not run: ${JSON.stringify(outcome.reason)}`, is_error: true };
+      return { content: `The call was not run: ${asText(outcome.reason)}`, is_error: true };
     default:
       return outcome satisfies never;
   }
@@ -36,8 +37,11 @@ function block(part: ContextPart): Json {
   switch (part._tag) {
     case "Text":
       return { type: "text", text: part.text };
-    case "ToolCall":
-      return { type: "tool_use", id: part.call, name: part.tool, input: part.input };
+    case "ToolCall": {
+      // The provider requires the input it sent back as an object; it sent it as JSON.
+      const parsed = parseJson(part.input);
+      return { type: "tool_use", id: part.call, name: part.tool, input: "value" in parsed ? parsed.value : {} };
+    }
     case "ToolResult":
       return { type: "tool_result", tool_use_id: part.call, ...resultContent(part.outcome) };
     default:
@@ -68,9 +72,9 @@ function part(received: Json): ModelPart {
     const { type, text, id, name, input } = received;
     if (type === "text" && typeof text === "string") return { _tag: "Text", text: ModelText.make(text) };
     if (type === "tool_use" && typeof id === "string" && typeof name === "string" && input !== undefined)
-      return { _tag: "ToolCall", call: CallId.make(id), tool: ToolName.make(name), input };
+      return { _tag: "ToolCall", call: CallId.make(id), tool: ToolName.make(name), input: receivedJson(input) };
   }
-  return { _tag: "Unrecognised", received };
+  return { _tag: "Unrecognised", received: receivedJson(received) };
 }
 
 const failed = (turn: TurnId, failure: string, details: Record<string, unknown>): Effect.Effect<Outcome> =>
@@ -116,7 +120,7 @@ export const HttpModelClient = Layer.succeed(ModelClient, {
         model: target.model,
         parts: (content as ReadonlyArray<Json>).map(part),
         stop: StopReason.make(typeof stop_reason === "string" ? stop_reason : String(stop_reason)),
-        metadata,
+        metadata: receivedJson(metadata),
       };
       return outcome;
     }),

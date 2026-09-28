@@ -4,6 +4,7 @@
  */
 
 import { Schema } from "effect";
+import { Received } from "./received.ts";
 import {
   AgentName,
   CallId,
@@ -34,20 +35,20 @@ export type InputSource = typeof InputSource.Type;
 export const ModelPart = Schema.Union([
   Schema.TaggedStruct("Text", { text: ModelText }),
   Schema.TaggedStruct("Thinking", { text: ThinkingText, signature: ThinkingSignature }),
-  Schema.TaggedStruct("ToolCall", { call: CallId, tool: ToolName, input: Schema.Json }),
+  Schema.TaggedStruct("ToolCall", { call: CallId, tool: ToolName, input: Received }),
   /** A part the decoder does not recognise, holding what was received. */
-  Schema.TaggedStruct("Unrecognised", { received: Schema.Json }),
+  Schema.TaggedStruct("Unrecognised", { received: Received }),
 ]);
 export type ModelPart = typeof ModelPart.Type;
 
 /**
  * How a tool call ended: the tool ran and succeeded or failed, or a policy vetoed the call before
- * it ran. A veto's reason is kept as the policy gave it.
+ * it ran. Each holds what the tool, or the policy, reported.
  */
 export const ToolOutcome = Schema.Union([
-  Schema.TaggedStruct("Succeeded", { output: Schema.Json }),
-  Schema.TaggedStruct("Failed", { failure: FailureText }),
-  Schema.TaggedStruct("Vetoed", { reason: Schema.Json }),
+  Schema.TaggedStruct("Succeeded", { output: Received }),
+  Schema.TaggedStruct("Failed", { error: Received }),
+  Schema.TaggedStruct("Vetoed", { reason: Received }),
 ]);
 export type ToolOutcome = typeof ToolOutcome.Type;
 
@@ -71,12 +72,12 @@ export const Observation = Schema.Union([
     model: ModelName,
     parts: Schema.Array(ModelPart),
     stop: StopReason,
-    metadata: Schema.Json,
+    metadata: Received,
   }),
   /** A request for a model response failed. */
   Schema.TaggedStruct("ModelFailed", { turn: TurnId, failure: FailureText }),
-  /** A policy vetoed a request for a model response. Its reason is kept as the policy gave it. */
-  Schema.TaggedStruct("ModelVetoed", { turn: TurnId, reason: Schema.Json }),
+  /** A policy vetoed a request for a model response, for the reason it gave. */
+  Schema.TaggedStruct("ModelVetoed", { turn: TurnId, reason: Received }),
   /** A tool call ended. */
   Schema.TaggedStruct("ToolEnded", { call: CallId, outcome: ToolOutcome }),
 ]);
@@ -85,6 +86,6 @@ export type Observation = typeof Observation.Type;
 /** Observations captured for display and not recorded. */
 export const CapturedObservation = Schema.Union([
   /** Part of a model response while it is still arriving, as received. */
-  Schema.TaggedStruct("ModelStreamed", { turn: TurnId, chunk: Schema.Json }),
+  Schema.TaggedStruct("ModelStreamed", { turn: TurnId, chunk: Received }),
 ]);
 export type CapturedObservation = typeof CapturedObservation.Type;

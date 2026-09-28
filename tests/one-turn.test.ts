@@ -1,4 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
+import { json } from "./support/received.ts";
 import { Effect, Layer } from "effect";
 import { BoringContextAssembler, BoringModelProvider, CountingTurns } from "../src/agent-effect/boring.ts";
 import { HttpModelClient } from "../src/agent-effect/http-model-client.ts";
@@ -69,7 +70,7 @@ test("one turn, from the user's message to the model's answer", async () => {
       model: "boring-1",
       parts: [{ _tag: "Text", text: "Hello back." }],
       stop: "end_turn",
-      metadata: { id: "msg_1", usage: { input_tokens: 3, output_tokens: 3 } },
+      metadata: json({ id: "msg_1", type: "message", role: "assistant", model: "boring-1", usage: { input_tokens: 3, output_tokens: 3 } }),
     },
   });
   expect(facts[6] as unknown).toMatchObject({ decision: { turn: "turn-1", ending: { _tag: "Answered" } } });

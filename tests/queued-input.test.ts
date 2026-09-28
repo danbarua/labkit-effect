@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { json } from "./support/received.ts";
 import type { Fact } from "../src/agent-core/fact.ts";
 import { observe, open, type Session } from "./support/drive.ts";
 
@@ -18,9 +19,9 @@ const callsTool = {
   turn: "turn-1",
   provider: "p",
   model: "m",
-  parts: [{ _tag: "ToolCall", call: "c1", tool: "run_tests", input: {} }],
+  parts: [{ _tag: "ToolCall", call: "c1", tool: "run_tests", input: json({}) }],
   stop: "tool_use",
-  metadata: {},
+  metadata: json({}),
 };
 
 const answers = {
@@ -30,7 +31,7 @@ const answers = {
   model: "m",
   parts: [{ _tag: "Text", text: "Done." }],
   stop: "end_turn",
-  metadata: {},
+  metadata: json({}),
 };
 
 test("input from another agent while a tool runs is given to the turn when the batch settles", () => {
@@ -43,7 +44,7 @@ test("input from another agent while a tool runs is given to the turn when the b
   });
   expect(session.state).toMatchObject({ queued: [interjection] });
 
-  const ended = observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: "2 failed" } });
+  const ended = observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json("2 failed") } });
   expect(tags(session.journal.filter((fact) => fact.seq > ended))).toEqual(["InputDelivered", "ModelAsked"]);
   expect(session.journal.at(-2)).toMatchObject({ decision: { inputs: [interjection] } });
   expect(session.live.entries.find((entry) => entry._tag === "Input" && entry.seq === interjection)).toMatchObject({
@@ -102,7 +103,7 @@ test("input queued when a turn fails is dropped, and no turn starts until the ne
 test("a tool result for a call nobody made is recorded, and changes nothing", () => {
   const session = started();
   const before = session.state;
-  const stray = observe(session, { _tag: "ToolEnded", call: "c9", outcome: { _tag: "Failed", failure: "?" } });
+  const stray = observe(session, { _tag: "ToolEnded", call: "c9", outcome: { _tag: "Failed", error: json("?") } });
   expect(session.state).toEqual(before);
   expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "ObservationNotExpected", observation: stray } });
 });
@@ -113,7 +114,7 @@ test("a vetoed call settles the batch and the model is asked again", () => {
   const vetoed = observe(session, {
     _tag: "ToolEnded",
     call: "c1",
-    outcome: { _tag: "Vetoed", reason: { rule: "no test runs on main" } },
+    outcome: { _tag: "Vetoed", reason: json({ rule: "no test runs on main" }) },
   });
   expect(tags(session.journal.filter((fact) => fact.seq > vetoed))).toEqual(["ModelAsked"]);
   expect(session.requests.map((request) => request._tag)).toEqual([

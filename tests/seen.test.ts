@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { json } from "./support/received.ts";
 import { unseen } from "../src/agent-core/view.ts";
 import { observe, open } from "./support/drive.ts";
 
@@ -7,9 +8,9 @@ const callsTool = {
   turn: "turn-1",
   provider: "p",
   model: "m",
-  parts: [{ _tag: "ToolCall", call: "c1", tool: "run_tests", input: {} }],
+  parts: [{ _tag: "ToolCall", call: "c1", tool: "run_tests", input: json({}) }],
   stop: "tool_use",
-  metadata: {},
+  metadata: json({}),
 };
 
 test("a tool result sent in a request that failed stays unseen, and the next turn's request carries it", () => {
@@ -20,7 +21,7 @@ test("a tool result sent in a request that failed stays unseen, and the next tur
   const result = observe(session, {
     _tag: "ToolEnded",
     call: "c1",
-    outcome: { _tag: "Succeeded", output: "2 failed" },
+    outcome: { _tag: "Succeeded", output: json("2 failed") },
   });
   expect(session.live.sentThrough).toBeGreaterThanOrEqual(result);
 

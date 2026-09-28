@@ -13,7 +13,7 @@ import type { Fact } from "./fact.ts";
 import type { CallId, FailureText, InputText, Seq, TurnId } from "./names.ts";
 import type { InputSource, ModelPart, ToolOutcome } from "./observation.ts";
 
-type Json = Extract<ModelPart, { _tag: "Unrecognised" }>["received"];
+import type { Received } from "./received.ts";
 
 /**
  * Where an input is: waiting for a turn, given to one, cancelled by its sender, or dropped because
@@ -41,7 +41,7 @@ export type Entry =
       readonly parts: ReadonlyArray<ModelPart>;
     }
   | { readonly _tag: "ModelFailure"; readonly seq: Seq; readonly turn: TurnId; readonly failure: FailureText }
-  | { readonly _tag: "ModelVetoed"; readonly seq: Seq; readonly turn: TurnId; readonly reason: Json }
+  | { readonly _tag: "ModelVetoed"; readonly seq: Seq; readonly turn: TurnId; readonly reason: Received }
   | { readonly _tag: "ToolResult"; readonly seq: Seq; readonly call: CallId; readonly outcome: ToolOutcome }
   | { readonly _tag: "TurnEnded"; readonly seq: Seq; readonly turn: TurnId; readonly ending: Ending }
   | { readonly _tag: "NotExpected"; readonly seq: Seq; readonly observation: Seq };

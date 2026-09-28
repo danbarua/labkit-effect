@@ -6,6 +6,7 @@ import { Context, type Effect, type Schema } from "effect";
 import type { Fact } from "../agent-core/fact.ts";
 import type { CallId, Inputs, ModelName, ProviderName, ToolName, TurnId } from "../agent-core/names.ts";
 import type { Observation, ToolOutcome } from "../agent-core/observation.ts";
+import type { Received } from "../agent-core/received.ts";
 
 /** Where a model request goes: which provider, which model, at which address. */
 export interface Target {
@@ -30,7 +31,7 @@ export interface ToolSpec {
 /** One part of a message the model is sent. */
 export type ContextPart =
   | { readonly _tag: "Text"; readonly text: string }
-  | { readonly _tag: "ToolCall"; readonly call: CallId; readonly tool: ToolName; readonly input: Schema.Json }
+  | { readonly _tag: "ToolCall"; readonly call: CallId; readonly tool: ToolName; readonly input: Received }
   | { readonly _tag: "ToolResult"; readonly call: CallId; readonly outcome: ToolOutcome };
 
 /** One message of what the model is sent. */
@@ -76,5 +77,5 @@ export class Turns extends Context.Service<
 /** Runs one tool call and reports how it ended. */
 export class ToolRunner extends Context.Service<
   ToolRunner,
-  { readonly run: (tool: ToolName, input: Schema.Json) => Effect.Effect<ToolOutcome> }
+  { readonly run: (tool: ToolName, input: Received) => Effect.Effect<ToolOutcome> }
 >()("agent-effect/ToolRunner") {}

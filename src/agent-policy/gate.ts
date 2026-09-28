@@ -10,7 +10,8 @@
 import { Schema } from "effect";
 import type { Observation } from "../agent-core/observation.ts";
 import type { EffectRequest } from "../agent-core/request.ts";
-import type { Json, Policy, PolicyMessage, PolicyStep } from "./policy.ts";
+import type { Received } from "../agent-core/received.ts";
+import type { Policy, PolicyMessage, PolicyStep } from "./policy.ts";
 
 /** Identifies a request under review: one model request per turn, one run per tool call. */
 export const RequestKey = Schema.String.pipe(Schema.brand("RequestKey"));
@@ -29,7 +30,7 @@ export function keyOf(request: Reviewed): RequestKey {
   }
 }
 
-function vetoed(request: Reviewed, reason: Json): Observation {
+function vetoed(request: Reviewed, reason: Received): Observation {
   switch (request._tag) {
     case "RequestModelResponse":
       return { _tag: "ModelVetoed", turn: request.turn, reason };
@@ -44,7 +45,7 @@ export type GateInput =
   /** The core sent an effect request. */
   | { readonly _tag: "Requested"; readonly request: EffectRequest }
   /** An answer for the request under review at `key`. */
-  | { readonly _tag: "Answered"; readonly key: RequestKey; readonly answer: Json }
+  | { readonly _tag: "Answered"; readonly key: RequestKey; readonly answer: Received }
   /** The clock reached `at`; every waiting policy is told. */
   | { readonly _tag: "Tick"; readonly message: Extract<PolicyMessage, { _tag: "Tick" }> };
 
@@ -54,7 +55,7 @@ export type GateOutput =
   /** Give this observation to the core. */
   | { readonly _tag: "Observe"; readonly observation: Observation }
   /** The policy reviewing `key` asks for this to be answered. */
-  | { readonly _tag: "Ask"; readonly key: RequestKey; readonly asks: Json };
+  | { readonly _tag: "Ask"; readonly key: RequestKey; readonly asks: Received };
 
 export interface GateState<State> {
   readonly waiting: ReadonlyMap<RequestKey, { readonly request: Reviewed; readonly state: State }>;

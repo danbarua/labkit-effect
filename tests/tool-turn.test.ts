@@ -1,4 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
+import { json } from "./support/received.ts";
 import { Effect, Layer } from "effect";
 import type { Observation } from "../src/agent-core/observation.ts";
 import { BoringModelProvider, CountingTurns } from "../src/agent-effect/boring.ts";
@@ -62,7 +63,7 @@ test("the model calls a tool from the catalog, and answers from its result", asy
     "TurnEnded",
   ]);
   expect(facts[6] as unknown).toMatchObject({
-    observation: { call: "toolu_1", outcome: { _tag: "Succeeded", output: 5 } },
+    observation: { call: "toolu_1", outcome: { _tag: "Succeeded", output: json(5) } },
   });
 
   const tools = [

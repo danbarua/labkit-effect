@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { json } from "./support/received.ts";
 import { stateOf } from "../src/agent-core/machine.ts";
 import { conversation } from "../src/agent-core/view.ts";
 import { observe, open } from "./support/drive.ts";
@@ -11,11 +12,11 @@ const responseWithEveryPartKind = {
   parts: [
     { _tag: "Thinking", text: "I should call ls.", signature: "sig-abc" },
     { _tag: "Text", text: "Listing them." },
-    { _tag: "ToolCall", call: "c1", tool: "ls", input: { path: "." } },
-    { _tag: "Unrecognised", received: { type: "citation", source: "doc-1" } },
+    { _tag: "ToolCall", call: "c1", tool: "ls", input: json({ path: "." }) },
+    { _tag: "Unrecognised", received: json({ type: "citation", source: "doc-1" }) },
   ],
   stop: "tool_use",
-  metadata: { usage: { input_tokens: 120, output_tokens: 40 }, id: "msg_1" },
+  metadata: json({ usage: { input_tokens: 120, output_tokens: 40 }, id: "msg_1" }),
 };
 
 function oneTurnWithATool() {
@@ -23,7 +24,7 @@ function oneTurnWithATool() {
   observe(session, { _tag: "SessionOpened", session: "s1" });
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
   observe(session, responseWithEveryPartKind);
-  observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: ["a.ts"] } });
+  observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } });
   observe(session, {
     _tag: "ModelResponded",
     turn: "turn-1",
@@ -31,7 +32,7 @@ function oneTurnWithATool() {
     model: "claude-sonnet-5",
     parts: [{ _tag: "Text", text: "There is one file, a.ts." }],
     stop: "end_turn",
-    metadata: {},
+    metadata: json({}),
   });
   return session;
 }

@@ -4,6 +4,7 @@
 
 import { Schema } from "effect";
 import { FailureText, Inputs, Seq, TurnId } from "./names.ts";
+import { Received } from "./received.ts";
 
 /** How a turn ended. */
 export const Ending = Schema.Union([
@@ -12,7 +13,7 @@ export const Ending = Schema.Union([
   /** A request for a model response failed. */
   Schema.TaggedStruct("Failed", { failure: FailureText }),
   /** A policy vetoed a request for a model response. */
-  Schema.TaggedStruct("Vetoed", { reason: Schema.Json }),
+  Schema.TaggedStruct("Vetoed", { reason: Received }),
 ]);
 export type Ending = typeof Ending.Type;
 

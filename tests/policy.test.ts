@@ -4,12 +4,14 @@ import type { EffectRequest } from "../src/agent-core/request.ts";
 import { emptyGate, type GateInput, type GateOutput, type GateState, gate, RequestKey } from "../src/agent-policy/gate.ts";
 import { every, type Policy } from "../src/agent-policy/policy.ts";
 import { observe, open } from "./support/drive.ts";
+import { json } from "./support/received.ts";
+import { asText, receivedJson, receivedText } from "../src/agent-effect/received.ts";
 
 /** Vetoes running any tool named in `denied`. */
 const denyTools = (denied: ReadonlyArray<string>): Policy<unknown> => ({
   start: (request) =>
     request._tag === "RunTool" && denied.includes(request.tool)
-      ? { _tag: "Decided", verdict: { _tag: "Veto", reason: { denied: request.tool } } }
+      ? { _tag: "Decided", verdict: { _tag: "Veto", reason: receivedJson({ denied: request.tool }) } }
       : { _tag: "Decided", verdict: { _tag: "Continue" } },
   receive: () => ({ _tag: "Decided", verdict: { _tag: "Continue" } }),
 });
@@ -18,13 +20,13 @@ const denyTools = (denied: ReadonlyArray<string>): Policy<unknown> => ({
 const askPerson: Policy<unknown> = {
   start: (request) =>
     request._tag === "RunTool"
-      ? { _tag: "Waiting", state: request.call, asks: { question: "run?", tool: request.tool } }
+      ? { _tag: "Waiting", state: request.call, asks: receivedJson({ question: "run?", tool: request.tool }) }
       : { _tag: "Decided", verdict: { _tag: "Continue" } },
   receive: (_state, message) =>
-    message._tag === "Answered" && message.answer === "yes"
+    message._tag === "Answered" && asText(message.answer) === "yes"
       ? { _tag: "Decided", verdict: { _tag: "Continue" } }
       : message._tag === "Answered"
-        ? { _tag: "Decided", verdict: { _tag: "Veto", reason: { person: message.answer } } }
+        ? { _tag: "Decided", verdict: { _tag: "Veto", reason: receivedJson({ person: asText(message.answer) }) } }
         : { _tag: "Waiting", state: _state, asks: undefined },
 };
 
@@ -52,7 +54,7 @@ function run<State>(policy: Policy<State>, inputs: ReadonlyArray<GateInput>): Ar
 }
 
 const runTool = (call: string, tool: string) =>
-  ({ _tag: "RunTool", call, tool, input: {} }) as unknown as EffectRequest;
+  ({ _tag: "RunTool", call, tool, input: json({}) }) as unknown as EffectRequest;
 const askModel = (turn: string) => ({ _tag: "RequestModelResponse", turn }) as unknown as EffectRequest;
 
 test("a denied tool is vetoed before the person is asked; another tool waits for the answer", () => {
@@ -62,8 +64,8 @@ test("a denied tool is vetoed before the person is asked; another tool waits for
     { _tag: "Requested", request: runTool("c2", "ls") },
   ]);
   expect(outputs as unknown).toEqual([
-    { _tag: "Observe", observation: { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Vetoed", reason: { denied: "rm" } } } },
-    { _tag: "Ask", key: "tool:c2", asks: { question: "run?", tool: "ls" } },
+    { _tag: "Observe", observation: { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Vetoed", reason: json({ denied: "rm" }) } } },
+    { _tag: "Ask", key: "tool:c2", asks: json({ question: "run?", tool: "ls" }) },
   ]);
 });
 
@@ -71,16 +73,16 @@ test("the person's answer lets the waiting call continue, or vetoes it", () => {
   const policy = every([denyTools(["rm"]), askPerson]);
   const yes = run(policy, [
     { _tag: "Requested", request: runTool("c2", "ls") },
-    { _tag: "Answered", key: RequestKey.make("tool:c2"), answer: "yes" },
+    { _tag: "Answered", key: RequestKey.make("tool:c2"), answer: receivedText("yes") },
   ]);
   expect(yes.at(-1) as unknown).toEqual({ _tag: "Forward", request: runTool("c2", "ls") });
   const no = run(policy, [
     { _tag: "Requested", request: runTool("c2", "ls") },
-    { _tag: "Answered", key: RequestKey.make("tool:c2"), answer: "not on main" },
+    { _tag: "Answered", key: RequestKey.make("tool:c2"), answer: receivedText("not on main") },
   ]);
   expect(no.at(-1) as unknown).toEqual({
     _tag: "Observe",
-    observation: { _tag: "ToolEnded", call: "c2", outcome: { _tag: "Vetoed", reason: { person: "not on main" } } },
+    observation: { _tag: "ToolEnded", call: "c2", outcome: { _tag: "Vetoed", reason: json({ person: "not on main" }) } },
   });
 });
 
@@ -106,9 +108,9 @@ test("a vetoed tool call, fed back to the core, settles the batch and the model 
     turn: "turn-1",
     provider: "p",
     model: "m",
-    parts: [{ _tag: "ToolCall", call: "c1", tool: "rm", input: { path: "/" } }],
+    parts: [{ _tag: "ToolCall", call: "c1", tool: "rm", input: json({ path: "/" }) }],
     stop: "tool_use",
-    metadata: {},
+    metadata: json({}),
   });
   const request = session.requests.at(-1)!;
   const [output] = run(denyTools(["rm"]), [{ _tag: "Requested", request }]);
@@ -122,14 +124,14 @@ test("a vetoed model request ends the turn, recorded with the policy's reason", 
   observe(session, { _tag: "SessionOpened", session: "s1" });
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "go" });
   const budget: Policy<unknown> = {
-    start: () => ({ _tag: "Decided", verdict: { _tag: "Veto", reason: { budget: "80% of the month used" } } }),
+    start: () => ({ _tag: "Decided", verdict: { _tag: "Veto", reason: receivedJson({ budget: "80% of the month used" }) } }),
     receive: () => ({ _tag: "Decided", verdict: { _tag: "Continue" } }),
   };
   const [output] = run(budget, [{ _tag: "Requested", request: session.requests.at(-1)! }]);
   if (output?._tag !== "Observe") throw new Error(`expected a veto, got ${JSON.stringify(output)}`);
   observe(session, output.observation);
   expect(session.journal.at(-1)).toMatchObject({
-    decision: { _tag: "TurnEnded", turn: "turn-1", ending: { _tag: "Vetoed", reason: { budget: "80% of the month used" } } },
+    decision: { _tag: "TurnEnded", turn: "turn-1", ending: { _tag: "Vetoed", reason: json({ budget: "80% of the month used" }) } },
   });
   expect(session.state).toMatchObject({ activity: { _tag: "Idle" } });
 });

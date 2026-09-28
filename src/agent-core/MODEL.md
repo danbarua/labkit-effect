@@ -19,15 +19,19 @@ Status: **open** means Dan has not settled it. **Proposal** means the wording is
 
 ## Rules
 
-- R1. A model response is recorded with every part the model sent, in order. A part the adapter
+- R1. Content from outside the harness (a tool's input or output, a provider's metadata, a
+  policy's reason, a part of a response the adapter does not recognise) is carried as `Received`:
+  its media type, and its body as text or bytes, unparsed. The core does not look inside it. An
+  adapter that needs the contents parses it, and handles and logs a parse that fails.
+- R2. A model response is recorded with every part the model sent, in order. A part the adapter
   does not recognise is recorded as `Unrecognised`, holding what was received.
-- R2. A failure is recorded as `FailureText`. What was received with it (status, identifiers, body)
-  is logged by the adapter that received it.
-- R3. Every `switch` over a union ends in `satisfies never`, so a new kind of observation or decision
+- R3. A failed model request is recorded as `FailureText`; what was received with it is logged by
+  the adapter that received it. A failed tool call holds what the tool reported, as `Received`.
+- R4. Every `switch` over a union ends in `satisfies never`, so a new kind of observation or decision
   does not compile until every machine handles it.
-- R4. An observation the session's state does not expect changes nothing, and is recorded with the
+- R5. An observation the session's state does not expect changes nothing, and is recorded with the
   decision `ObservationNotExpected`.
-- R5. The view built as each fact is recorded is the view built from all the facts at once.
+- R6. The view built as each fact is recorded is the view built from all the facts at once.
 
 ## Input during a turn
 
