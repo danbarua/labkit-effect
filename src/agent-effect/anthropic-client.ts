@@ -11,7 +11,7 @@
  * In: a response's `content` blocks become the observation's parts in order: a `text` block is
  * `Text`, a `tool_use` block is `ToolCall`, any other block is `Unrecognised` holding the block as
  * received. Everything else in the response is `metadata`. A failure is observed as `ModelFailed`;
- * what was received with it is logged here.
+ * what was received with it is logged here. The loop annotates these logs with the turn.
  */
 
 import { Effect, Layer, type Schema } from "effect";
@@ -218,17 +218,17 @@ function part(received: Json): ModelPart {
 }
 
 const failed = (turn: TurnId, failure: string, details: Record<string, unknown>): Effect.Effect<Outcome> =>
-  Effect.logError(logKeys.anthropic.requestFailed, { turn, failure, ...details }).pipe(
+  Effect.logError(logKeys.anthropic.requestFailed, { failure, ...details }).pipe(
     Effect.as({ _tag: "ModelFailed" as const, turn, failure: FailureText.make(failure) }),
   );
 
-const logSupplied = (turn: TurnId, supplied: ReadonlyArray<Supplied>): Effect.Effect<void> =>
+const logSupplied = (supplied: ReadonlyArray<Supplied>): Effect.Effect<void> =>
   Effect.forEach(
     supplied,
     (entry) =>
       entry.level === "warning"
-        ? Effect.logWarning(entry.event, { turn, ...entry.details })
-        : Effect.logInfo(entry.event, { turn, ...entry.details }),
+        ? Effect.logWarning(entry.event, entry.details)
+        : Effect.logInfo(entry.event, entry.details),
     { discard: true },
   );
 
@@ -236,7 +236,7 @@ export const AnthropicModelClient = Layer.succeed(ModelClient, {
   respond: (target, context, turn) =>
     Effect.gen(function* () {
       const sent = body(target, context);
-      yield* logSupplied(turn, sent.supplied);
+      yield* logSupplied(sent.supplied);
       const received = yield* Effect.tryPromise(async () => {
         const response = await fetch(target.endpoint, {
           method: "POST",

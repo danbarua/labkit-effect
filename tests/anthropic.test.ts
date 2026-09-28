@@ -114,7 +114,6 @@ test("the max_tokens the Messages API requires is supplied and logged, with the 
     message: [
       logKeys.anthropic.maxTokensSupplied,
       {
-        turn: "turn-1",
         max_tokens: 1024,
         reason: "the Messages API requires max_tokens and the context sets no output limit",
       },

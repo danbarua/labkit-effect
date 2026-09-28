@@ -2,6 +2,10 @@
  * The loop around the core: it records each observation, asks the core what follows, records the
  * decisions, and carries out the requests, each of whose outcome is the next observation. The
  * session's facts are held in memory.
+ *
+ * Every log line written while a request is carried out is annotated with what the request is
+ * about (its turn, and for a tool run its call and tool), so the services it calls do not pass
+ * those along themselves.
  */
 
 import { Effect, Ref } from "effect";
@@ -53,6 +57,21 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
     }
   };
 
+  /** What a request is about, for its log lines. */
+  const about = (request: EffectRequest, state: State): Record<string, unknown> => {
+    const turn = state._tag === "Open" && state.activity._tag === "InTurn" ? { turn: state.activity.turn } : {};
+    switch (request._tag) {
+      case "StartTurn":
+        return { inputs: request.inputs };
+      case "RequestModelResponse":
+        return { turn: request.turn };
+      case "RunTool":
+        return { ...turn, call: request.call, tool: request.tool };
+      default:
+        return request satisfies never;
+    }
+  };
+
   const observe = (observation: Observation): Effect.Effect<void, never, Services> =>
     Effect.gen(function* () {
       const before = yield* Ref.get(held);
@@ -70,8 +89,9 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
         state: recorded.reduce(fold, before.state),
         facts: [...before.facts, ...recorded],
       });
+      const after = (yield* Ref.get(held)).state;
       yield* Effect.forEach(outcome.requests, (request) =>
-        carryOut(request).pipe(Effect.flatMap(observe)),
+        carryOut(request).pipe(Effect.annotateLogs(about(request, after)), Effect.flatMap(observe)),
       );
     });
 
