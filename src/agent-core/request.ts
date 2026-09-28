@@ -4,9 +4,11 @@
  */
 
 import { Schema } from "effect";
-import { CallId, ToolName, TurnId } from "./names.ts";
+import { CallId, Inputs, ToolName, TurnId } from "./names.ts";
 
 export const EffectRequest = Schema.Union([
+  /** Start a turn with the inputs recorded at `inputs`. The adapter chooses the turn's identity. */
+  Schema.TaggedStruct("StartTurn", { inputs: Inputs }),
   /** Ask the model for its next response in `turn`, given the conversation so far. */
   Schema.TaggedStruct("RequestModelResponse", { turn: TurnId }),
   /** Ask the user whether one tool call may run. */

@@ -89,6 +89,8 @@ export function viewFact(view: Conversation, fact: Fact): Conversation {
             text: observation.text,
             status: { _tag: "Queued" },
           });
+        case "TurnStarted":
+          return setStatus(view, observation.inputs, { _tag: "Given", turn: observation.turn });
         case "InputCancelled":
           return setStatus(view, [observation.input], { _tag: "Cancelled" });
         case "ModelResponded":
@@ -110,7 +112,6 @@ export function viewFact(view: Conversation, fact: Fact): Conversation {
     case "Decided": {
       const decision = fact.decision;
       switch (decision._tag) {
-        case "TurnStarted":
         case "InputDelivered":
           return setStatus(view, decision.inputs, { _tag: "Given", turn: decision.turn });
         case "InputDropped":
@@ -125,6 +126,7 @@ export function viewFact(view: Conversation, fact: Fact): Conversation {
           return add(view, { _tag: "TurnEnded", seq, turn: decision.turn, ended: "failed" });
         case "ObservationNotExpected":
           return add(view, { _tag: "NotExpected", seq, observation: decision.observation });
+        case "TurnRequested":
         case "ToolCallAllowed":
           return view;
         default:

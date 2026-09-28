@@ -61,9 +61,9 @@ export type FailureText = typeof FailureText.Type;
 export const Seq = Schema.Int.pipe(Schema.brand("Seq"));
 export type Seq = typeof Seq.Type;
 
-/** A count of turns started in a session. */
-export const TurnCount = Schema.Int.pipe(Schema.brand("TurnCount"));
-export type TurnCount = typeof TurnCount.Type;
+/** The positions of inputs in the journal, oldest first. At least one. */
+export const Inputs = Schema.NonEmptyArray(Seq);
+export type Inputs = typeof Inputs.Type;
 
 /** A time in milliseconds, from a clock the caller chooses. */
 export const Millis = Schema.Finite.pipe(Schema.brand("Millis"));

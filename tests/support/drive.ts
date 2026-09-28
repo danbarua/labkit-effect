@@ -1,7 +1,8 @@
 /**
  * Plays the part of the layer around the core: records each observation, asks the machine what
- * follows, records the decisions, and collects the effect requests. The live view is built one
- * fact at a time as facts are recorded.
+ * follows, records the decisions, and collects the effect requests. It carries out `StartTurn`
+ * itself, naming turns `turn-1`, `turn-2`, …; every other request is left to the test. The live
+ * view is built one fact at a time as facts are recorded.
  */
 
 import { Schema } from "effect";
@@ -17,10 +18,13 @@ export interface Session {
   journal: Array<Fact>;
   requests: Array<EffectRequest>;
   live: Conversation;
+  turns: number;
+  /** Whether the driver carries out `StartTurn` requests; a test that plays that adapter sets false. */
+  startsTurns: boolean;
 }
 
 export function open(): Session {
-  return { state: initial, journal: [], requests: [], live: emptyConversation };
+  return { state: initial, journal: [], requests: [], live: emptyConversation, turns: 0, startsTurns: true };
 }
 
 function record(session: Session, fact: Fact): void {
@@ -39,6 +43,11 @@ export function observe(session: Session, raw: unknown): Seq {
   for (const decision of outcome.decisions)
     record(session, { _tag: "Decided", seq: Seq.make(session.journal.length + 1), decision });
   session.requests.push(...outcome.requests);
+  for (const request of outcome.requests)
+    if (request._tag === "StartTurn" && session.startsTurns) {
+      session.turns += 1;
+      observe(session, { _tag: "TurnStarted", turn: `turn-${session.turns}`, inputs: request.inputs });
+    }
   return seq;
 }
 

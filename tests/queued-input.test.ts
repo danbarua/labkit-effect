@@ -90,12 +90,13 @@ test("input queued when a turn fails is dropped, and no turn starts until the ne
   const queued = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "try again" });
   const failed = observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "overloaded" });
   expect(tags(session.journal.filter((fact) => fact.seq > failed))).toEqual(["InputDropped", "TurnFailed"]);
-  expect(session.state).toMatchObject({ turn: undefined, queued: [] });
+  expect(session.state).toMatchObject({ activity: { _tag: "Idle" }, queued: [] });
   expect(session.live.entries.find((entry) => entry._tag === "Input" && entry.seq === queued)).toMatchObject({
     status: { _tag: "Dropped", turn: "turn-1" },
   });
   const next = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "now" });
-  expect(session.journal.at(-2)).toMatchObject({ decision: { _tag: "TurnStarted", turn: "turn-2", inputs: [next] } });
+  expect(session.journal.at(-3)).toMatchObject({ decision: { _tag: "TurnRequested", inputs: [next] } });
+  expect(session.journal.at(-2)).toMatchObject({ observation: { _tag: "TurnStarted", turn: "turn-2", inputs: [next] } });
 });
 
 test("a tool result for a call nobody made is recorded, and changes nothing", () => {
@@ -111,5 +112,30 @@ test("a refused call settles the batch and the model is asked again", () => {
   observe(session, callsTool);
   const refused = observe(session, { _tag: "PermissionAnswered", call: "c1", answer: "refuse" });
   expect(tags(session.journal.filter((fact) => fact.seq > refused))).toEqual(["ToolCallRefused", "ModelAsked"]);
-  expect(session.requests.map((request) => request._tag)).toEqual(["RequestModelResponse", "AskPermission", "RequestModelResponse"]);
+  expect(session.requests.map((request) => request._tag)).toEqual([
+    "StartTurn",
+    "RequestModelResponse",
+    "AskPermission",
+    "RequestModelResponse",
+  ]);
+});
+
+test("input that arrives while a turn is starting is queued, not added to the starting turn", () => {
+  const session = open();
+  observe(session, { _tag: "SessionOpened", session: "s1", configuration: { permission: "allow" } });
+  session.startsTurns = false;
+  const first = observe(session, { _tag: "InputArrived", from: { _tag: "System" }, text: "wake up" });
+  expect(session.state).toMatchObject({ activity: { _tag: "Starting", inputs: [first] } });
+  const second = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "and check mail" });
+  expect(session.state).toMatchObject({ activity: { _tag: "Starting", inputs: [first] }, queued: [second] });
+  observe(session, { _tag: "TurnStarted", turn: "wake-7", inputs: [first] });
+  expect(session.state).toMatchObject({ activity: { _tag: "InTurn", turn: "wake-7" }, queued: [second] });
+});
+
+test("a turn reported with inputs other than those requested is recorded as not expected", () => {
+  const session = open();
+  observe(session, { _tag: "SessionOpened", session: "s1", configuration: { permission: "allow" } });
+  const stray = observe(session, { _tag: "TurnStarted", turn: "turn-x", inputs: [2] });
+  expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "ObservationNotExpected", observation: stray } });
+  expect(session.state).toMatchObject({ activity: { _tag: "Idle" } });
 });

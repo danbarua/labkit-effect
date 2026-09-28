@@ -4,15 +4,16 @@
  * facts through the same two functions, `observe` and `apply`, so the state after `decide` and the
  * state after folding the same facts are the same.
  *
- * Input can arrive at any time. Input that arrives during a turn is queued, and is given to the
- * turn at the next point between steps: when every call of a tool batch has settled, or when the
- * model gives a final answer. A turn ends only on a final answer with no input queued. A turn that
- * fails drops its queued input.
+ * The core decides when a turn starts and with which inputs; an adapter starts it and reports
+ * `TurnStarted`. Input can arrive at any time. Input that arrives while a turn is starting or under
+ * way is queued, and is given to the turn at the next point between steps: when every call of a
+ * tool batch has settled, or when the model gives a final answer. A turn ends only on a final
+ * answer with no input queued. A turn that fails drops its queued input.
  */
 
-import type { Decision, Inputs } from "./decision.ts";
+import type { Decision } from "./decision.ts";
 import type { Fact, Journal } from "./fact.ts";
-import { type CallId, Seq, type ToolName, TurnCount, TurnId } from "./names.ts";
+import { type CallId, type Inputs, Seq, type ToolName, type TurnId } from "./names.ts";
 import type { Configuration, ModelPart, Observation, ToolOutcome } from "./observation.ts";
 import type { EffectRequest } from "./request.ts";
 
@@ -34,46 +35,67 @@ export interface Call {
  */
 export type Stage = "model" | "tools" | "final";
 
-export interface Turn {
-  readonly id: TurnId;
-  readonly stage: Stage;
-  readonly calls: ReadonlyMap<CallId, Call>;
-}
+/** What the session is doing. */
+export type Activity =
+  | { readonly _tag: "Idle" }
+  /** A turn was requested with `inputs`; its start has not been reported. */
+  | { readonly _tag: "Starting"; readonly inputs: Inputs }
+  | {
+      readonly _tag: "InTurn";
+      readonly turn: TurnId;
+      readonly stage: Stage;
+      readonly calls: ReadonlyMap<CallId, Call>;
+    };
+
+type InTurn = Extract<Activity, { _tag: "InTurn" }>;
 
 export type State =
   | { readonly _tag: "NotOpened" }
   | {
       readonly _tag: "Open";
       readonly configuration: Configuration;
-      readonly turns: TurnCount;
       /** Inputs not yet given to a turn, oldest first. */
       readonly queued: ReadonlyArray<Seq>;
-      readonly turn: Turn | undefined;
+      readonly activity: Activity;
     };
 
 type Open = Extract<State, { _tag: "Open" }>;
 
 export const initial: State = { _tag: "NotOpened" };
 
+const idle: Activity = { _tag: "Idle" };
+
 export interface Outcome {
   readonly decisions: ReadonlyArray<Decision>;
   readonly requests: ReadonlyArray<EffectRequest>;
 }
 
+function inTurn(state: State): InTurn | undefined {
+  return state._tag === "Open" && state.activity._tag === "InTurn" ? state.activity : undefined;
+}
+
+function sameInputs(a: ReadonlyArray<Seq>, b: ReadonlyArray<Seq>): boolean {
+  return a.length === b.length && a.every((input, index) => input === b[index]);
+}
+
 /** Whether `state` expects `observation`. An observation it does not expect changes nothing. */
 export function expects(state: State, observation: Observation): boolean {
   if (state._tag === "NotOpened") return observation._tag === "SessionOpened";
-  const turn = state.turn;
+  const turn = inTurn(state);
   switch (observation._tag) {
     case "SessionOpened":
       return false;
     case "InputArrived":
       return true;
+    case "TurnStarted":
+      return (
+        state.activity._tag === "Starting" && sameInputs(state.activity.inputs, observation.inputs)
+      );
     case "InputCancelled":
       return state.queued.includes(observation.input);
     case "ModelResponded":
     case "ModelFailed":
-      return turn !== undefined && turn.stage === "model" && turn.id === observation.turn;
+      return turn?.stage === "model" && turn.turn === observation.turn;
     case "PermissionAnswered":
       return turn?.stage === "tools" && turn.calls.get(observation.call)?.permission === "undecided";
     case "ToolEnded": {
@@ -85,35 +107,53 @@ export function expects(state: State, observation: Observation): boolean {
   }
 }
 
+function withTurn(state: State, change: (turn: InTurn) => InTurn): State {
+  const turn = inTurn(state);
+  return state._tag === "Open" && turn !== undefined ? { ...state, activity: change(turn) } : state;
+}
+
+function withCall(state: State, id: CallId, change: (call: Call) => Call): State {
+  return withTurn(state, (turn) => {
+    const call = turn.calls.get(id);
+    if (call === undefined) return turn;
+    const calls = new Map(turn.calls);
+    calls.set(id, change(call));
+    return { ...turn, calls };
+  });
+}
+
+function without(queued: ReadonlyArray<Seq>, removed: ReadonlyArray<Seq>): ReadonlyArray<Seq> {
+  return queued.filter((input) => !removed.includes(input));
+}
+
 /** The state after recording an observation `state` expects. */
 function observe(state: State, seq: Seq, observation: Observation): State {
   if (observation._tag === "SessionOpened")
-    return {
-      _tag: "Open",
-      configuration: observation.configuration,
-      turns: TurnCount.make(0),
-      queued: [],
-      turn: undefined,
-    };
+    return { _tag: "Open", configuration: observation.configuration, queued: [], activity: idle };
   if (state._tag === "NotOpened") return state;
   switch (observation._tag) {
     case "InputArrived":
       return { ...state, queued: [...state.queued, seq] };
+    case "TurnStarted":
+      return {
+        ...state,
+        activity: { _tag: "InTurn", turn: observation.turn, stage: "model", calls: new Map() },
+      };
     case "InputCancelled":
       return { ...state, queued: state.queued.filter((input) => input !== observation.input) };
-    case "ModelResponded": {
-      if (state.turn === undefined) return state;
-      const calls = new Map<CallId, Call>();
-      for (const part of observation.parts)
-        if (part._tag === "ToolCall")
-          calls.set(part.call, {
-            tool: part.tool,
-            input: part.input,
-            permission: "undecided",
-            outcome: undefined,
-          });
-      return { ...state, turn: { ...state.turn, stage: calls.size > 0 ? "tools" : "final", calls } };
-    }
+    case "ModelResponded":
+      return withTurn(state, (turn) => {
+        const calls = new Map<CallId, Call>();
+        for (const part of observation.parts)
+          if (part._tag === "ToolCall")
+            calls.set(part.call, {
+              tool: part.tool,
+              input: part.input,
+              permission: "undecided",
+              outcome: undefined,
+            });
+        return { ...turn, stage: calls.size > 0 ? "tools" : "final", calls };
+      });
     case "ModelFailed":
     case "PermissionAnswered":
       return state;
@@ -128,27 +168,24 @@ function observe(state: State, seq: Seq, observation: Observation): State {
 function apply(state: State, decision: Decision): State {
   if (state._tag === "NotOpened") return state;
   switch (decision._tag) {
-    case "TurnStarted":
+    case "TurnRequested":
       return {
         ...state,
-        turns: TurnCount.make(state.turns + 1),
         queued: without(state.queued, decision.inputs),
-        turn: { id: decision.turn, stage: "model", calls: new Map() },
+        activity: { _tag: "Starting", inputs: decision.inputs },
       };
     case "InputDelivered":
     case "InputDropped":
       return { ...state, queued: without(state.queued, decision.inputs) };
     case "ModelAsked":
-      return state.turn === undefined
-        ? state
-        : { ...state, turn: { ...state.turn, stage: "model", calls: new Map() } };
+      return withTurn(state, (turn) => ({ ...turn, stage: "model", calls: new Map() }));
     case "ToolCallAllowed":
       return withCall(state, decision.call, (call) => ({ ...call, permission: "allowed" }));
     case "ToolCallRefused":
       return withCall(state, decision.call, (call) => ({ ...call, permission: "refused" }));
     case "TurnAnswered":
     case "TurnFailed":
-      return { ...state, turn: undefined };
+      return { ...state, activity: idle };
     case "ObservationNotExpected":
       return state;
     default:
@@ -171,6 +208,10 @@ export function fold(state: State, fact: Fact): State {
 /** The state a journal describes. */
 export function replay(journal: Journal): State {
   return journal.reduce(fold, initial);
+}
+
+function isInputs(queued: ReadonlyArray<Seq>): queued is Inputs {
+  return queued.length > 0;
 }
 
 /**
@@ -202,18 +243,19 @@ export function decide(state: State, seq: Seq, observation: Observation): Outcom
     askModel(turn);
   };
   const allow = (call: CallId, by: "configuration" | "user"): void => {
-    const known = open()?.turn?.calls.get(call);
+    const known = inTurn(current)?.calls.get(call);
     record({ _tag: "ToolCallAllowed", call, by });
-    if (known !== undefined) requests.push({ _tag: "RunTool", call, tool: known.tool, input: known.input });
+    if (known !== undefined)
+      requests.push({ _tag: "RunTool", call, tool: known.tool, input: known.input });
   };
   /** When every call of the batch has settled, the turn moves to its next step. */
   const afterCallSettled = (): void => {
-    const turn = open()?.turn;
+    const turn = inTurn(current);
     if (turn === undefined) return;
     const settled = [...turn.calls.values()].every(
       (call) => call.permission === "refused" || call.outcome !== undefined,
     );
-    if (settled) nextStep(turn.id);
+    if (settled) nextStep(turn.turn);
   };
 
   switch (observation._tag) {
@@ -222,20 +264,22 @@ export function decide(state: State, seq: Seq, observation: Observation): Outcom
       break;
     case "InputArrived": {
       const now = open();
-      if (now !== undefined && now.turn === undefined && isInputs(now.queued)) {
-        const turn = TurnId.make(`turn-${now.turns + 1}`);
-        record({ _tag: "TurnStarted", turn, inputs: now.queued });
-        askModel(turn);
+      if (now?.activity._tag === "Idle" && isInputs(now.queued)) {
+        record({ _tag: "TurnRequested", inputs: now.queued });
+        requests.push({ _tag: "StartTurn", inputs: now.queued });
       }
       break;
     }
+    case "TurnStarted":
+      askModel(observation.turn);
+      break;
     case "ModelResponded": {
       const now = open();
-      const turn = now?.turn;
+      const turn = inTurn(current);
       if (now === undefined || turn === undefined) break;
       if (turn.stage === "final") {
-        if (isInputs(now.queued)) nextStep(turn.id);
-        else record({ _tag: "TurnAnswered", turn: turn.id });
+        if (isInputs(now.queued)) nextStep(turn.turn);
+        else record({ _tag: "TurnAnswered", turn: turn.turn });
         break;
       }
       for (const [call, known] of turn.calls) {
@@ -278,21 +322,4 @@ export function decide(state: State, seq: Seq, observation: Observation): Outcom
       observation satisfies never;
   }
   return { decisions, requests };
-}
-
-function isInputs(queued: ReadonlyArray<Seq>): queued is Inputs {
-  return queued.length > 0;
-}
-
-function without(queued: ReadonlyArray<Seq>, removed: ReadonlyArray<Seq>): ReadonlyArray<Seq> {
-  return queued.filter((input) => !removed.includes(input));
-}
-
-function withCall(state: State, id: CallId, change: (call: Call) => Call): State {
-  if (state._tag === "NotOpened" || state.turn === undefined) return state;
-  const call = state.turn.calls.get(id);
-  if (call === undefined) return state;
-  const calls = new Map(state.turn.calls);
-  calls.set(id, change(call));
-  return { ...state, turn: { ...state.turn, calls } };
 }

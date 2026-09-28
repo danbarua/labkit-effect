@@ -3,19 +3,18 @@
  */
 
 import { Schema } from "effect";
-import { CallId, FailureText, Seq, TurnId } from "./names.ts";
+import { CallId, FailureText, Inputs, Seq, TurnId } from "./names.ts";
 
 /** Who allowed or refused a tool call: the configuration, or the user when asked. */
 export const Authority = Schema.Literals(["configuration", "user"]);
 export type Authority = typeof Authority.Type;
 
-/** The positions of queued inputs in the journal, oldest first. At least one. */
-export const Inputs = Schema.NonEmptyArray(Seq);
-export type Inputs = typeof Inputs.Type;
-
 export const Decision = Schema.Union([
-  /** A turn began, with the queued inputs recorded at `inputs`. */
-  Schema.TaggedStruct("TurnStarted", { turn: TurnId, inputs: Inputs }),
+  /**
+   * No turn is under way and input is queued, so a turn is to start with the inputs recorded at
+   * `inputs`. An adapter starts it and reports `TurnStarted`.
+   */
+  Schema.TaggedStruct("TurnRequested", { inputs: Inputs }),
   /**
    * Inputs that arrived during `turn` were given to it, at a point between steps: after a tool
    * batch settled, or after a final answer.

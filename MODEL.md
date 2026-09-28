@@ -51,8 +51,10 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
 
 - I1. Input arrives from the user, the system (a wake-up, a scheduled prompt), or another agent,
   at any time.
-- I2. Input that arrives while no turn is under way starts a turn (Decision `TurnStarted`) with
-  every queued input.
+- I2. Input that arrives while the session is idle leads to a turn. The core decides when and with
+  which inputs (Decision `TurnRequested`, request `StartTurn`); an adapter starts the turn, chooses
+  its identity, and reports it (Observation `TurnStarted`). Input that arrives while a turn is
+  starting is queued for that turn's next step.
 - I3. Input that arrives during a turn is queued. It is given to the turn (Decision
   `InputDelivered`) at the next point between steps: when every call of a tool batch has settled,
   or when the model gives a final answer. The model is then asked again.
@@ -62,6 +64,22 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
 - I6. A turn that fails drops its queued input (Decision `InputDropped`, recorded before
   `TurnFailed`). No turn is under way until the next input arrives. (Dan: "There is no 'next turn',
   until stimulus is received.")
+
+## Decisions and effects
+
+The core decides **when** and with **what**; an adapter decides **how** (Dan). Every effect follows
+one pattern: a Decision recorded, an effect request sent, the outcome observed.
+
+| Decision | Request | Observed outcome |
+|---|---|---|
+| `TurnRequested` | `StartTurn` | `TurnStarted` |
+| `ModelAsked` | `RequestModelResponse` | `ModelResponded`, `ModelFailed` |
+| `ToolCallAllowed` | `RunTool` | `ToolEnded` |
+| (none; the question is not a choice) | `AskPermission` | `PermissionAnswered` |
+
+What the design has to allow, without surprising a maintainer (Dan, "not a spec"): layers above the
+core that assemble what the model is sent (system prompt, history, tool schemas, system notices),
+choose which model and how it is called, and carry out the call, for example with routing policies.
 
 ## What the model has seen
 
@@ -86,6 +104,3 @@ in batches at most once per interval; time is an input, so it also serves tests.
 
 ## Open questions
 
-- Q2. Dan: starting a turn is a harness decision; in the chat-completions shape it looks like the
-  user's. The session's state ("a turn is under way") is a Fact. The code records `TurnStarted` as a
-  Decision, so it is a Fact under T4. Is that the reading Dan intends?
