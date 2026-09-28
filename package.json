@@ -6,7 +6,7 @@
     "prepare": "effect-tsgo patch --oxlint",
     "typecheck": "tsc --noEmit -p .",
     "check": "bun run typecheck && bun run lint && bun run check:brands && bun test",
-    "lint": "oxlint --type-aware",
+    "lint": "oxlint --type-aware --format default .",
     "check:brands": "bun scripts/check-brands.ts"
   },
   "devDependencies": {
