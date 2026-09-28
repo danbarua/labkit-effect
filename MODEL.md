@@ -63,6 +63,21 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
   `TurnFailed`). No turn is under way until the next input arrives. (Dan: "There is no 'next turn',
   until stimulus is received.")
 
+## What the model has seen
+
+The model's response to a request is its observation of what the request carried, as a tool's
+result is the harness's observation of the tool (Dan: the LLM "observes the tool result out loud and
+then continues").
+
+- S1. `ModelAsked { turn, through }` records how far a request goes: the conversation through the
+  fact at `through`.
+- S2. The model has seen a fact once it responds to a request that contained it. A request that
+  fails leaves what it carried unseen. The view holds `seenThrough` and `sentThrough`, and
+  `unseen(view)` lists the inputs, tool results and refusals the model has not seen.
+- S3. `ModelFailed` means the request failed after whatever the layer around the core does first:
+  retries with back-off, another model or provider. The turn fails and the session is idle until
+  the next input. That turn's first request carries the input and everything still unseen.
+
 ## Captured observations
 
 Streamed partial model output is side-band information for display, like a progress bar: a

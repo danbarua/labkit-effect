@@ -12,7 +12,7 @@
 
 import type { Decision, Inputs } from "./decision.ts";
 import type { Fact, Journal } from "./fact.ts";
-import { type CallId, type Seq, type ToolName, TurnCount, TurnId } from "./names.ts";
+import { type CallId, Seq, type ToolName, TurnCount, TurnId } from "./names.ts";
 import type { Configuration, ModelPart, Observation, ToolOutcome } from "./observation.ts";
 import type { EffectRequest } from "./request.ts";
 
@@ -175,7 +175,8 @@ export function replay(journal: Journal): State {
 
 /**
  * What follows from `observation`, recorded at `seq`, arriving in `state`. The caller records the
- * decisions in order after the observation, then carries out the requests.
+ * decisions in order at the positions after the observation (the first at `seq + 1`), then carries
+ * out the requests. `ModelAsked.through` names a position on that assumption.
  */
 export function decide(state: State, seq: Seq, observation: Observation): Outcome {
   if (!expects(state, observation))
@@ -191,7 +192,7 @@ export function decide(state: State, seq: Seq, observation: Observation): Outcom
   const open = (): Open | undefined => (current._tag === "Open" ? current : undefined);
 
   const askModel = (turn: TurnId): void => {
-    record({ _tag: "ModelAsked", turn });
+    record({ _tag: "ModelAsked", turn, through: Seq.make(seq + decisions.length) });
     requests.push({ _tag: "RequestModelResponse", turn });
   };
   /** At a point between steps: give the turn its queued input, then ask the model. */

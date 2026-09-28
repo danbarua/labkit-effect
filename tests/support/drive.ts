@@ -10,7 +10,7 @@ import { decide, fold, initial, type State } from "../../src/agent-core/machine.
 import { Seq } from "../../src/agent-core/names.ts";
 import { Observation } from "../../src/agent-core/observation.ts";
 import type { EffectRequest } from "../../src/agent-core/request.ts";
-import { type Conversation, viewFact } from "../../src/agent-core/view.ts";
+import { type Conversation, emptyConversation, viewFact } from "../../src/agent-core/view.ts";
 
 export interface Session {
   state: State;
@@ -20,7 +20,7 @@ export interface Session {
 }
 
 export function open(): Session {
-  return { state: initial, journal: [], requests: [], live: [] };
+  return { state: initial, journal: [], requests: [], live: emptyConversation };
 }
 
 function record(session: Session, fact: Fact): void {

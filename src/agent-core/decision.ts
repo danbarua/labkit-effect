@@ -21,8 +21,11 @@ export const Decision = Schema.Union([
    * batch settled, or after a final answer.
    */
   Schema.TaggedStruct("InputDelivered", { turn: TurnId, inputs: Inputs }),
-  /** The harness asked the model for the next step of `turn`. */
-  Schema.TaggedStruct("ModelAsked", { turn: TurnId }),
+  /**
+   * The harness asked the model for the next step of `turn`, sending the conversation through the
+   * fact recorded at `through`. The model has seen those facts once it responds to this request.
+   */
+  Schema.TaggedStruct("ModelAsked", { turn: TurnId, through: Seq }),
   /** The harness allowed a tool call. */
   Schema.TaggedStruct("ToolCallAllowed", { call: CallId, by: Authority }),
   /** The harness refused a tool call. The model is told it was refused. */

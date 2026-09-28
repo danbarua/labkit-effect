@@ -80,7 +80,7 @@ test("a journal read back after writing holds every part of every observation", 
 test("the view after reload is the view built live", () => {
   const session = oneTurnWithATool();
   expect(conversation(reload(session.journal))).toEqual(session.live);
-  const response = session.live.find((entry) => entry._tag === "ModelResponse");
+  const response = session.live.entries.find((entry) => entry._tag === "ModelResponse");
   expect(response).toMatchObject({ parts: responseWithEveryPartKind.parts });
 });
 
