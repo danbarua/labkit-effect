@@ -1,9 +1,10 @@
 /**
  * A conversation turn: from the input that started it to the model's final answer. It runs steps
- * one after another. Between steps it collects any queued input from the inbox and gives it to the
- * next step. It ends when a step gives a final answer and nothing is queued, or when a step stops
- * without an answer. The model's observations are addressed to the turn, which passes them to its
- * current step.
+ * one after another. Input for the turn waits in its mailbox while a step runs, and is taken
+ * between steps; between steps the turn posts `Proceed` to itself, which arrives after the waiting
+ * input is taken, and then goes on. It ends when a step gives a final answer and no input was
+ * taken since, or when a step stops without an answer; input still waiting then is dropped. The
+ * model's observations are addressed to the turn, which passes them to its current step.
  */
 
 import type { Ending } from "./decision.ts";
@@ -11,19 +12,24 @@ import {
   type ModelObservation,
   type Send,
   type ToConversationTurn,
-  toInbox,
+  toAgent,
+  toConversationTurn,
   toTurnStep,
 } from "./messages.ts";
-import { StepIndex, type TurnId } from "./names.ts";
+import { type Seq, StepIndex, type TurnId } from "./names.ts";
 import { becomes, type Step, type Table } from "./table.ts";
 
 export type ConversationTurnState =
   | { readonly _tag: "NotStarted"; readonly turn: TurnId }
+  /** Opened; taking its first input before the first step. */
+  | { readonly _tag: "Opening"; readonly turn: TurnId }
   | { readonly _tag: "Stepping"; readonly turn: TurnId; readonly step: StepIndex }
-  /** The step's tool calls settled; waiting for the inbox's mail before the next step. */
-  | { readonly _tag: "CollectingAfterTools"; readonly turn: TurnId; readonly step: StepIndex }
-  /** The step gave a final answer; waiting for the inbox's mail to know whether the turn goes on. */
-  | { readonly _tag: "CollectingAfterAnswer"; readonly turn: TurnId; readonly step: StepIndex }
+  /** Between steps after a tool batch settled. */
+  | { readonly _tag: "AfterTools"; readonly turn: TurnId; readonly step: StepIndex }
+  /** Between steps after a final answer, with no input taken since. */
+  | { readonly _tag: "AfterAnswer"; readonly turn: TurnId; readonly step: StepIndex }
+  /** Between steps after a final answer, with input taken since. */
+  | { readonly _tag: "AfterAnswerSteered"; readonly turn: TurnId; readonly step: StepIndex }
   | { readonly _tag: "Ended"; readonly turn: TurnId };
 
 export type ConversationTurnMessage = ToConversationTurn | ModelObservation;
@@ -31,6 +37,8 @@ export type ConversationTurnMessage = ToConversationTurn | ModelObservation;
 type TurnStep = Step<ConversationTurnState, Send>;
 
 export const openingConversationTurn = (turn: TurnId): ConversationTurnState => ({ _tag: "NotStarted", turn });
+
+const proceed = (turn: TurnId): Send => toConversationTurn(turn, { _tag: "Proceed" });
 
 const nextStep = (turn: TurnId, previous: number): TurnStep => {
   const step = StepIndex.make(previous + 1);
@@ -42,36 +50,47 @@ const nextStep = (turn: TurnId, previous: number): TurnStep => {
   };
 };
 
-const withMail = (
-  state: { readonly turn: TurnId; readonly step: StepIndex },
-  inputs: Extract<ToConversationTurn, { _tag: "Mail" }>["inputs"],
-): TurnStep => {
-  const next = nextStep(state.turn, state.step);
-  return { ...next, decisions: [{ _tag: "InputDelivered", turn: state.turn, inputs }, ...next.decisions] };
-};
+/** The input is given to the turn. */
+const take = (state: ConversationTurnState, input: Seq, next: ConversationTurnState = state): TurnStep => ({
+  state: next,
+  decisions: [{ _tag: "InputDelivered", turn: state.turn, inputs: [input] }],
+  requests: [],
+  sends: [],
+});
+
+const between = (
+  state: Extract<ConversationTurnState, { _tag: "Stepping" }>,
+  next: "AfterTools" | "AfterAnswer",
+): TurnStep => ({ ...becomes({ _tag: next, turn: state.turn, step: state.step }), sends: [proceed(state.turn)] });
 
 const passOn = (
   state: Extract<ConversationTurnState, { _tag: "Stepping" }>,
   message: ModelObservation,
 ): TurnStep => ({ ...becomes(state), sends: [toTurnStep({ turn: state.turn, index: state.step }, message)] });
 
-const collect = (
-  state: Extract<ConversationTurnState, { _tag: "Stepping" }>,
-  next: "CollectingAfterTools" | "CollectingAfterAnswer",
-): TurnStep => ({ ...becomes({ _tag: next, turn: state.turn, step: state.step }), sends: [toInbox({ _tag: "CollectMail" })] });
-
-const ended = (turn: TurnId, ending: Ending, told: Send): TurnStep => ({
+const ended = (turn: TurnId, ending: Ending): TurnStep => ({
   state: { _tag: "Ended", turn },
   decisions: [{ _tag: "TurnEnded", turn, ending }],
   requests: [],
-  sends: [told],
+  sends: [toAgent({ _tag: "TurnFinished" })],
 });
 
 export const conversationTurnTable: Table<ConversationTurnState, ConversationTurnMessage, Send> = {
   NotStarted: {
-    TurnOpened: (state) => nextStep(state.turn, 0),
-    Mail: "ignored",
-    NoMail: "ignored",
+    TurnOpened: (state) => ({ ...becomes({ _tag: "Opening", turn: state.turn }), sends: [proceed(state.turn)] }),
+    Steer: "deferred",
+    Proceed: "ignored",
+    StepToolsSettled: "ignored",
+    StepAnswered: "ignored",
+    StepStopped: "ignored",
+    ModelResponded: "ignored",
+    ModelFailed: "ignored",
+    ModelVetoed: "ignored",
+  },
+  Opening: {
+    TurnOpened: "ignored",
+    Steer: (state, message) => take(state, message.input),
+    Proceed: (state) => nextStep(state.turn, 0),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
     StepStopped: "ignored",
@@ -81,19 +100,19 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
   },
   Stepping: {
     TurnOpened: "ignored",
-    Mail: "ignored",
-    NoMail: "ignored",
-    StepToolsSettled: (state) => collect(state, "CollectingAfterTools"),
-    StepAnswered: (state) => collect(state, "CollectingAfterAnswer"),
-    StepStopped: (state, message) => ended(state.turn, message.ending, toInbox({ _tag: "TurnStopped" })),
+    Steer: "deferred",
+    Proceed: "ignored",
+    StepToolsSettled: (state) => between(state, "AfterTools"),
+    StepAnswered: (state) => between(state, "AfterAnswer"),
+    StepStopped: (state, message) => ended(state.turn, message.ending),
     ModelResponded: passOn,
     ModelFailed: passOn,
     ModelVetoed: passOn,
   },
-  CollectingAfterTools: {
+  AfterTools: {
     TurnOpened: "ignored",
-    Mail: (state, message) => withMail(state, message.inputs),
-    NoMail: (state) => nextStep(state.turn, state.step),
+    Steer: (state, message) => take(state, message.input),
+    Proceed: (state) => nextStep(state.turn, state.step),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
     StepStopped: "ignored",
@@ -101,10 +120,22 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelFailed: "ignored",
     ModelVetoed: "ignored",
   },
-  CollectingAfterAnswer: {
+  AfterAnswer: {
     TurnOpened: "ignored",
-    Mail: (state, message) => withMail(state, message.inputs),
-    NoMail: (state) => ended(state.turn, { _tag: "Answered" }, toInbox({ _tag: "TurnAnswered" })),
+    Steer: (state, message) =>
+      take(state, message.input, { _tag: "AfterAnswerSteered", turn: state.turn, step: state.step }),
+    Proceed: (state) => ended(state.turn, { _tag: "Answered" }),
+    StepToolsSettled: "ignored",
+    StepAnswered: "ignored",
+    StepStopped: "ignored",
+    ModelResponded: "ignored",
+    ModelFailed: "ignored",
+    ModelVetoed: "ignored",
+  },
+  AfterAnswerSteered: {
+    TurnOpened: "ignored",
+    Steer: (state, message) => take(state, message.input),
+    Proceed: (state) => nextStep(state.turn, state.step),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
     StepStopped: "ignored",
@@ -114,8 +145,12 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
   },
   Ended: {
     TurnOpened: "ignored",
-    Mail: "ignored",
-    NoMail: "ignored",
+    /** Input still waiting when the turn ends is dropped. */
+    Steer: (state, message) => ({
+      ...becomes(state),
+      decisions: [{ _tag: "InputDropped", turn: state.turn, inputs: [message.input] }],
+    }),
+    Proceed: "ignored",
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
     StepStopped: "ignored",

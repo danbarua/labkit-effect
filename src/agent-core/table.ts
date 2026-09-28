@@ -1,8 +1,9 @@
 /**
- * A machine is a table: for each state kind and each message kind, the transition to take, or
- * "ignored". Whether a message is acted on is decided by the two kinds alone. The table's type
- * requires an entry for every pair, so a new state or message kind does not compile until every
- * pair is answered.
+ * A machine is a table: for each state kind and each message kind, the transition to take,
+ * "ignored", or "deferred". Whether a message is acted on is decided by the two kinds alone. A
+ * deferred message waits in the machine's mailbox and is tried again after the machine's next
+ * transition. The table's type requires an entry for every pair, so a new state or message kind
+ * does not compile until every pair is answered.
  */
 
 import type { Decision } from "./decision.ts";
@@ -13,9 +14,9 @@ export interface Tagged {
   readonly _tag: PropertyKey;
 }
 
-/** Where a transition happens: the observation being handled, and the last fact recorded. */
+/** Where a transition happens: the message's own position, and the last fact recorded. */
 export interface Position {
-  /** The observation that started this delivery. */
+  /** The position of the observation the message came from; a deferred message keeps its own. */
   readonly seq: Seq;
   /** The last fact recorded so far; a decision this transition records goes after it. */
   readonly at: Seq;
@@ -39,20 +40,21 @@ export type Table<State extends Tagged, Message extends Tagged, Send> = {
   readonly [S in State["_tag"]]: {
     readonly [M in Message["_tag"]]:
       | "ignored"
+      | "deferred"
       | Transition<Extract<State, { _tag: S }>, Extract<Message, { _tag: M }>, State, Send>;
   };
 };
 
-/** The machine's step for `message` in `state`, or "ignored". */
+/** The machine's step for `message` in `state`, or "ignored", or "deferred". */
 export function step<State extends Tagged, Message extends Tagged, Send>(
   table: Table<State, Message, Send>,
   state: State,
   message: Message,
   position: Position,
-): Step<State, Send> | "ignored" {
+): Step<State, Send> | "ignored" | "deferred" {
   const entry = table[state._tag as State["_tag"]][message._tag as Message["_tag"]];
-  return entry === "ignored"
-    ? "ignored"
+  return entry === "ignored" || entry === "deferred"
+    ? entry
     : (entry as Transition<State, Message, State, Send>)(state, message, position);
 }
 

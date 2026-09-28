@@ -27,7 +27,7 @@ test("each request records how far the conversation it carries goes; after a fai
   expect(asked(session.journal).at(-1)).toBeGreaterThanOrEqual(result);
 
   observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "overloaded after 3 retries" });
-  expect(session.world.inbox).toMatchObject({ _tag: "Idle" });
+  expect(session.world.agent.state).toMatchObject({ _tag: "Idle" });
 
   const stimulus = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "try again" });
   expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "ModelAsked", turn: "turn-2" } });

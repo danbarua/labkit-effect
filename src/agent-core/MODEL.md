@@ -31,12 +31,13 @@ Status: **open** means Dan has not settled it. **Proposal** means the wording is
   outcome's two cases.
 - R5. Every `switch` over a union ends in `satisfies never`, so a new kind of observation or decision
   does not compile until every machine handles it.
-- R6. The core is machines that pass messages: an inbox, a conversation turn per turn, a turn step
-  per model request, and a call per tool call. Each is a table from (state kind, message kind) to a
-  transition or "ignored"; whether a message is acted on depends on the two kinds alone. The router
-  delivers an observation to the machine its fields address. An observation a machine does not act
-  on is recorded as `ObservationNotExpected`; one addressed to a turn or call no machine exists
-  for, as `ObservationUndelivered`.
+- R6. The core is machines that pass messages, in a tree: the agent, a conversation turn per
+  turn, a turn step per model request, a call per tool call. Each is a table from (state kind,
+  message kind) to a transition, "ignored" or "deferred"; whether a message is acted on depends on
+  the two kinds alone. A deferred message waits in the machine's mailbox and is tried again after
+  its next transition. The router delivers an observation to the machine its fields address. An
+  observation a machine ignores is recorded as `ObservationNotExpected`; one addressed to a turn or
+  call no machine exists for, as `ObservationUndelivered`.
 
 ## Input during a turn
 
@@ -44,30 +45,29 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
 
 - I1. Input arrives from the user, the system (a wake-up, a scheduled prompt), or another agent,
   at any time.
-- I2. Input that arrives while no turn is under way leads to a turn (the rule for when is
-  Claude's, not specified). The core decides when and with
-  which inputs (Decision `TurnRequested`, request `StartTurn`); an adapter starts the turn, chooses
-  its identity, and reports it (Observation `TurnStarted`). Input that arrives while a turn is
-  starting is queued for that turn's next step.
-- I3. Input that arrives during a turn is queued. It is given to the turn (Decision
-  `InputDelivered`) at the next point between steps: when every call of a tool batch has settled,
-  or when the model gives a final answer. The model is then asked again.
-- I4. A turn ends (Decision `TurnEnded`, `Answered`) on a final answer with no input queued. (Dan
-  chose this.)
-- I5. The sender can cancel a queued input (Observation `InputCancelled`). Cancelling an input
-  that is no longer queued changes nothing.
-- I6. A turn that ends other than by an answer (`Failed`, `Vetoed`) drops its queued input
+- I2. Every machine has a mailbox. Input that arrives while no turn is running waits in the
+  agent's mailbox. When a turn starts is decided by the layers around the core, which report
+  `TurnStarted`; the turn then takes every input waiting (Decision `InputDelivered`, one per
+  input).
+- I3. Input that arrives while a turn runs waits in the turn's mailbox and is taken between steps:
+  when every call of a tool batch has settled, or when the model gives a final answer. The model is
+  then asked again.
+- I4. A turn ends (Decision `TurnEnded`, `Answered`) on a final answer with no input taken after
+  it. (Dan chose this.)
+- I5. The sender can cancel input still waiting in a mailbox (Observation `InputCancelled`); it is
+  withdrawn. Cancelling input already taken changes nothing.
+- I6. A turn that ends other than by an answer (`Failed`, `Vetoed`) drops the input still waiting
   (Decision `InputDropped`). No turn is under way until the next input
   arrives. (Dan: "There is no 'next turn', until stimulus is received.")
 
 ## Decisions and effects
 
-The core decides **when** and with **what**; an adapter decides **how** (Dan). Every effect follows
-one pattern: a Decision recorded, an effect request sent, the outcome observed.
+Every effect the core requests follows one pattern: a Decision recorded, an effect request sent,
+the outcome observed. When a turn starts is not one of them: the layers around the core decide it
+and report `TurnStarted`.
 
 | Decision | Request | Observed outcome |
 |---|---|---|
-| `TurnRequested` | `StartTurn` | `TurnStarted` |
 | `ModelAsked` | `RequestModelResponse` | `ModelResponded`, `ModelFailed`, `ModelVetoed` |
 | (none: every proposed call is requested) | `RunTool` | `ToolEnded` (`Succeeded`, `Failed`, `Vetoed`) |
 

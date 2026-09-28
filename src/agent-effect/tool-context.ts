@@ -39,8 +39,6 @@ function message(fact: Fact, texts: ReadonlyMap<Seq, string>): ContextMessage | 
     return fact.decision._tag === "InputDelivered" ? inputs(fact.decision.inputs) : undefined;
   const observation = fact.observation;
   switch (observation._tag) {
-    case "TurnStarted":
-      return inputs(observation.inputs);
     case "ModelResponded":
       return {
         role: "assistant",

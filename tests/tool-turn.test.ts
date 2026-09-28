@@ -53,8 +53,8 @@ test("the model calls a tool from the catalog, and answers from its result", asy
   expect(facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag))).toEqual([
     "SessionOpened",
     "InputArrived",
-    "TurnRequested",
     "TurnStarted",
+    "InputDelivered",
     "ModelAsked",
     "ModelResponded",
     "ToolEnded",

@@ -40,8 +40,8 @@ test("the turn runs to an answer through one tool call", () => {
   expect(session.journal.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag))).toEqual([
     "SessionOpened",
     "InputArrived",
-    "TurnRequested",
     "TurnStarted",
+    "InputDelivered",
     "ModelAsked",
     "ModelResponded",
     "ToolEnded",
@@ -50,7 +50,6 @@ test("the turn runs to an answer through one tool call", () => {
     "TurnEnded",
   ]);
   expect(session.requests.map((request) => request._tag)).toEqual([
-    "StartTurn",
     "RequestModelResponse",
     "RunTool",
     "RequestModelResponse",

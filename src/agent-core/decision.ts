@@ -19,13 +19,8 @@ export type Ending = typeof Ending.Type;
 
 export const Decision = Schema.Union([
   /**
-   * The session is idle and input is queued, so a turn is to start with the inputs recorded at
-   * `inputs`. An adapter starts it and reports `TurnStarted`.
-   */
-  Schema.TaggedStruct("TurnRequested", { inputs: Inputs }),
-  /**
-   * Inputs that arrived during `turn` were given to it, at a point between steps: after a tool
-   * batch settled, or after a final answer.
+   * Inputs were given to `turn`: when it opened, or at a point between steps (after a tool batch
+   * settled, or after a final answer).
    */
   Schema.TaggedStruct("InputDelivered", { turn: TurnId, inputs: Inputs }),
   /**

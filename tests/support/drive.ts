@@ -1,7 +1,8 @@
 /**
  * Plays the part of the layer around the core: records each observation, asks the machine what
- * follows, records the decisions, and collects the effect requests. It carries out `StartTurn`
- * itself, naming turns `turn-1`, `turn-2`, …; every other request is left to the test.
+ * follows, records the decisions, and collects the effect requests. It starts turns by the loop's
+ * rule (input arrives while the agent is idle), naming them `turn-1`, `turn-2`, …; every request is
+ * left to the test.
  */
 
 import { Schema } from "effect";
@@ -16,7 +17,7 @@ export interface Session {
   journal: Array<Fact>;
   requests: Array<EffectRequest>;
   turns: number;
-  /** Whether the driver carries out `StartTurn` requests; a test that plays that adapter sets false. */
+  /** Whether the driver starts turns; a test that starts them itself sets false. */
   startsTurns: boolean;
 }
 
@@ -39,11 +40,10 @@ export function observe(session: Session, raw: unknown): Seq {
   for (const decision of outcome.decisions)
     record(session, { _tag: "Decided", seq: Seq.make(session.journal.length + 1), decision });
   session.requests.push(...outcome.requests);
-  for (const request of outcome.requests)
-    if (request._tag === "StartTurn" && session.startsTurns) {
-      session.turns += 1;
-      observe(session, { _tag: "TurnStarted", turn: `turn-${session.turns}`, inputs: request.inputs });
-    }
+  if (observation._tag === "InputArrived" && session.startsTurns && session.world.agent.state._tag === "Idle") {
+    session.turns += 1;
+    observe(session, { _tag: "TurnStarted", turn: `turn-${session.turns}` });
+  }
   return seq;
 }
 

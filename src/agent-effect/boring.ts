@@ -5,7 +5,7 @@
 
 import { Effect, Layer } from "effect";
 import type { Fact } from "../agent-core/fact.ts";
-import { type Inputs, ModelName, ProviderName, type Seq, TurnId } from "../agent-core/names.ts";
+import { ModelName, ProviderName, type Seq, TurnId } from "../agent-core/names.ts";
 import { ContextAssembler, type ModelContext, ModelProvider, Turns } from "./contracts.ts";
 
 /** Every request goes to `endpoint`, for provider "boring" and model "boring-1". */
@@ -30,11 +30,11 @@ export function inputTexts(facts: ReadonlyArray<Fact>): ReadonlyMap<Seq, string>
   );
 }
 
-/** The inputs the turn started with. */
+/** The inputs given to the turn, in order. */
 function turnInputs(facts: ReadonlyArray<Fact>, turn: TurnId): ReadonlyArray<Seq> {
   return facts.flatMap((fact) =>
-    fact._tag === "Observed" && fact.observation._tag === "TurnStarted" && fact.observation.turn === turn
-      ? fact.observation.inputs
+    fact._tag === "Decided" && fact.decision._tag === "InputDelivered" && fact.decision.turn === turn
+      ? fact.decision.inputs
       : [],
   );
 }
@@ -64,10 +64,9 @@ export const BoringContextAssembler = Layer.succeed(ContextAssembler, {
 export const CountingTurns = Layer.sync(Turns, () => {
   const started = { count: 0 };
   return {
-    start: (_inputs: Inputs) =>
-      Effect.sync(() => {
-        started.count += 1;
-        return TurnId.make(`turn-${started.count}`);
-      }),
+    start: Effect.sync(() => {
+      started.count += 1;
+      return TurnId.make(`turn-${started.count}`);
+    }),
   };
 });

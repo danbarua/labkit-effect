@@ -10,7 +10,6 @@ import {
   CallId,
   FailureText,
   InputText,
-  Inputs,
   ModelName,
   ModelText,
   ProviderName,
@@ -67,8 +66,8 @@ export const Observation = Schema.Union([
   Schema.TaggedStruct("SessionOpened", { session: SessionId }),
   /** An input arrived. It can arrive at any time, including while a turn is under way. */
   Schema.TaggedStruct("InputArrived", { from: InputSource, text: InputText }),
-  /** A turn started, with the inputs recorded at `inputs`, as a `StartTurn` request asked. */
-  Schema.TaggedStruct("TurnStarted", { turn: TurnId, inputs: Inputs }),
+  /** A turn started. It takes the input waiting for it. */
+  Schema.TaggedStruct("TurnStarted", { turn: TurnId }),
   /** The input recorded at `input`, still queued, was cancelled by its sender. */
   Schema.TaggedStruct("InputCancelled", { input: Seq }),
   /**

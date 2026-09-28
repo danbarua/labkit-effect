@@ -3,8 +3,6 @@
  * applies a policy to each request. A request the policy lets continue is forwarded to the
  * adapters; a vetoed one becomes the observation the core records for a veto; a request the policy
  * holds waits, with what the policy asked for passed on to be answered.
- *
- * `StartTurn` is forwarded without review: the core has no outcome for a turn that is not started.
  */
 
 import { Schema } from "effect";
@@ -17,7 +15,7 @@ import type { Policy, PolicyMessage, PolicyStep } from "./policy.ts";
 export const RequestKey = Schema.String.pipe(Schema.brand("RequestKey"));
 export type RequestKey = typeof RequestKey.Type;
 
-type Reviewed = Exclude<EffectRequest, { _tag: "StartTurn" }>;
+type Reviewed = EffectRequest;
 
 export function keyOf(request: Reviewed): RequestKey {
   switch (request._tag) {
@@ -118,12 +116,8 @@ export function gate<State>(
   input: GateInput,
 ): GateStep<State> {
   switch (input._tag) {
-    case "Requested": {
-      const request = input.request;
-      return request._tag === "StartTurn"
-        ? { gate: held, outputs: [{ _tag: "Forward", request }] }
-        : settle(held, keyOf(request), request, policy.start(request));
-    }
+    case "Requested":
+      return settle(held, keyOf(input.request), input.request, policy.start(input.request));
     case "Answered": {
       const waiting = held.waiting.get(input.key);
       return waiting === undefined

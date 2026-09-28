@@ -4,7 +4,7 @@
 
 import { Context, type Effect, type Schema } from "effect";
 import type { Fact } from "../agent-core/fact.ts";
-import type { CallId, Inputs, ModelName, ProviderName, ToolName, TurnId } from "../agent-core/names.ts";
+import type { CallId, ModelName, ProviderName, ToolName, TurnId } from "../agent-core/names.ts";
 import type { Observation, ToolOutcome } from "../agent-core/observation.ts";
 import type { Received } from "../agent-core/received.ts";
 
@@ -69,10 +69,9 @@ export class ModelClient extends Context.Service<
 >()("agent-effect/ModelClient") {}
 
 /** Starts a turn and chooses its identity. */
-export class Turns extends Context.Service<
-  Turns,
-  { readonly start: (inputs: Inputs) => Effect.Effect<TurnId> }
->()("agent-effect/Turns") {}
+export class Turns extends Context.Service<Turns, { readonly start: Effect.Effect<TurnId> }>()(
+  "agent-effect/Turns",
+) {}
 
 /** Runs one tool call and reports how it ended. */
 export class ToolRunner extends Context.Service<

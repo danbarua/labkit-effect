@@ -3,6 +3,9 @@
  * decisions, and carries out the requests, each of whose outcome is the next observation. The
  * session's facts are held in memory.
  *
+ * When a turn starts is decided here: when input arrives and the agent is idle, the loop starts a
+ * turn through `Turns` and reports `TurnStarted`.
+ *
  * Every log line written while a request is carried out is annotated with what the request is
  * about (its turn, and for a tool run its call and tool), so the services it calls do not pass
  * those along themselves.
@@ -34,12 +37,6 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
 
   const carryOut = (request: EffectRequest): Effect.Effect<Observation, never, Services> => {
     switch (request._tag) {
-      case "StartTurn":
-        return Effect.gen(function* () {
-          const turns = yield* Turns;
-          const turn = yield* turns.start(request.inputs);
-          return { _tag: "TurnStarted", turn, inputs: request.inputs } as const;
-        });
       case "RequestModelResponse":
         return Effect.gen(function* () {
           const target = yield* (yield* ModelProvider).select(request.turn);
@@ -59,10 +56,8 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
 
   /** What a request is about, for its log lines. */
   const about = (request: EffectRequest, world: World): Record<string, unknown> => {
-    const turn = world.inbox._tag === "Serving" ? { turn: world.inbox.turn } : {};
+    const turn = world.agent.state._tag === "Running" ? { turn: world.agent.state.turn } : {};
     switch (request._tag) {
-      case "StartTurn":
-        return { inputs: request.inputs };
       case "RequestModelResponse":
         return { turn: request.turn };
       case "RunTool":
@@ -93,6 +88,10 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
       yield* Effect.forEach(outcome.requests, (request) =>
         carryOut(request).pipe(Effect.annotateLogs(about(request, after)), Effect.flatMap(observe)),
       );
+      if (observation._tag === "InputArrived" && after.agent.state._tag === "Idle") {
+        const turn = yield* (yield* Turns).start;
+        yield* observe({ _tag: "TurnStarted", turn });
+      }
     });
 
   return { observe, facts: Ref.get(held).pipe(Effect.map((current) => current.facts)) };

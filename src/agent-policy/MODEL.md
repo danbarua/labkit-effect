@@ -20,8 +20,6 @@ it exists.
   `Continue` forwards the request. `Veto` becomes the core's observation for a veto: `ToolEnded`
   with `Vetoed`, or `ModelVetoed`, with the reason as the policy gave it. A waiting request is
   held, and what the policy asks is passed on.
-- P5. `StartTurn` is forwarded without review: the core has no outcome for a turn that does not
-  start.
 
 ## Examples
 

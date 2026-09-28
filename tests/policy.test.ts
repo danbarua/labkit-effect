@@ -133,14 +133,5 @@ test("a vetoed model request ends the turn, recorded with the policy's reason", 
   expect(session.journal.at(-1)).toMatchObject({
     decision: { _tag: "TurnEnded", turn: "turn-1", ending: { _tag: "Vetoed", reason: json({ budget: "80% of the month used" }) } },
   });
-  expect(session.world.inbox).toMatchObject({ _tag: "Idle" });
-});
-
-test("starting a turn is forwarded without review", () => {
-  const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1" });
-  session.startsTurns = false;
-  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "go" });
-  const start = session.requests.at(-1)!;
-  expect(run(denyTools([]), [{ _tag: "Requested", request: start }])).toEqual([{ _tag: "Forward", request: start }]);
+  expect(session.world.agent.state).toMatchObject({ _tag: "Idle" });
 });

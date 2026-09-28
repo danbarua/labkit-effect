@@ -45,8 +45,8 @@ test("one turn, from the user's message to the model's answer", async () => {
   expect(facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag))).toEqual([
     "SessionOpened",
     "InputArrived",
-    "TurnRequested",
     "TurnStarted",
+    "InputDelivered",
     "ModelAsked",
     "ModelResponded",
     "TurnEnded",

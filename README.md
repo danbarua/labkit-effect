@@ -16,7 +16,7 @@ The domain core of a coding harness, and the layers around it.
 
 | Directory | What it is | May import |
 |---|---|---|
-| `src/agent-core/` | Machines that pass messages (inbox, conversation turn, turn step, call), the router, and the facts, decisions and effect requests they record. See its `MODEL.md`. | `Schema` from `effect` |
+| `src/agent-core/` | Machines with mailboxes that pass messages (agent, conversation turn, turn step, call), the router, and the facts, decisions and effect requests they record. See its `MODEL.md`. | `Schema` from `effect` |
 | `src/agent-policy/` | Whether an effect request continues, is vetoed, or waits. See its `MODEL.md`. | `Schema` from `effect`, `agent-core` |
 | `src/agent-effect/` | The layer around them: contracts as Effect services, adapters, the loop. | anything |
 

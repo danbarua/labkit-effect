@@ -42,7 +42,9 @@ test("input from another agent while a tool runs is given to the turn when the b
     from: { _tag: "Agent", agent: "reviewer" },
     text: "the flaky test is in b.ts",
   });
-  expect(session.world.inbox).toMatchObject({ queued: [interjection] });
+  expect(session.world.turns.get("turn-1" as never)?.mailbox as unknown).toEqual([
+    { message: { _tag: "Steer", input: interjection }, seq: interjection },
+  ]);
 
   const ended = observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json("2 failed") } });
   expect(tags(session.journal.filter((fact) => fact.seq > ended))).toEqual(["InputDelivered", "ModelAsked"]);
@@ -67,7 +69,7 @@ test("queued input cancelled by its sender is not given to the turn", () => {
   const answered = observe(session, answers);
   expect(tags(session.journal.filter((fact) => fact.seq > answered))).toEqual(["TurnEnded"]);
   const given = session.journal.flatMap((fact) =>
-    fact._tag === "Decided" && (fact.decision._tag === "InputDelivered" || fact.decision._tag === "TurnRequested")
+    fact._tag === "Decided" && fact.decision._tag === "InputDelivered"
       ? fact.decision.inputs
       : [],
   );
@@ -89,11 +91,14 @@ test("input queued when a turn fails is dropped, and no turn starts until the ne
   const queued = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "try again" });
   const failed = observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "overloaded" });
   expect(tags(session.journal.filter((fact) => fact.seq > failed))).toEqual(["TurnEnded", "InputDropped"]);
-  expect(session.world.inbox).toMatchObject({ _tag: "Idle", queued: [] });
+  expect(session.world.agent.state).toMatchObject({ _tag: "Idle" });
   expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "InputDropped", turn: "turn-1", inputs: [queued] } });
   const next = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "now" });
-  expect(session.journal.at(-3)).toMatchObject({ decision: { _tag: "TurnRequested", inputs: [next] } });
-  expect(session.journal.at(-2)).toMatchObject({ observation: { _tag: "TurnStarted", turn: "turn-2", inputs: [next] } });
+  expect(session.journal.filter((fact) => fact.seq > next).map((fact) => (fact._tag === "Observed" ? fact.observation : fact.decision)) as unknown).toEqual([
+    { _tag: "TurnStarted", turn: "turn-2" },
+    { _tag: "InputDelivered", turn: "turn-2", inputs: [next] },
+    { _tag: "ModelAsked", turn: "turn-2", through: next + 2 },
+  ]);
 });
 
 test("a tool result for a call no machine exists for is recorded as undelivered, and changes nothing", () => {
@@ -114,30 +119,31 @@ test("a vetoed call settles the batch and the model is asked again", () => {
   });
   expect(tags(session.journal.filter((fact) => fact.seq > vetoed))).toEqual(["ModelAsked"]);
   expect(session.requests.map((request) => request._tag)).toEqual([
-    "StartTurn",
     "RequestModelResponse",
     "RunTool",
     "RequestModelResponse",
   ]);
 });
 
-test("input that arrives while a turn is starting is queued, not added to the starting turn", () => {
+test("input that arrives before a turn starts waits in the agent's mailbox, and the turn takes all of it", () => {
   const session = open();
   observe(session, { _tag: "SessionOpened", session: "s1" });
   session.startsTurns = false;
   const first = observe(session, { _tag: "InputArrived", from: { _tag: "System" }, text: "wake up" });
-  expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "TurnRequested", inputs: [first] } });
-  expect(session.world.inbox).toMatchObject({ _tag: "Starting", queued: [] });
   const second = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "and check mail" });
-  expect(session.world.inbox).toMatchObject({ _tag: "Starting", queued: [second] });
-  observe(session, { _tag: "TurnStarted", turn: "wake-7", inputs: [first] });
-  expect(session.world.inbox).toMatchObject({ _tag: "Serving", turn: "wake-7", queued: [second] });
+  expect(session.world.agent.mailbox.map((waiting) => waiting.seq)).toEqual([first, second]);
+  const started = observe(session, { _tag: "TurnStarted", turn: "wake-7" });
+  expect(session.journal.filter((fact) => fact.seq > started).map((fact) => (fact as { decision: unknown }).decision)).toEqual([
+    { _tag: "InputDelivered", turn: "wake-7", inputs: [first] },
+    { _tag: "InputDelivered", turn: "wake-7", inputs: [second] },
+    { _tag: "ModelAsked", turn: "wake-7", through: started + 2 },
+  ]);
+  expect(session.world.agent).toMatchObject({ state: { _tag: "Running", turn: "wake-7" }, mailbox: [] });
 });
 
-test("a turn reported while none was requested is recorded as not expected", () => {
-  const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1" });
-  const stray = observe(session, { _tag: "TurnStarted", turn: "turn-x", inputs: [2] });
+test("a turn reported while one is running is recorded as not expected", () => {
+  const session = started();
+  const stray = observe(session, { _tag: "TurnStarted", turn: "turn-x" });
   expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "ObservationNotExpected", observation: stray } });
-  expect(session.world.inbox).toMatchObject({ _tag: "Idle" });
+  expect(session.world.agent.state).toMatchObject({ _tag: "Running", turn: "turn-1" });
 });
