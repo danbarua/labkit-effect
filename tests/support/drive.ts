@@ -1,8 +1,7 @@
 /**
  * Plays the part of the layer around the core: records each observation, asks the machine what
  * follows, records the decisions, and collects the effect requests. It carries out `StartTurn`
- * itself, naming turns `turn-1`, `turn-2`, …; every other request is left to the test. The live
- * view is built one fact at a time as facts are recorded.
+ * itself, naming turns `turn-1`, `turn-2`, …; every other request is left to the test.
  */
 
 import { Schema } from "effect";
@@ -11,25 +10,22 @@ import { deliver, emptyWorld, type World } from "../../src/agent-core/router.ts"
 import { Seq } from "../../src/agent-core/names.ts";
 import { Observation } from "../../src/agent-core/observation.ts";
 import type { EffectRequest } from "../../src/agent-core/request.ts";
-import { type Conversation, emptyConversation, viewFact } from "../../src/agent-core/view.ts";
 
 export interface Session {
   world: World;
   journal: Array<Fact>;
   requests: Array<EffectRequest>;
-  live: Conversation;
   turns: number;
   /** Whether the driver carries out `StartTurn` requests; a test that plays that adapter sets false. */
   startsTurns: boolean;
 }
 
 export function open(): Session {
-  return { world: emptyWorld, journal: [], requests: [], live: emptyConversation, turns: 0, startsTurns: true };
+  return { world: emptyWorld, journal: [], requests: [], turns: 0, startsTurns: true };
 }
 
 function record(session: Session, fact: Fact): void {
   session.journal.push(fact);
-  session.live = viewFact(session.live, fact);
 }
 
 /** Records `raw` as an observation, then everything that follows from it. Returns its position. */

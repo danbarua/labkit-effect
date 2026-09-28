@@ -47,9 +47,6 @@ test("input from another agent while a tool runs is given to the turn when the b
   const ended = observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json("2 failed") } });
   expect(tags(session.journal.filter((fact) => fact.seq > ended))).toEqual(["InputDelivered", "ModelAsked"]);
   expect(session.journal.at(-2)).toMatchObject({ decision: { inputs: [interjection] } });
-  expect(session.live.entries.find((entry) => entry._tag === "Input" && entry.seq === interjection)).toMatchObject({
-    status: { _tag: "Given", turn: "turn-1" },
-  });
 });
 
 test("a final answer with input queued does not end the turn: the input is given and the model asked again", () => {
@@ -69,9 +66,12 @@ test("queued input cancelled by its sender is not given to the turn", () => {
   observe(session, { _tag: "InputCancelled", input: queued });
   const answered = observe(session, answers);
   expect(tags(session.journal.filter((fact) => fact.seq > answered))).toEqual(["TurnEnded"]);
-  expect(session.live.entries.find((entry) => entry._tag === "Input" && entry.seq === queued)).toMatchObject({
-    status: { _tag: "Cancelled" },
-  });
+  const given = session.journal.flatMap((fact) =>
+    fact._tag === "Decided" && (fact.decision._tag === "InputDelivered" || fact.decision._tag === "TurnRequested")
+      ? fact.decision.inputs
+      : [],
+  );
+  expect(given).not.toContain(queued);
 });
 
 test("cancelling input already given to a turn changes nothing", () => {
@@ -90,9 +90,7 @@ test("input queued when a turn fails is dropped, and no turn starts until the ne
   const failed = observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "overloaded" });
   expect(tags(session.journal.filter((fact) => fact.seq > failed))).toEqual(["TurnEnded", "InputDropped"]);
   expect(session.world.inbox).toMatchObject({ _tag: "Idle", queued: [] });
-  expect(session.live.entries.find((entry) => entry._tag === "Input" && entry.seq === queued)).toMatchObject({
-    status: { _tag: "Dropped", turn: "turn-1" },
-  });
+  expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "InputDropped", turn: "turn-1", inputs: [queued] } });
   const next = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "now" });
   expect(session.journal.at(-3)).toMatchObject({ decision: { _tag: "TurnRequested", inputs: [next] } });
   expect(session.journal.at(-2)).toMatchObject({ observation: { _tag: "TurnStarted", turn: "turn-2", inputs: [next] } });

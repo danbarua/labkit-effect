@@ -15,7 +15,6 @@ Status: **open** means Dan has not settled it. **Proposal** means the wording is
 | T3 | Effect | Proposal: an action on the outside world. The core sends a request for it as a message; an adapter carries it out. Its result reaches the core as an Observation. | open |
 | T4 | Fact | Dan: an Observation is a kind of Fact. Proposal: a Fact is a recorded Observation or a recorded Decision, at its position in the session. | open |
 | T5 | Event | Dan uses it for an Observation arriving and for a message the harness sends. Proposal: not a domain term. Arriving is an Observation; leaving is an Effect request. | open |
-| T6 | View | Proposal: a pure function of the facts, for example the conversation shown to a user. Not recorded. | open |
 
 ## Rules
 
@@ -38,7 +37,6 @@ Status: **open** means Dan has not settled it. **Proposal** means the wording is
   delivers an observation to the machine its fields address. An observation a machine does not act
   on is recorded as `ObservationNotExpected`; one addressed to a turn or call no machine exists
   for, as `ObservationUndelivered`.
-- R7. The view built as each fact is recorded is the view built from all the facts at once.
 
 ## Input during a turn
 
@@ -90,8 +88,9 @@ then continues").
 - S1. `ModelAsked { turn, through }` records how far a request goes: the conversation through the
   fact at `through`.
 - S2. The model has seen a fact once it responds to a request that contained it. A request that
-  fails leaves what it carried unseen. The view holds `seenThrough` and `sentThrough`, and
-  `unseen(view)` lists the inputs and tool outcomes (vetoes included) the model has not seen.
+  fails leaves what it carried unseen. Working out what is unseen belongs to whatever reads the
+  facts for a purpose (the next request, a person's display, a protocol); the core records
+  `through`.
 - S3. `ModelFailed` means the request failed after whatever the layers around the core do first:
   retries with back-off, another model or provider. The turn ends, and no turn is under way until
   the next input. That turn's first request carries the input and everything still unseen.

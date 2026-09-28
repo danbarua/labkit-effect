@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { json } from "./support/received.ts";
-import { conversation } from "../src/agent-core/view.ts";
 import { observe, open } from "./support/drive.ts";
 
 const responseWithEveryPartKind = {
@@ -64,11 +63,4 @@ test("the recorded response holds every part the model sent", () => {
     (fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded",
   );
   expect(recorded as unknown).toMatchObject({ observation: responseWithEveryPartKind });
-});
-
-test("the view built as each fact is recorded is the view built from all the facts", () => {
-  const session = oneTurnWithATool();
-  expect(conversation(session.journal)).toEqual(session.live);
-  const response = session.live.entries.find((entry) => entry._tag === "ModelResponse");
-  expect(response as unknown).toMatchObject({ parts: responseWithEveryPartKind.parts });
 });
