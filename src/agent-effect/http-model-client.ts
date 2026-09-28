@@ -1,14 +1,15 @@
 /**
  * A model client over HTTP, in the Anthropic Messages wire format. A response's `content` blocks
- * become the observation's parts in order: a `text` block is `Text`, any other block is
- * `Unrecognised` holding the block as received. Everything else in the response is `metadata`.
+ * become the observation's parts in order: a `text` block is `Text`, a `tool_use` block is
+ * `ToolCall`, any other block is `Unrecognised` holding the block as received. Everything else in
+ * the response is `metadata`.
  * A failure is observed as `ModelFailed`; what was received with it is logged here.
  */
 
 import { Effect, Layer, type Schema } from "effect";
-import { FailureText, ModelText, StopReason } from "../agent-core/names.ts";
-import type { ModelPart, Observation } from "../agent-core/observation.ts";
-import { type ModelContext, ModelClient, type Target } from "./contracts.ts";
+import { CallId, FailureText, ModelText, StopReason, ToolName } from "../agent-core/names.ts";
+import type { ModelPart, Observation, ToolOutcome } from "../agent-core/observation.ts";
+import { type ContextPart, type ModelContext, ModelClient, type Target } from "./contracts.ts";
 import type { TurnId } from "../agent-core/names.ts";
 
 type Json = Schema.Json;
@@ -18,20 +19,58 @@ function isObject(value: Json): value is Schema.JsonObject {
 }
 type Outcome = Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" }>;
 
+function resultContent(outcome: ToolOutcome): { content: string; is_error?: true } {
+  switch (outcome._tag) {
+    case "Succeeded":
+      return { content: typeof outcome.output === "string" ? outcome.output : JSON.stringify(outcome.output) };
+    case "Failed":
+      return { content: outcome.failure, is_error: true };
+    case "Vetoed":
+      return { content: `The call was not run: ${JSON.stringify(outcome.reason)}`, is_error: true };
+    default:
+      return outcome satisfies never;
+  }
+}
+
+function block(part: ContextPart): Json {
+  switch (part._tag) {
+    case "Text":
+      return { type: "text", text: part.text };
+    case "ToolCall":
+      return { type: "tool_use", id: part.call, name: part.tool, input: part.input };
+    case "ToolResult":
+      return { type: "tool_result", tool_use_id: part.call, ...resultContent(part.outcome) };
+    default:
+      return part satisfies never;
+  }
+}
+
 function body(target: Target, context: ModelContext): Json {
   return {
     model: target.model,
     max_tokens: 1024,
     ...(context.system === undefined ? {} : { system: context.system }),
-    messages: context.messages.map((message) => ({ role: message.role, content: message.text })),
+    ...(context.tools.length === 0
+      ? {}
+      : {
+          tools: context.tools.map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+            input_schema: tool.input,
+          })),
+        }),
+    messages: context.messages.map((message) => ({ role: message.role, content: message.parts.map(block) })),
   };
 }
 
-function part(block: Json): ModelPart {
-  const text = isObject(block) && block["type"] === "text" ? block["text"] : undefined;
-  return typeof text === "string"
-    ? { _tag: "Text", text: ModelText.make(text) }
-    : { _tag: "Unrecognised", received: block };
+function part(received: Json): ModelPart {
+  if (isObject(received)) {
+    const { type, text, id, name, input } = received;
+    if (type === "text" && typeof text === "string") return { _tag: "Text", text: ModelText.make(text) };
+    if (type === "tool_use" && typeof id === "string" && typeof name === "string" && input !== undefined)
+      return { _tag: "ToolCall", call: CallId.make(id), tool: ToolName.make(name), input };
+  }
+  return { _tag: "Unrecognised", received };
 }
 
 const failed = (turn: TurnId, failure: string, details: Record<string, unknown>): Effect.Effect<Outcome> =>

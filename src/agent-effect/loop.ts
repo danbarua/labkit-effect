@@ -10,14 +10,14 @@ import { decide, fold, initial, type State } from "../agent-core/machine.ts";
 import { Seq } from "../agent-core/names.ts";
 import type { Observation } from "../agent-core/observation.ts";
 import type { EffectRequest } from "../agent-core/request.ts";
-import { ContextAssembler, ModelClient, ModelProvider, Turns } from "./contracts.ts";
+import { ContextAssembler, ModelClient, ModelProvider, ToolRunner, Turns } from "./contracts.ts";
 
 interface Held {
   readonly state: State;
   readonly facts: ReadonlyArray<Fact>;
 }
 
-type Services = ModelProvider | ContextAssembler | ModelClient | Turns;
+type Services = ModelProvider | ContextAssembler | ModelClient | Turns | ToolRunner;
 
 export interface Session {
   /** Records an observation and carries out everything that follows from it. */
@@ -44,7 +44,10 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
           return yield* (yield* ModelClient).respond(target, context, request.turn);
         });
       case "RunTool":
-        return Effect.die(`no tool runner is part of this loop; the model asked for ${request.tool}`);
+        return Effect.gen(function* () {
+          const outcome = yield* (yield* ToolRunner).run(request.tool, request.input);
+          return { _tag: "ToolEnded", call: request.call, outcome } as const;
+        });
       default:
         return request satisfies never;
     }

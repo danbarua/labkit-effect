@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import { BoringContextAssembler, BoringModelProvider, CountingTurns } from "../src/agent-effect/boring.ts";
 import { HttpModelClient } from "../src/agent-effect/http-model-client.ts";
 import { openSession } from "../src/agent-effect/loop.ts";
+import { SmolToolRunner } from "../src/agent-effect/smol-tools.ts";
 import type { Observation } from "../src/agent-core/observation.ts";
 
 /** A provider that answers every request the same way, and keeps what it was sent. */
@@ -29,6 +30,7 @@ const services = Layer.mergeAll(
   BoringContextAssembler,
   HttpModelClient,
   CountingTurns,
+  SmolToolRunner,
 );
 
 test("one turn, from the user's message to the model's answer", async () => {
@@ -53,7 +55,11 @@ test("one turn, from the user's message to the model's answer", async () => {
   expect(received).toEqual([
     {
       path: "/v1/messages",
-      body: { model: "boring-1", max_tokens: 1024, messages: [{ role: "user", content: "Hello" }] },
+      body: {
+        model: "boring-1",
+        max_tokens: 1024,
+        messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+      },
     },
   ]);
   expect(facts[5] as unknown).toMatchObject({

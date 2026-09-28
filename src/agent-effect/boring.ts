@@ -5,7 +5,7 @@
 
 import { Effect, Layer } from "effect";
 import type { Fact } from "../agent-core/fact.ts";
-import { ModelName, ProviderName, type Seq, TurnId, type Inputs } from "../agent-core/names.ts";
+import { type Inputs, ModelName, ProviderName, type Seq, TurnId } from "../agent-core/names.ts";
 import { ContextAssembler, type ModelContext, ModelProvider, Turns } from "./contracts.ts";
 
 /** Every request goes to `endpoint`, for provider "boring" and model "boring-1". */
@@ -20,7 +20,7 @@ export const BoringModelProvider = (endpoint: URL) =>
   });
 
 /** The text of each input, by its position. */
-function inputTexts(facts: ReadonlyArray<Fact>): ReadonlyMap<Seq, string> {
+export function inputTexts(facts: ReadonlyArray<Fact>): ReadonlyMap<Seq, string> {
   return new Map(
     facts.flatMap((fact) =>
       fact._tag === "Observed" && fact.observation._tag === "InputArrived"
@@ -39,16 +39,22 @@ function turnInputs(facts: ReadonlyArray<Fact>, turn: TurnId): ReadonlyArray<Seq
   );
 }
 
-/** No system prompt; the turn's inputs as user messages, in order. */
+/** No system prompt and no tools; the turn's inputs as one user message. */
 export const BoringContextAssembler = Layer.succeed(ContextAssembler, {
   assemble: (facts, turn) => {
     const texts = inputTexts(facts);
     const context: ModelContext = {
       system: undefined,
-      messages: turnInputs(facts, turn).flatMap((input) => {
-        const text = texts.get(input);
-        return text === undefined ? [] : [{ role: "user" as const, text }];
-      }),
+      tools: [],
+      messages: [
+        {
+          role: "user",
+          parts: turnInputs(facts, turn).flatMap((input) => {
+            const text = texts.get(input);
+            return text === undefined ? [] : [{ _tag: "Text" as const, text }];
+          }),
+        },
+      ],
     };
     return Effect.succeed(context);
   },

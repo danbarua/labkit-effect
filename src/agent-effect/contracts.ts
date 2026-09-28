@@ -2,10 +2,10 @@
  * What the loop needs from the outside world, one service per job. Each adapter implements one.
  */
 
-import { Context, type Effect } from "effect";
+import { Context, type Effect, type Schema } from "effect";
 import type { Fact } from "../agent-core/fact.ts";
-import type { Inputs, ModelName, ProviderName, TurnId } from "../agent-core/names.ts";
-import type { Observation } from "../agent-core/observation.ts";
+import type { CallId, Inputs, ModelName, ProviderName, ToolName, TurnId } from "../agent-core/names.ts";
+import type { Observation, ToolOutcome } from "../agent-core/observation.ts";
 
 /** Where a model request goes: which provider, which model, at which address. */
 export interface Target {
@@ -20,15 +20,29 @@ export class ModelProvider extends Context.Service<
   { readonly select: (turn: TurnId) => Effect.Effect<Target> }
 >()("agent-effect/ModelProvider") {}
 
+/** A tool the model may call: its name, what it does, and the JSON Schema of its input. */
+export interface ToolSpec {
+  readonly name: ToolName;
+  readonly description: string;
+  readonly input: Schema.Json;
+}
+
+/** One part of a message the model is sent. */
+export type ContextPart =
+  | { readonly _tag: "Text"; readonly text: string }
+  | { readonly _tag: "ToolCall"; readonly call: CallId; readonly tool: ToolName; readonly input: Schema.Json }
+  | { readonly _tag: "ToolResult"; readonly call: CallId; readonly outcome: ToolOutcome };
+
 /** One message of what the model is sent. */
 export interface ContextMessage {
   readonly role: "user" | "assistant";
-  readonly text: string;
+  readonly parts: ReadonlyArray<ContextPart>;
 }
 
 /** What the model is sent for one request, before any provider's wire format. */
 export interface ModelContext {
   readonly system: string | undefined;
+  readonly tools: ReadonlyArray<ToolSpec>;
   readonly messages: ReadonlyArray<ContextMessage>;
 }
 
@@ -58,3 +72,9 @@ export class Turns extends Context.Service<
   Turns,
   { readonly start: (inputs: Inputs) => Effect.Effect<TurnId> }
 >()("agent-effect/Turns") {}
+
+/** Runs one tool call and reports how it ended. */
+export class ToolRunner extends Context.Service<
+  ToolRunner,
+  { readonly run: (tool: ToolName, input: Schema.Json) => Effect.Effect<ToolOutcome> }
+>()("agent-effect/ToolRunner") {}
