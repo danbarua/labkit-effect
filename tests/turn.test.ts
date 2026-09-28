@@ -1,11 +1,7 @@
 import { expect, test } from "bun:test";
-import { Schema } from "effect";
-import { Journal } from "../src/agent-core/fact.ts";
-import { replay } from "../src/agent-core/machine.ts";
+import { stateOf } from "../src/agent-core/machine.ts";
 import { conversation } from "../src/agent-core/view.ts";
 import { observe, open } from "./support/drive.ts";
-
-const strict = { onExcessProperty: "error" } as const;
 
 const responseWithEveryPartKind = {
   _tag: "ModelResponded",
@@ -40,11 +36,6 @@ function oneTurnWithATool() {
   return session;
 }
 
-function reload(journal: unknown): Journal {
-  const written = JSON.stringify(Schema.encodeSync(Journal)(journal as Journal));
-  return Schema.decodeUnknownSync(Journal)(JSON.parse(written), strict);
-}
-
 test("the turn runs to an answer through one tool call", () => {
   const session = oneTurnWithATool();
   expect(session.journal.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag))).toEqual([
@@ -67,30 +58,22 @@ test("the turn runs to an answer through one tool call", () => {
   ]);
 });
 
-test("a journal read back after writing holds every part of every observation", () => {
+test("the recorded response holds every part the model sent", () => {
   const session = oneTurnWithATool();
-  const read = reload(session.journal);
-  expect(read).toEqual(session.journal);
-  const recorded = read.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded");
-  expect(Schema.encodeSync(Journal)([recorded!])[0]).toMatchObject({ observation: responseWithEveryPartKind });
+  const recorded = session.journal.find(
+    (fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded",
+  );
+  expect(recorded as unknown).toMatchObject({ observation: responseWithEveryPartKind });
 });
 
-test("the view after reload is the view built live", () => {
+test("the view built as each fact is recorded is the view built from all the facts", () => {
   const session = oneTurnWithATool();
-  expect(conversation(reload(session.journal))).toEqual(session.live);
+  expect(conversation(session.journal)).toEqual(session.live);
   const response = session.live.entries.find((entry) => entry._tag === "ModelResponse");
-  expect(response).toMatchObject({ parts: responseWithEveryPartKind.parts });
+  expect(response as unknown).toMatchObject({ parts: responseWithEveryPartKind.parts });
 });
 
-test("the state after reload is the state built live", () => {
+test("the state built as each fact is recorded is the state built from all the facts", () => {
   const session = oneTurnWithATool();
-  expect(replay(reload(session.journal))).toEqual(session.state);
-});
-
-test("reading a fact with a field this build does not know is refused, not stripped", () => {
-  const written = Schema.encodeSync(Journal)(oneTurnWithATool().journal) as unknown as Array<Record<string, unknown>>;
-  const withNewField = structuredClone(written);
-  (withNewField[1] as { observation: Record<string, unknown> }).observation["attachments"] = ["x.png"];
-  expect(() => Schema.decodeUnknownSync(Journal)(withNewField, strict)).toThrow();
-  expect(JSON.stringify(Schema.decodeUnknownSync(Journal)(withNewField))).not.toContain("x.png");
+  expect(stateOf(session.journal)).toEqual(session.state);
 });

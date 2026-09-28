@@ -1,5 +1,5 @@
 /**
- * Facts: recorded Observations and recorded Decisions. A session's journal is its facts in order.
+ * Facts: recorded Observations and recorded Decisions, each at its position in the session.
  */
 
 import { Schema } from "effect";
@@ -12,6 +12,3 @@ export const Fact = Schema.Union([
   Schema.TaggedStruct("Decided", { seq: Seq, decision: Decision }),
 ]);
 export type Fact = typeof Fact.Type;
-
-export const Journal = Schema.Array(Fact);
-export type Journal = typeof Journal.Type;

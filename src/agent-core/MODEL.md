@@ -1,26 +1,8 @@
-# Model
+# agent-core
 
-The domain core of a coding harness: a session in which a user talks to a model, and the model
-calls tools.
-
-## Constraints (Dan, verbatim)
-
-- C1. Pure state machines.
-- C2. Message passing only.
-- C3. Build in the abstract. No concrete implementations.
-- C4. Facts, Decisions, Effects, Observations.
-- C5. No unbranded strings.
-- C6. Everything written down - code or prose - says exactly what it means and nothing else.
-- C7. Behaviours: implementation details. Those are the layer *around* the core. Contracts. Adapters.
-
-## Layout
-
-- `src/agent-core/`: data and pure machines. Imports `Schema` from `effect` and nothing else from
-  outside itself.
-- `src/agent-policy/`: whether an effect request continues, is vetoed, or waits. Pure machines;
-  imports `Schema` from `effect` and `agent-core`, nothing else. `bun run check:core` enforces the
-  imports of both layers and C5.
-- `src/agent-effect/`: the layer around the core. Contracts as Effect services, adapters, the loop.
+A session: inputs arrive, turns run, the model is asked, tools are called. The core records what it
+observes and what it decides, and sends requests for effects. It does not carry them out, and it
+does not decide whether they happen.
 
 ## Terms
 
@@ -31,22 +13,21 @@ Status: **open** means Dan has not settled it. **Proposal** means the wording is
 | T1 | Observation | Dan: "a Fact that's out of our sphere of influence." Proposal: something that reached the harness from outside, which the harness did not choose: an input, model output, a tool's outcome, a policy's veto. | open |
 | T2 | Decision | Proposal: a choice the harness makes, computed by a pure function of the facts. | open |
 | T3 | Effect | Proposal: an action on the outside world. The core sends a request for it as a message; an adapter carries it out. Its result reaches the core as an Observation. | open |
-| T4 | Fact | Dan: an Observation is a kind of Fact. Proposal: a Fact is a recorded Observation or a recorded Decision. The journal is the sequence of Facts. | open |
+| T4 | Fact | Dan: an Observation is a kind of Fact. Proposal: a Fact is a recorded Observation or a recorded Decision, at its position in the session. | open |
 | T5 | Event | Dan uses it for an Observation arriving and for a message the harness sends. Proposal: not a domain term. Arriving is an Observation; leaving is an Effect request. | open |
 | T6 | View | Proposal: a pure function of the facts, for example the conversation shown to a user. Not recorded. | open |
 
 ## Rules
 
-- R1. A recorded Observation is kept as received. Every part of it is in the Fact. Leaving a part
-  out is a Decision, and is recorded as one. (Proposal.)
-- R2. A decoder for a model response maps every received part to a part in the Observation. A part
-  the decoder does not recognise becomes an `Unrecognised` part holding what was received.
-- R3. For every machine state and every Observation kind, the machine produces a stated result.
-  An Observation the current state does not expect produces the Decision `ObservationNotExpected`.
-  The compiler checks this: every `switch` over a union ends in `satisfies never`.
-- R4. A live view and a view built after reload are the same function applied to the same facts.
-- R5. The journal is read strictly: a fact with a field this build does not know is refused, not
-  stripped. Effect Schema strips unknown fields by default.
+- R1. A model response is recorded with every part the model sent, in order. A part the adapter
+  does not recognise is recorded as `Unrecognised`, holding what was received.
+- R2. A failure is recorded as `FailureText`. What was received with it (status, identifiers, body)
+  is logged by the adapter that received it.
+- R3. Every `switch` over a union ends in `satisfies never`, so a new kind of observation or decision
+  does not compile until every machine handles it.
+- R4. An observation the session's state does not expect changes nothing, and is recorded with the
+  decision `ObservationNotExpected`.
+- R5. The view built as each fact is recorded is the view built from all the facts at once.
 
 ## Input during a turn
 
@@ -80,22 +61,9 @@ one pattern: a Decision recorded, an effect request sent, the outcome observed.
 | `ModelAsked` | `RequestModelResponse` | `ModelResponded`, `ModelFailed`, `ModelVetoed` |
 | (none: every proposed call is requested) | `RunTool` | `ToolEnded` (`Succeeded`, `Failed`, `Vetoed`) |
 
-## Policy
-
-Whether an effect happens is a run-time decision made by a policy, outside the core (Dan: "something
-might execute a decision to continue, veto or delay an Effect"). How it decides (permissions,
-parsing a command, a model's judgement, asking a person) is the policy's business, not the core's.
-
-- P1. A policy is a machine per request: it gives `Continue` or `Veto { reason }`, or waits.
-  Waiting is delay: it ends when a message (an answer, a clock tick) lets the policy decide.
-- P2. `every([...])` applies policies in order; the first veto is the verdict.
-- P3. The gate applies a policy between the core's requests and the adapters. `Continue` forwards
-  the request; `Veto` becomes the observation the core records (`ToolEnded` with `Vetoed`, or
-  `ModelVetoed`); waiting holds it and passes on what the policy asked for.
-- P4. A vetoed tool call settles like any other: the model sees the veto and is asked again. A
-  vetoed model request ends the turn.
-- P5. `StartTurn` is forwarded without review: the core has no outcome for a turn that does not
-  start.
+Whether a requested effect happens is decided outside the core. The core sees a veto as an outcome:
+a vetoed tool call settles like any other, and the model is asked again; a vetoed model request
+ends the turn.
 
 What the design has to allow, without surprising a maintainer (Dan, "not a spec"): layers above the
 core that assemble what the model is sent (system prompt, history, tool schemas, system notices),
@@ -112,8 +80,8 @@ then continues").
 - S2. The model has seen a fact once it responds to a request that contained it. A request that
   fails leaves what it carried unseen. The view holds `seenThrough` and `sentThrough`, and
   `unseen(view)` lists the inputs and tool outcomes (vetoes included) the model has not seen.
-- S3. `ModelFailed` means the request failed after whatever the layer around the core does first:
-  retries with back-off, another model or provider. The turn fails and the session is idle until
+- S3. `ModelFailed` means the request failed after whatever the layers around the core do first:
+  retries with back-off, another model or provider. The turn ends and the session is idle until
   the next input. That turn's first request carries the input and everything still unseen.
 
 ## Captured observations

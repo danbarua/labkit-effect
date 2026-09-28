@@ -35,6 +35,7 @@ function record(session: Session, fact: Fact): void {
 
 /** Records `raw` as an observation, then everything that follows from it. Returns its position. */
 export function observe(session: Session, raw: unknown): Seq {
+  // Refusing unknown fields here catches a mistyped field in a test's own data.
   const observation = Schema.decodeUnknownSync(Observation)(raw, { onExcessProperty: "error" });
   const seq = Seq.make(session.journal.length + 1);
   const before = session.state;

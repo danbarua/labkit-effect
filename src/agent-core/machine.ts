@@ -15,7 +15,7 @@
  */
 
 import type { Decision, Ending } from "./decision.ts";
-import type { Fact, Journal } from "./fact.ts";
+import type { Fact } from "./fact.ts";
 import { type CallId, type Inputs, Seq, type ToolName, type TurnId } from "./names.ts";
 import type { ModelPart, Observation, ToolOutcome } from "./observation.ts";
 import type { EffectRequest } from "./request.ts";
@@ -193,9 +193,9 @@ export function fold(state: State, fact: Fact): State {
   }
 }
 
-/** The state a journal describes. */
-export function replay(journal: Journal): State {
-  return journal.reduce(fold, initial);
+/** The state the facts describe, in order. */
+export function stateOf(facts: ReadonlyArray<Fact>): State {
+  return facts.reduce(fold, initial);
 }
 
 function isInputs(queued: ReadonlyArray<Seq>): queued is Inputs {

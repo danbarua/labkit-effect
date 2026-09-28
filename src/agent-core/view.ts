@@ -1,7 +1,7 @@
 /**
  * The conversation view: what a person reading the session sees, including how much of it the
- * model has seen. It is a function of the facts, built one fact at a time, so a live display and a
- * display built after reloading the journal apply the same function to the same facts.
+ * model has seen. It is a function of the facts, built one fact at a time: the view built as each
+ * fact is recorded and the view built from all the facts at once are the same.
  *
  * The model has seen a fact once it has responded to a request that contained it, the way the
  * harness has observed a tool once the tool's result arrives. A request that fails leaves what it
@@ -9,7 +9,7 @@
  */
 
 import type { Ending } from "./decision.ts";
-import type { Fact, Journal } from "./fact.ts";
+import type { Fact } from "./fact.ts";
 import type { CallId, FailureText, InputText, Seq, TurnId } from "./names.ts";
 import type { InputSource, ModelPart, ToolOutcome } from "./observation.ts";
 
@@ -139,8 +139,8 @@ export function viewFact(view: Conversation, fact: Fact): Conversation {
   }
 }
 
-export function conversation(journal: Journal): Conversation {
-  return journal.reduce(viewFact, emptyConversation);
+export function conversation(facts: ReadonlyArray<Fact>): Conversation {
+  return facts.reduce(viewFact, emptyConversation);
 }
 
 /**
