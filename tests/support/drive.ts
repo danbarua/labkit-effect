@@ -7,14 +7,14 @@
 
 import { Schema } from "effect";
 import type { Fact } from "../../src/agent-core/fact.ts";
-import { decide, fold, initial, type State } from "../../src/agent-core/machine.ts";
+import { deliver, emptyWorld, type World } from "../../src/agent-core/router.ts";
 import { Seq } from "../../src/agent-core/names.ts";
 import { Observation } from "../../src/agent-core/observation.ts";
 import type { EffectRequest } from "../../src/agent-core/request.ts";
 import { type Conversation, emptyConversation, viewFact } from "../../src/agent-core/view.ts";
 
 export interface Session {
-  state: State;
+  world: World;
   journal: Array<Fact>;
   requests: Array<EffectRequest>;
   live: Conversation;
@@ -24,12 +24,11 @@ export interface Session {
 }
 
 export function open(): Session {
-  return { state: initial, journal: [], requests: [], live: emptyConversation, turns: 0, startsTurns: true };
+  return { world: emptyWorld, journal: [], requests: [], live: emptyConversation, turns: 0, startsTurns: true };
 }
 
 function record(session: Session, fact: Fact): void {
   session.journal.push(fact);
-  session.state = fold(session.state, fact);
   session.live = viewFact(session.live, fact);
 }
 
@@ -38,9 +37,9 @@ export function observe(session: Session, raw: unknown): Seq {
   // Refusing unknown fields here catches a mistyped field in a test's own data.
   const observation = Schema.decodeUnknownSync(Observation)(raw, { onExcessProperty: "error" });
   const seq = Seq.make(session.journal.length + 1);
-  const before = session.state;
+  const outcome = deliver(session.world, seq, observation);
+  session.world = outcome.world;
   record(session, { _tag: "Observed", seq, observation });
-  const outcome = decide(before, seq, observation);
   for (const decision of outcome.decisions)
     record(session, { _tag: "Decided", seq: Seq.make(session.journal.length + 1), decision });
   session.requests.push(...outcome.requests);

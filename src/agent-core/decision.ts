@@ -41,9 +41,14 @@ export const Decision = Schema.Union([
   /** The turn ended. The session is idle until the next input arrives. */
   Schema.TaggedStruct("TurnEnded", { turn: TurnId, ending: Ending }),
   /**
-   * The observation recorded at `observation` arrived in a state that does not expect it. It stays
-   * recorded; the machine does not act on it.
+   * The observation recorded at `observation` reached a machine whose state does not act on it. It
+   * stays recorded; nothing changes.
    */
   Schema.TaggedStruct("ObservationNotExpected", { observation: Seq }),
+  /**
+   * The observation recorded at `observation` names a turn or a call no machine exists for. It stays
+   * recorded; nothing changes.
+   */
+  Schema.TaggedStruct("ObservationUndelivered", { observation: Seq }),
 ]);
 export type Decision = typeof Decision.Type;

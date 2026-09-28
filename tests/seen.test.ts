@@ -26,7 +26,7 @@ test("a tool result sent in a request that failed stays unseen, and the next tur
   expect(session.live.sentThrough).toBeGreaterThanOrEqual(result);
 
   observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "overloaded after 3 retries" });
-  expect(session.state).toMatchObject({ activity: { _tag: "Idle" } });
+  expect(session.world.session).toMatchObject({ _tag: "Idle" });
   expect(session.live.sentThrough).toBeUndefined();
   expect(unseen(session.live)).toMatchObject([{ _tag: "ToolResult", seq: result }]);
 

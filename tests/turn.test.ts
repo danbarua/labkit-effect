@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { json } from "./support/received.ts";
-import { stateOf } from "../src/agent-core/machine.ts";
 import { conversation } from "../src/agent-core/view.ts";
 import { observe, open } from "./support/drive.ts";
 
@@ -72,9 +71,4 @@ test("the view built as each fact is recorded is the view built from all the fac
   expect(conversation(session.journal)).toEqual(session.live);
   const response = session.live.entries.find((entry) => entry._tag === "ModelResponse");
   expect(response as unknown).toMatchObject({ parts: responseWithEveryPartKind.parts });
-});
-
-test("the state built as each fact is recorded is the state built from all the facts", () => {
-  const session = oneTurnWithATool();
-  expect(stateOf(session.journal)).toEqual(session.state);
 });

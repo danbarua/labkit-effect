@@ -10,14 +10,14 @@
 
 import { Effect, Ref } from "effect";
 import type { Fact } from "../agent-core/fact.ts";
-import { decide, fold, initial, type State } from "../agent-core/machine.ts";
+import { deliver, emptyWorld, type World } from "../agent-core/router.ts";
 import { Seq } from "../agent-core/names.ts";
 import type { Observation } from "../agent-core/observation.ts";
 import type { EffectRequest } from "../agent-core/request.ts";
 import { ContextAssembler, ModelClient, ModelProvider, ToolRunner, Turns } from "./contracts.ts";
 
 interface Held {
-  readonly state: State;
+  readonly world: World;
   readonly facts: ReadonlyArray<Fact>;
 }
 
@@ -30,7 +30,7 @@ export interface Session {
 }
 
 export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
-  const held = yield* Ref.make<Held>({ state: initial, facts: [] });
+  const held = yield* Ref.make<Held>({ world: emptyWorld, facts: [] });
 
   const carryOut = (request: EffectRequest): Effect.Effect<Observation, never, Services> => {
     switch (request._tag) {
@@ -58,8 +58,8 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
   };
 
   /** What a request is about, for its log lines. */
-  const about = (request: EffectRequest, state: State): Record<string, unknown> => {
-    const turn = state._tag === "Open" && state.activity._tag === "InTurn" ? { turn: state.activity.turn } : {};
+  const about = (request: EffectRequest, world: World): Record<string, unknown> => {
+    const turn = world.session._tag === "InTurn" ? { turn: world.session.turn } : {};
     switch (request._tag) {
       case "StartTurn":
         return { inputs: request.inputs };
@@ -76,7 +76,7 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
     Effect.gen(function* () {
       const before = yield* Ref.get(held);
       const seq = Seq.make(before.facts.length + 1);
-      const outcome = decide(before.state, seq, observation);
+      const outcome = deliver(before.world, seq, observation);
       const recorded: ReadonlyArray<Fact> = [
         { _tag: "Observed", seq, observation },
         ...outcome.decisions.map((decision, index): Fact => ({
@@ -86,10 +86,10 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
         })),
       ];
       yield* Ref.set(held, {
-        state: recorded.reduce(fold, before.state),
+        world: outcome.world,
         facts: [...before.facts, ...recorded],
       });
-      const after = (yield* Ref.get(held)).state;
+      const after = (yield* Ref.get(held)).world;
       yield* Effect.forEach(outcome.requests, (request) =>
         carryOut(request).pipe(Effect.annotateLogs(about(request, after)), Effect.flatMap(observe)),
       );

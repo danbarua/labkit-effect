@@ -44,7 +44,8 @@ export type Entry =
   | { readonly _tag: "ModelVetoed"; readonly seq: Seq; readonly turn: TurnId; readonly reason: Received }
   | { readonly _tag: "ToolResult"; readonly seq: Seq; readonly call: CallId; readonly outcome: ToolOutcome }
   | { readonly _tag: "TurnEnded"; readonly seq: Seq; readonly turn: TurnId; readonly ending: Ending }
-  | { readonly _tag: "NotExpected"; readonly seq: Seq; readonly observation: Seq };
+  | { readonly _tag: "NotExpected"; readonly seq: Seq; readonly observation: Seq }
+  | { readonly _tag: "Undelivered"; readonly seq: Seq; readonly observation: Seq };
 
 export interface Conversation {
   readonly entries: ReadonlyArray<Entry>;
@@ -128,6 +129,8 @@ export function viewFact(view: Conversation, fact: Fact): Conversation {
           return add(view, { _tag: "TurnEnded", seq, turn: decision.turn, ending: decision.ending });
         case "ObservationNotExpected":
           return add(view, { _tag: "NotExpected", seq, observation: decision.observation });
+        case "ObservationUndelivered":
+          return add(view, { _tag: "Undelivered", seq, observation: decision.observation });
         case "TurnRequested":
           return view;
         default:

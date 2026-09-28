@@ -32,8 +32,11 @@ Status: **open** means Dan has not settled it. **Proposal** means the wording is
   outcome's two cases.
 - R5. Every `switch` over a union ends in `satisfies never`, so a new kind of observation or decision
   does not compile until every machine handles it.
-- R6. An observation the session's state does not expect changes nothing, and is recorded with the
-  decision `ObservationNotExpected`.
+- R6. The core is a session machine, a machine per turn, and a machine per tool call. Each is a
+  table from (state kind, message kind) to a transition or "ignored"; whether a message is acted
+  on depends on the two kinds alone. The router delivers an observation to the machine its fields
+  address. An observation a machine does not act on is recorded as `ObservationNotExpected`; one
+  addressed to a turn or call no machine exists for, as `ObservationUndelivered`.
 - R7. The view built as each fact is recorded is the view built from all the facts at once.
 
 ## Input during a turn
@@ -52,7 +55,7 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
 - I4. A turn ends (Decision `TurnEnded`, `Answered`) on a final answer with no input queued. (Dan
   chose this.)
 - I5. The sender can cancel a queued input (Observation `InputCancelled`). Cancelling an input
-  already given to a turn is recorded as `ObservationNotExpected`.
+  that is no longer queued changes nothing.
 - I6. A turn that ends other than by an answer (`Failed`, `Vetoed`) drops its queued input
   (Decision `InputDropped`, recorded before `TurnEnded`). No turn is under way until the next input
   arrives. (Dan: "There is no 'next turn', until stimulus is received.")
