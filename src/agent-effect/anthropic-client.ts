@@ -19,6 +19,7 @@ import { CallId, FailureText, ModelText, StopReason, ToolName, type TurnId } fro
 import type { ModelPart, Observation, ToolOutcome } from "../agent-core/observation.ts";
 import type { Received } from "../agent-core/received.ts";
 import { type ContextPart, type ModelContext, ModelClient, type Target, type ToolSpec } from "./contracts.ts";
+import { logKeys } from "./log-keys.ts";
 import { asText, parseJson, receivedJson } from "./received.ts";
 
 type Json = Schema.Json;
@@ -68,7 +69,7 @@ function toolInput(call: CallId, input: Received): Shaped {
     supplied: [
       {
         level: "warning",
-        event: "model.request.tool_input_replaced",
+        event: logKeys.anthropic.toolInputReplaced,
         details: {
           call,
           reason: "value" in parsed ? "the input is not a JSON object" : parsed.reason,
@@ -190,7 +191,7 @@ function body(target: Target, context: ModelContext): Shaped {
     supplied: [
       {
         level: "info",
-        event: "model.request.max_tokens_supplied",
+        event: logKeys.anthropic.maxTokensSupplied,
         details: {
           max_tokens: defaultMaxTokens,
           reason: "the Messages API requires max_tokens and the context sets no output limit",
@@ -217,7 +218,7 @@ function part(received: Json): ModelPart {
 }
 
 const failed = (turn: TurnId, failure: string, details: Record<string, unknown>): Effect.Effect<Outcome> =>
-  Effect.logError("model.request.failed", { turn, failure, ...details }).pipe(
+  Effect.logError(logKeys.anthropic.requestFailed, { turn, failure, ...details }).pipe(
     Effect.as({ _tag: "ModelFailed" as const, turn, failure: FailureText.make(failure) }),
   );
 
@@ -231,7 +232,7 @@ const logSupplied = (turn: TurnId, supplied: ReadonlyArray<Supplied>): Effect.Ef
     { discard: true },
   );
 
-export const HttpModelClient = Layer.succeed(ModelClient, {
+export const AnthropicModelClient = Layer.succeed(ModelClient, {
   respond: (target, context, turn) =>
     Effect.gen(function* () {
       const sent = body(target, context);

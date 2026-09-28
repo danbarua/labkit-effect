@@ -30,14 +30,11 @@ Status: **open** means Dan has not settled it. **Proposal** means the wording is
 - R4. A tool call succeeds or fails. `Failed` carries the reason (`Reported`, `NotFound`,
   `InputRejected`, `Vetoed`), for code that cares; code that needs only ok or not-ok matches on the
   outcome's two cases.
-- R5. A provider adapter shapes the core's types into its wire format. Where the wire format needs
-  something the core does not say (Anthropic's `max_tokens`), the adapter supplies it and logs
-  what it supplied and why.
-- R6. Every `switch` over a union ends in `satisfies never`, so a new kind of observation or decision
+- R5. Every `switch` over a union ends in `satisfies never`, so a new kind of observation or decision
   does not compile until every machine handles it.
-- R7. An observation the session's state does not expect changes nothing, and is recorded with the
+- R6. An observation the session's state does not expect changes nothing, and is recorded with the
   decision `ObservationNotExpected`.
-- R8. The view built as each fact is recorded is the view built from all the facts at once.
+- R7. The view built as each fact is recorded is the view built from all the facts at once.
 
 ## Input during a turn
 

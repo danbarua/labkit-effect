@@ -1,11 +1,13 @@
+/** The Anthropic Messages adapter: how the core's types are shaped into its wire format. */
+
 import { afterAll, expect, test } from "bun:test";
-import { Effect, Layer, Logger, type Schema } from "effect";
-import { ModelName, ProviderName, ToolName, TurnId } from "../src/agent-core/names.ts";
-import { ModelClient, ToolRunner } from "../src/agent-effect/contracts.ts";
-import { receivedJson } from "../src/agent-effect/received.ts";
+import { Effect, Layer, Logger } from "effect";
+import { ModelName, ProviderName, TurnId } from "../src/agent-core/names.ts";
+import { ModelClient } from "../src/agent-effect/contracts.ts";
+import { logKeys } from "../src/agent-effect/log-keys.ts";
 import type { Observation } from "../src/agent-core/observation.ts";
 import { BoringModelProvider, CountingTurns } from "../src/agent-effect/boring.ts";
-import { HttpModelClient } from "../src/agent-effect/http-model-client.ts";
+import { AnthropicModelClient } from "../src/agent-effect/anthropic-client.ts";
 import { openSession } from "../src/agent-effect/loop.ts";
 import { SmolToolRunner, smolCatalog } from "../src/agent-effect/smol-tools.ts";
 import { ToolContextAssembler } from "../src/agent-effect/tool-context.ts";
@@ -46,7 +48,7 @@ async function toolResultSent(call: { name: string; input: unknown }) {
         Layer.mergeAll(
           BoringModelProvider(new URL("/v1/messages", provider.server.url)),
           ToolContextAssembler(smolCatalog),
-          HttpModelClient,
+          AnthropicModelClient,
           CountingTurns,
           SmolToolRunner,
         ),
@@ -58,7 +60,7 @@ async function toolResultSent(call: { name: string; input: unknown }) {
   return { ...result, content: JSON.parse(result["content"] as string) } as unknown;
 }
 
-test("a call to a tool that does not exist tells the model which tools do", async () => {
+test("a failed call to a tool that does not exist is sent as the tools that do", async () => {
   expect(await toolResultSent({ name: "___read_", input: { path: "a.ts" } })).toEqual({
     type: "tool_result",
     tool_use_id: "toolu_1",
@@ -71,7 +73,7 @@ test("a call to a tool that does not exist tells the model which tools do", asyn
   });
 });
 
-test("a call with input that does not fit tells the model what the tool takes and what it was given", async () => {
+test("a failed call with input that does not fit is sent as the tool's schema and what was given", async () => {
   expect(await toolResultSent({ name: "add", input: { a: "2" } })).toEqual({
     type: "tool_result",
     tool_use_id: "toolu_1",
@@ -86,21 +88,7 @@ test("a call with input that does not fit tells the model what the tool takes an
   });
 });
 
-test("the runner reports why a call failed, and formats nothing", async () => {
-  const run = (name: string, input: unknown) =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        return yield* (yield* ToolRunner).run(ToolName.make(name), receivedJson(input as Schema.Json));
-      }).pipe(Effect.provide(SmolToolRunner)),
-    );
-  expect(await run("___read_", { path: "a.ts" })).toEqual({ _tag: "Failed", reason: { _tag: "NotFound" } });
-  expect((await run("add", { a: "2" })) as unknown).toEqual({
-    _tag: "Failed",
-    reason: { _tag: "InputRejected", problem: "add needs two numbers, a and b." },
-  });
-});
-
-test("the client logs the max_tokens it supplies, and why", async () => {
+test("the max_tokens the Messages API requires is supplied and logged, with the reason", async () => {
   const logged: Array<{ level: string; message: unknown }> = [];
   const capture = Logger.make((options) => {
     logged.push({ level: options.logLevel, message: options.message });
@@ -119,12 +107,12 @@ test("the client logs the max_tokens it supplies, and why", async () => {
         { system: undefined, tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "hi" }] }] },
         TurnId.make("turn-1"),
       );
-    }).pipe(Effect.provide(Layer.mergeAll(HttpModelClient, Logger.layer([capture])))),
+    }).pipe(Effect.provide(Layer.mergeAll(AnthropicModelClient, Logger.layer([capture])))),
   );
   expect(logged).toContainEqual({
     level: "Info",
     message: [
-      "model.request.max_tokens_supplied",
+      logKeys.anthropic.maxTokensSupplied,
       {
         turn: "turn-1",
         max_tokens: 1024,

@@ -3,7 +3,7 @@ import { json } from "./support/received.ts";
 import { Effect, Layer } from "effect";
 import type { Observation } from "../src/agent-core/observation.ts";
 import { BoringModelProvider, CountingTurns } from "../src/agent-effect/boring.ts";
-import { HttpModelClient } from "../src/agent-effect/http-model-client.ts";
+import { AnthropicModelClient } from "../src/agent-effect/anthropic-client.ts";
 import { openSession } from "../src/agent-effect/loop.ts";
 import { SmolToolRunner, smolCatalog } from "../src/agent-effect/smol-tools.ts";
 import { ToolContextAssembler } from "../src/agent-effect/tool-context.ts";
@@ -35,7 +35,7 @@ afterAll(() => provider.stop(true));
 const services = Layer.mergeAll(
   BoringModelProvider(new URL("/v1/messages", provider.url)),
   ToolContextAssembler(smolCatalog),
-  HttpModelClient,
+  AnthropicModelClient,
   CountingTurns,
   SmolToolRunner,
 );
