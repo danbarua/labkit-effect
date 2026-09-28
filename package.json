@@ -1,0 +1,22 @@
+{
+  "name": "labkit-effect",
+  "module": "index.ts",
+  "type": "module",
+  "scripts": {
+    "prepare": "effect-tsgo patch",
+    "typecheck": "tsc --noEmit -p .",
+    "check:core": "bun scripts/check-core.ts",
+    "check": "bun run typecheck && bun run check:core && bun test"
+  },
+  "devDependencies": {
+    "@effect/tsgo": "^0.46.1",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^7"
+  },
+  "dependencies": {
+    "@logtape/logtape": "^2.3.9",
+    "effect": "^4.0.0-rc.118"
+  }
+}

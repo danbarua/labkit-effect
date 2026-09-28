@@ -1,0 +1,41 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Effect-TS/language-service/refs/heads/main/schema.json",
+  // https://www.effect.solutions/tsconfig
+  "compilerOptions": {
+    // Environment setup & latest features
+    "lib": ["ES2022"],
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleDetection": "force",
+    "types": ["bun"],
+
+    // Bundler mode
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "rewriteRelativeImportExtensions": true,
+    "noEmit": true,
+
+    // Best practices
+    "strict": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+
+    // Some stricter flags (disabled by default)
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "exactOptionalPropertyTypes": true,
+ 
+    // from package @effect/tsgo
+    // https://github.com/Effect-TS/tsgo
+    "plugins": [
+        {
+          "name": "@effect/language-service"
+        }
+      ]
+  }
+}
