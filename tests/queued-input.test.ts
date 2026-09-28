@@ -6,9 +6,9 @@ function tags(facts: ReadonlyArray<Fact>): Array<string> {
   return facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
 }
 
-function started(permission: "ask" | "allow"): Session {
+function started(): Session {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1", configuration: { permission } });
+  observe(session, { _tag: "SessionOpened", session: "s1" });
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "fix the tests" });
   return session;
 }
@@ -34,7 +34,7 @@ const answers = {
 };
 
 test("input from another agent while a tool runs is given to the turn when the batch settles", () => {
-  const session = started("allow");
+  const session = started();
   observe(session, callsTool);
   const interjection = observe(session, {
     _tag: "InputArrived",
@@ -52,29 +52,29 @@ test("input from another agent while a tool runs is given to the turn when the b
 });
 
 test("a final answer with input queued does not end the turn: the input is given and the model asked again", () => {
-  const session = started("allow");
+  const session = started();
   const interjection = observe(session, { _tag: "InputArrived", from: { _tag: "System" }, text: "CI went red" });
   const answered = observe(session, answers);
   expect(tags(session.journal.filter((fact) => fact.seq > answered))).toEqual(["InputDelivered", "ModelAsked"]);
   expect(session.journal.at(-2)).toMatchObject({ decision: { inputs: [interjection] } });
 
   const second = observe(session, answers);
-  expect(tags(session.journal.filter((fact) => fact.seq > second))).toEqual(["TurnAnswered"]);
+  expect(tags(session.journal.filter((fact) => fact.seq > second))).toEqual(["TurnEnded"]);
 });
 
 test("queued input cancelled by its sender is not given to the turn", () => {
-  const session = started("allow");
+  const session = started();
   const queued = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "also update the docs" });
   observe(session, { _tag: "InputCancelled", input: queued });
   const answered = observe(session, answers);
-  expect(tags(session.journal.filter((fact) => fact.seq > answered))).toEqual(["TurnAnswered"]);
+  expect(tags(session.journal.filter((fact) => fact.seq > answered))).toEqual(["TurnEnded"]);
   expect(session.live.entries.find((entry) => entry._tag === "Input" && entry.seq === queued)).toMatchObject({
     status: { _tag: "Cancelled" },
   });
 });
 
 test("cancelling input already given to a turn is recorded as not expected", () => {
-  const session = started("allow");
+  const session = started();
   const given = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "and b.ts" });
   observe(session, answers);
   const cancel = observe(session, { _tag: "InputCancelled", input: given });
@@ -86,10 +86,10 @@ test("cancelling input already given to a turn is recorded as not expected", () 
 });
 
 test("input queued when a turn fails is dropped, and no turn starts until the next input", () => {
-  const session = started("allow");
+  const session = started();
   const queued = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "try again" });
   const failed = observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "overloaded" });
-  expect(tags(session.journal.filter((fact) => fact.seq > failed))).toEqual(["InputDropped", "TurnFailed"]);
+  expect(tags(session.journal.filter((fact) => fact.seq > failed))).toEqual(["InputDropped", "TurnEnded"]);
   expect(session.state).toMatchObject({ activity: { _tag: "Idle" }, queued: [] });
   expect(session.live.entries.find((entry) => entry._tag === "Input" && entry.seq === queued)).toMatchObject({
     status: { _tag: "Dropped", turn: "turn-1" },
@@ -100,29 +100,33 @@ test("input queued when a turn fails is dropped, and no turn starts until the ne
 });
 
 test("a tool result for a call nobody made is recorded, and changes nothing", () => {
-  const session = started("ask");
+  const session = started();
   const before = session.state;
   const stray = observe(session, { _tag: "ToolEnded", call: "c9", outcome: { _tag: "Failed", failure: "?" } });
   expect(session.state).toEqual(before);
   expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "ObservationNotExpected", observation: stray } });
 });
 
-test("a refused call settles the batch and the model is asked again", () => {
-  const session = started("ask");
+test("a vetoed call settles the batch and the model is asked again", () => {
+  const session = started();
   observe(session, callsTool);
-  const refused = observe(session, { _tag: "PermissionAnswered", call: "c1", answer: "refuse" });
-  expect(tags(session.journal.filter((fact) => fact.seq > refused))).toEqual(["ToolCallRefused", "ModelAsked"]);
+  const vetoed = observe(session, {
+    _tag: "ToolEnded",
+    call: "c1",
+    outcome: { _tag: "Vetoed", reason: { rule: "no test runs on main" } },
+  });
+  expect(tags(session.journal.filter((fact) => fact.seq > vetoed))).toEqual(["ModelAsked"]);
   expect(session.requests.map((request) => request._tag)).toEqual([
     "StartTurn",
     "RequestModelResponse",
-    "AskPermission",
+    "RunTool",
     "RequestModelResponse",
   ]);
 });
 
 test("input that arrives while a turn is starting is queued, not added to the starting turn", () => {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1", configuration: { permission: "allow" } });
+  observe(session, { _tag: "SessionOpened", session: "s1" });
   session.startsTurns = false;
   const first = observe(session, { _tag: "InputArrived", from: { _tag: "System" }, text: "wake up" });
   expect(session.state).toMatchObject({ activity: { _tag: "Starting", inputs: [first] } });
@@ -134,7 +138,7 @@ test("input that arrives while a turn is starting is queued, not added to the st
 
 test("a turn reported with inputs other than those requested is recorded as not expected", () => {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1", configuration: { permission: "allow" } });
+  observe(session, { _tag: "SessionOpened", session: "s1" });
   const stray = observe(session, { _tag: "TurnStarted", turn: "turn-x", inputs: [2] });
   expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "ObservationNotExpected", observation: stray } });
   expect(session.state).toMatchObject({ activity: { _tag: "Idle" } });

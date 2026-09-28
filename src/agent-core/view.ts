@@ -8,14 +8,16 @@
  * carried unseen.
  */
 
-import type { Authority } from "./decision.ts";
+import type { Ending } from "./decision.ts";
 import type { Fact, Journal } from "./fact.ts";
 import type { CallId, FailureText, InputText, Seq, TurnId } from "./names.ts";
 import type { InputSource, ModelPart, ToolOutcome } from "./observation.ts";
 
+type Json = Extract<ModelPart, { _tag: "Unrecognised" }>["received"];
+
 /**
  * Where an input is: waiting for a turn, given to one, cancelled by its sender, or dropped because
- * the turn it waited for failed.
+ * the turn it waited for ended other than by an answer.
  */
 export type InputStatus =
   | { readonly _tag: "Queued" }
@@ -39,9 +41,9 @@ export type Entry =
       readonly parts: ReadonlyArray<ModelPart>;
     }
   | { readonly _tag: "ModelFailure"; readonly seq: Seq; readonly turn: TurnId; readonly failure: FailureText }
-  | { readonly _tag: "ToolRefused"; readonly seq: Seq; readonly call: CallId; readonly by: Authority }
+  | { readonly _tag: "ModelVetoed"; readonly seq: Seq; readonly turn: TurnId; readonly reason: Json }
   | { readonly _tag: "ToolResult"; readonly seq: Seq; readonly call: CallId; readonly outcome: ToolOutcome }
-  | { readonly _tag: "TurnEnded"; readonly seq: Seq; readonly turn: TurnId; readonly ended: "answered" | "failed" }
+  | { readonly _tag: "TurnEnded"; readonly seq: Seq; readonly turn: TurnId; readonly ending: Ending }
   | { readonly _tag: "NotExpected"; readonly seq: Seq; readonly observation: Seq };
 
 export interface Conversation {
@@ -79,7 +81,6 @@ export function viewFact(view: Conversation, fact: Fact): Conversation {
       const observation = fact.observation;
       switch (observation._tag) {
         case "SessionOpened":
-        case "PermissionAnswered":
           return view;
         case "InputArrived":
           return add(view, {
@@ -103,6 +104,11 @@ export function viewFact(view: Conversation, fact: Fact): Conversation {
             { ...view, sentThrough: undefined },
             { _tag: "ModelFailure", seq, turn: observation.turn, failure: observation.failure },
           );
+        case "ModelVetoed":
+          return add(
+            { ...view, sentThrough: undefined },
+            { _tag: "ModelVetoed", seq, turn: observation.turn, reason: observation.reason },
+          );
         case "ToolEnded":
           return add(view, { _tag: "ToolResult", seq, call: observation.call, outcome: observation.outcome });
         default:
@@ -118,16 +124,11 @@ export function viewFact(view: Conversation, fact: Fact): Conversation {
           return setStatus(view, decision.inputs, { _tag: "Dropped", turn: decision.turn });
         case "ModelAsked":
           return { ...view, sentThrough: decision.through };
-        case "ToolCallRefused":
-          return add(view, { _tag: "ToolRefused", seq, call: decision.call, by: decision.by });
-        case "TurnAnswered":
-          return add(view, { _tag: "TurnEnded", seq, turn: decision.turn, ended: "answered" });
-        case "TurnFailed":
-          return add(view, { _tag: "TurnEnded", seq, turn: decision.turn, ended: "failed" });
+        case "TurnEnded":
+          return add(view, { _tag: "TurnEnded", seq, turn: decision.turn, ending: decision.ending });
         case "ObservationNotExpected":
           return add(view, { _tag: "NotExpected", seq, observation: decision.observation });
         case "TurnRequested":
-        case "ToolCallAllowed":
           return view;
         default:
           return decision satisfies never;
@@ -143,16 +144,14 @@ export function conversation(journal: Journal): Conversation {
 }
 
 /**
- * What the model is shown and has not seen: inputs given to a turn, tool results and refusals that
- * no request it responded to contained. Its own responses are not in this list.
+ * What the model is shown and has not seen: inputs given to a turn, and tool results (a vetoed call
+ * included) that no request it responded to contained. Its own responses are not in this list.
  */
 export function unseen(view: Conversation): ReadonlyArray<Entry> {
   const seen = view.seenThrough;
   return view.entries.filter((entry) => {
     const shown =
-      (entry._tag === "Input" && entry.status._tag === "Given") ||
-      entry._tag === "ToolResult" ||
-      entry._tag === "ToolRefused";
+      (entry._tag === "Input" && entry.status._tag === "Given") || entry._tag === "ToolResult";
     return shown && (seen === undefined || entry.seq > seen);
   });
 }

@@ -24,10 +24,9 @@ const responseWithEveryPartKind = {
 
 function oneTurnWithATool() {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1", configuration: { permission: "ask" } });
+  observe(session, { _tag: "SessionOpened", session: "s1" });
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
   observe(session, responseWithEveryPartKind);
-  observe(session, { _tag: "PermissionAnswered", call: "c1", answer: "allow" });
   observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: ["a.ts"] } });
   observe(session, {
     _tag: "ModelResponded",
@@ -46,7 +45,7 @@ function reload(journal: unknown): Journal {
   return Schema.decodeUnknownSync(Journal)(JSON.parse(written), strict);
 }
 
-test("the turn runs to an answer, asking permission for the tool call", () => {
+test("the turn runs to an answer through one tool call", () => {
   const session = oneTurnWithATool();
   expect(session.journal.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag))).toEqual([
     "SessionOpened",
@@ -55,17 +54,14 @@ test("the turn runs to an answer, asking permission for the tool call", () => {
     "TurnStarted",
     "ModelAsked",
     "ModelResponded",
-    "PermissionAnswered",
-    "ToolCallAllowed",
     "ToolEnded",
     "ModelAsked",
     "ModelResponded",
-    "TurnAnswered",
+    "TurnEnded",
   ]);
   expect(session.requests.map((request) => request._tag)).toEqual([
     "StartTurn",
     "RequestModelResponse",
-    "AskPermission",
     "RunTool",
     "RequestModelResponse",
   ]);

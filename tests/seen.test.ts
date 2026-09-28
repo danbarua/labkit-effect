@@ -14,7 +14,7 @@ const callsTool = {
 
 test("a tool result sent in a request that failed stays unseen, and the next turn's request carries it", () => {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1", configuration: { permission: "allow" } });
+  observe(session, { _tag: "SessionOpened", session: "s1" });
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "fix the tests" });
   observe(session, callsTool);
   const result = observe(session, {

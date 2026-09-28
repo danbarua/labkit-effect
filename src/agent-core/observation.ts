@@ -22,13 +22,6 @@ import {
   TurnId,
 } from "./names.ts";
 
-/** Whether a tool call waits for the user's permission. */
-export const PermissionMode = Schema.Literals(["ask", "allow"]);
-export type PermissionMode = typeof PermissionMode.Type;
-
-export const Configuration = Schema.Struct({ permission: PermissionMode });
-export type Configuration = typeof Configuration.Type;
-
 /** Who sent an input: the user, the system (a wake-up, a scheduled prompt), or another agent. */
 export const InputSource = Schema.Union([
   Schema.TaggedStruct("User", {}),
@@ -47,17 +40,21 @@ export const ModelPart = Schema.Union([
 ]);
 export type ModelPart = typeof ModelPart.Type;
 
-/** How a tool call ended, as the tool reported it. */
+/**
+ * How a tool call ended: the tool ran and succeeded or failed, or a policy vetoed the call before
+ * it ran. A veto's reason is kept as the policy gave it.
+ */
 export const ToolOutcome = Schema.Union([
   Schema.TaggedStruct("Succeeded", { output: Schema.Json }),
   Schema.TaggedStruct("Failed", { failure: FailureText }),
+  Schema.TaggedStruct("Vetoed", { reason: Schema.Json }),
 ]);
 export type ToolOutcome = typeof ToolOutcome.Type;
 
 /** Observations recorded as facts. */
 export const Observation = Schema.Union([
-  /** A session was opened with a configuration. */
-  Schema.TaggedStruct("SessionOpened", { session: SessionId, configuration: Configuration }),
+  /** A session was opened. */
+  Schema.TaggedStruct("SessionOpened", { session: SessionId }),
   /** An input arrived. It can arrive at any time, including while a turn is under way. */
   Schema.TaggedStruct("InputArrived", { from: InputSource, text: InputText }),
   /** A turn started, with the inputs recorded at `inputs`, as a `StartTurn` request asked. */
@@ -78,11 +75,8 @@ export const Observation = Schema.Union([
   }),
   /** A request for a model response failed. */
   Schema.TaggedStruct("ModelFailed", { turn: TurnId, failure: FailureText }),
-  /** The user answered a permission question about one tool call. */
-  Schema.TaggedStruct("PermissionAnswered", {
-    call: CallId,
-    answer: Schema.Literals(["allow", "refuse"]),
-  }),
+  /** A policy vetoed a request for a model response. Its reason is kept as the policy gave it. */
+  Schema.TaggedStruct("ModelVetoed", { turn: TurnId, reason: Schema.Json }),
   /** A tool call ended. */
   Schema.TaggedStruct("ToolEnded", { call: CallId, outcome: ToolOutcome }),
 ]);

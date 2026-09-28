@@ -8,24 +8,24 @@
  * `TurnStarted`. Input can arrive at any time. Input that arrives while a turn is starting or under
  * way is queued, and is given to the turn at the next point between steps: when every call of a
  * tool batch has settled, or when the model gives a final answer. A turn ends only on a final
- * answer with no input queued. A turn that fails drops its queued input.
+ * answer with no input queued. A turn that ends any other way drops its queued input.
+ *
+ * Every tool call the model proposes is requested. Whether it runs is for the layers around the
+ * core: a policy there lets it continue, vetoes it, or delays it, and the core sees the outcome.
  */
 
-import type { Decision } from "./decision.ts";
+import type { Decision, Ending } from "./decision.ts";
 import type { Fact, Journal } from "./fact.ts";
 import { type CallId, type Inputs, Seq, type ToolName, type TurnId } from "./names.ts";
-import type { Configuration, ModelPart, Observation, ToolOutcome } from "./observation.ts";
+import type { ModelPart, Observation, ToolOutcome } from "./observation.ts";
 import type { EffectRequest } from "./request.ts";
 
 type ToolInput = Extract<ModelPart, { _tag: "ToolCall" }>["input"];
 
-/** Whether a call may run: not yet decided, allowed, or refused. */
-export type Permission = "undecided" | "allowed" | "refused";
-
 export interface Call {
   readonly tool: ToolName;
   readonly input: ToolInput;
-  readonly permission: Permission;
+  /** Undefined until the call ends. */
   readonly outcome: ToolOutcome | undefined;
 }
 
@@ -53,7 +53,6 @@ export type State =
   | { readonly _tag: "NotOpened" }
   | {
       readonly _tag: "Open";
-      readonly configuration: Configuration;
       /** Inputs not yet given to a turn, oldest first. */
       readonly queued: ReadonlyArray<Seq>;
       readonly activity: Activity;
@@ -95,12 +94,11 @@ export function expects(state: State, observation: Observation): boolean {
       return state.queued.includes(observation.input);
     case "ModelResponded":
     case "ModelFailed":
+    case "ModelVetoed":
       return turn?.stage === "model" && turn.turn === observation.turn;
-    case "PermissionAnswered":
-      return turn?.stage === "tools" && turn.calls.get(observation.call)?.permission === "undecided";
     case "ToolEnded": {
       const call = turn?.stage === "tools" ? turn.calls.get(observation.call) : undefined;
-      return call?.permission === "allowed" && call.outcome === undefined;
+      return call !== undefined && call.outcome === undefined;
     }
     default:
       return observation satisfies never;
@@ -129,7 +127,7 @@ function without(queued: ReadonlyArray<Seq>, removed: ReadonlyArray<Seq>): Reado
 /** The state after recording an observation `state` expects. */
 function observe(state: State, seq: Seq, observation: Observation): State {
   if (observation._tag === "SessionOpened")
-    return { _tag: "Open", configuration: observation.configuration, queued: [], activity: idle };
+    return { _tag: "Open", queued: [], activity: idle };
   if (state._tag === "NotOpened") return state;
   switch (observation._tag) {
     case "InputArrived":
@@ -146,16 +144,11 @@ function observe(state: State, seq: Seq, observation: Observation): State {
         const calls = new Map<CallId, Call>();
         for (const part of observation.parts)
           if (part._tag === "ToolCall")
-            calls.set(part.call, {
-              tool: part.tool,
-              input: part.input,
-              permission: "undecided",
-              outcome: undefined,
-            });
+            calls.set(part.call, { tool: part.tool, input: part.input, outcome: undefined });
         return { ...turn, stage: calls.size > 0 ? "tools" : "final", calls };
       });
     case "ModelFailed":
-    case "PermissionAnswered":
+    case "ModelVetoed":
       return state;
     case "ToolEnded":
       return withCall(state, observation.call, (call) => ({ ...call, outcome: observation.outcome }));
@@ -179,12 +172,7 @@ function apply(state: State, decision: Decision): State {
       return { ...state, queued: without(state.queued, decision.inputs) };
     case "ModelAsked":
       return withTurn(state, (turn) => ({ ...turn, stage: "model", calls: new Map() }));
-    case "ToolCallAllowed":
-      return withCall(state, decision.call, (call) => ({ ...call, permission: "allowed" }));
-    case "ToolCallRefused":
-      return withCall(state, decision.call, (call) => ({ ...call, permission: "refused" }));
-    case "TurnAnswered":
-    case "TurnFailed":
+    case "TurnEnded":
       return { ...state, activity: idle };
     case "ObservationNotExpected":
       return state;
@@ -242,19 +230,17 @@ export function decide(state: State, seq: Seq, observation: Observation): Outcom
     if (isInputs(queued)) record({ _tag: "InputDelivered", turn, inputs: queued });
     askModel(turn);
   };
-  const allow = (call: CallId, by: "configuration" | "user"): void => {
-    const known = inTurn(current)?.calls.get(call);
-    record({ _tag: "ToolCallAllowed", call, by });
-    if (known !== undefined)
-      requests.push({ _tag: "RunTool", call, tool: known.tool, input: known.input });
+  /** The turn ends other than by an answer, dropping the input queued for it. */
+  const endWithout = (turn: TurnId, ending: Ending): void => {
+    const queued = open()?.queued ?? [];
+    if (isInputs(queued)) record({ _tag: "InputDropped", turn, inputs: queued });
+    record({ _tag: "TurnEnded", turn, ending });
   };
   /** When every call of the batch has settled, the turn moves to its next step. */
   const afterCallSettled = (): void => {
     const turn = inTurn(current);
     if (turn === undefined) return;
-    const settled = [...turn.calls.values()].every(
-      (call) => call.permission === "refused" || call.outcome !== undefined,
-    );
+    const settled = [...turn.calls.values()].every((call) => call.outcome !== undefined);
     if (settled) nextStep(turn.turn);
   };
 
@@ -279,41 +265,18 @@ export function decide(state: State, seq: Seq, observation: Observation): Outcom
       if (now === undefined || turn === undefined) break;
       if (turn.stage === "final") {
         if (isInputs(now.queued)) nextStep(turn.turn);
-        else record({ _tag: "TurnAnswered", turn: turn.turn });
+        else record({ _tag: "TurnEnded", turn: turn.turn, ending: { _tag: "Answered" } });
         break;
       }
-      for (const [call, known] of turn.calls) {
-        switch (now.configuration.permission) {
-          case "allow":
-            allow(call, "configuration");
-            break;
-          case "ask":
-            requests.push({ _tag: "AskPermission", call, tool: known.tool, input: known.input });
-            break;
-          default:
-            now.configuration.permission satisfies never;
-        }
-      }
+      for (const [call, known] of turn.calls)
+        requests.push({ _tag: "RunTool", call, tool: known.tool, input: known.input });
       break;
     }
-    case "ModelFailed": {
-      const queued = open()?.queued ?? [];
-      if (isInputs(queued)) record({ _tag: "InputDropped", turn: observation.turn, inputs: queued });
-      record({ _tag: "TurnFailed", turn: observation.turn, failure: observation.failure });
+    case "ModelFailed":
+      endWithout(observation.turn, { _tag: "Failed", failure: observation.failure });
       break;
-    }
-    case "PermissionAnswered":
-      switch (observation.answer) {
-        case "allow":
-          allow(observation.call, "user");
-          break;
-        case "refuse":
-          record({ _tag: "ToolCallRefused", call: observation.call, by: "user" });
-          afterCallSettled();
-          break;
-        default:
-          observation.answer satisfies never;
-      }
+    case "ModelVetoed":
+      endWithout(observation.turn, { _tag: "Vetoed", reason: observation.reason });
       break;
     case "ToolEnded":
       afterCallSettled();
