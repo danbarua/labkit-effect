@@ -1,16 +1,11 @@
 /**
- * Addresses, and the messages machines send each other. Messages between machines are not facts:
+ * The messages machines send each other, and the observations each kind of machine receives. Messages between machines are not facts:
  * they are not recorded, and the facts they lead to are recorded by the machine that makes them.
  */
 
 import type { Ending } from "./decision.ts";
 import type { CallId, TurnId } from "./names.ts";
 import type { Observation } from "./observation.ts";
-
-export type Address =
-  | { readonly _tag: "Session" }
-  | { readonly _tag: "Turn"; readonly turn: TurnId }
-  | { readonly _tag: "Call"; readonly call: CallId };
 
 /** Observations delivered to the session. */
 export type SessionObservation = Extract<
@@ -45,21 +40,20 @@ export type ToCall =
   /** The call was proposed by `turn` and requested. */
   { readonly _tag: "CallOpened"; readonly turn: TurnId };
 
+/** A message from one machine to another, tagged with the kind of machine it goes to. */
 export type Send =
-  | { readonly to: Extract<Address, { _tag: "Session" }>; readonly message: ToSession }
-  | { readonly to: Extract<Address, { _tag: "Turn" }>; readonly message: ToTurn }
-  | { readonly to: Extract<Address, { _tag: "Call" }>; readonly message: ToCall };
-
-export const session: Extract<Address, { _tag: "Session" }> = { _tag: "Session" };
+  | { readonly _tag: "ToSession"; readonly message: ToSession }
+  | { readonly _tag: "ToTurn"; readonly turn: TurnId; readonly message: ToTurn }
+  | { readonly _tag: "ToCall"; readonly call: CallId; readonly message: ToCall };
 
 export function toSession(message: ToSession): Send {
-  return { to: session, message };
+  return { _tag: "ToSession", message };
 }
 
 export function toTurn(turn: TurnId, message: ToTurn): Send {
-  return { to: { _tag: "Turn", turn }, message };
+  return { _tag: "ToTurn", turn, message };
 }
 
 export function toCall(call: CallId, message: ToCall): Send {
-  return { to: { _tag: "Call", call }, message };
+  return { _tag: "ToCall", call, message };
 }

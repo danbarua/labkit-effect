@@ -16,7 +16,7 @@
 
 import { type CallMessage, type CallState, callTable, openingCall } from "./call.ts";
 import type { Decision } from "./decision.ts";
-import type { Address, Send } from "./messages.ts";
+import type { Send } from "./messages.ts";
 import { type CallId, Seq, type TurnId } from "./names.ts";
 import type { Observation } from "./observation.ts";
 import type { EffectRequest } from "./request.ts";
@@ -36,24 +36,6 @@ export interface Delivered {
   readonly world: World;
   readonly decisions: ReadonlyArray<Decision>;
   readonly requests: ReadonlyArray<EffectRequest>;
-}
-
-function addressOf(observation: Observation): Address {
-  switch (observation._tag) {
-    case "SessionOpened":
-    case "InputArrived":
-    case "InputCancelled":
-    case "TurnStarted":
-      return { _tag: "Session" };
-    case "ModelResponded":
-    case "ModelFailed":
-    case "ModelVetoed":
-      return { _tag: "Turn", turn: observation.turn };
-    case "ToolEnded":
-      return { _tag: "Call", call: observation.call };
-    default:
-      return observation satisfies never;
-  }
 }
 
 /** The machine's step, applied to the world; `undefined` when the machine did not act. */
@@ -83,19 +65,15 @@ function applyCall(world: World, call: CallId, state: CallState, message: CallMe
 
 /** A message between machines, delivered; a machine it names that does not exist yet is created. */
 function send(world: World, sent: Send, position: Position): Applied | undefined {
-  switch (sent.to._tag) {
-    case "Session":
-      return applySession(world, sent.message as SessionMessage, position);
-    case "Turn": {
-      const turn = sent.to.turn;
-      return applyTurn(world, turn, world.turns.get(turn) ?? openingTurn(turn), sent.message as TurnMessage, position);
-    }
-    case "Call": {
-      const call = sent.to.call;
-      return applyCall(world, call, world.calls.get(call) ?? openingCall(call), sent.message as CallMessage, position);
-    }
+  switch (sent._tag) {
+    case "ToSession":
+      return applySession(world, sent.message, position);
+    case "ToTurn":
+      return applyTurn(world, sent.turn, world.turns.get(sent.turn) ?? openingTurn(sent.turn), sent.message, position);
+    case "ToCall":
+      return applyCall(world, sent.call, world.calls.get(sent.call) ?? openingCall(sent.call), sent.message, position);
     default:
-      return sent.to satisfies never;
+      return sent satisfies never;
   }
 }
 
@@ -117,28 +95,34 @@ function drain(done: Delivered, pending: ReadonlyArray<Send>, seq: Seq): Deliver
       );
 }
 
+/** The observation delivered to the machine its fields address; "undelivered" when there is none. */
+function route(world: World, observation: Observation, position: Position): Applied | "undelivered" | undefined {
+  switch (observation._tag) {
+    case "SessionOpened":
+    case "InputArrived":
+    case "InputCancelled":
+    case "TurnStarted":
+      return applySession(world, observation, position);
+    case "ModelResponded":
+    case "ModelFailed":
+    case "ModelVetoed": {
+      const state = world.turns.get(observation.turn);
+      return state === undefined ? "undelivered" : applyTurn(world, observation.turn, state, observation, position);
+    }
+    case "ToolEnded": {
+      const state = world.calls.get(observation.call);
+      return state === undefined ? "undelivered" : applyCall(world, observation.call, state, observation, position);
+    }
+    default:
+      return observation satisfies never;
+  }
+}
+
 /** What follows from `observation`, recorded at `seq`. */
 export function deliver(world: World, seq: Seq, observation: Observation): Delivered {
-  const position: Position = { seq, at: seq };
-  const address = addressOf(observation);
-  const undelivered: Delivered = { world, decisions: [{ _tag: "ObservationUndelivered", observation: seq }], requests: [] };
-  const applied = ((): Applied | "undelivered" | undefined => {
-    switch (address._tag) {
-      case "Session":
-        return applySession(world, observation as SessionMessage, position);
-      case "Turn": {
-        const state = world.turns.get(address.turn);
-        return state === undefined ? "undelivered" : applyTurn(world, address.turn, state, observation as TurnMessage, position);
-      }
-      case "Call": {
-        const state = world.calls.get(address.call);
-        return state === undefined ? "undelivered" : applyCall(world, address.call, state, observation as CallMessage, position);
-      }
-      default:
-        return address satisfies never;
-    }
-  })();
-  if (applied === "undelivered") return undelivered;
+  const applied = route(world, observation, { seq, at: seq });
+  if (applied === "undelivered")
+    return { world, decisions: [{ _tag: "ObservationUndelivered", observation: seq }], requests: [] };
   if (applied === undefined)
     return { world, decisions: [{ _tag: "ObservationNotExpected", observation: seq }], requests: [] };
   return drain(

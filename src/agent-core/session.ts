@@ -44,12 +44,19 @@ const nextStep = (state: Extract<SessionState, { _tag: "InTurn" }>): SessionStep
   sends: [toTurn(state.turn, { _tag: "NextStep" })],
 });
 
-const ended = (state: Extract<SessionState, { _tag: "InTurn" }>, ending: Ending): SessionStep => ({
+/** The model answered and nothing is queued: the turn ends. */
+const answered = (state: Extract<SessionState, { _tag: "InTurn" }>): SessionStep => ({
+  state: { _tag: "Idle", queued: [] },
+  decisions: [{ _tag: "TurnEnded", turn: state.turn, ending: { _tag: "Answered" } }],
+  requests: [],
+  sends: [],
+});
+
+/** The turn stopped without an answer: its queued input is dropped, and it ends. */
+const stopped = (state: Extract<SessionState, { _tag: "InTurn" }>, ending: Exclude<Ending, { _tag: "Answered" }>): SessionStep => ({
   state: { _tag: "Idle", queued: [] },
   decisions: [
-    ...(isInputs(state.queued) && ending._tag !== "Answered"
-      ? [{ _tag: "InputDropped" as const, turn: state.turn, inputs: state.queued }]
-      : []),
+    ...(isInputs(state.queued) ? [{ _tag: "InputDropped" as const, turn: state.turn, inputs: state.queued }] : []),
     { _tag: "TurnEnded", turn: state.turn, ending },
   ],
   requests: [],
@@ -103,7 +110,7 @@ export const sessionTable: Table<SessionState, SessionMessage, Send> = {
     InputCancelled: (state, message) => cancel(state, message.input),
     TurnStarted: "ignored",
     ToolsSettled: (state) => nextStep(state),
-    Answered: (state) => (isInputs(state.queued) ? nextStep(state) : ended(state, { _tag: "Answered" })),
-    TurnStopped: (state, message) => ended(state, message.ending),
+    Answered: (state) => (isInputs(state.queued) ? nextStep(state) : answered(state)),
+    TurnStopped: (state, message) => stopped(state, message.ending),
   },
 };
