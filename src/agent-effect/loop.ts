@@ -3,15 +3,15 @@
  * decisions, and carries out the requests, each of whose outcome is the next observation. The
  * session's facts are held in memory.
  *
- * Every log line written while a request is carried out is annotated with the session and with
- * what the request is about (its turn, and for a tool run its call and tool), so the services it
- * calls do not pass those along themselves.
+ * Every log line written while a request is carried out is annotated with what the request is
+ * about (its turn, and for a tool run its call and tool), so the services it calls do not pass
+ * those along themselves.
  */
 
 import { Effect, Ref } from "effect";
 import type { Fact } from "../agent-core/fact.ts";
 import { decide, fold, initial, type State } from "../agent-core/machine.ts";
-import { Seq, type SessionId } from "../agent-core/names.ts";
+import { Seq } from "../agent-core/names.ts";
 import type { Observation } from "../agent-core/observation.ts";
 import type { EffectRequest } from "../agent-core/request.ts";
 import { ContextAssembler, ModelClient, ModelProvider, ToolRunner, Turns } from "./contracts.ts";
@@ -19,8 +19,6 @@ import { ContextAssembler, ModelClient, ModelProvider, ToolRunner, Turns } from 
 interface Held {
   readonly state: State;
   readonly facts: ReadonlyArray<Fact>;
-  /** The session's identity, once `SessionOpened` has been observed. */
-  readonly session: SessionId | undefined;
 }
 
 type Services = ModelProvider | ContextAssembler | ModelClient | Turns | ToolRunner;
@@ -32,7 +30,7 @@ export interface Session {
 }
 
 export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
-  const held = yield* Ref.make<Held>({ state: initial, facts: [], session: undefined });
+  const held = yield* Ref.make<Held>({ state: initial, facts: [] });
 
   const carryOut = (request: EffectRequest): Effect.Effect<Observation, never, Services> => {
     switch (request._tag) {
@@ -60,17 +58,15 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
   };
 
   /** What a request is about, for its log lines. */
-  const about = (request: EffectRequest, now: Held): Record<string, unknown> => {
-    const session = now.session === undefined ? {} : { session: now.session };
-    const turn =
-      now.state._tag === "Open" && now.state.activity._tag === "InTurn" ? { turn: now.state.activity.turn } : {};
+  const about = (request: EffectRequest, state: State): Record<string, unknown> => {
+    const turn = state._tag === "Open" && state.activity._tag === "InTurn" ? { turn: state.activity.turn } : {};
     switch (request._tag) {
       case "StartTurn":
-        return { ...session, inputs: request.inputs };
+        return { inputs: request.inputs };
       case "RequestModelResponse":
-        return { ...session, turn: request.turn };
+        return { turn: request.turn };
       case "RunTool":
-        return { ...session, ...turn, call: request.call, tool: request.tool };
+        return { ...turn, call: request.call, tool: request.tool };
       default:
         return request satisfies never;
     }
@@ -92,9 +88,8 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
       yield* Ref.set(held, {
         state: recorded.reduce(fold, before.state),
         facts: [...before.facts, ...recorded],
-        session: observation._tag === "SessionOpened" ? observation.session : before.session,
       });
-      const after = yield* Ref.get(held);
+      const after = (yield* Ref.get(held)).state;
       yield* Effect.forEach(outcome.requests, (request) =>
         carryOut(request).pipe(Effect.annotateLogs(about(request, after)), Effect.flatMap(observe)),
       );

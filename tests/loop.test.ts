@@ -10,7 +10,7 @@ import { openSession } from "../src/agent-effect/loop.ts";
 import { receivedJson } from "../src/agent-effect/received.ts";
 import { SmolToolRunner } from "../src/agent-effect/smol-tools.ts";
 
-test("a log line written while a request is carried out carries the session and the request's turn", async () => {
+test("a log line written while a request is carried out carries the request's turn", async () => {
   const logged: Array<{ message: unknown; annotations: Record<string, unknown> }> = [];
   const capture = Logger.make((options) => {
     logged.push({ message: options.message, annotations: { ...options.fiber.getRef(References.CurrentLogAnnotations) } });
@@ -48,5 +48,5 @@ test("a log line written while a request is carried out carries the session and 
       ),
     ),
   );
-  expect(logged).toContainEqual({ message: ["stub.responding"], annotations: { session: "s1", turn: TurnId.make("turn-1") } });
+  expect(logged).toContainEqual({ message: ["stub.responding"], annotations: { turn: TurnId.make("turn-1") } });
 });
