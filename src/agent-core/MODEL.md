@@ -27,17 +27,17 @@ Status: **open** means Dan has not settled it. **Proposal** means the wording is
   does not recognise is recorded as `Unrecognised`, holding what was received.
 - R3. A failed model request is recorded as `FailureText`; what was received with it is logged by
   the adapter that received it.
-- R3a. A tool call succeeds or fails. `Failed` carries the reason (`Reported`, `NotFound`,
+- R4. A tool call succeeds or fails. `Failed` carries the reason (`Reported`, `NotFound`,
   `InputRejected`, `Vetoed`), for code that cares; code that needs only ok or not-ok matches on the
   outcome's two cases.
-- R3b. A provider adapter shapes the core's types into its wire format. Where the wire format needs
+- R5. A provider adapter shapes the core's types into its wire format. Where the wire format needs
   something the core does not say (Anthropic's `max_tokens`), the adapter supplies it and logs
   what it supplied and why.
-- R4. Every `switch` over a union ends in `satisfies never`, so a new kind of observation or decision
+- R6. Every `switch` over a union ends in `satisfies never`, so a new kind of observation or decision
   does not compile until every machine handles it.
-- R5. An observation the session's state does not expect changes nothing, and is recorded with the
+- R7. An observation the session's state does not expect changes nothing, and is recorded with the
   decision `ObservationNotExpected`.
-- R6. The view built as each fact is recorded is the view built from all the facts at once.
+- R8. The view built as each fact is recorded is the view built from all the facts at once.
 
 ## Input during a turn
 
