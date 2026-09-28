@@ -28,8 +28,8 @@ Status: **open** means Dan has not settled it. **Proposal** means the wording is
 
 | # | Term | Definition | Status |
 |---|------|------------|--------|
-| T1 | Observation | Dan: "a Fact that's out of our sphere of influence." Proposal: something that reached the harness from outside, which the harness did not choose: user input, model output, a tool's output, a permission answer. | open |
-| T2 | Decision | Proposal: a choice the harness makes, computed by a pure function of the facts and the configuration. | open |
+| T1 | Observation | Dan: "a Fact that's out of our sphere of influence." Proposal: something that reached the harness from outside, which the harness did not choose: an input, model output, a tool's outcome, a policy's veto. | open |
+| T2 | Decision | Proposal: a choice the harness makes, computed by a pure function of the facts. | open |
 | T3 | Effect | Proposal: an action on the outside world. The core sends a request for it as a message; an adapter carries it out. Its result reaches the core as an Observation. | open |
 | T4 | Fact | Dan: an Observation is a kind of Fact. Proposal: a Fact is a recorded Observation or a recorded Decision. The journal is the sequence of Facts. | open |
 | T5 | Event | Dan uses it for an Observation arriving and for a message the harness sends. Proposal: not a domain term. Arriving is an Observation; leaving is an Effect request. | open |
@@ -111,7 +111,7 @@ then continues").
   fact at `through`.
 - S2. The model has seen a fact once it responds to a request that contained it. A request that
   fails leaves what it carried unseen. The view holds `seenThrough` and `sentThrough`, and
-  `unseen(view)` lists the inputs, tool results and refusals the model has not seen.
+  `unseen(view)` lists the inputs and tool outcomes (vetoes included) the model has not seen.
 - S3. `ModelFailed` means the request failed after whatever the layer around the core does first:
   retries with back-off, another model or provider. The turn fails and the session is idle until
   the next input. That turn's first request carries the input and everything still unseen.
@@ -121,6 +121,3 @@ then continues").
 Streamed partial model output is side-band information for display, like a progress bar: a
 captured observation, not recorded (Dan). `throttle.ts` is a machine that releases captured items
 in batches at most once per interval; time is an input, so it also serves tests.
-
-## Open questions
-
