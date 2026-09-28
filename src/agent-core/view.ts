@@ -9,11 +9,15 @@ import type { Fact, Journal } from "./fact.ts";
 import type { CallId, FailureText, InputText, Seq, TurnId } from "./names.ts";
 import type { InputSource, ModelPart, ToolOutcome } from "./observation.ts";
 
-/** Where an input is: waiting for a turn, given to one, or cancelled by its sender. */
+/**
+ * Where an input is: waiting for a turn, given to one, cancelled by its sender, or dropped because
+ * the turn it waited for failed.
+ */
 export type InputStatus =
   | { readonly _tag: "Queued" }
   | { readonly _tag: "Given"; readonly turn: TurnId }
-  | { readonly _tag: "Cancelled" };
+  | { readonly _tag: "Cancelled" }
+  | { readonly _tag: "Dropped"; readonly turn: TurnId };
 
 export type Entry =
   | {
@@ -76,6 +80,8 @@ export function viewFact(view: Conversation, fact: Fact): Conversation {
         case "TurnStarted":
         case "InputDelivered":
           return setStatus(view, decision.inputs, { _tag: "Given", turn: decision.turn });
+        case "InputDropped":
+          return setStatus(view, decision.inputs, { _tag: "Dropped", turn: decision.turn });
         case "ToolCallRefused":
           return [...view, { _tag: "ToolRefused", call: decision.call, by: decision.by }];
         case "TurnAnswered":

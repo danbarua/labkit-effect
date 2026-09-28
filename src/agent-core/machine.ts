@@ -6,7 +6,8 @@
  *
  * Input can arrive at any time. Input that arrives during a turn is queued, and is given to the
  * turn at the next point between steps: when every call of a tool batch has settled, or when the
- * model gives a final answer. A turn ends only on a final answer with no input queued.
+ * model gives a final answer. A turn ends only on a final answer with no input queued. A turn that
+ * fails drops its queued input.
  */
 
 import type { Decision, Inputs } from "./decision.ts";
@@ -135,6 +136,7 @@ function apply(state: State, decision: Decision): State {
         turn: { id: decision.turn, stage: "model", calls: new Map() },
       };
     case "InputDelivered":
+    case "InputDropped":
       return { ...state, queued: without(state.queued, decision.inputs) };
     case "ModelAsked":
       return state.turn === undefined
@@ -249,9 +251,12 @@ export function decide(state: State, seq: Seq, observation: Observation): Outcom
       }
       break;
     }
-    case "ModelFailed":
+    case "ModelFailed": {
+      const queued = open()?.queued ?? [];
+      if (isInputs(queued)) record({ _tag: "InputDropped", turn: observation.turn, inputs: queued });
       record({ _tag: "TurnFailed", turn: observation.turn, failure: observation.failure });
       break;
+    }
     case "PermissionAnswered":
       switch (observation.answer) {
         case "allow":

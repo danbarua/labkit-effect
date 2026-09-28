@@ -59,8 +59,9 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
 - I4. A turn ends (Decision `TurnAnswered`) on a final answer with no input queued. (Dan chose this.)
 - I5. The sender can cancel a queued input (Observation `InputCancelled`). Cancelling an input
   already given to a turn is recorded as `ObservationNotExpected`.
-- I6. A turn that fails leaves its queued input queued; the next input starts a turn with all of it.
-  (Proposal.)
+- I6. A turn that fails drops its queued input (Decision `InputDropped`, recorded before
+  `TurnFailed`). No turn is under way until the next input arrives. (Dan: "There is no 'next turn',
+  until stimulus is received.")
 
 ## Captured observations
 
@@ -73,4 +74,3 @@ in batches at most once per interval; time is an input, so it also serves tests.
 - Q2. Dan: starting a turn is a harness decision; in the chat-completions shape it looks like the
   user's. The session's state ("a turn is under way") is a Fact. The code records `TurnStarted` as a
   Decision, so it is a Fact under T4. Is that the reading Dan intends?
-- Q3. I6: should a failed turn's queued input start the next turn at once, rather than wait?

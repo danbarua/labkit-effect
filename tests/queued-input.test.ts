@@ -85,13 +85,17 @@ test("cancelling input already given to a turn is recorded as not expected", () 
   });
 });
 
-test("input queued when a turn fails starts the next turn with the next input", () => {
+test("input queued when a turn fails is dropped, and no turn starts until the next input", () => {
   const session = started("allow");
   const queued = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "try again" });
-  observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "overloaded" });
-  expect(session.state).toMatchObject({ turn: undefined, queued: [queued] });
+  const failed = observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "overloaded" });
+  expect(tags(session.journal.filter((fact) => fact.seq > failed))).toEqual(["InputDropped", "TurnFailed"]);
+  expect(session.state).toMatchObject({ turn: undefined, queued: [] });
+  expect(session.live.find((entry) => entry._tag === "Input" && entry.seq === queued)).toMatchObject({
+    status: { _tag: "Dropped", turn: "turn-1" },
+  });
   const next = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "now" });
-  expect(session.journal.at(-2)).toMatchObject({ decision: { _tag: "TurnStarted", turn: "turn-2", inputs: [queued, next] } });
+  expect(session.journal.at(-2)).toMatchObject({ decision: { _tag: "TurnStarted", turn: "turn-2", inputs: [next] } });
 });
 
 test("a tool result for a call nobody made is recorded, and changes nothing", () => {

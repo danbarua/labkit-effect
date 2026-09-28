@@ -29,7 +29,12 @@ export const Decision = Schema.Union([
   Schema.TaggedStruct("ToolCallRefused", { call: CallId, by: Authority }),
   /** The turn ended with the model's final answer and no input queued. */
   Schema.TaggedStruct("TurnAnswered", { turn: TurnId }),
-  /** The turn ended in failure. Queued inputs stay queued. */
+  /**
+   * Inputs queued during `turn` were discarded because the turn ended in failure. Recorded before
+   * `TurnFailed`.
+   */
+  Schema.TaggedStruct("InputDropped", { turn: TurnId, inputs: Inputs }),
+  /** The turn ended in failure. No turn is under way until the next input arrives. */
   Schema.TaggedStruct("TurnFailed", { turn: TurnId, failure: FailureText }),
   /**
    * The observation recorded at `observation` arrived in a state that does not expect it. It stays
