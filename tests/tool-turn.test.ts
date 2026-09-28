@@ -8,7 +8,7 @@ import { openSession } from "../src/agent-effect/loop.ts";
 import { SmolToolRunner, smolCatalog } from "../src/agent-effect/smol-tools.ts";
 import { ToolContextAssembler } from "../src/agent-effect/tool-context.ts";
 
-/** A provider that calls `add` on the first request and answers with the result on the second. */
+/** A provider that calls `add` on the first request and answers on the second. */
 const received: Array<unknown> = [];
 const responses = [
   {
@@ -65,37 +65,4 @@ test("the model calls a tool from the catalog, and answers from its result", asy
   expect(facts[6] as unknown).toMatchObject({
     observation: { call: "toolu_1", outcome: { _tag: "Succeeded", output: json(5) } },
   });
-
-  const tools = [
-    {
-      name: "add",
-      description: "Adds two numbers.",
-      input_schema: { type: "object", properties: { a: { type: "number" }, b: { type: "number" } }, required: ["a", "b"] },
-    },
-    {
-      name: "echo",
-      description: "Returns the text it is given.",
-      input_schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
-    },
-  ];
-  const question = { role: "user", content: [{ type: "text", text: "What is 2 + 3?" }] };
-  expect(received).toEqual([
-    { model: "boring-1", max_tokens: 1024, tools, messages: [question] },
-    {
-      model: "boring-1",
-      max_tokens: 1024,
-      tools,
-      messages: [
-        question,
-        {
-          role: "assistant",
-          content: [
-            { type: "text", text: "I'll add them." },
-            { type: "tool_use", id: "toolu_1", name: "add", input: { a: 2, b: 3 } },
-          ],
-        },
-        { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "5" }] },
-      ],
-    },
-  ]);
 });

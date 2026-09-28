@@ -1,5 +1,4 @@
 import { afterAll, expect, test } from "bun:test";
-import { json } from "./support/received.ts";
 import { Effect, Layer } from "effect";
 import { BoringContextAssembler, BoringModelProvider, CountingTurns } from "../src/agent-effect/boring.ts";
 import { AnthropicModelClient } from "../src/agent-effect/anthropic-client.ts";
@@ -7,12 +6,11 @@ import { openSession } from "../src/agent-effect/loop.ts";
 import { SmolToolRunner } from "../src/agent-effect/smol-tools.ts";
 import type { Observation } from "../src/agent-core/observation.ts";
 
-/** A provider that answers every request the same way, and keeps what it was sent. */
-const received: Array<{ path: string; body: unknown }> = [];
+/** A provider that answers every request the same way. */
+
 const provider = Bun.serve({
   port: 0,
-  async fetch(request) {
-    received.push({ path: new URL(request.url).pathname, body: await request.json() });
+  fetch() {
     return Response.json({
       id: "msg_1",
       type: "message",
@@ -53,24 +51,12 @@ test("one turn, from the user's message to the model's answer", async () => {
     "ModelResponded",
     "TurnEnded",
   ]);
-  expect(received).toEqual([
-    {
-      path: "/v1/messages",
-      body: {
-        model: "boring-1",
-        max_tokens: 1024,
-        messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
-      },
-    },
-  ]);
   expect(facts[5] as unknown).toMatchObject({
     observation: {
       turn: "turn-1",
       provider: "boring",
       model: "boring-1",
       parts: [{ _tag: "Text", text: "Hello back." }],
-      stop: "end_turn",
-      metadata: json({ id: "msg_1", type: "message", role: "assistant", model: "boring-1", usage: { input_tokens: 3, output_tokens: 3 } }),
     },
   });
   expect(facts[6] as unknown).toMatchObject({ decision: { turn: "turn-1", ending: { _tag: "Answered" } } });

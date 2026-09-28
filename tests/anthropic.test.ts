@@ -5,6 +5,7 @@ import { Effect, Layer, Logger } from "effect";
 import { ModelName, ProviderName, TurnId } from "../src/agent-core/names.ts";
 import { ModelClient } from "../src/agent-effect/contracts.ts";
 import { logKeys } from "../src/agent-effect/log-keys.ts";
+import { json } from "./support/received.ts";
 import type { Observation } from "../src/agent-core/observation.ts";
 import { BoringModelProvider, CountingTurns } from "../src/agent-effect/boring.ts";
 import { AnthropicModelClient } from "../src/agent-effect/anthropic-client.ts";
@@ -119,4 +120,121 @@ test("the max_tokens the Messages API requires is supplied and logged, with the 
       },
     ],
   });
+});
+
+/** A provider that answers each request with the next scripted response, keeping each request's body. */
+function recording(responses: ReadonlyArray<unknown>) {
+  const bodies: Array<unknown> = [];
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      bodies.push(await request.json());
+      return Response.json(responses[bodies.length - 1]);
+    },
+  });
+  servers.push(server);
+  return { url: new URL("/v1/messages", server.url), bodies };
+}
+
+const target = (endpoint: URL) => ({
+  provider: ProviderName.make("boring"),
+  model: ModelName.make("boring-1"),
+  endpoint,
+});
+
+test("a request is the model, the default max_tokens, and the context's messages as Messages blocks", async () => {
+  const provider = recording([{ content: [{ type: "text", text: "Hello back." }], stop_reason: "end_turn" }]);
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      yield* (yield* ModelClient).respond(
+        target(provider.url),
+        { system: undefined, tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "Hello" }] }] },
+        TurnId.make("turn-1"),
+      );
+    }).pipe(Effect.provide(AnthropicModelClient)),
+  );
+  expect(provider.bodies).toEqual([
+    { model: "boring-1", max_tokens: 1024, messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }] },
+  ]);
+});
+
+test("a response's text is a Text part, stop_reason is the stop, and everything else is metadata", async () => {
+  const provider = recording([
+    {
+      id: "msg_1",
+      type: "message",
+      content: [{ type: "text", text: "Hello back." }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 3, output_tokens: 3 },
+    },
+  ]);
+  const observed = await Effect.runPromise(
+    Effect.gen(function* () {
+      return yield* (yield* ModelClient).respond(
+        target(provider.url),
+        { system: undefined, tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "Hello" }] }] },
+        TurnId.make("turn-1"),
+      );
+    }).pipe(Effect.provide(AnthropicModelClient)),
+  );
+  expect(observed as unknown).toEqual({
+    _tag: "ModelResponded",
+    turn: "turn-1",
+    provider: "boring",
+    model: "boring-1",
+    parts: [{ _tag: "Text", text: "Hello back." }],
+    stop: "end_turn",
+    metadata: json({ id: "msg_1", type: "message", usage: { input_tokens: 3, output_tokens: 3 } }),
+  });
+});
+
+test("a tool turn sends the catalog, then the call and its result, as Messages blocks", async () => {
+  const provider = recording([
+    {
+      content: [
+        { type: "text", text: "I'll add them." },
+        { type: "tool_use", id: "toolu_1", name: "add", input: { a: 2, b: 3 } },
+      ],
+      stop_reason: "tool_use",
+    },
+    { content: [{ type: "text", text: "2 + 3 = 5." }], stop_reason: "end_turn" },
+  ]);
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const session = yield* openSession;
+      yield* session.observe({ _tag: "SessionOpened", session: "s1" } as unknown as Observation);
+      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          BoringModelProvider(provider.url),
+          ToolContextAssembler(smolCatalog),
+          AnthropicModelClient,
+          CountingTurns,
+          SmolToolRunner,
+        ),
+      ),
+    ),
+  );
+  const tools = smolCatalog.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.input }));
+  const question = { role: "user", content: [{ type: "text", text: "What is 2 + 3?" }] };
+  expect(provider.bodies).toEqual([
+    { model: "boring-1", max_tokens: 1024, tools, messages: [question] },
+    {
+      model: "boring-1",
+      max_tokens: 1024,
+      tools,
+      messages: [
+        question,
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "I'll add them." },
+            { type: "tool_use", id: "toolu_1", name: "add", input: { a: 2, b: 3 } },
+          ],
+        },
+        { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "5" }] },
+      ],
+    },
+  ]);
 });
