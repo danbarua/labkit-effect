@@ -11,7 +11,7 @@
  * those along themselves.
  */
 
-import { Effect, Ref } from "effect";
+import { DateTime, Effect, Ref } from "effect";
 import type { Fact } from "../agent-core/fact.ts";
 import { deliver, emptyWorld, type World } from "../agent-core/router.ts";
 import { InputText, Seq, type TurnId } from "../agent-core/names.ts";
@@ -99,11 +99,13 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
       const before = yield* Ref.get(held);
       const seq = Seq.make(before.facts.length + 1);
       const outcome = deliver(before.world, seq, observation);
+      const time = yield* DateTime.now;
       const recorded: ReadonlyArray<Fact> = [
-        { _tag: "Observed", seq, observation },
+        { _tag: "Observed", seq, time, observation },
         ...outcome.decisions.map((decision, index): Fact => ({
           _tag: "Decided",
           seq: Seq.make(seq + 1 + index),
+          time,
           decision,
         })),
       ];

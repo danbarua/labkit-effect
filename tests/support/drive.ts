@@ -6,7 +6,7 @@
  * the test.
  */
 
-import { Schema } from "effect";
+import { DateTime, Schema } from "effect";
 import type { Fact } from "../../src/agent-core/fact.ts";
 import { deliver, emptyWorld, type World } from "../../src/agent-core/router.ts";
 import { Seq } from "../../src/agent-core/names.ts";
@@ -39,9 +39,11 @@ export function observe(session: Session, raw: unknown): Seq {
   const seq = Seq.make(session.journal.length + 1);
   const outcome = deliver(session.world, seq, observation);
   session.world = outcome.world;
-  record(session, { _tag: "Observed", seq, observation });
+  // A test's clock: each observation is recorded one second after the one before, from the epoch.
+  const time = DateTime.makeUnsafe(seq * 1000);
+  record(session, { _tag: "Observed", seq, time, observation });
   for (const decision of outcome.decisions)
-    record(session, { _tag: "Decided", seq: Seq.make(session.journal.length + 1), decision });
+    record(session, { _tag: "Decided", seq: Seq.make(session.journal.length + 1), time, decision });
   session.requests.push(...outcome.requests);
   for (const request of outcome.requests)
     if (request._tag === "BeforeTurnEnded" && session.reviewsTurnEnds)

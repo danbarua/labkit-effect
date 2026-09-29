@@ -183,6 +183,7 @@ export async function importCodex(source: string): Promise<Imported> {
   }
 
   function onRecord(record: Record_): void {
+    projected.readAt(record["timestamp"]);
     const type = str(record["type"]);
     const payload = isRecord(record["payload"]) ? record["payload"] : {};
     const kind = str(payload["type"]);

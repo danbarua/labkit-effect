@@ -5,7 +5,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Schema } from "effect";
+import { DateTime, Option, Schema } from "effect";
 import { Fact } from "../../src/agent-core/fact.ts";
 import { Seq } from "../../src/agent-core/names.ts";
 import { Observation } from "../../src/agent-core/observation.ts";
@@ -35,6 +35,13 @@ export const isRecord = (value: Json | undefined): value is Record_ =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 export interface Projection {
+  /**
+   * The time of the source record being read, as an ISO 8601 string. A fact is recorded at the
+   * latest time read so far, so times never go backwards, even where the importer holds a record
+   * back and records it after a later one. A fact recorded before any record has had a time fails
+   * the import.
+   */
+  readonly readAt: (time: Json | undefined) => void;
   /** Records the observation and the decisions after it; returns its position and the requests. */
   readonly observe: (raw: unknown) => { readonly seq: number; readonly requests: ReadonlyArray<EffectRequest> };
   readonly count: (kind: string) => void;
@@ -49,17 +56,25 @@ export function projection(): Projection {
   const unmapped = new Map<string, number>();
   const decode = Schema.decodeUnknownSync(Observation);
   const encodeFact = Schema.encodeSync(Fact);
-  const state = { world: emptyWorld as World };
+  const state = { world: emptyWorld as World, time: undefined as DateTime.Utc | undefined };
 
   return {
+    readAt: (time) => {
+      const read = typeof time === "string" ? DateTime.make(time) : Option.none();
+      if (Option.isNone(read)) return;
+      const utc = DateTime.toUtc(read.value);
+      state.time = state.time === undefined ? utc : DateTime.max(state.time, utc);
+    },
     observe: (raw) => {
       const observation = decode(raw);
+      const time = state.time;
+      if (time === undefined) throw new Error(`a ${observation._tag} came before any record with a time`);
       const seq = Seq.make(facts.length + 1);
       const outcome = deliver(state.world, seq, observation);
       state.world = outcome.world;
-      facts.push(encodeFact({ _tag: "Observed", seq, observation }));
+      facts.push(encodeFact({ _tag: "Observed", seq, time, observation }));
       for (const decision of outcome.decisions)
-        facts.push(encodeFact({ _tag: "Decided", seq: Seq.make(facts.length + 1), decision }));
+        facts.push(encodeFact({ _tag: "Decided", seq: Seq.make(facts.length + 1), time, decision }));
       return { seq, requests: outcome.requests };
     },
     count: (kind) => {

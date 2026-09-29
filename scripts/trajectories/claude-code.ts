@@ -143,6 +143,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
 
   function onRecord(record: Record_): void {
     state.records += 1;
+    projected.readAt(record["timestamp"]);
     const type = typeof record["type"] === "string" ? record["type"] : "<no type>";
     const message = record["message"];
     const subtype = typeof record["subtype"] === "string" ? `/${record["subtype"]}` : "";
