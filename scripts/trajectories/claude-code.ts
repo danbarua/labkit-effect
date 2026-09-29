@@ -33,42 +33,17 @@
  *   is not such feedback.
  */
 
-import { createReadStream, mkdirSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
-import { createInterface } from "node:readline";
-import { Schema } from "effect";
-import { Fact } from "../../src/agent-core/fact.ts";
-import { Observation } from "../../src/agent-core/observation.ts";
-import { deliver, emptyWorld, type World } from "../../src/agent-core/router.ts";
-import { Seq } from "../../src/agent-core/names.ts";
+import { basename } from "node:path";
+import { eachRecord, type Imported, type Json, json, projection, type Record_, str, text, writeTrajectory } from "./project.ts";
 import { anthropicEndings } from "../../src/agent-effect/anthropic-client.ts";
 import { endingOf } from "../../src/agent-effect/shaping.ts";
 
-type Json = Schema.Json;
-type Record_ = { readonly [key: string]: Json };
-
-/** What an import produced: the facts, and the report of what was and was not mapped. */
-export interface Imported {
-  readonly facts: ReadonlyArray<unknown>;
-  readonly report: {
-    readonly source: string;
-    readonly records: number;
-    readonly facts: number;
-    readonly turns: number;
-    readonly decisions: Record<string, number>;
-    readonly unmapped: Record<string, number>;
-  };
-}
-
 export async function importClaudeCode(source: string): Promise<Imported> {
-  const json = (value: Json) => ({ mediaType: "application/json", body: { _tag: "Text", text: JSON.stringify(value) } });
-  const text = (value: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text: value } });
+  const projected = projection();
+  const { count } = projected;
 
   const state = {
-    world: emptyWorld as World,
-    facts: [] as Array<unknown>,
     turns: 0,
-    unmapped: new Map<string, number>(),
     records: 0,
     pending: undefined as
       | { id: string; uuids: Array<Json>; model: string; blocks: Array<Json>; usage: Json; stop: Json }
@@ -92,23 +67,13 @@ export async function importClaudeCode(source: string): Promise<Imported> {
     state.positions.set(uuid, [...(state.positions.get(uuid) ?? []), seq]);
   };
 
-  const count = (kind: string): void => {
-    state.unmapped.set(kind, (state.unmapped.get(kind) ?? 0) + 1);
-  };
-  const decode = Schema.decodeUnknownSync(Observation);
-  const encodeFact = Schema.encodeSync(Fact);
 
   /** Records the observation and what follows from it; returns its position. */
   function observe(raw: unknown): number {
-    const observation = decode(raw);
-    const seq = Seq.make(state.facts.length + 1);
-    const outcome = deliver(state.world, seq, observation);
-    state.world = outcome.world;
-    state.facts.push(encodeFact({ _tag: "Observed", seq, observation }));
-    for (const decision of outcome.decisions)
-      state.facts.push(encodeFact({ _tag: "Decided", seq: Seq.make(state.facts.length + 1), decision }));
-    for (const request of outcome.requests) if (request._tag === "BeforeTurnEnded") state.review = request.turn;
-    if (observation._tag === "InputArrived" && state.world.agent.state._tag === "Idle") {
+    const { seq, requests } = projected.observe(raw);
+    for (const request of requests) if (request._tag === "BeforeTurnEnded") state.review = request.turn;
+    const observation = raw as { _tag: string };
+    if (observation._tag === "InputArrived" && projected.world().agent.state._tag === "Idle") {
       state.turns += 1;
       observe({ _tag: "TurnStarted", turn: `turn-${state.turns}` });
     }
@@ -116,7 +81,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
   }
 
   function currentTurn(): string {
-    const agent = state.world.agent.state;
+    const agent = projected.world().agent.state;
     return agent._tag === "Running" ? agent.turn : `turn-${state.turns}`;
   }
 
@@ -139,8 +104,6 @@ export async function importClaudeCode(source: string): Promise<Imported> {
     state.review = undefined;
     observe({ _tag: "TurnEndReviewed", turn });
   }
-
-  const str = (value: Json | undefined): string => (typeof value === "string" ? value : "");
 
   /** The assistant message gathered so far, as one model response. */
   function flushResponse(): void {
@@ -250,13 +213,13 @@ export async function importClaudeCode(source: string): Promise<Imported> {
     if (type === "system" && record["subtype"] === "compact_boundary") {
       flushResponse();
       flushReview();
-      if (state.facts.length === 0) return count("system/compact_boundary (nothing before it in the file)");
+      if (projected.recorded() === 0) return count("system/compact_boundary (nothing before it in the file)");
       const metadata = record["compactMetadata"] as Record_ | undefined;
       const preserved = metadata?.["preservedMessages"] as Record_ | undefined;
       const all = preserved?.["allUuids"];
       state.boundary = {
         window: str(record["uuid"]),
-        through: state.facts.length,
+        through: projected.recorded(),
         kept: Array.isArray(all) ? all.flatMap((uuid) => (typeof uuid === "string" ? [uuid] : [])) : [],
       };
       return;
@@ -264,40 +227,11 @@ export async function importClaudeCode(source: string): Promise<Imported> {
     count(`${type}${subtype}`);
   }
 
-  const lines = createInterface({ input: createReadStream(source), crlfDelay: Number.POSITIVE_INFINITY });
-  for await (const line of lines) {
-    if (line.trim() === "") continue;
-    try {
-      onRecord(JSON.parse(line) as Record_);
-    } catch (error) {
-      count(`<unreadable line: ${error instanceof Error ? error.message.slice(0, 60) : "?"}>`);
-    }
-  }
+  await eachRecord(source, onRecord, count);
   flushResponse();
   flushReview();
   if (state.boundary !== undefined) count("system/compact_boundary (no summary after it)");
-
-  const decided = new Map<string, number>();
-  for (const fact of state.facts as Array<{ _tag: string; decision?: { _tag: string } }>)
-    if (fact._tag === "Decided" && fact.decision !== undefined)
-      decided.set(fact.decision._tag, (decided.get(fact.decision._tag) ?? 0) + 1);
-
-  const report = {
-    source,
-    records: state.records,
-    facts: state.facts.length,
-    turns: state.turns,
-    decisions: Object.fromEntries([...decided].sort((a, b) => b[1] - a[1])),
-    unmapped: Object.fromEntries([...state.unmapped].sort((a, b) => b[1] - a[1])),
-  };
-    return { facts: state.facts, report };
-}
-
-/** Writes an import's facts and report as `<name>.facts.jsonl` and `<name>.report.json` in `outDir`. */
-export function writeTrajectory(outDir: string, name: string, imported: Imported): void {
-  mkdirSync(outDir, { recursive: true });
-  writeFileSync(join(outDir, `${name}.facts.jsonl`), `${imported.facts.map((fact) => JSON.stringify(fact)).join("\n")}\n`);
-  writeFileSync(join(outDir, `${name}.report.json`), `${JSON.stringify(imported.report, null, 2)}\n`);
+  return projected.imported(source, state.records, state.turns);
 }
 
 if (import.meta.main) {

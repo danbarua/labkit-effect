@@ -24,7 +24,7 @@ export type AgentObservation = Extract<
 export type ModelObservation = Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" | "ModelVetoed" }>;
 
 /** Observations delivered to the turn they name, for the turn itself. */
-export type TurnObservation = Extract<Observation, { _tag: "TurnEndReviewed" }>;
+export type TurnObservation = Extract<Observation, { _tag: "TurnEndReviewed" | "TurnInterrupted" }>;
 
 /** Observations delivered to the call they name. */
 export type CallObservation = Extract<Observation, { _tag: "ToolEnded" }>;

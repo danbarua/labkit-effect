@@ -1,10 +1,10 @@
 /**
- * Projects every Claude Code session file under a directory (by default `~/.claude/projects`) into
- * trajectories, and writes a summary: totals of every decision and unmapped record kind, the
+ * Projects every session file of one harness under a directory (by default where that harness
+ * keeps them) into trajectories, and writes a summary: totals of every decision and unmapped record kind, the
  * sessions where the core found observations it did not expect or could not deliver, and the
  * sessions richest in the record kinds worth studying.
  *
- *   bun scripts/trajectories/sweep-claude-code.ts [projects-dir] [out-dir]
+ *   bun scripts/trajectories/sweep.ts <claude-code|codex> [sessions-dir] [out-dir]
  *
  * A session file that cannot be imported is listed with its error; the sweep goes on.
  */
@@ -12,9 +12,20 @@
 import { readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
-import { type Imported, importClaudeCode, writeTrajectory } from "./claude-code.ts";
+import { importClaudeCode } from "./claude-code.ts";
+import { importCodex } from "./codex.ts";
+import { type Imported, writeTrajectory } from "./project.ts";
 
-const [root = join(homedir(), ".claude", "projects"), outDir = "trajectories/claude-code"] = process.argv.slice(2);
+const harnesses = {
+  "claude-code": { importer: importClaudeCode, root: join(homedir(), ".claude", "projects") },
+  codex: { importer: importCodex, root: join(homedir(), ".codex", "sessions") },
+};
+const [harness, rootArg, outArg] = process.argv.slice(2);
+if (harness !== "claude-code" && harness !== "codex")
+  throw new Error("usage: bun scripts/trajectories/sweep.ts <claude-code|codex> [sessions-dir] [out-dir]");
+const { importer } = harnesses[harness];
+const root = rootArg ?? harnesses[harness].root;
+const outDir = outArg ?? join("trajectories", harness);
 
 function sessionFiles(dir: string): Array<string> {
   return readdirSync(dir).flatMap((entry) => {
@@ -38,7 +49,7 @@ const started = performance.now();
 for (const file of files) {
   const where = relative(root, dirname(file));
   try {
-    const imported = await importClaudeCode(file);
+    const imported = await importer(file);
     writeTrajectory(join(outDir, where), basename(file, ".jsonl"), imported);
     add(decisions, imported.report.decisions);
     add(unmapped, imported.report.unmapped);
@@ -72,7 +83,7 @@ const summary = {
     .sort((a, b) => off(b) - off(a))
     .map((report) => ({ source: report.source, notExpectedOrUndelivered: off(report), turns: report.turns })),
   richestIn: Object.fromEntries(
-    ["system/compact_boundary", "queue-operation", "user block: image"].map((kind) => [kind, richest(kind)]),
+    ["system/compact_boundary", "queue-operation", "user block: image", "user block: input_image"].map((kind) => [kind, richest(kind)]),
   ),
   failures,
 };

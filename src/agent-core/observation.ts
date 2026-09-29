@@ -98,7 +98,7 @@ export const Observation = Schema.Union([
   Schema.TaggedStruct("InputCancelled", { input: Seq }),
   /**
    * A model responded. `parts` are the response's parts in the order received; `stop` is why it
-   * stopped in the provider's words, and `ending` that reason classified; `metadata` is everything
+   * stopped in the provider's words, when the record has them, and `ending` that reason classified; `metadata` is everything
    * else the provider sent with it (usage, identifiers), as received.
    */
   Schema.TaggedStruct("ModelResponded", {
@@ -106,7 +106,7 @@ export const Observation = Schema.Union([
     provider: ProviderName,
     model: ModelName,
     parts: Schema.Array(ModelPart),
-    stop: StopReason,
+    stop: Schema.optionalKey(StopReason),
     ending: ResponseEnding,
     metadata: Received,
   }),
@@ -118,6 +118,8 @@ export const Observation = Schema.Union([
   Schema.TaggedStruct("ToolEnded", { call: CallId, outcome: ToolOutcome }),
   /** The layers around the core finished giving `turn` input before it ends (`BeforeTurnEnded`). */
   Schema.TaggedStruct("TurnEndReviewed", { turn: TurnId }),
+  /** The turn was interrupted (by the user, or whoever else may stop it). It ends at once. */
+  Schema.TaggedStruct("TurnInterrupted", { turn: TurnId }),
 ]);
 export type Observation = typeof Observation.Type;
 

@@ -14,6 +14,8 @@ export const Ending = Schema.Union([
   Schema.TaggedStruct("Failed", { failure: FailureText }),
   /** A policy vetoed a request for a model response. */
   Schema.TaggedStruct("Vetoed", { reason: Received }),
+  /** The turn was interrupted. */
+  Schema.TaggedStruct("Interrupted", {}),
 ]);
 export type Ending = typeof Ending.Type;
 

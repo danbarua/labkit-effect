@@ -6,7 +6,8 @@
  * between steps, or once the turn has ended. After a final answer it asks the layers around the core for
  * anything more first (`BeforeTurnEnded`, answered by `TurnEndReviewed`); it ends when no input was
  * taken by then, or when a step stops without an answer; input still waiting then is dropped. The
- * model's observations are addressed to the turn, which passes them to its current step.
+ * model's observations are addressed to the turn, which passes them to its current step. An
+ * interruption ends the turn at once, from any state before it has ended.
  */
 
 import type { Ending } from "./decision.ts";
@@ -83,6 +84,8 @@ const compact = (state: ConversationTurnState, compaction: Seq): TurnStep => ({
   decisions: [{ _tag: "WindowOpened", compaction }],
 });
 
+const interrupted = (state: ConversationTurnState): TurnStep => ended(state.turn, { _tag: "Interrupted" });
+
 const passOn = (
   state: Extract<ConversationTurnState, { _tag: "Stepping" }>,
   message: ModelObservation,
@@ -97,6 +100,7 @@ const ended = (turn: TurnId, ending: Ending): TurnStep => ({
 
 export const conversationTurnTable: Table<ConversationTurnState, ConversationTurnMessage, Send> = {
   NotStarted: {
+    TurnInterrupted: interrupted,
     TurnOpened: (state) => ({ ...becomes({ _tag: "Opening", turn: state.turn }), sends: [proceed(state.turn)] }),
     Steer: "deferred",
     Compact: "deferred",
@@ -111,6 +115,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     TurnEndReviewed: "ignored",
   },
   Opening: {
+    TurnInterrupted: interrupted,
     TurnOpened: "ignored",
     Steer: (state, message) => take(state, message.input),
     Compact: (state, message) => compact(state, message.compaction),
@@ -125,6 +130,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     TurnEndReviewed: "ignored",
   },
   Stepping: {
+    TurnInterrupted: interrupted,
     TurnOpened: "ignored",
     Steer: "deferred",
     Compact: "deferred",
@@ -139,6 +145,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     TurnEndReviewed: "ignored",
   },
   Continuing: {
+    TurnInterrupted: interrupted,
     TurnOpened: "ignored",
     Steer: (state, message) => take(state, message.input),
     Compact: (state, message) => compact(state, message.compaction),
@@ -153,6 +160,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     TurnEndReviewed: "ignored",
   },
   AfterAnswer: {
+    TurnInterrupted: interrupted,
     TurnOpened: "ignored",
     Steer: (state, message) =>
       take(state, message.input, { _tag: "AfterAnswerSteered", turn: state.turn, step: state.step }),
@@ -168,6 +176,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelVetoed: "ignored",
   },
   AfterAnswerSteered: {
+    TurnInterrupted: interrupted,
     TurnOpened: "ignored",
     Steer: (state, message) => take(state, message.input),
     Compact: (state, message) => compact(state, message.compaction),
@@ -182,6 +191,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelVetoed: "ignored",
   },
   Ended: {
+    TurnInterrupted: "ignored",
     TurnOpened: "ignored",
     /** Input still waiting when the turn ends is dropped. */
     Steer: (state, message) => ({
