@@ -2,7 +2,8 @@
  * A conversation turn: from the input that started it to the model's final answer. It runs steps
  * one after another; after a tool batch, or a response cut short, it goes on to the next. Input for the turn waits in its mailbox while a step runs, and is taken
  * between steps; between steps the turn posts `Proceed` to itself, which arrives after the waiting
- * input is taken, and then goes on. After a final answer it asks the layers around the core for
+ * input is taken, and then goes on. A compaction waits in the mailbox the same way, and is taken
+ * between steps, or once the turn has ended. After a final answer it asks the layers around the core for
  * anything more first (`BeforeTurnEnded`, answered by `TurnEndReviewed`); it ends when no input was
  * taken by then, or when a step stops without an answer; input still waiting then is dropped. The
  * model's observations are addressed to the turn, which passes them to its current step.
@@ -76,6 +77,12 @@ const afterAnswer = (state: Extract<ConversationTurnState, { _tag: "Stepping" }>
   requests: [{ _tag: "BeforeTurnEnded", turn: state.turn }],
 });
 
+/** The compaction's window is in effect from here. */
+const compact = (state: ConversationTurnState, compaction: Seq): TurnStep => ({
+  ...becomes(state),
+  decisions: [{ _tag: "WindowOpened", compaction }],
+});
+
 const passOn = (
   state: Extract<ConversationTurnState, { _tag: "Stepping" }>,
   message: ModelObservation,
@@ -92,6 +99,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
   NotStarted: {
     TurnOpened: (state) => ({ ...becomes({ _tag: "Opening", turn: state.turn }), sends: [proceed(state.turn)] }),
     Steer: "deferred",
+    Compact: "deferred",
     Proceed: "ignored",
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
@@ -105,6 +113,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
   Opening: {
     TurnOpened: "ignored",
     Steer: (state, message) => take(state, message.input),
+    Compact: (state, message) => compact(state, message.compaction),
     Proceed: (state) => nextStep(state.turn, 0),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
@@ -118,6 +127,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
   Stepping: {
     TurnOpened: "ignored",
     Steer: "deferred",
+    Compact: "deferred",
     Proceed: "ignored",
     StepToolsSettled: continuing,
     StepCutShort: continuing,
@@ -131,6 +141,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
   Continuing: {
     TurnOpened: "ignored",
     Steer: (state, message) => take(state, message.input),
+    Compact: (state, message) => compact(state, message.compaction),
     Proceed: (state) => nextStep(state.turn, state.step),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
@@ -145,6 +156,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     TurnOpened: "ignored",
     Steer: (state, message) =>
       take(state, message.input, { _tag: "AfterAnswerSteered", turn: state.turn, step: state.step }),
+    Compact: (state, message) => compact(state, message.compaction),
     Proceed: "ignored",
     TurnEndReviewed: (state) => ended(state.turn, { _tag: "Answered" }),
     StepToolsSettled: "ignored",
@@ -158,6 +170,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
   AfterAnswerSteered: {
     TurnOpened: "ignored",
     Steer: (state, message) => take(state, message.input),
+    Compact: (state, message) => compact(state, message.compaction),
     Proceed: "ignored",
     TurnEndReviewed: (state) => nextStep(state.turn, state.step),
     StepToolsSettled: "ignored",
@@ -175,6 +188,8 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
       ...becomes(state),
       decisions: [{ _tag: "InputDropped", turn: state.turn, inputs: [message.input] }],
     }),
+    /** A compaction still waiting when the turn ends is taken: its window outlasts the turn. */
+    Compact: (state, message) => compact(state, message.compaction),
     Proceed: "ignored",
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",

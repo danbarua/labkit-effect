@@ -82,5 +82,5 @@ That suggests three identities:
 
 ## Open
 
-- Which of these (sessions, windows, forks) gets built first, and what makes the first compaction.
-- Who assigns identities.
+- Forks. Windows are recorded by the core (`Compacted`, `WindowOpened`; agent-core S4), started and
+  identified by the layers around it; context assembly does not use them yet.

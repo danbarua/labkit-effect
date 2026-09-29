@@ -57,6 +57,10 @@ export type StopReason = typeof StopReason.Type;
 export const FailureText = Schema.String.pipe(Schema.brand("FailureText"));
 export type FailureText = typeof FailureText.Type;
 
+/** Identifies one window: what the model is sent after a compaction. Assigned by whoever compacted. */
+export const WindowId = Schema.String.pipe(Schema.brand("WindowId"));
+export type WindowId = typeof WindowId.Type;
+
 /** The position of a fact in its session's journal, starting at 1. */
 export const Seq = Schema.Int.pipe(Schema.brand("Seq"));
 export type Seq = typeof Seq.Type;

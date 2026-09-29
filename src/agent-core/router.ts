@@ -2,7 +2,8 @@
  * The router delivers each observation to the machine it is addressed to, then delivers the
  * messages machines send, in the order sent, until none are left.
  *
- * - An observation's address comes from its own fields: input and a turn's start go to the agent,
+ * - An observation's address comes from its own fields: input, a compaction and a turn's start go
+ *   to the agent,
  *   a model's response and a turn's end review to the turn they name, a tool's end to the call it
  *   names.
  * - Only messages between machines create machines: the agent opens a turn, a turn starts its
@@ -253,6 +254,7 @@ export function deliver(world: World, seq: Seq, observation: Observation): Deliv
     switch (observation._tag) {
       case "SessionOpened":
       case "InputArrived":
+      case "Compacted":
       case "TurnStarted":
         return toAgent(world, observation, seq, seq);
       case "InputCancelled":

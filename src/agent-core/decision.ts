@@ -32,6 +32,12 @@ export const Decision = Schema.Union([
    * Inputs queued during `turn` were discarded because the turn ended other than by an answer.
    */
   Schema.TaggedStruct("InputDropped", { turn: TurnId, inputs: Inputs }),
+  /**
+   * The window of the compaction recorded at `compaction` is in effect: requests to the model from
+   * here on are made in it. Taken at once while no turn runs, and between the steps of a turn that
+   * does.
+   */
+  Schema.TaggedStruct("WindowOpened", { compaction: Seq }),
   /** The turn ended. The session is idle until the next input arrives. */
   Schema.TaggedStruct("TurnEnded", { turn: TurnId, ending: Ending }),
   /**

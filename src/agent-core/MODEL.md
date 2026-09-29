@@ -96,6 +96,11 @@ then continues").
 - S3. `ModelFailed` means the request failed after whatever the layers around the core do first:
   retries with back-off, another model or provider. The turn ends, and no turn is under way until
   the next input. That turn's first request carries the input and everything still unseen.
+- S4. A compaction is started by the layers around the core, which report it as `Compacted { window,
+  previous, summary, through, kept }`. It goes to the agent like input: taken at once while no turn
+  runs, otherwise waiting in the turn's mailbox until between steps, or until the turn ends. Taking
+  it records `WindowOpened`. Requests after that are made in the window: its summary in place of the
+  facts through `through`, except those at `kept`, then everything after.
 
 ## Captured observations
 

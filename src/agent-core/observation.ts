@@ -20,6 +20,7 @@ import {
   ThinkingText,
   ToolName,
   TurnId,
+  WindowId,
 } from "./names.ts";
 
 /** Who sent an input: the user, the system (a wake-up, a scheduled prompt), or another agent. */
@@ -79,6 +80,18 @@ export const Observation = Schema.Union([
   Schema.TaggedStruct("SessionOpened", { session: SessionId }),
   /** An input arrived. It can arrive at any time, including while a turn is under way. */
   Schema.TaggedStruct("InputArrived", { from: InputSource, text: InputText }),
+  /**
+   * The conversation was compacted into a new window: once taken (`WindowOpened`), the model is sent
+   * `summary` in place of the facts through `through`, except those at `kept`, which it is sent as
+   * they are. `previous` is the window this one follows, when there is one.
+   */
+  Schema.TaggedStruct("Compacted", {
+    window: WindowId,
+    previous: Schema.optionalKey(WindowId),
+    summary: Received,
+    through: Seq,
+    kept: Schema.Array(Seq),
+  }),
   /** A turn started. It takes the input waiting for it. */
   Schema.TaggedStruct("TurnStarted", { turn: TurnId }),
   /** The input recorded at `input`, still queued, was cancelled by its sender. */

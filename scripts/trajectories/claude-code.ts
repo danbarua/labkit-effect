@@ -13,8 +13,12 @@
  *
  * Mapping:
  * - a user message with text is `InputArrived`, from the user, or from the system when Claude Code
- *   marks it meta (a hook's feedback, a message from another session) or it is a compaction's
- *   summary; while the agent is idle a turn is started, as the loop does;
+ *   marks it meta (a hook's feedback, a message from another session); while the agent is idle a
+ *   turn is started, as the loop does;
+ * - a `compact_boundary` record and the summary message after it are one `Compacted`: the window is
+ *   the boundary's uuid, the previous window the file's previous boundary, `through` the last
+ *   position before the boundary, and `kept` the positions of the messages the boundary names as
+ *   kept verbatim. A boundary with nothing before it in the file is counted, not mapped;
  * - the assistant records with one message id are one `ModelResponded`, however other records
  *   interleave with them: `text` is `Text`, `thinking` with its signature is `Thinking`, `tool_use`
  *   is `ToolCall`, anything else is `Unrecognised`; the message's id and usage are its metadata,
@@ -66,11 +70,26 @@ export async function importClaudeCode(source: string): Promise<Imported> {
     turns: 0,
     unmapped: new Map<string, number>(),
     records: 0,
-    pending: undefined as { id: string; model: string; blocks: Array<Json>; usage: Json; stop: Json } | undefined,
+    pending: undefined as
+      | { id: string; uuids: Array<Json>; model: string; blocks: Array<Json>; usage: Json; stop: Json }
+      | undefined,
     /** Tool results recorded while their message was still arriving, given after it. */
-    held: [] as Array<Record_>,
+    held: [] as Array<{ result: Record_; uuid: Json | undefined }>,
     /** A turn whose `BeforeTurnEnded` is not answered yet: a Stop hook's feedback may still come. */
     review: undefined as string | undefined,
+    /** The positions recorded for each Claude Code record, by its uuid. */
+    positions: new Map<string, Array<number>>(),
+    /** Each record's type and subtype, by its uuid. */
+    kinds: new Map<string, string>(),
+    /** A boundary whose summary message has not arrived yet. */
+    boundary: undefined as { window: string; through: number; kept: ReadonlyArray<string> } | undefined,
+    /** The window of the file's last boundary. */
+    window: undefined as string | undefined,
+  };
+
+  const placed = (uuid: Json | undefined, seq: number): void => {
+    if (typeof uuid !== "string") return;
+    state.positions.set(uuid, [...(state.positions.get(uuid) ?? []), seq]);
   };
 
   const count = (kind: string): void => {
@@ -79,7 +98,8 @@ export async function importClaudeCode(source: string): Promise<Imported> {
   const decode = Schema.decodeUnknownSync(Observation);
   const encodeFact = Schema.encodeSync(Fact);
 
-  function observe(raw: unknown): void {
+  /** Records the observation and what follows from it; returns its position. */
+  function observe(raw: unknown): number {
     const observation = decode(raw);
     const seq = Seq.make(state.facts.length + 1);
     const outcome = deliver(state.world, seq, observation);
@@ -92,6 +112,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
       state.turns += 1;
       observe({ _tag: "TurnStarted", turn: `turn-${state.turns}` });
     }
+    return seq;
   }
 
   function currentTurn(): string {
@@ -126,7 +147,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
     const pending = state.pending;
     if (pending === undefined) return;
     state.pending = undefined;
-    observe({
+    const seq = observe({
       _tag: "ModelResponded",
       turn: currentTurn(),
       provider: "anthropic",
@@ -136,12 +157,13 @@ export async function importClaudeCode(source: string): Promise<Imported> {
       ending: endingOf(anthropicEndings, pending.stop),
       metadata: json({ id: pending.id, usage: pending.usage }),
     });
+    for (const uuid of pending.uuids) placed(uuid, seq);
     const held = state.held.splice(0);
-    for (const result of held) toolEnded(result);
+    for (const { result, uuid } of held) toolEnded(result, uuid);
   }
 
-  function toolEnded(result: Record_): void {
-    observe({
+  function toolEnded(result: Record_, uuid: Json | undefined): void {
+    const seq = observe({
       _tag: "ToolEnded",
       call: str(result["tool_use_id"]),
       outcome:
@@ -149,6 +171,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
           ? { _tag: "Failed", reason: { _tag: "Reported", error: resultContent(result["content"]) } }
           : { _tag: "Succeeded", output: resultContent(result["content"]) },
     });
+    placed(uuid, seq);
   }
 
   function resultContent(content: Json | undefined): unknown {
@@ -159,6 +182,8 @@ export async function importClaudeCode(source: string): Promise<Imported> {
     state.records += 1;
     const type = typeof record["type"] === "string" ? record["type"] : "<no type>";
     const message = record["message"];
+    const subtype = typeof record["subtype"] === "string" ? `/${record["subtype"]}` : "";
+    if (typeof record["uuid"] === "string") state.kinds.set(record["uuid"], `${type}${subtype}`);
     if (record["isSidechain"] === true) return count(`${type} (sidechain: a subagent)`);
     if (type === "assistant" && typeof message === "object" && message !== null && !Array.isArray(message)) {
       const m = message as Record_;
@@ -168,6 +193,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
       const blocks = Array.isArray(m["content"]) ? (m["content"] as Array<Json>) : [];
       state.pending = {
         id,
+        uuids: [...(state.pending?.uuids ?? []), record["uuid"] ?? null],
         model: typeof m["model"] === "string" ? m["model"] : "unknown",
         blocks: [...(state.pending?.blocks ?? []), ...blocks],
         usage: m["usage"] ?? null,
@@ -187,25 +213,54 @@ export async function importClaudeCode(source: string): Promise<Imported> {
       // Results that arrive while their message is still being recorded (Claude Code starts a tool
       // as soon as its call has streamed in) are held until the message is complete.
       if (input === undefined && state.pending !== undefined) {
-        state.held.push(...results);
+        state.held.push(...results.map((result) => ({ result, uuid: record["uuid"] })));
         return;
       }
       flushResponse();
       const stopHook = record["isMeta"] === true && typeof content === "string" && content.startsWith("Stop hook feedback");
       if (!stopHook) flushReview();
-      // The model is shown a compaction's summary as input; the compaction itself (a new window of
-      // what the model sees) is not modelled, and its boundary record is counted as unmapped.
-      if (record["isCompactSummary"] === true) count("user (compaction summary, given as input)");
-      for (const result of results) toolEnded(result);
+      const boundary = state.boundary;
+      if (record["isCompactSummary"] === true && boundary !== undefined && input !== undefined) {
+        state.boundary = undefined;
+        const kept = boundary.kept.flatMap((uuid) => state.positions.get(uuid) ?? []);
+        for (const uuid of boundary.kept.filter((kept) => !state.positions.has(kept)))
+          count(`kept by a compaction, with no position: ${state.kinds.get(uuid) ?? "not in the file"}`);
+        observe({
+          _tag: "Compacted",
+          window: boundary.window,
+          ...(state.window === undefined ? {} : { previous: state.window }),
+          summary: text(input),
+          through: boundary.through,
+          kept,
+        });
+        state.window = boundary.window;
+        return;
+      }
+      for (const result of results) toolEnded(result, record["uuid"]);
       // A meta message is shown to the model but was not typed by the user: a hook's feedback, a
       // message from another session, a command's output.
+      // A summary with no boundary before it is still shown to the model: as input from the system.
+      if (record["isCompactSummary"] === true) count("user (compaction summary with no boundary, given as input)");
       const from = record["isMeta"] === true || record["isCompactSummary"] === true ? { _tag: "System" } : { _tag: "User" };
-      if (input !== undefined) observe({ _tag: "InputArrived", from, text: input });
+      if (input !== undefined) placed(record["uuid"], observe({ _tag: "InputArrived", from, text: input }));
       const others = blocks.filter((b) => !["tool_result", "text"].includes(str((b as Record_ | null)?.["type"])));
       for (const other of others) count(`user block: ${str((other as Record_ | null)?.["type"])}`);
       return;
     }
-    const subtype = typeof record["subtype"] === "string" ? `/${record["subtype"]}` : "";
+    if (type === "system" && record["subtype"] === "compact_boundary") {
+      flushResponse();
+      flushReview();
+      if (state.facts.length === 0) return count("system/compact_boundary (nothing before it in the file)");
+      const metadata = record["compactMetadata"] as Record_ | undefined;
+      const preserved = metadata?.["preservedMessages"] as Record_ | undefined;
+      const all = preserved?.["allUuids"];
+      state.boundary = {
+        window: str(record["uuid"]),
+        through: state.facts.length,
+        kept: Array.isArray(all) ? all.flatMap((uuid) => (typeof uuid === "string" ? [uuid] : [])) : [],
+      };
+      return;
+    }
     count(`${type}${subtype}`);
   }
 
@@ -220,6 +275,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
   }
   flushResponse();
   flushReview();
+  if (state.boundary !== undefined) count("system/compact_boundary (no summary after it)");
 
   const decided = new Map<string, number>();
   for (const fact of state.facts as Array<{ _tag: string; decision?: { _tag: string } }>)
