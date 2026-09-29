@@ -12,7 +12,7 @@ import type { Received } from "../agent-core/received.ts";
 import type { Policy, PolicyMessage, PolicyStep } from "./policy.ts";
 
 /** Identifies a request under review: one model request per turn, one run per tool call. */
-export const RequestKey = Schema.String.pipe(Schema.brand("RequestKey"));
+export const RequestKey = Schema.String.pipe(Schema.brand("agent-policy/RequestKey"));
 export type RequestKey = typeof RequestKey.Type;
 
 /** `BeforeTurnEnded` asks the layers around the core for more input; it is forwarded without review. */

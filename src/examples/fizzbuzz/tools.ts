@@ -20,7 +20,7 @@ export const ErrorCode = Schema.Literals(["number_out_of_sequence", "irrational_
 export type ErrorCode = typeof ErrorCode.Type;
 
 /** The model's description of a problem, for the system administrators. */
-export const ErrorMessage = Schema.String.pipe(Schema.brand("ErrorMessage"));
+export const ErrorMessage = Schema.String.pipe(Schema.brand("examples/fizzbuzz/ErrorMessage"));
 export type ErrorMessage = typeof ErrorMessage.Type;
 
 /** A tool: what the model is offered, and how a call runs. */

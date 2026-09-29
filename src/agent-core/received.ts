@@ -7,11 +7,11 @@
 import { Schema } from "effect";
 
 /** What the sender says the content is, such as `application/json`. A claim, not a guarantee. */
-export const MediaType = Schema.String.pipe(Schema.brand("MediaType"));
+export const MediaType = Schema.String.pipe(Schema.brand("agent-core/MediaType"));
 export type MediaType = typeof MediaType.Type;
 
 /** Text as it arrived, unparsed. */
-export const ReceivedText = Schema.String.pipe(Schema.brand("ReceivedText"));
+export const ReceivedText = Schema.String.pipe(Schema.brand("agent-core/ReceivedText"));
 export type ReceivedText = typeof ReceivedText.Type;
 
 export const Received = Schema.Struct({
