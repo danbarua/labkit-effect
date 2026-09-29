@@ -110,9 +110,13 @@ test("the context the model is sent grows with every request", async () => {
   const sizes = seen.map(tokens);
   const compacted = await at("2026-09-29T09:30:00.000Z", play(countingUser(200), { ...basic, conversation: FizzBuzzCompaction(20) }));
   const compactedSizes = compacted.seen.map(tokens);
-  console.log(
-    `FizzBuzz, 200 user messages: ${seen.length} requests, estimated tokens from ${sizes[0]} to ${sizes.at(-1)}; ` +
-      `compacted past 20 messages: at most ${Math.max(...compactedSizes)}`,
+  await runTest(
+    Effect.logInfo("fizzbuzz.context.measured", {
+      userMessages: 200,
+      requests: seen.length,
+      estimatedTokens: { first: sizes[0], last: sizes.at(-1) },
+      compactedPast20Messages: { mostEstimatedTokens: Math.max(...compactedSizes) },
+    }),
   );
 });
 
@@ -161,8 +165,10 @@ test("a tool call whose input does not fit its schema is rejected with the decod
       return yield* (yield* ToolRunner).run(ToolName.make("classify"), receivedJson({ label: "Fuzz" }));
     }).pipe(Effect.provide(FizzBuzzToolRunner)),
   );
-  expect(outcome._tag === "Failed" && outcome.reason._tag).toBe("InputRejected");
-  console.log(`classify({"label":"Fuzz"}) is rejected: ${outcome._tag === "Failed" && outcome.reason._tag === "InputRejected" ? outcome.reason.problem : ""}`);
+  expect(outcome as unknown).toEqual({
+    _tag: "Failed",
+    reason: { _tag: "InputRejected", problem: 'Expected "Fizz" | "Buzz" | "FizzBuzz"\n  at ["label"]' },
+  });
 });
 
 test("tool usage for the session is counted from its facts", async () => {
@@ -195,5 +201,5 @@ test("tool metrics, recorded live and attributed by session, agree with the coun
   expect(live("alice")).toEqual(fromFacts(alice.facts));
   expect(live("bob")).toEqual(fromFacts(bob.facts));
   expect(live("alice")).toEqual({ "classify Succeeded": 2, "report_error Succeeded": 1 });
-  console.log(`live tool metrics: alice ${JSON.stringify(live("alice"))}, bob ${JSON.stringify(live("bob"))}`);
+  expect(live("bob")).toEqual({ "classify Succeeded": 4 });
 });
