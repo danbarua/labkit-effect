@@ -5,16 +5,19 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
 
 ## Decisions for Dan
 
-- [ ] The compaction boundary's name: `compaction-window` (a span chosen for compaction: a decision)
-      or `compacted-episode` (a span that was compacted: a fact). Claude proposed the first.
-- [ ] Reshape `Compacted` to record only the span (window, previous, through, kept), with the
-      summary belonging to a fork of the history, as agent-context's direction note describes.
+- [ ] Reshape `Compacted` into the `compaction-window` entry (Dan chose the name): only the span
+      (window, previous, through, kept), with the summary belonging to a fork of the history. A
+      fork's summary may be text, or a provider's own compaction result: Anthropic's compaction
+      block (beta `compact-2026-09-04`) or OpenAI's encrypted `compaction` item, each opaque and
+      usable only with that provider.
 - [ ] The terms T1–T5 in agent-core's `MODEL.md` are all still marked open.
 - [ ] Where the model is chosen. The loop's `ModelProvider` chooses it, so context assembly's
       model selectors go unused, and `ModelChoice.endpoint` has no counterpart in `Target`.
       Reconfiguration through the inbox (below) may settle it.
-- [ ] Where notices go in what the model is sent. They are assembled and logged as not sent.
-- [ ] Namespaced brand names, e.g. `"agent-core/Seq"`, before this work is folded into the monorepo.
+- [ ] Where notices go in what the model is sent. They are assembled and logged as not sent. Each
+      provider takes instructions mid-conversation: Anthropic a `role: "system"` message (not on
+      every model; after a tool result, never between a tool call and its result; keeps the cache),
+      OpenAI Responses a `developer` message, compatible APIs a `system` message.
 
 ## Build
 
@@ -33,8 +36,10 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
       that tells the step `CallReady`.
 - [ ] Telemetry: parent spans for sessions and turns; an OTLP exporter; Effect's logs through
       OpenTelemetry.
-- [ ] The summary view merges the summary and the next input into one user message. Decide whether
-      a summary should be its own message.
+- [ ] The summary view merges the summary and the next input into one user message. Anthropic's
+      rule for its own compaction: the kept turns follow the summary unchanged, and the first kept
+      turn has a different role from the last summarised message, or the API merges them; compacting
+      exactly the messages of a request already sent makes the kept turns start with the reply.
 
 ## Try
 
