@@ -94,7 +94,10 @@ then continues").
   facts for a purpose (the next request, a person's display, a protocol).
 - S3. `ModelFailed` means the request failed after whatever the layers around the core do first:
   retries with back-off, another model or provider. The turn ends, and no turn is under way until
-  the next input. That turn's first request carries the input and everything still unseen.
+  the next input. That turn's first request carries the input and everything still unseen. It
+  carries the error as the layer encoded it (`error`), beside the words (`failure`). An attempt
+  that failed on the way, after which the request went on, is `ModelAttemptFailed`; it is recorded
+  when it happens, and the turn does not end.
 - S4. A compaction is started by the layers around the core, which report it as `Compacted { window,
   previous, summary, through, kept }`. It goes to the agent like input: taken at once while no turn
   runs, otherwise waiting in the turn's mailbox until between steps, or until the turn ends. Taking

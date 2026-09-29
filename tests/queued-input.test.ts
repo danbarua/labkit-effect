@@ -95,7 +95,7 @@ test("cancelling input already given to a turn changes nothing", () => {
 test("input queued when a turn fails is dropped, and no turn starts until the next input", () => {
   const session = started();
   const queued = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "try again" });
-  const failed = observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "overloaded" });
+  const failed = observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "overloaded", error: json({ reason: "overloaded" }) });
   expect(tags(session.journal.filter((fact) => fact.seq > failed))).toEqual(["TurnEnded", "InputDropped"]);
   expect(session.world.agent.state).toMatchObject({ _tag: "Idle" });
   expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "InputDropped", turn: "turn-1", inputs: [queued] } });

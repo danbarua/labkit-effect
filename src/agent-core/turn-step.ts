@@ -2,7 +2,9 @@
  * A turn step: one request to the model and what follows from its response. The step asks the
  * model; a response with tool calls opens a call for each and requests it be run, and the step
  * waits for each to settle; a response without tool calls is a final answer, unless it was cut
- * short, in which case the turn goes on to ask again. The step tells its turn how it finished.
+ * short, in which case the turn goes on to ask again. An attempt at the request that failed while
+ * the request goes on changes nothing; the step waits for the request's outcome. The step tells its
+ * turn how it finished.
  */
 
 import {
@@ -46,6 +48,7 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
     CallSettled: "ignored",
     ModelResponded: "ignored",
     ModelFailed: "ignored",
+    ModelAttemptFailed: "ignored",
     ModelVetoed: "ignored",
   },
   AwaitingModel: {
@@ -78,6 +81,8 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
           ending: { _tag: "Failed", failure: message.failure },
         }),
       ),
+    /** The request goes on; the step waits for its outcome. */
+    ModelAttemptFailed: (state) => becomes(state),
     ModelVetoed: (state, message) =>
       done(
         state.step,
@@ -99,6 +104,7 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
     StepStart: "ignored",
     ModelResponded: "ignored",
     ModelFailed: "ignored",
+    ModelAttemptFailed: "ignored",
     ModelVetoed: "ignored",
   },
   Done: {
@@ -106,6 +112,7 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
     CallSettled: "ignored",
     ModelResponded: "ignored",
     ModelFailed: "ignored",
+    ModelAttemptFailed: "ignored",
     ModelVetoed: "ignored",
   },
 };

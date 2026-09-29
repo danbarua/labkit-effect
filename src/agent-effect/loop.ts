@@ -10,7 +10,8 @@
  * for a tool run its call and tool), and every log line written is annotated with the same, so the
  * services it calls do not pass those along themselves. Each request is carried out in a span named
  * for its kind (`agent.model.request`, `agent.tool.run`, `agent.turn.review`), with the same as its
- * attributes; the observations that follow are recorded outside it.
+ * attributes; the observations that follow are recorded outside it. What happens during a request
+ * besides its outcome (a failed attempt at it, say) is recorded at once through `Report`.
  *
  * Each fact is published as it is recorded; `subscribe` receives every fact recorded after it.
  */
@@ -23,6 +24,7 @@ import type { Observation } from "../agent-core/observation.ts";
 import type { EffectRequest } from "../agent-core/request.ts";
 import { ContextAssembler, ModelClient, ModelProvider, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
+import { Report } from "./report.ts";
 import { CurrentWork, type Work } from "./work.ts";
 
 /** The span each kind of request is carried out in. */
@@ -132,12 +134,15 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
         facts: [...before.facts, ...facts],
       }));
       yield* PubSub.publishAll(recorded, facts);
+      const services = yield* Effect.context<Services>();
+      const report = (reported: Observation) => observe(reported).pipe(Effect.provideContext(services));
       yield* Effect.forEach(outcome.requests, (request) => {
         const work = about(request, now.world, now.facts);
         return carryOut(request).pipe(
           Effect.withSpan(spanNames[request._tag], { attributes: { ...work } }),
           Effect.annotateLogs({ ...work }),
           Effect.provideService(CurrentWork, work),
+          Effect.provideService(Report, report),
           Effect.flatMap((observations) => Effect.forEach(observations, observe, { discard: true })),
         );
       });

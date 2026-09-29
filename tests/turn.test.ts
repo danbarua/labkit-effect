@@ -102,3 +102,32 @@ test("a response cut short without tool calls is not an answer: the turn asks th
     "BeforeTurnEnded",
   ]);
 });
+
+test("a failed attempt at a model request is recorded and changes nothing; the request's outcome ends the step", () => {
+  const session = open();
+  observe(session, { _tag: "SessionOpened", session: "s1" });
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
+  const attempt = {
+    _tag: "ModelAttemptFailed",
+    turn: "turn-1",
+    provider: "anthropic",
+    model: "claude-sonnet-5",
+    failure: "overloaded",
+    error: json({ reason: "InternalProviderError" }),
+  };
+  const failed = observe(session, attempt);
+  expect(session.journal.filter((fact) => fact.seq > failed)).toEqual([]);
+  observe(session, {
+    _tag: "ModelResponded",
+    turn: "turn-1",
+    provider: "openai",
+    model: "gpt-5.6",
+    parts: [{ _tag: "Text", text: "Hello." }],
+    stop: "stop",
+    ending: { _tag: "Complete" },
+    metadata: json({}),
+  });
+  expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Answered" } } });
+  const late = observe(session, attempt);
+  expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "ObservationNotExpected", observation: late } });
+});

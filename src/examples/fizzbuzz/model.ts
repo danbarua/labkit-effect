@@ -9,20 +9,30 @@
  *   it returned (`number_out_of_sequence`); after the report's result it replies with the error
  *   code. The last number it returned is read from its own last reply, or from a summary's line
  *   "The last number you returned to the user was: N".
- * - Without `report_error`, input that is not a whole number fails the request.
+ * - Without `report_error`, input that is not a whole number fails the request with an `AiError`
+ *   (`InvalidUserInputError`), as a provider would.
  *
+ * It is a `ProviderRequest`, like an adapter's, and its model client is built with `modelClientOf`.
  * Every context it is sent is kept, in order, in `seen`.
  */
 
 import { Effect, Layer } from "effect";
-import { CallId, FailureText, ModelText, StopReason, ToolName, type TurnId } from "../../agent-core/names.ts";
+import * as AiError from "effect/ai/AiError";
+import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agent-core/names.ts";
 import type { ModelPart, Observation } from "../../agent-core/observation.ts";
-import { type ContextMessage, ModelClient, type ModelContext, type Target } from "../../agent-effect/contracts.ts";
+import {
+  type ContextMessage,
+  ModelClient,
+  type ModelContext,
+  type ProviderRequest,
+  type Target,
+} from "../../agent-effect/contracts.ts";
+import { modelClientOf } from "../../agent-effect/provider-call.ts";
 import { parseJson, receivedJson } from "../../agent-effect/received.ts";
 import { isObject } from "../../agent-effect/shaping.ts";
 import type { ErrorCode, Label } from "./tools.ts";
 
-type Responded = Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" }>;
+type Responded = Effect.Effect<Extract<Observation, { _tag: "ModelResponded" }>, AiError.AiError>;
 
 export function labelOf(n: number): Label | undefined {
   if (n % 15 === 0) return "FizzBuzz";
@@ -79,16 +89,19 @@ export function scriptedFizzBuzzModel(): {
   const seen: Array<ModelContext> = [];
   const calls = { count: 0 };
 
-  const responded = (target: Target, turn: TurnId, parts: ReadonlyArray<ModelPart>): Responded => ({
-    _tag: "ModelResponded",
-    turn,
-    provider: target.provider,
-    model: target.model,
-    parts,
-    stop: StopReason.make(parts.some((part) => part._tag === "ToolCall") ? "tool_use" : "end_turn"),
-    ending: { _tag: "Complete" },
-    metadata: receivedJson({}),
-  });
+  const responded = (target: Target, turn: TurnId, parts: ReadonlyArray<ModelPart>): Responded =>
+    Effect.succeed({
+      _tag: "ModelResponded",
+      turn,
+      provider: target.provider,
+      model: target.model,
+      parts,
+      stop: StopReason.make(parts.some((part) => part._tag === "ToolCall") ? "tool_use" : "end_turn"),
+      ending: { _tag: "Complete" },
+      metadata: receivedJson({}),
+    });
+  const failed = (reason: AiError.AiErrorReason): Responded =>
+    Effect.fail(AiError.make({ module: "ScriptedFizzBuzzModel", method: "respond", reason }));
   const say = (text: string): ModelPart => ({ _tag: "Text", text: ModelText.make(text) });
   const call = (tool: string, input: Record<string, string>): ModelPart => {
     calls.count += 1;
@@ -97,9 +110,9 @@ export function scriptedFizzBuzzModel(): {
 
   function respond(target: Target, context: ModelContext, turn: TurnId): Responded {
     seen.push(context);
-    const failed = (why: string): Responded => ({ _tag: "ModelFailed", turn, failure: FailureText.make(why) });
     const last = context.messages.at(-1);
-    if (last === undefined || last.role !== "user") return failed("the scripted FizzBuzz model needs a user message last");
+    if (last === undefined || last.role !== "user")
+      return failed(new AiError.InvalidRequestError({ description: "the scripted FizzBuzz model needs a user message last" }));
 
     const results = last.parts.flatMap((part) => (part._tag === "ToolResult" ? [part.call] : []));
     if (results.length > 0) {
@@ -124,13 +137,15 @@ export function scriptedFizzBuzzModel(): {
     if (judgement._tag === "Problem")
       return reports
         ? responded(target, turn, [call("report_error", { error_code: judgement.code, error_message: judgement.message })])
-        : failed(`the scripted FizzBuzz model reads only whole numbers: ${judgement.message}`);
+        : failed(
+            new AiError.InvalidUserInputError({
+              description: `the scripted FizzBuzz model reads only whole numbers: ${judgement.message}`,
+            }),
+          );
     const label = labelOf(judgement.n);
     return responded(target, turn, [label === undefined ? say(String(judgement.n + 1)) : call("classify", { label })]);
   }
 
-  return {
-    layer: Layer.succeed(ModelClient, { respond: (target, context, turn) => Effect.sync(() => respond(target, context, turn)) }),
-    seen,
-  };
+  const request: ProviderRequest = (target, context, turn) => Effect.suspend(() => respond(target, context, turn));
+  return { layer: Layer.succeed(ModelClient, modelClientOf(request)), seen };
 }

@@ -4,18 +4,20 @@
  * (`fallsBackOn`), which reaches it after the adapter's own retries. Any other failure is a fault in
  * the request or the configuration (credentials, an invalid request, content policy, output the
  * adapter could not read); moving to another provider would hide it, so it fails the request as it
- * would with one provider. When the last target fails too, its failure is reported as `ModelFailed`;
- * each earlier one is logged as the chain moves on.
+ * would with one provider. Each failure the chain moves on from is recorded as it happens
+ * (`ModelAttemptFailed`, through `Report`) and logged; when the last target fails too, its failure
+ * is the request's outcome, `ModelFailed`.
  *
  * Each attempt runs in a span, `agent.model.attempt`, with its provider and model.
  */
 
 import { Effect, Layer } from "effect";
 import type * as AiError from "effect/ai/AiError";
-import type { ProviderName, TurnId } from "../agent-core/names.ts";
+import { FailureText, type ProviderName, type TurnId } from "../agent-core/names.ts";
 import { ModelClient, type ModelContext, type ProviderRequest, type Target } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
-import { failedAs } from "./provider-call.ts";
+import { failedAs, receivedAiError } from "./provider-call.ts";
+import { Report } from "./report.ts";
 
 /** The `AiError` reasons after which the next provider is tried. */
 export const fallsBackOn: ReadonlySet<AiError.AiErrorReason["_tag"]> = new Set([
@@ -56,12 +58,23 @@ const attempt = (
     Effect.catchIf(
       (error) => fallsBackOn.has(error.reason._tag),
       (error) =>
-        Effect.logWarning(logKeys.provider.fellBack, {
-          from: { provider: target.provider, model: target.model },
-          to: { provider: next.provider, model: next.model },
-          reason: error.reason._tag,
-          message: error.message,
-        }).pipe(Effect.andThen(attempt(chain, [next, ...rest], context, turn))),
+        Effect.gen(function* () {
+          yield* (yield* Report)({
+            _tag: "ModelAttemptFailed",
+            turn,
+            provider: target.provider,
+            model: target.model,
+            failure: FailureText.make(error.message),
+            error: receivedAiError(error),
+          });
+          yield* Effect.logWarning(logKeys.provider.fellBack, {
+            from: { provider: target.provider, model: target.model },
+            to: { provider: next.provider, model: next.model },
+            reason: error.reason._tag,
+            message: error.message,
+          });
+          return yield* attempt(chain, [next, ...rest], context, turn);
+        }),
     ),
   );
 };

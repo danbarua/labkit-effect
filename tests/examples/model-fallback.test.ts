@@ -1,8 +1,10 @@
 /** A fallback chain from Anthropic to OpenAI, through the loop, over the stand-in providers of the example. */
 
 import { expect, test } from "bun:test";
-import { Effect, Exit, Layer, Logger } from "effect";
+import { Effect, Exit, Layer, Logger, Schema } from "effect";
 import * as AiError from "effect/ai/AiError";
+import type { Observation } from "../../src/agent-core/observation.ts";
+import { Report } from "../../src/agent-effect/report.ts";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { InputText, SessionId, TurnId } from "../../src/agent-core/names.ts";
 import { ModelClient, ModelProvider, type ProviderRequest } from "../../src/agent-effect/contracts.ts";
@@ -20,6 +22,8 @@ import { openSession } from "../../src/agent-effect/loop.ts";
 import { FallbackModelClient } from "../../src/agent-effect/model-fallback.ts";
 import { AgentTelemetry } from "../../src/instrumentation/telemetry.ts";
 import { runTest } from "../support/run.ts";
+
+const decodeAiError = Schema.decodeUnknownSync(Schema.toCodecJson(AiError.AiError));
 
 /** `request`, counting how often it is made. */
 const counted = (request: ProviderRequest) => {
@@ -64,9 +68,16 @@ test("Anthropic cannot serve the request, so OpenAI answers it", async () => {
     anthropic: failsWith(new AiError.InternalProviderError({ description: "overloaded" })),
     openAi: answers("Hello from OpenAI."),
   });
-  expect(observed(facts).find((observation) => observation._tag === "ModelResponded")).toMatchObject({
-    provider: openAi.provider,
-    model: openAi.model,
+  const model = observed(facts).filter((observation) => observation._tag.startsWith("Model"));
+  expect(model.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed", "ModelResponded"]);
+  expect(model[1]).toMatchObject({ provider: openAi.provider, model: openAi.model });
+  const [attemptFailed] = model;
+  expect(attemptFailed).toMatchObject({ provider: anthropic.provider, model: anthropic.model });
+  // The recorded error decodes back to the AiError the provider failed with.
+  const recorded = attemptFailed?._tag === "ModelAttemptFailed" ? attemptFailed.error : undefined;
+  expect(decodeAiError(JSON.parse(recorded?.body._tag === "Text" ? recorded.body.text : "null")).reason).toMatchObject({
+    _tag: "InternalProviderError",
+    description: "overloaded",
   });
   expect(ending(facts)).toEqual([{ _tag: "Answered" }]);
   expect(logged).toContainEqual([
@@ -118,14 +129,20 @@ test("each attempt runs in its own span, named for its provider and model", asyn
     anthropic: failsWith(new AiError.InternalProviderError({ description: "overloaded" })),
     openAi: answers("Hello from OpenAI."),
   });
+  // Outside the loop, so the test records what is reported itself.
+  const reported: Array<Observation> = [];
   const attempts = await runTest(
     Effect.gen(function* () {
       const client = yield* ModelClient;
       yield* client.respond(anthropic, { system: undefined, tools: [], messages: [] }, TurnId.make("turn-1"));
       // Read before the telemetry layer is released: shutting it down clears the in-memory exporter.
       return spans.getFinishedSpans().map((span) => ({ name: span.name, attributes: span.attributes }));
-    }).pipe(Effect.provide(Layer.mergeAll(chain, AgentTelemetry({ spans: new SimpleSpanProcessor(spans) })))),
+    }).pipe(
+      Effect.provide(Layer.mergeAll(chain, AgentTelemetry({ spans: new SimpleSpanProcessor(spans) }))),
+      Effect.provideService(Report, (observation) => Effect.sync(() => reported.push(observation))),
+    ),
   );
+  expect(reported.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed"]);
   expect(attempts).toEqual([
     { name: "agent.model.attempt", attributes: { provider: "anthropic", model: "claude-sonnet-5" } },
     { name: "agent.model.attempt", attributes: { provider: "openai", model: "gpt-5.6" } },

@@ -110,8 +110,22 @@ export const Observation = Schema.Union([
     ending: ResponseEnding,
     metadata: Received,
   }),
-  /** A request for a model response failed. */
-  Schema.TaggedStruct("ModelFailed", { turn: TurnId, failure: FailureText }),
+  /**
+   * A request for a model response failed. `failure` says why in words; `error` is the error as the
+   * adapter that failed encoded it, as received.
+   */
+  Schema.TaggedStruct("ModelFailed", { turn: TurnId, failure: FailureText, error: Received }),
+  /**
+   * One attempt at a request for a model response failed, and the request goes on (to another
+   * provider, say). The turn does not end: the request's outcome is still to come.
+   */
+  Schema.TaggedStruct("ModelAttemptFailed", {
+    turn: TurnId,
+    provider: ProviderName,
+    model: ModelName,
+    failure: FailureText,
+    error: Received,
+  }),
   /** A policy vetoed a request for a model response, for the reason it gave. */
   Schema.TaggedStruct("ModelVetoed", { turn: TurnId, reason: Received }),
   /** A tool call ended. */

@@ -5,13 +5,15 @@
  * used up. The whole error is logged where it is caught; the core sees a summary.
  */
 
-import { Duration, Effect, type Schema } from "effect";
+import { Duration, Effect, Schema } from "effect";
 import * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { FailureText, type TurnId } from "../agent-core/names.ts";
 import type { Observation } from "../agent-core/observation.ts";
+import type { Received } from "../agent-core/received.ts";
 import { ModelClient, type ProviderRequest } from "./contracts.ts";
+import { receivedJson } from "./received.ts";
 import { logKeys } from "./log-keys.ts";
 
 type Json = Schema.Json;
@@ -106,7 +108,12 @@ export const modelClientOf = (request: ProviderRequest) =>
     respond: (target, context, turn) => request(target, context, turn).pipe(Effect.catch(failedAs(turn))),
   });
 
-/** Ends as `ModelFailed` for `turn`, logging the whole error. */
+const encodeAiError = Schema.encodeSync(Schema.toCodecJson(AiError.AiError));
+
+/** The error as JSON, in `AiError`'s own encoding, which decodes back to the same error. */
+export const receivedAiError = (error: AiError.AiError): Received => receivedJson(encodeAiError(error) as Json);
+
+/** Ends as `ModelFailed` for `turn`, carrying the encoded error, and logs the whole error. */
 export const failedAs =
   (turn: TurnId) =>
   (error: AiError.AiError): Effect.Effect<Extract<Observation, { _tag: "ModelFailed" }>> =>
@@ -116,4 +123,11 @@ export const failedAs =
       message: error.message,
       module: error.module,
       method: error.method,
-    }).pipe(Effect.as({ _tag: "ModelFailed" as const, turn, failure: FailureText.make(error.message) }));
+    }).pipe(
+      Effect.as({
+        _tag: "ModelFailed" as const,
+        turn,
+        failure: FailureText.make(error.message),
+        error: receivedAiError(error),
+      }),
+    );

@@ -27,7 +27,7 @@ test("each request is made after the facts it can carry; after a failed request 
   const result = observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json("2 failed") } });
   expect(asked(session.journal).at(-1)).toBeGreaterThan(result);
 
-  observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "overloaded after 3 retries" });
+  observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "overloaded after 3 retries", error: json({ reason: "overloaded" }) });
   expect(session.world.agent.state).toMatchObject({ _tag: "Idle" });
 
   const stimulus = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "try again" });
