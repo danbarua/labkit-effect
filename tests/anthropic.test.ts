@@ -1,6 +1,7 @@
 /** The Anthropic Messages adapter: how the core's types are shaped into its wire format. */
 
 import { afterAll, expect, test } from "bun:test";
+import { anthropicAt } from "./support/anthropic.ts";
 import { Effect, Layer, Logger } from "effect";
 import { ModelName, ProviderName, TurnId } from "../src/agent-core/names.ts";
 import { ModelClient } from "../src/agent-effect/contracts.ts";
@@ -47,9 +48,9 @@ async function toolResultSent(call: { name: string; input: unknown }) {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          BoringModelProvider(new URL("/v1/messages", provider.server.url)),
+          BoringModelProvider,
           ToolContextAssembler(smolCatalog),
-          AnthropicModelClient,
+          AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.server.url))),
           CountingTurns,
           SmolToolRunner,
         ),
@@ -103,12 +104,15 @@ test("the max_tokens the Messages API requires is supplied and logged, with the 
         {
           provider: ProviderName.make("boring"),
           model: ModelName.make("boring-1"),
-          endpoint: new URL("/v1/messages", provider.server.url),
         },
         { system: undefined, tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "hi" }] }] },
         TurnId.make("turn-1"),
       );
-    }).pipe(Effect.provide(Layer.mergeAll(AnthropicModelClient, Logger.layer([capture])))),
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.server.url))), Logger.layer([capture])),
+      ),
+    ),
   );
   expect(logged).toContainEqual({
     level: "Info",
@@ -125,33 +129,34 @@ test("the max_tokens the Messages API requires is supplied and logged, with the 
 /** A provider that answers each request with the next scripted response, keeping each request's body. */
 function recording(responses: ReadonlyArray<unknown>) {
   const bodies: Array<unknown> = [];
+  const headers: Array<Record<string, string>> = [];
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
+      headers.push(Object.fromEntries(request.headers));
       bodies.push(await request.json());
       return Response.json(responses[bodies.length - 1]);
     },
   });
   servers.push(server);
-  return { url: new URL("/v1/messages", server.url), bodies };
+  return { url: new URL("/v1/messages", server.url), bodies, headers };
 }
 
-const target = (endpoint: URL) => ({
+const target = {
   provider: ProviderName.make("boring"),
   model: ModelName.make("boring-1"),
-  endpoint,
-});
+};
 
 test("a request is the model, the default max_tokens, and the context's messages as Messages blocks", async () => {
   const provider = recording([{ content: [{ type: "text", text: "Hello back." }], stop_reason: "end_turn" }]);
   await Effect.runPromise(
     Effect.gen(function* () {
       yield* (yield* ModelClient).respond(
-        target(provider.url),
+        target,
         { system: undefined, tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "Hello" }] }] },
         TurnId.make("turn-1"),
       );
-    }).pipe(Effect.provide(AnthropicModelClient)),
+    }).pipe(Effect.provide(AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))))),
   );
   expect(provider.bodies).toEqual([
     { model: "boring-1", max_tokens: 1024, messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }] },
@@ -171,11 +176,11 @@ test("a response's text is a Text part, stop_reason is the stop, and everything 
   const observed = await Effect.runPromise(
     Effect.gen(function* () {
       return yield* (yield* ModelClient).respond(
-        target(provider.url),
+        target,
         { system: undefined, tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "Hello" }] }] },
         TurnId.make("turn-1"),
       );
-    }).pipe(Effect.provide(AnthropicModelClient)),
+    }).pipe(Effect.provide(AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))))),
   );
   expect(observed as unknown).toEqual({
     _tag: "ModelResponded",
@@ -207,9 +212,9 @@ test("a tool turn sends the catalog, then the call and its result, as Messages b
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          BoringModelProvider(provider.url),
+          BoringModelProvider,
           ToolContextAssembler(smolCatalog),
-          AnthropicModelClient,
+          AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))),
           CountingTurns,
           SmolToolRunner,
         ),
@@ -237,4 +242,39 @@ test("a tool turn sends the catalog, then the call and its result, as Messages b
       ],
     },
   ]);
+});
+
+const respondWith = (provider: ReturnType<typeof recording>) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      return yield* (yield* ModelClient).respond(
+        target,
+        { system: undefined, tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "Hello" }] }] },
+        TurnId.make("turn-1"),
+      );
+    }).pipe(Effect.provide(AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))))),
+  );
+
+test("a thinking block becomes Thinking with its signature; a block type nobody knows is kept whole", async () => {
+  const future = { type: "future_block", payload: { any: "thing" } };
+  const provider = recording([
+    {
+      content: [{ type: "thinking", thinking: "Check the file first.", signature: "sig-abc" }, future],
+      stop_reason: "end_turn",
+    },
+  ]);
+  const observed = await respondWith(provider);
+  expect(observed as unknown).toMatchObject({
+    _tag: "ModelResponded",
+    parts: [
+      { _tag: "Thinking", text: "Check the file first.", signature: "sig-abc" },
+      { _tag: "Unrecognised", received: json(future) },
+    ],
+  });
+});
+
+test("requests go to /v1/messages with the client's key and API version", async () => {
+  const provider = recording([{ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" }]);
+  await respondWith(provider);
+  expect(provider.headers[0]).toMatchObject({ "x-api-key": "test-key", "anthropic-version": "2023-06-01" });
 });

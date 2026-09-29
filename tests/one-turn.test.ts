@@ -1,4 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
+import { anthropicAt } from "./support/anthropic.ts";
 import { Effect, Layer } from "effect";
 import { BoringContextAssembler, BoringModelProvider, CountingTurns } from "../src/agent-effect/boring.ts";
 import { AnthropicModelClient } from "../src/agent-effect/anthropic-client.ts";
@@ -25,9 +26,9 @@ const provider = Bun.serve({
 afterAll(() => provider.stop(true));
 
 const services = Layer.mergeAll(
-  BoringModelProvider(new URL("/v1/messages", provider.url)),
+  BoringModelProvider,
+  AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))),
   BoringContextAssembler,
-  AnthropicModelClient,
   CountingTurns,
   SmolToolRunner,
 );

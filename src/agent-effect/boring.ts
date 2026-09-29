@@ -8,16 +8,10 @@ import type { Fact } from "../agent-core/fact.ts";
 import { ModelName, ProviderName, type Seq, TurnId } from "../agent-core/names.ts";
 import { ContextAssembler, type ModelContext, ModelProvider, Turns } from "./contracts.ts";
 
-/** Every request goes to `endpoint`, for provider "boring" and model "boring-1". */
-export const BoringModelProvider = (endpoint: URL) =>
-  Layer.succeed(ModelProvider, {
-    select: () =>
-      Effect.succeed({
-        provider: ProviderName.make("boring"),
-        model: ModelName.make("boring-1"),
-        endpoint,
-      }),
-  });
+/** Every request is for provider "boring" and model "boring-1". */
+export const BoringModelProvider = Layer.succeed(ModelProvider, {
+  select: () => Effect.succeed({ provider: ProviderName.make("boring"), model: ModelName.make("boring-1") }),
+});
 
 /** The text of each input, by its position. */
 export function inputTexts(facts: ReadonlyArray<Fact>): ReadonlyMap<Seq, string> {

@@ -8,11 +8,10 @@ import type { CallId, ModelName, ProviderName, ToolName, TurnId } from "../agent
 import type { Observation, ToolOutcome } from "../agent-core/observation.ts";
 import type { Received } from "../agent-core/received.ts";
 
-/** Where a model request goes: which provider, which model, at which address. */
+/** Which model a request goes to. Where the provider is reached is its client's configuration. */
 export interface Target {
   readonly provider: ProviderName;
   readonly model: ModelName;
-  readonly endpoint: URL;
 }
 
 /** Chooses the model for a turn's next request. */

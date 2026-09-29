@@ -1,5 +1,5 @@
 /**
- * A model client over HTTP, in the Anthropic Messages wire format. It shapes the core's types into
+ * A model client for the Anthropic Messages API, sent through Effect's `AnthropicClient`. It shapes the core's types into
  * the wire format and back.
  *
  * Out: the context's messages, tools, and tool outcomes become Anthropic blocks. A failed tool call
@@ -9,13 +9,25 @@
  * it and logs that it did.
  *
  * In: a response's `content` blocks become the observation's parts in order: a `text` block is
- * `Text`, a `tool_use` block is `ToolCall`, any other block is `Unrecognised` holding the block as
- * received. Everything else in the response is `metadata`. A failure is observed as `ModelFailed`;
+ * `Text`, a `thinking` block with its signature is `Thinking`, a `tool_use` block is `ToolCall`
+ * (whatever the tool's name), any other block is `Unrecognised` holding the block as received. Everything else in the response is `metadata`. A failure is observed as `ModelFailed`;
  * what was received with it is logged here. The loop annotates these logs with the turn.
  */
 
+import { AnthropicClient } from "@effect/ai-anthropic";
 import { Effect, Layer, type Schema } from "effect";
-import { CallId, FailureText, ModelText, StopReason, ToolName, type TurnId } from "../agent-core/names.ts";
+import type * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import {
+  CallId,
+  FailureText,
+  ModelText,
+  StopReason,
+  ThinkingSignature,
+  ThinkingText,
+  ToolName,
+  type TurnId,
+} from "../agent-core/names.ts";
 import type { ModelPart, Observation, ToolOutcome } from "../agent-core/observation.ts";
 import type { Received } from "../agent-core/received.ts";
 import { type ContextPart, type ModelContext, ModelClient, type Target, type ToolSpec } from "./contracts.ts";
@@ -206,6 +218,9 @@ function part(received: Json): ModelPart {
   if (isObject(received)) {
     const { type, text, id, name, input } = received;
     if (type === "text" && typeof text === "string") return { _tag: "Text", text: ModelText.make(text) };
+    const { thinking, signature } = received;
+    if (type === "thinking" && typeof thinking === "string" && typeof signature === "string")
+      return { _tag: "Thinking", text: ThinkingText.make(thinking), signature: ThinkingSignature.make(signature) };
     if (type === "tool_use" && typeof id === "string" && typeof name === "string" && input !== undefined)
       return {
         _tag: "ToolCall",
@@ -232,55 +247,56 @@ const logSupplied = (supplied: ReadonlyArray<Supplied>): Effect.Effect<void> =>
     { discard: true },
   );
 
-export const AnthropicModelClient = Layer.succeed(ModelClient, {
-  respond: (target, context, turn) =>
-    Effect.gen(function* () {
-      const sent = body(target, context);
-      yield* logSupplied(sent.supplied);
-      const received = yield* Effect.tryPromise(async () => {
-        const response = await fetch(target.endpoint, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(sent.json),
-        });
-        return { status: response.status, text: await response.text() };
-      }).pipe(Effect.result);
-      if (received._tag === "Failure")
-        return yield* failed(turn, "the request did not complete", {
-          endpoint: target.endpoint.href,
-          cause: String(received.failure),
-        });
-      const { status, text } = received.success;
-      if (status < 200 || status > 299)
-        return yield* failed(turn, `the provider answered HTTP ${status}`, {
-          endpoint: target.endpoint.href,
-          status,
-          body: text,
-        });
-      const parsed = yield* Effect.try(() => JSON.parse(text) as Json).pipe(Effect.result);
-      if (parsed._tag === "Failure")
-        return yield* failed(turn, "the response is not JSON", {
-          endpoint: target.endpoint.href,
-          status,
-          body: text,
-        });
-      const response = parsed.success;
-      if (!isObject(response) || !Array.isArray(response["content"]))
-        return yield* failed(turn, "the response has no content blocks", {
-          endpoint: target.endpoint.href,
-          status,
-          body: text,
-        });
-      const { content, stop_reason, ...metadata } = response;
-      const outcome: Outcome = {
-        _tag: "ModelResponded",
-        turn,
-        provider: target.provider,
-        model: target.model,
-        parts: (content as ReadonlyArray<Json>).map(part),
-        stop: StopReason.make(typeof stop_reason === "string" ? stop_reason : JSON.stringify(stop_reason ?? null)),
-        metadata: receivedJson(metadata),
-      };
-      return outcome;
-    }),
-});
+/** The response's body and status, or why there is none. */
+const post = (http: HttpClient.HttpClient, payload: Json) =>
+  HttpClientRequest.post("/v1/messages").pipe(
+    HttpClientRequest.bodyJsonUnsafe(payload),
+    http.execute,
+    Effect.flatMap((response) =>
+      response.text.pipe(Effect.map((text) => ({ status: response.status, text }))),
+    ),
+    Effect.result,
+  );
+
+/**
+ * Requests go through the configured `AnthropicClient` (its address, key and API version); its
+ * typed response decoding is not used, so a block type it does not know is kept as `Unrecognised`
+ * rather than failing the response.
+ */
+export const AnthropicModelClient = Layer.effect(
+  ModelClient,
+  Effect.gen(function* () {
+    const http = (yield* AnthropicClient.AnthropicClient).client.httpClient;
+    return ModelClient.of({
+      respond: (target, context, turn) =>
+        Effect.gen(function* () {
+          const sent = body(target, context);
+          yield* logSupplied(sent.supplied);
+          const received = yield* post(http, sent.json);
+          if (received._tag === "Failure")
+            return yield* failed(turn, "the request did not complete", { cause: String(received.failure) });
+          const { status, text } = received.success;
+          if (status < 200 || status > 299)
+            return yield* failed(turn, `the provider answered HTTP ${status}`, { status, body: text });
+          const parsed = yield* Effect.try(() => JSON.parse(text) as Json).pipe(Effect.result);
+          if (parsed._tag === "Failure") return yield* failed(turn, "the response is not JSON", { status, body: text });
+          const response = parsed.success;
+          if (!isObject(response) || !Array.isArray(response["content"]))
+            return yield* failed(turn, "the response has no content blocks", { status, body: text });
+          const { content, stop_reason, ...metadata } = response;
+          const outcome: Outcome = {
+            _tag: "ModelResponded",
+            turn,
+            provider: target.provider,
+            model: target.model,
+            parts: (content as ReadonlyArray<Json>).map(part),
+            stop: StopReason.make(
+              typeof stop_reason === "string" ? stop_reason : JSON.stringify(stop_reason ?? null),
+            ),
+            metadata: receivedJson(metadata),
+          };
+          return outcome;
+        }),
+    });
+  }),
+);

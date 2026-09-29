@@ -34,7 +34,6 @@ test("a log line written while a request is carried out carries the request's tu
       Effect.succeed({
         provider: ProviderName.make("stub"),
         model: ModelName.make("stub-1"),
-        endpoint: new URL("http://stub.invalid/"),
       }),
   });
   await Effect.runPromise(
