@@ -8,6 +8,11 @@
  * (`ModelAttemptFailed`, through `Report`) and logged; when the last target fails too, its failure
  * is the request's outcome, `ModelFailed`.
  *
+ * When a fallback answers, the chain reports a change of model to it (`ModelChangeArrived`), so the
+ * session asks it first from then on, with `ModelFromFacts`. Only an answer moves the session: when
+ * every target fails, it stays where it was. A fallback that is the target already chosen is not
+ * tried again. The session does not move back to an earlier target by itself.
+ *
  * Each attempt runs in a span, `agent.model.attempt`, with its provider and model.
  */
 
@@ -42,16 +47,27 @@ const requestFor = (chain: FallbackChain, target: Target): Effect.Effect<Provide
     : Effect.succeed(request);
 };
 
+const sameTarget = (a: Target, b: Target): boolean => a.provider === b.provider && a.model === b.model;
+
+/** `targets` in order; `fellBack` when an earlier target has failed and this one is a fallback. */
 const attempt = (
   chain: FallbackChain,
   targets: readonly [Target, ...ReadonlyArray<Target>],
   context: ModelContext,
   turn: TurnId,
+  fellBack: boolean,
 ): ReturnType<ProviderRequest> => {
   const [target, next, ...rest] = targets;
   const tried = requestFor(chain, target).pipe(
     Effect.flatMap((request) => request(target, context, turn)),
     Effect.withSpan("agent.model.attempt", { attributes: { provider: target.provider, model: target.model } }),
+    Effect.tap(() =>
+      fellBack
+        ? Effect.gen(function* () {
+            yield* (yield* Report)({ _tag: "ModelChangeArrived", provider: target.provider, model: target.model });
+          })
+        : Effect.void,
+    ),
   );
   if (next === undefined) return tried;
   return tried.pipe(
@@ -73,7 +89,7 @@ const attempt = (
             reason: error.reason._tag,
             message: error.message,
           });
-          return yield* attempt(chain, [next, ...rest], context, turn);
+          return yield* attempt(chain, [next, ...rest], context, turn, true);
         }),
     ),
   );
@@ -87,7 +103,13 @@ export const FallbackModelClient = (chain: FallbackChain) =>
       Effect.as(
         ModelClient.of({
           respond: (target, context, turn) =>
-            attempt(chain, [target, ...chain.fallbacks], context, turn).pipe(Effect.catch(failedAs(turn))),
+            attempt(
+              chain,
+              [target, ...chain.fallbacks.filter((fallback) => !sameTarget(fallback, target))],
+              context,
+              turn,
+              false,
+            ).pipe(Effect.catch(failedAs(turn))),
         }),
       ),
     ),

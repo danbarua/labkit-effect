@@ -126,5 +126,6 @@ thinking, another model, another provider) is an observation recorded like any o
 or a fork reproduces it. It is a message posted to the session's inbox, and the session
 reconfigures itself when it takes it, between steps as with other mail. Fallback chains are built
 on this: when a provider is down or a subscription's limit is reached, whatever notices reports a
-change of model or provider, and the next request goes there.
+change of model or provider, and the next request goes there. Built for the model and provider:
+`ModelChangeArrived`, taken as `ModelChangeTaken`; thinking is not modelled yet.
 

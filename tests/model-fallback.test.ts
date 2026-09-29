@@ -11,7 +11,8 @@ import type { Fact } from "../src/agent-core/fact.ts";
 import { InputText, ModelName, ProviderName, SessionId, TurnId } from "../src/agent-core/names.ts";
 import type { Observation } from "../src/agent-core/observation.ts";
 import type { Received } from "../src/agent-core/received.ts";
-import { ModelClient, ModelProvider, type Target } from "../src/agent-effect/contracts.ts";
+import { ModelClient, type Target } from "../src/agent-effect/contracts.ts";
+import { ModelFromFacts } from "../src/agent-effect/model-choice.ts";
 import { BoringContextAssembler } from "./support/boring.ts";
 import { CountingTurns, NoTurnEndHooks } from "../src/agent-effect/turns.ts";
 import { SmolToolRunner } from "./support/smol-tools.ts";
@@ -52,19 +53,29 @@ const chain = (status: { readonly anthropic?: number; readonly openAi?: number }
     }),
   ).pipe(Layer.provide(Layer.mergeAll(anthropicAtMock(mock(), status.anthropic), openAiAtMock(mock(), status.openAi))));
 
-/** One turn with Anthropic chosen: the observations recorded, how the turn ended, and what was logged. */
-const oneTurn = async (status: { readonly anthropic?: number; readonly openAi?: number }) => {
+/**
+ * A session that starts on Anthropic and asks the model its facts name, with one turn per input:
+ * the model observations recorded, how each turn ended, and how often the chain fell back.
+ */
+const oneTurn = async (
+  status: { readonly anthropic?: number; readonly openAi?: number },
+  inputs: ReadonlyArray<string> = ["hello"],
+) => {
   const logged: Array<unknown> = [];
   const facts: ReadonlyArray<Fact> = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe({ _tag: "SessionOpened", session: SessionId.make("s1") });
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make("hello") });
+      yield* Effect.forEach(
+        inputs,
+        (input) => session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make(input) }),
+        { discard: true },
+      );
       return yield* session.facts;
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          Layer.succeed(ModelProvider, { select: () => Effect.succeed(anthropic) }),
+          ModelFromFacts(anthropic),
           chain(status),
           BoringContextAssembler,
           CountingTurns,
@@ -87,10 +98,11 @@ const reasonIn = (error: Received): string =>
 
 test("Anthropic is overloaded (HTTP 529), so OpenAI answers; the failed attempt is recorded with its error", async () => {
   const { model, ended, fellBack } = await oneTurn({ anthropic: 529 });
-  expect(model.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed", "ModelResponded"]);
-  const [attempt, response] = model;
+  expect(model.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed", "ModelChangeArrived", "ModelResponded"]);
+  const [attempt, change, response] = model;
   expect(attempt).toMatchObject({ provider: "anthropic", model: "claude-sonnet-5" });
   expect(attempt?._tag === "ModelAttemptFailed" ? reasonIn(attempt.error) : undefined).toBe("InternalProviderError");
+  expect(change).toMatchObject({ provider: "openai", model: "gpt-5.6" });
   expect(response).toMatchObject({ provider: "openai", model: "gpt-5.6" });
   expect(ended).toEqual(["Answered"]);
   expect(fellBack).toBe(1);
@@ -98,8 +110,21 @@ test("Anthropic is overloaded (HTTP 529), so OpenAI answers; the failed attempt 
 
 test("Anthropic's rate limit (HTTP 429) falls back too", async () => {
   const { model, ended } = await oneTurn({ anthropic: 429 });
-  expect(model.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed", "ModelResponded"]);
+  expect(model.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed", "ModelChangeArrived", "ModelResponded"]);
   expect(ended).toEqual(["Answered"]);
+});
+
+test("after falling back, the session stays on OpenAI: the next turn asks it first, and Anthropic is not tried again", async () => {
+  const { model, ended, fellBack } = await oneTurn({ anthropic: 529 }, ["hello", "and again"]);
+  expect(model.map((observation) => observation._tag)).toEqual([
+    "ModelAttemptFailed",
+    "ModelChangeArrived",
+    "ModelResponded",
+    "ModelResponded",
+  ]);
+  expect(model.at(-1)).toMatchObject({ provider: "openai", model: "gpt-5.6" });
+  expect(ended).toEqual(["Answered", "Answered"]);
+  expect(fellBack).toBe(1);
 });
 
 test("both providers are down, so the turn fails with OpenAI's error; Anthropic's is recorded as the failed attempt", async () => {
@@ -152,5 +177,5 @@ test("each attempt runs in its own span, with its provider and model", async () 
     { name: "agent.model.attempt", attributes: { provider: "anthropic", model: "claude-sonnet-5" } },
     { name: "agent.model.attempt", attributes: { provider: "openai", model: "gpt-5.6" } },
   ]);
-  expect(reported.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed"]);
+  expect(reported.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed", "ModelChangeArrived"]);
 });

@@ -21,11 +21,11 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
 
 ## Build
 
-- [ ] Reconfiguring a session: a change of model, thinking or provider is an observation posted to
-      the session's inbox and taken between steps. `FallbackModelClient` falls back per request
-      only: every request tries the first provider again. The failed attempt is recorded
-      (`ModelAttemptFailed`); the session does not change which provider it asks first. Building
-      on reconfiguration makes that change a fact that later requests follow.
+- [ ] Reconfiguring a session, beyond the model and provider (built: `ModelChangeArrived`, taken
+      between steps; `ModelFromFacts`; the fallback chain reports the switch when a fallback
+      answers): thinking settings, and returning to the primary provider after a switch.
+- [ ] A session that never switches records no model: the first `ModelChangeArrived` comes from a
+      switch. Whoever opens a session could report its starting model as one.
 - [ ] Policy as an Effect service, with the gate between the core's requests and the adapters in
       the loop (pre-flight veto, dry run).
 - [ ] The call lifecycle through Effect: timeouts and retries with `Schedule`.
