@@ -36,18 +36,20 @@ const texts = (message: ContextMessage): ReadonlyArray<string> =>
 
 const summaryLine = /The last number you returned to the user was: (-?\d+)/;
 
-/** The last number the model returned before the latest user message. */
+/**
+ * The last number the model returned before the latest text, which is the user's input. A summary
+ * can share one message with that input, so texts are read one by one, not message by message.
+ */
 function lastReturned(messages: ReadonlyArray<ContextMessage>): number | undefined {
   const found = messages
+    .flatMap((message) => texts(message).map((text) => ({ role: message.role, text })))
     .slice(0, -1)
     .reverse()
-    .flatMap((message) =>
-      [...texts(message)].reverse().flatMap((text) => {
-        if (message.role === "assistant" && /^-?\d+$/.test(text)) return [Number(text)];
-        const line = summaryLine.exec(text);
-        return message.role === "user" && line !== null ? [Number(line[1])] : [];
-      }),
-    );
+    .flatMap(({ role, text }) => {
+      if (role === "assistant" && /^-?\d+$/.test(text)) return [Number(text)];
+      const line = summaryLine.exec(text);
+      return role === "user" && line !== null ? [Number(line[1])] : [];
+    });
   return found[0];
 }
 

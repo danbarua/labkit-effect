@@ -21,7 +21,7 @@ import { type ModelContext, ModelProvider } from "../agent-effect/contracts.ts";
 import { openSession } from "../agent-effect/loop.ts";
 import { scriptedFizzBuzzModel } from "./model.ts";
 import { FizzBuzzSystemPromptProvider } from "./prompt.ts";
-import { FizzBuzzToolCatalog, FizzBuzzToolRunner } from "./tools.ts";
+import { AdvancedFizzBuzzToolCatalog, FizzBuzzToolCatalog, FizzBuzzToolRunner } from "./tools.ts";
 
 /** A user who counts: `count` messages, each the number after the one the model should have returned. */
 export const countingUser = (count: number): ReadonlyArray<string> =>
@@ -34,6 +34,8 @@ export interface Setup {
 }
 
 export const basic: Setup = { catalog: FizzBuzzToolCatalog, conversation: WholeConversation };
+
+export const advanced: Setup = { catalog: AdvancedFizzBuzzToolCatalog, conversation: WholeConversation };
 
 export interface Played {
   readonly facts: ReadonlyArray<Fact>;
