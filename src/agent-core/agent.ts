@@ -22,7 +22,7 @@ export const agentTable: Table<AgentState, AgentMessage, Send> = {
   Idle: {
     SessionOpened: (state) => becomes(state),
     InputArrived: "deferred",
-    Compacted: (state, _message, { seq }) => ({
+    CompactionWindow: (state, _message, { seq }) => ({
       ...becomes(state),
       decisions: [{ _tag: "WindowOpened", compaction: seq }],
     }),
@@ -42,7 +42,7 @@ export const agentTable: Table<AgentState, AgentMessage, Send> = {
       ...becomes(state),
       sends: [toConversationTurn(state.turn, { _tag: "Steer", input: seq })],
     }),
-    Compacted: (state, _message, { seq }) => ({
+    CompactionWindow: (state, _message, { seq }) => ({
       ...becomes(state),
       sends: [toConversationTurn(state.turn, { _tag: "Compact", compaction: seq })],
     }),

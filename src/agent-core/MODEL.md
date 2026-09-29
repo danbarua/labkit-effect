@@ -98,11 +98,12 @@ then continues").
   carries the error as the layer encoded it (`error`), beside the words (`failure`). An attempt
   that failed on the way, after which the request went on, is `ModelAttemptFailed`; it is recorded
   when it happens, and the turn does not end.
-- S4. A compaction is started by the layers around the core, which report it as `Compacted { window,
-  previous, summary, through, kept }`. It goes to the agent like input: taken at once while no turn
-  runs, otherwise waiting in the turn's mailbox until between steps, or until the turn ends. Taking
-  it records `WindowOpened`. Requests after that are made in the window: its summary in place of the
-  facts through `through`, except those at `kept`, then everything after.
+- S4. A compaction is started by the layers around the core, which report the span they chose as
+  `CompactionWindow { window, previous, through, kept }`. It goes to the agent like input: taken at
+  once while no turn runs, otherwise waiting in the turn's mailbox until between steps, or until the
+  turn ends. Taking it records `WindowOpened`. Requests after that are made in the window: a summary
+  in place of the facts through `through`, except those at `kept`, then everything after. The
+  summary is not a fact of the session; it belongs to a compaction fork over the window, held apart.
 
 ## Captured observations
 

@@ -6,6 +6,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DateTime, Option, Schema } from "effect";
+import { WindowSummary } from "../../src/agent-context/forks.ts";
 import { Fact } from "../../src/agent-core/fact.ts";
 import { Seq } from "../../src/agent-core/names.ts";
 import { Observation } from "../../src/agent-core/observation.ts";
@@ -15,9 +16,13 @@ import { deliver, emptyWorld, type World } from "../../src/agent-core/router.ts"
 export type Json = Schema.Json;
 export type Record_ = { readonly [key: string]: Json };
 
-/** What an import produced: the facts, and the report of what was and was not mapped. */
+/**
+ * What an import produced: the facts, the summaries of its compaction windows (held apart from the
+ * facts, as compaction forks' summaries), and the report of what was and was not mapped.
+ */
 export interface Imported {
   readonly facts: ReadonlyArray<unknown>;
+  readonly summaries: ReadonlyArray<unknown>;
   readonly report: {
     readonly source: string;
     readonly records: number;
@@ -45,6 +50,8 @@ export interface Projection {
   /** Records the observation and the decisions after it; returns its position and the requests. */
   readonly observe: (raw: unknown) => { readonly seq: number; readonly requests: ReadonlyArray<EffectRequest> };
   readonly count: (kind: string) => void;
+  /** Keeps a compaction window's summary, apart from the facts. */
+  readonly summarise: (raw: unknown) => void;
   readonly world: () => World;
   /** How many facts are recorded: the position of the last. */
   readonly recorded: () => number;
@@ -55,6 +62,9 @@ export interface Projection {
 
 export function projection(): Projection {
   const facts: Array<unknown> = [];
+  const summaries: Array<unknown> = [];
+  const summary = Schema.decodeUnknownSync(WindowSummary);
+  const encodeSummary = Schema.encodeSync(WindowSummary);
   const unmapped = new Map<string, number>();
   const decode = Schema.decodeUnknownSync(Observation);
   const encodeFact = Schema.encodeSync(Fact);
@@ -83,6 +93,9 @@ export function projection(): Projection {
     count: (kind) => {
       unmapped.set(kind, (unmapped.get(kind) ?? 0) + 1);
     },
+    summarise: (raw) => {
+      summaries.push(encodeSummary(summary(raw)));
+    },
     world: () => state.world,
     recorded: () => facts.length,
     begun: () => state.begun,
@@ -93,6 +106,7 @@ export function projection(): Projection {
           decided.set(fact.decision._tag, (decided.get(fact.decision._tag) ?? 0) + 1);
       return {
         facts,
+        summaries,
         report: {
           source,
           records,
@@ -121,9 +135,17 @@ export function eachRecord(source: string, onRecord: (record: Record_) => void, 
   }
 }
 
-/** Writes an import's facts and report as `<name>.facts.jsonl` and `<name>.report.json` in `outDir`. */
+/**
+ * Writes an import's facts, its window summaries (when it has any) and its report as
+ * `<name>.facts.jsonl`, `<name>.summaries.jsonl` and `<name>.report.json` in `outDir`.
+ */
 export function writeTrajectory(outDir: string, name: string, imported: Imported): void {
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, `${name}.facts.jsonl`), `${imported.facts.map((fact) => JSON.stringify(fact)).join("\n")}\n`);
+  if (imported.summaries.length > 0)
+    writeFileSync(
+      join(outDir, `${name}.summaries.jsonl`),
+      `${imported.summaries.map((summary) => JSON.stringify(summary)).join("\n")}\n`,
+    );
   writeFileSync(join(outDir, `${name}.report.json`), `${JSON.stringify(imported.report, null, 2)}\n`);
 }

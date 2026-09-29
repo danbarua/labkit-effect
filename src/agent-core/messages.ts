@@ -17,7 +17,7 @@ export interface StepAddress {
 /** Observations delivered to the agent. */
 export type AgentObservation = Extract<
   Observation,
-  { _tag: "SessionOpened" | "InputArrived" | "Compacted" | "ModelChangeArrived" | "TurnStarted" }
+  { _tag: "SessionOpened" | "InputArrived" | "CompactionWindow" | "ModelChangeArrived" | "TurnStarted" }
 >;
 
 /** Observations delivered to the turn they name, which passes them to its current step. */

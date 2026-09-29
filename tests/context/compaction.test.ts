@@ -5,23 +5,17 @@ import { observe, open, opened, type Session } from "../support/drive.ts";
 const tags = (session: Session) =>
   session.journal.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
 
-const compacted = (through: number, kept: ReadonlyArray<number>) => ({
-  _tag: "Compacted",
-  window: "w1",
-  summary: { mediaType: "text/plain", body: { _tag: "Text", text: "The user asked for the files listed." } },
-  through,
-  kept,
-});
+const window = (through: number, kept: ReadonlyArray<number>) => ({ _tag: "CompactionWindow", window: "w1", through, kept });
 
-test("a compaction while no turn runs is taken at once", () => {
+test("a compaction window while no turn runs is taken at once", () => {
   const session = open();
   observe(session, opened);
-  const at = observe(session, compacted(1, []));
-  expect(tags(session)).toEqual(["SessionOpened", "Compacted", "WindowOpened"]);
+  const at = observe(session, window(1, []));
+  expect(tags(session)).toEqual(["SessionOpened", "CompactionWindow", "WindowOpened"]);
   expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "WindowOpened", compaction: at } });
 });
 
-test("a compaction during a step waits in the turn's mailbox and is taken before the next request", () => {
+test("a compaction window during a step waits in the turn's mailbox and is taken before the next request", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -35,7 +29,7 @@ test("a compaction during a step waits in the turn's mailbox and is taken before
     ending: { _tag: "Complete" },
     metadata: json({}),
   });
-  observe(session, compacted(6, [2]));
+  observe(session, window(6, [2]));
   observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } });
   expect(tags(session)).toEqual([
     "SessionOpened",
@@ -44,9 +38,17 @@ test("a compaction during a step waits in the turn's mailbox and is taken before
     "InputDelivered",
     "ModelAsked",
     "ModelResponded",
-    "Compacted",
+    "CompactionWindow",
     "ToolEnded",
     "WindowOpened",
     "ModelAsked",
   ]);
+});
+
+test("a compaction window records the span only; a summary on it is not part of the fact", () => {
+  const session = open();
+  observe(session, opened);
+  expect(() =>
+    observe(session, { ...window(1, []), summary: { mediaType: "text/plain", body: { _tag: "Text", text: "a summary" } } }),
+  ).toThrow();
 });

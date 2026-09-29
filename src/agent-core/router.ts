@@ -249,7 +249,7 @@ export function deliver(world: World, seq: Seq, observation: Observation): Deliv
     switch (observation._tag) {
       case "SessionOpened":
       case "InputArrived":
-      case "Compacted":
+      case "CompactionWindow":
       case "ModelChangeArrived":
       case "TurnStarted":
         return toAgent(world, observation, seq);

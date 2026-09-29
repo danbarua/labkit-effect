@@ -94,14 +94,15 @@ export const Observation = Schema.Union([
   /** An input arrived. It can arrive at any time, including while a turn is under way. */
   Schema.TaggedStruct("InputArrived", { from: InputSource, text: InputText }),
   /**
-   * The conversation was compacted into a new window: once taken (`WindowOpened`), the model is sent
-   * `summary` in place of the facts through `through`, except those at `kept`, which it is sent as
-   * they are. `previous` is the window this one follows, when there is one.
+   * A span of the conversation was chosen for compaction: the facts through `through`, except those
+   * at `kept`. Once taken (`WindowOpened`), requests are made in the window, where a summary of the
+   * span stands in for it and the facts at `kept` are sent as they are. The summary is not a fact of
+   * the session: it belongs to a fork over the window, held apart, so it can be revised, replaced or
+   * set beside others. `previous` is the window this one follows, when there is one.
    */
-  Schema.TaggedStruct("Compacted", {
+  Schema.TaggedStruct("CompactionWindow", {
     window: WindowId,
     previous: Schema.optionalKey(WindowId),
-    summary: Received,
     through: Seq,
     kept: Schema.Array(Seq),
   }),

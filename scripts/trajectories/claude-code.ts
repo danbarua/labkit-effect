@@ -18,10 +18,11 @@
  * - a user message with text is `InputArrived`, from the user, or from the system when Claude Code
  *   marks it meta (a hook's feedback, a message from another session); while the agent is idle a
  *   turn is started, as the loop does;
- * - a `compact_boundary` record and the summary message after it are one `Compacted`: the window is
- *   the boundary's uuid, the previous window the file's previous boundary, `through` the last
- *   position before the boundary, and `kept` the positions of the messages the boundary names as
- *   kept verbatim. A boundary with nothing before it in the file is counted, not mapped;
+ * - a `compact_boundary` record is a `CompactionWindow`: the window is the boundary's uuid, the
+ *   previous window the file's previous boundary, `through` the last position before the boundary,
+ *   and `kept` the positions of the messages the boundary names as kept verbatim. The summary
+ *   message after it is the window's summary, kept apart from the facts (`summaries.jsonl`). A
+ *   boundary with nothing before it in the file is counted, not mapped;
  * - the assistant records with one message id are one `ModelResponded`, however other records
  *   interleave with them: `text` is `Text`, `thinking` with its signature is `Thinking`, `tool_use`
  *   is `ToolCall`, anything else is `Unrecognised`; the message's id and usage are its metadata,
@@ -48,6 +49,8 @@ export async function importClaudeCode(source: string): Promise<Imported> {
   const state = {
     turns: 0,
     records: 0,
+    /** The session's id, once it is opened. */
+    session: undefined as string | undefined,
     pending: undefined as
       | { id: string; uuids: Array<Json>; model: string; blocks: Array<Json>; usage: Json; stop: Json }
       | undefined,
@@ -193,13 +196,14 @@ export async function importClaudeCode(source: string): Promise<Imported> {
         for (const uuid of boundary.kept.filter((kept) => !state.positions.has(kept)))
           count(`kept by a compaction, with no position: ${state.kinds.get(uuid) ?? "not in the file"}`);
         observe({
-          _tag: "Compacted",
+          _tag: "CompactionWindow",
           window: boundary.window,
           ...(state.window === undefined ? {} : { previous: state.window }),
-          summary: text(input),
           through: boundary.through,
           kept,
         });
+        if (state.session === undefined) count("compaction summary kept nowhere (the session was not opened)");
+        else projected.summarise({ session: state.session, window: boundary.window, summary: text(input) });
         state.window = boundary.window;
         return;
       }
@@ -244,6 +248,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
   if (typeof session === "string" && typeof model === "string") {
     projected.readAt(records.map((record) => record["timestamp"]).find((time) => typeof time === "string"));
     observe({ _tag: "SessionOpened", session, model: { provider: "anthropic", model } });
+    state.session = session;
     count("session opened without its system prompt or tools (not in the record)");
   } else count("session not opened (no record names its id and model)");
   for (const record of records) {

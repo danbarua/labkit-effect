@@ -125,7 +125,8 @@ policies.
 
 ## Open
 
-- The boundary entry is `compaction-window` (Dan's choice): a span chosen for compaction. The
-  core's `Compacted` observation (agent-core S4) still records the summary in the journal; moving
-  the summary into a fork reshapes it into that entry.
-- Forks, the turn pointer, and addressing facts by session and position are not built.
+- The boundary entry is built: `CompactionWindow` records only the span (agent-core S4), and a
+  window's summary is a `WindowSummary` (`forks.ts`), held apart; the importers write them to
+  `summaries.jsonl`. Which of a window's summaries a request uses, and a live compaction that
+  writes one, are not built.
+- Forks as sessions, the turn pointer, and addressing facts by session and position are not built.

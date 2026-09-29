@@ -34,8 +34,8 @@
  * - after a final answer the core asks `BeforeTurnEnded`; it is answered (`TurnEndReviewed`) at the
  *   next record that is not input to the same turn;
  * - `turn_aborted` is `TurnInterrupted`;
- * - `compacted` is `Compacted`: its window ids are Codex's, its replacement history is the summary,
- *   and nothing is kept by position. Codex asks the model for the summary in the turn, and records
+ * - `compacted` is a `CompactionWindow`: its window ids are Codex's, and nothing is kept by position.
+ *   Its replacement history is the window's summary, kept apart from the facts (`summaries.jsonl`). Codex asks the model for the summary in the turn, and records
  *   its answer as a final answer; a response whose text the replacement history carries is that
  *   request, part of the compaction, and is counted, not mapped.
  */
@@ -92,7 +92,10 @@ export async function importCodex(source: string): Promise<Imported> {
     /** The turn Codex last started. */
     turn: undefined as string | undefined,
     model: "unknown",
+    /** Whether a `session_meta` has been read. */
     session: false,
+    /** The session's id, once it is opened. */
+    opened: undefined as string | undefined,
     pending: [] as Array<Record_>,
     /** The usage a `token_count` reported for the pending response; set once the response is complete. */
     usage: undefined as Json | undefined,
@@ -218,6 +221,7 @@ export async function importCodex(source: string): Promise<Imported> {
         model: { provider: typeof payload["model_provider"] === "string" ? payload["model_provider"] : "openai", model },
         ...(typeof system === "string" ? { system: text(system) } : {}),
       });
+      state.opened = str(payload["id"]);
       return;
     }
     if (state.turn === undefined && (type === "response_item" || type === "compacted" || type === "event_msg") && kind !== "task_started")
@@ -287,14 +291,16 @@ export async function importCodex(source: string): Promise<Imported> {
       flushReview();
       if (!projected.begun()) return count("compacted (nothing before it in the file)");
       const previous = payload["previous_window_id"];
+      const window = str(payload["window_id"]);
       observe({
-        _tag: "Compacted",
-        window: str(payload["window_id"]),
+        _tag: "CompactionWindow",
+        window,
         ...(typeof previous === "string" ? { previous } : {}),
-        summary: json(payload["replacement_history"] ?? null),
         through: projected.recorded(),
         kept: [],
       });
+      if (state.opened === undefined) count("compaction summary kept nowhere (the session was not opened)");
+      else projected.summarise({ session: state.opened, window, summary: json(payload["replacement_history"] ?? null) });
       return;
     }
     count(kind === "" ? type : `${type}/${kind}`);
