@@ -4,10 +4,10 @@
  */
 
 import { Effect, Layer } from "effect";
-import type { Fact } from "../agent-core/fact.ts";
-import { ModelName, ProviderName, type Seq, TurnId } from "../agent-core/names.ts";
-import { ContextAssembler, type ModelContext, ModelProvider, TurnEndHooks, Turns } from "./contracts.ts";
-import { inputTexts } from "./conversation.ts";
+import type { Fact } from "../../agent-core/fact.ts";
+import { ModelName, ProviderName, type Seq, TurnId } from "../../agent-core/names.ts";
+import { ContextAssembler, type ModelContext, ModelProvider, TurnEndHooks, Turns } from "../contracts.ts";
+import { inputTexts } from "../conversation.ts";
 
 /** Every request is for provider "boring" and model "boring-1". */
 export const BoringModelProvider = Layer.succeed(ModelProvider, {

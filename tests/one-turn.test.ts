@@ -1,10 +1,10 @@
 import { afterAll, expect, test } from "bun:test";
 import { anthropicAt } from "./support/providers.ts";
 import { Effect, Layer } from "effect";
-import { BoringContextAssembler, BoringModelProvider, CountingTurns, NoTurnEndHooks } from "../src/agent-effect/example-providers.ts";
+import { BoringContextAssembler, BoringModelProvider, CountingTurns, NoTurnEndHooks } from "../src/agent-effect/examples/example-providers.ts";
 import { AnthropicModelClient } from "../src/agent-effect/providers/anthropic-client.ts";
 import { openSession } from "../src/agent-effect/loop.ts";
-import { SmolToolRunner } from "../src/agent-effect/example-smol-tools.ts";
+import { SmolToolRunner } from "../src/agent-effect/examples/example-smol-tools.ts";
 import type { Observation } from "../src/agent-core/observation.ts";
 import { runTest } from "./support/run.ts";
 

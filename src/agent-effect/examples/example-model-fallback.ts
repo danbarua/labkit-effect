@@ -6,10 +6,10 @@
 
 import { Effect } from "effect";
 import * as AiError from "effect/ai/AiError";
-import { ModelName, ModelText, ProviderName, StopReason } from "../agent-core/names.ts";
-import type { ProviderRequest, Target } from "./contracts.ts";
-import { FallbackModelClient } from "./model-fallback.ts";
-import { receivedJson } from "./received.ts";
+import { ModelName, ModelText, ProviderName, StopReason } from "../../agent-core/names.ts";
+import type { ProviderRequest, Target } from "../contracts.ts";
+import { FallbackModelClient } from "../model-fallback.ts";
+import { receivedJson } from "../received.ts";
 
 export const anthropic: Target = { provider: ProviderName.make("anthropic"), model: ModelName.make("claude-sonnet-5") };
 export const openAi: Target = { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.6") };

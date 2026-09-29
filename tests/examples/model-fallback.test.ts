@@ -4,22 +4,22 @@ import { expect, test } from "bun:test";
 import { Effect, Exit, Layer, Logger } from "effect";
 import * as AiError from "effect/ai/AiError";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { InputText, SessionId, TurnId } from "../src/agent-core/names.ts";
-import { ModelClient, ModelProvider, type ProviderRequest } from "../src/agent-effect/contracts.ts";
+import { InputText, SessionId, TurnId } from "../../src/agent-core/names.ts";
+import { ModelClient, ModelProvider, type ProviderRequest } from "../../src/agent-effect/contracts.ts";
 import {
   anthropic,
   anthropicThenOpenAi,
   answers,
   failsWith,
   openAi,
-} from "../src/agent-effect/example-model-fallback.ts";
-import { BoringContextAssembler, CountingTurns, NoTurnEndHooks } from "../src/agent-effect/example-providers.ts";
-import { SmolToolRunner } from "../src/agent-effect/example-smol-tools.ts";
-import { logKeys } from "../src/agent-effect/log-keys.ts";
-import { openSession } from "../src/agent-effect/loop.ts";
-import { FallbackModelClient } from "../src/agent-effect/model-fallback.ts";
-import { AgentTelemetry } from "../src/instrumentation/telemetry.ts";
-import { runTest } from "./support/run.ts";
+} from "../../src/agent-effect/examples/example-model-fallback.ts";
+import { BoringContextAssembler, CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/examples/example-providers.ts";
+import { SmolToolRunner } from "../../src/agent-effect/examples/example-smol-tools.ts";
+import { logKeys } from "../../src/agent-effect/log-keys.ts";
+import { openSession } from "../../src/agent-effect/loop.ts";
+import { FallbackModelClient } from "../../src/agent-effect/model-fallback.ts";
+import { AgentTelemetry } from "../../src/instrumentation/telemetry.ts";
+import { runTest } from "../support/run.ts";
 
 /** `request`, counting how often it is made. */
 const counted = (request: ProviderRequest) => {

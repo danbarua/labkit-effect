@@ -3,7 +3,7 @@ import { Effect, type Schema } from "effect";
 import { ToolName } from "../../src/agent-core/names.ts";
 import { ToolRunner } from "../../src/agent-effect/contracts.ts";
 import { receivedJson } from "../../src/agent-effect/received.ts";
-import { SmolToolRunner } from "../../src/agent-effect/example-smol-tools.ts";
+import { SmolToolRunner } from "../../src/agent-effect/examples/example-smol-tools.ts";
 import { runTest } from "../support/run.ts";
 
 test("the runner reports why a call failed, and formats nothing", async () => {
