@@ -19,8 +19,10 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
 ## Build
 
 - [ ] Reconfiguring a session: a change of model, thinking or provider is an observation posted to
-      the session's inbox and taken between steps. Fallback chains when a provider is down or a
-      limit is reached are built on it.
+      the session's inbox and taken between steps. `FallbackModelClient` falls back per request
+      only: every request tries the first provider again, and the move is logged, not recorded.
+      Building on reconfiguration makes the switch a fact that later requests follow.
+- [ ] `ModelFailed` records the failure as text; the `AiError` reason is logged but not recorded.
 - [ ] Policy as an Effect service, with the gate between the core's requests and the adapters in
       the loop (pre-flight veto, dry run).
 - [ ] The call lifecycle through Effect: timeouts and retries with `Schedule`.
