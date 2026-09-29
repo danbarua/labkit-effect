@@ -34,5 +34,10 @@ to a type with no unbranded string, however it is built.
 
 ```sh
 bun install
-bun run check       # typecheck, lint, check:brands, tests
+bun run vidaimock:install   # the mock provider server the adapter tests run against
+bun run check               # installs it if missing, then typecheck, lint, check:brands, tests
 ```
+
+The adapter tests start [VidaiMock](https://github.com/vidaiUK/VidaiMock), a server that answers as
+the providers' APIs do. `scripts/vidaimock.ts` downloads the pinned release for this platform into
+`.tools/`, refusing an archive whose SHA-256 differs from the one it holds.

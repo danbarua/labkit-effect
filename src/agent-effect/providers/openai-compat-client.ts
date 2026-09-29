@@ -115,13 +115,17 @@ function toolCall(call: Json): ModelPart {
   return { _tag: "Unrecognised", received: receivedJson(call) };
 }
 
-/** The parts the choice's message becomes. */
+/**
+ * The parts the choice's message becomes. Any other field of the message is kept as `Unrecognised`,
+ * unless it holds nothing: `null`, or an empty array (OpenAI sends `refusal: null` and
+ * `annotations: []` with every message).
+ */
 function parts(message: Schema.JsonObject): ReadonlyArray<ModelPart> {
   const { role: _role, content, tool_calls, ...rest } = message;
   return [
     ...(typeof content === "string" && content.length > 0 ? [{ _tag: "Text" as const, text: ModelText.make(content) }] : []),
     ...Object.entries(rest)
-      .filter(([, value]) => value !== null && value !== undefined)
+      .filter(([, value]) => value !== null && value !== undefined && !(Array.isArray(value) && value.length === 0))
       .map(([field, value]): ModelPart => ({ _tag: "Unrecognised", received: receivedJson({ [field]: value as Json }) })),
     ...(Array.isArray(tool_calls) ? (tool_calls as ReadonlyArray<Json>).map(toolCall) : []),
   ];

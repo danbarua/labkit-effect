@@ -35,3 +35,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Trajectories regenerated from local agent session files; they hold real sessions.
 /trajectories/
+
+# VidaiMock, installed by scripts/vidaimock.ts
+/.tools/

@@ -8,6 +8,7 @@
 import { Duration, Effect, Schema } from "effect";
 import * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
+import type * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { FailureText, type TurnId } from "../agent-core/names.ts";
 import type { Observation } from "../agent-core/observation.ts";
@@ -35,7 +36,11 @@ export const defaultRetries: Retries = { times: 3, firstWait: "500 millis" };
 const failure = (caller: Caller, reason: AiError.AiErrorReason): AiError.AiError =>
   AiError.make({ module: caller.module, method: caller.method, reason });
 
-/** The response to `payload` posted to `path`, parsed as JSON. */
+/**
+ * The response to `payload` posted to `path`, parsed as JSON. A response that is not 2xx fails with
+ * the `AiError` reason for its status, however it arrives: as a response, or, from a client that
+ * fails such responses itself (Effect's OpenAI client does), inside a `StatusCodeError`.
+ */
 export const postJson = (
   http: HttpClient.HttpClient,
   caller: Caller,
@@ -45,6 +50,11 @@ export const postJson = (
   HttpClientRequest.post(path).pipe(
     HttpClientRequest.bodyJsonUnsafe(payload),
     http.execute,
+    Effect.catchIf(
+      (error): error is HttpClientError.HttpClientError & { readonly reason: HttpClientError.StatusCodeError } =>
+        error.reason._tag === "StatusCodeError",
+      (error) => Effect.succeed(error.reason.response),
+    ),
     Effect.flatMap((response) => response.text.pipe(Effect.map((text) => ({ status: response.status, text })))),
     Effect.mapError((error) => {
       const reason = error.reason;
