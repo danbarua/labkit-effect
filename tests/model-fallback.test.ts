@@ -1,0 +1,155 @@
+/**
+ * `FallbackModelClient` over the real Anthropic and OpenAI adapters, with VidaiMock answering as each
+ * provider does, or failing with the HTTP status given; through the loop.
+ */
+
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { Effect, Exit, Layer, Logger, Schema } from "effect";
+import * as AiError from "effect/ai/AiError";
+import type { Fact } from "../src/agent-core/fact.ts";
+import { InputText, ModelName, ProviderName, SessionId, TurnId } from "../src/agent-core/names.ts";
+import type { Observation } from "../src/agent-core/observation.ts";
+import type { Received } from "../src/agent-core/received.ts";
+import { ModelClient, ModelProvider, type Target } from "../src/agent-effect/contracts.ts";
+import { BoringContextAssembler, CountingTurns, NoTurnEndHooks } from "../src/agent-effect/examples/example-providers.ts";
+import { SmolToolRunner } from "../src/agent-effect/examples/example-smol-tools.ts";
+import { logKeys } from "../src/agent-effect/log-keys.ts";
+import { openSession } from "../src/agent-effect/loop.ts";
+import { FallbackModelClient } from "../src/agent-effect/model-fallback.ts";
+import type { Retries } from "../src/agent-effect/provider-call.ts";
+import { anthropicRequests } from "../src/agent-effect/providers/anthropic-client.ts";
+import { Report } from "../src/agent-effect/report.ts";
+import { openAiRequests } from "../src/agent-effect/providers/openai-client.ts";
+import { AgentTelemetry } from "../src/instrumentation/telemetry.ts";
+import { runTest } from "./support/run.ts";
+import { anthropicAtMock, openAiAtMock, startVidaiMock, type VidaiMock } from "./support/vidaimock.ts";
+
+const state: { mock?: VidaiMock } = {};
+beforeAll(async () => {
+  state.mock = await startVidaiMock();
+});
+afterAll(() => state.mock?.stop());
+const mock = (): VidaiMock => {
+  if (state.mock === undefined) throw new Error("VidaiMock did not start");
+  return state.mock;
+};
+
+const anthropic: Target = { provider: ProviderName.make("anthropic"), model: ModelName.make("claude-sonnet-5") };
+const openAi: Target = { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.6") };
+const noRetries: Retries = { times: 0, firstWait: "1 millis" };
+
+/** Anthropic, then OpenAI, each at the mock; a provider given a status fails every request with it. */
+const chain = (status: { readonly anthropic?: number; readonly openAi?: number }) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const requests = new Map([
+        [anthropic.provider, yield* anthropicRequests(noRetries)],
+        [openAi.provider, yield* openAiRequests(noRetries)],
+      ]);
+      return FallbackModelClient({ requests, fallbacks: [openAi] });
+    }),
+  ).pipe(Layer.provide(Layer.mergeAll(anthropicAtMock(mock(), status.anthropic), openAiAtMock(mock(), status.openAi))));
+
+/** One turn with Anthropic chosen: the observations recorded, how the turn ended, and what was logged. */
+const oneTurn = async (status: { readonly anthropic?: number; readonly openAi?: number }) => {
+  const logged: Array<unknown> = [];
+  const facts: ReadonlyArray<Fact> = await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession;
+      yield* session.observe({ _tag: "SessionOpened", session: SessionId.make("s1") });
+      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make("hello") });
+      return yield* session.facts;
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(ModelProvider, { select: () => Effect.succeed(anthropic) }),
+          chain(status),
+          BoringContextAssembler,
+          CountingTurns,
+          NoTurnEndHooks,
+          SmolToolRunner,
+          Logger.layer([Logger.make((options) => logged.push(options.message))]),
+        ),
+      ),
+    ),
+  );
+  const observed = facts.flatMap((fact): ReadonlyArray<Observation> => (fact._tag === "Observed" ? [fact.observation] : []));
+  const ended = facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? [fact.decision.ending._tag] : []));
+  const fellBack = logged.filter((message) => Array.isArray(message) && message[0] === logKeys.provider.fellBack).length;
+  return { model: observed.filter((observation) => observation._tag.startsWith("Model")), ended, fellBack };
+};
+
+const decodeAiError = Schema.decodeUnknownSync(Schema.toCodecJson(AiError.AiError));
+const reasonIn = (error: Received): string =>
+  decodeAiError(JSON.parse(error.body._tag === "Text" ? error.body.text : "null")).reason._tag;
+
+test("Anthropic is overloaded (HTTP 529), so OpenAI answers; the failed attempt is recorded with its error", async () => {
+  const { model, ended, fellBack } = await oneTurn({ anthropic: 529 });
+  expect(model.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed", "ModelResponded"]);
+  const [attempt, response] = model;
+  expect(attempt).toMatchObject({ provider: "anthropic", model: "claude-sonnet-5" });
+  expect(attempt?._tag === "ModelAttemptFailed" ? reasonIn(attempt.error) : undefined).toBe("InternalProviderError");
+  expect(response).toMatchObject({ provider: "openai", model: "gpt-5.6" });
+  expect(ended).toEqual(["Answered"]);
+  expect(fellBack).toBe(1);
+});
+
+test("Anthropic's rate limit (HTTP 429) falls back too", async () => {
+  const { model, ended } = await oneTurn({ anthropic: 429 });
+  expect(model.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed", "ModelResponded"]);
+  expect(ended).toEqual(["Answered"]);
+});
+
+test("both providers are down, so the turn fails with OpenAI's error; Anthropic's is recorded as the failed attempt", async () => {
+  const { model, ended } = await oneTurn({ anthropic: 503, openAi: 429 });
+  expect(model.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed", "ModelFailed"]);
+  const [attempt, failed] = model;
+  expect(attempt?._tag === "ModelAttemptFailed" ? reasonIn(attempt.error) : undefined).toBe("InternalProviderError");
+  expect(failed?._tag === "ModelFailed" ? reasonIn(failed.error) : undefined).toBe("RateLimitError");
+  expect(ended).toEqual(["Failed"]);
+});
+
+test("Anthropic rejects the key (HTTP 401): the turn fails with it, and OpenAI is not asked", async () => {
+  const { model, ended, fellBack } = await oneTurn({ anthropic: 401 });
+  expect(model.map((observation) => observation._tag)).toEqual(["ModelFailed"]);
+  expect(model[0]?._tag === "ModelFailed" ? reasonIn(model[0].error) : undefined).toBe("AuthenticationError");
+  expect(ended).toEqual(["Failed"]);
+  expect(fellBack).toBe(0);
+});
+
+test("a fallback to a provider with no request configured is a defect when the layer is built", async () => {
+  const exit = await Effect.runPromiseExit(
+    Layer.build(
+      Layer.unwrap(
+        anthropicRequests(noRetries).pipe(
+          Effect.map((request) => FallbackModelClient({ requests: new Map([[anthropic.provider, request]]), fallbacks: [openAi] })),
+        ),
+      ).pipe(Layer.provide(anthropicAtMock(mock()))),
+    ).pipe(Effect.scoped),
+  );
+  expect(Exit.isFailure(exit) && Exit.hasDies(exit)).toBe(true);
+});
+
+test("each attempt runs in its own span, with its provider and model", async () => {
+  const spans = new InMemorySpanExporter();
+  const reported: Array<Observation> = [];
+  const attempts = await runTest(
+    Effect.gen(function* () {
+      const client = yield* ModelClient;
+      const context = { system: undefined, tools: [], messages: [{ role: "user" as const, parts: [{ _tag: "Text" as const, text: "hi" }] }] };
+      yield* client.respond(anthropic, context, TurnId.make("turn-1"));
+      // Read before the telemetry layer is released: shutting it down clears the in-memory exporter.
+      return spans.getFinishedSpans().map((span) => ({ name: span.name, attributes: span.attributes }));
+    }).pipe(
+      Effect.provide(Layer.mergeAll(chain({ anthropic: 529 }), AgentTelemetry({ spans: new SimpleSpanProcessor(spans) }))),
+      // Outside the loop, so the test records what is reported itself.
+      Effect.provideService(Report, (observation) => Effect.sync(() => reported.push(observation))),
+    ),
+  );
+  expect(attempts.filter((span) => span.name === "agent.model.attempt")).toEqual([
+    { name: "agent.model.attempt", attributes: { provider: "anthropic", model: "claude-sonnet-5" } },
+    { name: "agent.model.attempt", attributes: { provider: "openai", model: "gpt-5.6" } },
+  ]);
+  expect(reported.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed"]);
+});
