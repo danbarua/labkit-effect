@@ -3,11 +3,12 @@
  * ordered list of providers, and their outputs are appended in order. The model is chosen last,
  * because a selector may choose by the size of what was assembled.
  *
- * Where each part comes from is a service: the conversation so far, and one ordered list of
- * providers per kind. Layers supply them.
+ * Where each part comes from is a service: the conversation, as a view of the session's facts, and
+ * one ordered list of providers per kind. Layers supply them.
  */
 
 import { Context, Effect } from "effect";
+import type { Fact } from "../agent-core/fact.ts";
 import type { ModelName, ProviderName } from "../agent-core/names.ts";
 import type { ContextMessage, ToolSpec } from "../agent-effect/contracts.ts";
 
@@ -53,10 +54,10 @@ export interface ModelSelector {
   readonly select: (contents: Contents, chosen: ModelChoice | undefined) => Effect.Effect<ModelChoice>;
 }
 
-/** The conversation so far, in order. */
+/** The conversation the model is sent, as a view of the session's facts. */
 export class Conversation extends Context.Service<
   Conversation,
-  { readonly messages: Effect.Effect<ReadonlyArray<ContextMessage>> }
+  { readonly messages: (facts: ReadonlyArray<Fact>) => Effect.Effect<ReadonlyArray<ContextMessage>> }
 >()("agent-context/Conversation") {}
 
 export class SystemPrompts extends Context.Service<SystemPrompts, ReadonlyArray<SystemPromptProvider>>()(
@@ -78,23 +79,31 @@ export class ModelSelectors extends Context.Service<
 const appended = <A>(outputs: ReadonlyArray<Effect.Effect<ReadonlyArray<A>>>): Effect.Effect<ReadonlyArray<A>> =>
   Effect.forEach(outputs, (output) => output).pipe(Effect.map((all) => all.flat()));
 
-export const assemble: Effect.Effect<
-  AssembledContext,
-  never,
-  Conversation | SystemPrompts | ToolCatalogs | Notices | ModelSelectors
-> = Effect.gen(function* () {
-  const contents: Contents = {
-    system: yield* appended((yield* SystemPrompts).map((provider) => provider.system)),
-    tools: yield* appended((yield* ToolCatalogs).map((catalog) => catalog.tools)),
-    messages: yield* (yield* Conversation).messages,
-    notices: yield* appended((yield* Notices).map((provider) => provider.notices)),
-  };
-  const [first, ...rest] = yield* ModelSelectors;
-  const initial = yield* first.select(contents, undefined);
-  const model = yield* Effect.reduce(
-    rest,
-    (): ModelChoice => initial,
-    (chosen: ModelChoice, selector: ModelSelector) => selector.select(contents, chosen),
-  );
-  return { ...contents, model };
-});
+/** Everything but the model, for the session's `facts`. */
+export const assembleContents = (
+  facts: ReadonlyArray<Fact>,
+): Effect.Effect<Contents, never, Conversation | SystemPrompts | ToolCatalogs | Notices> =>
+  Effect.gen(function* () {
+    return {
+      system: yield* appended((yield* SystemPrompts).map((provider) => provider.system)),
+      tools: yield* appended((yield* ToolCatalogs).map((catalog) => catalog.tools)),
+      messages: yield* (yield* Conversation).messages(facts),
+      notices: yield* appended((yield* Notices).map((provider) => provider.notices)),
+    };
+  });
+
+/** The contents for the session's `facts`, and the model they go to. */
+export const assemble = (
+  facts: ReadonlyArray<Fact>,
+): Effect.Effect<AssembledContext, never, Conversation | SystemPrompts | ToolCatalogs | Notices | ModelSelectors> =>
+  Effect.gen(function* () {
+    const contents = yield* assembleContents(facts);
+    const [first, ...rest] = yield* ModelSelectors;
+    const initial = yield* first.select(contents, undefined);
+    const model = yield* Effect.reduce(
+      rest,
+      (): ModelChoice => initial,
+      (chosen: ModelChoice, selector: ModelSelector) => selector.select(contents, chosen),
+    );
+    return { ...contents, model };
+  });

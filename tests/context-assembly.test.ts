@@ -62,7 +62,7 @@ const run = (setup: Setup, messages: ReadonlyArray<ContextMessage>) => {
     logged.push(options.message);
   });
   const layers = Layer.mergeAll(
-    Layer.succeed(Conversation, { messages: Effect.succeed(messages) }),
+    Layer.succeed(Conversation, { messages: () => Effect.succeed(messages) }),
     Layer.succeed(SystemPrompts, setup.systemPrompts),
     Layer.succeed(ToolCatalogs, setup.toolCatalogs),
     Layer.succeed(Notices, setup.notices),
@@ -73,7 +73,7 @@ const run = (setup: Setup, messages: ReadonlyArray<ContextMessage>) => {
   return Effect.runPromise(
     Effect.gen(function* () {
       yield* TestClock.setTime(Date.parse("2026-09-28T12:00:00.000Z"));
-      return yield* assemble;
+      return yield* assemble([]);
     }).pipe(Effect.provide(layers)),
   ).then((assembled) => ({ assembled, logged }));
 };
