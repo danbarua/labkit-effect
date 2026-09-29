@@ -1,9 +1,10 @@
 /**
  * A conversation turn: from the input that started it to the model's final answer. It runs steps
- * one after another; after a tool batch, or a response cut short, it goes on to the next. Input for the turn waits in its mailbox while a step runs, and is taken
- * between steps; between steps the turn posts `Proceed` to itself, which arrives after the waiting
- * input is taken, and then goes on. A compaction waits in the mailbox the same way, and is taken
- * between steps, or once the turn has ended. After a final answer it asks the layers around the core for
+ * one after another; after a tool batch, or a response cut short, it goes on to the next. Input for
+ * the turn waits in its mailbox while a step runs, and is taken between steps; between steps the
+ * turn posts `Proceed` to itself, which arrives after the waiting input is taken, and then goes on.
+ * A compaction or a change of model waits in the mailbox the same way, and is taken between steps,
+ * or once the turn has ended. After a final answer it asks the layers around the core for
  * anything more first (`BeforeTurnEnded`, answered by `TurnEndReviewed`); it ends when no input was
  * taken by then, or when a step stops without an answer; input still waiting then is dropped. The
  * model's observations are addressed to the turn, which passes them to its current step. An
@@ -84,6 +85,12 @@ const compact = (state: ConversationTurnState, compaction: Seq): TurnStep => ({
   decisions: [{ _tag: "WindowOpened", compaction }],
 });
 
+/** The change of model is in effect from here. */
+const changeModel = (state: ConversationTurnState, change: Seq): TurnStep => ({
+  ...becomes(state),
+  decisions: [{ _tag: "ModelChangeTaken", change }],
+});
+
 const interrupted = (state: ConversationTurnState): TurnStep => ended(state.turn, { _tag: "Interrupted" });
 
 const passOn = (
@@ -104,6 +111,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     TurnOpened: (state) => ({ ...becomes({ _tag: "Opening", turn: state.turn }), sends: [proceed(state.turn)] }),
     Steer: "deferred",
     Compact: "deferred",
+    ChangeModel: "deferred",
     Proceed: "ignored",
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
@@ -121,6 +129,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     TurnOpened: "ignored",
     Steer: (state, message) => take(state, message.input),
     Compact: (state, message) => compact(state, message.compaction),
+    ChangeModel: (state, message) => changeModel(state, message.change),
     Proceed: (state) => nextStep(state.turn, 0),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
@@ -138,6 +147,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     TurnOpened: "ignored",
     Steer: "deferred",
     Compact: "deferred",
+    ChangeModel: "deferred",
     Proceed: "ignored",
     StepToolsSettled: continuing,
     StepCutShort: continuing,
@@ -155,6 +165,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     TurnOpened: "ignored",
     Steer: (state, message) => take(state, message.input),
     Compact: (state, message) => compact(state, message.compaction),
+    ChangeModel: (state, message) => changeModel(state, message.change),
     Proceed: (state) => nextStep(state.turn, state.step),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
@@ -173,6 +184,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     Steer: (state, message) =>
       take(state, message.input, { _tag: "AfterAnswerSteered", turn: state.turn, step: state.step }),
     Compact: (state, message) => compact(state, message.compaction),
+    ChangeModel: (state, message) => changeModel(state, message.change),
     Proceed: "ignored",
     TurnEndReviewed: (state) => ended(state.turn, { _tag: "Answered" }),
     /** Recorded; the review goes on, without the hooks. */
@@ -191,6 +203,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     TurnOpened: "ignored",
     Steer: (state, message) => take(state, message.input),
     Compact: (state, message) => compact(state, message.compaction),
+    ChangeModel: (state, message) => changeModel(state, message.change),
     Proceed: "ignored",
     TurnEndReviewed: (state) => nextStep(state.turn, state.step),
     TurnHoldsExhausted: (state) => becomes(state),
@@ -213,6 +226,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     }),
     /** A compaction still waiting when the turn ends is taken: its window outlasts the turn. */
     Compact: (state, message) => compact(state, message.compaction),
+    ChangeModel: (state, message) => changeModel(state, message.change),
     Proceed: "ignored",
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",

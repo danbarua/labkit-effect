@@ -92,6 +92,11 @@ export const Observation = Schema.Union([
     through: Seq,
     kept: Schema.Array(Seq),
   }),
+  /**
+   * The session is to ask `model` of `provider` from now on. Once taken (`ModelChangeTaken`), the
+   * requests that follow go there.
+   */
+  Schema.TaggedStruct("ModelChangeArrived", { provider: ProviderName, model: ModelName }),
   /** A turn started. It takes the input waiting for it. */
   Schema.TaggedStruct("TurnStarted", { turn: TurnId }),
   /** The input recorded at `input`, still queued, was cancelled by its sender. */

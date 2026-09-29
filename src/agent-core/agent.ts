@@ -2,8 +2,8 @@
  * The agent: the parent of conversation turns. Input that arrives while no turn is running waits in
  * the agent's mailbox. When a turn starts (the layers around the core decide when, and report
  * `TurnStarted`), the agent opens it and passes it each waiting input; input that arrives while a
- * turn runs is passed to that turn. A compaction is taken at once while no turn runs, and passed to
- * the running turn otherwise.
+ * turn runs is passed to that turn. A compaction or a change of model is taken at once while no turn
+ * runs, and passed to the running turn otherwise.
  */
 
 import { type AgentObservation, type Send, type ToAgent, toConversationTurn } from "./messages.ts";
@@ -26,6 +26,10 @@ export const agentTable: Table<AgentState, AgentMessage, Send> = {
       ...becomes(state),
       decisions: [{ _tag: "WindowOpened", compaction: seq }],
     }),
+    ModelChangeArrived: (state, _message, { seq }) => ({
+      ...becomes(state),
+      decisions: [{ _tag: "ModelChangeTaken", change: seq }],
+    }),
     TurnStarted: (_state, message) => ({
       ...becomes({ _tag: "Running", turn: message.turn }),
       sends: [toConversationTurn(message.turn, { _tag: "TurnOpened" })],
@@ -41,6 +45,10 @@ export const agentTable: Table<AgentState, AgentMessage, Send> = {
     Compacted: (state, _message, { seq }) => ({
       ...becomes(state),
       sends: [toConversationTurn(state.turn, { _tag: "Compact", compaction: seq })],
+    }),
+    ModelChangeArrived: (state, _message, { seq }) => ({
+      ...becomes(state),
+      sends: [toConversationTurn(state.turn, { _tag: "ChangeModel", change: seq })],
     }),
     TurnStarted: "ignored",
     TurnFinished: () => becomes({ _tag: "Idle" }),

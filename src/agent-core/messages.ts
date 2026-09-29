@@ -17,7 +17,7 @@ export interface StepAddress {
 /** Observations delivered to the agent. */
 export type AgentObservation = Extract<
   Observation,
-  { _tag: "SessionOpened" | "InputArrived" | "Compacted" | "TurnStarted" }
+  { _tag: "SessionOpened" | "InputArrived" | "Compacted" | "ModelChangeArrived" | "TurnStarted" }
 >;
 
 /** Observations delivered to the turn they name, which passes them to its current step. */
@@ -48,6 +48,8 @@ export type ToConversationTurn =
   | { readonly _tag: "Steer"; readonly input: Seq }
   /** The compaction recorded at `compaction`, for the turn to take between steps. */
   | { readonly _tag: "Compact"; readonly compaction: Seq }
+  /** The change of model recorded at `change`, for the turn to take between steps. */
+  | { readonly _tag: "ChangeModel"; readonly change: Seq }
   /** Posted by the turn to itself: its mail is taken, so it goes on. */
   | { readonly _tag: "Proceed" }
   /** Every call of the step's tool batch settled. */

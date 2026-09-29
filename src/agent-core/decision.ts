@@ -40,6 +40,12 @@ export const Decision = Schema.Union([
    * does.
    */
   Schema.TaggedStruct("WindowOpened", { compaction: Seq }),
+  /**
+   * The change of model recorded at `change` is in effect: requests to the model from here on go to
+   * the model it names. Taken at once while no turn runs, and between the steps of a turn that does,
+   * or once it has ended.
+   */
+  Schema.TaggedStruct("ModelChangeTaken", { change: Seq }),
   /** The turn ended. The session is idle until the next input arrives. */
   Schema.TaggedStruct("TurnEnded", { turn: TurnId, ending: Ending }),
   /**
