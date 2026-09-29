@@ -14,18 +14,21 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
 - [ ] Where the model is chosen. The loop's `ModelProvider` chooses it, so context assembly's
       model selectors go unused, and `ModelChoice.endpoint` has no counterpart in `Target`.
       Reconfiguration through the inbox (below) may settle it.
-- [ ] Where notices go in what the model is sent. They are assembled and logged as not sent. Each
-      provider takes instructions mid-conversation: Anthropic a `role: "system"` message (not on
-      every model; after a tool result, never between a tool call and its result; keeps the cache),
-      OpenAI Responses a `developer` message, compatible APIs a `system` message.
 
 ## Build
 
+- [ ] Starting a session (Dan): a session's first turn needs a model, a system prompt (if any),
+      tools (if any) and the first input. A session with no model selected is an invalid state, so
+      make it unrepresentable: the starting model is recorded when the session opens, and
+      `ModelFromFacts` loses its `initial` default. Whether the system prompt and tools are also
+      recorded (they come from context assembly's providers today) is open.
 - [ ] Reconfiguring a session, beyond the model and provider (built: `ModelChangeArrived`, taken
       between steps; `ModelFromFacts`; the fallback chain reports the switch when a fallback
-      answers): thinking settings, and returning to the primary provider after a switch.
-- [ ] A session that never switches records no model: the first `ModelChangeArrived` comes from a
-      switch. Whoever opens a session could report its starting model as one.
+      answers): thinking and effort. Newer Anthropic models take thinking as `adaptive` or off and
+      use effort in its place; older ones take levels (low, medium, high).
+- Returning to the primary provider after a fallback is the user's (a manual `/switch`), as other
+  harnesses do. Doing it by itself would need the harness to know more of the world: a later
+  feature, not ruled out.
 - [ ] Policy as an Effect service, with the gate between the core's requests and the adapters in
       the loop (pre-flight veto, dry run).
 - [ ] The call lifecycle through Effect: timeouts and retries with `Schedule`.

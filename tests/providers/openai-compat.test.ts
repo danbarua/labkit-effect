@@ -35,7 +35,6 @@ async function turn(responses: ReadonlyArray<unknown>) {
           OpenAiCompatModelClient.pipe(Layer.provide(openAiCompatAt(provider.url))),
           CountingTurns,
           NoTurnEndHooks,
-  NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),

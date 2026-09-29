@@ -55,7 +55,6 @@ async function toolResultSent(call: { name: string; input: unknown }) {
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.server.url))),
           CountingTurns,
           NoTurnEndHooks,
-  NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),

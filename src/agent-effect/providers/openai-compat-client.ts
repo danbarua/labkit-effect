@@ -40,6 +40,19 @@ type Responded = Extract<Observation, { _tag: "ModelResponded" }>;
 
 const caller = { module: "OpenAiCompatModelClient", method: "respond" };
 
+/** The chat role for a message: an instruction is a `system` message in the conversation. */
+function role(message: ContextMessage): string {
+  switch (message.role) {
+    case "user":
+    case "assistant":
+      return message.role;
+    case "instruction":
+      return "system";
+    default:
+      return message.role satisfies never;
+  }
+}
+
 /** The chat messages one context message becomes: tool outcomes each become their own message. */
 function chatMessages(message: ContextMessage, calls: ReadonlyMap<CallId, Called>, context: ModelContext): Shaped {
   const text = message.parts.flatMap((part) => (part._tag === "Text" ? [{ type: "text", text: part.text }] : []));
@@ -62,7 +75,7 @@ function chatMessages(message: ContextMessage, calls: ReadonlyMap<CallId, Called
       ? []
       : [
           {
-            role: message.role,
+            role: role(message),
             content: text.length === 0 ? null : text,
             ...(toolCalls.length === 0
               ? {}

@@ -38,18 +38,28 @@ type Responded = Extract<Observation, { _tag: "ModelResponded" }>;
 
 const caller = { module: "OpenAiResponsesModelClient", method: "respond" };
 
+/** The Responses role for a message, and the type of its text: an instruction is a `developer` message. */
+function textAs(message: ContextMessage): { readonly role: string; readonly type: string } {
+  switch (message.role) {
+    case "user":
+      return { role: "user", type: "input_text" };
+    case "assistant":
+      return { role: "assistant", type: "output_text" };
+    case "instruction":
+      return { role: "developer", type: "input_text" };
+    default:
+      return message.role satisfies never;
+  }
+}
+
 /** The input items one message becomes, in order. */
 function items(message: ContextMessage, calls: ReadonlyMap<CallId, Called>, context: ModelContext): Shaped {
   const shaped = message.parts.map((part): Shaped => {
     switch (part._tag) {
-      case "Text":
-        return {
-          json: {
-            role: message.role,
-            content: [{ type: message.role === "user" ? "input_text" : "output_text", text: part.text }],
-          },
-          supplied: [],
-        };
+      case "Text": {
+        const { role, type } = textAs(message);
+        return { json: { role, content: [{ type, text: part.text }] }, supplied: [] };
+      }
       case "ToolCall": {
         const input = toolInputObject(part.call, part.input);
         return {

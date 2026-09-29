@@ -28,7 +28,14 @@ import {
   type TurnId,
 } from "../../agent-core/names.ts";
 import type { ModelPart, Observation } from "../../agent-core/observation.ts";
-import { type ContextPart, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
+import {
+  type ContextMessage,
+  type ContextPart,
+  type ModelContext,
+  ModelClient,
+  type ProviderRequest,
+  type Target,
+} from "../contracts.ts";
 import { logKeys } from "../log-keys.ts";
 import { defaultRetries, invalidOutput, modelClientOf, postJson, type Retries, withRetries } from "../provider-call.ts";
 import { receivedJson } from "../received.ts";
@@ -79,12 +86,28 @@ function block(part: ContextPart, context: ModelContext, calls: ReadonlyMap<Call
   }
 }
 
+/**
+ * The Messages API role for a message. An instruction is a mid-conversation `system` message, which
+ * not every model accepts; a model that does not fails the request with the provider's error.
+ */
+function role(message: ContextMessage): string {
+  switch (message.role) {
+    case "user":
+    case "assistant":
+      return message.role;
+    case "instruction":
+      return "system";
+    default:
+      return message.role satisfies never;
+  }
+}
+
 function body(target: Target, context: ModelContext): Shaped {
   const calls = callsIn(context);
   const messages = context.messages.map((message) => {
     const blocks = message.parts.map((part) => block(part, context, calls));
     return {
-      json: { role: message.role, content: blocks.map((shaped) => shaped.json) },
+      json: { role: role(message), content: blocks.map((shaped) => shaped.json) },
       supplied: blocks.flatMap((shaped) => shaped.supplied),
     };
   });

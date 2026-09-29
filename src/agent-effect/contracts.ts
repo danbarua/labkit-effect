@@ -34,9 +34,13 @@ export type ContextPart =
   | { readonly _tag: "ToolCall"; readonly call: CallId; readonly tool: ToolName; readonly input: Received }
   | { readonly _tag: "ToolResult"; readonly call: CallId; readonly outcome: ToolOutcome };
 
-/** One message of what the model is sent. */
+/**
+ * One message of what the model is sent. An `instruction` is the harness speaking to the model in
+ * the middle of the conversation (a notice, a changed rule); each provider adapter sends it as its
+ * provider takes such messages.
+ */
 export interface ContextMessage {
-  readonly role: "user" | "assistant";
+  readonly role: "user" | "assistant" | "instruction";
   readonly parts: ReadonlyArray<ContextPart>;
 }
 
