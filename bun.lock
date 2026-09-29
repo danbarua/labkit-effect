@@ -6,6 +6,8 @@
       "name": "labkit-effect",
       "dependencies": {
         "@effect/ai-anthropic": "4.0.0-rc.118",
+        "@effect/ai-openai": "4.0.0-rc.118",
+        "@effect/ai-openai-compat": "4.0.0-rc.118",
         "@logtape/logtape": "^2.3.9",
         "effect": "^4.0.0-rc.118",
       },
@@ -22,6 +24,10 @@
   },
   "packages": {
     "@effect/ai-anthropic": ["@effect/ai-anthropic@4.0.0-rc.118", "", { "peerDependencies": { "effect": "^4.0.0-rc.118" } }, "sha512-75a5I0nU/CnKXBstDKCtMVWazzGnmxETRtO1EXXtFJfYRGIp2MjJeB5bIfBReqrT6aXA3LE+D4S1K/9bqfOTHg=="],
+
+    "@effect/ai-openai": ["@effect/ai-openai@4.0.0-rc.118", "", { "peerDependencies": { "effect": "^4.0.0-rc.118" } }, "sha512-VEhcR8L77hurJ5bHjxrrDe3KAIFZYf3xB1qwycbI5sfXrO6OdH6SMqqWQuOT71bBaUdGLbFc48Cmjl44XTozzg=="],
+
+    "@effect/ai-openai-compat": ["@effect/ai-openai-compat@4.0.0-rc.118", "", { "peerDependencies": { "effect": "^4.0.0-rc.118" } }, "sha512-VqjUIq1HDcluCx6Xoqg+nDY4UC2FQUnfihNitg0y3rj/gHOps70k1PCgyPzBXNNi6GWzfakjNp69d2PfTryyOA=="],
 
     "@effect/tsgo": ["@effect/tsgo@0.46.1", "", { "optionalDependencies": { "@effect/tsgo-darwin-arm64": "0.46.1", "@effect/tsgo-darwin-x64": "0.46.1", "@effect/tsgo-linux-arm": "0.46.1", "@effect/tsgo-linux-arm64": "0.46.1", "@effect/tsgo-linux-x64": "0.46.1", "@effect/tsgo-win32-arm64": "0.46.1", "@effect/tsgo-win32-x64": "0.46.1" }, "bin": { "effect-tsgo": "dist/effect-tsgo.cjs" } }, "sha512-DMcBCg5nWLufejRlyqFEkXmbtaLUJ56NKny6L1LTtimvz0U3VNj9H6ZUXV4WeeWvJzVyL0y7G2wsCBAFUgy1jw=="],
 

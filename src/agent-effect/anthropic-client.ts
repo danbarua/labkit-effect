@@ -15,7 +15,7 @@
  */
 
 import { AnthropicClient } from "@effect/ai-anthropic";
-import { Effect, Layer, type Schema } from "effect";
+import { Effect, Layer } from "effect";
 import type * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
 import {
@@ -27,127 +27,30 @@ import {
   ToolName,
   type TurnId,
 } from "../agent-core/names.ts";
-import type { ModelPart, Observation, ToolOutcome } from "../agent-core/observation.ts";
-import type { Received } from "../agent-core/received.ts";
-import { type ContextPart, type ModelContext, ModelClient, type Target, type ToolSpec } from "./contracts.ts";
+import type { ModelPart, Observation } from "../agent-core/observation.ts";
+import { type ContextPart, type ModelContext, ModelClient, type Target } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
 import { defaultRetries, failedAs, invalidOutput, postJson, type Retries, withRetries } from "./provider-call.ts";
-import { asText, parseJson, receivedJson } from "./received.ts";
+import { receivedJson } from "./received.ts";
+import {
+  type Called,
+  callsIn,
+  isObject,
+  type Json,
+  logSupplied,
+  type RenderedResult,
+  renderToolResult,
+  type Shaped,
+  toolInputObject,
+} from "./shaping.ts";
 
-type Json = Schema.Json;
 type Outcome = Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" }>;
 
 /** The output limit sent when the context sets none; the Messages API requires one. */
 const defaultMaxTokens = 1024;
 
-/** Something the client supplied or changed to fit the wire format, and why. */
-interface Supplied {
-  readonly level: "info" | "warning";
-  readonly event: string;
-  readonly details: Record<string, unknown>;
-}
-
-interface Shaped {
-  readonly json: Json;
-  readonly supplied: ReadonlyArray<Supplied>;
-}
-
-interface Called {
-  readonly tool: ToolName;
-  readonly input: Received;
-}
-
-function isObject(value: Json): value is Schema.JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** What the model called, by call: the tool's name and the input it gave. */
-function callsIn(context: ModelContext): ReadonlyMap<CallId, Called> {
-  return new Map(
-    context.messages.flatMap((message) =>
-      message.parts.flatMap((part) =>
-        part._tag === "ToolCall" ? [[part.call, { tool: part.tool, input: part.input }] as const] : [],
-      ),
-    ),
-  );
-}
-
-/** The input as the object the wire format requires, or `{}` in its place, logged. */
-function toolInput(call: CallId, input: Received): Shaped {
-  const parsed = parseJson(input);
-  if ("value" in parsed && isObject(parsed.value)) return { json: parsed.value, supplied: [] };
-  return {
-    json: {},
-    supplied: [
-      {
-        level: "warning",
-        event: logKeys.anthropic.toolInputReplaced,
-        details: {
-          call,
-          reason: "value" in parsed ? "the input is not a JSON object" : parsed.reason,
-          sent: {},
-          received: asText(input),
-        },
-      },
-    ],
-  };
-}
-
-/** What was given, as JSON when it parses and as text otherwise. */
-function given(input: Received): Json {
-  const parsed = parseJson(input);
-  return "value" in parsed ? parsed.value : asText(input);
-}
-
-function resultContent(
-  outcome: ToolOutcome,
-  called: Called | undefined,
-  catalog: ReadonlyArray<ToolSpec>,
-): { content: string; is_error?: true } {
-  switch (outcome._tag) {
-    case "Succeeded":
-      return { content: asText(outcome.output) };
-    case "Failed": {
-      const reason = outcome.reason;
-      switch (reason._tag) {
-        case "Reported":
-          return { content: asText(reason.error), is_error: true };
-        case "NotFound":
-          return {
-            content: JSON.stringify({
-              code: "tool_not_found",
-              message: `No tool is named "${called?.tool ?? ""}".`,
-              tools: catalog.map((tool) => ({ name: tool.name, input_schema: tool.input })),
-            }),
-            is_error: true,
-          };
-        case "InputRejected":
-          return {
-            content: JSON.stringify({
-              code: "invalid_input",
-              message: reason.problem,
-              tool: called?.tool,
-              input_schema: catalog.find((tool) => tool.name === called?.tool)?.input,
-              given: called === undefined ? undefined : given(called.input),
-            }),
-            is_error: true,
-          };
-        case "Vetoed":
-          return {
-            content: JSON.stringify({
-              code: "vetoed",
-              message: "The call was not run.",
-              reason: asText(reason.reason),
-            }),
-            is_error: true,
-          };
-        default:
-          return reason satisfies never;
-      }
-    }
-    default:
-      return outcome satisfies never;
-  }
+function resultContent(result: RenderedResult): { content: string; is_error?: true } {
+  return result.isError ? { content: result.text, is_error: true } : { content: result.text };
 }
 
 function block(part: ContextPart, context: ModelContext, calls: ReadonlyMap<CallId, Called>): Shaped {
@@ -155,7 +58,7 @@ function block(part: ContextPart, context: ModelContext, calls: ReadonlyMap<Call
     case "Text":
       return { json: { type: "text", text: part.text }, supplied: [] };
     case "ToolCall": {
-      const input = toolInput(part.call, part.input);
+      const input = toolInputObject(part.call, part.input);
       return {
         json: { type: "tool_use", id: part.call, name: part.tool, input: input.json },
         supplied: input.supplied,
@@ -166,7 +69,7 @@ function block(part: ContextPart, context: ModelContext, calls: ReadonlyMap<Call
         json: {
           type: "tool_result",
           tool_use_id: part.call,
-          ...resultContent(part.outcome, calls.get(part.call), context.tools),
+          ...resultContent(renderToolResult(part.outcome, calls.get(part.call), context.tools)),
         },
         supplied: [],
       };
@@ -231,16 +134,6 @@ function part(received: Json): ModelPart {
   }
   return { _tag: "Unrecognised", received: receivedJson(received) };
 }
-
-const logSupplied = (supplied: ReadonlyArray<Supplied>): Effect.Effect<void> =>
-  Effect.forEach(
-    supplied,
-    (entry) =>
-      entry.level === "warning"
-        ? Effect.logWarning(entry.event, entry.details)
-        : Effect.logInfo(entry.event, entry.details),
-    { discard: true },
-  );
 
 const caller = { module: "AnthropicModelClient", method: "respond" };
 

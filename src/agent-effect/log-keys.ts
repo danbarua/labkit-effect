@@ -9,11 +9,11 @@ export const logKeys = {
     requestRetried: "provider.request.retried",
     /** A model request failed and will not be tried again; the details are the whole error. */
     requestFailed: "provider.request.failed",
+    /** A stored tool input was not a JSON object, so `{}` was sent in its place. */
+    toolInputReplaced: "provider.request.tool_input_replaced",
   },
   anthropic: {
     /** The request carried the default `max_tokens`, because the context set no output limit. */
     maxTokensSupplied: "anthropic.request.max_tokens_supplied",
-    /** A stored tool input was not a JSON object, so `{}` was sent in its place. */
-    toolInputReplaced: "anthropic.request.tool_input_replaced",
   },
 } as const;
