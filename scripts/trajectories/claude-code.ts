@@ -227,7 +227,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
     count(`${type}${subtype}`);
   }
 
-  await eachRecord(source, onRecord, count);
+  eachRecord(source, onRecord, count);
   flushResponse();
   flushReview();
   if (state.boundary !== undefined) count("system/compact_boundary (no summary after it)");

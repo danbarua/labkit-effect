@@ -3,9 +3,8 @@
  * what it does not map, and writes the trajectory and its report.
  */
 
-import { createReadStream, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { Schema } from "effect";
 import { Fact } from "../../src/agent-core/fact.ts";
 import { Seq } from "../../src/agent-core/names.ts";
@@ -88,10 +87,12 @@ export function projection(): Projection {
   };
 }
 
-/** Calls `onRecord` with each JSON line of the file; a line that fails is counted by its error. */
-export async function eachRecord(source: string, onRecord: (record: Record_) => void, count: (kind: string) => void) {
-  const lines = createInterface({ input: createReadStream(source), crlfDelay: Number.POSITIVE_INFINITY });
-  for await (const line of lines) {
+/**
+ * Calls `onRecord` with each JSON line of the file; a line that fails is counted by its error. Lines
+ * are split on `\n` only: Node's line reader also splits on U+2028, which JSON strings may hold.
+ */
+export function eachRecord(source: string, onRecord: (record: Record_) => void, count: (kind: string) => void): void {
+  for (const line of readFileSync(source, "utf8").split("\n")) {
     if (line.trim() === "") continue;
     try {
       onRecord(JSON.parse(line) as Record_);

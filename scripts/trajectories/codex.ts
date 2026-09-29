@@ -32,7 +32,9 @@
  *   next record that is not input to the same turn;
  * - `turn_aborted` is `TurnInterrupted`;
  * - `compacted` is `Compacted`: its window ids are Codex's, its replacement history is the summary,
- *   and nothing is kept by position.
+ *   and nothing is kept by position. Codex asks the model for the summary in the turn, and records
+ *   its answer as a final answer; a response whose text the replacement history carries is that
+ *   request, part of the compaction, and is counted, not mapped.
  */
 
 import { basename } from "node:path";
@@ -56,7 +58,7 @@ export async function importCodex(source: string): Promise<Imported> {
   const projected = projection();
   const { count } = projected;
   const records: Array<Record_> = [];
-  await eachRecord(source, (record) => records.push(record), count);
+  eachRecord(source, (record) => records.push(record), count);
 
   // Texts Codex reports as the user's own messages.
   const userTexts = new Set(
@@ -242,6 +244,17 @@ export async function importCodex(source: string): Promise<Imported> {
       return;
     }
     if (type === "compacted") {
+      const history = JSON.stringify(payload["replacement_history"] ?? null);
+      const written = state.pending.flatMap((item) =>
+        Array.isArray(item["content"])
+          ? item["content"].flatMap((block) => (isRecord(block) && typeof block["text"] === "string" ? [block["text"]] : []))
+          : [],
+      );
+      if (written.length > 0 && written.every((line) => history.includes(JSON.stringify(line).slice(1, -1)))) {
+        state.pending.splice(0);
+        state.usage = undefined;
+        count("the model's summary for a compaction");
+      }
       flushResponse();
       flushReview();
       if (projected.recorded() === 0) return count("compacted (nothing before it in the file)");
