@@ -6,12 +6,14 @@
  * When a turn starts is decided here: when input arrives and the agent is idle, the loop starts a
  * turn through `Turns` and reports `TurnStarted`.
  *
- * Every log line written while a request is carried out is annotated with what the request is
- * about (its turn, and for a tool run its call and tool), so the services it calls do not pass
- * those along themselves.
+ * While a request is carried out, `CurrentWork` says what it is about (the session, its turn, and
+ * for a tool run its call and tool), and every log line written is annotated with the same, so the
+ * services it calls do not pass those along themselves.
+ *
+ * Each fact is published as it is recorded; `subscribe` receives every fact recorded after it.
  */
 
-import { DateTime, Effect, Ref } from "effect";
+import { DateTime, Effect, PubSub, Ref, type Scope } from "effect";
 import type { Fact } from "../agent-core/fact.ts";
 import { deliver, emptyWorld, type World } from "../agent-core/router.ts";
 import { InputText, Seq, type TurnId } from "../agent-core/names.ts";
@@ -19,6 +21,7 @@ import type { Observation } from "../agent-core/observation.ts";
 import type { EffectRequest } from "../agent-core/request.ts";
 import { ContextAssembler, ModelClient, ModelProvider, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
+import { CurrentWork, type Work } from "./work.ts";
 
 interface Held {
   readonly world: World;
@@ -33,10 +36,13 @@ export interface Session {
   /** Records an observation and carries out everything that follows from it. */
   readonly observe: (observation: Observation) => Effect.Effect<void, never, Services>;
   readonly facts: Effect.Effect<ReadonlyArray<Fact>>;
+  /** Every fact recorded from now on, in order, for as long as the scope lasts. */
+  readonly subscribe: Effect.Effect<PubSub.Subscription<Fact>, never, Scope.Scope>;
 }
 
 export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
   const held = yield* Ref.make<Held>({ world: emptyWorld, facts: [], holds: new Map() });
+  const recorded = yield* PubSub.unbounded<Fact>();
 
   /** The turn-end hooks' feedback as input, then the review; after `maxHolds` holds, only the review. */
   const reviewTurnEnd = (turn: TurnId): Effect.Effect<ReadonlyArray<Observation>, never, Services> =>
@@ -79,16 +85,18 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
     }
   };
 
-  /** What a request is about, for its log lines. */
-  const about = (request: EffectRequest, world: World): Record<string, unknown> => {
+  /** What a request is about: the session the facts opened, and the request's turn, call and tool. */
+  const about = (request: EffectRequest, world: World, facts: ReadonlyArray<Fact>): Work => {
+    const opened = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "SessionOpened");
+    const session = opened?._tag === "Observed" && opened.observation._tag === "SessionOpened" ? { session: opened.observation.session } : {};
     const turn = world.agent.state._tag === "Running" ? { turn: world.agent.state.turn } : {};
     switch (request._tag) {
       case "RequestModelResponse":
-        return { turn: request.turn };
+        return { ...session, turn: request.turn };
       case "RunTool":
-        return { ...turn, call: request.call, tool: request.tool };
+        return { ...session, ...turn, call: request.call, tool: request.tool };
       case "BeforeTurnEnded":
-        return { turn: request.turn };
+        return { ...session, turn: request.turn };
       default:
         return request satisfies never;
     }
@@ -100,7 +108,7 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
       const seq = Seq.make(before.facts.length + 1);
       const outcome = deliver(before.world, seq, observation);
       const time = yield* DateTime.now;
-      const recorded: ReadonlyArray<Fact> = [
+      const facts: ReadonlyArray<Fact> = [
         { _tag: "Observed", seq, time, observation },
         ...outcome.decisions.map((decision, index): Fact => ({
           _tag: "Decided",
@@ -109,19 +117,30 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
           decision,
         })),
       ];
-      yield* Ref.update(held, (now) => ({ ...now, world: outcome.world, facts: [...before.facts, ...recorded] }));
-      const after = (yield* Ref.get(held)).world;
-      yield* Effect.forEach(outcome.requests, (request) =>
-        carryOut(request).pipe(
-          Effect.annotateLogs(about(request, after)),
+      const now = yield* Ref.updateAndGet(held, (current) => ({
+        ...current,
+        world: outcome.world,
+        facts: [...before.facts, ...facts],
+      }));
+      yield* PubSub.publishAll(recorded, facts);
+      yield* Effect.forEach(outcome.requests, (request) => {
+        const work = about(request, now.world, now.facts);
+        return carryOut(request).pipe(
+          Effect.annotateLogs({ ...work }),
+          Effect.provideService(CurrentWork, work),
           Effect.flatMap((observations) => Effect.forEach(observations, observe, { discard: true })),
-        ),
-      );
+        );
+      });
+      const after = now.world;
       if (observation._tag === "InputArrived" && after.agent.state._tag === "Idle") {
         const turn = yield* (yield* Turns).start;
         yield* observe({ _tag: "TurnStarted", turn });
       }
     });
 
-  return { observe, facts: Ref.get(held).pipe(Effect.map((current) => current.facts)) };
+  return {
+    observe,
+    facts: Ref.get(held).pipe(Effect.map((current) => current.facts)),
+    subscribe: PubSub.subscribe(recorded),
+  };
 });

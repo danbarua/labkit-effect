@@ -1,8 +1,9 @@
 /** The loop around the core, with stub services: what it does regardless of which adapters run. */
 
 import { expect, test } from "bun:test";
-import { Effect, Layer, Logger, References } from "effect";
-import { ModelName, ModelText, ProviderName, StopReason, TurnId } from "../src/agent-core/names.ts";
+import { Effect, Layer, Logger, PubSub, References } from "effect";
+import { ModelName, ModelText, ProviderName, SessionId, StopReason, TurnId } from "../src/agent-core/names.ts";
+import { CurrentWork, type Work } from "../src/agent-effect/work.ts";
 import type { Observation } from "../src/agent-core/observation.ts";
 import { BoringContextAssembler, CountingTurns, NoTurnEndHooks } from "../src/agent-effect/boring.ts";
 import { ModelClient, ModelProvider, TurnEndHooks } from "../src/agent-effect/contracts.ts";
@@ -11,14 +12,18 @@ import { openSession } from "../src/agent-effect/loop.ts";
 import { receivedJson } from "../src/agent-effect/received.ts";
 import { SmolToolRunner } from "../src/agent-effect/smol-tools.ts";
 
-test("a log line written while a request is carried out carries the request's turn", async () => {
+test("while a request is carried out, CurrentWork and every log line name its session and turn", async () => {
   const logged: Array<{ message: unknown; annotations: Record<string, unknown> }> = [];
+  const worked: Array<Work> = [];
   const capture = Logger.make((options) => {
     logged.push({ message: options.message, annotations: { ...options.fiber.getRef(References.CurrentLogAnnotations) } });
   });
   const client = Layer.succeed(ModelClient, {
     respond: (target, _context, turn) =>
-      Effect.logInfo("stub.responding").pipe(
+      Effect.gen(function* () {
+        yield* Effect.logInfo("stub.responding");
+        worked.push(yield* CurrentWork);
+      }).pipe(
         Effect.as({
           _tag: "ModelResponded" as const,
           turn,
@@ -49,7 +54,9 @@ test("a log line written while a request is carried out carries the request's tu
       ),
     ),
   );
-  expect(logged).toContainEqual({ message: ["stub.responding"], annotations: { turn: TurnId.make("turn-1") } });
+  const expected = { session: SessionId.make("s1"), turn: TurnId.make("turn-1") };
+  expect(logged).toContainEqual({ message: ["stub.responding"], annotations: expected });
+  expect(worked).toEqual([expected]);
 });
 
 /** A model that answers every request with text, and a loop over it with the given turn-end hooks. */
@@ -123,4 +130,35 @@ test("a hook that never lets go holds the turn at most maxHolds times, then the 
   expect(tags.filter((tag) => tag === "ModelResponded")).toHaveLength(3);
   expect(tags.at(-1)).toBe("TurnEnded");
   expect(logged).toContainEqual([logKeys.loop.holdsExhausted, { holds: 2, maxHolds: 2 }]);
+});
+
+test("a subscriber receives every fact recorded after it subscribed, in order", async () => {
+  const client = Layer.succeed(ModelClient, {
+    respond: (target, _context, turn) =>
+      Effect.succeed({
+        _tag: "ModelResponded" as const,
+        turn,
+        provider: target.provider,
+        model: target.model,
+        parts: [{ _tag: "Text" as const, text: ModelText.make("ok") }],
+        stop: StopReason.make("end_turn"),
+        ending: { _tag: "Complete" },
+        metadata: receivedJson({}),
+      }),
+  });
+  const provider = Layer.succeed(ModelProvider, {
+    select: () => Effect.succeed({ provider: ProviderName.make("stub"), model: ModelName.make("stub-1") }),
+  });
+  const { received, facts } = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const session = yield* openSession;
+        yield* session.observe({ _tag: "SessionOpened", session: "s1" } as unknown as Observation);
+        const subscription = yield* session.subscribe;
+        yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
+        return { received: yield* PubSub.takeAll(subscription), facts: yield* session.facts };
+      }),
+    ).pipe(Effect.provide(Layer.mergeAll(provider, client, BoringContextAssembler, CountingTurns, NoTurnEndHooks, SmolToolRunner))),
+  );
+  expect([...received]).toEqual(facts.slice(1));
 });
