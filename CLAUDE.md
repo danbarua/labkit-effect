@@ -9,8 +9,13 @@ Default to using Bun instead of Node.js.
 - Use `bunx <package> <command>` instead of `npx <package> <command>`
 - Bun automatically loads .env, so don't use dotenv.
 
-## Local Effect Source
+## Effect source
 
-The Effect v4 repository is cloned to `~/Code/lib/effect` for reference.
-Use this to explore APIs, find usage examples, and understand implementation
-details when the documentation isn't enough.
+`repos/effect` is the Effect repository at the tag of the version installed
+(`effect@4.0.0-rc.118`), vendored with `git subtree --squash`. It is reference
+material: read it for APIs, examples and implementation details; do not edit it
+or import from it. `~/Code/lib/effect` is an older beta and does not match what
+is installed.
+
+To move to another version, install it, then:
+`git subtree pull --prefix=repos/effect https://github.com/Effect-TS/effect.git "effect@<version>" --squash`

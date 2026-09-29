@@ -15,6 +15,7 @@ const abstractLayer = {
 const effectSchemaOnly = { name: "effect", allowImportNames: ["Schema"], message: "The abstract layers import only `Schema` from effect." };
 
 export default defineConfig({
+  ignorePatterns: ["repos/**"],
   extends: [recommended],
   jsPlugins: ["./scripts/oxlint/abstract-layers.js"],
   overrides: [
