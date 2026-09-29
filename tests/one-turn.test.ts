@@ -6,6 +6,7 @@ import { AnthropicModelClient } from "../src/agent-effect/anthropic-client.ts";
 import { openSession } from "../src/agent-effect/loop.ts";
 import { SmolToolRunner } from "../src/agent-effect/smol-tools.ts";
 import type { Observation } from "../src/agent-core/observation.ts";
+import { runTest } from "./support/run.ts";
 
 /** A provider that answers every request the same way. */
 
@@ -35,7 +36,7 @@ const services = Layer.mergeAll(
 );
 
 test("one turn, from the user's message to the model's answer", async () => {
-  const facts = await Effect.runPromise(
+  const facts = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe({ _tag: "SessionOpened", session: "s1" } as unknown as Observation);

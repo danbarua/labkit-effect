@@ -1,3 +1,5 @@
 # https://bun.com/docs/test/configuration
 [test]
 pathIgnorePatterns = "repos/**"
+# Empties logs/test.log, where tests run through tests/support/run.ts write their log lines.
+preload = ["./tests/support/preload.ts"]

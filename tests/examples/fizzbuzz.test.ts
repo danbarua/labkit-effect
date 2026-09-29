@@ -14,6 +14,7 @@ import { toolStats } from "../../src/instrumentation/tool-stats.ts";
 import { ToolName } from "../../src/agent-core/names.ts";
 import { ToolRunner } from "../../src/agent-effect/contracts.ts";
 import { asText, receivedJson } from "../../src/agent-effect/received.ts";
+import { runTest } from "../support/run.ts";
 
 /** One line per part: who sent it and what it was. */
 const transcript = (messages: ReadonlyArray<ContextMessage>): ReadonlyArray<string> =>
@@ -36,7 +37,7 @@ const tokens = (context: ModelContext) =>
   estimatedTokens({ system: context.system === undefined ? [] : [context.system], notices: [], tools: context.tools, messages: context.messages });
 
 test("the user counts to 15; the model classifies each multiple of 3 or 5 and replies with the next number", async () => {
-  const { facts, seen } = await Effect.runPromise(play(countingUser(8)));
+  const { facts, seen } = await runTest(play(countingUser(8)));
   const last = seen.at(-1);
   expect(last?.system).toContain("Number Classification Assistant");
   expect(last?.tools.map((tool) => tool.name as string)).toEqual(["classify"]);
@@ -72,7 +73,7 @@ test("the user counts to 15; the model classifies each multiple of 3 or 5 and re
 });
 
 const at = (time: string, effect: Effect.Effect<Played>) =>
-  Effect.runPromise(
+  runTest(
     Effect.gen(function* () {
       yield* TestClock.setTime(Date.parse(time));
       return yield* effect;
@@ -103,7 +104,7 @@ test("past 20 messages, the completed turns are sent as a summary, and the model
 });
 
 test("the context the model is sent grows with every request", async () => {
-  const { seen } = await Effect.runPromise(play(countingUser(200)));
+  const { seen } = await runTest(play(countingUser(200)));
   const counts = seen.map((context) => context.messages.length);
   expect(counts.every((count, index) => index === 0 || count > (counts[index - 1] ?? 0))).toBe(true);
   const sizes = seen.map(tokens);
@@ -116,7 +117,7 @@ test("the context the model is sent grows with every request", async () => {
 });
 
 test("with report_error offered, the model reports a number out of sequence, a fraction and a word, then counts on", async () => {
-  const { seen } = await Effect.runPromise(play(["1", "3", "7", "3.5", "banana", "5"], advanced));
+  const { seen } = await runTest(play(["1", "3", "7", "3.5", "banana", "5"], advanced));
   const last = seen.at(-1);
   expect(last?.tools.map((tool) => tool.name as string)).toEqual(["classify", "report_error"]);
   expect(transcript(last?.messages ?? [])).toEqual([
@@ -155,7 +156,7 @@ test("after compaction, the model finds the last number it returned in the summa
 });
 
 test("a tool call whose input does not fit its schema is rejected with the decoder's reason", async () => {
-  const outcome = await Effect.runPromise(
+  const outcome = await runTest(
     Effect.gen(function* () {
       return yield* (yield* ToolRunner).run(ToolName.make("classify"), receivedJson({ label: "Fuzz" }));
     }).pipe(Effect.provide(FizzBuzzToolRunner)),
@@ -165,7 +166,7 @@ test("a tool call whose input does not fit its schema is rejected with the decod
 });
 
 test("tool usage for the session is counted from its facts", async () => {
-  const { facts } = await Effect.runPromise(play(["1", "3", "7", "3.5", "banana", "5", "7", "9", "11", "13", "15"], advanced));
+  const { facts } = await runTest(play(["1", "3", "7", "3.5", "banana", "5", "7", "9", "11", "13", "15"], advanced));
   expect(Object.fromEntries(toolStats(facts))).toEqual({
     classify: { calls: 4, succeeded: 4, failed: { Reported: 0, NotFound: 0, InputRejected: 0, Vetoed: 0 }, unfinished: 0 },
     report_error: { calls: 3, succeeded: 3, failed: { Reported: 0, NotFound: 0, InputRejected: 0, Vetoed: 0 }, unfinished: 0 },
@@ -174,7 +175,7 @@ test("tool usage for the session is counted from its facts", async () => {
 
 test("tool metrics, recorded live and attributed by session, agree with the counts from each session's facts", async () => {
   const counted = { ...advanced, tools: CountedToolRunner(FizzBuzzToolRunner) };
-  const { alice, bob, snapshot } = await Effect.runPromise(
+  const { alice, bob, snapshot } = await runTest(
     Effect.gen(function* () {
       const alice = yield* play(["1", "3", "7", "5"], { ...counted, session: "alice" });
       const bob = yield* play(countingUser(8), { ...counted, session: "bob" });

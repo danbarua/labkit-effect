@@ -10,6 +10,7 @@ import { SmolToolRunner, smolCatalog } from "../../src/agent-effect/smol-tools.t
 import { ToolContextAssembler } from "../../src/agent-effect/tool-context.ts";
 import { openAiAt, recordingServer } from "../support/providers.ts";
 import { json } from "../support/received.ts";
+import { runTest } from "../support/run.ts";
 
 const stops: Array<() => unknown> = [];
 afterAll(() => {
@@ -19,7 +20,7 @@ afterAll(() => {
 async function turn(responses: ReadonlyArray<unknown>) {
   const provider = recordingServer(responses);
   stops.push(provider.stop);
-  const facts = await Effect.runPromise(
+  const facts = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe({ _tag: "SessionOpened", session: "s1" } as unknown as Observation);

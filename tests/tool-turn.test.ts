@@ -8,6 +8,7 @@ import { AnthropicModelClient } from "../src/agent-effect/anthropic-client.ts";
 import { openSession } from "../src/agent-effect/loop.ts";
 import { SmolToolRunner, smolCatalog } from "../src/agent-effect/smol-tools.ts";
 import { ToolContextAssembler } from "../src/agent-effect/tool-context.ts";
+import { runTest } from "./support/run.ts";
 
 /** A provider that calls `add` on the first request and answers on the second. */
 const received: Array<unknown> = [];
@@ -43,7 +44,7 @@ const services = Layer.mergeAll(
 );
 
 test("the model calls a tool from the catalog, and answers from its result", async () => {
-  const facts = await Effect.runPromise(
+  const facts = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe({ _tag: "SessionOpened", session: "s1" } as unknown as Observation);

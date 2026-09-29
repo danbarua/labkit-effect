@@ -11,6 +11,7 @@ import { logKeys } from "../src/agent-effect/log-keys.ts";
 import { openSession } from "../src/agent-effect/loop.ts";
 import { receivedJson } from "../src/agent-effect/received.ts";
 import { SmolToolRunner } from "../src/agent-effect/smol-tools.ts";
+import { runTest } from "./support/run.ts";
 
 test("while a request is carried out, CurrentWork and every log line name its session and turn", async () => {
   const logged: Array<{ message: unknown; annotations: Record<string, unknown> }> = [];
@@ -43,7 +44,7 @@ test("while a request is carried out, CurrentWork and every log line name its se
         model: ModelName.make("stub-1"),
       }),
   });
-  await Effect.runPromise(
+  await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe({ _tag: "SessionOpened", session: "s1" } as unknown as Observation);
@@ -85,7 +86,7 @@ async function answeringTurn(hooks: ReadonlyArray<() => ReadonlyArray<string>>, 
     hooks: hooks.map((hook) => () => Effect.sync(hook)),
     maxHolds,
   });
-  const facts = await Effect.runPromise(
+  const facts = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe({ _tag: "SessionOpened", session: "s1" } as unknown as Observation);
@@ -149,7 +150,7 @@ test("a subscriber receives every fact recorded after it subscribed, in order", 
   const provider = Layer.succeed(ModelProvider, {
     select: () => Effect.succeed({ provider: ProviderName.make("stub"), model: ModelName.make("stub-1") }),
   });
-  const { received, facts } = await Effect.runPromise(
+  const { received, facts } = await runTest(
     Effect.scoped(
       Effect.gen(function* () {
         const session = yield* openSession;

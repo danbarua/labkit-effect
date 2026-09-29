@@ -26,6 +26,7 @@ import {
   SystemTimeNoticeProvider,
 } from "../../src/agent-context/providers.ts";
 import { ModelName, ProviderName } from "../../src/agent-core/names.ts";
+import { runTest } from "../support/run.ts";
 
 const model = (name: string, contextWindow: number): ModelChoice => ({
   provider: ProviderName.make("boring"),
@@ -70,7 +71,7 @@ const run = (setup: Setup, messages: ReadonlyArray<ContextMessage>) => {
     TestClock.layer(),
     Logger.layer([capture]),
   );
-  return Effect.runPromise(
+  return runTest(
     Effect.gen(function* () {
       yield* TestClock.setTime(Date.parse("2026-09-28T12:00:00.000Z"));
       return yield* assemble([]);

@@ -8,6 +8,7 @@ import { advanced, play } from "../src/fizzbuzz/scenario.ts";
 import { FizzBuzzToolRunner } from "../src/fizzbuzz/tools.ts";
 import { AgentTelemetry } from "../src/instrumentation/telemetry.ts";
 import { CountedToolRunner } from "../src/instrumentation/tool-metrics.ts";
+import { runTest } from "./support/run.ts";
 
 /** A metric reader collected by hand. */
 class ReadOnDemand extends MetricReader {
@@ -23,7 +24,7 @@ test("each request is a span with the session, turn, call and tool; tool runs ar
   const spans = new InMemorySpanExporter();
   const metrics = new ReadOnDemand();
   // Read before the telemetry layer is released: shutting it down clears the in-memory exporter.
-  const { finished, collected } = await Effect.runPromise(
+  const { finished, collected } = await runTest(
     Effect.gen(function* () {
       yield* play(["1", "3", "7"], { ...advanced, session: "carol", tools: CountedToolRunner(FizzBuzzToolRunner) });
       return {

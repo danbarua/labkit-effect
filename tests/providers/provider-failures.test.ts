@@ -7,6 +7,7 @@ import { anthropicModelClient } from "../../src/agent-effect/anthropic-client.ts
 import { ModelClient } from "../../src/agent-effect/contracts.ts";
 import { logKeys } from "../../src/agent-effect/log-keys.ts";
 import { anthropicAt } from "../support/providers.ts";
+import { runTest } from "../support/run.ts";
 
 const servers: Array<{ stop: (force: boolean) => unknown }> = [];
 afterAll(() => {
@@ -36,7 +37,7 @@ async function request(url: URL) {
   const capture = Logger.make((options) => {
     logged.push({ level: options.logLevel, message: options.message });
   });
-  const observed = await Effect.runPromise(
+  const observed = await runTest(
     Effect.gen(function* () {
       return yield* (yield* ModelClient).respond(
         { provider: ProviderName.make("boring"), model: ModelName.make("boring-1") },

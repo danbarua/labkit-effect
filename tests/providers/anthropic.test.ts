@@ -13,6 +13,7 @@ import { AnthropicModelClient } from "../../src/agent-effect/anthropic-client.ts
 import { openSession } from "../../src/agent-effect/loop.ts";
 import { SmolToolRunner, smolCatalog } from "../../src/agent-effect/smol-tools.ts";
 import { ToolContextAssembler } from "../../src/agent-effect/tool-context.ts";
+import { runTest } from "../support/run.ts";
 
 /** A provider that makes one scripted tool call, then answers; it keeps every request it is sent. */
 function scripted(call: { name: string; input: unknown }) {
@@ -40,7 +41,7 @@ afterAll(() => {
 async function toolResultSent(call: { name: string; input: unknown }) {
   const provider = scripted(call);
   servers.push(provider.server);
-  await Effect.runPromise(
+  await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe({ _tag: "SessionOpened", session: "s1" } as unknown as Observation);
@@ -99,7 +100,7 @@ test("the max_tokens the Messages API requires is supplied and logged, with the 
   });
   const provider = scripted({ name: "add", input: { a: 1, b: 2 } });
   servers.push(provider.server);
-  await Effect.runPromise(
+  await runTest(
     Effect.gen(function* () {
       const client = yield* ModelClient;
       yield* client.respond(
@@ -151,7 +152,7 @@ const target = {
 
 test("a request is the model, the default max_tokens, and the context's messages as Messages blocks", async () => {
   const provider = recording([{ content: [{ type: "text", text: "Hello back." }], stop_reason: "end_turn" }]);
-  await Effect.runPromise(
+  await runTest(
     Effect.gen(function* () {
       yield* (yield* ModelClient).respond(
         target,
@@ -175,7 +176,7 @@ test("a response's text is a Text part, stop_reason is the stop, and everything 
       usage: { input_tokens: 3, output_tokens: 3 },
     },
   ]);
-  const observed = await Effect.runPromise(
+  const observed = await runTest(
     Effect.gen(function* () {
       return yield* (yield* ModelClient).respond(
         target,
@@ -207,7 +208,7 @@ test("a tool turn sends the catalog, then the call and its result, as Messages b
     },
     { content: [{ type: "text", text: "2 + 3 = 5." }], stop_reason: "end_turn" },
   ]);
-  await Effect.runPromise(
+  await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe({ _tag: "SessionOpened", session: "s1" } as unknown as Observation);
@@ -249,7 +250,7 @@ test("a tool turn sends the catalog, then the call and its result, as Messages b
 });
 
 const respondWith = (provider: ReturnType<typeof recording>) =>
-  Effect.runPromise(
+  runTest(
     Effect.gen(function* () {
       return yield* (yield* ModelClient).respond(
         target,

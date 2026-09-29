@@ -10,6 +10,7 @@
     "check:brands": "bun scripts/check-brands.ts"
   },
   "devDependencies": {
+    "@effect/platform-bun": "4.0.0-rc.118",
     "@effect/tsgo": "^0.46.1",
     "@types/bun": "latest",
     "oxlint": "1.85.0",
