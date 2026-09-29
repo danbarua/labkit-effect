@@ -2,8 +2,9 @@
  * A conversation turn: from the input that started it to the model's final answer. It runs steps
  * one after another. Input for the turn waits in its mailbox while a step runs, and is taken
  * between steps; between steps the turn posts `Proceed` to itself, which arrives after the waiting
- * input is taken, and then goes on. It ends when a step gives a final answer and no input was
- * taken since, or when a step stops without an answer; input still waiting then is dropped. The
+ * input is taken, and then goes on. After a final answer it asks the layers around the core for
+ * anything more first (`BeforeTurnEnded`, answered by `TurnEndReviewed`); it ends when no input was
+ * taken by then, or when a step stops without an answer; input still waiting then is dropped. The
  * model's observations are addressed to the turn, which passes them to its current step.
  */
 
@@ -12,6 +13,7 @@ import {
   type ModelObservation,
   type Send,
   type ToConversationTurn,
+  type TurnObservation,
   toAgent,
   toConversationTurn,
   toTurnStep,
@@ -32,7 +34,7 @@ export type ConversationTurnState =
   | { readonly _tag: "AfterAnswerSteered"; readonly turn: TurnId; readonly step: StepIndex }
   | { readonly _tag: "Ended"; readonly turn: TurnId };
 
-export type ConversationTurnMessage = ToConversationTurn | ModelObservation;
+export type ConversationTurnMessage = ToConversationTurn | ModelObservation | TurnObservation;
 
 type TurnStep = Step<ConversationTurnState, Send>;
 
@@ -58,10 +60,21 @@ const take = (state: ConversationTurnState, input: Seq, next: ConversationTurnSt
   sends: [],
 });
 
-const between = (
-  state: Extract<ConversationTurnState, { _tag: "Stepping" }>,
-  next: "AfterTools" | "AfterAnswer",
-): TurnStep => ({ ...becomes({ _tag: next, turn: state.turn, step: state.step }), sends: [proceed(state.turn)] });
+/** After a tool batch the turn goes on once its waiting input is taken. */
+const afterTools = (state: Extract<ConversationTurnState, { _tag: "Stepping" }>): TurnStep => ({
+  ...becomes({ _tag: "AfterTools", turn: state.turn, step: state.step }),
+  sends: [proceed(state.turn)],
+});
+
+/**
+ * After an answer the layers around the core are asked for anything more before the turn ends
+ * (`BeforeTurnEnded`); `TurnEndReviewed` then decides: input taken meanwhile means a next step,
+ * none means the turn ends.
+ */
+const afterAnswer = (state: Extract<ConversationTurnState, { _tag: "Stepping" }>): TurnStep => ({
+  ...becomes({ _tag: "AfterAnswer", turn: state.turn, step: state.step }),
+  requests: [{ _tag: "BeforeTurnEnded", turn: state.turn }],
+});
 
 const passOn = (
   state: Extract<ConversationTurnState, { _tag: "Stepping" }>,
@@ -86,6 +99,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelResponded: "ignored",
     ModelFailed: "ignored",
     ModelVetoed: "ignored",
+    TurnEndReviewed: "ignored",
   },
   Opening: {
     TurnOpened: "ignored",
@@ -97,17 +111,19 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelResponded: "ignored",
     ModelFailed: "ignored",
     ModelVetoed: "ignored",
+    TurnEndReviewed: "ignored",
   },
   Stepping: {
     TurnOpened: "ignored",
     Steer: "deferred",
     Proceed: "ignored",
-    StepToolsSettled: (state) => between(state, "AfterTools"),
-    StepAnswered: (state) => between(state, "AfterAnswer"),
+    StepToolsSettled: afterTools,
+    StepAnswered: afterAnswer,
     StepStopped: (state, message) => ended(state.turn, message.ending),
     ModelResponded: passOn,
     ModelFailed: passOn,
     ModelVetoed: passOn,
+    TurnEndReviewed: "ignored",
   },
   AfterTools: {
     TurnOpened: "ignored",
@@ -119,12 +135,14 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelResponded: "ignored",
     ModelFailed: "ignored",
     ModelVetoed: "ignored",
+    TurnEndReviewed: "ignored",
   },
   AfterAnswer: {
     TurnOpened: "ignored",
     Steer: (state, message) =>
       take(state, message.input, { _tag: "AfterAnswerSteered", turn: state.turn, step: state.step }),
-    Proceed: (state) => ended(state.turn, { _tag: "Answered" }),
+    Proceed: "ignored",
+    TurnEndReviewed: (state) => ended(state.turn, { _tag: "Answered" }),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
     StepStopped: "ignored",
@@ -135,7 +153,8 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
   AfterAnswerSteered: {
     TurnOpened: "ignored",
     Steer: (state, message) => take(state, message.input),
-    Proceed: (state) => nextStep(state.turn, state.step),
+    Proceed: "ignored",
+    TurnEndReviewed: (state) => nextStep(state.turn, state.step),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
     StepStopped: "ignored",
@@ -157,5 +176,6 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelResponded: "ignored",
     ModelFailed: "ignored",
     ModelVetoed: "ignored",
+    TurnEndReviewed: "ignored",
   },
 };

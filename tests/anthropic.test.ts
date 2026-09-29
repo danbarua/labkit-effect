@@ -8,7 +8,7 @@ import { ModelClient } from "../src/agent-effect/contracts.ts";
 import { logKeys } from "../src/agent-effect/log-keys.ts";
 import { json } from "./support/received.ts";
 import type { Observation } from "../src/agent-core/observation.ts";
-import { BoringModelProvider, CountingTurns } from "../src/agent-effect/boring.ts";
+import { BoringModelProvider, CountingTurns, NoTurnEndHooks } from "../src/agent-effect/boring.ts";
 import { AnthropicModelClient } from "../src/agent-effect/anthropic-client.ts";
 import { openSession } from "../src/agent-effect/loop.ts";
 import { SmolToolRunner, smolCatalog } from "../src/agent-effect/smol-tools.ts";
@@ -52,6 +52,8 @@ async function toolResultSent(call: { name: string; input: unknown }) {
           ToolContextAssembler(smolCatalog),
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.server.url))),
           CountingTurns,
+          NoTurnEndHooks,
+  NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),
@@ -216,6 +218,7 @@ test("a tool turn sends the catalog, then the call and its result, as Messages b
           ToolContextAssembler(smolCatalog),
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))),
           CountingTurns,
+          NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),

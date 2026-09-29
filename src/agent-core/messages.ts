@@ -20,6 +20,9 @@ export type AgentObservation = Extract<Observation, { _tag: "SessionOpened" | "I
 /** Observations delivered to the turn they name, which passes them to its current step. */
 export type ModelObservation = Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" | "ModelVetoed" }>;
 
+/** Observations delivered to the turn they name, for the turn itself. */
+export type TurnObservation = Extract<Observation, { _tag: "TurnEndReviewed" }>;
+
 /** Observations delivered to the call they name. */
 export type CallObservation = Extract<Observation, { _tag: "ToolEnded" }>;
 

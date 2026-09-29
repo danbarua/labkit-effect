@@ -52,8 +52,10 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
 - I3. Input that arrives while a turn runs waits in the turn's mailbox and is taken between steps:
   when every call of a tool batch has settled, or when the model gives a final answer. The model is
   then asked again.
-- I4. A turn ends (Decision `TurnEnded`, `Answered`) on a final answer with no input taken after
-  it. (Dan chose this.)
+- I4. After a final answer the turn asks the layers around the core for anything more first
+  (request `BeforeTurnEnded`; a Stop hook's feedback, say, arrives as input), and they answer with
+  `TurnEndReviewed`. The turn ends (Decision `TurnEnded`, `Answered`) when no input was taken by
+  then; otherwise it goes on. How often hooks may hold a turn open is the layers' business.
 - I5. The sender can cancel input still waiting in a mailbox (Observation `InputCancelled`); it is
   withdrawn. Cancelling input already taken changes nothing.
 - I6. A turn that ends other than by an answer (`Failed`, `Vetoed`) drops the input still waiting

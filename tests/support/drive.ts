@@ -1,8 +1,9 @@
 /**
  * Plays the part of the layer around the core: records each observation, asks the machine what
  * follows, records the decisions, and collects the effect requests. It starts turns by the loop's
- * rule (input arrives while the agent is idle), naming them `turn-1`, `turn-2`, …; every request is
- * left to the test.
+ * rule (input arrives while the agent is idle), naming them `turn-1`, `turn-2`, …, and answers
+ * `BeforeTurnEnded` at once, as a layer with no turn-end hooks does; every other request is left to
+ * the test.
  */
 
 import { Schema } from "effect";
@@ -19,10 +20,12 @@ export interface Session {
   turns: number;
   /** Whether the driver starts turns; a test that starts them itself sets false. */
   startsTurns: boolean;
+  /** Whether the driver answers `BeforeTurnEnded` at once, as a layer with no hooks does. */
+  reviewsTurnEnds: boolean;
 }
 
 export function open(): Session {
-  return { world: emptyWorld, journal: [], requests: [], turns: 0, startsTurns: true };
+  return { world: emptyWorld, journal: [], requests: [], turns: 0, startsTurns: true, reviewsTurnEnds: true };
 }
 
 function record(session: Session, fact: Fact): void {
@@ -40,6 +43,9 @@ export function observe(session: Session, raw: unknown): Seq {
   for (const decision of outcome.decisions)
     record(session, { _tag: "Decided", seq: Seq.make(session.journal.length + 1), decision });
   session.requests.push(...outcome.requests);
+  for (const request of outcome.requests)
+    if (request._tag === "BeforeTurnEnded" && session.reviewsTurnEnds)
+      observe(session, { _tag: "TurnEndReviewed", turn: request.turn });
   if (observation._tag === "InputArrived" && session.startsTurns && session.world.agent.state._tag === "Idle") {
     session.turns += 1;
     observe(session, { _tag: "TurnStarted", turn: `turn-${session.turns}` });

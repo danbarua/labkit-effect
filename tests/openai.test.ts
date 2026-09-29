@@ -3,7 +3,7 @@
 import { afterAll, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import type { Observation } from "../src/agent-core/observation.ts";
-import { BoringModelProvider, CountingTurns } from "../src/agent-effect/boring.ts";
+import { BoringModelProvider, CountingTurns, NoTurnEndHooks } from "../src/agent-effect/boring.ts";
 import { openSession } from "../src/agent-effect/loop.ts";
 import { OpenAiModelClient } from "../src/agent-effect/openai-client.ts";
 import { SmolToolRunner, smolCatalog } from "../src/agent-effect/smol-tools.ts";
@@ -32,6 +32,8 @@ async function turn(responses: ReadonlyArray<unknown>) {
           ToolContextAssembler(smolCatalog),
           OpenAiModelClient.pipe(Layer.provide(openAiAt(provider.url))),
           CountingTurns,
+          NoTurnEndHooks,
+  NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),

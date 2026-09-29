@@ -55,11 +55,15 @@ test("a final answer with input queued does not end the turn: the input is given
   const session = started();
   const interjection = observe(session, { _tag: "InputArrived", from: { _tag: "System" }, text: "CI went red" });
   const answered = observe(session, answers);
-  expect(tags(session.journal.filter((fact) => fact.seq > answered))).toEqual(["InputDelivered", "ModelAsked"]);
-  expect(session.journal.at(-2)).toMatchObject({ decision: { inputs: [interjection] } });
+  expect(tags(session.journal.filter((fact) => fact.seq > answered))).toEqual([
+    "InputDelivered",
+    "TurnEndReviewed",
+    "ModelAsked",
+  ]);
+  expect(session.journal.at(-3)).toMatchObject({ decision: { inputs: [interjection] } });
 
   const second = observe(session, answers);
-  expect(tags(session.journal.filter((fact) => fact.seq > second))).toEqual(["TurnEnded"]);
+  expect(tags(session.journal.filter((fact) => fact.seq > second))).toEqual(["TurnEndReviewed", "TurnEnded"]);
 });
 
 test("queued input cancelled by its sender is not given to the turn", () => {
@@ -67,7 +71,7 @@ test("queued input cancelled by its sender is not given to the turn", () => {
   const queued = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "also update the docs" });
   observe(session, { _tag: "InputCancelled", input: queued });
   const answered = observe(session, answers);
-  expect(tags(session.journal.filter((fact) => fact.seq > answered))).toEqual(["TurnEnded"]);
+  expect(tags(session.journal.filter((fact) => fact.seq > answered))).toEqual(["TurnEndReviewed", "TurnEnded"]);
   const given = session.journal.flatMap((fact) =>
     fact._tag === "Decided" && fact.decision._tag === "InputDelivered"
       ? fact.decision.inputs

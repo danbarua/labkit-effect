@@ -17,7 +17,10 @@
  *   `thinking` with its signature is `Thinking`, `tool_use` is `ToolCall`, anything else is
  *   `Unrecognised`; the message's id and usage are its metadata;
  * - a `tool_result` block is `ToolEnded`: `Failed` (the tool's own report) when `is_error`,
- *   otherwise `Succeeded`.
+ *   otherwise `Succeeded`;
+ * - after a final answer the core asks `BeforeTurnEnded`; a Stop hook's feedback that follows is
+ *   given to the turn first, and the review is answered (`TurnEndReviewed`) at the next record that
+ *   is not such feedback.
  */
 
 import { createReadStream, mkdirSync, writeFileSync } from "node:fs";
@@ -45,6 +48,8 @@ const state = {
   unmapped: new Map<string, number>(),
   records: 0,
   pending: undefined as { id: string; model: string; blocks: Array<Json>; usage: Json; stop: Json } | undefined,
+  /** A turn whose `BeforeTurnEnded` is not answered yet: a Stop hook's feedback may still come. */
+  review: undefined as string | undefined,
 };
 
 const count = (kind: string): void => {
@@ -61,6 +66,7 @@ function observe(raw: unknown): void {
   state.facts.push(encodeFact({ _tag: "Observed", seq, observation }));
   for (const decision of outcome.decisions)
     state.facts.push(encodeFact({ _tag: "Decided", seq: Seq.make(state.facts.length + 1), decision }));
+  for (const request of outcome.requests) if (request._tag === "BeforeTurnEnded") state.review = request.turn;
   if (observation._tag === "InputArrived" && state.world.agent.state._tag === "Idle") {
     state.turns += 1;
     observe({ _tag: "TurnStarted", turn: `turn-${state.turns}` });
@@ -83,6 +89,16 @@ function part(block: Json): unknown {
   }
   return { _tag: "Unrecognised", received: json(block) };
 }
+
+/** Answers the open `BeforeTurnEnded`: whatever feedback there was has been given. */
+function flushReview(): void {
+  const turn = state.review;
+  if (turn === undefined) return;
+  state.review = undefined;
+  observe({ _tag: "TurnEndReviewed", turn });
+}
+
+const str = (value: Json | undefined): string => (typeof value === "string" ? value : "");
 
 /** The assistant message gathered so far, as one model response. */
 function flushResponse(): void {
@@ -113,6 +129,7 @@ function onRecord(record: Record_): void {
     const m = message as Record_;
     const id = typeof m["id"] === "string" ? m["id"] : "";
     if (state.pending !== undefined && state.pending.id !== id) flushResponse();
+    if (state.pending === undefined) flushReview();
     const blocks = Array.isArray(m["content"]) ? (m["content"] as Array<Json>) : [];
     state.pending = {
       id,
@@ -125,6 +142,9 @@ function onRecord(record: Record_): void {
   }
   flushResponse();
   if (type === "user" && typeof message === "object" && message !== null && !Array.isArray(message)) {
+    const raw = (message as Record_)["content"];
+    const stopHook = record["isMeta"] === true && typeof raw === "string" && raw.startsWith("Stop hook feedback");
+    if (!stopHook) flushReview();
     if (record["isCompactSummary"] === true) return count("user (compaction summary)");
     const content = (message as Record_)["content"];
     // A meta message is shown to the model but was not typed by the user: a hook's feedback, a
@@ -136,7 +156,7 @@ function onRecord(record: Record_): void {
     for (const result of results)
       observe({
         _tag: "ToolEnded",
-        call: String(result["tool_use_id"]),
+        call: str(result["tool_use_id"]),
         outcome:
           result["is_error"] === true
             ? { _tag: "Failed", reason: { _tag: "Reported", error: resultContent(result["content"]) } }
@@ -147,8 +167,8 @@ function onRecord(record: Record_): void {
       return r?.["type"] === "text" && typeof r["text"] === "string" ? [r["text"]] : [];
     });
     if (texts.length > 0) observe({ _tag: "InputArrived", from, text: texts.join("\n") });
-    const others = blocks.filter((b) => !["tool_result", "text"].includes(String((b as Record_ | null)?.["type"])));
-    for (const other of others) count(`user block: ${String((other as Record_ | null)?.["type"])}`);
+    const others = blocks.filter((b) => !["tool_result", "text"].includes(str((b as Record_ | null)?.["type"])));
+    for (const other of others) count(`user block: ${str((other as Record_ | null)?.["type"])}`);
     return;
   }
   const subtype = typeof record["subtype"] === "string" ? `/${record["subtype"]}` : "";
@@ -165,6 +185,7 @@ for await (const line of lines) {
   }
 }
 flushResponse();
+flushReview();
 
 const decided = new Map<string, number>();
 for (const fact of state.facts as Array<{ _tag: string; decision?: { _tag: string } }>)

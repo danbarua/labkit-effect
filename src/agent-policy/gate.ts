@@ -15,7 +15,8 @@ import type { Policy, PolicyMessage, PolicyStep } from "./policy.ts";
 export const RequestKey = Schema.String.pipe(Schema.brand("RequestKey"));
 export type RequestKey = typeof RequestKey.Type;
 
-type Reviewed = EffectRequest;
+/** `BeforeTurnEnded` asks the layers around the core for more input; it is forwarded without review. */
+type Reviewed = Exclude<EffectRequest, { _tag: "BeforeTurnEnded" }>;
 
 export function keyOf(request: Reviewed): RequestKey {
   switch (request._tag) {
@@ -116,8 +117,12 @@ export function gate<State>(
   input: GateInput,
 ): GateStep<State> {
   switch (input._tag) {
-    case "Requested":
-      return settle(held, keyOf(input.request), input.request, policy.start(input.request));
+    case "Requested": {
+      const request = input.request;
+      return request._tag === "BeforeTurnEnded"
+        ? { gate: held, outputs: [{ _tag: "Forward", request }] }
+        : settle(held, keyOf(request), request, policy.start(request));
+    }
     case "Answered": {
       const waiting = held.waiting.get(input.key);
       return waiting === undefined

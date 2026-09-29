@@ -88,6 +88,8 @@ export const Observation = Schema.Union([
   Schema.TaggedStruct("ModelVetoed", { turn: TurnId, reason: Received }),
   /** A tool call ended. */
   Schema.TaggedStruct("ToolEnded", { call: CallId, outcome: ToolOutcome }),
+  /** The layers around the core finished giving `turn` input before it ends (`BeforeTurnEnded`). */
+  Schema.TaggedStruct("TurnEndReviewed", { turn: TurnId }),
 ]);
 export type Observation = typeof Observation.Type;
 

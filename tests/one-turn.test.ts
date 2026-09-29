@@ -1,7 +1,7 @@
 import { afterAll, expect, test } from "bun:test";
 import { anthropicAt } from "./support/providers.ts";
 import { Effect, Layer } from "effect";
-import { BoringContextAssembler, BoringModelProvider, CountingTurns } from "../src/agent-effect/boring.ts";
+import { BoringContextAssembler, BoringModelProvider, CountingTurns, NoTurnEndHooks } from "../src/agent-effect/boring.ts";
 import { AnthropicModelClient } from "../src/agent-effect/anthropic-client.ts";
 import { openSession } from "../src/agent-effect/loop.ts";
 import { SmolToolRunner } from "../src/agent-effect/smol-tools.ts";
@@ -30,6 +30,7 @@ const services = Layer.mergeAll(
   AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))),
   BoringContextAssembler,
   CountingTurns,
+  NoTurnEndHooks,
   SmolToolRunner,
 );
 
@@ -50,6 +51,7 @@ test("one turn, from the user's message to the model's answer", async () => {
     "InputDelivered",
     "ModelAsked",
     "ModelResponded",
+    "TurnEndReviewed",
     "TurnEnded",
   ]);
   expect(facts[5] as unknown).toMatchObject({
@@ -60,5 +62,5 @@ test("one turn, from the user's message to the model's answer", async () => {
       parts: [{ _tag: "Text", text: "Hello back." }],
     },
   });
-  expect(facts[6] as unknown).toMatchObject({ decision: { turn: "turn-1", ending: { _tag: "Answered" } } });
+  expect(facts[7] as unknown).toMatchObject({ decision: { turn: "turn-1", ending: { _tag: "Answered" } } });
 });

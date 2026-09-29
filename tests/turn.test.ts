@@ -47,12 +47,14 @@ test("the turn runs to an answer through one tool call", () => {
     "ToolEnded",
     "ModelAsked",
     "ModelResponded",
+    "TurnEndReviewed",
     "TurnEnded",
   ]);
   expect(session.requests.map((request) => request._tag)).toEqual([
     "RequestModelResponse",
     "RunTool",
     "RequestModelResponse",
+    "BeforeTurnEnded",
   ]);
 });
 

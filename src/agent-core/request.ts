@@ -12,6 +12,11 @@ import { Received } from "./received.ts";
 export const EffectRequest = Schema.Union([
   /** Ask the model for its next response in `turn`, given the conversation so far. */
   Schema.TaggedStruct("RequestModelResponse", { turn: TurnId }),
+  /**
+   * The model answered `turn` and nothing was waiting: before the turn ends, the layers around the
+   * core may give it more input (a hook's feedback, say). They report `TurnEndReviewed` when done.
+   */
+  Schema.TaggedStruct("BeforeTurnEnded", { turn: TurnId }),
   /** Run one tool call the model proposed. */
   Schema.TaggedStruct("RunTool", { call: CallId, tool: ToolName, input: Received }),
 ]);

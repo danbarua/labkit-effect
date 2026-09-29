@@ -3,7 +3,8 @@
  * messages machines send, in the order sent, until none are left.
  *
  * - An observation's address comes from its own fields: input and a turn's start go to the agent,
- *   a model's response to the turn it names, a tool's end to the call it names.
+ *   a model's response and a turn's end review to the turn they name, a tool's end to the call it
+ *   names.
  * - Only messages between machines create machines: the agent opens a turn, a turn starts its
  *   steps, a step opens its calls.
  * - Every machine has a mailbox. A message its table defers waits there, with its own position;
@@ -231,7 +232,8 @@ export function deliver(world: World, seq: Seq, observation: Observation): Deliv
         return { world: withdrawn(world, observation.input), outputs: none };
       case "ModelResponded":
       case "ModelFailed":
-      case "ModelVetoed": {
+      case "ModelVetoed":
+      case "TurnEndReviewed": {
         const machine = world.turns.get(observation.turn);
         return machine === undefined ? "undelivered" : toTurn(world, observation.turn, machine, observation, seq, seq);
       }

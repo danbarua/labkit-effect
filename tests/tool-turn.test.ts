@@ -3,7 +3,7 @@ import { anthropicAt } from "./support/providers.ts";
 import { json } from "./support/received.ts";
 import { Effect, Layer } from "effect";
 import type { Observation } from "../src/agent-core/observation.ts";
-import { BoringModelProvider, CountingTurns } from "../src/agent-effect/boring.ts";
+import { BoringModelProvider, CountingTurns, NoTurnEndHooks } from "../src/agent-effect/boring.ts";
 import { AnthropicModelClient } from "../src/agent-effect/anthropic-client.ts";
 import { openSession } from "../src/agent-effect/loop.ts";
 import { SmolToolRunner, smolCatalog } from "../src/agent-effect/smol-tools.ts";
@@ -38,6 +38,7 @@ const services = Layer.mergeAll(
   AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))),
   ToolContextAssembler(smolCatalog),
   CountingTurns,
+  NoTurnEndHooks,
   SmolToolRunner,
 );
 
@@ -61,6 +62,7 @@ test("the model calls a tool from the catalog, and answers from its result", asy
     "ToolEnded",
     "ModelAsked",
     "ModelResponded",
+    "TurnEndReviewed",
     "TurnEnded",
   ]);
   expect(facts[6] as unknown).toMatchObject({
