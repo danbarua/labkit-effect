@@ -1,4 +1,9 @@
 import { expect, test } from "bun:test";
+import { Effect } from "effect";
+import type { Fact } from "../src/agent-core/fact.ts";
+import { ModelName, ProviderName, TurnId } from "../src/agent-core/names.ts";
+import { ModelProvider } from "../src/agent-effect/contracts.ts";
+import { ModelFromFacts } from "../src/agent-effect/model-choice.ts";
 import { observe, open, type Session } from "./support/drive.ts";
 import { json } from "./support/received.ts";
 
@@ -65,4 +70,21 @@ test("a change of model still waiting when the turn ends is taken, not dropped",
   observe(session, toOpenAi);
   observe(session, { _tag: "TurnInterrupted", turn: "turn-1" });
   expect(tags(session).slice(-4)).toEqual(["ModelChangeArrived", "TurnInterrupted", "TurnEnded", "ModelChangeTaken"]);
+});
+
+test("a session's facts say which model it asks: the latest change taken, or the one it started with", async () => {
+  const anthropic = { provider: ProviderName.make("anthropic"), model: ModelName.make("claude-sonnet-5") };
+  const select = (facts: ReadonlyArray<Fact>) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        return yield* (yield* ModelProvider).select(facts, TurnId.make("turn-1"));
+      }).pipe(Effect.provide(ModelFromFacts(anthropic))),
+    );
+  const session = open();
+  observe(session, { _tag: "SessionOpened", session: "s1" });
+  expect(await select(session.journal)).toEqual(anthropic);
+  observe(session, toOpenAi);
+  observe(session, { _tag: "ModelChangeArrived", provider: "openai", model: "gpt-5.6-mini" });
+  // Resuming from these facts asks the model the session last switched to.
+  expect(await select(session.journal) as unknown).toEqual({ provider: "openai", model: "gpt-5.6-mini" });
 });

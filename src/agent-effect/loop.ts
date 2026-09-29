@@ -88,8 +88,8 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
     switch (request._tag) {
       case "RequestModelResponse":
         return Effect.gen(function* () {
-          const target = yield* (yield* ModelProvider).select(request.turn);
           const facts = (yield* Ref.get(held)).facts;
+          const target = yield* (yield* ModelProvider).select(facts, request.turn);
           const context = yield* (yield* ContextAssembler).assemble(facts, request.turn);
           return [yield* (yield* ModelClient).respond(target, context, request.turn)];
         });

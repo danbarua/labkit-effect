@@ -15,10 +15,10 @@ export interface Target {
   readonly model: ModelName;
 }
 
-/** Chooses the model for a turn's next request. */
+/** Chooses the model for a turn's next request, given the session's facts. */
 export class ModelProvider extends Context.Service<
   ModelProvider,
-  { readonly select: (turn: TurnId) => Effect.Effect<Target> }
+  { readonly select: (facts: ReadonlyArray<Fact>, turn: TurnId) => Effect.Effect<Target> }
 >()("agent-effect/ModelProvider") {}
 
 /** A tool the model may call: its name, what it does, and the JSON Schema of its input. */
