@@ -19,6 +19,10 @@ export type Label = typeof Label.Type;
 export const ErrorCode = Schema.Literals(["number_out_of_sequence", "irrational_number", "irrational_user", "i_am_bored"]);
 export type ErrorCode = typeof ErrorCode.Type;
 
+/** The model's description of a problem, for the system administrators. */
+export const ErrorMessage = Schema.String.pipe(Schema.brand("ErrorMessage"));
+export type ErrorMessage = typeof ErrorMessage.Type;
+
 /** A tool: what the model is offered, and how a call runs. */
 interface FizzBuzzTool {
   readonly spec: ToolSpec;
@@ -45,7 +49,7 @@ function tool<A>(
       const decoded = decode(parsed.value);
       return decoded._tag === "Success"
         ? { _tag: "Succeeded", output: receivedJson(run(decoded.success)) }
-        : rejected(String(decoded.failure));
+        : rejected(decoded.failure.message);
     },
   };
 }
@@ -66,7 +70,7 @@ export const reportError = tool(
   "Reports a problem with the user's message to the system administrators.",
   Schema.Struct({
     error_code: ErrorCode.annotate({ description: "Select the appropriate error for the problem." }),
-    error_message: Schema.String.annotate({
+    error_message: ErrorMessage.annotate({
       description:
         "Provide a helpful description of the error to assist the system administrators in diagnosing the problem.",
     }),
