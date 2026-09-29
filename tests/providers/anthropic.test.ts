@@ -1,18 +1,18 @@
 /** The Anthropic Messages adapter: how the core's types are shaped into its wire format. */
 
 import { afterAll, expect, test } from "bun:test";
-import { anthropicAt } from "./support/providers.ts";
+import { anthropicAt } from "../support/providers.ts";
 import { Effect, Layer, Logger } from "effect";
-import { ModelName, ProviderName, TurnId } from "../src/agent-core/names.ts";
-import { ModelClient } from "../src/agent-effect/contracts.ts";
-import { logKeys } from "../src/agent-effect/log-keys.ts";
-import { json } from "./support/received.ts";
-import type { Observation } from "../src/agent-core/observation.ts";
-import { BoringModelProvider, CountingTurns, NoTurnEndHooks } from "../src/agent-effect/boring.ts";
-import { AnthropicModelClient } from "../src/agent-effect/anthropic-client.ts";
-import { openSession } from "../src/agent-effect/loop.ts";
-import { SmolToolRunner, smolCatalog } from "../src/agent-effect/smol-tools.ts";
-import { ToolContextAssembler } from "../src/agent-effect/tool-context.ts";
+import { ModelName, ProviderName, TurnId } from "../../src/agent-core/names.ts";
+import { ModelClient } from "../../src/agent-effect/contracts.ts";
+import { logKeys } from "../../src/agent-effect/log-keys.ts";
+import { json } from "../support/received.ts";
+import type { Observation } from "../../src/agent-core/observation.ts";
+import { BoringModelProvider, CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/boring.ts";
+import { AnthropicModelClient } from "../../src/agent-effect/anthropic-client.ts";
+import { openSession } from "../../src/agent-effect/loop.ts";
+import { SmolToolRunner, smolCatalog } from "../../src/agent-effect/smol-tools.ts";
+import { ToolContextAssembler } from "../../src/agent-effect/tool-context.ts";
 
 /** A provider that makes one scripted tool call, then answers; it keeps every request it is sent. */
 function scripted(call: { name: string; input: unknown }) {

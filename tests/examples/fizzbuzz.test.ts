@@ -1,19 +1,19 @@
 import { Metric } from "effect";
-import type { Fact } from "../src/agent-core/fact.ts";
-import { CountedToolRunner } from "../src/instrumentation/tool-metrics.ts";
+import type { Fact } from "../../src/agent-core/fact.ts";
+import { CountedToolRunner } from "../../src/instrumentation/tool-metrics.ts";
 import { expect, test } from "bun:test";
 import { Effect } from "effect";
 import { TestClock } from "effect/testing";
-import { estimatedTokens } from "../src/agent-context/providers.ts";
-import type { ContextMessage, ModelContext } from "../src/agent-effect/contracts.ts";
-import { conversationOf } from "../src/agent-effect/conversation.ts";
-import { FizzBuzzCompaction } from "../src/fizzbuzz/compaction.ts";
-import { advanced, basic, countingUser, type Played, play } from "../src/fizzbuzz/scenario.ts";
-import { FizzBuzzToolRunner } from "../src/fizzbuzz/tools.ts";
-import { toolStats } from "../src/instrumentation/tool-stats.ts";
-import { ToolName } from "../src/agent-core/names.ts";
-import { ToolRunner } from "../src/agent-effect/contracts.ts";
-import { asText, receivedJson } from "../src/agent-effect/received.ts";
+import { estimatedTokens } from "../../src/agent-context/providers.ts";
+import type { ContextMessage, ModelContext } from "../../src/agent-effect/contracts.ts";
+import { conversationOf } from "../../src/agent-effect/conversation.ts";
+import { FizzBuzzCompaction } from "../../src/fizzbuzz/compaction.ts";
+import { advanced, basic, countingUser, type Played, play } from "../../src/fizzbuzz/scenario.ts";
+import { FizzBuzzToolRunner } from "../../src/fizzbuzz/tools.ts";
+import { toolStats } from "../../src/instrumentation/tool-stats.ts";
+import { ToolName } from "../../src/agent-core/names.ts";
+import { ToolRunner } from "../../src/agent-effect/contracts.ts";
+import { asText, receivedJson } from "../../src/agent-effect/received.ts";
 
 /** One line per part: who sent it and what it was. */
 const transcript = (messages: ReadonlyArray<ContextMessage>): ReadonlyArray<string> =>

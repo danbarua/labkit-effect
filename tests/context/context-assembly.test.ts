@@ -15,17 +15,17 @@ import {
   SystemPrompts,
   type ToolCatalog,
   ToolCatalogs,
-} from "../src/agent-context/assemble.ts";
-import type { ContextMessage } from "../src/agent-effect/contracts.ts";
-import { logKeys } from "../src/agent-context/log-keys.ts";
+} from "../../src/agent-context/assemble.ts";
+import type { ContextMessage } from "../../src/agent-effect/contracts.ts";
+import { logKeys } from "../../src/agent-context/log-keys.ts";
 import {
   BoringSystemPromptProvider,
   BoringToolCatalog,
   ContextWindowAwareModelSelector,
   FixedModelSelector,
   SystemTimeNoticeProvider,
-} from "../src/agent-context/providers.ts";
-import { ModelName, ProviderName } from "../src/agent-core/names.ts";
+} from "../../src/agent-context/providers.ts";
+import { ModelName, ProviderName } from "../../src/agent-core/names.ts";
 
 const model = (name: string, contextWindow: number): ModelChoice => ({
   provider: ProviderName.make("boring"),

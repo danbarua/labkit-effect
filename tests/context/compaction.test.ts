@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { json } from "./support/received.ts";
-import { observe, open, type Session } from "./support/drive.ts";
+import { json } from "../support/received.ts";
+import { observe, open, type Session } from "../support/drive.ts";
 
 const tags = (session: Session) =>
   session.journal.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
