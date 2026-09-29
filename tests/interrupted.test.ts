@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test";
 import { json } from "./support/received.ts";
-import { observe, open, type Session } from "./support/drive.ts";
+import { observe, open, opened, type Session } from "./support/drive.ts";
 
 const tags = (session: Session) =>
   session.journal.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
 
 test("an interruption during a step ends the turn; input waiting for it is dropped", () => {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1" });
+  observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "and count them" });
   observe(session, { _tag: "TurnInterrupted", turn: "turn-1" });
@@ -28,7 +28,7 @@ test("an interruption during a step ends the turn; input waiting for it is dropp
 
 test("a response to an interrupted turn is not expected", () => {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1" });
+  observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
   observe(session, { _tag: "TurnInterrupted", turn: "turn-1" });
   observe(session, {

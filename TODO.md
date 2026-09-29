@@ -17,11 +17,10 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
 
 ## Build
 
-- [ ] Starting a session (Dan): a session's first turn needs a model, a system prompt (if any),
-      tools (if any) and the first input. A session with no model selected is an invalid state, so
-      make it unrepresentable: the starting model is recorded when the session opens, and
-      `ModelFromFacts` loses its `initial` default. Whether the system prompt and tools are also
-      recorded (they come from context assembly's providers today) is open.
+- [ ] Changes to the system prompt or tools after the session opens, as facts of their own (the
+      opening records them; Anthropic takes tool changes mid-conversation as `tool_addition` and
+      `tool_removal` blocks). Codex records settings changes as `thread_settings_applied`, which
+      the importer reads only for the first model.
 - [ ] Reconfiguring a session, beyond the model and provider (built: `ModelChangeArrived`, taken
       between steps; `ModelFromFacts`; the fallback chain reports the switch when a fallback
       answers): thinking and effort. Newer Anthropic models take thinking as `adaptive` or off and

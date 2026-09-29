@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Effect, Exit, Layer, Logger, Schema } from "effect";
 import * as AiError from "effect/ai/AiError";
 import type { Fact } from "../../src/agent-core/fact.ts";
-import { InputText, ModelName, ProviderName, SessionId, TurnId } from "../../src/agent-core/names.ts";
+import { InputText, ModelName, ProviderName, TurnId } from "../../src/agent-core/names.ts";
 import type { ModelClient, ModelContext, ProviderRequest } from "../../src/agent-effect/contracts.ts";
 import { BoringModelProvider } from "../support/boring.ts";
 import { CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/turns.ts";
@@ -19,8 +19,9 @@ import type { Retries } from "../../src/agent-effect/provider-call.ts";
 import { anthropicModelClient, anthropicRequests } from "../../src/agent-effect/providers/anthropic-client.ts";
 import { openAiModelClient, openAiRequests } from "../../src/agent-effect/providers/openai-client.ts";
 import { openAiCompatModelClient, openAiCompatRequests } from "../../src/agent-effect/providers/openai-compat-client.ts";
-import { ToolContextAssembler } from "../../src/agent-effect/tool-context.ts";
+import { TurnContextAssembler } from "../../src/agent-effect/turn-context.ts";
 import { runTest } from "../support/run.ts";
+import { boringOpening } from "../support/boring.ts";
 import { anthropicAtMock, openAiAtMock, openAiCompatAtMock, startVidaiMock, type VidaiMock } from "../support/vidaimock.ts";
 
 const state: { mock?: VidaiMock } = {};
@@ -76,7 +77,7 @@ const oneTurn = (client: Layer.Layer<ModelClient>) => {
   const services = Layer.mergeAll(
     BoringModelProvider,
     client,
-    ToolContextAssembler(smolCatalog),
+    TurnContextAssembler,
     CountingTurns,
     NoTurnEndHooks,
     SmolToolRunner,
@@ -85,7 +86,7 @@ const oneTurn = (client: Layer.Layer<ModelClient>) => {
   return runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
-      yield* session.observe({ _tag: "SessionOpened", session: SessionId.make("s1") });
+      yield* session.observe(boringOpening(smolCatalog));
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make("What is 2 + 3?") });
       return yield* session.facts;
     }).pipe(Effect.provide(services)),

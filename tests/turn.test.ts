@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { json } from "./support/received.ts";
-import { observe, open } from "./support/drive.ts";
+import { observe, open, opened } from "./support/drive.ts";
 
 const responseWithEveryPartKind = {
   _tag: "ModelResponded",
@@ -20,7 +20,7 @@ const responseWithEveryPartKind = {
 
 function oneTurnWithATool() {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1" });
+  observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
   observe(session, responseWithEveryPartKind);
   observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } });
@@ -70,7 +70,7 @@ test("the recorded response holds every part the model sent", () => {
 
 test("a response cut short without tool calls is not an answer: the turn asks the model again", () => {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1" });
+  observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "write the report" });
   const response = (text: string, stop: string, ending: string) => ({
     _tag: "ModelResponded",
@@ -105,7 +105,7 @@ test("a response cut short without tool calls is not an answer: the turn asks th
 
 test("a failed attempt at a model request is recorded and changes nothing; the request's outcome ends the step", () => {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1" });
+  observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
   const attempt = {
     _tag: "ModelAttemptFailed",

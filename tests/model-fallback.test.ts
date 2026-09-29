@@ -13,6 +13,7 @@ import type { Observation } from "../src/agent-core/observation.ts";
 import type { Received } from "../src/agent-core/received.ts";
 import { ModelClient, type Target } from "../src/agent-effect/contracts.ts";
 import { ModelFromFacts } from "../src/agent-effect/model-choice.ts";
+import { openedWith } from "../src/agent-effect/session-setup.ts";
 import { BoringContextAssembler } from "./support/boring.ts";
 import { CountingTurns, NoTurnEndHooks } from "../src/agent-effect/turns.ts";
 import { SmolToolRunner } from "./support/smol-tools.ts";
@@ -65,7 +66,7 @@ const oneTurn = async (
   const facts: ReadonlyArray<Fact> = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
-      yield* session.observe({ _tag: "SessionOpened", session: SessionId.make("s1") });
+      yield* session.observe(openedWith({ session: SessionId.make("s1"), model: anthropic, system: undefined, tools: [] }));
       yield* Effect.forEach(
         inputs,
         (input) => session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make(input) }),
@@ -75,7 +76,7 @@ const oneTurn = async (
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          ModelFromFacts(anthropic),
+          ModelFromFacts,
           chain(status),
           BoringContextAssembler,
           CountingTurns,

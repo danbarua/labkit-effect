@@ -1,14 +1,15 @@
 /**
- * Plays a FizzBuzz conversation through the loop: each input the user sends is observed, and the
- * loop carries out everything that follows, with the scripted model, the FizzBuzz tools, and
- * context assembly's services. The result is the session's facts and every context the model was
- * sent.
+ * Plays a FizzBuzz conversation through the loop: the session opens asking the scripted model, with
+ * the FizzBuzz system prompt and the setup's tool catalog recorded; each input the user sends is
+ * observed, and the loop carries out everything that follows. The result is the session's facts and
+ * every context the model was sent.
  */
 
 import { Effect, Layer } from "effect";
 import {
   type Conversation,
   Notices,
+  opening,
   SystemPrompts,
   type ToolCatalog,
   ToolCatalogs,
@@ -16,9 +17,10 @@ import {
 import { AgentContextAssembler, WholeConversation } from "../../agent-context/assembler.ts";
 import type { Fact } from "../../agent-core/fact.ts";
 import { InputText, ModelName, ProviderName, SessionId } from "../../agent-core/names.ts";
-import { CountingTurns, NoTurnEndHooks } from "../../agent-effect/turns.ts";
-import { type ModelContext, ModelProvider, type ToolRunner } from "../../agent-effect/contracts.ts";
+import type { ModelContext, ToolRunner } from "../../agent-effect/contracts.ts";
 import { openSession } from "../../agent-effect/loop.ts";
+import { ModelFromFacts } from "../../agent-effect/model-choice.ts";
+import { CountingTurns, NoTurnEndHooks } from "../../agent-effect/turns.ts";
 import { scriptedFizzBuzzModel } from "./model.ts";
 import { FizzBuzzSystemPromptProvider } from "./prompt.ts";
 import { AdvancedFizzBuzzToolCatalog, FizzBuzzToolCatalog, FizzBuzzToolRunner } from "./tools.ts";
@@ -48,29 +50,24 @@ export interface Played {
 
 export const play = (inputs: ReadonlyArray<string>, setup: Setup = basic): Effect.Effect<Played> => {
   const model = scriptedFizzBuzzModel();
-  const assembler = AgentContextAssembler.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        setup.conversation,
-        Layer.succeed(SystemPrompts, [FizzBuzzSystemPromptProvider]),
-        Layer.succeed(ToolCatalogs, [setup.catalog]),
-        Layer.succeed(Notices, []),
-      ),
-    ),
-  );
   const services = Layer.mergeAll(
-    Layer.succeed(ModelProvider, {
-      select: () => Effect.succeed({ provider: ProviderName.make("scripted"), model: ModelName.make("fizzbuzz-1") }),
-    }),
+    ModelFromFacts,
     model.layer,
-    assembler,
+    AgentContextAssembler.pipe(Layer.provide(Layer.mergeAll(setup.conversation, Layer.succeed(Notices, [])))),
     CountingTurns,
     NoTurnEndHooks,
     setup.tools ?? FizzBuzzToolRunner,
+    Layer.succeed(SystemPrompts, [FizzBuzzSystemPromptProvider]),
+    Layer.succeed(ToolCatalogs, [setup.catalog]),
   );
   return Effect.gen(function* () {
     const session = yield* openSession;
-    yield* session.observe({ _tag: "SessionOpened", session: SessionId.make(setup.session ?? "fizzbuzz") });
+    yield* session.observe(
+      yield* opening(SessionId.make(setup.session ?? "fizzbuzz"), {
+        provider: ProviderName.make("scripted"),
+        model: ModelName.make("fizzbuzz-1"),
+      }),
+    );
     yield* Effect.forEach(
       inputs,
       (text) => session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make(text) }),

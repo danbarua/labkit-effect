@@ -74,10 +74,23 @@ export const ResponseEnding = Schema.Union([
 ]);
 export type ResponseEnding = typeof ResponseEnding.Type;
 
+/** A model, and the provider it is asked through. */
+export const ModelTarget = Schema.Struct({ provider: ProviderName, model: ModelName });
+export type ModelTarget = typeof ModelTarget.Type;
+
 /** Observations recorded as facts. */
 export const Observation = Schema.Union([
-  /** A session was opened. */
-  Schema.TaggedStruct("SessionOpened", { session: SessionId }),
+  /**
+   * A session was opened with what its first turn is given: the model it asks, and its system prompt
+   * and tools when it has any, as they were set. Changes to any of them later are facts of their
+   * own. A session cannot be opened without a model.
+   */
+  Schema.TaggedStruct("SessionOpened", {
+    session: SessionId,
+    model: ModelTarget,
+    system: Schema.optionalKey(Received),
+    tools: Schema.optionalKey(Received),
+  }),
   /** An input arrived. It can arrive at any time, including while a turn is under way. */
   Schema.TaggedStruct("InputArrived", { from: InputSource, text: InputText }),
   /**

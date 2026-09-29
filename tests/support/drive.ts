@@ -24,6 +24,9 @@ export interface Session {
   reviewsTurnEnds: boolean;
 }
 
+/** The opening of session "s1", asking model "boring-1", with no system prompt or tools. */
+export const opened = { _tag: "SessionOpened", session: "s1", model: { provider: "boring", model: "boring-1" } };
+
 export function open(): Session {
   return { world: emptyWorld, journal: [], requests: [], turns: 0, startsTurns: true, reviewsTurnEnds: true };
 }

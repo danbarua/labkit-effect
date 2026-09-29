@@ -1,11 +1,13 @@
 /** Context assembly on its own: the services it needs, provided by test layers; an assembled context out. */
 
 import { expect, test } from "bun:test";
-import { Effect, Layer, Logger } from "effect";
+import { DateTime, Effect, Layer, Logger } from "effect";
 import { TestClock } from "effect/testing";
+import type { Fact } from "../../src/agent-core/fact.ts";
 import {
   assemble,
   Conversation,
+  opening,
   type ModelChoice,
   type ModelSelector,
   ModelSelectors,
@@ -23,7 +25,7 @@ import {
   FixedModelSelector,
   SystemTimeNoticeProvider,
 } from "../../src/agent-context/example-providers.ts";
-import { ModelName, ProviderName } from "../../src/agent-core/names.ts";
+import { ModelName, ProviderName, Seq, SessionId } from "../../src/agent-core/names.ts";
 import { BoringSystemPromptProvider, BoringToolCatalog } from "../support/boring.ts";
 import { runTest } from "../support/run.ts";
 
@@ -55,7 +57,10 @@ const conversation = (text: string): ReadonlyArray<ContextMessage> => [
   { role: "user", parts: [{ _tag: "Text", text }] },
 ];
 
-/** Runs assembly at a fixed time over `messages`, collecting what it logs. */
+/**
+ * Opens a session with the setup's providers, then assembles a request over `messages` at a fixed
+ * time, from the session's facts; collects what it logs.
+ */
 const run = (setup: Setup, messages: ReadonlyArray<ContextMessage>) => {
   const logged: Array<unknown> = [];
   const capture = Logger.make((options) => {
@@ -73,12 +78,14 @@ const run = (setup: Setup, messages: ReadonlyArray<ContextMessage>) => {
   return runTest(
     Effect.gen(function* () {
       yield* TestClock.setTime(Date.parse("2026-09-28T12:00:00.000Z"));
-      return yield* assemble([]);
+      const observation = yield* opening(SessionId.make("s1"), { provider: small.provider, model: small.model });
+      const facts: ReadonlyArray<Fact> = [{ _tag: "Observed", seq: Seq.make(1), time: yield* DateTime.now, observation }];
+      return yield* assemble(facts);
     }).pipe(Effect.provide(layers)),
   ).then((assembled) => ({ assembled, logged }));
 };
 
-test("one provider of each kind: the conversation passes through, each provider's output is in place", async () => {
+test("one provider of each kind: the system prompt and tools recorded at opening, the conversation, the notices", async () => {
   const messages = conversation("Ping?");
   const { assembled, logged } = await run(oneOfEach, messages);
   expect(assembled as unknown).toEqual({
@@ -91,7 +98,7 @@ test("one provider of each kind: the conversation passes through, each provider'
   expect(logged).toEqual([]);
 });
 
-test("the outputs of providers of one kind are appended in the order the providers are listed", async () => {
+test("the system prompts are joined, and the tool catalogs appended, in the order the providers are listed", async () => {
   const { assembled } = await run(
     {
       ...oneOfEach,
@@ -100,7 +107,7 @@ test("the outputs of providers of one kind are appended in the order the provide
     },
     conversation("Ping?"),
   );
-  expect(assembled.system).toEqual(["You are a helpful assistant.", "Answer briefly."]);
+  expect(assembled.system).toEqual(["You are a helpful assistant.\n\nAnswer briefly."]);
   expect(assembled.tools.map((tool) => tool.name as string)).toEqual(["echo", "echo"]);
 });
 

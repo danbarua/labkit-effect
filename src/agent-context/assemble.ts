@@ -1,16 +1,19 @@
 /**
- * Context assembly: produces what the model is sent next. Each kind of content comes from an
- * ordered list of providers, and their outputs are appended in order. The model is chosen last,
- * because a selector may choose by the size of what was assembled.
+ * Context assembly: produces what the model is sent next. The system prompt and tools are the ones
+ * the session's facts record; the system prompt providers and tool catalogs supply them when the
+ * session opens (`opening`). The conversation is a view of the facts, and notices come from their
+ * providers, in order, for each request. The model is chosen last, because a selector may choose by
+ * the size of what was assembled.
  *
- * Where each part comes from is a service: the conversation, as a view of the session's facts, and
- * one ordered list of providers per kind. Layers supply them.
+ * Each of these is a service; layers supply them.
  */
 
 import { Context, Effect } from "effect";
 import type { Fact } from "../agent-core/fact.ts";
-import type { ModelName, ProviderName } from "../agent-core/names.ts";
+import type { ModelName, ProviderName, SessionId } from "../agent-core/names.ts";
+import type { ModelTarget, Observation } from "../agent-core/observation.ts";
 import type { ContextMessage, ToolSpec } from "../agent-effect/contracts.ts";
+import { openedWith, systemOf, toolsOf } from "../agent-effect/session-setup.ts";
 
 /** A model a request can go to, and how much context it takes. */
 export interface ModelChoice {
@@ -79,14 +82,30 @@ export class ModelSelectors extends Context.Service<
 const appended = <A>(outputs: ReadonlyArray<Effect.Effect<ReadonlyArray<A>>>): Effect.Effect<ReadonlyArray<A>> =>
   Effect.forEach(outputs, (output) => output).pipe(Effect.map((all) => all.flat()));
 
-/** Everything but the model, for the session's `facts`. */
+/**
+ * The opening of a session that asks `model`: its system prompt is the system prompt providers'
+ * outputs in order, joined by blank lines, and its tools the tool catalogs' in order. What they
+ * give is recorded, and every request is sent what was recorded, not what they would give later.
+ */
+export const opening = (
+  session: SessionId,
+  model: ModelTarget,
+): Effect.Effect<Extract<Observation, { _tag: "SessionOpened" }>, never, SystemPrompts | ToolCatalogs> =>
+  Effect.gen(function* () {
+    const system = yield* appended((yield* SystemPrompts).map((provider) => provider.system));
+    const tools = yield* appended((yield* ToolCatalogs).map((catalog) => catalog.tools));
+    return openedWith({ session, model, system: system.length === 0 ? undefined : system.join("\n\n"), tools });
+  });
+
+/** Everything but the model, for the session's `facts`: the system prompt and tools as recorded. */
 export const assembleContents = (
   facts: ReadonlyArray<Fact>,
-): Effect.Effect<Contents, never, Conversation | SystemPrompts | ToolCatalogs | Notices> =>
+): Effect.Effect<Contents, never, Conversation | Notices> =>
   Effect.gen(function* () {
+    const system = systemOf(facts);
     return {
-      system: yield* appended((yield* SystemPrompts).map((provider) => provider.system)),
-      tools: yield* appended((yield* ToolCatalogs).map((catalog) => catalog.tools)),
+      system: system === undefined ? [] : [system],
+      tools: yield* toolsOf(facts),
       messages: yield* (yield* Conversation).messages(facts),
       notices: yield* appended((yield* Notices).map((provider) => provider.notices)),
     };
@@ -95,7 +114,7 @@ export const assembleContents = (
 /** The contents for the session's `facts`, and the model they go to. */
 export const assemble = (
   facts: ReadonlyArray<Fact>,
-): Effect.Effect<AssembledContext, never, Conversation | SystemPrompts | ToolCatalogs | Notices | ModelSelectors> =>
+): Effect.Effect<AssembledContext, never, Conversation | Notices | ModelSelectors> =>
   Effect.gen(function* () {
     const contents = yield* assembleContents(facts);
     const [first, ...rest] = yield* ModelSelectors;

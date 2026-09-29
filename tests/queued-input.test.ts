@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { json } from "./support/received.ts";
 import type { Fact } from "../src/agent-core/fact.ts";
-import { observe, open, type Session } from "./support/drive.ts";
+import { observe, open, opened, type Session } from "./support/drive.ts";
 
 function tags(facts: ReadonlyArray<Fact>): Array<string> {
   return facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
@@ -9,7 +9,7 @@ function tags(facts: ReadonlyArray<Fact>): Array<string> {
 
 function started(): Session {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1" });
+  observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "fix the tests" });
   return session;
 }
@@ -133,7 +133,7 @@ test("a vetoed call settles the batch and the model is asked again", () => {
 
 test("input that arrives before a turn starts waits in the agent's mailbox, and the turn takes all of it", () => {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1" });
+  observe(session, opened);
   session.startsTurns = false;
   const first = observe(session, { _tag: "InputArrived", from: { _tag: "System" }, text: "wake up" });
   const second = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "and check mail" });

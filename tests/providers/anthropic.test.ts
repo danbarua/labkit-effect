@@ -13,8 +13,9 @@ import { CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/turns.ts";
 import { AnthropicModelClient } from "../../src/agent-effect/providers/anthropic-client.ts";
 import { openSession } from "../../src/agent-effect/loop.ts";
 import { SmolToolRunner, smolCatalog } from "../support/smol-tools.ts";
-import { ToolContextAssembler } from "../../src/agent-effect/tool-context.ts";
+import { TurnContextAssembler } from "../../src/agent-effect/turn-context.ts";
 import { runTest } from "../support/run.ts";
+import { boringOpening } from "../support/boring.ts";
 
 /** A provider that makes one scripted tool call, then answers; it keeps every request it is sent. */
 function scripted(call: { name: string; input: unknown }) {
@@ -45,13 +46,13 @@ async function toolResultSent(call: { name: string; input: unknown }) {
   await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
-      yield* session.observe({ _tag: "SessionOpened", session: "s1" } as unknown as Observation);
+      yield* session.observe(boringOpening(smolCatalog));
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "go" } as unknown as Observation);
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
           BoringModelProvider,
-          ToolContextAssembler(smolCatalog),
+          TurnContextAssembler,
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.server.url))),
           CountingTurns,
           NoTurnEndHooks,
@@ -211,13 +212,13 @@ test("a tool turn sends the catalog, then the call and its result, as Messages b
   await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
-      yield* session.observe({ _tag: "SessionOpened", session: "s1" } as unknown as Observation);
+      yield* session.observe(boringOpening(smolCatalog));
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
           BoringModelProvider,
-          ToolContextAssembler(smolCatalog),
+          TurnContextAssembler,
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))),
           CountingTurns,
           NoTurnEndHooks,

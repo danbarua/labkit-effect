@@ -6,9 +6,19 @@
 import { Effect, Layer } from "effect";
 import type { SystemPromptProvider, ToolCatalog } from "../../src/agent-context/assemble.ts";
 import type { Fact } from "../../src/agent-core/fact.ts";
-import { ModelName, ProviderName, type Seq, ToolName, type TurnId } from "../../src/agent-core/names.ts";
-import { ContextAssembler, type ModelContext, ModelProvider } from "../../src/agent-effect/contracts.ts";
+import { ModelName, ProviderName, type Seq, SessionId, ToolName, type TurnId } from "../../src/agent-core/names.ts";
+import { ContextAssembler, type ModelContext, ModelProvider, type ToolSpec } from "../../src/agent-effect/contracts.ts";
 import { inputTexts } from "../../src/agent-effect/conversation.ts";
+import { openedWith } from "../../src/agent-effect/session-setup.ts";
+
+/** The opening of session `session`, asking "boring-1" of "boring", with no system prompt and `tools`. */
+export const boringOpening = (tools: ReadonlyArray<ToolSpec> = [], session = "s1") =>
+  openedWith({
+    session: SessionId.make(session),
+    model: { provider: ProviderName.make("boring"), model: ModelName.make("boring-1") },
+    system: undefined,
+    tools,
+  });
 
 /** Every request is for provider "boring" and model "boring-1". */
 export const BoringModelProvider = Layer.succeed(ModelProvider, {

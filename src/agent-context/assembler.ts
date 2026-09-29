@@ -1,7 +1,7 @@
 /**
- * The loop's context assembler, built from context assembly's services: the system prompts joined
- * into one, the tool catalogs, the conversation as the `Conversation` service views the facts, and
- * the notices as one instruction message at its end, after the latest input or tool result.
+ * The loop's context assembler: the system prompt and tools the session's facts record, the
+ * conversation as the `Conversation` service views the facts, and the notices as one instruction
+ * message at its end, after the latest input or tool result.
  *
  * Notices are assembled for each request and are not facts, so what a request carried in them is
  * not recorded. The loop's `ModelProvider` chooses the model, so model selectors are not used here.
@@ -10,12 +10,12 @@
 import { Effect, Layer } from "effect";
 import { ContextAssembler, type ContextMessage, type ModelContext } from "../agent-effect/contracts.ts";
 import { conversationOf } from "../agent-effect/conversation.ts";
-import { assembleContents, Conversation, Notices, SystemPrompts, ToolCatalogs } from "./assemble.ts";
+import { assembleContents, Conversation, Notices } from "./assemble.ts";
 
 export const AgentContextAssembler = Layer.effect(
   ContextAssembler,
   Effect.gen(function* () {
-    const services = yield* Effect.context<Conversation | SystemPrompts | ToolCatalogs | Notices>();
+    const services = yield* Effect.context<Conversation | Notices>();
     return {
       assemble: (facts) =>
         assembleContents(facts).pipe(

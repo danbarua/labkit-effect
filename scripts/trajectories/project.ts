@@ -48,6 +48,8 @@ export interface Projection {
   readonly world: () => World;
   /** How many facts are recorded: the position of the last. */
   readonly recorded: () => number;
+  /** Whether anything but the session's opening has been recorded: the conversation has begun. */
+  readonly begun: () => boolean;
   readonly imported: (source: string, records: number, turns: number) => Imported;
 }
 
@@ -56,7 +58,7 @@ export function projection(): Projection {
   const unmapped = new Map<string, number>();
   const decode = Schema.decodeUnknownSync(Observation);
   const encodeFact = Schema.encodeSync(Fact);
-  const state = { world: emptyWorld as World, time: undefined as DateTime.Utc | undefined };
+  const state = { world: emptyWorld as World, time: undefined as DateTime.Utc | undefined, begun: false };
 
   return {
     readAt: (time) => {
@@ -72,6 +74,7 @@ export function projection(): Projection {
       const seq = Seq.make(facts.length + 1);
       const outcome = deliver(state.world, seq, observation);
       state.world = outcome.world;
+      if (observation._tag !== "SessionOpened") state.begun = true;
       facts.push(encodeFact({ _tag: "Observed", seq, time, observation }));
       for (const decision of outcome.decisions)
         facts.push(encodeFact({ _tag: "Decided", seq: Seq.make(facts.length + 1), time, decision }));
@@ -82,6 +85,7 @@ export function projection(): Projection {
     },
     world: () => state.world,
     recorded: () => facts.length,
+    begun: () => state.begun,
     imported: (source, records, turns) => {
       const decided = new Map<string, number>();
       for (const fact of facts as Array<{ _tag: string; decision?: { _tag: string } }>)

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { json } from "../support/received.ts";
-import { observe, open, type Session } from "../support/drive.ts";
+import { observe, open, opened, type Session } from "../support/drive.ts";
 
 const tags = (session: Session) =>
   session.journal.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
@@ -15,7 +15,7 @@ const compacted = (through: number, kept: ReadonlyArray<number>) => ({
 
 test("a compaction while no turn runs is taken at once", () => {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1" });
+  observe(session, opened);
   const at = observe(session, compacted(1, []));
   expect(tags(session)).toEqual(["SessionOpened", "Compacted", "WindowOpened"]);
   expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "WindowOpened", compaction: at } });
@@ -23,7 +23,7 @@ test("a compaction while no turn runs is taken at once", () => {
 
 test("a compaction during a step waits in the turn's mailbox and is taken before the next request", () => {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1" });
+  observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
   observe(session, {
     _tag: "ModelResponded",

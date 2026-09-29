@@ -13,6 +13,7 @@ import { openSession } from "../src/agent-effect/loop.ts";
 import { receivedJson } from "../src/agent-effect/received.ts";
 import { SmolToolRunner } from "./support/smol-tools.ts";
 import { runTest } from "./support/run.ts";
+import { boringOpening } from "./support/boring.ts";
 
 test("while a request is carried out, CurrentWork and every log line name its session and turn", async () => {
   const logged: Array<{ message: unknown; annotations: Record<string, unknown> }> = [];
@@ -48,7 +49,7 @@ test("while a request is carried out, CurrentWork and every log line name its se
   await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
-      yield* session.observe({ _tag: "SessionOpened", session: "s1" } as unknown as Observation);
+      yield* session.observe(boringOpening());
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
     }).pipe(
       Effect.provide(
@@ -97,7 +98,7 @@ async function answeringTurn(hooks: ReadonlyArray<() => ReadonlyArray<string>>, 
   const facts = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
-      yield* session.observe({ _tag: "SessionOpened", session: "s1" } as unknown as Observation);
+      yield* session.observe(boringOpening());
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
       return yield* session.facts;
     }).pipe(
@@ -162,7 +163,7 @@ test("a subscriber receives every fact recorded after it subscribed, in order", 
     Effect.scoped(
       Effect.gen(function* () {
         const session = yield* openSession;
-        yield* session.observe({ _tag: "SessionOpened", session: "s1" } as unknown as Observation);
+        yield* session.observe(boringOpening());
         const subscription = yield* session.subscribe;
         yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
         return { received: yield* PubSub.takeAll(subscription), facts: yield* session.facts };

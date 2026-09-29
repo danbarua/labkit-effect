@@ -12,6 +12,9 @@
  * The source file is only read.
  *
  * Mapping:
+ * - the session is opened (`SessionOpened`) before its first record, with its `sessionId`, asking the
+ *   model of its first assistant message through `anthropic`. Claude Code does not record the system
+ *   prompt or the tools a session is given, so neither is recorded, and the report counts that;
  * - a user message with text is `InputArrived`, from the user, or from the system when Claude Code
  *   marks it meta (a hook's feedback, a message from another session); while the agent is idle a
  *   turn is started, as the loop does;
@@ -214,7 +217,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
     if (type === "system" && record["subtype"] === "compact_boundary") {
       flushResponse();
       flushReview();
-      if (projected.recorded() === 0) return count("system/compact_boundary (nothing before it in the file)");
+      if (!projected.begun()) return count("system/compact_boundary (nothing before it in the file)");
       const metadata = record["compactMetadata"] as Record_ | undefined;
       const preserved = metadata?.["preservedMessages"] as Record_ | undefined;
       const all = preserved?.["allUuids"];
@@ -228,7 +231,28 @@ export async function importClaudeCode(source: string): Promise<Imported> {
     count(`${type}${subtype}`);
   }
 
-  eachRecord(source, onRecord, count);
+  const records: Array<Record_> = [];
+  eachRecord(source, (record) => records.push(record), count);
+  const session = records.map((record) => record["sessionId"]).find((id) => typeof id === "string");
+  const model = records
+    .filter((record) => record["type"] === "assistant" && record["isSidechain"] !== true)
+    .map((record) => {
+      const message = record["message"];
+      return typeof message === "object" && message !== null && !Array.isArray(message) ? (message as Record_)["model"] : undefined;
+    })
+    .find((name) => typeof name === "string");
+  if (typeof session === "string" && typeof model === "string") {
+    projected.readAt(records.map((record) => record["timestamp"]).find((time) => typeof time === "string"));
+    observe({ _tag: "SessionOpened", session, model: { provider: "anthropic", model } });
+    count("session opened without its system prompt or tools (not in the record)");
+  } else count("session not opened (no record names its id and model)");
+  for (const record of records) {
+    try {
+      onRecord(record);
+    } catch (error) {
+      count(`<record not mapped: ${error instanceof Error ? error.message.slice(0, 60) : "?"}>`);
+    }
+  }
   flushResponse();
   flushReview();
   if (state.boundary !== undefined) count("system/compact_boundary (no summary after it)");

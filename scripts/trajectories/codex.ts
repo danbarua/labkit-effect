@@ -10,7 +10,10 @@
  * The source file is only read.
  *
  * Mapping:
- * - `session_meta` is `SessionOpened`;
+ * - `session_meta` is `SessionOpened`: the model is the first `turn_context`'s, asked through the
+ *   header's `model_provider` (Codex's default provider, `openai`, when the header names none); the
+ *   system prompt is the header's `base_instructions`. Codex does not record the tools a session
+ *   is given in our shape, so none are recorded, and the report counts that;
  * - a subagent's session (a fork) starts with history copied from its parent before its first turn;
  *   those records are counted, not mapped;
  * - a user message is `InputArrived`: from the user when Codex marks its content as the user's text
@@ -70,6 +73,19 @@ export async function importCodex(source: string): Promise<Imported> {
       return item["content"].flatMap((block) => (isRecord(block) && typeof block["text"] === "string" ? [block["text"]] : []));
     }),
   );
+
+  /**
+   * The first model the record names, in a `turn_context` or in the settings a `thread_settings_applied`
+   * event reports: the model the session's first turn asks.
+   */
+  const firstModel = (): string | undefined =>
+    records.flatMap((record) => {
+      const payload = record["payload"];
+      if (!isRecord(payload)) return [];
+      if (record["type"] === "turn_context" && typeof payload["model"] === "string") return [payload["model"]];
+      const settings = payload["type"] === "thread_settings_applied" ? payload["thread_settings"] : undefined;
+      return isRecord(settings) && typeof settings["model"] === "string" ? [settings["model"]] : [];
+    })[0];
 
   const state = {
     turns: 0,
@@ -190,7 +206,18 @@ export async function importCodex(source: string): Promise<Imported> {
     if (type === "session_meta") {
       if (state.session) return count("session_meta (another in the same file)");
       state.session = true;
-      observe({ _tag: "SessionOpened", session: str(payload["id"]) });
+      const model = firstModel();
+      if (model === undefined) return count("session_meta (no record names a model)");
+      const instructions = payload["base_instructions"];
+      const system = isRecord(instructions) ? instructions["text"] : undefined;
+      if (payload["model_provider"] === undefined) count("session opened on Codex's default provider, openai");
+      count("session opened without its tools (not in the record)");
+      observe({
+        _tag: "SessionOpened",
+        session: str(payload["id"]),
+        model: { provider: typeof payload["model_provider"] === "string" ? payload["model_provider"] : "openai", model },
+        ...(typeof system === "string" ? { system: text(system) } : {}),
+      });
       return;
     }
     if (state.turn === undefined && (type === "response_item" || type === "compacted" || type === "event_msg") && kind !== "task_started")
@@ -258,7 +285,7 @@ export async function importCodex(source: string): Promise<Imported> {
       }
       flushResponse();
       flushReview();
-      if (projected.recorded() === 0) return count("compacted (nothing before it in the file)");
+      if (!projected.begun()) return count("compacted (nothing before it in the file)");
       const previous = payload["previous_window_id"];
       observe({
         _tag: "Compacted",

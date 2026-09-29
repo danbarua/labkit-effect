@@ -8,10 +8,11 @@ import { CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/turns.ts";
 import { openSession } from "../../src/agent-effect/loop.ts";
 import { OpenAiModelClient } from "../../src/agent-effect/providers/openai-client.ts";
 import { SmolToolRunner, smolCatalog } from "../support/smol-tools.ts";
-import { ToolContextAssembler } from "../../src/agent-effect/tool-context.ts";
+import { TurnContextAssembler } from "../../src/agent-effect/turn-context.ts";
 import { openAiAt, recordingServer } from "../support/providers.ts";
 import { json } from "../support/received.ts";
 import { runTest } from "../support/run.ts";
+import { boringOpening } from "../support/boring.ts";
 
 const stops: Array<() => unknown> = [];
 afterAll(() => {
@@ -24,14 +25,14 @@ async function turn(responses: ReadonlyArray<unknown>) {
   const facts = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
-      yield* session.observe({ _tag: "SessionOpened", session: "s1" } as unknown as Observation);
+      yield* session.observe(boringOpening(smolCatalog));
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
       return yield* session.facts;
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
           BoringModelProvider,
-          ToolContextAssembler(smolCatalog),
+          TurnContextAssembler,
           OpenAiModelClient.pipe(Layer.provide(openAiAt(provider.url))),
           CountingTurns,
           NoTurnEndHooks,

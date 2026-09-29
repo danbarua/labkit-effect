@@ -3,7 +3,7 @@ import { Millis } from "../src/agent-core/names.ts";
 import type { EffectRequest } from "../src/agent-core/request.ts";
 import { emptyGate, type GateInput, type GateOutput, type GateState, gate, RequestKey } from "../src/agent-policy/gate.ts";
 import { every, type Policy } from "../src/agent-policy/policy.ts";
-import { observe, open } from "./support/drive.ts";
+import { observe, open, opened } from "./support/drive.ts";
 import { json } from "./support/received.ts";
 import { asText, receivedJson, receivedText } from "../src/agent-effect/received.ts";
 
@@ -101,7 +101,7 @@ test("a delayed model request is forwarded when the clock reaches the policy's t
 
 test("a vetoed tool call, fed back to the core, settles the batch and the model is asked again", () => {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1" });
+  observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "clean up" });
   observe(session, {
     _tag: "ModelResponded",
@@ -122,7 +122,7 @@ test("a vetoed tool call, fed back to the core, settles the batch and the model 
 
 test("a vetoed model request ends the turn, recorded with the policy's reason", () => {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1" });
+  observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "go" });
   const budget: Policy<unknown> = {
     start: () => ({ _tag: "Decided", verdict: { _tag: "Veto", reason: receivedJson({ budget: "80% of the month used" }) } }),

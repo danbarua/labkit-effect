@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Fact } from "../src/agent-core/fact.ts";
-import { observe, open } from "./support/drive.ts";
+import { observe, open, opened } from "./support/drive.ts";
 import { json } from "./support/received.ts";
 
 const callsTool = {
@@ -21,7 +21,7 @@ function asked(journal: ReadonlyArray<Fact>): Array<number> {
 
 test("each request is made after the facts it can carry; after a failed request the next one comes later", () => {
   const session = open();
-  observe(session, { _tag: "SessionOpened", session: "s1" });
+  observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "fix the tests" });
   observe(session, callsTool);
   const result = observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json("2 failed") } });
