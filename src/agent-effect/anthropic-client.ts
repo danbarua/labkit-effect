@@ -35,6 +35,7 @@ import { receivedJson } from "./received.ts";
 import {
   type Called,
   callsIn,
+  endingOf,
   isObject,
   type Json,
   logSupplied,
@@ -137,6 +138,17 @@ function part(received: Json): ModelPart {
 
 const caller = { module: "AnthropicModelClient", method: "respond" };
 
+/** Anthropic's `stop_reason` values. */
+export const anthropicEndings = new Map([
+  ["end_turn", "Complete"],
+  ["tool_use", "Complete"],
+  ["max_tokens", "CutShort"],
+  ["stop_sequence", "CutShort"],
+  ["pause_turn", "CutShort"],
+  ["model_context_window_exceeded", "CutShort"],
+  ["refusal", "Refused"],
+] as const);
+
 /** One request: the observation it produced, or the `AiError` it failed with. */
 const respondOnce = (
   http: HttpClient.HttpClient,
@@ -158,6 +170,7 @@ const respondOnce = (
       model: target.model,
       parts: (content as ReadonlyArray<Json>).map(part),
       stop: StopReason.make(typeof stop_reason === "string" ? stop_reason : JSON.stringify(stop_reason ?? null)),
+      ending: endingOf(anthropicEndings, stop_reason),
       metadata: receivedJson(metadata),
     };
   });

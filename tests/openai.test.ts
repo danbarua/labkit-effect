@@ -90,6 +90,7 @@ test("output items become parts: text, calls to any tool name, and everything el
   expect(responded as unknown).toMatchObject({
     observation: {
       stop: "incomplete: max_output_tokens",
+      ending: { _tag: "CutShort" },
       parts: [
         { _tag: "Unrecognised", received: json({ type: "reasoning", id: "rs_1", summary: [] }) },
         { _tag: "Text", text: "Reading." },

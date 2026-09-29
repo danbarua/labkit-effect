@@ -60,6 +60,19 @@ export const ToolOutcome = Schema.Union([
 ]);
 export type ToolOutcome = typeof ToolOutcome.Type;
 
+/**
+ * Why a model's response stopped, as its adapter classifies the provider's own reason (kept in
+ * `stop`): it is complete (with or without tool calls), it was cut short (a length limit, a pause,
+ * a stop sequence), the provider refused it, or the adapter does not know the reason.
+ */
+export const ResponseEnding = Schema.Union([
+  Schema.TaggedStruct("Complete", {}),
+  Schema.TaggedStruct("CutShort", {}),
+  Schema.TaggedStruct("Refused", {}),
+  Schema.TaggedStruct("Unclassified", {}),
+]);
+export type ResponseEnding = typeof ResponseEnding.Type;
+
 /** Observations recorded as facts. */
 export const Observation = Schema.Union([
   /** A session was opened. */
@@ -71,8 +84,9 @@ export const Observation = Schema.Union([
   /** The input recorded at `input`, still queued, was cancelled by its sender. */
   Schema.TaggedStruct("InputCancelled", { input: Seq }),
   /**
-   * A model responded. `parts` are the response's parts in the order received; `metadata` is
-   * everything else the provider sent with it (usage, identifiers), as received.
+   * A model responded. `parts` are the response's parts in the order received; `stop` is why it
+   * stopped in the provider's words, and `ending` that reason classified; `metadata` is everything
+   * else the provider sent with it (usage, identifiers), as received.
    */
   Schema.TaggedStruct("ModelResponded", {
     turn: TurnId,
@@ -80,6 +94,7 @@ export const Observation = Schema.Union([
     model: ModelName,
     parts: Schema.Array(ModelPart),
     stop: StopReason,
+    ending: ResponseEnding,
     metadata: Received,
   }),
   /** A request for a model response failed. */

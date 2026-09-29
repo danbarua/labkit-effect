@@ -1,8 +1,8 @@
 /**
  * A turn step: one request to the model and what follows from its response. The step asks the
  * model; a response with tool calls opens a call for each and requests it be run, and the step
- * waits for each to settle; a response without tool calls is a final answer. The step tells its
- * turn how it finished.
+ * waits for each to settle; a response without tool calls is a final answer, unless it was cut
+ * short, in which case the turn goes on to ask again. The step tells its turn how it finished.
  */
 
 import {
@@ -52,7 +52,12 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
     ModelResponded: (state, message) => {
       const calls = message.parts.flatMap((part) => (part._tag === "ToolCall" ? [part] : []));
       return calls.length === 0
-        ? done(state.step, toConversationTurn(state.step.turn, { _tag: "StepAnswered" }))
+        ? done(
+            state.step,
+            toConversationTurn(state.step.turn, {
+              _tag: message.ending._tag === "CutShort" ? "StepCutShort" : "StepAnswered",
+            }),
+          )
         : {
             state: { _tag: "RunningTools", step: state.step, unsettled: calls.map((call) => call.call) },
             decisions: [],

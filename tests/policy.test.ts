@@ -110,6 +110,7 @@ test("a vetoed tool call, fed back to the core, settles the batch and the model 
     model: "m",
     parts: [{ _tag: "ToolCall", call: "c1", tool: "rm", input: json({ path: "/" }) }],
     stop: "tool_use",
+    ending: { _tag: "Complete" },
     metadata: json({}),
   });
   const request = session.requests.at(-1)!;

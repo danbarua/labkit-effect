@@ -17,7 +17,8 @@
  *   summary; while the agent is idle a turn is started, as the loop does;
  * - the assistant records with one message id are one `ModelResponded`, however other records
  *   interleave with them: `text` is `Text`, `thinking` with its signature is `Thinking`, `tool_use`
- *   is `ToolCall`, anything else is `Unrecognised`; the message's id and usage are its metadata.
+ *   is `ToolCall`, anything else is `Unrecognised`; the message's id and usage are its metadata,
+ *   and its `stop_reason` is classified as the Anthropic adapter classifies it.
  *   Claude Code starts a tool as soon as its call has streamed in, so a result can be recorded
  *   before the rest of its message; such results are given after the message, and the early start
  *   is not represented;
@@ -36,6 +37,8 @@ import { Fact } from "../../src/agent-core/fact.ts";
 import { Observation } from "../../src/agent-core/observation.ts";
 import { deliver, emptyWorld, type World } from "../../src/agent-core/router.ts";
 import { Seq } from "../../src/agent-core/names.ts";
+import { anthropicEndings } from "../../src/agent-effect/anthropic-client.ts";
+import { endingOf } from "../../src/agent-effect/shaping.ts";
 
 type Json = Schema.Json;
 type Record_ = { readonly [key: string]: Json };
@@ -130,6 +133,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
       model: pending.model,
       parts: pending.blocks.map(part),
       stop: typeof pending.stop === "string" ? pending.stop : JSON.stringify(pending.stop),
+      ending: endingOf(anthropicEndings, pending.stop),
       metadata: json({ id: pending.id, usage: pending.usage }),
     });
     const held = state.held.splice(0);

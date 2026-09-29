@@ -43,6 +43,8 @@ export type ToConversationTurn =
   | { readonly _tag: "StepToolsSettled" }
   /** The model gave a final answer in the step. */
   | { readonly _tag: "StepAnswered" }
+  /** The model's response was cut short with no tool calls; the turn goes on to ask again. */
+  | { readonly _tag: "StepCutShort" }
   /** The step stopped without an answer. */
   | { readonly _tag: "StepStopped"; readonly ending: Exclude<Ending, { _tag: "Answered" }> };
 

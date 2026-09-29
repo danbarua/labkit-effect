@@ -191,6 +191,7 @@ test("a response's text is a Text part, stop_reason is the stop, and everything 
     model: "boring-1",
     parts: [{ _tag: "Text", text: "Hello back." }],
     stop: "end_turn",
+    ending: { _tag: "Complete" },
     metadata: json({ id: "msg_1", type: "message", usage: { input_tokens: 3, output_tokens: 3 } }),
   });
 });

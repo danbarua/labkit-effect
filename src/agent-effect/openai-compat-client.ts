@@ -27,6 +27,7 @@ import { receivedJson, receivedJsonText } from "./received.ts";
 import {
   type Called,
   callsIn,
+  endingOf,
   isObject,
   type Json,
   logSupplied,
@@ -126,6 +127,15 @@ function parts(message: Schema.JsonObject): ReadonlyArray<ModelPart> {
   ];
 }
 
+/** A choice's `finish_reason` values. */
+const endings = new Map([
+  ["stop", "Complete"],
+  ["tool_calls", "Complete"],
+  ["function_call", "Complete"],
+  ["length", "CutShort"],
+  ["content_filter", "Refused"],
+] as const);
+
 const respondOnce = (
   http: HttpClient.HttpClient,
   target: Target,
@@ -150,6 +160,7 @@ const respondOnce = (
       model: target.model,
       parts: parts(message),
       stop: StopReason.make(typeof finish_reason === "string" ? finish_reason : JSON.stringify(finish_reason ?? null)),
+      ending: endingOf(endings, finish_reason),
       metadata: receivedJson({ ...metadata, choice: choiceRest }),
     };
   });

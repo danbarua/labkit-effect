@@ -94,6 +94,7 @@ test("the choice's message becomes parts: content, calls to any tool name, and o
   expect(responded as unknown).toMatchObject({
     observation: {
       stop: "tool_calls",
+      ending: { _tag: "Complete" },
       parts: [
         { _tag: "Text", text: "Reading." },
         { _tag: "Unrecognised", received: json({ reasoning_content: "The user wants a file." }) },

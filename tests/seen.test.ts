@@ -10,6 +10,7 @@ const callsTool = {
   model: "m",
   parts: [{ _tag: "ToolCall", call: "c1", tool: "run_tests", input: json({}) }],
   stop: "tool_use",
+  ending: { _tag: "Complete" },
   metadata: json({}),
 };
 

@@ -25,6 +25,7 @@ import { receivedJson, receivedJsonText } from "./received.ts";
 import {
   type Called,
   callsIn,
+  endingOf,
   isObject,
   type Json,
   logSupplied,
@@ -117,6 +118,13 @@ function stopOf(status: Json | undefined, incomplete: Json | undefined): StopRea
   return StopReason.make(typeof reason === "string" ? `${text}: ${reason}` : text);
 }
 
+/** A response's `status`, and for an incomplete one the reason in `incomplete_details`. */
+const endings = new Map([
+  ["completed", "Complete"],
+  ["incomplete: max_output_tokens", "CutShort"],
+  ["incomplete: content_filter", "Refused"],
+] as const);
+
 const respondOnce = (
   http: HttpClient.HttpClient,
   target: Target,
@@ -137,6 +145,7 @@ const respondOnce = (
       model: target.model,
       parts: (output as ReadonlyArray<Json>).flatMap(parts),
       stop: stopOf(status, incomplete_details),
+      ending: endingOf(endings, stopOf(status, incomplete_details)),
       metadata: receivedJson(metadata),
     };
   });

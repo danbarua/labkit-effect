@@ -7,7 +7,7 @@
 
 import { Effect, type Schema } from "effect";
 import type { CallId, ToolName } from "../agent-core/names.ts";
-import type { ToolOutcome } from "../agent-core/observation.ts";
+import type { ResponseEnding, ToolOutcome } from "../agent-core/observation.ts";
 import type { Received } from "../agent-core/received.ts";
 import type { ModelContext, ToolSpec } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
@@ -32,6 +32,11 @@ export interface Shaped {
 export interface Called {
   readonly tool: ToolName;
   readonly input: Received;
+}
+
+/** A provider's stop reason, classified by the adapter's table; a reason not in it is `Unclassified`. */
+export function endingOf(table: ReadonlyMap<string, ResponseEnding["_tag"]>, reason: Json | undefined): ResponseEnding {
+  return { _tag: (typeof reason === "string" ? table.get(reason) : undefined) ?? "Unclassified" };
 }
 
 export function isObject(value: Json): value is Schema.JsonObject {
