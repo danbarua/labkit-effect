@@ -94,7 +94,6 @@ function retried<State extends Tagged, Message extends Tagged>(
   table: Table<State, Message, Send>,
   machine: Machine<State, Message>,
   outputs: Outputs,
-  at: number,
 ): { readonly machine: Machine<State, Message>; readonly outputs: Outputs } {
   const pass = machine.mailbox.reduce<{
     readonly state: State;
@@ -103,10 +102,7 @@ function retried<State extends Tagged, Message extends Tagged>(
     readonly took: boolean;
   }>(
     (done, waiting) => {
-      const next = step(table, done.state, waiting.message, {
-        seq: waiting.seq,
-        at: Seq.make(at + done.outputs.decisions.length),
-      });
+      const next = step(table, done.state, waiting.message, { seq: waiting.seq });
       if (next === "deferred") return { ...done, kept: [...done.kept, waiting] };
       if (next === "ignored") return done;
       return { state: next.state, kept: done.kept, outputs: joined(done.outputs, next), took: true };
@@ -114,19 +110,18 @@ function retried<State extends Tagged, Message extends Tagged>(
     { state: machine.state, kept: [], outputs, took: false },
   );
   const after: Machine<State, Message> = { state: pass.state, mailbox: pass.kept };
-  return pass.took ? retried(table, after, pass.outputs, at) : { machine: after, outputs: pass.outputs };
+  return pass.took ? retried(table, after, pass.outputs) : { machine: after, outputs: pass.outputs };
 }
 
 function handle<State extends Tagged, Message extends Tagged>(
   table: Table<State, Message, Send>,
   machine: Machine<State, Message>,
   waiting: Waiting<Message>,
-  at: number,
 ): Handled<State, Message> {
-  const next = step(table, machine.state, waiting.message, { seq: waiting.seq, at: Seq.make(at) });
+  const next = step(table, machine.state, waiting.message, { seq: waiting.seq });
   if (next === "ignored") return { _tag: "Ignored" };
   if (next === "deferred") return { _tag: "Deferred", machine: { ...machine, mailbox: [...machine.mailbox, waiting] } };
-  const done = retried(table, { state: next.state, mailbox: machine.mailbox }, joined(none, next), at);
+  const done = retried(table, { state: next.state, mailbox: machine.mailbox }, joined(none, next));
   return { _tag: "Acted", machine: done.machine, outputs: done.outputs };
 }
 
@@ -151,35 +146,35 @@ function applied<State, Message>(
   }
 }
 
-const toAgent = (world: World, message: AgentMessage, seq: Seq, at: number) =>
-  applied(handle(agentTable, world.agent, { message, seq }, at), (agent) => ({ ...world, agent }));
+const toAgent = (world: World, message: AgentMessage, seq: Seq) =>
+  applied(handle(agentTable, world.agent, { message, seq }), (agent) => ({ ...world, agent }));
 
-const toTurn = (world: World, turn: TurnId, machine: World["turns"] extends ReadonlyMap<TurnId, infer M> ? M : never, message: ConversationTurnMessage, seq: Seq, at: number) =>
-  applied(handle(conversationTurnTable, machine, { message, seq }, at), (next) => ({ ...world, turns: withEntry(world.turns, turn, next) }));
+const toTurn = (world: World, turn: TurnId, machine: World["turns"] extends ReadonlyMap<TurnId, infer M> ? M : never, message: ConversationTurnMessage, seq: Seq) =>
+  applied(handle(conversationTurnTable, machine, { message, seq }), (next) => ({ ...world, turns: withEntry(world.turns, turn, next) }));
 
-const toStep = (world: World, address: StepAddress, message: TurnStepMessage, seq: Seq, at: number) => {
+const toStep = (world: World, address: StepAddress, message: TurnStepMessage, seq: Seq) => {
   const ofTurn = world.steps.get(address.turn) ?? new Map<StepIndex, Machine<TurnStepState, TurnStepMessage>>();
   const machine = ofTurn.get(address.index) ?? fresh<TurnStepState, TurnStepMessage>(openingTurnStep(address));
-  return applied(handle(turnStepTable, machine, { message, seq }, at), (next) => ({
+  return applied(handle(turnStepTable, machine, { message, seq }), (next) => ({
     ...world,
     steps: withEntry(world.steps, address.turn, withEntry(ofTurn, address.index, next)),
   }));
 };
 
-const toCall = (world: World, call: CallId, machine: Machine<CallState, CallMessage>, message: CallMessage, seq: Seq, at: number) =>
-  applied(handle(callTable, machine, { message, seq }, at), (next) => ({ ...world, calls: withEntry(world.calls, call, next) }));
+const toCall = (world: World, call: CallId, machine: Machine<CallState, CallMessage>, message: CallMessage, seq: Seq) =>
+  applied(handle(callTable, machine, { message, seq }), (next) => ({ ...world, calls: withEntry(world.calls, call, next) }));
 
 /** A message between machines, delivered; a machine it names that does not exist yet is created. */
-function send(world: World, sent: Send, seq: Seq, at: number) {
+function send(world: World, sent: Send, seq: Seq) {
   switch (sent._tag) {
     case "ToAgent":
-      return toAgent(world, sent.message, seq, at);
+      return toAgent(world, sent.message, seq);
     case "ToConversationTurn":
-      return toTurn(world, sent.turn, world.turns.get(sent.turn) ?? fresh(openingConversationTurn(sent.turn)), sent.message, seq, at);
+      return toTurn(world, sent.turn, world.turns.get(sent.turn) ?? fresh(openingConversationTurn(sent.turn)), sent.message, seq);
     case "ToTurnStep":
-      return toStep(world, sent.step, sent.message, seq, at);
+      return toStep(world, sent.step, sent.message, seq);
     case "ToCall":
-      return toCall(world, sent.call, world.calls.get(sent.call) ?? fresh(openingCall(sent.call)), sent.message, seq, at);
+      return toCall(world, sent.call, world.calls.get(sent.call) ?? fresh(openingCall(sent.call)), sent.message, seq);
     default:
       return sent satisfies never;
   }
@@ -209,7 +204,7 @@ function isPassedOn(sent: Send): boolean {
 function drain(done: Delivered, pending: ReadonlyArray<Send>, seq: Seq): Delivered {
   const [next, ...rest] = pending;
   if (next === undefined) return done;
-  const result = send(done.world, next, seq, seq + done.decisions.length);
+  const result = send(done.world, next, seq);
   return result === undefined
     ? drain(
         isPassedOn(next)
@@ -256,7 +251,7 @@ export function deliver(world: World, seq: Seq, observation: Observation): Deliv
       case "InputArrived":
       case "Compacted":
       case "TurnStarted":
-        return toAgent(world, observation, seq, seq);
+        return toAgent(world, observation, seq);
       case "InputCancelled":
         return { world: withdrawn(world, observation.input), outputs: none };
       case "ModelResponded":
@@ -265,11 +260,11 @@ export function deliver(world: World, seq: Seq, observation: Observation): Deliv
       case "TurnEndReviewed":
       case "TurnInterrupted": {
         const machine = world.turns.get(observation.turn);
-        return machine === undefined ? "undelivered" : toTurn(world, observation.turn, machine, observation, seq, seq);
+        return machine === undefined ? "undelivered" : toTurn(world, observation.turn, machine, observation, seq);
       }
       case "ToolEnded": {
         const machine = world.calls.get(observation.call);
-        return machine === undefined ? "undelivered" : toCall(world, observation.call, machine, observation, seq, seq);
+        return machine === undefined ? "undelivered" : toCall(world, observation.call, machine, observation, seq);
       }
       default:
         return observation satisfies never;

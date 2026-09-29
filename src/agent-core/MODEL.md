@@ -87,12 +87,11 @@ The model's response to a request is its observation of what the request carried
 result is the harness's observation of the tool (Dan: the LLM "observes the tool result out loud and
 then continues").
 
-- S1. `ModelAsked { turn, through }` records how far a request goes: the conversation through the
-  fact at `through`.
+- S1. `ModelAsked { turn }` is recorded where the request is made: it is made from the facts before
+  it, and the conversation view decides which of them are sent.
 - S2. The model has seen a fact once it responds to a request that contained it. A request that
   fails leaves what it carried unseen. Working out what is unseen belongs to whatever reads the
-  facts for a purpose (the next request, a person's display, a protocol); the core records
-  `through`.
+  facts for a purpose (the next request, a person's display, a protocol).
 - S3. `ModelFailed` means the request failed after whatever the layers around the core do first:
   retries with back-off, another model or provider. The turn ends, and no turn is under way until
   the next input. That turn's first request carries the input and everything still unseen.

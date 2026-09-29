@@ -37,9 +37,9 @@ const done = (step: StepAddress, told: Send): StepStep => ({
 
 export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
   NotStarted: {
-    StepStart: (state, _message, { at }) => ({
+    StepStart: (state) => ({
       state: { _tag: "AwaitingModel", step: state.step },
-      decisions: [{ _tag: "ModelAsked", turn: state.step.turn, through: at }],
+      decisions: [{ _tag: "ModelAsked", turn: state.step.turn }],
       requests: [{ _tag: "RequestModelResponse", turn: state.step.turn }],
       sends: [],
     }),

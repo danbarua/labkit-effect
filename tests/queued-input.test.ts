@@ -103,7 +103,7 @@ test("input queued when a turn fails is dropped, and no turn starts until the ne
   expect(session.journal.filter((fact) => fact.seq > next).map((fact) => (fact._tag === "Observed" ? fact.observation : fact.decision)) as unknown).toEqual([
     { _tag: "TurnStarted", turn: "turn-2" },
     { _tag: "InputDelivered", turn: "turn-2", inputs: [next] },
-    { _tag: "ModelAsked", turn: "turn-2", through: next + 2 },
+    { _tag: "ModelAsked", turn: "turn-2" },
   ]);
 });
 
@@ -142,7 +142,7 @@ test("input that arrives before a turn starts waits in the agent's mailbox, and 
   expect(session.journal.filter((fact) => fact.seq > started).map((fact) => (fact as { decision: unknown }).decision)).toEqual([
     { _tag: "InputDelivered", turn: "wake-7", inputs: [first] },
     { _tag: "InputDelivered", turn: "wake-7", inputs: [second] },
-    { _tag: "ModelAsked", turn: "wake-7", through: started + 2 },
+    { _tag: "ModelAsked", turn: "wake-7" },
   ]);
   expect(session.world.agent).toMatchObject({ state: { _tag: "Running", turn: "wake-7" }, mailbox: [] });
 });

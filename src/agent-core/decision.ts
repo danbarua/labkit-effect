@@ -26,10 +26,10 @@ export const Decision = Schema.Union([
    */
   Schema.TaggedStruct("InputDelivered", { turn: TurnId, inputs: Inputs }),
   /**
-   * The harness asked the model for the next step of `turn`, sending the conversation through the
-   * fact recorded at `through`. The model has seen those facts once it responds to this request.
+   * The harness asked the model for the next step of `turn`. The request is made from the facts
+   * recorded before this one; which of them it sends is the conversation view's business.
    */
-  Schema.TaggedStruct("ModelAsked", { turn: TurnId, through: Seq }),
+  Schema.TaggedStruct("ModelAsked", { turn: TurnId }),
   /**
    * Inputs queued during `turn` were discarded because the turn ended other than by an answer.
    */

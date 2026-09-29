@@ -14,12 +14,10 @@ export interface Tagged {
   readonly _tag: PropertyKey;
 }
 
-/** Where a transition happens: the message's own position, and the last fact recorded. */
+/** Where a transition happens: the message's own position. */
 export interface Position {
   /** The position of the observation the message came from; a deferred message keeps its own. */
   readonly seq: Seq;
-  /** The last fact recorded so far; a decision this transition records goes after it. */
-  readonly at: Seq;
 }
 
 /** What a transition produces: the machine's next state, what it records and requests, what it sends. */
