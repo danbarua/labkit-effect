@@ -5,12 +5,12 @@
  */
 
 import { DateTime, Effect, Layer } from "effect";
-import { Conversation } from "../agent-context/assemble.ts";
-import type { Fact } from "../agent-core/fact.ts";
-import type { ContextMessage } from "../agent-effect/contracts.ts";
-import { conversationOf, merged } from "../agent-effect/conversation.ts";
-import { parseJson } from "../agent-effect/received.ts";
-import { isObject } from "../agent-effect/shaping.ts";
+import { Conversation } from "../../agent-context/assemble.ts";
+import type { Fact } from "../../agent-core/fact.ts";
+import type { ContextMessage } from "../../agent-effect/contracts.ts";
+import { conversationOf, merged } from "../../agent-effect/conversation.ts";
+import { parseJson } from "../../agent-effect/received.ts";
+import { isObject } from "../../agent-effect/shaping.ts";
 
 const labels = ["Fizz", "Buzz", "FizzBuzz"] as const;
 

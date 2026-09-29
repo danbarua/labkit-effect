@@ -15,11 +15,11 @@
  */
 
 import { Effect, Layer } from "effect";
-import { CallId, FailureText, ModelText, StopReason, ToolName, type TurnId } from "../agent-core/names.ts";
-import type { ModelPart, Observation } from "../agent-core/observation.ts";
-import { type ContextMessage, ModelClient, type ModelContext, type Target } from "../agent-effect/contracts.ts";
-import { parseJson, receivedJson } from "../agent-effect/received.ts";
-import { isObject } from "../agent-effect/shaping.ts";
+import { CallId, FailureText, ModelText, StopReason, ToolName, type TurnId } from "../../agent-core/names.ts";
+import type { ModelPart, Observation } from "../../agent-core/observation.ts";
+import { type ContextMessage, ModelClient, type ModelContext, type Target } from "../../agent-effect/contracts.ts";
+import { parseJson, receivedJson } from "../../agent-effect/received.ts";
+import { isObject } from "../../agent-effect/shaping.ts";
 import type { ErrorCode, Label } from "./tools.ts";
 
 type Responded = Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" }>;

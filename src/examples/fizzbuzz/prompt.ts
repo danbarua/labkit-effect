@@ -1,7 +1,7 @@
 /** The FizzBuzz system prompt. */
 
 import { Effect } from "effect";
-import type { SystemPromptProvider } from "../agent-context/assemble.ts";
+import type { SystemPromptProvider } from "../../agent-context/assemble.ts";
 
 export const FizzBuzzSystemPromptProvider: SystemPromptProvider = {
   system: Effect.succeed([
