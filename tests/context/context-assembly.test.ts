@@ -24,7 +24,7 @@ import {
   ContextWindowAwareModelSelector,
   FixedModelSelector,
   SystemTimeNoticeProvider,
-} from "../../src/agent-context/providers.ts";
+} from "../../src/agent-context/example-providers.ts";
 import { ModelName, ProviderName } from "../../src/agent-core/names.ts";
 import { runTest } from "../support/run.ts";
 

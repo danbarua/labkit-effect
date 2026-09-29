@@ -8,10 +8,10 @@ import { ModelClient } from "../../src/agent-effect/contracts.ts";
 import { logKeys } from "../../src/agent-effect/log-keys.ts";
 import { json } from "../support/received.ts";
 import type { Observation } from "../../src/agent-core/observation.ts";
-import { BoringModelProvider, CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/boring.ts";
+import { BoringModelProvider, CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/example-providers.ts";
 import { AnthropicModelClient } from "../../src/agent-effect/providers/anthropic-client.ts";
 import { openSession } from "../../src/agent-effect/loop.ts";
-import { SmolToolRunner, smolCatalog } from "../../src/agent-effect/smol-tools.ts";
+import { SmolToolRunner, smolCatalog } from "../../src/agent-effect/example-smol-tools.ts";
 import { ToolContextAssembler } from "../../src/agent-effect/tool-context.ts";
 import { runTest } from "../support/run.ts";
 

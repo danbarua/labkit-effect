@@ -8,8 +8,18 @@
 
 import type { Fact } from "../agent-core/fact.ts";
 import type { Seq } from "../agent-core/names.ts";
-import { inputTexts } from "./boring.ts";
 import type { ContextMessage, ContextPart } from "./contracts.ts";
+
+/** The text of each input, by its position. */
+export function inputTexts(facts: ReadonlyArray<Fact>): ReadonlyMap<Seq, string> {
+  return new Map(
+    facts.flatMap((fact) =>
+      fact._tag === "Observed" && fact.observation._tag === "InputArrived"
+        ? [[fact.seq, fact.observation.text] as const]
+        : [],
+    ),
+  );
+}
 
 /** The message a fact adds, if any. */
 function message(fact: Fact, texts: ReadonlyMap<Seq, string>): ContextMessage | undefined {

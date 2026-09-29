@@ -4,7 +4,7 @@ import { CountedToolRunner } from "../../src/instrumentation/tool-metrics.ts";
 import { expect, test } from "bun:test";
 import { Effect } from "effect";
 import { TestClock } from "effect/testing";
-import { estimatedTokens } from "../../src/agent-context/providers.ts";
+import { estimatedTokens } from "../../src/agent-context/example-providers.ts";
 import type { ContextMessage, ModelContext } from "../../src/agent-effect/contracts.ts";
 import { conversationOf } from "../../src/agent-effect/conversation.ts";
 import { FizzBuzzCompaction } from "../../src/examples/fizzbuzz/compaction.ts";

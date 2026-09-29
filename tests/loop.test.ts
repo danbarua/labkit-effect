@@ -5,12 +5,12 @@ import { Effect, Layer, Logger, PubSub, References } from "effect";
 import { ModelName, ModelText, ProviderName, SessionId, StopReason, TurnId } from "../src/agent-core/names.ts";
 import { CurrentWork, type Work } from "../src/agent-effect/work.ts";
 import type { Observation } from "../src/agent-core/observation.ts";
-import { BoringContextAssembler, CountingTurns, NoTurnEndHooks } from "../src/agent-effect/boring.ts";
+import { BoringContextAssembler, CountingTurns, NoTurnEndHooks } from "../src/agent-effect/example-providers.ts";
 import { ModelClient, ModelProvider, TurnEndHooks } from "../src/agent-effect/contracts.ts";
 import { logKeys } from "../src/agent-effect/log-keys.ts";
 import { openSession } from "../src/agent-effect/loop.ts";
 import { receivedJson } from "../src/agent-effect/received.ts";
-import { SmolToolRunner } from "../src/agent-effect/smol-tools.ts";
+import { SmolToolRunner } from "../src/agent-effect/example-smol-tools.ts";
 import { runTest } from "./support/run.ts";
 
 test("while a request is carried out, CurrentWork and every log line name its session and turn", async () => {
