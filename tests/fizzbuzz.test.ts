@@ -7,6 +7,7 @@ import { conversationOf } from "../src/agent-effect/conversation.ts";
 import { FizzBuzzCompaction } from "../src/fizzbuzz/compaction.ts";
 import { advanced, basic, countingUser, type Played, play } from "../src/fizzbuzz/scenario.ts";
 import { FizzBuzzToolRunner } from "../src/fizzbuzz/tools.ts";
+import { toolStats } from "../src/instrumentation/tool-stats.ts";
 import { ToolName } from "../src/agent-core/names.ts";
 import { ToolRunner } from "../src/agent-effect/contracts.ts";
 import { asText, receivedJson } from "../src/agent-effect/received.ts";
@@ -158,4 +159,12 @@ test("a tool call whose input does not fit its schema is rejected with the decod
   );
   expect(outcome._tag === "Failed" && outcome.reason._tag).toBe("InputRejected");
   console.log(`classify({"label":"Fuzz"}) is rejected: ${outcome._tag === "Failed" && outcome.reason._tag === "InputRejected" ? outcome.reason.problem : ""}`);
+});
+
+test("tool usage for the session is counted from its facts", async () => {
+  const { facts } = await Effect.runPromise(play(["1", "3", "7", "3.5", "banana", "5", "7", "9", "11", "13", "15"], advanced));
+  expect(Object.fromEntries(toolStats(facts))).toEqual({
+    classify: { calls: 4, succeeded: 4, failed: { Reported: 0, NotFound: 0, InputRejected: 0, Vetoed: 0 }, unfinished: 0 },
+    report_error: { calls: 3, succeeded: 3, failed: { Reported: 0, NotFound: 0, InputRejected: 0, Vetoed: 0 }, unfinished: 0 },
+  });
 });
