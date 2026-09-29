@@ -27,7 +27,10 @@ export type ModelObservation = Extract<
 >;
 
 /** Observations delivered to the turn they name, for the turn itself. */
-export type TurnObservation = Extract<Observation, { _tag: "TurnEndReviewed" | "TurnInterrupted" }>;
+export type TurnObservation = Extract<
+  Observation,
+  { _tag: "TurnEndReviewed" | "TurnHoldsExhausted" | "TurnInterrupted" }
+>;
 
 /** Observations delivered to the call they name. */
 export type CallObservation = Extract<Observation, { _tag: "ToolEnded" }>;

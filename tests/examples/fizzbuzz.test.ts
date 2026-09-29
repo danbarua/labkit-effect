@@ -1,19 +1,18 @@
-import { Metric } from "effect";
-import type { Fact } from "../../src/agent-core/fact.ts";
-import { CountedToolRunner } from "../../src/instrumentation/tool-metrics.ts";
 import { expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Metric } from "effect";
 import { TestClock } from "effect/testing";
+import { Conversation } from "../../src/agent-context/assemble.ts";
 import { estimatedTokens } from "../../src/agent-context/example-providers.ts";
-import type { ContextMessage, ModelContext } from "../../src/agent-effect/contracts.ts";
-import { conversationOf } from "../../src/agent-effect/conversation.ts";
-import { FizzBuzzCompaction } from "../../src/examples/fizzbuzz/compaction.ts";
-import { advanced, basic, countingUser, type Played, play } from "../../src/examples/fizzbuzz/scenario.ts";
-import { FizzBuzzToolRunner } from "../../src/examples/fizzbuzz/tools.ts";
-import { toolStats } from "../../src/instrumentation/tool-stats.ts";
+import type { Fact } from "../../src/agent-core/fact.ts";
 import { ToolName } from "../../src/agent-core/names.ts";
-import { ToolRunner } from "../../src/agent-effect/contracts.ts";
+import { type ContextMessage, type ModelContext, ToolRunner } from "../../src/agent-effect/contracts.ts";
+import { conversationOf } from "../../src/agent-effect/conversation.ts";
 import { asText, receivedJson } from "../../src/agent-effect/received.ts";
+import { FizzBuzzCompaction } from "../../src/examples/fizzbuzz/compaction.ts";
+import { advanced, basic, countingUser, play } from "../../src/examples/fizzbuzz/scenario.ts";
+import { FizzBuzzToolRunner } from "../../src/examples/fizzbuzz/tools.ts";
+import { CountedToolRunner } from "../../src/instrumentation/tool-metrics.ts";
+import { toolStats } from "../../src/instrumentation/tool-stats.ts";
 import { runTest } from "../support/run.ts";
 
 /** One line per part: who sent it and what it was. */
@@ -72,7 +71,7 @@ test("the user counts to 15; the model classifies each multiple of 3 or 5 and re
   expect(ended).toEqual(Array.from({ length: 8 }, () => "Answered"));
 });
 
-const at = (time: string, effect: Effect.Effect<Played>) =>
+const at = <A>(time: string, effect: Effect.Effect<A>) =>
   runTest(
     Effect.gen(function* () {
       yield* TestClock.setTime(Date.parse(time));
@@ -202,4 +201,18 @@ test("tool metrics, recorded live and attributed by session, agree with the coun
   expect(live("bob")).toEqual(fromFacts(bob.facts));
   expect(live("alice")).toEqual({ "classify Succeeded": 2, "report_error Succeeded": 1 });
   expect(live("bob")).toEqual({ "classify Succeeded": 4 });
+});
+
+test("the summary is dated with the last fact it summarises, so the same facts give the same summary later", async () => {
+  const { facts } = await at("2026-09-29T09:30:00.000Z", play(countingUser(12), { ...basic, conversation: FizzBuzzCompaction(20) }));
+  const view = (time: string) =>
+    at(
+      time,
+      Effect.gen(function* () {
+        return yield* (yield* Conversation).messages(facts);
+      }).pipe(Effect.provide(FizzBuzzCompaction(20))),
+    );
+  const [then, later] = [await view("2026-09-29T09:30:00.000Z"), await view("2027-01-01T00:00:00.000Z")];
+  expect(later).toEqual(then);
+  expect(transcript(later)[0]).toStartWith("user: System Date: 2026-09-29T09:30:00.000Z");
 });

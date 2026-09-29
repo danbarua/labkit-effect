@@ -129,7 +129,7 @@ test("a turn-end hook's feedback holds the turn open; the turn ends when the hoo
 test("a hook that never lets go holds the turn at most maxHolds times, then the turn ends", async () => {
   const { tags, logged } = await answeringTurn([() => ["Not yet."]], 2);
   expect(tags.filter((tag) => tag === "ModelResponded")).toHaveLength(3);
-  expect(tags.at(-1)).toBe("TurnEnded");
+  expect(tags.slice(-3)).toEqual(["TurnHoldsExhausted", "TurnEndReviewed", "TurnEnded"]);
   expect(logged).toContainEqual([logKeys.loop.holdsExhausted, { holds: 2, maxHolds: 2 }]);
 });
 

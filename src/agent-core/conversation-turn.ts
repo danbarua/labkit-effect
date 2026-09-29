@@ -114,6 +114,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelAttemptFailed: "ignored",
     ModelVetoed: "ignored",
     TurnEndReviewed: "ignored",
+    TurnHoldsExhausted: "ignored",
   },
   Opening: {
     TurnInterrupted: interrupted,
@@ -130,6 +131,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelAttemptFailed: "ignored",
     ModelVetoed: "ignored",
     TurnEndReviewed: "ignored",
+    TurnHoldsExhausted: "ignored",
   },
   Stepping: {
     TurnInterrupted: interrupted,
@@ -146,6 +148,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelAttemptFailed: passOn,
     ModelVetoed: passOn,
     TurnEndReviewed: "ignored",
+    TurnHoldsExhausted: "ignored",
   },
   Continuing: {
     TurnInterrupted: interrupted,
@@ -162,6 +165,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelAttemptFailed: "ignored",
     ModelVetoed: "ignored",
     TurnEndReviewed: "ignored",
+    TurnHoldsExhausted: "ignored",
   },
   AfterAnswer: {
     TurnInterrupted: interrupted,
@@ -171,6 +175,8 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     Compact: (state, message) => compact(state, message.compaction),
     Proceed: "ignored",
     TurnEndReviewed: (state) => ended(state.turn, { _tag: "Answered" }),
+    /** Recorded; the review goes on, without the hooks. */
+    TurnHoldsExhausted: (state) => becomes(state),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
     StepCutShort: "ignored",
@@ -187,6 +193,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     Compact: (state, message) => compact(state, message.compaction),
     Proceed: "ignored",
     TurnEndReviewed: (state) => nextStep(state.turn, state.step),
+    TurnHoldsExhausted: (state) => becomes(state),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
     StepCutShort: "ignored",
@@ -216,5 +223,6 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelAttemptFailed: "ignored",
     ModelVetoed: "ignored",
     TurnEndReviewed: "ignored",
+    TurnHoldsExhausted: "ignored",
   },
 };

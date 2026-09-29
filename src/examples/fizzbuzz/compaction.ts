@@ -1,7 +1,7 @@
 /**
  * The toy FizzBuzz compaction, as a view of the conversation: once the completed turns hold `after`
  * text messages, they are sent as one summary message, followed by the current turn as it is. The
- * summary is regenerated from the facts for every request; nothing is recorded.
+ * summary is regenerated from the facts alone for every request; nothing is recorded.
  */
 
 import { DateTime, Effect, Layer } from "effect";
@@ -18,10 +18,10 @@ const textCount = (messages: ReadonlyArray<ContextMessage>): number =>
   messages.reduce((total, message) => total + message.parts.filter((part) => part._tag === "Text").length, 0);
 
 /**
- * The summary of `messages`, dated `now`. The last number returned is the model's last reply that is
+ * The summary of `messages`, dated `at`. The last number returned is the model's last reply that is
  * a whole number; a reply that is not (an error code) is not a number returned.
  */
-export function fizzBuzzSummary(messages: ReadonlyArray<ContextMessage>, now: DateTime.Utc): string {
+export function fizzBuzzSummary(messages: ReadonlyArray<ContextMessage>, at: DateTime.Utc): string {
   const walked = messages
     .flatMap((message) => message.parts.map((part) => ({ role: message.role, part })))
     .reduce<{ readonly asked: string | undefined; readonly returned: string | undefined; readonly classified: ReadonlyArray<readonly [string, string]> }>(
@@ -40,7 +40,7 @@ export function fizzBuzzSummary(messages: ReadonlyArray<ContextMessage>, now: Da
     return found.length === 0 ? "none" : found.join(", ");
   };
   return [
-    `System Date: ${DateTime.formatIso(now)}`,
+    `System Date: ${DateTime.formatIso(at)}`,
     "**Conversation Summary (auto-generated)**",
     "This summary was generated from your conversation with the user.",
     "Continue the conversation, do not mention this summary to the user.",
@@ -61,15 +61,19 @@ function currentTurnStart(facts: ReadonlyArray<Fact>): number {
   );
 }
 
+/**
+ * The summary is dated with the time of the last fact it summarises, so the same facts always give
+ * the same summary, whenever the view is computed.
+ */
 export const FizzBuzzCompaction = (after: number) =>
   Layer.succeed(Conversation, {
-    messages: (facts) =>
-      Effect.gen(function* () {
-        const start = currentTurnStart(facts);
-        const completed = conversationOf(facts.slice(0, start), facts);
-        const current = conversationOf(facts.slice(start), facts);
-        if (textCount(completed) < after) return merged([...completed, ...current]);
-        const summary: ContextMessage = { role: "user", parts: [{ _tag: "Text", text: fizzBuzzSummary(completed, yield* DateTime.now) }] };
-        return merged([summary, ...current]);
-      }),
+    messages: (facts) => {
+      const start = currentTurnStart(facts);
+      const completed = conversationOf(facts.slice(0, start), facts);
+      const current = conversationOf(facts.slice(start), facts);
+      const last = facts[start - 1];
+      if (textCount(completed) < after || last === undefined) return Effect.succeed(merged([...completed, ...current]));
+      const summary: ContextMessage = { role: "user", parts: [{ _tag: "Text", text: fizzBuzzSummary(completed, last.time) }] };
+      return Effect.succeed(merged([summary, ...current]));
+    },
   });

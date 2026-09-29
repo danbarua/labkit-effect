@@ -55,7 +55,10 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
   const held = yield* Ref.make<Held>({ world: emptyWorld, facts: [], holds: new Map() });
   const recorded = yield* PubSub.unbounded<Fact>();
 
-  /** The turn-end hooks' feedback as input, then the review; after `maxHolds` holds, only the review. */
+  /**
+   * The turn-end hooks' feedback as input, then the review. After `maxHolds` holds the hooks are not
+   * run; that is recorded (`TurnHoldsExhausted`), then the review.
+   */
   const reviewTurnEnd = (turn: TurnId): Effect.Effect<ReadonlyArray<Observation>, never, Services> =>
     Effect.gen(function* () {
       const { hooks, maxHolds } = yield* TurnEndHooks;
@@ -63,7 +66,7 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
       const reviewed = { _tag: "TurnEndReviewed" as const, turn };
       if (hooks.length > 0 && holds >= maxHolds) {
         yield* Effect.logWarning(logKeys.loop.holdsExhausted, { holds, maxHolds });
-        return [reviewed];
+        return [{ _tag: "TurnHoldsExhausted" as const, turn, holds }, reviewed];
       }
       const feedback = (yield* Effect.forEach(hooks, (hook) => hook(turn))).flat();
       if (feedback.length === 0) return [reviewed];

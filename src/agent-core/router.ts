@@ -260,6 +260,7 @@ export function deliver(world: World, seq: Seq, observation: Observation): Deliv
       case "ModelAttemptFailed":
       case "ModelVetoed":
       case "TurnEndReviewed":
+      case "TurnHoldsExhausted":
       case "TurnInterrupted": {
         const machine = world.turns.get(observation.turn);
         return machine === undefined ? "undelivered" : toTurn(world, observation.turn, machine, observation, seq);
