@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { anthropicAt } from "./support/anthropic.ts";
+import { anthropicAt } from "./support/providers.ts";
 import { Effect, Layer } from "effect";
 import { BoringContextAssembler, BoringModelProvider, CountingTurns } from "../src/agent-effect/boring.ts";
 import { AnthropicModelClient } from "../src/agent-effect/anthropic-client.ts";

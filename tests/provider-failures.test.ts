@@ -6,7 +6,7 @@ import { ModelName, ProviderName, TurnId } from "../src/agent-core/names.ts";
 import { anthropicModelClient } from "../src/agent-effect/anthropic-client.ts";
 import { ModelClient } from "../src/agent-effect/contracts.ts";
 import { logKeys } from "../src/agent-effect/log-keys.ts";
-import { anthropicAt } from "./support/anthropic.ts";
+import { anthropicAt } from "./support/providers.ts";
 
 const servers: Array<{ stop: (force: boolean) => unknown }> = [];
 afterAll(() => {

@@ -12,6 +12,11 @@ export function receivedJson(value: Schema.Json): Received {
   return { mediaType: json, body: { _tag: "Text", text: ReceivedText.make(JSON.stringify(value)) } };
 }
 
+/** JSON exactly as it was received, as text, without parsing it. */
+export function receivedJsonText(text: string): Received {
+  return { mediaType: json, body: { _tag: "Text", text: ReceivedText.make(text) } };
+}
+
 /** Plain text content. */
 export function receivedText(text: string): Received {
   return { mediaType: MediaType.make("text/plain"), body: { _tag: "Text", text: ReceivedText.make(text) } };

@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { anthropicAt } from "./support/anthropic.ts";
+import { anthropicAt } from "./support/providers.ts";
 import { json } from "./support/received.ts";
 import { Effect, Layer } from "effect";
 import type { Observation } from "../src/agent-core/observation.ts";
