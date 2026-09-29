@@ -151,3 +151,10 @@ test("a turn reported while one is running is recorded as not expected", () => {
   expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "ObservationNotExpected", observation: stray } });
   expect(session.world.agent.state).toMatchObject({ _tag: "Running", turn: "turn-1" });
 });
+
+test("a model response passed on to a step that is running tools is recorded as not expected", () => {
+  const session = started();
+  observe(session, callsTool);
+  const stray = observe(session, answers);
+  expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "ObservationNotExpected", observation: stray } });
+});

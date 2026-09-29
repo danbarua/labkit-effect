@@ -13,8 +13,9 @@
  * - `InputCancelled` withdraws the input it names from whichever mailbox holds it; if no mailbox
  *   does, nothing changes. This is the one place the router reads more than an address.
  * - An observation addressed to a turn or call that no machine exists for is recorded as
- *   `ObservationUndelivered`. One a machine's state ignores is recorded as `ObservationNotExpected`.
- *   A message between machines that is ignored records nothing.
+ *   `ObservationUndelivered`. One a machine's state ignores, or that a machine passes on and the next
+ *   ignores, is recorded as `ObservationNotExpected`. Any other message between machines that is
+ *   ignored records nothing.
  *
  * Decisions are recorded in order at the positions after the observation (the first at `seq + 1`);
  * the caller records them there.
@@ -183,13 +184,39 @@ function send(world: World, sent: Send, seq: Seq, at: number) {
   }
 }
 
-/** Delivers the messages in order, and those they lead to after them, until none are left. */
+/** Whether the message is the observation itself, passed on by the machine it was delivered to. */
+function isPassedOn(sent: Send): boolean {
+  if (sent._tag !== "ToTurnStep") return false;
+  switch (sent.message._tag) {
+    case "ModelResponded":
+    case "ModelFailed":
+    case "ModelVetoed":
+      return true;
+    case "StepStart":
+    case "CallSettled":
+      return false;
+    default:
+      return sent.message satisfies never;
+  }
+}
+
+/**
+ * Delivers the messages in order, and those they lead to after them, until none are left. An
+ * observation passed on and ignored is recorded as `ObservationNotExpected`, as it would be had the
+ * first machine ignored it.
+ */
 function drain(done: Delivered, pending: ReadonlyArray<Send>, seq: Seq): Delivered {
   const [next, ...rest] = pending;
   if (next === undefined) return done;
   const result = send(done.world, next, seq, seq + done.decisions.length);
   return result === undefined
-    ? drain(done, rest, seq)
+    ? drain(
+        isPassedOn(next)
+          ? { ...done, decisions: [...done.decisions, { _tag: "ObservationNotExpected", observation: seq }] }
+          : done,
+        rest,
+        seq,
+      )
     : drain(
         {
           world: result.world,

@@ -13,9 +13,12 @@
  * - a user message with text is `InputArrived`, from the user, or from the system when Claude Code
  *   marks it meta (a hook's feedback, a message from another session); while the agent is idle a
  *   turn is started, as the loop does;
- * - consecutive assistant records with one message id are one `ModelResponded`: `text` is `Text`,
- *   `thinking` with its signature is `Thinking`, `tool_use` is `ToolCall`, anything else is
- *   `Unrecognised`; the message's id and usage are its metadata;
+ * - the assistant records with one message id are one `ModelResponded`, however other records
+ *   interleave with them: `text` is `Text`, `thinking` with its signature is `Thinking`, `tool_use`
+ *   is `ToolCall`, anything else is `Unrecognised`; the message's id and usage are its metadata.
+ *   Claude Code starts a tool as soon as its call has streamed in, so a result can be recorded
+ *   before the rest of its message; such results are given after the message, and the early start
+ *   is not represented;
  * - a `tool_result` block is `ToolEnded`: `Failed` (the tool's own report) when `is_error`,
  *   otherwise `Succeeded`;
  * - after a final answer the core asks `BeforeTurnEnded`; a Stop hook's feedback that follows is
@@ -48,6 +51,8 @@ const state = {
   unmapped: new Map<string, number>(),
   records: 0,
   pending: undefined as { id: string; model: string; blocks: Array<Json>; usage: Json; stop: Json } | undefined,
+  /** Tool results recorded while their message was still arriving, given after it. */
+  held: [] as Array<Record_>,
   /** A turn whose `BeforeTurnEnded` is not answered yet: a Stop hook's feedback may still come. */
   review: undefined as string | undefined,
 };
@@ -114,6 +119,19 @@ function flushResponse(): void {
     stop: typeof pending.stop === "string" ? pending.stop : JSON.stringify(pending.stop),
     metadata: json({ id: pending.id, usage: pending.usage }),
   });
+  const held = state.held.splice(0);
+  for (const result of held) toolEnded(result);
+}
+
+function toolEnded(result: Record_): void {
+  observe({
+    _tag: "ToolEnded",
+    call: str(result["tool_use_id"]),
+    outcome:
+      result["is_error"] === true
+        ? { _tag: "Failed", reason: { _tag: "Reported", error: resultContent(result["content"]) } }
+        : { _tag: "Succeeded", output: resultContent(result["content"]) },
+  });
 }
 
 function resultContent(content: Json | undefined): unknown {
@@ -140,33 +158,30 @@ function onRecord(record: Record_): void {
     };
     return;
   }
-  flushResponse();
   if (type === "user" && typeof message === "object" && message !== null && !Array.isArray(message)) {
-    const raw = (message as Record_)["content"];
-    const stopHook = record["isMeta"] === true && typeof raw === "string" && raw.startsWith("Stop hook feedback");
-    if (!stopHook) flushReview();
-    if (record["isCompactSummary"] === true) return count("user (compaction summary)");
     const content = (message as Record_)["content"];
-    // A meta message is shown to the model but was not typed by the user: a hook's feedback, a
-    // message from another session, a command's output.
-    const from = record["isMeta"] === true ? { _tag: "System" } : { _tag: "User" };
-    if (typeof content === "string") return observe({ _tag: "InputArrived", from, text: content });
     const blocks = Array.isArray(content) ? (content as Array<Json>) : [];
     const results = blocks.filter((b) => (b as Record_ | null)?.["type"] === "tool_result") as Array<Record_>;
-    for (const result of results)
-      observe({
-        _tag: "ToolEnded",
-        call: str(result["tool_use_id"]),
-        outcome:
-          result["is_error"] === true
-            ? { _tag: "Failed", reason: { _tag: "Reported", error: resultContent(result["content"]) } }
-            : { _tag: "Succeeded", output: resultContent(result["content"]) },
-      });
     const texts = blocks.flatMap((b) => {
       const r = b as Record_ | null;
       return r?.["type"] === "text" && typeof r["text"] === "string" ? [r["text"]] : [];
     });
-    if (texts.length > 0) observe({ _tag: "InputArrived", from, text: texts.join("\n") });
+    const input = typeof content === "string" ? content : texts.length > 0 ? texts.join("\n") : undefined;
+    // Results that arrive while their message is still being recorded (Claude Code starts a tool
+    // as soon as its call has streamed in) are held until the message is complete.
+    if (input === undefined && state.pending !== undefined) {
+      state.held.push(...results);
+      return;
+    }
+    flushResponse();
+    const stopHook = record["isMeta"] === true && typeof content === "string" && content.startsWith("Stop hook feedback");
+    if (!stopHook) flushReview();
+    if (record["isCompactSummary"] === true) return count("user (compaction summary)");
+    for (const result of results) toolEnded(result);
+    // A meta message is shown to the model but was not typed by the user: a hook's feedback, a
+    // message from another session, a command's output.
+    const from = record["isMeta"] === true ? { _tag: "System" } : { _tag: "User" };
+    if (input !== undefined) observe({ _tag: "InputArrived", from, text: input });
     const others = blocks.filter((b) => !["tool_result", "text"].includes(str((b as Record_ | null)?.["type"])));
     for (const other of others) count(`user block: ${str((other as Record_ | null)?.["type"])}`);
     return;
