@@ -42,45 +42,71 @@ effects can be run ahead and their results put into the next step's context, so 
 is spent asking for them. A lighter form: a per-step tool catalog with pre-filled "hint" calls the
 model might make next. This needs to know which tools are read-only, as a property of the tool.
 
-### Identity: sessions, windows, forks
+### Identity: sessions, turns, forks
 
-Who assigns an identity (the harness or something outside it) is not decided; the records hold
-identities as data either way.
+A session has an id, and so does a turn. A turn's parent is a pointer to a session and a turn:
 
-Dan's proposal: turn 0 is the init; a root session has `SessionId == ParentId`; every compaction
-or fork marks an episode boundary and gets a new session whose journal points back to its parent.
-The user sees the root head to tail; the model sees the tail of the latest summarised fork.
+- turn zero of a root session points at itself (`session/session`): a pointer to itself marks the
+  root;
+- turn zero of a fork points at the session and turn it was forked from
+  (`parent-session/parent-turn`).
 
-What two systems on this machine do (checked in their session files, 2026-09-29):
+On disk this is one field; a database may split it into two columns for joins. A fork reads its
+parent's history through the pointer, so forking copies nothing, unless the fork is made with a
+copy of the parent's history. A copied history can then be rewritten in the fork, independently of
+the parent and of the fork's siblings.
 
-- Claude Code records compaction inside the same session file, under the same session id: a
-  `compact_boundary` record starts a new chain for the model (`parentUuid: null`), links to the
-  last message before it (`logicalParentUuid`), names the recent messages kept verbatim, and
-  records token counts before and after; the summary is a message marked `isCompactSummary`.
-- Codex records compaction as a `compacted` record in the same session, carrying the history the
-  model sees from then on, and chains "windows" within the session (`window_id`,
-  `previous_window_id`, `first_window_id`). A true fork (a subagent's thread) is a separate session
-  with `forked_from_id`.
+What Claude Code and Codex do (their session files, 2026-09-29):
 
-Where the proposal and those differ:
+- Claude Code records a compaction inside the session's journal, under the same session id: a
+  `compact_boundary` record, the recent messages it keeps verbatim, token counts before and after,
+  and the summary as a message marked `isCompactSummary`. The model request that wrote the summary
+  is not recorded.
+- Codex records a `compacted` record in the session's journal, carrying the whole history the model
+  sees from then on, and chains windows (`window_id`, `previous_window_id`). The request that wrote
+  the summary is recorded inside the turn, as a response marked as the final answer. A subagent is a
+  new session with `forked_from_id`: it names the parent session but not the point it forked at,
+  and starts with a copy of the parent's history.
 
-1. Neither treats compaction as a fork. If compaction made a child session and new facts went into
-   it, the root would stop being head to tail, and the person's view would have to stitch root and
-   forks together. With compaction as a window record in one journal, "the person sees the
-   canonical journal" stays literally true.
-2. A fork needs its fork point (which position or turn in the parent), not only the parent's id.
-3. Both mark a root by having no parent; `SessionId == ParentId` works as a convention but makes a
-   root and a malformed record look the same.
+### Compaction
 
-That suggests three identities:
+Both systems write the summary into the append-only journal, where it stays whatever its quality.
+A journal with cheap forks allows more: one log that holds everything is like one process holding
+everything, and cheap forks are like Unix `fork()`.
 
-- a session: the canonical journal;
-- a window: a compaction's view within a session, with its own identity, the previous window, and
-  the positions it covers; spend is summed per window;
-- a fork: a new session with `forkedFrom: { session, at }`, for histories that diverge (`/btw`,
-  what-if, parallel attempts).
+- The journal records the boundary: which span of the session was compacted. The summary belongs to
+  a fork whose history is the summary and what follows it, and can be revised, replaced or compared
+  without changing the parent.
+- A session's compacted forks form a linked list of episodic summaries, each pointing at the one
+  before.
+- What that allows:
+  - trying compaction strategies side by side over the same parent (A/B tests);
+  - forks that keep different facts: a fork made for a purpose keeps what that purpose needs (the
+    reason a user forks at all);
+  - strategies per provider or model (cache-aware, attention-aware), or after switching model;
+  - compaction by meaning: fork, drop what the fork's goal does not need, and keep revising the
+    compacted history as the goal changes. A compacted fork of a fork can diverge from its
+    parent's compacted fork.
+- Compacting between steps is one strategy, like stop-the-world garbage collection. A request to
+  compact goes to the inbox like any other message, and waits for a point between steps. That does
+  not rule out summarising asynchronously or ahead of time beside it.
+- Summarising ahead of time: a worker beside the session follows it and rolls tool calls up as they
+  happen: a raw file read becomes "read file foo.ts", a write "wrote file foo.ts", a pull request
+  "GH: owner/repo/pulls/123". This runs off-line, before compaction is needed, and shrinks what a
+  model is later asked to summarise. The same summaries serve an advisor agent, evaluations and
+  analytics.
+
+### Behaviour as extensions
+
+Compaction strategies, like all other behaviour, are extensions hooked into the core's machines.
+The Effect layer orchestrates: it schedules effects, routes messages and observations, and applies
+policies. A harness that behaves like Codex, or like Claude Code, would each be a bundle of
+policies.
 
 ## Open
 
-- Forks. Windows are recorded by the core (`Compacted`, `WindowOpened`; agent-core S4), started and
-  identified by the layers around it; context assembly does not use them yet.
+- The boundary entry's name: `compaction-window` (a span chosen for compaction, a decision) or
+  `compacted-episode` (a span that was compacted, a fact).
+- The core's `Compacted` observation (agent-core S4) records the summary in the journal, as Claude
+  Code and Codex do. Moving the summary into a fork changes it.
+- Forks and the turn pointer are not built.
