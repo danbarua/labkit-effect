@@ -57,6 +57,13 @@ test("while a request is carried out, CurrentWork and every log line name its se
   );
   const expected = { session: SessionId.make("s1"), turn: TurnId.make("turn-1") };
   expect(logged).toContainEqual({ message: ["stub.responding"], annotations: expected });
+  // Every decision recorded is also logged, for whoever is debugging the loop.
+  expect(logged.filter((line) => Array.isArray(line.message) && line.message[0] === logKeys.loop.decisionRecorded)).toEqual(
+    ["InputDelivered", "ModelAsked", "TurnEnded"].map((decision) => ({
+      message: [logKeys.loop.decisionRecorded, expect.objectContaining({ decision })],
+      annotations: { session: SessionId.make("s1") },
+    })),
+  );
   expect(worked).toEqual([expected]);
 });
 

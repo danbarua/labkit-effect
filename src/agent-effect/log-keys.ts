@@ -15,6 +15,8 @@ export const logKeys = {
     toolInputReplaced: "provider.request.tool_input_replaced",
   },
   loop: {
+    /** The core made a decision, and it was recorded; the details are the decision and where. */
+    decisionRecorded: "loop.decision.recorded",
     /** A turn-end hook's feedback held a turn open. */
     turnHeld: "loop.turn_end.held",
     /** A turn reached `maxHolds`; its turn-end hooks were not run again. */

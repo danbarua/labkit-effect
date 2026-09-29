@@ -19,13 +19,19 @@
 import { DateTime, Effect, PubSub, Ref, type Scope } from "effect";
 import type { Fact } from "../agent-core/fact.ts";
 import { deliver, emptyWorld, type World } from "../agent-core/router.ts";
-import { InputText, Seq, type TurnId } from "../agent-core/names.ts";
+import { InputText, Seq, type SessionId, type TurnId } from "../agent-core/names.ts";
 import type { Observation } from "../agent-core/observation.ts";
 import type { EffectRequest } from "../agent-core/request.ts";
 import { ContextAssembler, ModelClient, ModelProvider, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
 import { Report } from "./report.ts";
 import { CurrentWork, type Work } from "./work.ts";
+
+/** The session the facts opened, if they have. */
+const sessionOf = (facts: ReadonlyArray<Fact>): SessionId | undefined =>
+  facts.flatMap((fact) =>
+    fact._tag === "Observed" && fact.observation._tag === "SessionOpened" ? [fact.observation.session] : [],
+  )[0];
 
 /** The span each kind of request is carried out in. */
 const spanNames: Record<EffectRequest["_tag"], string> = {
@@ -101,8 +107,8 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
 
   /** What a request is about: the session the facts opened, and the request's turn, call and tool. */
   const about = (request: EffectRequest, world: World, facts: ReadonlyArray<Fact>): Work => {
-    const opened = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "SessionOpened");
-    const session = opened?._tag === "Observed" && opened.observation._tag === "SessionOpened" ? { session: opened.observation.session } : {};
+    const opened = sessionOf(facts);
+    const session = opened === undefined ? {} : { session: opened };
     const turn = world.agent.state._tag === "Running" ? { turn: world.agent.state.turn } : {};
     switch (request._tag) {
       case "RequestModelResponse":
@@ -137,6 +143,17 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
         facts: [...before.facts, ...facts],
       }));
       yield* PubSub.publishAll(recorded, facts);
+      const session = sessionOf(now.facts);
+      yield* Effect.forEach(facts, (fact) =>
+        fact._tag === "Decided"
+          ? Effect.logInfo(logKeys.loop.decisionRecorded, {
+              decision: fact.decision._tag,
+              seq: fact.seq,
+              after: seq,
+              details: fact.decision,
+            }).pipe(Effect.annotateLogs(session === undefined ? {} : { session }))
+          : Effect.void,
+      );
       const services = yield* Effect.context<Services>();
       const report = (reported: Observation) => observe(reported).pipe(Effect.provideContext(services));
       yield* Effect.forEach(outcome.requests, (request) => {
