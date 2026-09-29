@@ -18,7 +18,11 @@ The domain core of a coding harness, and the layers around it.
 |---|---|---|
 | `src/agent-core/` | Machines with mailboxes that pass messages (agent, conversation turn, turn step, call), the router, and the facts, decisions and effect requests they record. See its `MODEL.md`. | `Schema` from `effect` |
 | `src/agent-policy/` | Whether an effect request continues, is vetoed, or waits. See its `MODEL.md`. | `Schema` from `effect`, `agent-core` |
-| `src/agent-effect/` | The layer around them: contracts as Effect services, adapters, the loop. | anything |
+| `src/agent-effect/` | The layer around them: contracts as Effect services, adapters, the loop (which records every fact, and so owns the journal). | anything |
+| `src/agent-context/` | Context assembly: what the model is sent, from system prompts, tool catalogs and a view of the conversation. See its `MODEL.md`. | anything |
+| `src/instrumentation/` | Tool usage counted from facts, as Effect metrics, and OpenTelemetry. | anything |
+| `src/fizzbuzz/` | A synthetic scenario for testing the rest: a scripted model, its tools, a toy compaction. | anything |
+| `scripts/trajectories/` | Importers that replay Claude Code and Codex sessions through the core into `trajectories/` (not committed). | anything |
 
 In the first two, `bun run lint` (oxlint, with Effect's recommended preset and the rules in
 `scripts/oxlint/abstract-layers.js`) enforces their imports and pure functions (no `let`, no loops,
