@@ -17,7 +17,7 @@ import { AgentContextAssembler, WholeConversation } from "../agent-context/assem
 import type { Fact } from "../agent-core/fact.ts";
 import { InputText, ModelName, ProviderName, SessionId } from "../agent-core/names.ts";
 import { CountingTurns, NoTurnEndHooks } from "../agent-effect/boring.ts";
-import { type ModelContext, ModelProvider } from "../agent-effect/contracts.ts";
+import { type ModelContext, ModelProvider, type ToolRunner } from "../agent-effect/contracts.ts";
 import { openSession } from "../agent-effect/loop.ts";
 import { scriptedFizzBuzzModel } from "./model.ts";
 import { FizzBuzzSystemPromptProvider } from "./prompt.ts";
@@ -31,6 +31,10 @@ export interface Setup {
   readonly catalog: ToolCatalog;
   /** How the conversation is viewed for each request. */
   readonly conversation: Layer.Layer<Conversation>;
+  /** Runs the tools; the FizzBuzz runner when not given. */
+  readonly tools?: Layer.Layer<ToolRunner>;
+  /** The session's id; "fizzbuzz" when not given. */
+  readonly session?: string;
 }
 
 export const basic: Setup = { catalog: FizzBuzzToolCatalog, conversation: WholeConversation };
@@ -62,11 +66,11 @@ export const play = (inputs: ReadonlyArray<string>, setup: Setup = basic): Effec
     assembler,
     CountingTurns,
     NoTurnEndHooks,
-    FizzBuzzToolRunner,
+    setup.tools ?? FizzBuzzToolRunner,
   );
   return Effect.gen(function* () {
     const session = yield* openSession;
-    yield* session.observe({ _tag: "SessionOpened", session: SessionId.make("fizzbuzz") });
+    yield* session.observe({ _tag: "SessionOpened", session: SessionId.make(setup.session ?? "fizzbuzz") });
     yield* Effect.forEach(
       inputs,
       (text) => session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make(text) }),

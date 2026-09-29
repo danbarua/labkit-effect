@@ -1,3 +1,6 @@
+import { Metric } from "effect";
+import type { Fact } from "../src/agent-core/fact.ts";
+import { CountedToolRunner } from "../src/instrumentation/tool-metrics.ts";
 import { expect, test } from "bun:test";
 import { Effect } from "effect";
 import { TestClock } from "effect/testing";
@@ -167,4 +170,29 @@ test("tool usage for the session is counted from its facts", async () => {
     classify: { calls: 4, succeeded: 4, failed: { Reported: 0, NotFound: 0, InputRejected: 0, Vetoed: 0 }, unfinished: 0 },
     report_error: { calls: 3, succeeded: 3, failed: { Reported: 0, NotFound: 0, InputRejected: 0, Vetoed: 0 }, unfinished: 0 },
   });
+});
+
+test("tool metrics, recorded live and attributed by session, agree with the counts from each session's facts", async () => {
+  const counted = { ...advanced, tools: CountedToolRunner(FizzBuzzToolRunner) };
+  const { alice, bob, snapshot } = await Effect.runPromise(
+    Effect.gen(function* () {
+      const alice = yield* play(["1", "3", "7", "5"], { ...counted, session: "alice" });
+      const bob = yield* play(countingUser(8), { ...counted, session: "bob" });
+      return { alice, bob, snapshot: yield* Metric.snapshot };
+    }).pipe(Effect.provideService(Metric.MetricRegistry, new Map())),
+  );
+  const live = (session: string) =>
+    Object.fromEntries(
+      snapshot.flatMap((metric) =>
+        metric.id === "agent.tool.runs" && metric.attributes?.["session"] === session && metric.type === "Counter"
+          ? [[`${metric.attributes["tool"]} ${metric.attributes["outcome"]}`, Number(metric.state.count)]]
+          : [],
+      ),
+    );
+  const fromFacts = (facts: ReadonlyArray<Fact>) =>
+    Object.fromEntries([...toolStats(facts)].map(([tool, stats]) => [`${tool} Succeeded`, stats.succeeded]));
+  expect(live("alice")).toEqual(fromFacts(alice.facts));
+  expect(live("bob")).toEqual(fromFacts(bob.facts));
+  expect(live("alice")).toEqual({ "classify Succeeded": 2, "report_error Succeeded": 1 });
+  console.log(`live tool metrics: alice ${JSON.stringify(live("alice"))}, bob ${JSON.stringify(live("bob"))}`);
 });
