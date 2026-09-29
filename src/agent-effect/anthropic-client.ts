@@ -16,11 +16,10 @@
 
 import { AnthropicClient } from "@effect/ai-anthropic";
 import { Effect, Layer, type Schema } from "effect";
+import type * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
-import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import {
   CallId,
-  FailureText,
   ModelText,
   StopReason,
   ThinkingSignature,
@@ -32,6 +31,7 @@ import type { ModelPart, Observation, ToolOutcome } from "../agent-core/observat
 import type { Received } from "../agent-core/received.ts";
 import { type ContextPart, type ModelContext, ModelClient, type Target, type ToolSpec } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
+import { defaultRetries, failedAs, invalidOutput, postJson, type Retries, withRetries } from "./provider-call.ts";
 import { asText, parseJson, receivedJson } from "./received.ts";
 
 type Json = Schema.Json;
@@ -232,11 +232,6 @@ function part(received: Json): ModelPart {
   return { _tag: "Unrecognised", received: receivedJson(received) };
 }
 
-const failed = (turn: TurnId, failure: string, details: Record<string, unknown>): Effect.Effect<Outcome> =>
-  Effect.logError(logKeys.anthropic.requestFailed, { failure, ...details }).pipe(
-    Effect.as({ _tag: "ModelFailed" as const, turn, failure: FailureText.make(failure) }),
-  );
-
 const logSupplied = (supplied: ReadonlyArray<Supplied>): Effect.Effect<void> =>
   Effect.forEach(
     supplied,
@@ -247,56 +242,48 @@ const logSupplied = (supplied: ReadonlyArray<Supplied>): Effect.Effect<void> =>
     { discard: true },
   );
 
-/** The response's body and status, or why there is none. */
-const post = (http: HttpClient.HttpClient, payload: Json) =>
-  HttpClientRequest.post("/v1/messages").pipe(
-    HttpClientRequest.bodyJsonUnsafe(payload),
-    http.execute,
-    Effect.flatMap((response) =>
-      response.text.pipe(Effect.map((text) => ({ status: response.status, text }))),
-    ),
-    Effect.result,
-  );
+const caller = { module: "AnthropicModelClient", method: "respond" };
+
+/** One request: the observation it produced, or the `AiError` it failed with. */
+const respondOnce = (
+  http: HttpClient.HttpClient,
+  target: Target,
+  context: ModelContext,
+  turn: TurnId,
+): Effect.Effect<Extract<Outcome, { _tag: "ModelResponded" }>, AiError.AiError> =>
+  Effect.gen(function* () {
+    const sent = body(target, context);
+    yield* logSupplied(sent.supplied);
+    const response = yield* postJson(http, caller, "/v1/messages", sent.json);
+    if (!isObject(response) || !Array.isArray(response["content"]))
+      return yield* invalidOutput(caller, `The response has no content blocks: ${JSON.stringify(response)}`);
+    const { content, stop_reason, ...metadata } = response;
+    return {
+      _tag: "ModelResponded" as const,
+      turn,
+      provider: target.provider,
+      model: target.model,
+      parts: (content as ReadonlyArray<Json>).map(part),
+      stop: StopReason.make(typeof stop_reason === "string" ? stop_reason : JSON.stringify(stop_reason ?? null)),
+      metadata: receivedJson(metadata),
+    };
+  });
 
 /**
  * Requests go through the configured `AnthropicClient` (its address, key and API version); its
  * typed response decoding is not used, so a block type it does not know is kept as `Unrecognised`
- * rather than failing the response.
+ * rather than failing the response. A failure is an `AiError`; retryable ones are retried.
  */
-export const AnthropicModelClient = Layer.effect(
-  ModelClient,
-  Effect.gen(function* () {
-    const http = (yield* AnthropicClient.AnthropicClient).client.httpClient;
-    return ModelClient.of({
-      respond: (target, context, turn) =>
-        Effect.gen(function* () {
-          const sent = body(target, context);
-          yield* logSupplied(sent.supplied);
-          const received = yield* post(http, sent.json);
-          if (received._tag === "Failure")
-            return yield* failed(turn, "the request did not complete", { cause: String(received.failure) });
-          const { status, text } = received.success;
-          if (status < 200 || status > 299)
-            return yield* failed(turn, `the provider answered HTTP ${status}`, { status, body: text });
-          const parsed = yield* Effect.try(() => JSON.parse(text) as Json).pipe(Effect.result);
-          if (parsed._tag === "Failure") return yield* failed(turn, "the response is not JSON", { status, body: text });
-          const response = parsed.success;
-          if (!isObject(response) || !Array.isArray(response["content"]))
-            return yield* failed(turn, "the response has no content blocks", { status, body: text });
-          const { content, stop_reason, ...metadata } = response;
-          const outcome: Outcome = {
-            _tag: "ModelResponded",
-            turn,
-            provider: target.provider,
-            model: target.model,
-            parts: (content as ReadonlyArray<Json>).map(part),
-            stop: StopReason.make(
-              typeof stop_reason === "string" ? stop_reason : JSON.stringify(stop_reason ?? null),
-            ),
-            metadata: receivedJson(metadata),
-          };
-          return outcome;
-        }),
-    });
-  }),
-);
+export const anthropicModelClient = (retries: Retries = defaultRetries) =>
+  Layer.effect(
+    ModelClient,
+    Effect.gen(function* () {
+      const http = (yield* AnthropicClient.AnthropicClient).client.httpClient;
+      return ModelClient.of({
+        respond: (target, context, turn) =>
+          respondOnce(http, target, context, turn).pipe(withRetries(retries), Effect.catch(failedAs(turn))),
+      });
+    }),
+  );
+
+export const AnthropicModelClient = anthropicModelClient();
