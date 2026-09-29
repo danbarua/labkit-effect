@@ -3,7 +3,7 @@
 import { afterAll, expect, test } from "bun:test";
 import { Effect, Layer, Logger } from "effect";
 import { ModelName, ProviderName, TurnId } from "../../src/agent-core/names.ts";
-import { anthropicModelClient } from "../../src/agent-effect/anthropic-client.ts";
+import { anthropicModelClient } from "../../src/agent-effect/providers/anthropic-client.ts";
 import { ModelClient } from "../../src/agent-effect/contracts.ts";
 import { logKeys } from "../../src/agent-effect/log-keys.ts";
 import { anthropicAt } from "../support/providers.ts";

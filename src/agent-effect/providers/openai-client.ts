@@ -17,11 +17,11 @@ import { OpenAiClient } from "@effect/ai-openai";
 import { Effect, Layer } from "effect";
 import type * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
-import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../agent-core/names.ts";
-import type { ModelPart, Observation } from "../agent-core/observation.ts";
-import { type ContextMessage, type ModelContext, ModelClient, type Target } from "./contracts.ts";
-import { defaultRetries, failedAs, invalidOutput, postJson, type Retries, withRetries } from "./provider-call.ts";
-import { receivedJson, receivedJsonText } from "./received.ts";
+import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agent-core/names.ts";
+import type { ModelPart, Observation } from "../../agent-core/observation.ts";
+import { type ContextMessage, type ModelContext, ModelClient, type Target } from "../contracts.ts";
+import { defaultRetries, failedAs, invalidOutput, postJson, type Retries, withRetries } from "../provider-call.ts";
+import { receivedJson, receivedJsonText } from "../received.ts";
 import {
   type Called,
   callsIn,
@@ -32,7 +32,7 @@ import {
   renderToolResult,
   type Shaped,
   toolInputObject,
-} from "./shaping.ts";
+} from "../shaping.ts";
 
 type Responded = Extract<Observation, { _tag: "ModelResponded" }>;
 

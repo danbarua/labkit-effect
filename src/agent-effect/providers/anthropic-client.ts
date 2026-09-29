@@ -26,12 +26,12 @@ import {
   ThinkingText,
   ToolName,
   type TurnId,
-} from "../agent-core/names.ts";
-import type { ModelPart, Observation } from "../agent-core/observation.ts";
-import { type ContextPart, type ModelContext, ModelClient, type Target } from "./contracts.ts";
-import { logKeys } from "./log-keys.ts";
-import { defaultRetries, failedAs, invalidOutput, postJson, type Retries, withRetries } from "./provider-call.ts";
-import { receivedJson } from "./received.ts";
+} from "../../agent-core/names.ts";
+import type { ModelPart, Observation } from "../../agent-core/observation.ts";
+import { type ContextPart, type ModelContext, ModelClient, type Target } from "../contracts.ts";
+import { logKeys } from "../log-keys.ts";
+import { defaultRetries, failedAs, invalidOutput, postJson, type Retries, withRetries } from "../provider-call.ts";
+import { receivedJson } from "../received.ts";
 import {
   type Called,
   callsIn,
@@ -43,7 +43,7 @@ import {
   renderToolResult,
   type Shaped,
   toolInputObject,
-} from "./shaping.ts";
+} from "../shaping.ts";
 
 type Outcome = Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" }>;
 

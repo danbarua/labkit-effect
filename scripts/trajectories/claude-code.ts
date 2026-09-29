@@ -35,7 +35,7 @@
 
 import { basename } from "node:path";
 import { eachRecord, type Imported, type Json, json, projection, type Record_, str, text, writeTrajectory } from "./project.ts";
-import { anthropicEndings } from "../../src/agent-effect/anthropic-client.ts";
+import { anthropicEndings } from "../../src/agent-effect/providers/anthropic-client.ts";
 import { endingOf } from "../../src/agent-effect/shaping.ts";
 
 export async function importClaudeCode(source: string): Promise<Imported> {

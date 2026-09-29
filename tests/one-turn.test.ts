@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { anthropicAt } from "./support/providers.ts";
 import { Effect, Layer } from "effect";
 import { BoringContextAssembler, BoringModelProvider, CountingTurns, NoTurnEndHooks } from "../src/agent-effect/boring.ts";
-import { AnthropicModelClient } from "../src/agent-effect/anthropic-client.ts";
+import { AnthropicModelClient } from "../src/agent-effect/providers/anthropic-client.ts";
 import { openSession } from "../src/agent-effect/loop.ts";
 import { SmolToolRunner } from "../src/agent-effect/smol-tools.ts";
 import type { Observation } from "../src/agent-core/observation.ts";

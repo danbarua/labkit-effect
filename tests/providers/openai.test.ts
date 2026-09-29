@@ -5,7 +5,7 @@ import { Effect, Layer } from "effect";
 import type { Observation } from "../../src/agent-core/observation.ts";
 import { BoringModelProvider, CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/boring.ts";
 import { openSession } from "../../src/agent-effect/loop.ts";
-import { OpenAiModelClient } from "../../src/agent-effect/openai-client.ts";
+import { OpenAiModelClient } from "../../src/agent-effect/providers/openai-client.ts";
 import { SmolToolRunner, smolCatalog } from "../../src/agent-effect/smol-tools.ts";
 import { ToolContextAssembler } from "../../src/agent-effect/tool-context.ts";
 import { openAiAt, recordingServer } from "../support/providers.ts";
