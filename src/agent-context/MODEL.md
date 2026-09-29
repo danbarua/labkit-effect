@@ -95,6 +95,26 @@ everything, and cheap forks are like Unix `fork()`.
   "GH: owner/repo/pulls/123". This runs off-line, before compaction is needed, and shrinks what a
   model is later asked to summarise. The same summaries serve an advisor agent, evaluations and
   analytics.
+- Providers compact too: Anthropic returns a compaction block (beta `compact-2026-09-04`), OpenAI
+  an encrypted `compaction` item. Each is opaque and works only with its own provider, so a
+  fallback to another provider after one needs a compaction of its own. That is one more fork over
+  the same window: a fallback compaction, made when the chain switches, or ahead of time.
+- Compaction forks link back to the journal they summarise, so a history can be shown with two or
+  more providers' compactions of the same span side by side, and our own strategies can be tried
+  and evaluated against them the same way.
+
+### Forks copy nothing
+
+Facts are never rewritten and summaries are not facts, so a fork is a pointer (parent session,
+position) and the facts it appends itself. Reading a fork reads the parent's facts up to the fork
+point, then its own. The parent is append-only, so it can grow without touching its forks. This
+holds because:
+
+- a fork point is a position where the machines' state can be rebuilt by folding the facts before
+  it: between steps at the least, ideally between turns;
+- the parent is never truncated or edited;
+- a fact is addressed by the session it lives in and its position there; a position alone is not
+  enough, because a fork and its parent each number the facts after the fork point.
 
 ### Behaviour as extensions
 
@@ -105,8 +125,7 @@ policies.
 
 ## Open
 
-- The boundary entry's name: `compaction-window` (a span chosen for compaction, a decision) or
-  `compacted-episode` (a span that was compacted, a fact).
-- The core's `Compacted` observation (agent-core S4) records the summary in the journal, as Claude
-  Code and Codex do. Moving the summary into a fork changes it.
-- Forks and the turn pointer are not built.
+- The boundary entry is `compaction-window` (Dan's choice): a span chosen for compaction. The
+  core's `Compacted` observation (agent-core S4) still records the summary in the journal; moving
+  the summary into a fork reshapes it into that entry.
+- Forks, the turn pointer, and addressing facts by session and position are not built.
