@@ -16,7 +16,7 @@ import {
 import { AgentContextAssembler, WholeConversation } from "../../agent-context/assembler.ts";
 import type { Fact } from "../../agent-core/fact.ts";
 import { InputText, ModelName, ProviderName, SessionId } from "../../agent-core/names.ts";
-import { CountingTurns, NoTurnEndHooks } from "../../agent-effect/examples/example-providers.ts";
+import { CountingTurns, NoTurnEndHooks } from "../../agent-effect/turns.ts";
 import { type ModelContext, ModelProvider, type ToolRunner } from "../../agent-effect/contracts.ts";
 import { openSession } from "../../agent-effect/loop.ts";
 import { scriptedFizzBuzzModel } from "./model.ts";

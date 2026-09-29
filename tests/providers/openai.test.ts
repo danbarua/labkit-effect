@@ -3,10 +3,11 @@
 import { afterAll, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import type { Observation } from "../../src/agent-core/observation.ts";
-import { BoringModelProvider, CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/examples/example-providers.ts";
+import { BoringModelProvider } from "../support/boring.ts";
+import { CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/turns.ts";
 import { openSession } from "../../src/agent-effect/loop.ts";
 import { OpenAiModelClient } from "../../src/agent-effect/providers/openai-client.ts";
-import { SmolToolRunner, smolCatalog } from "../../src/agent-effect/examples/example-smol-tools.ts";
+import { SmolToolRunner, smolCatalog } from "../support/smol-tools.ts";
 import { ToolContextAssembler } from "../../src/agent-effect/tool-context.ts";
 import { openAiAt, recordingServer } from "../support/providers.ts";
 import { json } from "../support/received.ts";

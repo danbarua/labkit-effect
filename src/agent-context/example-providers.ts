@@ -1,34 +1,12 @@
 /**
- * One provider of each kind, for trying context assembly.
+ * Providers and selectors for trying context assembly: the current time as a notice, a fixed
+ * model, and a move to a larger model when the context is estimated not to fit.
  */
 
 import { DateTime, Effect } from "effect";
-import { ToolName } from "../agent-core/names.ts";
 import type { ContextMessage } from "../agent-effect/contracts.ts";
-import type {
-  Contents,
-  ModelChoice,
-  ModelSelector,
-  NoticeProvider,
-  SystemPromptProvider,
-  ToolCatalog,
-} from "./assemble.ts";
+import type { Contents, ModelChoice, ModelSelector, NoticeProvider } from "./assemble.ts";
 import { logKeys } from "./log-keys.ts";
-
-export const BoringSystemPromptProvider: SystemPromptProvider = {
-  system: Effect.succeed(["You are a helpful assistant."]),
-};
-
-/** One tool, `echo`, which answers "PONG". */
-export const BoringToolCatalog: ToolCatalog = {
-  tools: Effect.succeed([
-    {
-      name: ToolName.make("echo"),
-      description: 'Answers "PONG".',
-      input: { type: "object", properties: {} },
-    },
-  ]),
-};
 
 /** A notice of the current time, from the clock the program runs with. */
 export const SystemTimeNoticeProvider: NoticeProvider = {

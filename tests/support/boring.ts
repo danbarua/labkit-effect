@@ -1,13 +1,14 @@
 /**
- * The least machinery that runs a turn: one hard-coded provider and model, a context that is the
- * turn's inputs and nothing else, and turn identities from a counter.
+ * Test doubles for the least machinery that runs a turn: one hard-coded provider and model, a
+ * context that is the turn's inputs and nothing else, a system prompt and a one-tool catalog.
  */
 
 import { Effect, Layer } from "effect";
-import type { Fact } from "../../agent-core/fact.ts";
-import { ModelName, ProviderName, type Seq, TurnId } from "../../agent-core/names.ts";
-import { ContextAssembler, type ModelContext, ModelProvider, TurnEndHooks, Turns } from "../contracts.ts";
-import { inputTexts } from "../conversation.ts";
+import type { SystemPromptProvider, ToolCatalog } from "../../src/agent-context/assemble.ts";
+import type { Fact } from "../../src/agent-core/fact.ts";
+import { ModelName, ProviderName, type Seq, ToolName, type TurnId } from "../../src/agent-core/names.ts";
+import { ContextAssembler, type ModelContext, ModelProvider } from "../../src/agent-effect/contracts.ts";
+import { inputTexts } from "../../src/agent-effect/conversation.ts";
 
 /** Every request is for provider "boring" and model "boring-1". */
 export const BoringModelProvider = Layer.succeed(ModelProvider, {
@@ -44,16 +45,17 @@ export const BoringContextAssembler = Layer.succeed(ContextAssembler, {
   },
 });
 
-/** No hooks: a turn ends as soon as it may. */
-export const NoTurnEndHooks = Layer.succeed(TurnEndHooks, { hooks: [], maxHolds: 0 });
+export const BoringSystemPromptProvider: SystemPromptProvider = {
+  system: Effect.succeed(["You are a helpful assistant."]),
+};
 
-/** Turn identities `turn-1`, `turn-2`, … in the order turns start. */
-export const CountingTurns = Layer.sync(Turns, () => {
-  const started = { count: 0 };
-  return {
-    start: Effect.sync(() => {
-      started.count += 1;
-      return TurnId.make(`turn-${started.count}`);
-    }),
-  };
-});
+/** One tool, `echo`, which answers "PONG". */
+export const BoringToolCatalog: ToolCatalog = {
+  tools: Effect.succeed([
+    {
+      name: ToolName.make("echo"),
+      description: 'Answers "PONG".',
+      input: { type: "object", properties: {} },
+    },
+  ]),
+};

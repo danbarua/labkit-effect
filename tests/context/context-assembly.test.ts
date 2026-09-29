@@ -19,13 +19,12 @@ import {
 import type { ContextMessage } from "../../src/agent-effect/contracts.ts";
 import { logKeys } from "../../src/agent-context/log-keys.ts";
 import {
-  BoringSystemPromptProvider,
-  BoringToolCatalog,
   ContextWindowAwareModelSelector,
   FixedModelSelector,
   SystemTimeNoticeProvider,
 } from "../../src/agent-context/example-providers.ts";
 import { ModelName, ProviderName } from "../../src/agent-core/names.ts";
+import { BoringSystemPromptProvider, BoringToolCatalog } from "../support/boring.ts";
 import { runTest } from "../support/run.ts";
 
 const model = (name: string, contextWindow: number): ModelChoice => ({

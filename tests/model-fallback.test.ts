@@ -12,8 +12,9 @@ import { InputText, ModelName, ProviderName, SessionId, TurnId } from "../src/ag
 import type { Observation } from "../src/agent-core/observation.ts";
 import type { Received } from "../src/agent-core/received.ts";
 import { ModelClient, ModelProvider, type Target } from "../src/agent-effect/contracts.ts";
-import { BoringContextAssembler, CountingTurns, NoTurnEndHooks } from "../src/agent-effect/examples/example-providers.ts";
-import { SmolToolRunner } from "../src/agent-effect/examples/example-smol-tools.ts";
+import { BoringContextAssembler } from "./support/boring.ts";
+import { CountingTurns, NoTurnEndHooks } from "../src/agent-effect/turns.ts";
+import { SmolToolRunner } from "./support/smol-tools.ts";
 import { logKeys } from "../src/agent-effect/log-keys.ts";
 import { openSession } from "../src/agent-effect/loop.ts";
 import { FallbackModelClient } from "../src/agent-effect/model-fallback.ts";
