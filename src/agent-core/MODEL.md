@@ -122,8 +122,8 @@ recorded fact does not change: `ModelResponded` still holds the whole response w
 ends, and calls already opened stay open.
 
 **Reconfiguring a session.** A change to how a session runs (the same model with different
-thinking, another model, another provider) is an observation recorded like any other, so a replay
-or a fork reproduces it. It is a message posted to the session's inbox, and the session
+thinking, another model, another provider) is an observation recorded like any other, so a session
+loaded from its record, or a fork, goes on with it. It is a message posted to the session's inbox, and the session
 reconfigures itself when it takes it, between steps as with other mail. Fallback chains are built
 on this: when a provider is down or a subscription's limit is reached, whatever notices reports a
 change of model or provider, and the next request goes there. Built for the model and provider:
