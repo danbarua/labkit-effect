@@ -9,7 +9,7 @@ import { Effect, type Schema } from "effect";
 import type { CallId, ToolName } from "../agent-core/names.ts";
 import type { ResponseEnding, ToolOutcome } from "../agent-core/observation.ts";
 import type { Received } from "../agent-core/received.ts";
-import type { ModelContext, ToolSpec } from "./contracts.ts";
+import type { ContextPart, ModelContext, Target, ToolSpec } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
 import { asText, parseJson } from "./received.ts";
 
@@ -41,6 +41,24 @@ export function endingOf(table: ReadonlyMap<string, ResponseEnding["_tag"]>, rea
 
 export function isObject(value: Json): value is Schema.JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** A part of an earlier response that is not sent, and why. */
+export function leftOut(part: ContextPart, reason: string): Shaped {
+  return {
+    json: [],
+    supplied: [{ level: "info", event: logKeys.provider.partLeftOut, details: { part: part._tag, reason } }],
+  };
+}
+
+/**
+ * The JSON a provider's own part is sent back as: what was received, unchanged. Another provider's
+ * part is left out: only the provider that produced it reads it.
+ */
+export function sentBack(part: Extract<ContextPart, { _tag: "Unrecognised" }>, target: Target): Shaped {
+  if (part.provider !== target.provider) return leftOut(part, `produced by ${part.provider}, not ${target.provider}`);
+  const parsed = parseJson(part.received);
+  return "value" in parsed ? { json: [parsed.value], supplied: [] } : leftOut(part, parsed.reason);
 }
 
 /** What the model called, by call: the tool's name and the input it gave. */

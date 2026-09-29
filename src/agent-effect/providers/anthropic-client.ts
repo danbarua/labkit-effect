@@ -6,7 +6,9 @@
  * becomes an error `tool_result` whose content tells the model what to do next: for a tool that
  * does not exist, the tools that do; for input that does not fit, the tool's input schema and what
  * was given. Where the wire format needs something the context does not say, the client supplies
- * it and logs that it did.
+ * it and logs that it did. Thinking, and blocks it did not recognise, go back to the provider that
+ * produced them unchanged and in their place, as the API requires for thinking to stay valid; for
+ * any other provider they are left out, and that is logged.
  *
  * In: a response's `content` blocks become the observation's parts in order: a `text` block is
  * `Text`, a `thinking` block with its signature is `Thinking`, a `tool_use` block is `ToolCall`
@@ -45,10 +47,12 @@ import {
   endingOf,
   isObject,
   type Json,
+  leftOut,
   logSupplied,
   type RenderedResult,
   renderToolResult,
   type Shaped,
+  sentBack,
   toolInputObject,
 } from "../shaping.ts";
 
@@ -61,26 +65,35 @@ function resultContent(result: RenderedResult): { content: string; is_error?: tr
   return result.isError ? { content: result.text, is_error: true } : { content: result.text };
 }
 
-function block(part: ContextPart, context: ModelContext, calls: ReadonlyMap<CallId, Called>): Shaped {
+/** The blocks one part becomes: one, or none when it is left out. */
+function blocks(part: ContextPart, target: Target, context: ModelContext, calls: ReadonlyMap<CallId, Called>): Shaped {
   switch (part._tag) {
     case "Text":
-      return { json: { type: "text", text: part.text }, supplied: [] };
+      return { json: [{ type: "text", text: part.text }], supplied: [] };
+    case "Thinking":
+      return part.provider === target.provider
+        ? { json: [{ type: "thinking", thinking: part.text, signature: part.signature }], supplied: [] }
+        : leftOut(part, `produced by ${part.provider}, not ${target.provider}`);
     case "ToolCall": {
       const input = toolInputObject(part.call, part.input);
       return {
-        json: { type: "tool_use", id: part.call, name: part.tool, input: input.json },
+        json: [{ type: "tool_use", id: part.call, name: part.tool, input: input.json }],
         supplied: input.supplied,
       };
     }
     case "ToolResult":
       return {
-        json: {
-          type: "tool_result",
-          tool_use_id: part.call,
-          ...resultContent(renderToolResult(part.outcome, calls.get(part.call), context.tools)),
-        },
+        json: [
+          {
+            type: "tool_result",
+            tool_use_id: part.call,
+            ...resultContent(renderToolResult(part.outcome, calls.get(part.call), context.tools)),
+          },
+        ],
         supplied: [],
       };
+    case "Unrecognised":
+      return sentBack(part, target);
     default:
       return part satisfies never;
   }
@@ -104,12 +117,12 @@ function role(message: ContextMessage): string {
 
 function body(target: Target, context: ModelContext): Shaped {
   const calls = callsIn(context);
-  const messages = context.messages.map((message) => {
-    const blocks = message.parts.map((part) => block(part, context, calls));
-    return {
-      json: { role: role(message), content: blocks.map((shaped) => shaped.json) },
-      supplied: blocks.flatMap((shaped) => shaped.supplied),
-    };
+  const messages = context.messages.flatMap((message) => {
+    const shaped = message.parts.map((part) => blocks(part, target, context, calls));
+    const content = shaped.flatMap((each) => each.json as ReadonlyArray<Json>);
+    const supplied = shaped.flatMap((each) => each.supplied);
+    // A message whose every part was left out is not sent: the API rejects empty content.
+    return content.length === 0 ? [{ json: [], supplied }] : [{ json: [{ role: role(message), content }], supplied }];
   });
   return {
     json: {
@@ -125,7 +138,7 @@ function body(target: Target, context: ModelContext): Shaped {
               input_schema: tool.input,
             })),
           }),
-      messages: messages.map((message) => message.json),
+      messages: messages.flatMap((message) => message.json as ReadonlyArray<Json>),
     },
     supplied: [
       {

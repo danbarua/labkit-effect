@@ -3,10 +3,11 @@
 import { afterAll, expect, test } from "bun:test";
 import { anthropicAt } from "../support/providers.ts";
 import { Effect, Layer, Logger } from "effect";
-import { ModelName, ProviderName, TurnId } from "../../src/agent-core/names.ts";
+import { ModelName, ProviderName, ThinkingSignature, ThinkingText, TurnId } from "../../src/agent-core/names.ts";
 import { ModelClient } from "../../src/agent-effect/contracts.ts";
 import { logKeys } from "../../src/agent-effect/log-keys.ts";
 import { json } from "../support/received.ts";
+import { receivedJson } from "../../src/agent-effect/received.ts";
 import type { Observation } from "../../src/agent-core/observation.ts";
 import { BoringModelProvider } from "../support/boring.ts";
 import { CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/turns.ts";
@@ -277,6 +278,79 @@ test("a thinking block becomes Thinking with its signature; a block type nobody 
       { _tag: "Unrecognised", received: json(future) },
     ],
   });
+});
+
+test("thinking, an empty one included, and blocks nobody knows go back to the provider unchanged and in place", async () => {
+  const thinking = { type: "thinking", thinking: "", signature: "sig-abc" };
+  const redacted = { type: "redacted_thinking", data: "opaque" };
+  const call = { type: "tool_use", id: "toolu_1", name: "add", input: { a: 2, b: 3 } };
+  const provider = recording([
+    { content: [thinking, redacted, call], stop_reason: "tool_use" },
+    { content: [{ type: "text", text: "5." }], stop_reason: "end_turn" },
+  ]);
+  await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession;
+      yield* session.observe(boringOpening(smolCatalog));
+      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          BoringModelProvider,
+          TurnContextAssembler,
+          AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))),
+          CountingTurns,
+          NoTurnEndHooks,
+          SmolToolRunner,
+        ),
+      ),
+    ),
+  );
+  expect((provider.bodies[1] as { messages: ReadonlyArray<unknown> }).messages[1]).toEqual({
+    role: "assistant",
+    content: [thinking, redacted, call],
+  });
+});
+
+test("another provider's thinking and blocks are left out and logged; a message left empty is not sent", async () => {
+  const logged: Array<unknown> = [];
+  const capture = Logger.make((options) => {
+    logged.push(options.message);
+  });
+  const provider = recording([{ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" }]);
+  const other = ProviderName.make("other");
+  await runTest(
+    Effect.gen(function* () {
+      yield* (yield* ModelClient).respond(
+        target,
+        {
+          system: undefined,
+          tools: [],
+          messages: [
+            { role: "user", parts: [{ _tag: "Text", text: "Hello" }] },
+            {
+              role: "assistant",
+              parts: [
+                { _tag: "Thinking", provider: other, text: ThinkingText.make(""), signature: ThinkingSignature.make("sig") },
+                { _tag: "Unrecognised", provider: other, received: receivedJson({ type: "reasoning" }) },
+              ],
+            },
+            { role: "user", parts: [{ _tag: "Text", text: "Again" }] },
+          ],
+        },
+        TurnId.make("turn-1"),
+      );
+    }).pipe(
+      Effect.provide(Layer.mergeAll(AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))), Logger.layer([capture]))),
+    ),
+  );
+  expect((provider.bodies[0] as { messages: unknown }).messages).toEqual([
+    { role: "user", content: [{ type: "text", text: "Hello" }] },
+    { role: "user", content: [{ type: "text", text: "Again" }] },
+  ]);
+  const reason = "produced by other, not boring";
+  expect(logged).toContainEqual([logKeys.provider.partLeftOut, { part: "Thinking", reason }]);
+  expect(logged).toContainEqual([logKeys.provider.partLeftOut, { part: "Unrecognised", reason }]);
 });
 
 test("requests go to /v1/messages with the client's key and API version", async () => {

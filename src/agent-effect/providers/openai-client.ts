@@ -4,11 +4,14 @@
  * Out: the system text is `instructions`; the context's messages become input items: text as
  * `input_text` or `output_text` messages, a tool call as a `function_call` item, a tool outcome as
  * a `function_call_output` item carrying the text the model is sent. The catalog is sent as
- * `function` tools.
+ * `function` tools. An item it did not recognise (a `reasoning` item, say) goes back to the provider
+ * that produced it unchanged and in its place; for any other provider it is left out, as is
+ * another provider's thinking, and that is logged.
  *
- * In: the response's `output` items become the observation's parts in order: each `output_text` of
- * a `message` is `Text`; a `function_call` is `ToolCall` (whatever the tool's name), its arguments
- * kept as the text received; every other item or content part is `Unrecognised`. The stop is the
+ * In: the response's `output` items become the observation's parts in order: a `message` whose
+ * content is all `output_text` is a `Text` for each; a `function_call` is `ToolCall` (whatever the
+ * tool's name), its arguments kept as the text received; every other item, a `message` with any
+ * other content included, is `Unrecognised`, whole, so that it can be sent back as it came. The stop is the
  * response's `status` (with the reason when it is `incomplete`); everything else in the response is
  * `metadata`. A request that fails, after retries, is observed as `ModelFailed`.
  */
@@ -28,9 +31,11 @@ import {
   endingOf,
   isObject,
   type Json,
+  leftOut,
   logSupplied,
   renderToolResult,
   type Shaped,
+  sentBack,
   toolInputObject,
 } from "../shaping.ts";
 
@@ -53,39 +58,48 @@ function textAs(message: ContextMessage): { readonly role: string; readonly type
 }
 
 /** The input items one message becomes, in order. */
-function items(message: ContextMessage, calls: ReadonlyMap<CallId, Called>, context: ModelContext): Shaped {
+function items(message: ContextMessage, target: Target, calls: ReadonlyMap<CallId, Called>, context: ModelContext): Shaped {
   const shaped = message.parts.map((part): Shaped => {
     switch (part._tag) {
       case "Text": {
         const { role, type } = textAs(message);
-        return { json: { role, content: [{ type, text: part.text }] }, supplied: [] };
+        return { json: [{ role, content: [{ type, text: part.text }] }], supplied: [] };
       }
+      case "Thinking":
+        return leftOut(part, "the Responses API has no thinking block");
       case "ToolCall": {
         const input = toolInputObject(part.call, part.input);
         return {
-          json: { type: "function_call", call_id: part.call, name: part.tool, arguments: JSON.stringify(input.json) },
+          json: [{ type: "function_call", call_id: part.call, name: part.tool, arguments: JSON.stringify(input.json) }],
           supplied: input.supplied,
         };
       }
       case "ToolResult":
         return {
-          json: {
-            type: "function_call_output",
-            call_id: part.call,
-            output: renderToolResult(part.outcome, calls.get(part.call), context.tools).text,
-          },
+          json: [
+            {
+              type: "function_call_output",
+              call_id: part.call,
+              output: renderToolResult(part.outcome, calls.get(part.call), context.tools).text,
+            },
+          ],
           supplied: [],
         };
+      case "Unrecognised":
+        return sentBack(part, target);
       default:
         return part satisfies never;
     }
   });
-  return { json: shaped.map((item) => item.json), supplied: shaped.flatMap((item) => item.supplied) };
+  return {
+    json: shaped.flatMap((item) => item.json as ReadonlyArray<Json>),
+    supplied: shaped.flatMap((item) => item.supplied),
+  };
 }
 
 function body(target: Target, context: ModelContext): Shaped {
   const calls = callsIn(context);
-  const input = context.messages.map((message) => items(message, calls, context));
+  const input = context.messages.map((message) => items(message, target, calls, context));
   return {
     json: {
       model: target.model,
@@ -106,16 +120,17 @@ function body(target: Target, context: ModelContext): Shaped {
   };
 }
 
+function isOutputText(content: Json): content is { readonly type: "output_text"; readonly text: string } {
+  return isObject(content) && content["type"] === "output_text" && typeof content["text"] === "string";
+}
+
 /** The parts one output item becomes. */
 function parts(item: Json): ReadonlyArray<ModelPart> {
   if (!isObject(item)) return [{ _tag: "Unrecognised", received: receivedJson(item) }];
   const { type } = item;
-  if (type === "message" && Array.isArray(item["content"]))
-    return (item["content"] as ReadonlyArray<Json>).map((content): ModelPart =>
-      isObject(content) && content["type"] === "output_text" && typeof content["text"] === "string"
-        ? { _tag: "Text", text: ModelText.make(content["text"]) }
-        : { _tag: "Unrecognised", received: receivedJson(content) },
-    );
+  const content = item["content"];
+  if (type === "message" && Array.isArray(content) && content.every(isOutputText))
+    return content.map((each): ModelPart => ({ _tag: "Text", text: ModelText.make(each.text) }));
   const { call_id, name, arguments: args } = item;
   if (type === "function_call" && typeof call_id === "string" && typeof name === "string" && typeof args === "string")
     return [{ _tag: "ToolCall", call: CallId.make(call_id), tool: ToolName.make(name), input: receivedJsonText(args) }];

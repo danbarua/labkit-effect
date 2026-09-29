@@ -3,7 +3,8 @@
  * user message, each response an assistant message with its text and tool calls, each tool's
  * outcome a user message. Consecutive messages from one role become one.
  *
- * Parts the model sent that the harness does not recognise are not sent back.
+ * A response's thinking and the parts the harness does not recognise stay in their place, marked
+ * with the provider that produced them; which provider reads them is its adapter's business.
  */
 
 import type { Fact } from "../agent-core/fact.ts";
@@ -44,8 +45,9 @@ function message(fact: Fact, texts: ReadonlyMap<Seq, string>): ContextMessage | 
             case "ToolCall":
               return [{ _tag: "ToolCall", call: part.call, tool: part.tool, input: part.input }];
             case "Thinking":
+              return [{ _tag: "Thinking", provider: observation.provider, text: part.text, signature: part.signature }];
             case "Unrecognised":
-              return [];
+              return [{ _tag: "Unrecognised", provider: observation.provider, received: part.received }];
             default:
               return part satisfies never;
           }

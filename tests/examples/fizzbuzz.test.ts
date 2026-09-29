@@ -26,6 +26,10 @@ const transcript = (messages: ReadonlyArray<ContextMessage>): ReadonlyArray<stri
           return `${message.role}: ${part.tool}(${asText(part.input)})`;
         case "ToolResult":
           return `${message.role}: result ${part.outcome._tag === "Succeeded" ? asText(part.outcome.output) : part.outcome.reason._tag}`;
+        case "Thinking":
+          return `${message.role}: thinking ${part.text}`;
+        case "Unrecognised":
+          return `${message.role}: unrecognised ${asText(part.received)}`;
         default:
           return part satisfies never;
       }

@@ -5,7 +5,15 @@
 import { Context, type Effect, type Schema } from "effect";
 import type * as AiError from "effect/ai/AiError";
 import type { Fact } from "../agent-core/fact.ts";
-import type { CallId, ModelName, ProviderName, ToolName, TurnId } from "../agent-core/names.ts";
+import type {
+  CallId,
+  ModelName,
+  ProviderName,
+  ThinkingSignature,
+  ThinkingText,
+  ToolName,
+  TurnId,
+} from "../agent-core/names.ts";
 import type { Observation, ToolOutcome } from "../agent-core/observation.ts";
 import type { Received } from "../agent-core/received.ts";
 
@@ -28,11 +36,22 @@ export interface ToolSpec {
   readonly input: Schema.Json;
 }
 
-/** One part of a message the model is sent. */
+/**
+ * One part of a message the model is sent. `Thinking` and `Unrecognised` are parts of a response
+ * that only the provider that produced it reads: its adapter sends them back unchanged, in their
+ * place; any other provider's adapter leaves them out.
+ */
 export type ContextPart =
   | { readonly _tag: "Text"; readonly text: string }
+  | {
+      readonly _tag: "Thinking";
+      readonly provider: ProviderName;
+      readonly text: ThinkingText;
+      readonly signature: ThinkingSignature;
+    }
   | { readonly _tag: "ToolCall"; readonly call: CallId; readonly tool: ToolName; readonly input: Received }
-  | { readonly _tag: "ToolResult"; readonly call: CallId; readonly outcome: ToolOutcome };
+  | { readonly _tag: "ToolResult"; readonly call: CallId; readonly outcome: ToolOutcome }
+  | { readonly _tag: "Unrecognised"; readonly provider: ProviderName; readonly received: Received };
 
 /**
  * One message of what the model is sent. An `instruction` is the harness speaking to the model in

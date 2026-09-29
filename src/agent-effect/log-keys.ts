@@ -13,6 +13,8 @@ export const logKeys = {
     fellBack: "provider.request.fell_back",
     /** A stored tool input was not a JSON object, so `{}` was sent in its place. */
     toolInputReplaced: "provider.request.tool_input_replaced",
+    /** A part of an earlier response was not sent; the details say which part and why. */
+    partLeftOut: "provider.request.part_left_out",
   },
   loop: {
     /** The core made a decision, and it was recorded; the details are the decision and where. */

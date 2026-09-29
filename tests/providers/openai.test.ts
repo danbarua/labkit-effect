@@ -54,7 +54,7 @@ const callsAdd = {
 };
 const answers = { id: "resp_2", status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "5." }] }] };
 
-test("a tool turn sends the catalog, then the call and its output, as Responses input items", async () => {
+test("a tool turn sends the catalog, then the reasoning and call as received and the call's output, as Responses input items", async () => {
   const { provider, facts } = await turn([callsAdd, answers]);
   const tools = smolCatalog.map((tool) => ({ type: "function", name: tool.name, description: tool.description, parameters: tool.input }));
   const question = { role: "user", content: [{ type: "input_text", text: "What is 2 + 3?" }] };
@@ -67,6 +67,7 @@ test("a tool turn sends the catalog, then the call and its output, as Responses 
       tools,
       input: [
         question,
+        { type: "reasoning", id: "rs_1", summary: [] },
         { type: "function_call", call_id: "call_1", name: "add", arguments: '{"a":2,"b":3}' },
         { type: "function_call_output", call_id: "call_1", output: "5" },
       ],
@@ -76,17 +77,22 @@ test("a tool turn sends the catalog, then the call and its output, as Responses 
 });
 
 test("output items become parts: text, calls to any tool name, and everything else kept whole", async () => {
-  const { facts } = await turn([
+  const refused = { type: "message", role: "assistant", content: [{ type: "output_text", text: "Reading." }, { type: "refusal", refusal: "no" }] };
+  const { provider, facts } = await turn([
     {
       status: "incomplete",
       incomplete_details: { reason: "max_output_tokens" },
       output: [
         { type: "reasoning", id: "rs_1", summary: [] },
-        { type: "message", role: "assistant", content: [{ type: "output_text", text: "Reading." }, { type: "refusal", refusal: "no" }] },
+        refused,
         { type: "function_call", call_id: "call_9", name: "___read_", arguments: '{"path":"a.ts"}' },
       ],
     },
     answers,
+  ]);
+  expect((provider.bodies[1] as { input: ReadonlyArray<unknown> }).input.slice(1, 3)).toEqual([
+    { type: "reasoning", id: "rs_1", summary: [] },
+    refused,
   ]);
   const responded = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded");
   expect(responded as unknown).toMatchObject({
@@ -95,8 +101,7 @@ test("output items become parts: text, calls to any tool name, and everything el
       ending: { _tag: "CutShort" },
       parts: [
         { _tag: "Unrecognised", received: json({ type: "reasoning", id: "rs_1", summary: [] }) },
-        { _tag: "Text", text: "Reading." },
-        { _tag: "Unrecognised", received: json({ type: "refusal", refusal: "no" }) },
+        { _tag: "Unrecognised", received: json(refused) },
         { _tag: "ToolCall", call: "call_9", tool: "___read_", input: { body: { _tag: "Text", text: '{"path":"a.ts"}' } } },
       ],
     },

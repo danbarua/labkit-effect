@@ -6,7 +6,8 @@
  * Out: the system text is a `system` message; the context's messages become chat messages: text
  * as `text` content parts, the model's tool calls as an assistant message's `tool_calls`, each tool
  * outcome as a `tool` message carrying the text the model is sent. The catalog is sent as
- * `function` tools.
+ * `function` tools. An earlier response's other fields (`reasoning_content`, ...) are not sent back
+ * yet; each one left out is logged.
  *
  * In: the first choice's message becomes the observation's parts in order: its `content` is
  * `Text`, each of its `tool_calls` is `ToolCall` (whatever the tool's name), its arguments kept as
@@ -30,6 +31,7 @@ import {
   endingOf,
   isObject,
   type Json,
+  leftOut,
   logSupplied,
   renderToolResult,
   type Shaped,
@@ -55,6 +57,11 @@ function role(message: ContextMessage): string {
 
 /** The chat messages one context message becomes: tool outcomes each become their own message. */
 function chatMessages(message: ContextMessage, calls: ReadonlyMap<CallId, Called>, context: ModelContext): Shaped {
+  const notSent = message.parts.flatMap((part) =>
+    part._tag === "Thinking" || part._tag === "Unrecognised"
+      ? leftOut(part, "this adapter does not send an earlier response's other fields back").supplied
+      : [],
+  );
   const text = message.parts.flatMap((part) => (part._tag === "Text" ? [{ type: "text", text: part.text }] : []));
   const toolCalls = message.parts.flatMap((part) =>
     part._tag === "ToolCall" ? [{ call: part.call, tool: part.tool, input: toolInputObject(part.call, part.input) }] : [],
@@ -88,7 +95,7 @@ function chatMessages(message: ContextMessage, calls: ReadonlyMap<CallId, Called
                 }),
           },
         ];
-  return { json: [...results, ...own], supplied: toolCalls.flatMap((call) => call.input.supplied) };
+  return { json: [...results, ...own], supplied: [...toolCalls.flatMap((call) => call.input.supplied), ...notSent] };
 }
 
 function body(target: Target, context: ModelContext): Shaped {
