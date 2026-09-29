@@ -102,3 +102,15 @@ then continues").
 Streamed partial model output is side-band information for display, like a progress bar: a
 captured observation, not recorded (Dan). `throttle.ts` is a machine that releases captured items
 in batches at most once per interval; time is an input, so it also serves tests.
+
+## Direction (Dan, 2026-09-29): not a spec
+
+**Starting tools while the response streams.** Claude Code parses tool calls out of the stream and
+starts each one as soon as its call is complete, while the model is still writing; its session
+files record such a tool's result before the rest of the message. The core has no concept for
+this. A shape that fits: a machine per model request fed by the captured stream chunks, tracking
+the block being written (thinking, text, a tool call's input accumulating); when a tool call's
+block closes it tells the step `CallReady`, and the step opens and runs that call early. The
+recorded fact does not change: `ModelResponded` still holds the whole response when the stream
+ends, and calls already opened stay open.
+
