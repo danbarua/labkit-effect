@@ -11,6 +11,7 @@ import type * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { FailureText, type TurnId } from "../agent-core/names.ts";
 import type { Observation } from "../agent-core/observation.ts";
+import { ModelClient, type ProviderRequest } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
 
 type Json = Schema.Json;
@@ -98,6 +99,12 @@ export const withRetries =
       );
     return attempt(0);
   };
+
+/** A model client that makes `request`, and reports a failure as `ModelFailed`. */
+export const modelClientOf = (request: ProviderRequest) =>
+  ModelClient.of({
+    respond: (target, context, turn) => request(target, context, turn).pipe(Effect.catch(failedAs(turn))),
+  });
 
 /** Ends as `ModelFailed` for `turn`, logging the whole error. */
 export const failedAs =

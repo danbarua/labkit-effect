@@ -9,6 +9,8 @@ export const logKeys = {
     requestRetried: "provider.request.retried",
     /** A model request failed and will not be tried again; the details are the whole error. */
     requestFailed: "provider.request.failed",
+    /** A provider could not serve a model request, and it goes to the next provider in the chain. */
+    fellBack: "provider.request.fell_back",
     /** A stored tool input was not a JSON object, so `{}` was sent in its place. */
     toolInputReplaced: "provider.request.tool_input_replaced",
   },

@@ -3,6 +3,7 @@
  */
 
 import { Context, type Effect, type Schema } from "effect";
+import type * as AiError from "effect/ai/AiError";
 import type { Fact } from "../agent-core/fact.ts";
 import type { CallId, ModelName, ProviderName, ToolName, TurnId } from "../agent-core/names.ts";
 import type { Observation, ToolOutcome } from "../agent-core/observation.ts";
@@ -66,6 +67,17 @@ export class ModelClient extends Context.Service<
     ) => Effect.Effect<Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" }>>;
   }
 >()("agent-effect/ModelClient") {}
+
+/**
+ * One request to one provider, as its adapter makes it (retries included): the response, or the
+ * `AiError` it failed with. A model client is built from one or more of these, and decides what a
+ * failure becomes.
+ */
+export type ProviderRequest = (
+  target: Target,
+  context: ModelContext,
+  turn: TurnId,
+) => Effect.Effect<Extract<Observation, { _tag: "ModelResponded" }>, AiError.AiError>;
 
 /** Starts a turn and chooses its identity. */
 export class Turns extends Context.Service<Turns, { readonly start: Effect.Effect<TurnId> }>()(

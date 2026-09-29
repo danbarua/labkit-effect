@@ -28,9 +28,9 @@ import {
   type TurnId,
 } from "../../agent-core/names.ts";
 import type { ModelPart, Observation } from "../../agent-core/observation.ts";
-import { type ContextPart, type ModelContext, ModelClient, type Target } from "../contracts.ts";
+import { type ContextPart, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
 import { logKeys } from "../log-keys.ts";
-import { defaultRetries, failedAs, invalidOutput, postJson, type Retries, withRetries } from "../provider-call.ts";
+import { defaultRetries, invalidOutput, modelClientOf, postJson, type Retries, withRetries } from "../provider-call.ts";
 import { receivedJson } from "../received.ts";
 import {
   type Called,
@@ -180,16 +180,15 @@ const respondOnce = (
  * typed response decoding is not used, so a block type it does not know is kept as `Unrecognised`
  * rather than failing the response. A failure is an `AiError`; retryable ones are retried.
  */
+export const anthropicRequests = (
+  retries: Retries = defaultRetries,
+): Effect.Effect<ProviderRequest, never, AnthropicClient.AnthropicClient> =>
+  Effect.gen(function* () {
+    const http = (yield* AnthropicClient.AnthropicClient).client.httpClient;
+    return (target, context, turn) => respondOnce(http, target, context, turn).pipe(withRetries(retries));
+  });
+
 export const anthropicModelClient = (retries: Retries = defaultRetries) =>
-  Layer.effect(
-    ModelClient,
-    Effect.gen(function* () {
-      const http = (yield* AnthropicClient.AnthropicClient).client.httpClient;
-      return ModelClient.of({
-        respond: (target, context, turn) =>
-          respondOnce(http, target, context, turn).pipe(withRetries(retries), Effect.catch(failedAs(turn))),
-      });
-    }),
-  );
+  Layer.effect(ModelClient, anthropicRequests(retries).pipe(Effect.map(modelClientOf)));
 
 export const AnthropicModelClient = anthropicModelClient();

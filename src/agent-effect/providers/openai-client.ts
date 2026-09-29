@@ -19,8 +19,8 @@ import type * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
 import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agent-core/names.ts";
 import type { ModelPart, Observation } from "../../agent-core/observation.ts";
-import { type ContextMessage, type ModelContext, ModelClient, type Target } from "../contracts.ts";
-import { defaultRetries, failedAs, invalidOutput, postJson, type Retries, withRetries } from "../provider-call.ts";
+import { type ContextMessage, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
+import { defaultRetries, invalidOutput, modelClientOf, postJson, type Retries, withRetries } from "../provider-call.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
 import {
   type Called,
@@ -150,16 +150,16 @@ const respondOnce = (
     };
   });
 
+/** Requests through the configured `OpenAiClient`, retried while retryable; a failure is the `AiError`. */
+export const openAiRequests = (
+  retries: Retries = defaultRetries,
+): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient> =>
+  Effect.gen(function* () {
+    const http = (yield* OpenAiClient.OpenAiClient).client;
+    return (target, context, turn) => respondOnce(http, target, context, turn).pipe(withRetries(retries));
+  });
+
 export const openAiModelClient = (retries: Retries = defaultRetries) =>
-  Layer.effect(
-    ModelClient,
-    Effect.gen(function* () {
-      const http = (yield* OpenAiClient.OpenAiClient).client;
-      return ModelClient.of({
-        respond: (target, context, turn) =>
-          respondOnce(http, target, context, turn).pipe(withRetries(retries), Effect.catch(failedAs(turn))),
-      });
-    }),
-  );
+  Layer.effect(ModelClient, openAiRequests(retries).pipe(Effect.map(modelClientOf)));
 
 export const OpenAiModelClient = openAiModelClient();
