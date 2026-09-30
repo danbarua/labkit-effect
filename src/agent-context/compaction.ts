@@ -25,12 +25,12 @@ import type { Fact } from "../agent-machine/fact.ts";
 import type { PolicyName, ProviderName, SessionId, Seq } from "../agent-machine/names.ts";
 import { WindowId } from "../agent-machine/names.ts";
 import type { Received } from "../agent-machine/received.ts";
-import type { ContextMessage, ContextPart, Target } from "../agent-session/contracts.ts";
+import type { ContextMessage, ContextPart, Target, ToolSpec } from "../agent-session/contracts.ts";
 import { conversationOf, merged } from "../agent-session/conversation.ts";
 import type { Session } from "../agent-session/loop.ts";
 import { asText, parseJson, receivedJson } from "../agent-session/received.ts";
 import { sentIn } from "../agent-session/sent.ts";
-import { modelOf } from "../agent-session/session-setup.ts";
+import { modelOf, systemOf, toolsOf } from "../agent-session/session-setup.ts";
 import { Conversation } from "./assemble.ts";
 import type { SummarizerName, WindowSummary } from "./forks.ts";
 
@@ -39,12 +39,19 @@ import type { SummarizerName, WindowSummary } from "./forks.ts";
  * model the session is asking. A summary is text, or JSON: a provider's own compaction, the items
  * it returned (`provider-compaction.ts`).
  */
+/** What every request of the session carries besides the conversation: its system prompt and tools. */
+export interface SessionOpening {
+  readonly system: string | undefined;
+  readonly tools: ReadonlyArray<ToolSpec>;
+}
+
 export interface Summarizer {
   readonly name: SummarizerName;
   readonly summarize: (
     previous: ReadonlyArray<WindowSummary>,
     messages: ReadonlyArray<ContextMessage>,
     target: Target,
+    opening: SessionOpening,
   ) => Effect.Effect<Received>;
 }
 
@@ -97,7 +104,8 @@ const windowNamed = (facts: ReadonlyArray<Fact>, window: WindowId): WindowFact["
 /**
  * Compacts `session` for the provider it is asking, with `summarizer`, as `decidedBy` decided: the
  * span is every fact after that provider's last summary's window, the summarizer is given that
- * provider's summaries, the messages of the span and the model the session is asking, and the new window is `window-<n>` for the
+ * provider's summaries, the messages of the span, the model the session is asking and the session's
+ * system prompt and tools, and the new window is `window-<n>` for the
  * session's n-th window. Run it between turns.
  */
 export const compact = (session: Session, summarizer: Summarizer, decidedBy: PolicyName) =>
@@ -114,7 +122,10 @@ export const compact = (session: Session, summarizer: Summarizer, decidedBy: Pol
     const span = from === undefined ? facts : facts.filter((fact) => fact.seq > from);
     const windows = windowsOf(facts);
     const window = WindowId.make(`window-${windows.length + 1}`);
-    const summary = yield* summarizer.summarize(previous, conversationOf(span, facts), target);
+    const summary = yield* summarizer.summarize(previous, conversationOf(span, facts), target, {
+      system: systemOf(facts),
+      tools: yield* toolsOf(facts),
+    });
     yield* summaries.record({
       session: sessionOf(facts),
       window,

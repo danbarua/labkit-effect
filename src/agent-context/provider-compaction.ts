@@ -1,6 +1,7 @@
 /**
  * A summarizer that asks the provider for its own compaction: the model the session is asking is
- * sent the provider's earlier summaries (`summaryMessage`), then the span's messages, and what it
+ * sent the session's system prompt and tools, the provider's earlier summaries (`summaryMessage`),
+ * then the span's messages, as a request would carry them, and what it
  * returns (the items that stand in for them, such as a `compaction` item) is the summary, as JSON.
  * The Responses adapter's `openAiCompactions` does this for OpenAI and xAI.
  *
@@ -19,10 +20,10 @@ export const providerCompaction = (
   compactions: (target: Target, context: ModelContext) => Effect.Effect<Compacted, AiError.AiError>,
 ): Summarizer => ({
   name: SummarizerName.make("ProviderCompaction"),
-  summarize: (previous, messages, target) =>
+  summarize: (previous, messages, target, opening) =>
     compactions(target, {
-      system: undefined,
-      tools: [],
+      system: opening.system,
+      tools: opening.tools,
       messages: previous.length === 0 ? messages : [summaryMessage(previous), ...messages],
     }).pipe(
       Effect.map((compacted) => compacted.output),
