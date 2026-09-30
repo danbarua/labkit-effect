@@ -23,7 +23,7 @@ export type AgentObservation = Extract<
 /** Observations delivered to the turn they name, which passes them to its current step. */
 export type ModelObservation = Extract<
   Observation,
-  { _tag: "ModelResponded" | "ModelFailed" | "ModelAttemptFailed" | "ModelVetoed" }
+  { _tag: "ModelResponded" | "ModelFailed" | "ModelAttemptFailed" | "NoticeInserted" | "ModelVetoed" }
 >;
 
 /** Observations delivered to the turn they name, for the turn itself. */

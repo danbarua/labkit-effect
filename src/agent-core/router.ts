@@ -186,6 +186,7 @@ function isPassedOn(sent: Send): boolean {
     case "ModelResponded":
     case "ModelFailed":
     case "ModelAttemptFailed":
+    case "NoticeInserted":
     case "ModelVetoed":
       return true;
     case "StepStart":
@@ -258,6 +259,7 @@ export function deliver(world: World, seq: Seq, observation: Observation): Deliv
       case "ModelResponded":
       case "ModelFailed":
       case "ModelAttemptFailed":
+      case "NoticeInserted":
       case "ModelVetoed":
       case "TurnEndReviewed":
       case "TurnHoldsExhausted":

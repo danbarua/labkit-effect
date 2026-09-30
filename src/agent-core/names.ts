@@ -49,6 +49,10 @@ export type ThinkingText = typeof ThinkingText.Type;
 export const ThinkingSignature = Schema.String.pipe(Schema.brand("agent-core/ThinkingSignature"));
 export type ThinkingSignature = typeof ThinkingSignature.Type;
 
+/** Text the harness gives the model as a notice: timely context, such as the current time. */
+export const NoticeText = Schema.String.pipe(Schema.brand("agent-core/NoticeText"));
+export type NoticeText = typeof NoticeText.Type;
+
 /** Why a provider says a response ended, in the provider's own words. */
 export const StopReason = Schema.String.pipe(Schema.brand("agent-core/StopReason"));
 export type StopReason = typeof StopReason.Type;

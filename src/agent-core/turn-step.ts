@@ -49,6 +49,7 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
     ModelResponded: "ignored",
     ModelFailed: "ignored",
     ModelAttemptFailed: "ignored",
+    NoticeInserted: "ignored",
     ModelVetoed: "ignored",
   },
   AwaitingModel: {
@@ -83,6 +84,8 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
       ),
     /** The request goes on; the step waits for its outcome. */
     ModelAttemptFailed: (state) => becomes(state),
+    /** A notice went into the request; the step waits for its outcome. */
+    NoticeInserted: (state) => becomes(state),
     ModelVetoed: (state, message) =>
       done(
         state.step,
@@ -105,6 +108,7 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
     ModelResponded: "ignored",
     ModelFailed: "ignored",
     ModelAttemptFailed: "ignored",
+    NoticeInserted: "ignored",
     ModelVetoed: "ignored",
   },
   Done: {
@@ -113,6 +117,7 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
     ModelResponded: "ignored",
     ModelFailed: "ignored",
     ModelAttemptFailed: "ignored",
+    NoticeInserted: "ignored",
     ModelVetoed: "ignored",
   },
 };

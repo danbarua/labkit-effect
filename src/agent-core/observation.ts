@@ -12,6 +12,7 @@ import {
   InputText,
   ModelName,
   ModelText,
+  NoticeText,
   ProviderName,
   Seq,
   SessionId,
@@ -145,6 +146,12 @@ export const Observation = Schema.Union([
     failure: FailureText,
     error: Received,
   }),
+  /**
+   * A notice went into a request for a model response, after everything else it carried; later
+   * requests carry it in the same place. A notice is disposable: it is timely context, and a
+   * compaction may drop it.
+   */
+  Schema.TaggedStruct("NoticeInserted", { turn: TurnId, text: NoticeText }),
   /** A policy vetoed a request for a model response, for the reason it gave. */
   Schema.TaggedStruct("ModelVetoed", { turn: TurnId, reason: Received }),
   /** A tool call ended. */

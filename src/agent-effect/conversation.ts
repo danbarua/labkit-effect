@@ -1,14 +1,15 @@
 /**
  * The conversation as the model is sent it, projected from facts: each input given to a turn is a
  * user message, each response an assistant message with its text and tool calls, each tool's
- * outcome a user message. Consecutive messages from one role become one.
+ * outcome a user message, each notice an instruction message where it was inserted. Consecutive
+ * messages from one role become one.
  *
  * A response's thinking and the parts the harness does not recognise stay in their place, marked
  * with the provider that produced them; which provider reads them is its adapter's business.
  */
 
 import type { Fact } from "../agent-core/fact.ts";
-import type { Seq } from "../agent-core/names.ts";
+import type { NoticeText, Seq } from "../agent-core/names.ts";
 import type { ContextMessage, ContextPart } from "./contracts.ts";
 
 /** The text of each input, by its position. */
@@ -20,6 +21,11 @@ export function inputTexts(facts: ReadonlyArray<Fact>): ReadonlyMap<Seq, string>
         : [],
     ),
   );
+}
+
+/** Notices, as the instruction message the model is sent them in. */
+export function noticeMessage(notices: ReadonlyArray<NoticeText>): ContextMessage {
+  return { role: "instruction", parts: notices.map((text) => ({ _tag: "Text", text })) };
 }
 
 /** The message a fact adds, if any. */
@@ -55,6 +61,8 @@ function message(fact: Fact, texts: ReadonlyMap<Seq, string>): ContextMessage | 
       };
     case "ToolEnded":
       return { role: "user", parts: [{ _tag: "ToolResult", call: observation.call, outcome: observation.outcome }] };
+    case "NoticeInserted":
+      return noticeMessage([observation.text]);
     default:
       return undefined;
   }

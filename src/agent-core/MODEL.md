@@ -104,6 +104,11 @@ then continues").
   turn ends. Taking it records `WindowOpened`. Requests after that are made in the window: a summary
   in place of the facts through `through`, except those at `kept`, then everything after. The
   summary is not a fact of the session; it belongs to a compaction fork over the window, held apart.
+- S5. A notice (timely context, such as the current time) is decided on by the layers around the
+  core, which report it as `NoticeInserted { turn, text }` while they make the request that carries
+  it. Every later request carries it in the same place: a provider that binds thinking to what came
+  before it rejects a request that leaves out a notice sent earlier. Notices are disposable content:
+  a compaction may drop them.
 
 ## Captured observations
 
