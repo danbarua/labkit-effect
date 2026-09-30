@@ -24,8 +24,11 @@ in `DESIGN.next.md`.
   grow as if nothing were compacted, and a window says nothing about which providers have a summary
   of it. `compact(session, summarizer, decidedBy)` compacts between turns, for the provider the
   session is asking: the span is every fact after that provider's last summary's window (from the
-  start when it has none), the summarizer is given that provider's summaries and the messages of
-  the span, the summary is recorded, and then the window is reported. A `CompactionPolicy` has a
+  start when it has none), the summarizer is given that provider's summaries, the messages of
+  the span and the model the session is asking, the summary is recorded, and then the window is
+  reported. A summary is text, or JSON: `providerCompaction` asks the provider for its own
+  compaction (the Responses adapter's `openAiCompactions`, for OpenAI and xAI), sending it the
+  provider's earlier summaries and then the span, and records the items it returns. A `CompactionPolicy` has a
   name and decides from the facts whether to compact now and with which summarizer; `compactIfDue`
   asks it, run between turns by whoever runs the session, and records its name on the window. The
   importers write the summaries Claude Code and Codex made to `summaries.jsonl`, written by
@@ -39,7 +42,10 @@ in `DESIGN.next.md`.
   The first request to a provider after its latest summary carries all of its summaries, in the
   order written, as one instruction message (the harness speaking; the Anthropic adapter sends
   instructions that open the conversation in the top-level system), then the messages of the facts
-  that summary's window keeps and of those after its span. A summary is read from the record and
+  that summary's window keeps and of those after its span. A text summary is a `Text` part. A JSON
+  summary, a provider's own compaction, is its items, each an `Unrecognised` part from that
+  provider, which only its adapter sends, unchanged; it was made from the summaries before it, so
+  it is carried in their place, with any written after it. A summary is read from the record and
   never written again, so a change of summarizer changes later summaries only.
 - A8. A request to a provider that has been sent a request since its latest summary carries on from
   its last request (A6), whatever other providers were asked in between; a provider with no
@@ -55,10 +61,9 @@ contents are estimated not to fit.
 - A policy the loop asks by itself: whoever runs the session asks one between turns.
 - A compaction policy that applies at a share of the model's context window: that needs an
   estimate of the next request's size (`TODO.md`).
-- A provider's own compaction in `compact`. The Responses adapter can ask OpenAI or xAI for one
-  (`openAiCompactions`), and sends a `compaction` item back as it sends back any item it did not
-  recognise, but no summarizer asks for one, and a summary is text. Anthropic's compaction block is
-  not asked for.
+- Anthropic's own compaction (its compaction block) is not asked for. The request a
+  `providerCompaction` makes is not recorded with the session's facts, and one that fails is a
+  defect.
 - Caching. No request marks anything for the provider's cache.
 - Model selectors in the loop. The loop asks `ModelProvider` for the model (from the session's
   facts), so `ModelSelectors` and `assemble` are used only by their tests.

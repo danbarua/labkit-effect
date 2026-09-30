@@ -8,12 +8,15 @@
  * With `compact`, the session is compacted when the count reaches 30, 60 and 90; with `fizzbuzz`,
  * after every turn in which the model classified FizzBuzz. The compactions are written by the
  * plain text summarizer, the emoji one, and the plain text one after that, and the model is sent
- * the summaries in place of the turns they cover (`CompactedConversation`).
+ * the summaries in place of the turns they cover (`CompactedConversation`). With `provider` (openai
+ * or xai), the session is compacted after every FizzBuzz by the provider's own compaction
+ * (`providerCompaction`), and the model is sent the items it returned.
  *
  *   OPENAI_API_KEY=...    bun scripts/probes/fizzbuzz-live.ts openai gpt-5.5 45
  *   ANTHROPIC_API_KEY=... bun scripts/probes/fizzbuzz-live.ts anthropic claude-sonnet-5-5 47 compact
  *   ANTHROPIC_API_KEY=... bun scripts/probes/fizzbuzz-live.ts anthropic claude-sonnet-5-5 39 fizzbuzz
  *   XAI_API_KEY=...       bun scripts/probes/fizzbuzz-live.ts xai grok-4.7 20
+ *   XAI_API_KEY=...       bun scripts/probes/fizzbuzz-live.ts xai grok-4.7 50 provider
  *
  * Settings follow as `name=value`, as for `live-turn.ts` (`cache=5m`). The probe prints the input
  * tokens the responses report as read from the cache, written to it, and neither.
@@ -31,9 +34,10 @@ import { ModelSettings } from "../../src/agent-machine/settings.ts";
 import { ModelName, ProviderName, TestName } from "../../src/agent-machine/names.ts";
 import { reportedBy } from "../../src/agent-session/origin.ts";
 import { AnthropicModelClient } from "../../src/agent-session/providers/anthropic-client.ts";
-import { OpenAiModelClient } from "../../src/agent-session/providers/openai-client.ts";
+import { OpenAiModelClient, openAiCompactions } from "../../src/agent-session/providers/openai-client.ts";
+import { providerCompaction } from "../../src/agent-context/provider-compaction.ts";
 import { XAiModelClient, xAiClient } from "../../src/agent-session/providers/xai-client.ts";
-import { parseJson } from "../../src/agent-session/received.ts";
+import { asText, parseJson } from "../../src/agent-session/received.ts";
 import { isObject } from "../../src/agent-session/shaping.ts";
 import { afterFizzBuzz, whenCountReaches } from "../../src/examples/fizzbuzz/compaction-policies.ts";
 import { basic, countingUser, play } from "../../src/examples/fizzbuzz/scenario.ts";
@@ -63,6 +67,11 @@ if (key === undefined || key === "") {
 }
 const apiKey = Redacted.make(key);
 
+const openAiClientLayer = (provider === "xai" ? xAiClient(apiKey) : OpenAiClient.layer({ apiKey })).pipe(Layer.provide(FetchHttpClient.layer));
+// The provider's own compaction, asked through the same client as the requests.
+const byProvider =
+  compacting === "provider" ? providerCompaction(await Effect.runPromise(openAiCompactions().pipe(Effect.provide(openAiClientLayer)))) : undefined;
+
 const client =
   provider === "anthropic"
     ? AnthropicModelClient.pipe(Layer.provide(AnthropicClient.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))))
@@ -70,7 +79,7 @@ const client =
       ? XAiModelClient.pipe(Layer.provide(xAiClient(apiKey).pipe(Layer.provide(FetchHttpClient.layer))))
       : OpenAiModelClient.pipe(Layer.provide(OpenAiClient.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))));
 
-const { facts } = await Effect.runPromise(
+const { facts, summaries } = await Effect.runPromise(
   play(countingUser(count), {
     ...basic,
     ...(compacting === undefined
@@ -78,7 +87,9 @@ const { facts } = await Effect.runPromise(
       : {
           conversation: CompactedConversation,
           compaction:
-            compacting === "fizzbuzz"
+            byProvider !== undefined
+              ? afterFizzBuzz(() => byProvider)
+              : compacting === "fizzbuzz"
               ? afterFizzBuzz((compacted) => summarizers[compacted] ?? PlainTextFizzBuzzSummarizer)
               : whenCountReaches(new Map([30, 60, 90].map((count, index) => [count, summarizers[index] ?? PlainTextFizzBuzzSummarizer]))),
         }),
@@ -156,6 +167,11 @@ for (const fact of facts) {
   }
 }
 
+for (const summary of summaries) {
+  const parsed = parseJson(summary.summary);
+  const items = "value" in parsed && Array.isArray(parsed.value) ? parsed.value.map((item) => (isObject(item) ? item["type"] : null)) : undefined;
+  console.log(`summary ${summary.window} by ${summary.writtenBy}: ${items === undefined ? `${asText(summary.summary).length} characters` : `items ${JSON.stringify(items)}`}`);
+}
 for (const line of wrong) console.log(line);
 console.log(`input tokens: ${JSON.stringify(usage)}`);
 console.log(`${turns.size - wrong.length} of ${turns.size} turns right`);

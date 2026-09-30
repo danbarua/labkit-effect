@@ -299,9 +299,12 @@ export const openAiRequests = (
     };
   });
 
-/** What the provider's own compaction returned: the items that stand in for what was compacted, and the rest of the response. */
+/**
+ * What the provider's own compaction returned: `output`, the array of items that stand in for what
+ * was compacted, as received; and the rest of the response.
+ */
 export interface Compacted {
-  readonly items: ReadonlyArray<Received>;
+  readonly output: Received;
   readonly metadata: Received;
 }
 
@@ -313,7 +316,8 @@ const compactCaller = { module: "OpenAiResponsesModelClient", method: "compact" 
  * settings; the response is not streamed. Its `output` items stand in for the input they were made
  * from, and are returned as received: each goes back unchanged, in order, at the head of the next
  * request's input, which is where the provider reads them (xAI returns one `compaction` item;
- * OpenAI returns the user's messages and a `compaction` item).
+ * OpenAI returns the user's messages and a `compaction` item). `providerCompaction` makes them a
+ * summary.
  */
 export const openAiCompactions = (
   retries: Retries = defaultRetries,
@@ -330,7 +334,7 @@ export const openAiCompactions = (
               if (!isObject(response) || !Array.isArray(response["output"]))
                 return Effect.fail(invalidOutput(compactCaller, `The compaction has no output: ${JSON.stringify(response)}`));
               const { output, ...metadata } = response;
-              return Effect.succeed({ items: (output as ReadonlyArray<Json>).map(receivedJson), metadata: receivedJson(metadata) });
+              return Effect.succeed({ output: receivedJson(output), metadata: receivedJson(metadata) });
             }),
             withRetries(retries),
           ),

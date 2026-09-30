@@ -10,14 +10,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import * as BunPath from "@effect/platform-bun/BunPath";
-import { Layer } from "effect";
+import { Effect, Layer } from "effect";
 import { CompactedConversation } from "../../src/agent-context/compaction.ts";
 import { SummariesInFolder } from "../../src/agent-context/summaries-in-folder.ts";
 import { ModelName, ProviderName } from "../../src/agent-machine/names.ts";
 import { scriptedFizzBuzzModel } from "../../src/examples/fizzbuzz/model.ts";
 import type { Fact } from "../../src/agent-machine/fact.ts";
 import type { ModelContext } from "../../src/agent-session/contracts.ts";
-import { asText } from "../../src/agent-session/received.ts";
+import { asText, receivedJson } from "../../src/agent-session/received.ts";
+import { providerCompaction } from "../../src/agent-context/provider-compaction.ts";
+import { json } from "../support/received.ts";
 import { sentIn } from "../../src/agent-session/sent.ts";
 import { afterFizzBuzz, whenCountReaches } from "../../src/examples/fizzbuzz/compaction-policies.ts";
 import { basic, countingUser, play } from "../../src/examples/fizzbuzz/scenario.ts";
@@ -96,6 +98,42 @@ test("A7: the first request in each window carries every summary so far, as writ
       { role: "instruction", parts: [{ _tag: "Text", text: texts[0] }, { _tag: "Text", text: texts[1] }, { _tag: "Text", text: texts[2] }] },
       { role: "user", parts: [{ _tag: "Text", text: "91" }] },
     ],
+  ]);
+});
+
+test("A7: a provider's own compaction is sent as its items, to that provider only, in place of the summaries it was made from", async () => {
+  const asked: Array<ModelContext> = [];
+  const compactions = (_target: unknown, context: ModelContext) =>
+    Effect.sync(() => {
+      asked.push(context);
+      return { output: receivedJson([{ type: "compaction", id: `cmp_${asked.length}`, encrypted_content: "opaque" }]), metadata: receivedJson({}) };
+    });
+  const byProvider = providerCompaction(compactions);
+  const { facts, summaries } = await runTest(
+    play(countingUser(47), {
+      ...basic,
+      conversation: CompactedConversation,
+      compaction: whenCountReaches(new Map([[30, PlainTextFizzBuzzSummarizer], [60, byProvider], [90, byProvider]])),
+    }),
+  );
+  const item = (n: number) => ({ _tag: "Unrecognised", provider: "scripted", received: json({ type: "compaction", id: `cmp_${n}`, encrypted_content: "opaque" }) });
+  const plain = asText(summaries[0]?.summary ?? receivedJson(null));
+  expect(summaries.map((each) => [each.writtenBy, each.summary.mediaType]) as unknown).toEqual([
+    ["PlainTextFizzBuzzSummarizer", "text/plain"],
+    ["ProviderCompaction", "application/json"],
+    ["ProviderCompaction", "application/json"],
+  ]);
+  // Each compaction is given the provider's summaries before it, then the span since the last one.
+  expect(asked.map((context) => context.messages[0]) as unknown).toEqual([
+    { role: "instruction", parts: [{ _tag: "Text", text: plain }] },
+    { role: "instruction", parts: [item(1)] },
+  ]);
+  expect(asked[1]?.messages[1] as unknown).toEqual({ role: "user", parts: [{ _tag: "Text", text: "61" }] });
+  const firsts = requests(facts).filter((request) => request.inNewWindow);
+  expect(firsts.map((request) => request.sent.messages.slice(0, 2)) as unknown).toEqual([
+    [{ role: "instruction", parts: [{ _tag: "Text", text: plain }] }, { role: "user", parts: [{ _tag: "Text", text: "31" }] }],
+    [{ role: "instruction", parts: [item(1)] }, { role: "user", parts: [{ _tag: "Text", text: "61" }] }],
+    [{ role: "instruction", parts: [item(2)] }, { role: "user", parts: [{ _tag: "Text", text: "91" }] }],
   ]);
 });
 

@@ -11,7 +11,8 @@
  * `CompactedConversation` is the view for a session with windows. A request goes to one provider
  * and carries that provider's summaries only. The first request to it after its latest summary
  * carries all of its summaries, in the order written, as one instruction message (consecutive
- * messages of one role are merged), then the messages of the facts that summary's window keeps and
+ * messages of one role are merged); a provider's own compaction was made from the summaries before
+ * it, so it is carried in their place. Then come the messages of the facts that summary's window keeps and
  * of those after its span. A later request to it carries on from its last request (A6), and so does
  * a request to a provider whose summaries predate its last request: after a switch back, it goes on
  * from where it was. So two providers in one session can be sent different conversations; what they
@@ -23,22 +24,28 @@ import { Context, DateTime, Effect, Layer, Ref } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { PolicyName, ProviderName, SessionId, Seq } from "../agent-machine/names.ts";
 import { WindowId } from "../agent-machine/names.ts";
-import type { ContextMessage } from "../agent-session/contracts.ts";
+import type { Received } from "../agent-machine/received.ts";
+import type { ContextMessage, ContextPart, Target } from "../agent-session/contracts.ts";
 import { conversationOf, merged } from "../agent-session/conversation.ts";
 import type { Session } from "../agent-session/loop.ts";
-import { asText, receivedText } from "../agent-session/received.ts";
+import { asText, parseJson, receivedJson } from "../agent-session/received.ts";
 import { sentIn } from "../agent-session/sent.ts";
 import { modelOf } from "../agent-session/session-setup.ts";
 import { Conversation } from "./assemble.ts";
 import type { SummarizerName, WindowSummary } from "./forks.ts";
 
-/** Writes the summary of a span, given the summaries already written for the same provider. */
+/**
+ * Writes the summary of a span, given the summaries already written for the same provider and the
+ * model the session is asking. A summary is text, or JSON: a provider's own compaction, the items
+ * it returned (`provider-compaction.ts`).
+ */
 export interface Summarizer {
   readonly name: SummarizerName;
   readonly summarize: (
     previous: ReadonlyArray<WindowSummary>,
     messages: ReadonlyArray<ContextMessage>,
-  ) => Effect.Effect<string>;
+    target: Target,
+  ) => Effect.Effect<Received>;
 }
 
 /** The summaries written so far, in the order written. A summary once recorded is not changed. */
@@ -98,7 +105,8 @@ export const compact = (session: Session, summarizer: Summarizer, decidedBy: Pol
     const facts = yield* session.facts;
     const through = facts.at(-1)?.seq;
     if (through === undefined) return yield* Effect.die(new Error("An empty session has nothing to compact"));
-    const kind = (yield* modelOf(facts)).provider;
+    const target = yield* modelOf(facts);
+    const kind = target.provider;
     const summaries = yield* Summaries;
     const previous = summariesFor(yield* summaries.recorded, facts, kind);
     const before = previous.at(-1);
@@ -106,14 +114,14 @@ export const compact = (session: Session, summarizer: Summarizer, decidedBy: Pol
     const span = from === undefined ? facts : facts.filter((fact) => fact.seq > from);
     const windows = windowsOf(facts);
     const window = WindowId.make(`window-${windows.length + 1}`);
-    const text = yield* summarizer.summarize(previous, conversationOf(span, facts));
+    const summary = yield* summarizer.summarize(previous, conversationOf(span, facts), target);
     yield* summaries.record({
       session: sessionOf(facts),
       window,
       kind,
       writtenBy: summarizer.name,
       writtenAt: yield* DateTime.now,
-      summary: receivedText(text),
+      summary,
     });
     const last = windows.at(-1);
     yield* session.observe({
@@ -143,13 +151,30 @@ export const compactIfDue = (session: Session, policy: CompactionPolicy) =>
     if (summarizer !== undefined) yield* compact(session, summarizer, policy.name);
   });
 
+/** The parts one summary becomes: its text, or each item of a provider's compaction, for that provider only. */
+const summaryParts = (summary: WindowSummary): ReadonlyArray<ContextPart> => {
+  if (summary.summary.mediaType !== "application/json") return [{ _tag: "Text", text: asText(summary.summary) }];
+  const parsed = parseJson(summary.summary);
+  const items = "value" in parsed && Array.isArray(parsed.value) ? parsed.value : [];
+  return items.map((item) => ({ _tag: "Unrecognised", provider: summary.kind, received: receivedJson(item) }));
+};
+
 /**
- * Summaries, as the text each summarizer wrote, in an instruction message: the harness speaking, so
- * the input that follows stays a message of its own.
+ * The summaries a request carries: all of them, in the order written, or those from the latest
+ * provider's compaction on, since it was made from the summaries before it.
  */
-const summaryMessage = (summaries: ReadonlyArray<WindowSummary>): ContextMessage => ({
+const carried = (summaries: ReadonlyArray<WindowSummary>): ReadonlyArray<WindowSummary> =>
+  summaries.slice(summaries.reduce((from, summary, at) => (summary.summary.mediaType === "application/json" ? at : from), 0));
+
+/**
+ * Summaries in an instruction message: the harness speaking, so the input that follows stays a
+ * message of its own. A text summary is a `Text` part; a provider's compaction is its items, each an
+ * `Unrecognised` part from the provider whose summary it is, which only that provider's adapter
+ * sends, unchanged.
+ */
+export const summaryMessage = (summaries: ReadonlyArray<WindowSummary>): ContextMessage => ({
   role: "instruction",
-  parts: summaries.map((summary) => ({ _tag: "Text", text: asText(summary.summary) })),
+  parts: carried(summaries).flatMap(summaryParts),
 });
 
 /** The position in `facts` of the last fact that `is`, or -1. */

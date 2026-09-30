@@ -13,6 +13,7 @@
 import { Effect } from "effect";
 import type { Summarizer } from "../../agent-context/compaction.ts";
 import { SummarizerName, type WindowSummary } from "../../agent-context/forks.ts";
+import { receivedText } from "../../agent-session/received.ts";
 import { fizzBuzzLabels, fizzBuzzSpan } from "./compaction.ts";
 
 /** Where the span starts: after the summary before it, or at the start of the conversation. */
@@ -27,11 +28,11 @@ export const PlainTextFizzBuzzSummarizer: Summarizer = {
   summarize: (previous, messages) => {
     const span = fizzBuzzSpan(messages);
     return Effect.succeed(
-      [
+      receivedText([
         `Summary of the conversation ${since(previous)}. The user and the assistant exchanged ${span.exchanged} messages in it.`,
         ...fizzBuzzLabels.map((label) => `Classified as ${label}: ${listed(span.classified.get(label))}.`),
         `The last number the assistant returned was ${span.returned ?? "none"}.`,
-      ].join("\n"),
+      ].join("\n")),
     );
   },
 };
@@ -43,7 +44,7 @@ export const EmojiHappyFizzBuzzSummarizer: Summarizer = {
   summarize: (previous, messages) => {
     const span = fizzBuzzSpan(messages);
     return Effect.succeed(
-      [
+      receivedText([
         "# 🚀✨ Your Amazing FizzBuzz Journey! ✨🚀",
         "",
         `What an **incredible** stretch of conversation! 🙌 ${since(previous)}, you and the assistant exchanged **${span.exchanged}** messages 💬🔥`,
@@ -56,7 +57,7 @@ export const EmojiHappyFizzBuzzSummarizer: Summarizer = {
         "Remember: every number is a step on the path to greatness! 🌈💪",
         "",
         "Would you like me to turn this into a colourful chart of your FizzBuzz progress? 📊😊",
-      ].join("\n"),
+      ].join("\n")),
     );
   },
 };

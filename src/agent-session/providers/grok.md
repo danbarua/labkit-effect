@@ -153,3 +153,9 @@ Completions adapter keeps it as `Unrecognised` and does not send it back.
   messages and then a `compaction` item. Through the adapter (`openAiCompactions` with `xAiClient`), four
   messages became one `compaction` item, and a request that began with it as an `Unrecognised`
   part from `xai` answered three questions about what was compacted, at 1,551 input tokens.
+- A compaction whose input ends with an answered question leaves Grok treating that question as
+  unanswered. Compacting "13", "14", "15", "16" (user, assistant, user, assistant) and then sending
+  "17" was answered "16\n18"; asked instead what it last replied, it said 16. In the FizzBuzz probe
+  with `providerCompaction` after every FizzBuzz, grok-4.7 got 15 of 25 turns right: after each
+  compaction it answered the number before as well, and it stopped calling the tool. OpenAI's
+  compaction, in the same probe with gpt-5.5, got 25 of 25.

@@ -173,5 +173,5 @@ test("the provider's own compaction: the context goes to /responses/compact, and
     },
   ]);
   const { output: _output, ...metadata } = returned;
-  expect(compacted).toEqual({ items: [receivedJson(compaction)], metadata: receivedJson(metadata) });
+  expect(compacted).toEqual({ output: receivedJson([compaction]), metadata: receivedJson(metadata) });
 });
