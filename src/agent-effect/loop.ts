@@ -43,7 +43,10 @@ import { Report } from "./report.ts";
 import { modelOf } from "./session-setup.ts";
 import { CurrentWork, type Work } from "./work.ts";
 
-/** The core's machines as `facts` leave them: each observation delivered in order. */
+/**
+ * The core's machines as `facts` leave them: each recorded observation delivered in order. Only the
+ * machines' state is kept from each delivery.
+ */
 const worldOf = (facts: ReadonlyArray<Fact>): World =>
   facts.reduce((world, fact) => (fact._tag === "Observed" ? deliver(world, fact.seq, fact.observation).world : world), emptyWorld);
 
@@ -103,15 +106,13 @@ export interface Session {
 
 /**
  * A session that goes on from `facts`: another session's, or this one's before its process ended.
- * This is all there is to resuming. The facts are kept as given, and the core's machines are put
- * where the facts leave them, by delivering each recorded observation in order (`worldOf`). The
- * core is pure, so a session's state is its facts and what the machines make of them; nothing else
- * is restored.
+ * This is all there is to resuming. The facts are kept as given. Where the machines stand (which
+ * turn runs, what a step waits for, what is in each mailbox) is not among the facts: it is what the
+ * observations make of the machines, so each recorded observation is delivered in order to arrive
+ * at it (`worldOf`). The decisions the machines make on the way are discarded; the recorded ones
+ * stand as they are.
  *
- * What it does not do: check the facts (the decisions recorded are not compared with the ones the
- * machines make again, nor the positions with 1, 2, 3, …), or bring back what is held outside them
- * (how often a turn's end was held, and where `Turns` has got to with turn identities: the turns
- * that start from here need identities the facts have not used).
+ * The turns that start from here need identities the facts have not used: that is `Turns`' business.
  */
 export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, never, Scope.Scope> => Effect.gen(function* () {
   const held = yield* Ref.make<Held>({ world: worldOf(facts), facts, holds: new Map() });
