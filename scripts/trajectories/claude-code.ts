@@ -259,7 +259,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
           kept,
         });
         if (state.session === undefined) count("compaction summary kept nowhere (the session was not opened)");
-        else projected.summarise({ session: state.session, window: boundary.window, summary: text(input) });
+        else projected.summarise({ session: state.session, window: boundary.window, writtenBy: "claude-code", summary: text(input) });
         state.window = boundary.window;
         return;
       }

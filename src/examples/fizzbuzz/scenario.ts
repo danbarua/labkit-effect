@@ -15,6 +15,8 @@ import {
   ToolCatalogs,
 } from "../../agent-context/assemble.ts";
 import { AgentContextAssembler, WholeConversation } from "../../agent-context/assembler.ts";
+import { compact, type Summarizer, Summaries, SummariesInMemory } from "../../agent-context/compaction.ts";
+import type { WindowSummary } from "../../agent-context/forks.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
 import type { ModelTarget } from "../../agent-machine/observation.ts";
 import { InputText, ModelName, ProviderName, SessionId } from "../../agent-machine/names.ts";
@@ -34,13 +36,18 @@ export const countingUser = (count: number): ReadonlyArray<string> =>
 export interface Setup {
   readonly catalog: ToolCatalog;
   /** How the conversation is viewed for each request. */
-  readonly conversation: Layer.Layer<Conversation>;
+  readonly conversation: Layer.Layer<Conversation, never, Summaries>;
   /** Runs the tools; the FizzBuzz runner when not given. */
   readonly tools?: Layer.Layer<ToolRunner>;
   /** The session's id; "fizzbuzz" when not given. */
   readonly session?: string;
   /** The model the session asks, and the client that reaches it; the scripted model when not given. */
   readonly model?: { readonly target: ModelTarget; readonly client: Layer.Layer<ModelClient> };
+  /**
+   * Compactions the user asks for: after the turn in which the count reaches a key (the model's
+   * reply to the user's number), the session is compacted with that key's summarizer.
+   */
+  readonly compactions?: ReadonlyMap<number, Summarizer>;
 }
 
 export const basic: Setup = { catalog: FizzBuzzToolCatalog, conversation: WholeConversation };
@@ -51,15 +58,28 @@ export interface Played {
   readonly facts: ReadonlyArray<Fact>;
   /** What each request carried, as recorded with it. */
   readonly seen: ReadonlyArray<ModelContext>;
+  /** The summaries the compactions wrote, in order. */
+  readonly summaries: ReadonlyArray<WindowSummary>;
 }
 
 const scripted: ModelTarget = { provider: ProviderName.make("scripted"), model: ModelName.make("fizzbuzz-1") };
 
-export const play = (inputs: ReadonlyArray<string>, setup: Setup = basic): Effect.Effect<Played> => {
+export const play = (inputs: ReadonlyArray<string>, setup: Setup = basic): Effect.Effect<Played> =>
+  Effect.gen(function* () {
+    const summaries = yield* Summaries.pipe(Effect.provide(SummariesInMemory));
+    return yield* played(inputs, setup, summaries);
+  });
+
+const played = (inputs: ReadonlyArray<string>, setup: Setup, summaries: Summaries["Service"]): Effect.Effect<Played> => {
   const services = Layer.mergeAll(
     ModelFromFacts,
     setup.model?.client ?? scriptedFizzBuzzModel().layer,
-    AgentContextAssembler.pipe(Layer.provide(Layer.mergeAll(setup.conversation, Layer.succeed(Notices, [])))),
+    AgentContextAssembler.pipe(
+      Layer.provide(
+        Layer.mergeAll(setup.conversation.pipe(Layer.provide(Layer.succeed(Summaries, summaries))), Layer.succeed(Notices, [])),
+      ),
+    ),
+    Layer.succeed(Summaries, summaries),
     CountingTurns,
     NoTurnEndHooks,
     setup.tools ?? FizzBuzzToolRunner,
@@ -68,6 +88,10 @@ export const play = (inputs: ReadonlyArray<string>, setup: Setup = basic): Effec
   );
   return Effect.gen(function* () {
     const session = yield* openSession;
+    const compactAfter = (text: string) => {
+      const summarizer = setup.compactions?.get(Number(text) + 1);
+      return summarizer === undefined ? Effect.void : compact(session, summarizer).pipe(Effect.andThen(session.idle));
+    };
     yield* session.observe(
       yield* opening(SessionId.make(setup.session ?? "fizzbuzz"), setup.model?.target ?? scripted),
     );
@@ -78,13 +102,13 @@ export const play = (inputs: ReadonlyArray<string>, setup: Setup = basic): Effec
       (text) =>
         session
           .observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make(text) })
-          .pipe(Effect.andThen(session.idle)),
+          .pipe(Effect.andThen(session.idle), Effect.andThen(compactAfter(text))),
       { discard: true },
     );
     const facts = yield* session.facts;
     const seen = facts.flatMap((fact) =>
       fact._tag === "Observed" && fact.observation._tag === "ModelRequestDispatched" ? [sentIn(fact.observation.sent)] : [],
     );
-    return { facts, seen };
+    return { facts, seen, summaries: yield* summaries.recorded };
   }).pipe(Effect.provide(services), Effect.scoped);
 };

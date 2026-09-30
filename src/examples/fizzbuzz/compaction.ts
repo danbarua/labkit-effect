@@ -17,11 +17,17 @@ const labels = ["Fizz", "Buzz", "FizzBuzz"] as const;
 const textCount = (messages: ReadonlyArray<ContextMessage>): number =>
   messages.reduce((total, message) => total + message.parts.filter((part) => part._tag === "Text").length, 0);
 
-/**
- * The summary of `messages`, dated `at`. The last number returned is the model's last reply that is
- * a whole number; a reply that is not (an error code) is not a number returned.
- */
-export function fizzBuzzSummary(messages: ReadonlyArray<ContextMessage>, at: DateTime.Utc): string {
+/** What a span of the FizzBuzz conversation holds, for a summary of it. */
+export interface FizzBuzzSpan {
+  /** How many text messages the user and the assistant exchanged. */
+  readonly exchanged: number;
+  /** The numbers the assistant classified with each label, in order. */
+  readonly classified: ReadonlyMap<(typeof labels)[number], ReadonlyArray<string>>;
+  /** The model's last reply that is a whole number; a reply that is not (an error code) is not a number returned. */
+  readonly returned: string | undefined;
+}
+
+export function fizzBuzzSpan(messages: ReadonlyArray<ContextMessage>): FizzBuzzSpan {
   const walked = messages
     .flatMap((message) => message.parts.map((part) => ({ role: message.role, part })))
     .reduce<{ readonly asked: string | undefined; readonly returned: string | undefined; readonly classified: ReadonlyArray<readonly [string, string]> }>(
@@ -35,8 +41,22 @@ export function fizzBuzzSummary(messages: ReadonlyArray<ContextMessage>, at: Dat
       },
       { asked: undefined, returned: undefined, classified: [] },
     );
-  const numbers = (label: string) => {
-    const found = walked.classified.flatMap(([given, number]) => (given === label ? [number] : []));
+  return {
+    exchanged: textCount(messages),
+    classified: new Map(
+      labels.map((label) => [label, walked.classified.flatMap(([given, number]) => (given === label ? [number] : []))] as const),
+    ),
+    returned: walked.returned,
+  };
+}
+
+export const fizzBuzzLabels = labels;
+
+/** The summary of `messages`, dated `at`. */
+export function fizzBuzzSummary(messages: ReadonlyArray<ContextMessage>, at: DateTime.Utc): string {
+  const span = fizzBuzzSpan(messages);
+  const numbers = (label: (typeof labels)[number]) => {
+    const found = span.classified.get(label) ?? [];
     return found.length === 0 ? "none" : found.join(", ");
   };
   return [
@@ -45,11 +65,11 @@ export function fizzBuzzSummary(messages: ReadonlyArray<ContextMessage>, at: Dat
     "This summary was generated from your conversation with the user.",
     "Continue the conversation, do not mention this summary to the user.",
     "",
-    `The user and the assistant exchanged ${textCount(messages)} messages.`,
+    `The user and the assistant exchanged ${span.exchanged} messages.`,
     "The assistant classified the following numbers as",
     ...labels.map((label) => `- "${label}": ${numbers(label)}`),
     "",
-    `The last number you returned to the user was: ${walked.returned ?? "none"}`,
+    `The last number you returned to the user was: ${span.returned ?? "none"}`,
   ].join("\n");
 }
 

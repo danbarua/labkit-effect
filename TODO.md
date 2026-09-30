@@ -29,17 +29,19 @@ not yet work is in its `DESIGN.next.md`. Delete an item when it is done or dropp
 
 ### Compaction
 
-Built: the window marker only (agent-machine S4, agent-context A5).
+Built: the window marker (agent-machine S4); compaction on request with a record of summaries and
+who wrote each, and the view that sends them in place of the spans (agent-context A5, A7).
 
-- [ ] Requests made in a window: which of a window's summaries a request uses, and the view that
-      sends the summary in place of the span.
-- [ ] A compaction that runs while a session does, and writes a summary.
+- [ ] Compaction the session decides on itself, by a policy (every n turns, by size, when the
+      provider's cache has expired).
+- [ ] A summarizer that asks a model. Its request belongs to the compaction's own record (a fork),
+      which is not built.
 - [ ] A provider's own compaction: Anthropic's compaction block (beta `compact-2026-09-04`), OpenAI's
       `compaction` item. Each works only with its own provider.
 - [ ] Anthropic's rules for its own compaction, for the view: the kept turns follow the summary
       unchanged, and the first kept turn has a different role from the last summarised message, or
-      the API merges them. The FizzBuzz toy view merges the summary and the next input into one
-      user message.
+      the API merges them. `CompactedConversation` and the FizzBuzz toy view merge the summaries
+      and the next input into one user message.
 - [ ] Our own summary with kept turns breaks the kept turns' thinking on Anthropic (the API accepts
       the swap only for a summary it wrote). On hold: explore keeping the last turn with its
       thinking.
