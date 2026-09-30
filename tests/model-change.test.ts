@@ -70,7 +70,22 @@ test("a change of model still waiting when the turn ends is taken, not dropped",
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
   observe(session, toOpenAi);
   observe(session, { _tag: "TurnInterrupted", turn: "turn-1" });
-  expect(tags(session).slice(-4)).toEqual(["ModelChangeArrived", "TurnInterrupted", "TurnEnded", "ModelChangeTaken"]);
+  observe(session, {
+    _tag: "ModelResponded",
+    turn: "turn-1",
+    provider: "boring",
+    model: "boring-1",
+    parts: [],
+    ending: { _tag: "Interrupted" },
+    metadata: { mediaType: "application/json", body: { _tag: "Text", text: "{}" } },
+  });
+  expect(tags(session).slice(-5)).toEqual([
+    "ModelChangeArrived",
+    "TurnInterrupted",
+    "ModelResponded",
+    "TurnEnded",
+    "ModelChangeTaken",
+  ]);
 });
 
 const select = (facts: ReadonlyArray<Fact>) =>

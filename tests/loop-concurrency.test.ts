@@ -81,7 +81,7 @@ test("observe returns once the observation is recorded; input given while the mo
   expect(seen).toHaveLength(2);
 });
 
-test("an interruption while the model is asked ends the turn and the request; nothing comes of the request", async () => {
+test("an interruption while the model is asked stops the request; the response as far as it arrived is recorded, and the turn ends", async () => {
   const { facts, interrupted } = await runTest(
     Effect.gen(function* () {
       const never = yield* Deferred.make<void>();
@@ -103,8 +103,10 @@ test("an interruption while the model is asked ends the turn and the request; no
     "InputDelivered",
     "ModelAsked",
     "TurnInterrupted",
+    "ModelResponded",
     "TurnEnded",
   ]);
+  expect(facts.at(-2) as unknown).toMatchObject({ observation: { parts: [], ending: { _tag: "Interrupted" } } });
   expect(facts.at(-1) as unknown).toMatchObject({ decision: { ending: { _tag: "Interrupted" } } });
   expect(interrupted).toBe(true);
 });

@@ -63,6 +63,10 @@ export const ToolFailure = Schema.Union([
   Schema.TaggedStruct("InputRejected", { problem: FailureText }),
   /** A policy vetoed the call before it ran, for the reason it gave. */
   Schema.TaggedStruct("Vetoed", { reason: Received }),
+  /** The tool began to run and how it ended was not observed. It may have had effects. */
+  Schema.TaggedStruct("Indeterminate", {}),
+  /** The call was not run. */
+  Schema.TaggedStruct("NotRun", {}),
 ]);
 export type ToolFailure = typeof ToolFailure.Type;
 
@@ -76,12 +80,15 @@ export type ToolOutcome = typeof ToolOutcome.Type;
 /**
  * Why a model's response stopped, as its adapter classifies the provider's own reason (kept in
  * `stop`): it is complete (with or without tool calls), it was cut short (a length limit, a pause,
- * a stop sequence), the provider refused it, or the adapter does not know the reason.
+ * a stop sequence), the provider refused it, the harness stopped it, or the adapter does not know
+ * the reason.
  */
 export const ResponseEnding = Schema.Union([
   Schema.TaggedStruct("Complete", {}),
   Schema.TaggedStruct("CutShort", {}),
   Schema.TaggedStruct("Refused", {}),
+  /** The response was stopped while it was arriving; it holds the parts that were complete by then. */
+  Schema.TaggedStruct("Interrupted", {}),
   Schema.TaggedStruct("Unclassified", {}),
 ]);
 export type ResponseEnding = typeof ResponseEnding.Type;
@@ -185,6 +192,13 @@ export const Observation = Schema.Union([
   }),
   /** A policy vetoed a request for a model response, for the reason it gave. */
   Schema.TaggedStruct("ModelVetoed", { turn: TurnId, reason: Received }),
+  /**
+   * A tool call in a response that is still arriving is complete: the model asked for it. The call
+   * is run without waiting for the rest of the response, which will hold it as one of its parts.
+   */
+  Schema.TaggedStruct("ToolCallArrived", { turn: TurnId, call: CallId, tool: ToolName, input: Received }),
+  /** The tool a call asks for began to run. */
+  Schema.TaggedStruct("ToolCallDispatched", { call: CallId }),
   /** A tool call ended. */
   Schema.TaggedStruct("ToolEnded", { call: CallId, outcome: ToolOutcome }),
   /** The layers around the core finished giving `turn` input before it ends (`BeforeTurnEnded`). */

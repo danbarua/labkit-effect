@@ -5,13 +5,17 @@
 
 import { afterAll, expect } from "bun:test";
 import { Effect, Layer, PubSub } from "effect";
-import { Millis } from "../../src/agent-core/names.ts";
+import { Notices } from "../../src/agent-context/assemble.ts";
+import { AgentContextAssembler, WholeConversation } from "../../src/agent-context/assembler.ts";
+import { Millis, TurnId } from "../../src/agent-core/names.ts";
 import type { Observation } from "../../src/agent-core/observation.ts";
 import { openSession } from "../../src/agent-effect/loop.ts";
 import { ModelStreamInterval } from "../../src/agent-effect/model-stream.ts";
 import { AnthropicModelClient } from "../../src/agent-effect/providers/anthropic-client.ts";
 import { assemble, assembled, cut, nothingYet } from "../../src/agent-effect/providers/anthropic-stream.ts";
 import { OpenAiModelClient } from "../../src/agent-effect/providers/openai-client.ts";
+import { receivedJson } from "../../src/agent-effect/received.ts";
+import { ToolRunner } from "../../src/agent-effect/contracts.ts";
 import { TurnContextAssembler } from "../../src/agent-effect/turn-context.ts";
 import { CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/turns.ts";
 import { BoringModelProvider, boringOpening } from "../support/boring.ts";
@@ -237,4 +241,160 @@ test("while a response arrives, its events and each completed part are passed on
   expect(chunks).toHaveLength(9 + 6);
   expect(passed.every((each) => each.turn === "turn-1")).toBe(true);
   expect(parts(facts)).toEqual([["Text", "ToolCall"], ["Text"]]);
+});
+
+test("a tool call is run as soon as it is complete in the stream, before the response has ended; its result follows the response", async () => {
+  const toolRan = Promise.withResolvers<void>();
+  const bodies: Array<{ messages: ReadonlyArray<unknown> }> = [];
+  const event = (data: Record<string, unknown>) => new TextEncoder().encode(`event: ${String(data["type"])}\ndata: ${JSON.stringify(data)}\n\n`);
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      bodies.push((await request.json()) as (typeof bodies)[number]);
+      if (bodies.length > 1) return anthropicStream({ content: [{ type: "text", text: "5." }], stop_reason: "end_turn" });
+      // The call's block is complete; the stream stays open until the tool has run, then ends.
+      return new Response(
+        new ReadableStream({
+          async start(controller) {
+            controller.enqueue(event({ type: "message_start", message: { id: "msg_1" } }));
+            controller.enqueue(event({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_1", name: "add", input: {} } }));
+            controller.enqueue(event({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"a":2,"b":3}' } }));
+            controller.enqueue(event({ type: "content_block_stop", index: 0 }));
+            await toolRan.promise;
+            controller.enqueue(event({ type: "message_delta", delta: { stop_reason: "tool_use" } }));
+            controller.enqueue(event({ type: "message_stop" }));
+            controller.close();
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    },
+  });
+  stops.push(() => server.stop(true));
+  const tools = Layer.succeed(ToolRunner, {
+    run: () =>
+      Effect.sync(() => {
+        toolRan.resolve();
+        return { _tag: "Succeeded" as const, output: receivedJson(5) };
+      }),
+  });
+  const facts = await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession;
+      yield* session.observe(boringOpening(smolCatalog));
+      yield* session.observe(input);
+      yield* session.idle;
+      return yield* session.facts;
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          BoringModelProvider,
+          TurnContextAssembler,
+          AnthropicModelClient.pipe(Layer.provide(anthropicAt(new URL("/v1/messages", server.url)))),
+          CountingTurns,
+          NoTurnEndHooks,
+          tools,
+        ),
+      ),
+    ),
+  );
+  const recorded = facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
+  expect(recorded.slice(4)).toEqual([
+    "ModelAsked",
+    "ToolCallArrived",
+    "ToolCallDispatched",
+    "ToolEnded",
+    "ModelResponded",
+    "ModelAsked",
+    "ModelResponded",
+    "TurnEndReviewed",
+    "TurnEnded",
+  ]);
+  expect(bodies[1]?.messages.slice(1)).toEqual([
+    { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "add", input: { a: 2, b: 3 } }] },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "5" }] },
+  ]);
+});
+
+test("interrupted while a response streams and its tool runs: both are stopped and recorded as far as they got, and the conversation goes on", async () => {
+  const toolBegan = Promise.withResolvers<void>();
+  const bodies: Array<{ messages: ReadonlyArray<unknown> }> = [];
+  const event = (data: Record<string, unknown>) => new TextEncoder().encode(`event: ${String(data["type"])}\ndata: ${JSON.stringify(data)}\n\n`);
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      bodies.push((await request.json()) as (typeof bodies)[number]);
+      if (bodies.length > 1) return anthropicStream({ content: [{ type: "text", text: "Understood." }], stop_reason: "end_turn" });
+      // One text block and one call are complete, a second text block is arriving, and the stream never ends.
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(event({ type: "message_start", message: { id: "msg_1" } }));
+            controller.enqueue(event({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }));
+            controller.enqueue(event({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Adding." } }));
+            controller.enqueue(event({ type: "content_block_stop", index: 0 }));
+            controller.enqueue(event({ type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "toolu_1", name: "add", input: {} } }));
+            controller.enqueue(event({ type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"a":2,"b":3}' } }));
+            controller.enqueue(event({ type: "content_block_stop", index: 1 }));
+            controller.enqueue(event({ type: "content_block_start", index: 2, content_block: { type: "text", text: "" } }));
+            controller.enqueue(event({ type: "content_block_delta", index: 2, delta: { type: "text_delta", text: "Then I will" } }));
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    },
+  });
+  stops.push(() => server.stop(true));
+  const tools = Layer.succeed(ToolRunner, {
+    run: () => Effect.sync(() => toolBegan.resolve()).pipe(Effect.andThen(Effect.never)),
+  });
+  const facts = await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession;
+      yield* session.observe(boringOpening(smolCatalog));
+      yield* session.observe(input);
+      yield* Effect.promise(() => toolBegan.promise);
+      yield* session.observe({ _tag: "TurnInterrupted", turn: TurnId.make("turn-1") });
+      yield* session.idle;
+      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "Stop adding." } as unknown as Observation);
+      yield* session.idle;
+      return yield* session.facts;
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          BoringModelProvider,
+          AgentContextAssembler.pipe(Layer.provide(Layer.mergeAll(WholeConversation, Layer.succeed(Notices, [])))),
+          AnthropicModelClient.pipe(Layer.provide(anthropicAt(new URL("/v1/messages", server.url)))),
+          CountingTurns,
+          NoTurnEndHooks,
+          tools,
+        ),
+      ),
+    ),
+  );
+  const recorded = facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
+  expect(recorded.slice(4, 8)).toEqual(["ModelAsked", "ToolCallArrived", "ToolCallDispatched", "TurnInterrupted"]);
+  // The response and the tool are stopped together; which is heard from first is not fixed.
+  expect(recorded.slice(8, 10).sort() as ReadonlyArray<string>).toEqual(["ModelResponded", "ToolEnded"]);
+  expect(recorded[10]).toBe("TurnEnded");
+  expect(recorded).not.toContain("ObservationNotExpected");
+  const observed = facts.flatMap((fact) => (fact._tag === "Observed" ? [fact.observation] : []));
+  expect(observed.find((each) => each._tag === "ModelResponded") as unknown).toMatchObject({
+    parts: [{ _tag: "Text", text: "Adding." }, { _tag: "ToolCall", call: "toolu_1" }],
+    ending: { _tag: "Interrupted" },
+  });
+  expect(observed.find((each) => each._tag === "ToolEnded") as unknown).toMatchObject({
+    outcome: { _tag: "Failed", reason: { _tag: "Indeterminate" } },
+  });
+  // The next turn's request holds the call, a result for it, and the new input.
+  expect(bodies[1]?.messages.slice(1) as unknown).toMatchObject([
+    { role: "assistant", content: [{ type: "text", text: "Adding." }, { type: "tool_use", id: "toolu_1" }] },
+    {
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: "toolu_1", is_error: true },
+        { type: "text", text: "Stop adding." },
+      ],
+    },
+  ]);
 });

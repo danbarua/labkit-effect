@@ -19,5 +19,11 @@ export const EffectRequest = Schema.Union([
   Schema.TaggedStruct("BeforeTurnEnded", { turn: TurnId }),
   /** Run one tool call the model proposed. */
   Schema.TaggedStruct("RunTool", { call: CallId, tool: ToolName, input: Received }),
+  /**
+   * Stop what is being carried out for `turn`. Each request under way reports how far it got: a
+   * model request, the response as far as it had arrived; a tool call, how it ended or that this
+   * was not observed.
+   */
+  Schema.TaggedStruct("StopTurnWork", { turn: TurnId }),
 ]);
 export type EffectRequest = typeof EffectRequest.Type;

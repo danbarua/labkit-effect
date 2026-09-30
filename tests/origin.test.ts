@@ -58,6 +58,7 @@ test("what the test gives the session is from the test; what the loop observes i
     ["InputArrived", { _tag: "Test", name }],
     ["TurnStarted", { _tag: "Harness", part: "loop" }],
     ["ModelResponded", { _tag: "Provider", provider: "boring" }],
+    ["ToolCallDispatched", { _tag: "Harness", part: "tool runner" }],
     ["ToolEnded", { _tag: "Tool", tool: "add" }],
     ["ModelResponded", { _tag: "Provider", provider: "boring" }],
     ["TurnEndReviewed", { _tag: "Harness", part: "turn-end hooks" }],

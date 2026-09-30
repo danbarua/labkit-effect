@@ -38,6 +38,11 @@ export type ConversationTurnState =
   | { readonly _tag: "AfterAnswer"; readonly turn: TurnId; readonly step: StepIndex; readonly ending: LastResponse }
   /** Between steps after a response with no tool calls, with input taken since. */
   | { readonly _tag: "AfterAnswerSteered"; readonly turn: TurnId; readonly step: StepIndex }
+  /**
+   * Interrupted while a step was under way: what was being carried out has been asked to stop, and
+   * the turn ends when the step has heard how far each request got.
+   */
+  | { readonly _tag: "Interrupting"; readonly turn: TurnId; readonly step: StepIndex }
   | { readonly _tag: "Ended"; readonly turn: TurnId };
 
 /** How a turn ends when its last response had no tool calls and no input follows it. */
@@ -100,12 +105,24 @@ const changeModel = (state: ConversationTurnState, change: Seq): TurnStep => ({
   decisions: [{ _tag: "ModelChangeTaken", change }],
 });
 
-const interrupted = (state: ConversationTurnState): TurnStep => ended(state.turn, { _tag: "Interrupted" });
+/** Nothing of the turn's is mid-step: it ends at once, and whatever is being carried out for it is stopped. */
+const interrupted = (state: ConversationTurnState): TurnStep => ({
+  ...ended(state.turn, { _tag: "Interrupted" }),
+  requests: [{ _tag: "StopTurnWork", turn: state.turn }],
+});
+
+/** A step is under way: its requests are stopped, and the turn waits to hear how far each got. */
+const interrupting = (state: Extract<ConversationTurnState, { _tag: "Stepping" }>): TurnStep => ({
+  ...becomes({ _tag: "Interrupting", turn: state.turn, step: state.step }),
+  requests: [{ _tag: "StopTurnWork", turn: state.turn }],
+});
 
 const passOn = (
-  state: Extract<ConversationTurnState, { _tag: "Stepping" }>,
+  state: Extract<ConversationTurnState, { _tag: "Stepping" | "Interrupting" }>,
   message: ModelObservation,
 ): TurnStep => ({ ...becomes(state), sends: [toTurnStep({ turn: state.turn, index: state.step }, message)] });
+
+const endInterrupted = (state: ConversationTurnState): TurnStep => ended(state.turn, { _tag: "Interrupted" });
 
 const ended = (turn: TurnId, ending: Ending): TurnStep => ({
   state: { _tag: "Ended", turn },
@@ -131,6 +148,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelAttemptFailed: "ignored",
     NoticeInserted: "ignored",
     SettingEnforced: "ignored",
+    ToolCallArrived: "ignored",
     ModelVetoed: "ignored",
     TurnEndReviewed: "ignored",
     TurnHoldsExhausted: "ignored",
@@ -151,12 +169,13 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelAttemptFailed: "ignored",
     NoticeInserted: "ignored",
     SettingEnforced: "ignored",
+    ToolCallArrived: "ignored",
     ModelVetoed: "ignored",
     TurnEndReviewed: "ignored",
     TurnHoldsExhausted: "ignored",
   },
   Stepping: {
-    TurnInterrupted: interrupted,
+    TurnInterrupted: interrupting,
     TurnOpened: "ignored",
     Steer: "deferred",
     Compact: "deferred",
@@ -171,6 +190,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelAttemptFailed: passOn,
     NoticeInserted: passOn,
     SettingEnforced: passOn,
+    ToolCallArrived: passOn,
     ModelVetoed: passOn,
     TurnEndReviewed: "ignored",
     TurnHoldsExhausted: "ignored",
@@ -191,6 +211,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelAttemptFailed: "ignored",
     NoticeInserted: "ignored",
     SettingEnforced: "ignored",
+    ToolCallArrived: "ignored",
     ModelVetoed: "ignored",
     TurnEndReviewed: "ignored",
     TurnHoldsExhausted: "ignored",
@@ -215,6 +236,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelAttemptFailed: "ignored",
     NoticeInserted: "ignored",
     SettingEnforced: "ignored",
+    ToolCallArrived: "ignored",
     ModelVetoed: "ignored",
   },
   AfterAnswerSteered: {
@@ -235,7 +257,31 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelAttemptFailed: "ignored",
     NoticeInserted: "ignored",
     SettingEnforced: "ignored",
+    ToolCallArrived: "ignored",
     ModelVetoed: "ignored",
+  },
+  Interrupting: {
+    TurnInterrupted: "ignored",
+    TurnOpened: "ignored",
+    /** What waits is dealt with when the turn has ended. */
+    Steer: "deferred",
+    Compact: "deferred",
+    ChangeModel: "deferred",
+    Proceed: "ignored",
+    /** The step has heard from every request it made: the turn ends. */
+    StepToolsSettled: endInterrupted,
+    StepAnswered: endInterrupted,
+    StepCutShort: endInterrupted,
+    StepStopped: endInterrupted,
+    ModelResponded: passOn,
+    ModelFailed: passOn,
+    ModelAttemptFailed: passOn,
+    NoticeInserted: passOn,
+    SettingEnforced: passOn,
+    ToolCallArrived: passOn,
+    ModelVetoed: passOn,
+    TurnEndReviewed: "ignored",
+    TurnHoldsExhausted: "ignored",
   },
   Ended: {
     TurnInterrupted: "ignored",
@@ -258,6 +304,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelAttemptFailed: "ignored",
     NoticeInserted: "ignored",
     SettingEnforced: "ignored",
+    ToolCallArrived: "ignored",
     ModelVetoed: "ignored",
     TurnEndReviewed: "ignored",
     TurnHoldsExhausted: "ignored",

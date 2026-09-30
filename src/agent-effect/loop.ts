@@ -5,8 +5,9 @@
  *
  * Observations are recorded one at a time, in the order they arrive. Each request is carried out
  * in a fiber of its own, so the session takes further observations meanwhile: input is queued in
- * the core's mailboxes, and an interruption ends the turn and the work its requests are doing in
- * the world. `idle` waits until no request is being carried out. The session lives in a scope;
+ * the core's mailboxes. When the core asks for a turn's work to stop (it was interrupted), each
+ * request under way ends what it is doing and reports how far it got: a model request, the response
+ * as far as it had arrived; a tool run, that how it ended was not observed. `idle` waits until no request is being carried out. The session lives in a scope;
  * closing it ends whatever is still being carried out.
  *
  * When a turn starts is decided here: when input arrives and the agent is idle, the loop starts a
@@ -27,12 +28,13 @@ import { Clock, DateTime, Deferred, Effect, FiberSet, PubSub, Ref, type Scope, S
 import type { Fact } from "../agent-core/fact.ts";
 import { deliver, emptyWorld, type World } from "../agent-core/router.ts";
 import { InputText, Millis, Seq, type SessionId, type TurnId } from "../agent-core/names.ts";
-import type { CapturedObservation, Observation } from "../agent-core/observation.ts";
+import type { CapturedObservation, ModelPart, Observation, ToolOutcome } from "../agent-core/observation.ts";
 import type { Origin } from "../agent-core/origin.ts";
 import type { EffectRequest } from "../agent-core/request.ts";
 import { emptyHeld, type Held as Throttled, throttle, type ThrottleInput } from "../agent-core/throttle.ts";
 import { ContextAssembler, ModelClient, ModelProvider, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
+import { receivedJson } from "./received.ts";
 import { ModelStream, ModelStreamInterval, type Streamed } from "./model-stream.ts";
 import { CurrentOrigin, harnessParts } from "./origin.ts";
 import { Report } from "./report.ts";
@@ -49,6 +51,7 @@ const spanNames: Record<EffectRequest["_tag"], string> = {
   RequestModelResponse: "agent.model.request",
   RunTool: "agent.tool.run",
   BeforeTurnEnded: "agent.turn.review",
+  StopTurnWork: "agent.turn.stop",
 };
 
 /** An observation, and who or what it came from. */
@@ -126,6 +129,13 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope> = Effect.ge
       return [...inputs, reviewed];
     });
 
+  /** The signal that ends what `turn`'s requests are doing in the world, made when first asked for. */
+  const cancelOf = (turn: TurnId): Effect.Effect<Deferred.Deferred<void>> =>
+    Ref.modify(cancels, (now) => {
+      const made = now.get(turn) ?? Deferred.makeUnsafe<void>();
+      return [made, now.has(turn) ? now : new Map([...now, [turn, made]])];
+    });
+
   /**
    * Carries out `request` with what it streams passed on to `streamed`: events held and released in
    * batches at most once per `ModelStreamInterval`; a completed part, and the end of the request,
@@ -162,30 +172,85 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope> = Effect.ge
       );
     });
 
-  const carryOut = (request: EffectRequest): Effect.Effect<ReadonlyArray<Observed>, never, Services> => {
+  /**
+   * Carries out one request in the world. `stop` is completed when the request's turn is to stop
+   * its work: the request then ends what it is doing and reports how far it got.
+   */
+  const carryOut = (
+    request: EffectRequest,
+    stop: Deferred.Deferred<void> | undefined,
+  ): Effect.Effect<ReadonlyArray<Observed>, never, Services> => {
+    const stopped = stop === undefined ? Effect.never : Deferred.await(stop);
     switch (request._tag) {
       case "RequestModelResponse":
         return passingOn(
           request.turn,
           Effect.gen(function* () {
-          const facts = (yield* Ref.get(held)).facts;
-          const target = yield* (yield* ModelProvider).select(facts, request.turn);
-          const context = yield* (yield* ContextAssembler).assemble(facts, request.turn);
-          const outcome = yield* (yield* ModelClient).respond(target, context, request.turn);
-          // A response names the provider that gave it, which a fallback makes another than the one asked.
-          const provider = outcome._tag === "ModelResponded" ? outcome.provider : target.provider;
-          return [{ origin: { _tag: "Provider", provider }, observation: outcome } satisfies Observed];
+            const facts = (yield* Ref.get(held)).facts;
+            const target = yield* (yield* ModelProvider).select(facts, request.turn);
+            const context = yield* (yield* ContextAssembler).assemble(facts, request.turn);
+            const asked: Origin = { _tag: "Provider", provider: target.provider };
+            const report = yield* Report;
+            const passOn = yield* ModelStream;
+            const arrived = yield* Ref.make<ReadonlyArray<ModelPart>>([]);
+            // A tool call that is complete is recorded, so the core runs it without waiting for the
+            // rest of the response; every completed part is kept, for a response stopped early.
+            const sink = (streamed: Streamed) =>
+              Effect.gen(function* () {
+                if (streamed._tag === "Part") {
+                  const part = streamed.part;
+                  if (part._tag === "ToolCall")
+                    yield* report(
+                      { _tag: "ToolCallArrived", turn: request.turn, call: part.call, tool: part.tool, input: part.input },
+                      asked,
+                    );
+                  yield* Ref.update(arrived, (parts) => [...parts, part]);
+                }
+                yield* passOn(streamed);
+              });
+            const asFarAsArrived = stopped.pipe(
+              Effect.andThen(Ref.get(arrived)),
+              Effect.map(
+                (parts): Extract<Observation, { _tag: "ModelResponded" }> => ({
+                  _tag: "ModelResponded",
+                  turn: request.turn,
+                  provider: target.provider,
+                  model: target.model,
+                  parts,
+                  ending: { _tag: "Interrupted" },
+                  metadata: receivedJson({}),
+                }),
+              ),
+            );
+            const outcome = yield* (yield* ModelClient)
+              .respond(target, context, request.turn)
+              .pipe(Effect.provideService(ModelStream, sink), Effect.raceFirst(asFarAsArrived));
+            // A response names the provider that gave it, which a fallback makes another than the one asked.
+            const provider = outcome._tag === "ModelResponded" ? outcome.provider : target.provider;
+            return [{ origin: { _tag: "Provider", provider }, observation: outcome } satisfies Observed];
           }),
         );
-      case "RunTool":
+      case "RunTool": {
+        const origin: Origin = { _tag: "Tool", tool: request.tool };
+        const ended = (outcome: ToolOutcome): ReadonlyArray<Observed> => [
+          { origin, observation: { _tag: "ToolEnded", call: request.call, outcome } },
+        ];
         return Effect.gen(function* () {
-          const outcome = yield* (yield* ToolRunner).run(request.tool, request.input);
-          return [
-            { origin: { _tag: "Tool", tool: request.tool }, observation: { _tag: "ToolEnded", call: request.call, outcome } },
-          ];
+          if (stop !== undefined && (yield* Deferred.isDone(stop))) return ended({ _tag: "Failed", reason: { _tag: "NotRun" } });
+          yield* (yield* Report)({ _tag: "ToolCallDispatched", call: request.call }, harnessParts.toolRunner);
+          const outcome = yield* (yield* ToolRunner)
+            .run(request.tool, request.input)
+            .pipe(Effect.raceFirst(stopped.pipe(Effect.as<ToolOutcome>({ _tag: "Failed", reason: { _tag: "Indeterminate" } }))));
+          return ended(outcome);
         });
+      }
       case "BeforeTurnEnded":
-        return reviewTurnEnd(request.turn);
+        return reviewTurnEnd(request.turn).pipe(Effect.raceFirst(stopped.pipe(Effect.as<ReadonlyArray<Observed>>([]))));
+      case "StopTurnWork":
+        return cancelOf(request.turn).pipe(
+          Effect.flatMap((cancel) => Deferred.succeed(cancel, undefined)),
+          Effect.as([]),
+        );
       default:
         return request satisfies never;
     }
@@ -202,23 +267,16 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope> = Effect.ge
       case "RunTool":
         return { ...session, ...turn, call: request.call, tool: request.tool };
       case "BeforeTurnEnded":
+      case "StopTurnWork":
         return { ...session, turn: request.turn };
       default:
         return request satisfies never;
     }
   };
 
-  /** The signal that ends what `turn`'s requests are doing in the world, made when first asked for. */
-  const cancelOf = (turn: TurnId): Effect.Effect<Deferred.Deferred<void>> =>
-    Ref.modify(cancels, (now) => {
-      const made = now.get(turn) ?? Deferred.makeUnsafe<void>();
-      return [made, now.has(turn) ? now : new Map([...now, [turn, made]])];
-    });
-
   /**
    * Records the observation and the decisions that follow from it, and returns the requests that
    * follow, each with what it is about. One observation is recorded at a time: callers hold `lock`.
-   * A turn interrupted has its requests' work in the world ended.
    */
   const write = (origin: Origin, observation: Observation): Effect.Effect<ReadonlyArray<Started>, never, Services> =>
     Effect.gen(function* () {
@@ -252,35 +310,23 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope> = Effect.ge
             }).pipe(Effect.annotateLogs(session === undefined ? {} : { session }))
           : Effect.void,
       );
-      yield* Effect.forEach(outcome.decisions, (decision) =>
-        decision._tag === "TurnEnded" && decision.ending._tag === "Interrupted"
-          ? cancelOf(decision.turn).pipe(Effect.flatMap((cancel) => Deferred.succeed(cancel, undefined)))
-          : Effect.void,
-      );
       const started = outcome.requests.map((request) => ({ request, work: about(request, now.world, now.facts) }));
       if (observation._tag !== "InputArrived" || now.world.agent.state._tag !== "Idle") return started;
       const turn = yield* (yield* Turns).start;
       return [...started, ...(yield* write(harnessParts.loop, { _tag: "TurnStarted", turn }))];
     });
 
-  /**
-   * Carries out one request in the world and records each observation that comes of it. The work in
-   * the world ends when the request's turn is interrupted; what it had already returned is recorded.
-   */
+  /** Carries out one request in the world and records each observation that comes of it. */
   const carry = ({ request, work }: Started): Effect.Effect<void, never, Services> =>
     Effect.gen(function* () {
       const services = yield* Effect.context<Services>();
       const report = (reported: Observation, by: Origin) => record(by, reported).pipe(Effect.provideContext(services));
-      const cancelled: Effect.Effect<ReadonlyArray<Observed>> =
-        work.turn === undefined
-          ? Effect.never
-          : cancelOf(work.turn).pipe(Effect.flatMap((cancel) => Deferred.await(cancel)), Effect.as([]));
-      const observed = yield* carryOut(request).pipe(
+      const stop = work.turn === undefined ? undefined : yield* cancelOf(work.turn);
+      const observed = yield* carryOut(request, stop).pipe(
         Effect.withSpan(spanNames[request._tag], { attributes: { ...work } }),
         Effect.annotateLogs({ ...work }),
         Effect.provideService(CurrentWork, work),
         Effect.provideService(Report, report),
-        Effect.raceFirst(cancelled),
       );
       yield* Effect.forEach(observed, (each) => record(each.origin, each.observation), { discard: true });
     });

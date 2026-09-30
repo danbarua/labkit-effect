@@ -47,12 +47,17 @@ export function anthropicStream(response: unknown, options: { readonly cut?: boo
   ]);
 }
 
-/** A Responses API response as its stream: each output item as it is done, then the whole response. */
+/**
+ * A Responses API response as its stream: each output item as it is done (one marked incomplete is
+ * never done), then the whole response.
+ */
 export function openAiStream(whole: unknown): Response {
   const response = whole as Json;
   const output = (response["output"] ?? []) as ReadonlyArray<Json>;
   return events([
-    ...output.map((item, output_index) => ({ type: "response.output_item.done", output_index, item })),
+    ...output.flatMap((item, output_index) =>
+      item["status"] === "incomplete" ? [] : [{ type: "response.output_item.done", output_index, item }],
+    ),
     { type: response["status"] === "incomplete" ? "response.incomplete" : "response.completed", response },
   ]);
 }

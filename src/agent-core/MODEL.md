@@ -69,6 +69,32 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
   (Decision `InputDropped`). No turn is under way until the next input
   arrives. (Dan: "There is no 'next turn', until stimulus is received.")
 
+## Tool calls
+
+- C1. A tool call is three facts: the model asked for it (`ToolCallArrived` while its response is
+  still arriving, or as a part of `ModelResponded`), the tool began to run (`ToolCallDispatched`),
+  and how it ended (`ToolEnded`). A call may have the first without the second, and the second
+  without the third.
+- C2. A call that arrives while the response streams is run at once, without waiting for the rest
+  of the response; the response, when it is recorded, holds the call as one of its parts and does
+  not run it again. The calls of one response run at the same time.
+- C3. Every call a recorded response made has a result when the model is next sent the
+  conversation: the one recorded; for a call with none, that how it ended was not observed
+  (`Indeterminate`) when it began to run, and that it was not run (`NotRun`) when it did not. The
+  result follows the response that made the call, whenever the tool ended.
+- C4. A call that arrived in a response that then failed is recorded, with its dispatch and its
+  end. The response is not, so the model is not sent the call or its result.
+
+## Interruption
+
+- X1. Interrupted while a step is under way, the turn asks for its work to stop (`StopTurnWork`)
+  and waits to hear how far each request got: a model request reports the response as far as it
+  had arrived, with the parts that were complete (`ModelResponded`, ending `Interrupted`); a tool
+  that was running, that how it ended was not observed; a call not yet run, that it was not. The
+  turn then ends (`Interrupted`). It ends on a step's boundary, so the conversation goes on from it.
+- X2. Interrupted between steps, the turn ends at once.
+- X3. Input that arrives while the turn waits is dropped when it ends, as I6 says.
+
 ## Decisions and effects
 
 Every effect the core requests follows one pattern: a Decision recorded, an effect request sent,
@@ -78,7 +104,8 @@ and report `TurnStarted`.
 | Decision | Request | Observed outcome |
 |---|---|---|
 | `ModelAsked` | `RequestModelResponse` | `ModelResponded`, `ModelFailed`, `ModelVetoed` |
-| (none: every proposed call is requested) | `RunTool` | `ToolEnded` (`Succeeded`, `Failed`, `Vetoed`) |
+| (none: every proposed call is requested) | `RunTool` | `ToolCallDispatched` when the tool begins to run, then `ToolEnded` (`Succeeded`, `Failed`) |
+| (none: the turn was interrupted) | `StopTurnWork` | each request under way reports how far it got |
 
 Whether a requested effect happens is decided outside the core. The core sees a veto as an outcome:
 a vetoed tool call settles like any other, and the model is asked again; a vetoed model request
@@ -127,15 +154,6 @@ were completed: one still arriving when it was cut short is not part of it. `thr
 in batches at most once per interval; time is an input, so it also serves tests.
 
 ## Direction (Dan, 2026-09-29): not a spec
-
-**Starting tools while the response streams.** Claude Code parses tool calls out of the stream and
-starts each one as soon as its call is complete, while the model is still writing; its session
-files record such a tool's result before the rest of the message. The core has no concept for
-this. A shape that fits: a machine per model request fed by the captured stream chunks, tracking
-the block being written (thinking, text, a tool call's input accumulating); when a tool call's
-block closes it tells the step `CallReady`, and the step opens and runs that call early. The
-recorded fact does not change: `ModelResponded` still holds the whole response when the stream
-ends, and calls already opened stay open.
 
 **Streaming, and every kind of thinking content.** Where a provider streams, requests stream; where
 it returns anything about the model's thinking (summaries, progress updates between tool calls,

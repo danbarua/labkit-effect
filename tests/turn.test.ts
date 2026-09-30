@@ -151,3 +151,52 @@ test("a failed attempt at a model request is recorded and changes nothing; the r
   const late = observe(session, attempt);
   expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "ObservationNotExpected", observation: late } });
 });
+
+test("a call that arrives while the response streams is run at once; the response, when it comes, does not run it again", () => {
+  const session = open();
+  observe(session, opened);
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
+  const call = { call: "c1", tool: "ls", input: json({ path: "." }) };
+  observe(session, { _tag: "ToolCallArrived", turn: "turn-1", ...call });
+  expect(session.requests.at(-1)).toEqual({ _tag: "RunTool", ...call } as never);
+  observe(session, { _tag: "ToolCallDispatched", call: "c1" });
+  observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } });
+  // The tool has ended and the response has not: the step waits for the response.
+  expect(tags(session).at(-1)).toBe("ToolEnded");
+  observe(session, {
+    ...cutShort("Listing.", "tool_use", "Complete"),
+    parts: [
+      { _tag: "Text", text: "Listing." },
+      { _tag: "ToolCall", ...call },
+    ],
+  });
+  expect(tags(session).slice(4)).toEqual([
+    "ModelAsked",
+    "ToolCallArrived",
+    "ToolCallDispatched",
+    "ToolEnded",
+    "ModelResponded",
+    "ModelAsked",
+  ]);
+  expect(session.requests.map((request) => request._tag)).toEqual(["RequestModelResponse", "RunTool", "RequestModelResponse"]);
+  expect(tags(session)).not.toContain("ObservationNotExpected");
+});
+
+test("a response's calls that did not arrive earlier are run when it comes; the step waits for those still running", () => {
+  const session = open();
+  observe(session, opened);
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
+  observe(session, { _tag: "ToolCallArrived", turn: "turn-1", call: "c1", tool: "ls", input: json({}) });
+  observe(session, {
+    ...cutShort("", "tool_use", "Complete"),
+    parts: [
+      { _tag: "ToolCall", call: "c1", tool: "ls", input: json({}) },
+      { _tag: "ToolCall", call: "c2", tool: "ls", input: json({}) },
+    ],
+  });
+  expect(session.requests.flatMap((request) => (request._tag === "RunTool" ? [request.call] : []))).toEqual(["c1", "c2"] as never);
+  observe(session, { _tag: "ToolEnded", call: "c2", outcome: { _tag: "Succeeded", output: json([]) } });
+  expect(tags(session).at(-1)).toBe("ToolEnded");
+  observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json([]) } });
+  expect(tags(session).slice(-2)).toEqual(["ToolEnded", "ModelAsked"]);
+});

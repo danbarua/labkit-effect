@@ -15,8 +15,11 @@ import type { Policy, PolicyMessage, PolicyStep } from "./policy.ts";
 export const RequestKey = Schema.String.pipe(Schema.brand("agent-policy/RequestKey"));
 export type RequestKey = typeof RequestKey.Type;
 
-/** `BeforeTurnEnded` asks the layers around the core for more input; it is forwarded without review. */
-type Reviewed = Exclude<EffectRequest, { _tag: "BeforeTurnEnded" }>;
+/**
+ * `BeforeTurnEnded` asks the layers around the core for more input, and `StopTurnWork` stops what
+ * they are carrying out; both are forwarded without review.
+ */
+type Reviewed = Exclude<EffectRequest, { _tag: "BeforeTurnEnded" | "StopTurnWork" }>;
 
 export function keyOf(request: Reviewed): RequestKey {
   switch (request._tag) {
@@ -119,7 +122,7 @@ export function gate<State>(
   switch (input._tag) {
     case "Requested": {
       const request = input.request;
-      return request._tag === "BeforeTurnEnded"
+      return request._tag === "BeforeTurnEnded" || request._tag === "StopTurnWork"
         ? { gate: held, outputs: [{ _tag: "Forward", request }] }
         : settle(held, keyOf(request), request, policy.start(request));
     }

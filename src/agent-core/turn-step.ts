@@ -1,8 +1,8 @@
 /**
  * A turn step: one request to the model and what follows from its response. The step asks the
- * model; a response with tool calls opens a call for each and requests it be run, and the step
- * waits for each to settle; a response without tool calls is a final answer, unless it was cut
- * short, in which case the turn goes on to ask again. An attempt at the request that failed while
+ * model; each tool call opens a call and requests it be run, when it arrives while the response
+ * streams or, for one that did not, when the response does; the step waits for each to settle. A
+ * response without tool calls is a final answer, unless it was cut short or stopped. An attempt at the request that failed while
  * the request goes on changes nothing; the step waits for the request's outcome. The step tells its
  * turn how it finished.
  */
@@ -20,7 +20,16 @@ import { becomes, type Step, type Table } from "./table.ts";
 
 export type TurnStepState =
   | { readonly _tag: "NotStarted"; readonly step: StepAddress }
-  | { readonly _tag: "AwaitingModel"; readonly step: StepAddress }
+  /**
+   * The model was asked. `opened` are the calls that arrived while its response streams, each run
+   * at once; `unsettled` are those of them that have not ended.
+   */
+  | {
+      readonly _tag: "AwaitingModel";
+      readonly step: StepAddress;
+      readonly opened: ReadonlyArray<CallId>;
+      readonly unsettled: ReadonlyArray<CallId>;
+    }
   | { readonly _tag: "RunningTools"; readonly step: StepAddress; readonly unsettled: ReadonlyArray<CallId> }
   | { readonly _tag: "Done"; readonly step: StepAddress };
 
@@ -40,7 +49,7 @@ const done = (step: StepAddress, told: Send): StepStep => ({
 export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
   NotStarted: {
     StepStart: (state) => ({
-      state: { _tag: "AwaitingModel", step: state.step },
+      state: { _tag: "AwaitingModel", step: state.step, opened: [], unsettled: [] },
       decisions: [{ _tag: "ModelAsked", turn: state.step.turn }],
       requests: [{ _tag: "RequestModelResponse", turn: state.step.turn }],
       sends: [],
@@ -51,29 +60,44 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
     ModelAttemptFailed: "ignored",
     NoticeInserted: "ignored",
     SettingEnforced: "ignored",
+    ToolCallArrived: "ignored",
     ModelVetoed: "ignored",
   },
   AwaitingModel: {
+    /** A call that arrives while the response streams is opened and run at once. */
+    ToolCallArrived: (state, message) =>
+      state.opened.includes(message.call)
+        ? becomes(state)
+        : {
+            state: { ...state, opened: [...state.opened, message.call], unsettled: [...state.unsettled, message.call] },
+            decisions: [],
+            requests: [{ _tag: "RunTool", call: message.call, tool: message.tool, input: message.input }],
+            sends: [toCall(message.call, { _tag: "CallOpened", step: state.step })],
+          },
+    CallSettled: (state, message) => becomes({ ...state, unsettled: state.unsettled.filter((call) => call !== message.call) }),
+    /**
+     * The response's calls that did not arrive earlier are opened and run. With no call at all the
+     * response is an answer, or was cut short; with every call settled the tool batch is; otherwise
+     * the step waits for the calls still running.
+     */
     ModelResponded: (state, message) => {
       const calls = message.parts.flatMap((part) => (part._tag === "ToolCall" ? [part] : []));
-      return calls.length === 0
-        ? done(
-            state.step,
-            toConversationTurn(state.step.turn, {
-              _tag: message.ending._tag === "CutShort" ? "StepCutShort" : "StepAnswered",
-            }),
-          )
-        : {
-            state: { _tag: "RunningTools", step: state.step, unsettled: calls.map((call) => call.call) },
-            decisions: [],
-            requests: calls.map((call) => ({
-              _tag: "RunTool" as const,
-              call: call.call,
-              tool: call.tool,
-              input: call.input,
-            })),
-            sends: calls.map((call) => toCall(call.call, { _tag: "CallOpened", step: state.step })),
-          };
+      const fresh = calls.filter((call) => !state.opened.includes(call.call));
+      const unsettled = [...state.unsettled, ...fresh.map((call) => call.call)];
+      if (state.opened.length === 0 && calls.length === 0)
+        return done(
+          state.step,
+          toConversationTurn(state.step.turn, {
+            _tag: message.ending._tag === "Complete" ? "StepAnswered" : "StepCutShort",
+          }),
+        );
+      if (unsettled.length === 0) return done(state.step, toConversationTurn(state.step.turn, { _tag: "StepToolsSettled" }));
+      return {
+        state: { _tag: "RunningTools", step: state.step, unsettled },
+        decisions: [],
+        requests: fresh.map((call) => ({ _tag: "RunTool" as const, call: call.call, tool: call.tool, input: call.input })),
+        sends: fresh.map((call) => toCall(call.call, { _tag: "CallOpened", step: state.step })),
+      };
     },
     ModelFailed: (state, message) =>
       done(
@@ -98,7 +122,6 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
         }),
       ),
     StepStart: "ignored",
-    CallSettled: "ignored",
   },
   RunningTools: {
     CallSettled: (state, message) => {
@@ -113,6 +136,7 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
     ModelAttemptFailed: "ignored",
     NoticeInserted: "ignored",
     SettingEnforced: "ignored",
+    ToolCallArrived: "ignored",
     ModelVetoed: "ignored",
   },
   Done: {
@@ -123,6 +147,7 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
     ModelAttemptFailed: "ignored",
     NoticeInserted: "ignored",
     SettingEnforced: "ignored",
+    ToolCallArrived: "ignored",
     ModelVetoed: "ignored",
   },
 };

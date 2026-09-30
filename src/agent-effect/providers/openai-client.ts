@@ -225,9 +225,12 @@ const respondOnce = (
             yield* passOn({ _tag: "Chunk", chunk: receivedJson(event) });
             if (!isObject(event)) return response;
             switch (event["type"]) {
-              case "response.output_item.done":
-                yield* Effect.forEach(parts(event["item"] ?? null), (part) => passOn({ _tag: "Part", part }), { discard: true });
+              case "response.output_item.done": {
+                const item = event["item"] ?? null;
+                if (!stillArriving(item))
+                  yield* Effect.forEach(parts(item), (part) => passOn({ _tag: "Part", part }), { discard: true });
                 return response;
+              }
               case "response.completed":
               case "response.incomplete":
                 return event["response"];

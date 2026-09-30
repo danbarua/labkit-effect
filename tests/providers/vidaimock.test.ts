@@ -40,6 +40,8 @@ const noRetries: Retries = { times: 0, firstWait: "1 millis" };
 /** An adapter at the mock: its requests, and its model client; with `status`, every request is answered with it. */
 interface AtMock {
   readonly name: string;
+  /** Whether the adapter reads its response as a stream, and so starts a tool call when it arrives. */
+  readonly streams: boolean;
   readonly requests: (status?: number) => Effect.Effect<ProviderRequest>;
   readonly client: (retries: Retries, status?: number) => Layer.Layer<ModelClient>;
 }
@@ -47,16 +49,19 @@ interface AtMock {
 const adapters: ReadonlyArray<AtMock> = [
   {
     name: "Anthropic Messages",
+    streams: true,
     requests: (status) => anthropicRequests(noRetries).pipe(Effect.provide(anthropicAtMock(mock(), status))),
     client: (retries, status) => anthropicModelClient(retries).pipe(Layer.provide(anthropicAtMock(mock(), status))),
   },
   {
     name: "OpenAI Responses",
+    streams: true,
     requests: (status) => openAiRequests(noRetries).pipe(Effect.provide(openAiAtMock(mock(), status))),
     client: (retries, status) => openAiModelClient(retries).pipe(Layer.provide(openAiAtMock(mock(), status))),
   },
   {
     name: "OpenAI-compatible Chat Completions",
+    streams: false,
     requests: (status) => openAiCompatRequests(noRetries).pipe(Effect.provide(openAiCompatAtMock(mock(), status))),
     client: (retries, status) => openAiCompatModelClient(retries).pipe(Layer.provide(openAiCompatAtMock(mock(), status))),
   },
@@ -118,19 +123,16 @@ describe.each([...adapters])("$name at VidaiMock", (adapter) => {
 
   test("a turn with tools: the model calls one, is sent its outcome, and answers", async () => {
     const { facts } = await oneTurn(client(noRetries));
-    expect(tags(facts)).toEqual([
-      "SessionOpened",
-      "InputArrived",
-      "TurnStarted",
-      "InputDelivered",
-      "ModelAsked",
-      "ModelResponded",
-      "ToolEnded",
-      "ModelAsked",
-      "ModelResponded",
-      "TurnEndReviewed",
-      "TurnEnded",
-    ]);
+    const recorded = tags(facts);
+    const second = recorded.lastIndexOf("ModelAsked");
+    expect(recorded.slice(0, 5)).toEqual(["SessionOpened", "InputArrived", "TurnStarted", "InputDelivered", "ModelAsked"]);
+    // In the first step a streaming adapter's call arrives, and runs, before its response has ended;
+    // whether the tool or the response ends first is not fixed.
+    expect(recorded.slice(5, second).sort() as ReadonlyArray<string>).toEqual(
+      [...(adapter.streams ? ["ToolCallArrived"] : []), "ModelResponded", "ToolCallDispatched", "ToolEnded"].sort(),
+    );
+    if (adapter.streams) expect(recorded.indexOf("ToolCallArrived")).toBeLessThan(recorded.indexOf("ModelResponded"));
+    expect(recorded.slice(second)).toEqual(["ModelAsked", "ModelResponded", "TurnEndReviewed", "TurnEnded"]);
     const responses = facts.flatMap((fact) =>
       fact._tag === "Observed" && fact.observation._tag === "ModelResponded" ? [fact.observation] : [],
     );

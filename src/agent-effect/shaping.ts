@@ -148,6 +148,16 @@ export function renderToolResult(
             text: JSON.stringify({ code: "vetoed", message: "The call was not run.", reason: asText(reason.reason) }),
             isError: true,
           };
+        case "Indeterminate":
+          return {
+            text: JSON.stringify({
+              code: "indeterminate",
+              message: "The tool began to run and how it ended was not observed. It may have had effects: check before relying on them.",
+            }),
+            isError: true,
+          };
+        case "NotRun":
+          return { text: JSON.stringify({ code: "not_run", message: "The call was not run." }), isError: true };
         default:
           return reason satisfies never;
       }

@@ -177,11 +177,13 @@ test("a tool call whose input does not fit its schema is rejected with the decod
   });
 });
 
+const noneFailed = { Reported: 0, NotFound: 0, InputRejected: 0, Vetoed: 0, Indeterminate: 0, NotRun: 0 };
+
 test("tool usage for the session is counted from its facts", async () => {
   const { facts } = await runTest(play(["1", "3", "7", "3.5", "banana", "5", "7", "9", "11", "13", "15"], advanced));
   expect(Object.fromEntries(toolStats(facts))).toEqual({
-    classify: { calls: 4, succeeded: 4, failed: { Reported: 0, NotFound: 0, InputRejected: 0, Vetoed: 0 }, unfinished: 0 },
-    report_error: { calls: 3, succeeded: 3, failed: { Reported: 0, NotFound: 0, InputRejected: 0, Vetoed: 0 }, unfinished: 0 },
+    classify: { calls: 4, succeeded: 4, failed: { ...noneFailed }, unfinished: 0 },
+    report_error: { calls: 3, succeeded: 3, failed: { ...noneFailed }, unfinished: 0 },
   });
 });
 

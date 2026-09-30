@@ -11,7 +11,7 @@ import type { ToolOutcome } from "../agent-core/observation.ts";
 export interface ToolStats {
   readonly calls: number;
   readonly succeeded: number;
-  /** Failed calls by reason: the tool's report, no such tool, input rejected, vetoed. */
+  /** Failed calls by reason. */
   readonly failed: Readonly<Record<Extract<ToolOutcome, { _tag: "Failed" }>["reason"]["_tag"], number>>;
   readonly unfinished: number;
 }
@@ -19,7 +19,7 @@ export interface ToolStats {
 const none: ToolStats = {
   calls: 0,
   succeeded: 0,
-  failed: { Reported: 0, NotFound: 0, InputRejected: 0, Vetoed: 0 },
+  failed: { Reported: 0, NotFound: 0, InputRejected: 0, Vetoed: 0, Indeterminate: 0, NotRun: 0 },
   unfinished: 0,
 };
 

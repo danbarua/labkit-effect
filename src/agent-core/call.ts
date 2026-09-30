@@ -20,9 +20,12 @@ export const openingCall = (call: CallId): CallState => ({ _tag: "NotOpened", ca
 export const callTable: Table<CallState, CallMessage, Send> = {
   NotOpened: {
     CallOpened: (state, message) => becomes({ _tag: "Running", call: state.call, step: message.step }),
+    ToolCallDispatched: "ignored",
     ToolEnded: "ignored",
   },
   Running: {
+    /** Recorded; the call waits for how it ends. */
+    ToolCallDispatched: (state) => becomes(state),
     ToolEnded: (state) => ({
       state: { _tag: "Ended", call: state.call },
       decisions: [],
@@ -33,6 +36,7 @@ export const callTable: Table<CallState, CallMessage, Send> = {
   },
   Ended: {
     CallOpened: "ignored",
+    ToolCallDispatched: "ignored",
     ToolEnded: "ignored",
   },
 };

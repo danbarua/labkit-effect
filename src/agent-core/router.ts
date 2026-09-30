@@ -188,6 +188,7 @@ function isPassedOn(sent: Send): boolean {
     case "ModelAttemptFailed":
     case "NoticeInserted":
     case "SettingEnforced":
+    case "ToolCallArrived":
     case "ModelVetoed":
       return true;
     case "StepStart":
@@ -262,6 +263,7 @@ export function deliver(world: World, seq: Seq, observation: Observation): Deliv
       case "ModelAttemptFailed":
       case "NoticeInserted":
       case "SettingEnforced":
+      case "ToolCallArrived":
       case "ModelVetoed":
       case "TurnEndReviewed":
       case "TurnHoldsExhausted":
@@ -269,6 +271,7 @@ export function deliver(world: World, seq: Seq, observation: Observation): Deliv
         const machine = world.turns.get(observation.turn);
         return machine === undefined ? "undelivered" : toTurn(world, observation.turn, machine, observation, seq);
       }
+      case "ToolCallDispatched":
       case "ToolEnded": {
         const machine = world.calls.get(observation.call);
         return machine === undefined ? "undelivered" : toCall(world, observation.call, machine, observation, seq);

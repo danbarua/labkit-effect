@@ -23,7 +23,16 @@ export type AgentObservation = Extract<
 /** Observations delivered to the turn they name, which passes them to its current step. */
 export type ModelObservation = Extract<
   Observation,
-  { _tag: "ModelResponded" | "ModelFailed" | "ModelAttemptFailed" | "NoticeInserted" | "SettingEnforced" | "ModelVetoed" }
+  {
+    _tag:
+      | "ModelResponded"
+      | "ModelFailed"
+      | "ModelAttemptFailed"
+      | "NoticeInserted"
+      | "SettingEnforced"
+      | "ToolCallArrived"
+      | "ModelVetoed";
+  }
 >;
 
 /** Observations delivered to the turn they name, for the turn itself. */
@@ -33,7 +42,7 @@ export type TurnObservation = Extract<
 >;
 
 /** Observations delivered to the call they name. */
-export type CallObservation = Extract<Observation, { _tag: "ToolEnded" }>;
+export type CallObservation = Extract<Observation, { _tag: "ToolCallDispatched" | "ToolEnded" }>;
 
 /** What a conversation turn tells the agent. */
 export type ToAgent =
@@ -56,7 +65,7 @@ export type ToConversationTurn =
   | { readonly _tag: "StepToolsSettled" }
   /** The model gave a final answer in the step. */
   | { readonly _tag: "StepAnswered" }
-  /** The model's response was cut short with no tool calls; the turn goes on to ask again. */
+  /** The model's response was cut short, or stopped, with no tool calls. */
   | { readonly _tag: "StepCutShort" }
   /** The step stopped without an answer. */
   | { readonly _tag: "StepStopped"; readonly ending: Exclude<Ending, { _tag: "Answered" }> };

@@ -21,19 +21,17 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
       yet; today only the fallback chain reports it.
 - [ ] `InputArrived.from` says what a fact's origin says (the outside world: a user, the system,
       another agent). Fold it into the origin.
-- [ ] Start each tool as soon as its call is complete in the stream, without waiting for the rest
-      of the response. The adapters already pass each completed part on (`ModelPartArrived`); the
-      core has no way yet to open a call before the response is recorded.
-- [ ] A request whose turn is interrupted records nothing more than the interruption. Record what
-      had arrived, up to its last completed part, with a result for each tool call in it, so the
-      conversation can go on from there.
+- [ ] Input that arrives between an interruption and the turn's end (while its requests report how
+      far they got) is dropped with the turn. It should start the next turn.
+- [ ] A call that arrived in a response that then failed may have run; the model is not told. When
+      the harness knows which tools change things, tell the model, or do not run those early.
+- [ ] `ToolCallDispatched` is reported by the loop when it hands a call to the tool runner. When
+      tools run in another process (the ACP host), that adapter reports it.
 - [ ] The Chat Completions adapter does not stream.
 - [ ] A request retried after its stream had begun passes its parts on a second time.
 - [ ] The Chat Completions adapter sends back none of a response's other fields
       (`reasoning_content`) and none of the session's settings; it records each as left out or
       enforced.
-- [ ] Requests that follow one observation (several tool calls in one response) now run at the same
-      time. Nothing limits how many, and nothing says which tools may not run together.
 - [ ] A model's own output limit: a `maxOutputTokens` above what a model allows is sent as asked,
       and the provider rejects it. A settings function per model class could enforce the nearest.
 - [ ] A model's settings function can only shape a request. Refusing one is the same place with

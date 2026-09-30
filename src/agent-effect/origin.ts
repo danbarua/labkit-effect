@@ -33,6 +33,8 @@ export const harnessParts = {
   fallbackChain: harness("fallback chain"),
   /** Builds what the model is sent. */
   contextAssembler: harness("context assembler"),
+  /** Hands each tool call to the tool that runs it. */
+  toolRunner: harness("tool runner"),
   /** Puts a session's settings into a request a model accepts. */
   modelSettings: harness("model settings"),
 } as const;
