@@ -21,8 +21,6 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
       yet; today only the fallback chain reports it.
 - [ ] `InputArrived.from` says what a fact's origin says (the outside world: a user, the system,
       another agent). Fold it into the origin.
-- [ ] Input that arrives between an interruption and the turn's end (while its requests report how
-      far they got) is dropped with the turn. It should start the next turn.
 - [ ] A call that arrived in a response that then failed may have run; the model is not told. When
       the harness knows which tools change things, tell the model, or do not run those early.
 - [ ] `ToolCallDispatched` is reported by the loop when it hands a call to the tool runner. When
@@ -56,6 +54,20 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
       turn has a different role from the last summarised message, or the API merges them; compacting
       exactly the messages of a request already sent makes the kept turns start with the reply.
 
+## Later: worth doing, not core
+
+The request and response with each provider come first: whatever goes up or down becomes the same
+stream of effects and observations. These build on that.
+
+- [ ] OpenAI `async: true` on a tool: the model goes on past a call before its output is returned.
+- [ ] OpenAI mid-turn steering (GPT-6, over a WebSocket to the Responses API): new input during a
+      response. The core delivers input at a step's boundary; this would deliver it sooner.
+- [ ] OpenAI `end_turn` on a completed response. Codex follows a response with another request when
+      it is `false` (`codex-rs/core/src/session/turn.rs`); the responses the public API returned to
+      this harness carry no such field. It would map to `Unfinished`.
+- [ ] A response that reads as unfinished with no mark from the provider (oh-my-pi's "unexpected
+      stop": nothing visible, or text a small model judges to have stopped partway).
+
 ## Try
 
 - [ ] FizzBuzz against a real model through the Anthropic adapter (costs a little).
@@ -65,8 +77,12 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
 
 - [ ] Claude Code: 9 observations the core does not expect, and 49 that follow from two of them.
       Three follow a refusal that Claude Code asked again after; three are responses with no turn;
-      one follows an answered turn; two follow a response that stopped on a stop sequence, which
-      Claude Code asked again after and the core ends the turn on.
+      one follows an answered turn; two follow a message Claude Code wrote itself.
+- [ ] Claude Code writes messages of its own as assistant messages with model `<synthetic>` and
+      `stop_reason: "stop_sequence"` (137 in 808 files: "No response requested.", API errors, "Not
+      logged in"). The importer records them as model responses; they are the harness's.
+- [ ] Codex: three responses in files from 2026-08 are split in two by a `token_count` that arrived
+      mid-response, and the first half is recorded as `Unfinished`.
 - [ ] Codex: 8 turns still running when Codex completes them; 10 completions while another turn
       runs. Neither diverges.
 - [ ] Codex compactions copy the user's messages word for word; match them back to positions so

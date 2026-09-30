@@ -17,8 +17,7 @@
  * tool's name), its arguments kept as the text received; a `reasoning` item is `Thinking` (its
  * summary as text, and the item as received); every other item, a `message` with any
  * other content included, is `Unrecognised`, whole, so that it can be sent back as it came. The stop is the
- * response's `status` (with the reason when it is `incomplete`); a completed response that holds
- * commentary and neither an answer nor a tool call is `Unfinished`; everything else in the response is
+ * response's `status` (with the reason when it is `incomplete`); everything else in the response is
  * `metadata`. A request that fails, after retries, is observed as `ModelFailed`.
  */
 
@@ -255,12 +254,6 @@ const respondOnce = (
       yield* Effect.logInfo(logKeys.provider.partCut, { parts: cutItems.map((item) => (isObject(item) ? item["type"] : null)) });
     const responded = whole.flatMap(parts);
     const stop = stopOf(status, incomplete_details);
-    const classified = endingOf(endings, stop);
-    // A completed response that only says what the model is doing (commentary), with no answer and
-    // no tool call, is not the model's answer: it is asked again.
-    const commentaryOnly =
-      responded.some((part) => part._tag === "Commentary") &&
-      !responded.some((part) => part._tag === "Text" || part._tag === "ToolCall");
     return {
       _tag: "ModelResponded" as const,
       turn,
@@ -268,7 +261,7 @@ const respondOnce = (
       model: target.model,
       parts: responded,
       stop,
-      ending: classified._tag === "Complete" && commentaryOnly ? { _tag: "Unfinished" as const } : classified,
+      ending: endingOf(endings, stop),
       metadata: receivedJson(metadata),
     };
   });

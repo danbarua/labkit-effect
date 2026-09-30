@@ -63,9 +63,10 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
   (Decision `TurnEnded`: `Answered`, or `CutShort`) when no input was taken by then; otherwise it
   goes on. A response cut short is not followed by another request with nothing new for the model
   to answer. How often hooks may hold a turn open is the layers' business.
-- I7. A response that is whole, has no tool calls and is not the model's answer (`Unfinished`: it
-  only said what it is doing, or paused) is followed by another request at once. In 168 Codex
-  session files (2026-09-30) about 2,400 of 5,325 requests followed such a response.
+- I7. A response that is whole, has no tool calls, and that its provider marks as not the end of
+  the model's turn (`Unfinished`: Anthropic's `pause_turn`) is followed by another request at
+  once. Whether a response that reads as unfinished, with no such mark, is followed up is a
+  judgement for the layers around the core.
 - I5. The sender can cancel input still waiting in a mailbox (Observation `InputCancelled`); it is
   withdrawn. Cancelling input already taken changes nothing.
 - I6. A turn that ends other than by an answer (`Failed`, `Vetoed`) drops the input still waiting

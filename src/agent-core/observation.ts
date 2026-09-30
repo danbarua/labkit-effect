@@ -87,8 +87,8 @@ export const ResponseEnding = Schema.Union([
   Schema.TaggedStruct("Complete", {}),
   Schema.TaggedStruct("CutShort", {}),
   /**
-   * The response is whole and is not the model's answer: it said what it is doing, or paused, and
-   * called no tool. The model is asked again.
+   * The response is whole, called no tool, and its provider marks it as not the end of the model's
+   * turn (a pause). The model is asked again.
    */
   Schema.TaggedStruct("Unfinished", {}),
   Schema.TaggedStruct("Refused", {}),

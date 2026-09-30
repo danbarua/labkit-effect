@@ -23,7 +23,9 @@
  * - Codex names its turns (`task_started`): the turn is started, with Codex's id, at the first model
  *   item after it;
  * - the model items of one request (reasoning, assistant messages, tool calls) are one
- *   `ModelResponded`, ended by the `token_count` that follows them, by input, or by the turn's end:
+ *   `ModelResponded`, ended by the `token_usage_record` that follows them (it gives the response's
+ *   id and usage, kept in `metadata`) or, in a file without those, the `token_count`; by input; or
+ *   by the turn's end:
  *   an assistant message's `output_text` is `Text` (`Commentary` when the message's `phase` is
  *   `commentary`), a tool call is `ToolCall`, a reasoning item is `Thinking` (its
  *   summary as text), anything else (a web search the provider ran) is `Unrecognised`. Codex records no stop reason, and
@@ -98,8 +100,12 @@ export async function importCodex(source: string): Promise<Imported> {
     /** The session's id, once it is opened. */
     opened: undefined as string | undefined,
     pending: [] as Array<Record_>,
-    /** The usage a `token_count` reported for the pending response; set once the response is complete. */
+    /** The usage reported for the pending response; set once the response is complete. */
     usage: undefined as Json | undefined,
+    /** The provider's id for the pending response, when the file records it. */
+    response: undefined as string | undefined,
+    /** Whether the file records each response's end itself (`token_usage_record`). */
+    recordsResponses: false,
     /** Tool outputs recorded while their response was still arriving, given after it. */
     held: [] as Array<Record_>,
     /** A turn whose `BeforeTurnEnded` is not answered yet. */
@@ -161,7 +167,9 @@ export async function importCodex(source: string): Promise<Imported> {
   function flushResponse(askedAgain = false): void {
     const items = state.pending.splice(0);
     const usage = state.usage ?? null;
+    const response = state.response;
     state.usage = undefined;
+    state.response = undefined;
     if (items.length === 0) return;
     const parts = items.flatMap(part);
     const complete =
@@ -175,7 +183,11 @@ export async function importCodex(source: string): Promise<Imported> {
       model: state.model,
       parts,
       ending: { _tag: complete ? "Complete" : "Unfinished" },
-      metadata: json({ items: items.map((item) => item["id"] ?? null), usage }),
+      metadata: json({
+        ...(response === undefined ? {} : { response_id: response }),
+        items: items.map((item) => item["id"] ?? null),
+        usage,
+      }),
     });
     for (const output of state.held.splice(0)) toolEnded(output);
   }
@@ -257,8 +269,17 @@ export async function importCodex(source: string): Promise<Imported> {
       else toolEnded(payload);
       return;
     }
+    if (type === "token_usage_record") {
+      state.recordsResponses = true;
+      if (state.pending.length === 0) return count("token_usage_record with no model items");
+      state.usage = payload["usage"] ?? null;
+      state.response = str(payload["response_id"]) || undefined;
+      return;
+    }
     if (type === "event_msg" && kind === "token_count") {
-      if (state.pending.length > 0) state.usage = payload["info"] ?? null;
+      // Codex also reports token counts while a response is arriving; where the file records each
+      // response's end, only that ends one.
+      if (!state.recordsResponses && state.pending.length > 0) state.usage = payload["info"] ?? null;
       return;
     }
     if (type === "event_msg" && kind === "task_started") {
