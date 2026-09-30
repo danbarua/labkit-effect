@@ -13,6 +13,9 @@ export function openAiCompatSettings(settings: ModelSettings = {}): Settled {
     ...(settings.thinking === undefined ? [] : [{ enforced: { _tag: "Thinking" as const, asked: settings.thinking }, reason }]),
     ...(settings.observe === undefined ? [] : [{ enforced: { _tag: "Observe" as const, asked: settings.observe }, reason }]),
     ...(settings.effort === undefined ? [] : [{ enforced: { _tag: "Effort" as const, asked: settings.effort }, reason }]),
+    ...(settings.maxOutputTokens === undefined
+      ? []
+      : [{ enforced: { _tag: "MaxOutputTokens" as const, asked: settings.maxOutputTokens }, reason }]),
   ];
   return { fields: {}, headers: {}, enforced };
 }

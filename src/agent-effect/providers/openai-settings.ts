@@ -1,6 +1,6 @@
 /**
- * A session's settings as the Responses API takes them: `reasoning.effort` and
- * `reasoning.summary`. The API has no setting for when a model thinks, other than not at all
+ * A session's settings as the Responses API takes them: `reasoning.effort`, `reasoning.summary` and
+ * `max_output_tokens`. The API has no setting for when a model thinks, other than not at all
  * (effort `none`); a setting it cannot take is returned as enforced.
  */
 
@@ -9,7 +9,7 @@ import type { Enforcement, Settled } from "../settings.ts";
 
 export function openAiSettings(settings: ModelSettings = {}): Settled {
   const enforced: Array<Enforcement> = [];
-  const { thinking, observe, effort } = settings;
+  const { thinking, observe, effort, maxOutputTokens } = settings;
   if (thinking === "before_answer" || thinking === "between_tools")
     enforced.push({
       enforced: { _tag: "Thinking", asked: thinking, used: "auto" },
@@ -25,5 +25,12 @@ export function openAiSettings(settings: ModelSettings = {}): Settled {
     // A summary is the only thinking content the API returns on request; commentary comes unasked.
     ...(observe === "all" ? { summary: "auto" } : {}),
   };
-  return { fields: Object.keys(reasoning).length === 0 ? {} : { reasoning }, headers: {}, enforced };
+  return {
+    fields: {
+      ...(Object.keys(reasoning).length === 0 ? {} : { reasoning }),
+      ...(maxOutputTokens === undefined ? {} : { max_output_tokens: maxOutputTokens }),
+    },
+    headers: {},
+    enforced,
+  };
 }

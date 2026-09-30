@@ -125,8 +125,8 @@ test("the max_tokens the Messages API requires is supplied and logged, with the 
     message: [
       logKeys.anthropic.maxTokensSupplied,
       {
-        max_tokens: 1024,
-        reason: "the Messages API requires max_tokens and the context sets no output limit",
+        max_tokens: 32_768,
+        reason: "the Messages API requires max_tokens and the session's settings give no output limit",
       },
     ],
   });
@@ -165,7 +165,7 @@ test("a request is the model, the default max_tokens, and the context's messages
     }).pipe(Effect.provide(AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))))),
   );
   expect(provider.bodies).toEqual([
-    { model: "boring-1", max_tokens: 1024, messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }] },
+    { model: "boring-1", max_tokens: 32_768, messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }] },
   ]);
 });
 
@@ -232,10 +232,10 @@ test("a tool turn sends the catalog, then the call and its result, as Messages b
   const tools = smolCatalog.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.input }));
   const question = { role: "user", content: [{ type: "text", text: "What is 2 + 3?" }] };
   expect(provider.bodies).toEqual([
-    { model: "boring-1", max_tokens: 1024, tools, messages: [question] },
+    { model: "boring-1", max_tokens: 32_768, tools, messages: [question] },
     {
       model: "boring-1",
-      max_tokens: 1024,
+      max_tokens: 32_768,
       tools,
       messages: [
         question,

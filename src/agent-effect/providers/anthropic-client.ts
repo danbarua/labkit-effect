@@ -59,8 +59,8 @@ import {
 
 type Outcome = Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" }>;
 
-/** The output limit sent when the context sets none; the Messages API requires one. */
-const defaultMaxTokens = 1024;
+/** The output limit sent when the session's settings give none; the Messages API requires one. */
+const defaultMaxTokens = 32_768;
 
 function resultContent(result: RenderedResult): { content: string; is_error?: true } {
   return result.isError ? { content: result.text, is_error: true } : { content: result.text };
@@ -126,7 +126,7 @@ function body(target: Target, context: ModelContext): Shaped {
   return {
     json: {
       model: target.model,
-      max_tokens: defaultMaxTokens,
+      max_tokens: target.settings?.maxOutputTokens ?? defaultMaxTokens,
       ...(context.system === undefined ? {} : { system: context.system }),
       ...(context.tools.length === 0
         ? {}
@@ -140,14 +140,18 @@ function body(target: Target, context: ModelContext): Shaped {
       messages: messages.flatMap((message) => message.json as ReadonlyArray<Json>),
     },
     supplied: [
-      {
-        level: "info",
-        event: logKeys.anthropic.maxTokensSupplied,
-        details: {
-          max_tokens: defaultMaxTokens,
-          reason: "the Messages API requires max_tokens and the context sets no output limit",
-        },
-      },
+      ...(target.settings?.maxOutputTokens === undefined
+        ? [
+            {
+              level: "info" as const,
+              event: logKeys.anthropic.maxTokensSupplied,
+              details: {
+                max_tokens: defaultMaxTokens,
+                reason: "the Messages API requires max_tokens and the session's settings give no output limit",
+              },
+            },
+          ]
+        : []),
       ...messages.flatMap((message) => message.supplied),
     ],
   };

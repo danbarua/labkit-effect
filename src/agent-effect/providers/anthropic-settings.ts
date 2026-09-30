@@ -1,6 +1,7 @@
 /**
  * A session's settings as the Messages API takes them, for one model. The settings are put into
- * `thinking` (its `type` and `display`) and `output_config.effort`. Where a class of models does not
+ * `thinking` (its `type` and `display`) and `output_config.effort`; the adapter sends the output
+ * limit itself, as `max_tokens`, which the API requires. Where a class of models does not
  * allow what was asked, the nearest thing it allows is sent and the difference is returned as
  * enforced. A model in no class here is sent what was asked, and the provider answers for it.
  */

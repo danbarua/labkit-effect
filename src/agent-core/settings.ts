@@ -5,6 +5,7 @@
  */
 
 import { Schema } from "effect";
+import { TokenCount } from "./names.ts";
 
 /**
  * When the model thinks: as it sees fit, before every answer, only between its tool calls, or not
@@ -29,6 +30,8 @@ export const ModelSettings = Schema.Struct({
   thinking: Schema.optionalKey(ThinkingMode),
   observe: Schema.optionalKey(Observe),
   effort: Schema.optionalKey(Effort),
+  /** The most tokens a response may take, thinking and answer together. */
+  maxOutputTokens: Schema.optionalKey(TokenCount),
 });
 export type ModelSettings = typeof ModelSettings.Type;
 
@@ -37,5 +40,6 @@ export const Enforced = Schema.Union([
   Schema.TaggedStruct("Thinking", { asked: ThinkingMode, used: Schema.optionalKey(ThinkingMode) }),
   Schema.TaggedStruct("Observe", { asked: Observe, used: Schema.optionalKey(Observe) }),
   Schema.TaggedStruct("Effort", { asked: Effort, used: Schema.optionalKey(Effort) }),
+  Schema.TaggedStruct("MaxOutputTokens", { asked: TokenCount, used: Schema.optionalKey(TokenCount) }),
 ]);
 export type Enforced = typeof Enforced.Type;

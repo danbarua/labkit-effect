@@ -25,7 +25,7 @@ export const logKeys = {
     holdsExhausted: "loop.turn_end.holds_exhausted",
   },
   anthropic: {
-    /** The request carried the default `max_tokens`, because the context set no output limit. */
+    /** The request carried the default `max_tokens`, because the session's settings gave no output limit. */
     maxTokensSupplied: "anthropic.request.max_tokens_supplied",
   },
 } as const;

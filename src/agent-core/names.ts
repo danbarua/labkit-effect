@@ -69,6 +69,10 @@ export type StopReason = typeof StopReason.Type;
 export const FailureText = Schema.String.pipe(Schema.brand("agent-core/FailureText"));
 export type FailureText = typeof FailureText.Type;
 
+/** A number of tokens. */
+export const TokenCount = Schema.Int.pipe(Schema.brand("agent-core/TokenCount"));
+export type TokenCount = typeof TokenCount.Type;
+
 /** Why a setting was not applied as asked, in the words of whatever enforced it. */
 export const EnforcementReason = Schema.String.pipe(Schema.brand("agent-core/EnforcementReason"));
 export type EnforcementReason = typeof EnforcementReason.Type;
