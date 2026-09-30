@@ -5,8 +5,12 @@
  * (`.md`) and as recorded (`.facts.jsonl`), and prints each turn the model got wrong and how many
  * it got right.
  *
+ * With `compact`, the user asks for a compaction when the count reaches 30, 60 and 90, written by
+ * the plain text summarizer, the emoji one, and the plain text one again, and the model is sent
+ * the summaries in place of the turns they cover (`CompactedConversation`).
+ *
  *   OPENAI_API_KEY=...    bun scripts/probes/fizzbuzz-live.ts openai gpt-5.5 45
- *   ANTHROPIC_API_KEY=... bun scripts/probes/fizzbuzz-live.ts anthropic claude-sonnet-5-5 45
+ *   ANTHROPIC_API_KEY=... bun scripts/probes/fizzbuzz-live.ts anthropic claude-sonnet-5-5 47 compact
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -15,6 +19,7 @@ import { AnthropicClient } from "@effect/ai-anthropic";
 import { OpenAiClient } from "@effect/ai-openai";
 import { Effect, Layer, Redacted, Schema } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import { CompactedConversation } from "../../src/agent-context/compaction.ts";
 import { Fact } from "../../src/agent-machine/fact.ts";
 import { ModelName, ProviderName, TestName } from "../../src/agent-machine/names.ts";
 import { reportedBy } from "../../src/agent-session/origin.ts";
@@ -23,9 +28,10 @@ import { OpenAiModelClient } from "../../src/agent-session/providers/openai-clie
 import { parseJson } from "../../src/agent-session/received.ts";
 import { isObject } from "../../src/agent-session/shaping.ts";
 import { basic, countingUser, play } from "../../src/examples/fizzbuzz/scenario.ts";
+import { EmojiHappyFizzBuzzSummarizer, PlainTextFizzBuzzSummarizer } from "../../src/examples/fizzbuzz/summarizers.ts";
 import { transcript } from "./transcript.ts";
 
-const [provider = "openai", model = "gpt-5.5", counted = "45"] = process.argv.slice(2);
+const [provider = "openai", model = "gpt-5.5", counted = "45", compacting] = process.argv.slice(2);
 const count = Number(counted);
 const variable = provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
 const key = process.env[variable];
@@ -43,6 +49,16 @@ const client =
 const { facts } = await Effect.runPromise(
   play(countingUser(count), {
     ...basic,
+    ...(compacting === "compact"
+      ? {
+          conversation: CompactedConversation,
+          compactions: new Map([
+            [30, PlainTextFizzBuzzSummarizer],
+            [60, EmojiHappyFizzBuzzSummarizer],
+            [90, PlainTextFizzBuzzSummarizer],
+          ]),
+        }
+      : {}),
     model: { target: { provider: ProviderName.make(provider), model: ModelName.make(model) }, client },
   }).pipe(reportedBy({ _tag: "Test", name: TestName.make(`fizzbuzz-live ${provider} ${model}`) })),
 );
@@ -84,7 +100,7 @@ const wrong = [...turns.entries()].flatMap(([turn, { asked, labels, reply }]) =>
 });
 
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-const name = [stamp, "fizzbuzz", provider, model, counted].join("-");
+const name = [stamp, "fizzbuzz", provider, model, counted, ...(compacting === undefined ? [] : [compacting])].join("-");
 mkdirSync("logs/live", { recursive: true });
 writeFileSync(
   join("logs/live", `${name}.md`),
