@@ -55,8 +55,10 @@ contents are estimated not to fit.
 - A policy the loop asks by itself: whoever runs the session asks one between turns.
 - A compaction policy that applies at a share of the model's context window: that needs an
   estimate of the next request's size (`TODO.md`).
-- A provider's own compaction (Anthropic's compaction block, OpenAI's `compaction` item). Neither
-  adapter asks for one or sends one back.
+- A provider's own compaction in `compact`. The Responses adapter can ask OpenAI or xAI for one
+  (`openAiCompactions`), and sends a `compaction` item back as it sends back any item it did not
+  recognise, but no summarizer asks for one, and a summary is text. Anthropic's compaction block is
+  not asked for.
 - Caching. No request marks anything for the provider's cache.
 - Model selectors in the loop. The loop asks `ModelProvider` for the model (from the session's
   facts), so `ModelSelectors` and `assemble` are used only by their tests.

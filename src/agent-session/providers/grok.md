@@ -114,3 +114,37 @@ The next request starts with the compaction item as returned, and the new user t
 
 The compaction output is not to be pruned or reordered: new turns go after it, never before. A
 conversation that was compacted can be compacted again later, when it has grown long.
+
+## What it did, measured with grok-4.7
+
+The adapter reaches Grok through the Responses adapter (`xai-client.ts`). Chat Completions works as
+well: its message carries `reasoning_content` as text, and a stream sends it in `delta`; the Chat
+Completions adapter keeps it as `Unrecognised` and does not send it back.
+
+- Streaming: the same events as OpenAI's (`response.output_item.done` for each item, then
+  `response.completed` with the whole response), with `reasoning_summary_text.delta` events and a
+  `sequence_number` on each. No `data: [DONE]` line ends a Responses stream.
+- Reasoning: every response has a `reasoning` item with a `summary` and `encrypted_content`, whether
+  or not `include` or `reasoning.summary` asks for them; `reasoning.summary` is ignored (the
+  response says `detailed`). The summary reads as the reasoning itself. Grok reads the
+  `encrypted_content` of a reasoning item sent back: without it, a request is counted as if the
+  item were not there.
+- Messages have no `phase`. A message sent back with `phase: commentary` is taken.
+- Efforts: grok-4.7 takes `low` to `xhigh` and refuses `none` and `max` with a 400. grok-4.3 takes
+  `none`. `GET /v1/models` lists each model's efforts under `capabilities.reasoning_effort`.
+- `max_output_tokens` limits the answer only. With 20, a response took 62 output tokens, 42 of them
+  reasoning, and ended `incomplete` with the reason `max_output_tokens`.
+- `prompt_cache_retention` is accepted and ignored: the response does not echo it.
+- Cache: each request reports about 1,152 cached tokens, the first one too; a one-line question
+  counts 1,380 input tokens, so xAI adds a prefix of its own. Four conversations of about 7,000
+  tokens, each growing over six requests, two with a `prompt_cache_key` and two without: of the 20
+  requests after the first in each, 19 read 7,040 to 7,296 from the cache, and one (keyed) read only
+  the 1,152. Another keyed conversation, with three seconds between requests, read 7,168 on one of
+  its three later requests and 1,152 on the others. The same request sent twice in a row read only
+  the 1,152 both times, keyed or not.
+- Compaction: `/v1/responses/compact` took six items (a question, two reasoning items, a call, its
+  output and the answer) and returned one `compaction` item with `dropped_message_count: 3`. A
+  request starting with it and a new question counted 1,802 input tokens, against 3,049 for the
+  items themselves, and answered from what was compacted. It takes `instructions` and `tools`, and
+  answers as JSON when asked to stream. OpenAI's endpoint of the same name returns the user's
+  messages and then a `compaction` item.
