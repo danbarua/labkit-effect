@@ -8,8 +8,9 @@ import { join } from "node:path";
 import { DateTime, Option, Schema } from "effect";
 import { WindowSummary } from "../../src/agent-context/forks.ts";
 import { Fact } from "../../src/agent-core/fact.ts";
-import { Seq } from "../../src/agent-core/names.ts";
+import { HarnessPart, Seq, ToolName, Via } from "../../src/agent-core/names.ts";
 import { Observation } from "../../src/agent-core/observation.ts";
+import type { Origin } from "../../src/agent-core/origin.ts";
 import type { EffectRequest } from "../../src/agent-core/request.ts";
 import { deliver, emptyWorld, type World } from "../../src/agent-core/router.ts";
 
@@ -60,7 +61,32 @@ export interface Projection {
   readonly imported: (source: string, records: number, turns: number) => Imported;
 }
 
-export function projection(): Projection {
+/**
+ * Where an imported observation came from, as far as the record says. `harness` names the harness
+ * whose session file is read: a user's input and the session's opening came from the user through
+ * it, a response from its provider, a tool's outcome from the tool when the record has the call,
+ * and everything else from that harness itself.
+ */
+function originOf(observation: Observation, harness: string, tools: ReadonlyMap<string, string>): Origin {
+  const itself: Origin = { _tag: "Harness", part: HarnessPart.make(harness) };
+  switch (observation._tag) {
+    case "SessionOpened":
+      return { _tag: "User", via: Via.make(harness) };
+    case "InputArrived":
+      return observation.from._tag === "User" ? { _tag: "User", via: Via.make(harness) } : itself;
+    case "ModelResponded":
+      return { _tag: "Provider", provider: observation.provider };
+    case "ToolEnded": {
+      const tool = tools.get(observation.call);
+      return tool === undefined ? itself : { _tag: "Tool", tool: ToolName.make(tool) };
+    }
+    default:
+      return itself;
+  }
+}
+
+/** A projection of the session file of `harness` ("claude-code", "codex"). */
+export function projection(harness: string): Projection {
   const facts: Array<unknown> = [];
   const summaries: Array<unknown> = [];
   const summary = Schema.decodeUnknownSync(WindowSummary);
@@ -69,6 +95,7 @@ export function projection(): Projection {
   const decode = Schema.decodeUnknownSync(Observation);
   const encodeFact = Schema.encodeSync(Fact);
   const state = { world: emptyWorld as World, time: undefined as DateTime.Utc | undefined, begun: false };
+  const tools = new Map<string, string>();
 
   return {
     readAt: (time) => {
@@ -85,7 +112,9 @@ export function projection(): Projection {
       const outcome = deliver(state.world, seq, observation);
       state.world = outcome.world;
       if (observation._tag !== "SessionOpened") state.begun = true;
-      facts.push(encodeFact({ _tag: "Observed", seq, time, observation }));
+      if (observation._tag === "ModelResponded")
+        for (const part of observation.parts) if (part._tag === "ToolCall") tools.set(part.call, part.tool);
+      facts.push(encodeFact({ _tag: "Observed", seq, time, origin: originOf(observation, harness, tools), observation }));
       for (const decision of outcome.decisions)
         facts.push(encodeFact({ _tag: "Decided", seq: Seq.make(facts.length + 1), time, decision }));
       return { seq, requests: outcome.requests };

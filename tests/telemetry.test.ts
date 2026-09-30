@@ -1,6 +1,7 @@
 /** OpenTelemetry: a FizzBuzz session's spans and tool metrics reach in-memory OpenTelemetry outputs. */
 
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
+import { test } from "./support/test.ts";
 import { MetricReader } from "@opentelemetry/sdk-metrics";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { Effect, Metric } from "effect";

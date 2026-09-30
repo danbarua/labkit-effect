@@ -22,6 +22,7 @@ import { FailureText, type ProviderName, type TurnId } from "../agent-core/names
 import { ModelClient, type ModelContext, type ProviderRequest, type Target } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
 import { failedAs, receivedAiError } from "./provider-call.ts";
+import { harnessParts } from "./origin.ts";
 import { Report } from "./report.ts";
 
 /** The `AiError` reasons after which the next provider is tried. */
@@ -64,7 +65,10 @@ const attempt = (
     Effect.tap(() =>
       fellBack
         ? Effect.gen(function* () {
-            yield* (yield* Report)({ _tag: "ModelChangeArrived", provider: target.provider, model: target.model });
+            yield* (yield* Report)(
+              { _tag: "ModelChangeArrived", provider: target.provider, model: target.model },
+              harnessParts.fallbackChain,
+            );
           })
         : Effect.void,
     ),
@@ -75,14 +79,17 @@ const attempt = (
       (error) => fallsBackOn.has(error.reason._tag),
       (error) =>
         Effect.gen(function* () {
-          yield* (yield* Report)({
-            _tag: "ModelAttemptFailed",
-            turn,
-            provider: target.provider,
-            model: target.model,
-            failure: FailureText.make(error.message),
-            error: receivedAiError(error),
-          });
+          yield* (yield* Report)(
+            {
+              _tag: "ModelAttemptFailed",
+              turn,
+              provider: target.provider,
+              model: target.model,
+              failure: FailureText.make(error.message),
+              error: receivedAiError(error),
+            },
+            { _tag: "Provider", provider: target.provider },
+          );
           yield* Effect.logWarning(logKeys.provider.fellBack, {
             from: { provider: target.provider, model: target.model },
             to: { provider: next.provider, model: next.model },

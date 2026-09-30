@@ -1,6 +1,7 @@
 /** The Anthropic Messages adapter: how the core's types are shaped into its wire format. */
 
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
+import { test } from "../support/test.ts";
 import { anthropicAt } from "../support/providers.ts";
 import { Effect, Layer, Logger } from "effect";
 import { ModelName, ProviderName, ThinkingSignature, ThinkingText, TurnId } from "../../src/agent-core/names.ts";

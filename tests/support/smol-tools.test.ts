@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
+import { test } from "../support/test.ts";
 import { Effect, type Schema } from "effect";
 import { ToolName } from "../../src/agent-core/names.ts";
 import { ToolRunner } from "../../src/agent-effect/contracts.ts";

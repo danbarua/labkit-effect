@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
+import { test } from "./support/test.ts";
 import { Effect, Exit } from "effect";
 import type { Fact } from "../src/agent-core/fact.ts";
 import { TurnId } from "../src/agent-core/names.ts";

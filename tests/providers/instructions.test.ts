@@ -4,7 +4,8 @@
  * What is sent is checked on a recording server; that the provider takes it, against VidaiMock.
  */
 
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
+import { test } from "../support/test.ts";
 import { Effect, Exit, Layer } from "effect";
 import { ModelName, ProviderName, TurnId } from "../../src/agent-core/names.ts";
 import { ModelClient, type ModelContext } from "../../src/agent-effect/contracts.ts";

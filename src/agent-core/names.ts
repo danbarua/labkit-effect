@@ -33,6 +33,18 @@ export type ModelName = typeof ModelName.Type;
 export const AgentName = Schema.String.pipe(Schema.brand("agent-core/AgentName"));
 export type AgentName = typeof AgentName.Type;
 
+/** The surface a person acts through: an editor, a protocol, a terminal. */
+export const Via = Schema.String.pipe(Schema.brand("agent-core/Via"));
+export type Via = typeof Via.Type;
+
+/** The name of a part of the harness around the core that reports observations. */
+export const HarnessPart = Schema.String.pipe(Schema.brand("agent-core/HarnessPart"));
+export type HarnessPart = typeof HarnessPart.Type;
+
+/** The name of a test, or of any other exercise of the code. */
+export const TestName = Schema.String.pipe(Schema.brand("agent-core/TestName"));
+export type TestName = typeof TestName.Type;
+
 /** The text of an input to a session, from whichever source sent it. */
 export const InputText = Schema.String.pipe(Schema.brand("agent-core/InputText"));
 export type InputText = typeof InputText.Type;

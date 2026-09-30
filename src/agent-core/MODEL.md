@@ -39,6 +39,11 @@ Status: **open** means Dan has not settled it. **Proposal** means the wording is
   observation a machine ignores is recorded as `ObservationNotExpected`; one addressed to a turn or
   call no machine exists for, as `ObservationUndelivered`.
 
+- R7. Every observation is recorded with its origin: who or what in the world outside the core
+  reported it (a user through some surface, another session, a provider, a tool, a part of the
+  harness, a test). A decision has none: it is the core's own. Whoever gives a session an
+  observation says who it is; giving one with no origin is a defect.
+
 ## Input during a turn
 
 Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool calls."

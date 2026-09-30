@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
+import { test } from "./support/test.ts";
 import { Millis } from "../src/agent-core/names.ts";
 import { emptyHeld, type Held, type ThrottleInput, throttle } from "../src/agent-core/throttle.ts";
 

@@ -3,7 +3,8 @@
  * play; the others (HTTP statuses, retries) are tested against it in `vidaimock.test.ts`.
  */
 
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
+import { test } from "../support/test.ts";
 import { Effect, Layer, Logger } from "effect";
 import { ModelName, ProviderName, TurnId } from "../../src/agent-core/names.ts";
 import { ModelClient } from "../../src/agent-effect/contracts.ts";

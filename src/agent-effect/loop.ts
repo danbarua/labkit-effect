@@ -21,9 +21,11 @@ import type { Fact } from "../agent-core/fact.ts";
 import { deliver, emptyWorld, type World } from "../agent-core/router.ts";
 import { InputText, Seq, type SessionId, type TurnId } from "../agent-core/names.ts";
 import type { Observation } from "../agent-core/observation.ts";
+import type { Origin } from "../agent-core/origin.ts";
 import type { EffectRequest } from "../agent-core/request.ts";
 import { ContextAssembler, ModelClient, ModelProvider, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
+import { CurrentOrigin, harnessParts } from "./origin.ts";
 import { Report } from "./report.ts";
 import { CurrentWork, type Work } from "./work.ts";
 
@@ -40,6 +42,12 @@ const spanNames: Record<EffectRequest["_tag"], string> = {
   BeforeTurnEnded: "agent.turn.review",
 };
 
+/** An observation, and who or what it came from. */
+interface Observed {
+  readonly origin: Origin;
+  readonly observation: Observation;
+}
+
 interface Held {
   readonly world: World;
   /** How many times turn-end hooks have held each turn open. */
@@ -50,7 +58,10 @@ interface Held {
 type Services = ModelProvider | ContextAssembler | ModelClient | Turns | ToolRunner | TurnEndHooks;
 
 export interface Session {
-  /** Records an observation and carries out everything that follows from it. */
+  /**
+   * Records an observation, with the origin `CurrentOrigin` gives, and carries out everything that
+   * follows from it.
+   */
   readonly observe: (observation: Observation) => Effect.Effect<void, never, Services>;
   readonly facts: Effect.Effect<ReadonlyArray<Fact>>;
   /** Every fact recorded from now on, in order, for as long as the scope lasts. */
@@ -65,38 +76,47 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
    * The turn-end hooks' feedback as input, then the review. After `maxHolds` holds the hooks are not
    * run; that is recorded (`TurnHoldsExhausted`), then the review.
    */
-  const reviewTurnEnd = (turn: TurnId): Effect.Effect<ReadonlyArray<Observation>, never, Services> =>
+  const reviewTurnEnd = (turn: TurnId): Effect.Effect<ReadonlyArray<Observed>, never, Services> =>
     Effect.gen(function* () {
       const { hooks, maxHolds } = yield* TurnEndHooks;
       const holds = (yield* Ref.get(held)).holds.get(turn) ?? 0;
-      const reviewed = { _tag: "TurnEndReviewed" as const, turn };
+      const origin = harnessParts.turnEndHooks;
+      const reviewed: Observed = { origin, observation: { _tag: "TurnEndReviewed", turn } };
       if (hooks.length > 0 && holds >= maxHolds) {
         yield* Effect.logWarning(logKeys.loop.holdsExhausted, { holds, maxHolds });
-        return [{ _tag: "TurnHoldsExhausted" as const, turn, holds }, reviewed];
+        return [{ origin, observation: { _tag: "TurnHoldsExhausted", turn, holds } }, reviewed];
       }
       const feedback = (yield* Effect.forEach(hooks, (hook) => hook(turn))).flat();
       if (feedback.length === 0) return [reviewed];
       yield* Ref.update(held, (now) => ({ ...now, holds: new Map([...now.holds, [turn, holds + 1]]) }));
       yield* Effect.logInfo(logKeys.loop.turnHeld, { hold: holds + 1, maxHolds, feedback: feedback.length });
       const inputs = feedback.map(
-        (text): Observation => ({ _tag: "InputArrived", from: { _tag: "System" }, text: InputText.make(text) }),
+        (text): Observed => ({
+          origin,
+          observation: { _tag: "InputArrived", from: { _tag: "System" }, text: InputText.make(text) },
+        }),
       );
       return [...inputs, reviewed];
     });
 
-  const carryOut = (request: EffectRequest): Effect.Effect<ReadonlyArray<Observation>, never, Services> => {
+  const carryOut = (request: EffectRequest): Effect.Effect<ReadonlyArray<Observed>, never, Services> => {
     switch (request._tag) {
       case "RequestModelResponse":
         return Effect.gen(function* () {
           const facts = (yield* Ref.get(held)).facts;
           const target = yield* (yield* ModelProvider).select(facts, request.turn);
           const context = yield* (yield* ContextAssembler).assemble(facts, request.turn);
-          return [yield* (yield* ModelClient).respond(target, context, request.turn)];
+          const outcome = yield* (yield* ModelClient).respond(target, context, request.turn);
+          // A response names the provider that gave it, which a fallback makes another than the one asked.
+          const provider = outcome._tag === "ModelResponded" ? outcome.provider : target.provider;
+          return [{ origin: { _tag: "Provider", provider }, observation: outcome }];
         });
       case "RunTool":
         return Effect.gen(function* () {
           const outcome = yield* (yield* ToolRunner).run(request.tool, request.input);
-          return [{ _tag: "ToolEnded", call: request.call, outcome } as const];
+          return [
+            { origin: { _tag: "Tool", tool: request.tool }, observation: { _tag: "ToolEnded", call: request.call, outcome } },
+          ];
         });
       case "BeforeTurnEnded":
         return reviewTurnEnd(request.turn);
@@ -122,14 +142,14 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
     }
   };
 
-  const observe = (observation: Observation): Effect.Effect<void, never, Services> =>
+  const record = (origin: Origin, observation: Observation): Effect.Effect<void, never, Services> =>
     Effect.gen(function* () {
       const before = yield* Ref.get(held);
       const seq = Seq.make(before.facts.length + 1);
       const outcome = deliver(before.world, seq, observation);
       const time = yield* DateTime.now;
       const facts: ReadonlyArray<Fact> = [
-        { _tag: "Observed", seq, time, observation },
+        { _tag: "Observed", seq, time, origin, observation },
         ...outcome.decisions.map((decision, index): Fact => ({
           _tag: "Decided",
           seq: Seq.make(seq + 1 + index),
@@ -155,7 +175,7 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
           : Effect.void,
       );
       const services = yield* Effect.context<Services>();
-      const report = (reported: Observation) => observe(reported).pipe(Effect.provideContext(services));
+      const report = (reported: Observation, by: Origin) => record(by, reported).pipe(Effect.provideContext(services));
       yield* Effect.forEach(outcome.requests, (request) => {
         const work = about(request, now.world, now.facts);
         return carryOut(request).pipe(
@@ -163,14 +183,24 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
           Effect.annotateLogs({ ...work }),
           Effect.provideService(CurrentWork, work),
           Effect.provideService(Report, report),
-          Effect.flatMap((observations) => Effect.forEach(observations, observe, { discard: true })),
+          Effect.flatMap((observed) =>
+            Effect.forEach(observed, (each) => record(each.origin, each.observation), { discard: true }),
+          ),
         );
       });
       const after = now.world;
       if (observation._tag === "InputArrived" && after.agent.state._tag === "Idle") {
         const turn = yield* (yield* Turns).start;
-        yield* observe({ _tag: "TurnStarted", turn });
+        yield* record(harnessParts.loop, { _tag: "TurnStarted", turn });
       }
+    });
+
+  const observe = (observation: Observation): Effect.Effect<void, never, Services> =>
+    Effect.gen(function* () {
+      const origin = yield* CurrentOrigin;
+      if (origin === undefined)
+        return yield* Effect.die(new Error(`${observation._tag} was given to a session with no origin set`));
+      yield* record(origin, observation);
     });
 
   return {

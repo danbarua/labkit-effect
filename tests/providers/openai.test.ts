@@ -1,6 +1,7 @@
 /** The OpenAI Responses adapter: how the core's types are shaped into its wire format and back. */
 
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
+import { test } from "../support/test.ts";
 import { Effect, Layer } from "effect";
 import type { Observation } from "../../src/agent-core/observation.ts";
 import { BoringModelProvider } from "../support/boring.ts";

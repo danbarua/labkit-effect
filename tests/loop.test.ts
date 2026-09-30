@@ -1,6 +1,7 @@
 /** The loop around the core, with stub services: what it does regardless of which adapters run. */
 
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
+import { test } from "./support/test.ts";
 import { Effect, Layer, Logger, PubSub, References } from "effect";
 import { ModelName, ModelText, ProviderName, SessionId, StopReason, TurnId } from "../src/agent-core/names.ts";
 import { CurrentWork, type Work } from "../src/agent-effect/work.ts";
@@ -15,7 +16,7 @@ import { SmolToolRunner } from "./support/smol-tools.ts";
 import { runTest } from "./support/run.ts";
 import { boringOpening } from "./support/boring.ts";
 
-test("while a request is carried out, CurrentWork and every log line name its session and turn", async () => {
+test("while a request is carried out, CurrentWork and every log line name its session and turn; every line names the test", async () => {
   const logged: Array<{ message: unknown; annotations: Record<string, unknown> }> = [];
   const worked: Array<Work> = [];
   const capture = Logger.make((options) => {
@@ -58,12 +59,16 @@ test("while a request is carried out, CurrentWork and every log line name its se
     ),
   );
   const expected = { session: SessionId.make("s1"), turn: TurnId.make("turn-1") };
-  expect(logged).toContainEqual({ message: ["stub.responding"], annotations: expected });
+  const origin = {
+    _tag: "Test",
+    name: "while a request is carried out, CurrentWork and every log line name its session and turn; every line names the test",
+  };
+  expect(logged).toContainEqual({ message: ["stub.responding"], annotations: { ...expected, origin } });
   // Every decision recorded is also logged, for whoever is debugging the loop.
   expect(logged.filter((line) => Array.isArray(line.message) && line.message[0] === logKeys.loop.decisionRecorded)).toEqual(
     ["InputDelivered", "ModelAsked", "TurnEnded"].map((decision) => ({
       message: [logKeys.loop.decisionRecorded, expect.objectContaining({ decision })],
-      annotations: { session: SessionId.make("s1") },
+      annotations: { session: SessionId.make("s1"), origin },
     })),
   );
   expect(worked).toEqual([expected]);

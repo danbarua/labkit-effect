@@ -43,7 +43,7 @@ import { anthropicEndings } from "../../src/agent-effect/providers/anthropic-cli
 import { endingOf } from "../../src/agent-effect/shaping.ts";
 
 export async function importClaudeCode(source: string): Promise<Imported> {
-  const projected = projection();
+  const projected = projection("claude-code");
   const { count } = projected;
 
   const state = {

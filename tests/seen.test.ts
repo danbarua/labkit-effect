@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
+import { test } from "./support/test.ts";
 import type { Fact } from "../src/agent-core/fact.ts";
 import { observe, open, opened } from "./support/drive.ts";
 import { json } from "./support/received.ts";

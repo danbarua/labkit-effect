@@ -13,6 +13,7 @@ import { Effect, Layer } from "effect";
 import { NoticeText } from "../agent-core/names.ts";
 import { ContextAssembler, type ModelContext } from "../agent-effect/contracts.ts";
 import { conversationOf, noticeMessage } from "../agent-effect/conversation.ts";
+import { harnessParts } from "../agent-effect/origin.ts";
 import { Report } from "../agent-effect/report.ts";
 import { assembleContents, Conversation, Notices } from "./assemble.ts";
 
@@ -26,7 +27,11 @@ export const AgentContextAssembler = Layer.effect(
           const contents = yield* assembleContents(facts).pipe(Effect.provideContext(services));
           const notices = contents.notices.map((text) => NoticeText.make(text));
           const report = yield* Report;
-          yield* Effect.forEach(notices, (text) => report({ _tag: "NoticeInserted", turn, text }), { discard: true });
+          yield* Effect.forEach(
+            notices,
+            (text) => report({ _tag: "NoticeInserted", turn, text }, harnessParts.contextAssembler),
+            { discard: true },
+          );
           const context: ModelContext = {
             system: contents.system.length === 0 ? undefined : contents.system.join("\n\n"),
             tools: contents.tools,

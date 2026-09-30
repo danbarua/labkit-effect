@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
+import { test } from "./support/test.ts";
 import { json } from "./support/received.ts";
 import { observe, open, opened, type Session } from "./support/drive.ts";
 

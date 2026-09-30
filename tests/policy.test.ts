@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
+import { test } from "./support/test.ts";
 import { Millis } from "../src/agent-core/names.ts";
 import type { EffectRequest } from "../src/agent-core/request.ts";
 import { emptyGate, type GateInput, type GateOutput, type GateState, gate, RequestKey } from "../src/agent-policy/gate.ts";

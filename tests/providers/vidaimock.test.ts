@@ -4,7 +4,8 @@
  * a failed request records.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
+import { test } from "../support/test.ts";
 import { Effect, Exit, Layer, Logger, Schema } from "effect";
 import * as AiError from "effect/ai/AiError";
 import type { Fact } from "../../src/agent-core/fact.ts";

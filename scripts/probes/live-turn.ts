@@ -11,10 +11,11 @@ import { AnthropicClient } from "@effect/ai-anthropic";
 import { OpenAiClient } from "@effect/ai-openai";
 import { Effect, Layer, Redacted } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
-import { ModelName, ProviderName, SessionId } from "../../src/agent-core/names.ts";
+import { ModelName, ProviderName, SessionId, TestName } from "../../src/agent-core/names.ts";
 import type { Observation } from "../../src/agent-core/observation.ts";
 import { openSession } from "../../src/agent-effect/loop.ts";
 import { ModelFromFacts } from "../../src/agent-effect/model-choice.ts";
+import { reportedBy } from "../../src/agent-effect/origin.ts";
 import { AnthropicModelClient } from "../../src/agent-effect/providers/anthropic-client.ts";
 import { OpenAiModelClient } from "../../src/agent-effect/providers/openai-client.ts";
 import { asText } from "../../src/agent-effect/received.ts";
@@ -54,7 +55,10 @@ const facts = await Effect.runPromise(
       text: "Add 1873 and 7519 with the tool, then tell me the result.",
     } as unknown as Observation);
     return yield* session.facts;
-  }).pipe(Effect.provide(Layer.mergeAll(ModelFromFacts, TurnContextAssembler, client, CountingTurns, NoTurnEndHooks, SmolToolRunner))),
+  }).pipe(
+    reportedBy({ _tag: "Test", name: TestName.make(`live-turn ${provider} ${model}`) }),
+    Effect.provide(Layer.mergeAll(ModelFromFacts, TurnContextAssembler, client, CountingTurns, NoTurnEndHooks, SmolToolRunner)),
+  ),
 );
 
 for (const fact of facts) {

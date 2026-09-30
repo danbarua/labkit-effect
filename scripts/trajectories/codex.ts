@@ -59,7 +59,7 @@ const modelItems = new Set(["message", "reasoning", "custom_tool_call", "functio
 const toolOutputs = new Set(["function_call_output", "custom_tool_call_output", "tool_search_output"]);
 
 export async function importCodex(source: string): Promise<Imported> {
-  const projected = projection();
+  const projected = projection("codex");
   const { count } = projected;
   const records: Array<Record_> = [];
   eachRecord(source, (record) => records.push(record), count);

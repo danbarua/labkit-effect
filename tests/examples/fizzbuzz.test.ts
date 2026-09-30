@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
+import { test } from "../support/test.ts";
 import { Effect, Metric } from "effect";
 import { TestClock } from "effect/testing";
 import { Conversation } from "../../src/agent-context/assemble.ts";

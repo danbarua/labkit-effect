@@ -4,7 +4,8 @@
  * the requests after it.
  */
 
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
+import { test } from "../support/test.ts";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { Notices, type NoticeProvider } from "../../src/agent-context/assemble.ts";

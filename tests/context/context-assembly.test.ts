@@ -1,6 +1,7 @@
 /** Context assembly on its own: the services it needs, provided by test layers; an assembled context out. */
 
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
+import { test, testOrigin } from "../support/test.ts";
 import { DateTime, Effect, Layer, Logger } from "effect";
 import { TestClock } from "effect/testing";
 import type { Fact } from "../../src/agent-core/fact.ts";
@@ -79,7 +80,9 @@ const run = (setup: Setup, messages: ReadonlyArray<ContextMessage>) => {
     Effect.gen(function* () {
       yield* TestClock.setTime(Date.parse("2026-09-28T12:00:00.000Z"));
       const observation = yield* opening(SessionId.make("s1"), { provider: small.provider, model: small.model });
-      const facts: ReadonlyArray<Fact> = [{ _tag: "Observed", seq: Seq.make(1), time: yield* DateTime.now, observation }];
+      const facts: ReadonlyArray<Fact> = [
+        { _tag: "Observed", seq: Seq.make(1), time: yield* DateTime.now, origin: testOrigin(), observation },
+      ];
       return yield* assemble(facts);
     }).pipe(Effect.provide(layers)),
   ).then((assembled) => ({ assembled, logged }));

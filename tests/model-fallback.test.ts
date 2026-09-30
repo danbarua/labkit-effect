@@ -3,7 +3,8 @@
  * provider does, or failing with the HTTP status given; through the loop.
  */
 
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
+import { test } from "./support/test.ts";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { Effect, Exit, Layer, Logger, Schema } from "effect";
 import * as AiError from "effect/ai/AiError";
