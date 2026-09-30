@@ -4,8 +4,10 @@
  * to `logs/live/` as a transcript to read (`.md`) and as recorded (`.facts.jsonl`), and prints how
  * the turn ended and the transcript's path.
  *
- *   OPENAI_API_KEY=...    bun scripts/probes/live-turn.ts openai gpt-5.5
- *   ANTHROPIC_API_KEY=... bun scripts/probes/live-turn.ts anthropic claude-opus-5-5
+ * Settings follow the model as `name=value` (`thinking`, `observe`, `effort`).
+ *
+ *   OPENAI_API_KEY=...    bun scripts/probes/live-turn.ts openai gpt-5.5 observe=all
+ *   ANTHROPIC_API_KEY=... bun scripts/probes/live-turn.ts anthropic claude-opus-5-5 observe=all effort=high
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -17,6 +19,7 @@ import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { Fact } from "../../src/agent-core/fact.ts";
 import { ModelName, ProviderName, SessionId, TestName } from "../../src/agent-core/names.ts";
 import type { Observation } from "../../src/agent-core/observation.ts";
+import { ModelSettings } from "../../src/agent-core/settings.ts";
 import { openSession } from "../../src/agent-effect/loop.ts";
 import { ModelFromFacts } from "../../src/agent-effect/model-choice.ts";
 import { reportedBy } from "../../src/agent-effect/origin.ts";
@@ -28,7 +31,11 @@ import { CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/turns.ts";
 import { SmolToolRunner, smolCatalog } from "../../tests/support/smol-tools.ts";
 import { transcript } from "./transcript.ts";
 
-const [provider = "openai", model = "gpt-5.5"] = process.argv.slice(2);
+const [provider = "openai", model = "gpt-5.5", ...said] = process.argv.slice(2);
+// A setting the core does not know fails here, as it would in a recorded opening.
+const settings = Schema.decodeUnknownSync(ModelSettings)(Object.fromEntries(said.map((each) => each.split("="))), {
+  onExcessProperty: "error",
+});
 const variable = provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
 const key = process.env[variable];
 if (key === undefined || key === "") {
@@ -50,7 +57,7 @@ const facts = await Effect.runPromise(
     yield* session.observe(
       openedWith({
         session: SessionId.make("live"),
-        model: { provider: ProviderName.make(provider), model: ModelName.make(model) },
+        model: { provider: ProviderName.make(provider), model: ModelName.make(model), settings },
         system: "Before each tool call, say in one sentence what you are about to do.",
         tools: smolCatalog,
       }),
@@ -58,7 +65,10 @@ const facts = await Effect.runPromise(
     yield* session.observe({
       _tag: "InputArrived",
       from: { _tag: "User" },
-      text: "Add 1873 and 7519 with the tool, then tell me the result.",
+      // Hard enough that a model which thinks as it sees fit does think.
+      text:
+        "Of 1873, 4127, 2946, 6054, 3381 and 7519, exactly two are the smallest and largest primes in the list. " +
+        "Work out which, add those two with the tool, then tell me the result.",
     } as unknown as Observation);
     return yield* session.facts;
   }).pipe(
@@ -68,9 +78,9 @@ const facts = await Effect.runPromise(
 );
 
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-const name = `${stamp}-${provider}-${model}`;
+const name = [stamp, provider, model, ...said].join("-");
 mkdirSync("logs/live", { recursive: true });
-writeFileSync(join("logs/live", `${name}.md`), transcript(`live-turn ${provider} ${model}`, facts));
+writeFileSync(join("logs/live", `${name}.md`), transcript(["live-turn", provider, model, ...said].join(" "), facts));
 writeFileSync(join("logs/live", `${name}.facts.jsonl`), `${facts.map((fact) => JSON.stringify(encodeFact(fact))).join("\n")}\n`);
 
 const ended = facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? [fact.decision.ending._tag] : []));

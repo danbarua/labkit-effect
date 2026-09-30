@@ -16,11 +16,16 @@ import type {
 } from "../agent-core/names.ts";
 import type { Observation, ToolOutcome } from "../agent-core/observation.ts";
 import type { Received } from "../agent-core/received.ts";
+import type { ModelSettings } from "../agent-core/settings.ts";
 
-/** Which model a request goes to. Where the provider is reached is its client's configuration. */
+/**
+ * Which model a request goes to, and how it is to process the request, where that was said. Where
+ * the provider is reached is its client's configuration.
+ */
 export interface Target {
   readonly provider: ProviderName;
   readonly model: ModelName;
+  readonly settings?: ModelSettings;
 }
 
 /** Chooses the model for a turn's next request, given the session's facts. */

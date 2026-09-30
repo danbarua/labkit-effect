@@ -147,7 +147,8 @@ loaded from its record, or a fork, goes on with it. It is a message posted to th
 reconfigures itself when it takes it, between steps as with other mail. Fallback chains are built
 on this: when a provider is down or a subscription's limit is reached, whatever notices reports a
 change of model or provider, and the next request goes there. Built for the model and provider:
-`ModelChangeArrived`, taken as `ModelChangeTaken`; thinking is not modelled yet.
+`ModelChangeArrived`, taken as `ModelChangeTaken`. A model's settings (`thinking`, `observe`,
+`effort`) are said in the opening and in a change; each stays as last said.
 
 **Configuration is three kinds of fact.** How a request is to be processed (which model, how it
 thinks, what of its thinking is shown, how much effort) is said in the core in a small set of
@@ -160,7 +161,7 @@ plain terms, the way one would say it to a colleague. It shows up in the record 
 
 Each provider's adapter writes the wire format of its API. Each model, or class of models, that
 brings its own constraints has a small function that runs before the request and makes it one the
-provider will accept, doing the sensible thing and recording what it enforced; it is not a
-validator of every combination. Shaping a request and refusing one are the same place with a
+provider will accept, doing the sensible thing and recording what it enforced
+(`SettingEnforced`); it is not a validator of every combination. Shaping a request and refusing one are the same place with a
 different outcome. Whoever needs a model without thinking chooses a model that allows it.
 

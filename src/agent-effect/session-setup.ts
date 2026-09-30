@@ -1,8 +1,8 @@
 /**
  * A session's set-up, recorded and read back: `openedWith` makes the `SessionOpened` observation
  * from the model, system prompt and tools a session starts with; the readers give, from a session's
- * facts, the model it asks now (the latest change of model taken, or the one it opened with) and
- * the system prompt and tools it opened with. What a request is sent comes from these, so the
+ * facts, the model it asks now (the latest change of model taken, or the one it opened with), its
+ * settings, and the system prompt and tools it opened with. What a request is sent comes from these, so the
  * facts are the one place they are held.
  */
 
@@ -39,26 +39,32 @@ export function openingOf(facts: ReadonlyArray<Fact>): Opened | undefined {
   return found?._tag === "Observed" && found.observation._tag === "SessionOpened" ? found.observation : undefined;
 }
 
-/** The model named by the latest change of model taken in `facts`, if any has been. */
-function changedModel(facts: ReadonlyArray<Fact>): Target | undefined {
-  const change = facts
-    .flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "ModelChangeTaken" ? [fact.decision.change] : []))
-    .at(-1);
-  const arrived = facts.find(
-    (fact) => fact.seq === change && fact._tag === "Observed" && fact.observation._tag === "ModelChangeArrived",
+/** The changes of model taken in `facts`, in order. */
+function changesTaken(facts: ReadonlyArray<Fact>): ReadonlyArray<Extract<Observation, { _tag: "ModelChangeArrived" }>> {
+  const taken = new Set(
+    facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "ModelChangeTaken" ? [fact.decision.change] : [])),
   );
-  return arrived?._tag === "Observed" && arrived.observation._tag === "ModelChangeArrived"
-    ? { provider: arrived.observation.provider, model: arrived.observation.model }
-    : undefined;
+  return facts.flatMap((fact) =>
+    taken.has(fact.seq) && fact._tag === "Observed" && fact.observation._tag === "ModelChangeArrived" ? [fact.observation] : [],
+  );
 }
 
 /**
- * The model the session asks now. A session's facts without its opening is a session that was
- * never opened: asking for its model is a defect.
+ * The model the session asks now: the one named by the latest change taken, or the one it opened
+ * with; and its settings, each as last said by the opening or a change taken. A session's facts
+ * without its opening is a session that was never opened: asking for its model is a defect.
  */
 export const modelOf = (facts: ReadonlyArray<Fact>): Effect.Effect<Target> => {
-  const model = changedModel(facts) ?? openingOf(facts)?.model;
-  return model === undefined ? Effect.die(new Error("A model was asked for in a session that was never opened")) : Effect.succeed(model);
+  const opened = openingOf(facts)?.model;
+  if (opened === undefined) return Effect.die(new Error("A model was asked for in a session that was never opened"));
+  const changes = changesTaken(facts);
+  const latest = changes.at(-1) ?? opened;
+  const settings = changes.reduce((said, change) => ({ ...said, ...change.settings }), { ...opened.settings });
+  return Effect.succeed({
+    provider: latest.provider,
+    model: latest.model,
+    ...(Object.keys(settings).length === 0 ? {} : { settings }),
+  });
 };
 
 /** The system prompt the session opened with, if it has one. */

@@ -6,7 +6,8 @@
  * a `function_call_output` item carrying the text the model is sent. The catalog is sent as
  * `function` tools. An item it did not recognise (a `reasoning` item, say) goes back to the provider
  * that produced it unchanged and in its place; for any other provider it is left out, as is
- * another provider's thinking, and that is logged.
+ * another provider's thinking, and that is logged. The session's settings go in as `reasoning`
+ * (`openai-settings.ts`); what that enforced is recorded before the request.
  *
  * In: the response's `output` items become the observation's parts in order: a `message` whose
  * content is all `output_text` is a `Text` for each, or a `Commentary` for each when its `phase` is
@@ -25,6 +26,8 @@ import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agen
 import type { ModelPart, Observation } from "../../agent-core/observation.ts";
 import { type ContextMessage, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
 import { defaultRetries, invalidOutput, modelClientOf, postJson, type Retries, withRetries } from "../provider-call.ts";
+import { reportEnforced, type Settled } from "../settings.ts";
+import { openAiSettings } from "./openai-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
 import {
   type Called,
@@ -164,11 +167,18 @@ const respondOnce = (
   target: Target,
   context: ModelContext,
   turn: TurnId,
+  settled: Settled,
 ): Effect.Effect<Responded, AiError.AiError> =>
   Effect.gen(function* () {
     const sent = body(target, context);
     yield* logSupplied(sent.supplied);
-    const response = yield* postJson(http, caller, "/responses", sent.json);
+    const response = yield* postJson(
+      http,
+      caller,
+      "/responses",
+      { ...(sent.json as Record<string, Json>), ...settled.fields },
+      settled.headers,
+    );
     if (!isObject(response) || !Array.isArray(response["output"]))
       return yield* invalidOutput(caller, `The response has no output items: ${JSON.stringify(response)}`);
     const { output, status, incomplete_details, ...metadata } = response;
@@ -190,7 +200,12 @@ export const openAiRequests = (
 ): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
-    return (target, context, turn) => respondOnce(http, target, context, turn).pipe(withRetries(retries));
+    return (target, context, turn) => {
+      const settled = openAiSettings(target.settings);
+      return reportEnforced(turn, target, settled).pipe(
+        Effect.andThen(respondOnce(http, target, context, turn, settled).pipe(withRetries(retries))),
+      );
+    };
   });
 
 export const openAiModelClient = (retries: Retries = defaultRetries) =>

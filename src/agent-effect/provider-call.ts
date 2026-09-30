@@ -46,8 +46,10 @@ export const postJson = (
   caller: Caller,
   path: string,
   payload: Json,
+  headers: Readonly<Record<string, string>> = {},
 ): Effect.Effect<Json, AiError.AiError> =>
   HttpClientRequest.post(path).pipe(
+    HttpClientRequest.setHeaders(headers),
     HttpClientRequest.bodyJsonUnsafe(payload),
     http.execute,
     Effect.catchIf(

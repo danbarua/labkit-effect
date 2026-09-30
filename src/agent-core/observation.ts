@@ -5,9 +5,11 @@
 
 import { Schema } from "effect";
 import { Received } from "./received.ts";
+import { Enforced, ModelSettings } from "./settings.ts";
 import {
   AgentName,
   CallId,
+  EnforcementReason,
   FailureText,
   InputText,
   ModelName,
@@ -80,8 +82,12 @@ export const ResponseEnding = Schema.Union([
 ]);
 export type ResponseEnding = typeof ResponseEnding.Type;
 
-/** A model, and the provider it is asked through. */
-export const ModelTarget = Schema.Struct({ provider: ProviderName, model: ModelName });
+/** A model, the provider it is asked through, and how it is to process requests, where that is said. */
+export const ModelTarget = Schema.Struct({
+  provider: ProviderName,
+  model: ModelName,
+  settings: Schema.optionalKey(ModelSettings),
+});
 export type ModelTarget = typeof ModelTarget.Type;
 
 /** Observations recorded as facts. */
@@ -113,10 +119,14 @@ export const Observation = Schema.Union([
     kept: Schema.Array(Seq),
   }),
   /**
-   * The session is to ask `model` of `provider` from now on. Once taken (`ModelChangeTaken`), the
-   * requests that follow go there.
+   * The session is to ask `model` of `provider` from now on, with the `settings` named; a setting
+   * not named stays as it was. Once taken (`ModelChangeTaken`), the requests that follow go there.
    */
-  Schema.TaggedStruct("ModelChangeArrived", { provider: ProviderName, model: ModelName }),
+  Schema.TaggedStruct("ModelChangeArrived", {
+    provider: ProviderName,
+    model: ModelName,
+    settings: Schema.optionalKey(ModelSettings),
+  }),
   /** A turn started. It takes the input waiting for it. */
   Schema.TaggedStruct("TurnStarted", { turn: TurnId }),
   /** The input recorded at `input`, still queued, was cancelled by its sender. */
@@ -157,6 +167,17 @@ export const Observation = Schema.Union([
    * compaction may drop it.
    */
   Schema.TaggedStruct("NoticeInserted", { turn: TurnId, text: NoticeText }),
+  /**
+   * A request for a model response went out with a setting other than the one asked for, because
+   * the model does not allow what was asked.
+   */
+  Schema.TaggedStruct("SettingEnforced", {
+    turn: TurnId,
+    provider: ProviderName,
+    model: ModelName,
+    enforced: Enforced,
+    reason: EnforcementReason,
+  }),
   /** A policy vetoed a request for a model response, for the reason it gave. */
   Schema.TaggedStruct("ModelVetoed", { turn: TurnId, reason: Received }),
   /** A tool call ended. */

@@ -1,15 +1,10 @@
 # To do
 
 Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review discussion, as of
-2026-09-29. Delete an item when it is done or dropped.
+2026-09-30. Delete an item when it is done or dropped.
 
 ## Decisions for Dan
 
-- [ ] Reshape `Compacted` into the `compaction-window` entry (Dan chose the name): only the span
-      (window, previous, through, kept), with the summary belonging to a fork of the history. A
-      fork's summary may be text, or a provider's own compaction result: Anthropic's compaction
-      block (beta `compact-2026-09-04`) or OpenAI's encrypted `compaction` item, each opaque and
-      usable only with that provider.
 - [ ] The terms T1–T5 in agent-core's `MODEL.md` are all still marked open.
 - [ ] Where the model is chosen. The loop's `ModelProvider` chooses it, so context assembly's
       model selectors go unused, and `ModelChoice.endpoint` has no counterpart in `Target`.
@@ -21,10 +16,25 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
       opening records them; Anthropic takes tool changes mid-conversation as `tool_addition` and
       `tool_removal` blocks). Codex records settings changes as `thread_settings_applied`, which
       the importer reads only for the first model.
-- [ ] Reconfiguring a session, beyond the model and provider (built: `ModelChangeArrived`, taken
-      between steps; `ModelFromFacts`; the fallback chain reports the switch when a fallback
-      answers): thinking and effort. Newer Anthropic models take thinking as `adaptive` or off and
-      use effort in its place; older ones take levels (low, medium, high).
+- [ ] A user's change of model or settings has no way in. `ModelChangeArrived` will come from the
+      surface the user works through (its origin says so), and the session is not bridged to one
+      yet; today only the fallback chain reports it.
+- [ ] `InputArrived.from` says what a fact's origin says (the outside world: a user, the system,
+      another agent). Fold it into the origin.
+- [ ] Reasoning a person or an advisor can read: OpenAI's reasoning summary is inside the reasoning
+      item, recorded whole as `Unrecognised`; Anthropic's progress updates are `Thinking` parts.
+      Decode the text for readers while the provider's item still goes back unchanged.
+- [ ] Streaming: every adapter waits for the whole response. Stream where the provider streams,
+      with cancellation, so a generation can be interrupted.
+- [ ] The Chat Completions adapter sends back none of a response's other fields
+      (`reasoning_content`) and none of the session's settings; it records each as left out or
+      enforced.
+- [ ] An output limit has no home. The Anthropic adapter supplies `max_tokens: 1024`, which counts
+      thinking tokens, so a model that thinks can be cut short by it.
+- [ ] A model's settings function can only shape a request. Refusing one is the same place with
+      another outcome (`ModelVetoed`, which nothing produces yet); build it when a case needs it.
+- [ ] Settings functions exist for the Anthropic classes met so far (Opus 5.5, Fable and Mythos 5;
+      Sonnet 5.5). A model in no class is sent what was asked.
 - Returning to the primary provider after a fallback is the user's (a manual `/switch`), as other
   harnesses do. Doing it by itself would need the harness to know more of the world: a later
   feature, not ruled out.
@@ -65,7 +75,5 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
 
 - Google (no Effect package).
 - Jev, later, as a tool.
-- Sending reasoning back to the provider.
-- A seam for provider-specific hooks that shape context and apply pre-flight constraints.
 - Cache-control headers, and compaction that knows the provider's cache.
 - Attachments and system records in Claude Code sessions, including exo's injected memories.

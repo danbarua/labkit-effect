@@ -8,7 +8,8 @@
  * was given. Where the wire format needs something the context does not say, the client supplies
  * it and logs that it did. Thinking, and blocks it did not recognise, go back to the provider that
  * produced them unchanged and in their place, as the API requires for thinking to stay valid; for
- * any other provider they are left out, and that is logged.
+ * any other provider they are left out, and that is logged. The session's settings go in as
+ * `anthropic-settings.ts` puts them for the model; what it enforced is recorded before the request.
  *
  * In: a response's `content` blocks become the observation's parts in order: a `text` block is
  * `Text`, a `thinking` block with its signature is `Thinking`, a `tool_use` block is `ToolCall`
@@ -40,6 +41,8 @@ import {
 } from "../contracts.ts";
 import { logKeys } from "../log-keys.ts";
 import { defaultRetries, invalidOutput, modelClientOf, postJson, type Retries, withRetries } from "../provider-call.ts";
+import { reportEnforced, type Settled } from "../settings.ts";
+import { anthropicSettings } from "./anthropic-settings.ts";
 import { receivedJson } from "../received.ts";
 import {
   type Called,
@@ -192,11 +195,18 @@ const respondOnce = (
   target: Target,
   context: ModelContext,
   turn: TurnId,
+  settled: Settled,
 ): Effect.Effect<Extract<Outcome, { _tag: "ModelResponded" }>, AiError.AiError> =>
   Effect.gen(function* () {
     const sent = body(target, context);
     yield* logSupplied(sent.supplied);
-    const response = yield* postJson(http, caller, "/v1/messages", sent.json);
+    const response = yield* postJson(
+      http,
+      caller,
+      "/v1/messages",
+      { ...(sent.json as Record<string, Json>), ...settled.fields },
+      settled.headers,
+    );
     if (!isObject(response) || !Array.isArray(response["content"]))
       return yield* invalidOutput(caller, `The response has no content blocks: ${JSON.stringify(response)}`);
     const { content, stop_reason, ...metadata } = response;
@@ -222,7 +232,12 @@ export const anthropicRequests = (
 ): Effect.Effect<ProviderRequest, never, AnthropicClient.AnthropicClient> =>
   Effect.gen(function* () {
     const http = (yield* AnthropicClient.AnthropicClient).client.httpClient;
-    return (target, context, turn) => respondOnce(http, target, context, turn).pipe(withRetries(retries));
+    return (target, context, turn) => {
+      const settled = anthropicSettings(target.model, target.settings);
+      return reportEnforced(turn, target, settled).pipe(
+        Effect.andThen(respondOnce(http, target, context, turn, settled).pipe(withRetries(retries))),
+      );
+    };
   });
 
 export const anthropicModelClient = (retries: Retries = defaultRetries) =>

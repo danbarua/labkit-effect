@@ -7,7 +7,8 @@
  * as `text` content parts, the model's tool calls as an assistant message's `tool_calls`, each tool
  * outcome as a `tool` message carrying the text the model is sent. The catalog is sent as
  * `function` tools. An earlier response's other fields (`reasoning_content`, ...) are not sent back
- * yet; each one left out is logged.
+ * yet; each one left out is logged. The session's settings are not sent; each one asked for is
+ * recorded as enforced.
  *
  * In: the first choice's message becomes the observation's parts in order: its `content` is
  * `Text`, each of its `tool_calls` is `ToolCall` (whatever the tool's name), its arguments kept as
@@ -24,6 +25,8 @@ import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agen
 import type { ModelPart, Observation } from "../../agent-core/observation.ts";
 import { type ContextMessage, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
 import { defaultRetries, invalidOutput, modelClientOf, postJson, type Retries, withRetries } from "../provider-call.ts";
+import { reportEnforced, type Settled } from "../settings.ts";
+import { openAiCompatSettings } from "./openai-compat-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
 import {
   type Called,
@@ -165,11 +168,18 @@ const respondOnce = (
   target: Target,
   context: ModelContext,
   turn: TurnId,
+  settled: Settled,
 ): Effect.Effect<Responded, AiError.AiError> =>
   Effect.gen(function* () {
     const sent = body(target, context);
     yield* logSupplied(sent.supplied);
-    const response = yield* postJson(http, caller, "/chat/completions", sent.json);
+    const response = yield* postJson(
+      http,
+      caller,
+      "/chat/completions",
+      { ...(sent.json as Record<string, Json>), ...settled.fields },
+      settled.headers,
+    );
     const choices = isObject(response) ? response["choices"] : undefined;
     const choice = Array.isArray(choices) ? (choices as ReadonlyArray<Json>)[0] : undefined;
     const message = choice !== undefined && isObject(choice) ? choice["message"] : undefined;
@@ -195,7 +205,12 @@ export const openAiCompatRequests = (
 ): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
-    return (target, context, turn) => respondOnce(http, target, context, turn).pipe(withRetries(retries));
+    return (target, context, turn) => {
+      const settled = openAiCompatSettings(target.settings);
+      return reportEnforced(turn, target, settled).pipe(
+        Effect.andThen(respondOnce(http, target, context, turn, settled).pipe(withRetries(retries))),
+      );
+    };
   });
 
 export const openAiCompatModelClient = (retries: Retries = defaultRetries) =>
