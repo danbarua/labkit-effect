@@ -88,6 +88,17 @@ Built: the gate and what a policy is, pure and not in the loop (agent-policy `MO
 - [ ] `ToolCallDispatched` is reported by the loop when it hands a call to the tool runner. When
       tools run in another process (the ACP host), that adapter reports it.
 
+### Loading a session
+
+- [ ] A session cannot be opened from its record: `openSession` starts with no facts.
+- [ ] A record can stop with a request under way (the process ended while the model was asked, or
+      while a tool ran). Loaded as it is, the turn waits for an outcome nobody will report, and new
+      input queues behind it. On loading, each such request is either made again or given its
+      outcome: the model request failed, or the tool's end was not observed (`Indeterminate`).
+- [ ] After a turn that got no response (failed, vetoed, interrupted before anything arrived), the
+      next request carries that turn's input and the new input as one user message. It is valid
+      for both providers, and nothing tells the model the first went unanswered.
+
 ### Forks
 
 - [ ] Forks as sessions, and the turn pointer (`session/turn`; turn zero of a root points at
