@@ -44,11 +44,23 @@ import { modelOf } from "./session-setup.ts";
 import { CurrentWork, type Work } from "./work.ts";
 
 /**
- * The core's machines as `facts` leave them: each recorded observation delivered in order. Only the
- * machines' state is kept from each delivery.
+ * The core's machines as `facts` leave them. Between turns they hold nothing: no turn runs, and the
+ * machines of a turn that has ended are finished. So only what was recorded after the last turn
+ * ended bears on them: input waiting for a turn, or a turn the facts leave running. Those
+ * observations are delivered in order, and the machines' state is what is kept.
  */
-const worldOf = (facts: ReadonlyArray<Fact>): World =>
-  facts.reduce((world, fact) => (fact._tag === "Observed" ? deliver(world, fact.seq, fact.observation).world : world), emptyWorld);
+const worldOf = (facts: ReadonlyArray<Fact>): World => {
+  const ended = facts.reduce(
+    (last, fact, index) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? index : last),
+    -1,
+  );
+  return facts
+    .slice(ended + 1)
+    .reduce(
+      (world, fact) => (fact._tag === "Observed" ? deliver(world, fact.seq, fact.observation).world : world),
+      emptyWorld,
+    );
+};
 
 /** The session the facts opened, if they have. */
 const sessionOf = (facts: ReadonlyArray<Fact>): SessionId | undefined =>
@@ -106,11 +118,11 @@ export interface Session {
 
 /**
  * A session that goes on from `facts`: another session's, or this one's before its process ended.
- * This is all there is to resuming. The facts are kept as given. Where the machines stand (which
- * turn runs, what a step waits for, what is in each mailbox) is not among the facts: it is what the
- * observations make of the machines, so each recorded observation is delivered in order to arrive
- * at it (`worldOf`). The decisions the machines make on the way are discarded; the recorded ones
- * stand as they are.
+ * This is all there is to resuming, because going on from facts that stop between turns is no
+ * different from starting the next turn. The facts are kept as given, and everything a turn's
+ * requests carry (the conversation, the model and its settings, the system prompt, the tools) is
+ * read from them when the request is made. The machines start as the facts leave them (`worldOf`),
+ * which between turns is as they start in a new session.
  *
  * The turns that start from here need identities the facts have not used: that is `Turns`' business.
  */

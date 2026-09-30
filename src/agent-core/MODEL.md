@@ -117,15 +117,14 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
   turn then ends (`Interrupted`). It ends on a step's boundary, so the conversation goes on from it.
 - X2. Interrupted between steps, the turn ends at once.
 - X3. Input that arrives while the turn waits is dropped when it ends, as I6 says.
-- X4. A session can go on from its facts: they are kept as given, and the machines are put where
-  the facts leave them by delivering each recorded observation in order. Where the machines stand
-  is not recorded; it is what the observations make of them.
-  The facts may stop while a turn runs: the process ended with requests made and no outcome
-  recorded. Nobody is carrying those requests out, so the turn is interrupted
-  and each is given what is known of it: no response was observed (`ModelResponded`, ending
-  `Indeterminate`, holding the tool calls that had arrived), and how each call still running ended
-  was not observed. The request is not made again. The turn ends as `Interrupted`, and the
-  conversation goes on from it. Facts that stop between turns are gone on from as they are.
+- X4. A session can go on from its facts, which are kept as given. Between turns the machines hold
+  nothing, and what a request carries is read from the facts, so going on from facts that stop
+  between turns is no different from starting the next turn. Facts may also stop while a turn
+  runs: the process ended with requests made and no outcome recorded. Nobody is carrying those
+  requests out, so the turn is interrupted and each is given what is known of it: no response was
+  observed (`ModelResponded`, ending `Indeterminate`, holding the tool calls that had arrived), and
+  how each call still running ended was not observed. The request is not made again. The turn
+  ends as `Interrupted`, and the conversation goes on from it.
 
 ## What the model has seen
 

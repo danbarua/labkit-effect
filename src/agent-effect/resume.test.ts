@@ -31,8 +31,11 @@ function asked(): Driven {
 const dispatched = { _tag: "ModelRequestDispatched", turn: "turn-1", provider: "boring", model: "boring-1" };
 const call = { _tag: "ToolCall", call: "c1", tool: "ls", input: json({ path: "." }) };
 
-/** Goes on from `facts`, then gives `then` as input; the facts after, and what the model was sent. */
-const resumed = (facts: ReadonlyArray<Fact>, then?: string) => {
+/**
+ * Goes on from `facts`, which hold `turns` turns, then gives `then` as input; the facts after, and
+ * what the model was sent.
+ */
+const resumed = (facts: ReadonlyArray<Fact>, then?: string, turns = 1) => {
   const seen: Array<ModelContext> = [];
   const model = Layer.succeed(ModelClient, {
     respond: (target, context, turn) =>
@@ -61,8 +64,8 @@ const resumed = (facts: ReadonlyArray<Fact>, then?: string) => {
       return { settled: settled.slice(facts.length), after: (yield* session.facts).slice(settled.length), seen };
     }).pipe(
       Effect.provide(
-        // The facts here hold one turn, `turn-1`: the turns that start now are counted on from it.
-        Layer.mergeAll(ModelFromFacts, WholeSessionAssembler, model, countingTurnsAfter(1), NoTurnEndHooks, SmolToolRunner),
+        // The facts hold `turns` turns: the turns that start now are counted on from them.
+        Layer.mergeAll(ModelFromFacts, WholeSessionAssembler, model, countingTurnsAfter(turns), NoTurnEndHooks, SmolToolRunner),
       ),
     ),
   );
@@ -191,4 +194,27 @@ test("X4: a session made from facts holds them as given; a turn they leave runni
   );
   expect(made).toEqual(driven.journal);
   expect(tags(ended)).toEqual(["TurnInterrupted", "ModelResponded", "TurnEnded"]);
+});
+
+test("X4: a turn left running is ended though earlier turns came before it; only that turn's facts bear on the machines", async () => {
+  const driven = asked();
+  observe(driven, {
+    _tag: "ModelResponded",
+    turn: "turn-1",
+    provider: "boring",
+    model: "boring-1",
+    parts: [{ _tag: "Text", text: "a.ts and b.ts." }],
+    ending: { _tag: "Complete" },
+    metadata: json({}),
+  });
+  observe(driven, { _tag: "InputArrived", from: { _tag: "User" }, text: "and the tests?" });
+  observe(driven, { ...dispatched, turn: "turn-2" });
+  const { settled, seen } = await resumed(driven.journal, "never mind the tests", 2);
+  expect(tags(settled)).toEqual(["TurnInterrupted", "ModelResponded", "TurnEnded"]);
+  expect(settled[2] as unknown).toMatchObject({ decision: { turn: "turn-2", ending: { _tag: "Interrupted" } } });
+  expect(seen[0]?.messages as unknown).toEqual([
+    { role: "user", parts: [{ _tag: "Text", text: "list the files" }] },
+    { role: "assistant", parts: [{ _tag: "Text", text: "a.ts and b.ts." }] },
+    { role: "user", parts: [{ _tag: "Text", text: "and the tests?" }, { _tag: "Text", text: "never mind the tests" }] },
+  ]);
 });
