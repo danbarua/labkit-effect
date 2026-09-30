@@ -50,6 +50,7 @@ const settingOf = {
   Observe: "observe",
   Effort: "effort",
   MaxOutputTokens: "maxOutputTokens",
+  Cache: "cache",
 } as const satisfies Record<Enforced["_tag"], keyof ModelSettings>;
 
 type Enforcement = Extract<Observation, { _tag: "SettingEnforced" }>;

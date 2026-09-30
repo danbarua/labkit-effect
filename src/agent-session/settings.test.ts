@@ -137,6 +137,23 @@ test("OpenAI: effort and a summary go into reasoning; off is effort none; when t
   });
 });
 
+test("the cache: Anthropic marks the request for five minutes or an hour, OpenAI keeps it 24 hours when asked for an hour and cannot turn it off", () => {
+  expect(anthropic("claude-sonnet-5-5", { cache: "off" }).fields).toEqual({});
+  expect(anthropic("claude-sonnet-5-5", { cache: "5m" }).fields).toEqual({ cache_control: { type: "ephemeral" } });
+  expect(anthropic("claude-sonnet-5-5", { cache: "1h" }).fields).toEqual({ cache_control: { type: "ephemeral", ttl: "1h" } });
+  expect(openAiSettings({ cache: "5m" })).toEqual({ fields: {}, headers: {}, enforced: [] });
+  expect(openAiSettings({ cache: "1h" })).toEqual({ fields: { prompt_cache_retention: "24h" }, headers: {}, enforced: [] });
+  expect(openAiSettings({ cache: "off" }).enforced).toEqual([
+    {
+      enforced: { _tag: "Cache", asked: "off", used: "5m" },
+      reason: "the Responses API caches every long enough request for minutes, and cannot be asked not to",
+    },
+  ]);
+  expect(openAiCompatSettings({ cache: "1h" }).enforced).toEqual([
+    { enforced: { _tag: "Cache", asked: "1h" }, reason: "the Chat Completions adapter sends no settings" },
+  ]);
+});
+
 test("Chat Completions: no setting is sent, and each one asked for is enforced", () => {
   expect(openAiCompatSettings({ thinking: "off", effort: "low" })).toEqual({
     fields: {},

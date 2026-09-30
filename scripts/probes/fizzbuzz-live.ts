@@ -13,6 +13,9 @@
  *   OPENAI_API_KEY=...    bun scripts/probes/fizzbuzz-live.ts openai gpt-5.5 45
  *   ANTHROPIC_API_KEY=... bun scripts/probes/fizzbuzz-live.ts anthropic claude-sonnet-5-5 47 compact
  *   ANTHROPIC_API_KEY=... bun scripts/probes/fizzbuzz-live.ts anthropic claude-sonnet-5-5 39 fizzbuzz
+ *
+ * Settings follow as `name=value`, as for `live-turn.ts` (`cache=5m`). The probe prints the input
+ * tokens the responses report as read from the cache, written to it, and neither.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -23,6 +26,7 @@ import { Effect, Layer, Redacted, Schema } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { CompactedConversation } from "../../src/agent-context/compaction.ts";
 import { Fact } from "../../src/agent-machine/fact.ts";
+import { ModelSettings } from "../../src/agent-machine/settings.ts";
 import { ModelName, ProviderName, TestName } from "../../src/agent-machine/names.ts";
 import { reportedBy } from "../../src/agent-session/origin.ts";
 import { AnthropicModelClient } from "../../src/agent-session/providers/anthropic-client.ts";
@@ -34,7 +38,19 @@ import { basic, countingUser, play } from "../../src/examples/fizzbuzz/scenario.
 import { EmojiHappyFizzBuzzSummarizer, PlainTextFizzBuzzSummarizer } from "../../src/examples/fizzbuzz/summarizers.ts";
 import { transcript } from "./transcript.ts";
 
-const [provider = "openai", model = "gpt-5.5", counted = "45", compacting] = process.argv.slice(2);
+const [provider = "openai", model = "gpt-5.5", counted = "45", ...rest] = process.argv.slice(2);
+const compacting = rest.find((each) => !each.includes("="));
+const said = rest.filter((each) => each.includes("="));
+// A setting the core does not know fails here, as it would in a recorded opening.
+const settings = Schema.decodeUnknownSync(ModelSettings)(
+  Object.fromEntries(
+    said.map((each) => {
+      const [name, value = ""] = each.split("=");
+      return [name, /^\d+$/.test(value) ? Number(value) : value];
+    }),
+  ),
+  { onExcessProperty: "error" },
+);
 const summarizers = [PlainTextFizzBuzzSummarizer, EmojiHappyFizzBuzzSummarizer, PlainTextFizzBuzzSummarizer];
 const count = Number(counted);
 const variable = provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
@@ -62,7 +78,7 @@ const { facts } = await Effect.runPromise(
               ? afterFizzBuzz((compacted) => summarizers[compacted] ?? PlainTextFizzBuzzSummarizer)
               : whenCountReaches(new Map([30, 60, 90].map((count, index) => [count, summarizers[index] ?? PlainTextFizzBuzzSummarizer]))),
         }),
-    model: { target: { provider: ProviderName.make(provider), model: ModelName.make(model) }, client },
+    model: { target: { provider: ProviderName.make(provider), model: ModelName.make(model), settings }, client },
   }).pipe(reportedBy({ _tag: "Test", name: TestName.make(`fizzbuzz-live ${provider} ${model}`) })),
 );
 
@@ -103,7 +119,7 @@ const wrong = [...turns.entries()].flatMap(([turn, { asked, labels, reply }]) =>
 });
 
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-const name = [stamp, "fizzbuzz", provider, model, counted, ...(compacting === undefined ? [] : [compacting])].join("-");
+const name = [stamp, "fizzbuzz", provider, model, counted, ...rest].join("-");
 mkdirSync("logs/live", { recursive: true });
 writeFileSync(
   join("logs/live", `${name}.md`),
@@ -116,6 +132,27 @@ writeFileSync(
 const encodeFact = Schema.encodeSync(Fact);
 writeFileSync(join("logs/live", `${name}.facts.jsonl`), `${facts.map((fact) => JSON.stringify(encodeFact(fact))).join("\n")}\n`);
 
+/** The input tokens each response reports, summed: read from the cache, written to it, and neither. */
+const usage = { cacheRead: 0, cacheWritten: 0, uncached: 0 };
+for (const fact of facts) {
+  if (fact._tag !== "Observed" || fact.observation._tag !== "ModelResponded") continue;
+  const metadata = parseJson(fact.observation.metadata);
+  const reported = "value" in metadata && isObject(metadata.value) ? metadata.value["usage"] : undefined;
+  if (reported === undefined || !isObject(reported)) continue;
+  const count = (value: unknown) => (typeof value === "number" ? value : 0);
+  const details = reported["input_tokens_details"] ?? null;
+  if (provider === "anthropic") {
+    usage.cacheRead += count(reported["cache_read_input_tokens"]);
+    usage.cacheWritten += count(reported["cache_creation_input_tokens"]);
+    usage.uncached += count(reported["input_tokens"]);
+  } else {
+    const read = isObject(details) ? count(details["cached_tokens"]) : 0;
+    usage.cacheRead += read;
+    usage.uncached += count(reported["input_tokens"]) - read;
+  }
+}
+
 for (const line of wrong) console.log(line);
+console.log(`input tokens: ${JSON.stringify(usage)}`);
 console.log(`${turns.size - wrong.length} of ${turns.size} turns right`);
 console.log(`logs/live/${name}.md`);

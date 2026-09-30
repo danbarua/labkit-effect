@@ -1,6 +1,8 @@
 /**
  * A session's settings as the Messages API takes them, for one model. The settings are put into
- * `thinking` (its `type` and `display`) and `output_config.effort`; the adapter sends the output
+ * `thinking` (its `type` and `display`), `output_config.effort`, and a top-level `cache_control`,
+ * which marks the whole request for the cache, for five minutes or, with `ttl`, an hour (nothing is
+ * marked when the cache is off). The adapter sends the output
  * limit itself, as `max_tokens`, which the API requires. Where a class of models does not
  * allow what was asked, the nearest thing it allows is sent and the difference is returned as
  * enforced. A model in no class here is sent what was asked, and the provider answers for it.
@@ -97,6 +99,8 @@ export function anthropicSettings(model: ModelName, settings: ModelSettings = {}
     fields: {
       ...(thinkingField === undefined ? {} : { thinking: thinkingField }),
       ...(settings.effort === undefined ? {} : { output_config: { effort: settings.effort } }),
+      ...(settings.cache === "5m" ? { cache_control: { type: "ephemeral" } } : {}),
+      ...(settings.cache === "1h" ? { cache_control: { type: "ephemeral", ttl: "1h" } } : {}),
     },
     headers: display === displays.progress_only ? { "anthropic-beta": updatesBeta } : {},
     enforced,

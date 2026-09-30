@@ -26,12 +26,21 @@ export type Observe = typeof Observe.Type;
 export const Effort = Schema.Literals(["low", "medium", "high", "xhigh", "max"]);
 export type Effort = typeof Effort.Type;
 
+/**
+ * How long, at least, the provider is asked to keep what a request carried, so that later requests
+ * that begin the same way read it back rather than paying for it again: not at all, five minutes, or
+ * an hour.
+ */
+export const CacheFor = Schema.Literals(["off", "5m", "1h"]);
+export type CacheFor = typeof CacheFor.Type;
+
 export const ModelSettings = Schema.Struct({
   thinking: Schema.optionalKey(ThinkingMode),
   observe: Schema.optionalKey(Observe),
   effort: Schema.optionalKey(Effort),
   /** The most tokens a response may take, thinking and answer together. */
   maxOutputTokens: Schema.optionalKey(TokenCount),
+  cache: Schema.optionalKey(CacheFor),
 });
 export type ModelSettings = typeof ModelSettings.Type;
 
@@ -41,5 +50,6 @@ export const Enforced = Schema.Union([
   Schema.TaggedStruct("Observe", { asked: Observe, used: Schema.optionalKey(Observe) }),
   Schema.TaggedStruct("Effort", { asked: Effort, used: Schema.optionalKey(Effort) }),
   Schema.TaggedStruct("MaxOutputTokens", { asked: TokenCount, used: Schema.optionalKey(TokenCount) }),
+  Schema.TaggedStruct("Cache", { asked: CacheFor, used: Schema.optionalKey(CacheFor) }),
 ]);
 export type Enforced = typeof Enforced.Type;

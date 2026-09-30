@@ -16,6 +16,7 @@ export function openAiCompatSettings(settings: ModelSettings = {}): Settled {
     ...(settings.maxOutputTokens === undefined
       ? []
       : [{ enforced: { _tag: "MaxOutputTokens" as const, asked: settings.maxOutputTokens }, reason }]),
+    ...(settings.cache === undefined ? [] : [{ enforced: { _tag: "Cache" as const, asked: settings.cache }, reason }]),
   ];
   return { fields: {}, headers: {}, enforced };
 }

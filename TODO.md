@@ -27,6 +27,10 @@ not yet work is in its `DESIGN.next.md`. Delete an item when it is done or dropp
 - [ ] Compaction that knows the provider's cache: when the cache has expired, the next request
       costs the same whatever it carries (agent-context `DESIGN.next.md`).
 
+- [ ] OpenAI reported 0 cached tokens in every FizzBuzz run (2026-09-30), requests over 1,024
+      tokens included, with and without `prompt_cache_retention: "24h"`. Find out why before
+      relying on it.
+
 ### Compaction
 
 Built: the window marker (agent-machine S4); compaction on request with a record of summaries and
