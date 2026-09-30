@@ -5,7 +5,7 @@
 
 import { afterAll, expect } from "bun:test";
 import { Effect, Layer } from "effect";
-import { ModelName, ProviderName, SessionId } from "../agent-machine/names.ts";
+import { ModelName, ProviderName, SessionId, TokenCount } from "../agent-machine/names.ts";
 import type { Observation } from "../agent-machine/observation.ts";
 import type { ModelSettings } from "../agent-machine/settings.ts";
 import { openSession } from "./loop.ts";
@@ -14,6 +14,7 @@ import { AnthropicModelClient } from "./providers/anthropic-client.ts";
 import { anthropicSettings } from "./providers/anthropic-settings.ts";
 import { openAiCompatSettings } from "./providers/openai-compat-settings.ts";
 import { openAiSettings } from "./providers/openai-settings.ts";
+import { xAiSettings } from "./providers/xai-settings.ts";
 import { sentIn } from "./sent.ts";
 import { modelOf, openedWith } from "./session-setup.ts";
 import { TurnContextAssembler } from "./turn-context.ts";
@@ -152,6 +153,42 @@ test("the cache: Anthropic marks the request for five minutes or an hour, OpenAI
   expect(openAiCompatSettings({ cache: "1h" }).enforced).toEqual([
     { enforced: { _tag: "Cache", asked: "1h" }, reason: "the Chat Completions adapter sends no settings" },
   ]);
+});
+
+test("xAI: effort goes into reasoning, max as xhigh; the summary always comes back; the cache and its retention cannot be set", () => {
+  expect(xAiSettings({})).toEqual({ fields: {}, headers: {}, enforced: [] });
+  expect(xAiSettings({ thinking: "auto", observe: "all", effort: "high", maxOutputTokens: TokenCount.make(2000) })).toEqual({
+    fields: { reasoning: { effort: "high" }, max_output_tokens: 2000 },
+    headers: {},
+    enforced: [],
+  });
+  expect(xAiSettings({ effort: "max", observe: "off" })).toEqual({
+    fields: { reasoning: { effort: "xhigh" } },
+    headers: {},
+    enforced: [
+      {
+        enforced: { _tag: "Observe", asked: "off", used: "all" },
+        reason: "xAI returns the reasoning's summary with every response, and cannot be asked not to",
+      },
+      { enforced: { _tag: "Effort", asked: "max", used: "xhigh" }, reason: "xAI's reasoning efforts go up to xhigh" },
+    ],
+  });
+  expect(xAiSettings({ thinking: "off", effort: "max" })).toEqual({
+    fields: { reasoning: { effort: "none" } },
+    headers: {},
+    enforced: [{ enforced: { _tag: "Effort", asked: "max" }, reason: "thinking is off, which is sent as reasoning effort none" }],
+  });
+  for (const cache of ["off", "5m", "1h"] as const)
+    expect(xAiSettings({ cache })).toEqual({
+      fields: {},
+      headers: {},
+      enforced: [
+        {
+          enforced: { _tag: "Cache", asked: cache },
+          reason: "xAI caches every request for as long as the server keeps it, and has no setting for how long",
+        },
+      ],
+    });
 });
 
 test("Chat Completions: no setting is sent, and each one asked for is enforced", () => {

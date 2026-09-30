@@ -1,0 +1,311 @@
+[
+ {
+  "sequence_number": 0,
+  "type": "response.created",
+  "response": {
+   "created_at": 1790797977,
+   "completed_at": null,
+   "id": "bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3",
+   "max_output_tokens": null,
+   "model": "grok-4.7",
+   "object": "response",
+   "output": [],
+   "parallel_tool_calls": true,
+   "previous_response_id": null,
+   "reasoning": {
+    "effort": null,
+    "summary": "auto"
+   },
+   "temperature": 0.699999988079071,
+   "text": {
+    "format": {
+     "type": "text"
+    }
+   },
+   "tool_choice": "auto",
+   "tools": [
+    {
+     "type": "function",
+     "name": "add"
+    }
+   ],
+   "top_p": 0.949999988079071,
+   "usage": null,
+   "user": null,
+   "incomplete_details": null,
+   "status": "in_progress",
+   "store": true,
+   "metadata": {
+    "system_fingerprint": "fp_c60958d81f66f847"
+   },
+   "background": false,
+   "service_tier": "default",
+   "truncation": "disabled",
+   "top_logprobs": 0,
+   "presence_penalty": 0,
+   "frequency_penalty": 0,
+   "prompt_cache_key": null,
+   "max_tool_calls": null,
+   "safety_identifier": null,
+   "error": null,
+   "instructions": null
+  }
+ },
+ {
+  "sequence_number": 1,
+  "type": "response.in_progress",
+  "response": {
+   "created_at": 1790797977,
+   "completed_at": null,
+   "id": "bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3",
+   "max_output_tokens": null,
+   "model": "grok-4.7",
+   "object": "response",
+   "output": [],
+   "parallel_tool_calls": true,
+   "previous_response_id": null,
+   "reasoning": {
+    "effort": null,
+    "summary": "auto"
+   },
+   "temperature": 0.699999988079071,
+   "text": {
+    "format": {
+     "type": "text"
+    }
+   },
+   "tool_choice": "auto",
+   "tools": [
+    {
+     "type": "function",
+     "name": "add"
+    }
+   ],
+   "top_p": 0.949999988079071,
+   "usage": null,
+   "user": null,
+   "incomplete_details": null,
+   "status": "in_progress",
+   "store": true,
+   "metadata": {
+    "system_fingerprint": "fp_c60958d81f66f847"
+   },
+   "background": false,
+   "service_tier": "default",
+   "truncation": "disabled",
+   "top_logprobs": 0,
+   "presence_penalty": 0,
+   "frequency_penalty": 0,
+   "prompt_cache_key": null,
+   "max_tool_calls": null,
+   "safety_identifier": null,
+   "error": null,
+   "instructions": null
+  }
+ },
+ {
+  "sequence_number": 2,
+  "type": "response.output_item.added",
+  "item": {
+   "id": "rs_bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3",
+   "summary": [],
+   "type": "reasoning",
+   "status": "in_progress"
+  },
+  "output_index": 0
+ },
+ {
+  "sequence_number": 3,
+  "type": "response.reasoning_summary_part.added",
+  "item_id": "rs_bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3",
+  "output_index": 0,
+  "part": {
+   "text": "",
+   "type": "summary_text"
+  },
+  "summary_index": 0
+ },
+ {
+  "sequence_number": 4,
+  "type": "response.reasoning_summary_text.delta",
+  "delta": "Two primes to find,",
+  "item_id": "rs_bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3",
+  "output_index": 0,
+  "summary_index": 0
+ },
+ {
+  "sequence_number": 5,
+  "type": "response.reasoning_summary_text.delta",
+  "delta": " then add.",
+  "item_id": "rs_bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3",
+  "output_index": 0,
+  "summary_index": 0
+ },
+ {
+  "sequence_number": 6,
+  "type": "response.reasoning_summary_text.done",
+  "item_id": "rs_bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3",
+  "output_index": 0,
+  "summary_index": 0,
+  "text": "Two primes to find, then add."
+ },
+ {
+  "sequence_number": 7,
+  "type": "response.reasoning_summary_part.done",
+  "item_id": "rs_bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3",
+  "output_index": 0,
+  "part": {
+   "text": "Two primes to find, then add.",
+   "type": "summary_text"
+  },
+  "summary_index": 0
+ },
+ {
+  "sequence_number": 8,
+  "type": "response.output_item.done",
+  "item": {
+   "id": "rs_bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3",
+   "summary": [
+    {
+     "text": "Two primes to find, then add.",
+     "type": "summary_text"
+    }
+   ],
+   "type": "reasoning",
+   "status": "completed",
+   "encrypted_content": "ogzdNhY4rMBzko"
+  },
+  "output_index": 0
+ },
+ {
+  "sequence_number": 9,
+  "type": "response.output_item.added",
+  "item": {
+   "arguments": "",
+   "call_id": "call-a485744a-65f2-4f73-ab57-275e638c3ad7-0",
+   "name": "add",
+   "type": "function_call",
+   "id": "fc_bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3_0",
+   "status": "in_progress"
+  },
+  "output_index": 1
+ },
+ {
+  "sequence_number": 10,
+  "type": "response.function_call_arguments.delta",
+  "delta": "{\"a\":1873.0,\"b\":4127.0}",
+  "item_id": "fc_bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3_0",
+  "output_index": 1
+ },
+ {
+  "sequence_number": 11,
+  "type": "response.function_call_arguments.done",
+  "arguments": "{\"a\":1873.0,\"b\":4127.0}",
+  "item_id": "fc_bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3_0",
+  "name": "add",
+  "output_index": 1
+ },
+ {
+  "sequence_number": 12,
+  "type": "response.output_item.done",
+  "item": {
+   "arguments": "{\"a\":1873.0,\"b\":4127.0}",
+   "call_id": "call-a485744a-65f2-4f73-ab57-275e638c3ad7-0",
+   "name": "add",
+   "type": "function_call",
+   "id": "fc_bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3_0",
+   "status": "completed"
+  },
+  "output_index": 1
+ },
+ {
+  "sequence_number": 13,
+  "type": "response.completed",
+  "response": {
+   "created_at": 1790797977,
+   "completed_at": 1790797995,
+   "id": "bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3",
+   "max_output_tokens": null,
+   "model": "grok-4.7",
+   "object": "response",
+   "output": [
+    {
+     "id": "rs_bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3",
+     "summary": [
+      {
+       "text": "Two primes to find, then add.",
+       "type": "summary_text"
+      }
+     ],
+     "type": "reasoning",
+     "status": "completed",
+     "encrypted_content": "ogzdNhY4rMBzko"
+    },
+    {
+     "arguments": "{\"a\":1873.0,\"b\":4127.0}",
+     "call_id": "call-a485744a-65f2-4f73-ab57-275e638c3ad7-0",
+     "name": "add",
+     "type": "function_call",
+     "id": "fc_bf6dc7be-1f74-9ee8-8f2d-895ce9aa4fd3_0",
+     "status": "completed"
+    }
+   ],
+   "parallel_tool_calls": true,
+   "previous_response_id": null,
+   "reasoning": {
+    "effort": null,
+    "summary": "auto"
+   },
+   "temperature": 0.699999988079071,
+   "text": {
+    "format": {
+     "type": "text"
+    }
+   },
+   "tool_choice": "auto",
+   "tools": [
+    {
+     "type": "function",
+     "name": "add"
+    }
+   ],
+   "top_p": 0.949999988079071,
+   "usage": {
+    "input_tokens": 1380,
+    "input_tokens_details": {
+     "cached_tokens": 1152
+    },
+    "output_tokens": 1714,
+    "output_tokens_details": {
+     "reasoning_tokens": 1699
+    },
+    "total_tokens": 3094,
+    "num_sources_used": 0,
+    "num_server_side_tools_used": 0,
+    "cost_in_usd_ticks": 113160000,
+    "context_details": {
+     "input_tokens": 1380,
+     "output_tokens": 1718
+    }
+   },
+   "user": null,
+   "incomplete_details": null,
+   "status": "completed",
+   "store": true,
+   "metadata": {
+    "system_fingerprint": "fp_c60958d81f66f847"
+   },
+   "background": false,
+   "service_tier": "default",
+   "truncation": "disabled",
+   "top_logprobs": 0,
+   "presence_penalty": 0,
+   "frequency_penalty": 0,
+   "prompt_cache_key": null,
+   "max_tool_calls": null,
+   "safety_identifier": null,
+   "error": null,
+   "instructions": null
+  }
+ }
+]

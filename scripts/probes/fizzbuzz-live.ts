@@ -13,6 +13,7 @@
  *   OPENAI_API_KEY=...    bun scripts/probes/fizzbuzz-live.ts openai gpt-5.5 45
  *   ANTHROPIC_API_KEY=... bun scripts/probes/fizzbuzz-live.ts anthropic claude-sonnet-5-5 47 compact
  *   ANTHROPIC_API_KEY=... bun scripts/probes/fizzbuzz-live.ts anthropic claude-sonnet-5-5 39 fizzbuzz
+ *   XAI_API_KEY=...       bun scripts/probes/fizzbuzz-live.ts xai grok-4.7 20
  *
  * Settings follow as `name=value`, as for `live-turn.ts` (`cache=5m`). The probe prints the input
  * tokens the responses report as read from the cache, written to it, and neither.
@@ -31,6 +32,7 @@ import { ModelName, ProviderName, TestName } from "../../src/agent-machine/names
 import { reportedBy } from "../../src/agent-session/origin.ts";
 import { AnthropicModelClient } from "../../src/agent-session/providers/anthropic-client.ts";
 import { OpenAiModelClient } from "../../src/agent-session/providers/openai-client.ts";
+import { XAiModelClient, xAiClient } from "../../src/agent-session/providers/xai-client.ts";
 import { parseJson } from "../../src/agent-session/received.ts";
 import { isObject } from "../../src/agent-session/shaping.ts";
 import { afterFizzBuzz, whenCountReaches } from "../../src/examples/fizzbuzz/compaction-policies.ts";
@@ -53,7 +55,7 @@ const settings = Schema.decodeUnknownSync(ModelSettings)(
 );
 const summarizers = [PlainTextFizzBuzzSummarizer, EmojiHappyFizzBuzzSummarizer, PlainTextFizzBuzzSummarizer];
 const count = Number(counted);
-const variable = provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
+const variable = provider === "anthropic" ? "ANTHROPIC_API_KEY" : provider === "xai" ? "XAI_API_KEY" : "OPENAI_API_KEY";
 const key = process.env[variable];
 if (key === undefined || key === "") {
   console.error(`${variable} is not set`);
@@ -64,7 +66,9 @@ const apiKey = Redacted.make(key);
 const client =
   provider === "anthropic"
     ? AnthropicModelClient.pipe(Layer.provide(AnthropicClient.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))))
-    : OpenAiModelClient.pipe(Layer.provide(OpenAiClient.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))));
+    : provider === "xai"
+      ? XAiModelClient.pipe(Layer.provide(xAiClient(apiKey).pipe(Layer.provide(FetchHttpClient.layer))))
+      : OpenAiModelClient.pipe(Layer.provide(OpenAiClient.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))));
 
 const { facts } = await Effect.runPromise(
   play(countingUser(count), {

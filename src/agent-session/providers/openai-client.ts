@@ -19,6 +19,11 @@
  * other content included, is `Unrecognised`, whole, so that it can be sent back as it came. The stop is the
  * response's `status` (with the reason when it is `incomplete`); everything else in the response is
  * `metadata`. A request that fails, after retries, is observed as `ModelFailed`.
+ *
+ * Compaction: `openAiCompactions` asks the provider to compact a context, and returns the items it
+ * made as received.
+ *
+ * xAI takes the same requests (`xai-client.ts`).
  */
 
 import { OpenAiClient } from "@effect/ai-openai";
@@ -28,10 +33,22 @@ import type * as HttpClient from "effect/http/HttpClient";
 import { CallId, ModelText, StopReason, ThinkingText, ToolName, type TurnId } from "../../agent-machine/names.ts";
 import type { ModelPart, Observation } from "../../agent-machine/observation.ts";
 import { type ContextMessage, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
-import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEvents, type Retries, withRetries } from "../provider-call.ts";
+import {
+  defaultRetries,
+  failedPosting,
+  invalidOutput,
+  modelClientOf,
+  type Post,
+  postEvents,
+  postJson,
+  type Retries,
+  withRetries,
+} from "../provider-call.ts";
 import { logKeys } from "../log-keys.ts";
 import { ModelStream } from "../model-stream.ts";
-import { reportEnforced } from "../settings.ts";
+import type { Received } from "../../agent-machine/received.ts";
+import type { ModelSettings } from "../../agent-machine/settings.ts";
+import { reportEnforced, type Settled } from "../settings.ts";
 import { openAiSettings } from "./openai-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
 import {
@@ -257,14 +274,19 @@ const respondOnce = (
     };
   });
 
-/** Requests through the configured `OpenAiClient`, retried while retryable; a failure is the `AiError`. */
+/**
+ * Requests through the configured `OpenAiClient`, retried while retryable; a failure is the
+ * `AiError`. `settle` puts the session's settings into the request: another provider that takes
+ * Responses requests takes them differently (`xai-settings.ts`).
+ */
 export const openAiRequests = (
   retries: Retries = defaultRetries,
+  settle: (settings: ModelSettings | undefined) => Settled = openAiSettings,
 ): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
     return (target, context, turn) => {
-      const settled = openAiSettings(target.settings);
+      const settled = settle(target.settings);
       const sent = body(target, context);
       const post: Post = {
         path: "/responses",
@@ -274,6 +296,46 @@ export const openAiRequests = (
       return reportEnforced(turn, target, settled).pipe(
         Effect.andThen(logSupplied(sent.supplied)),
         Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
+      );
+    };
+  });
+
+/** What the provider's own compaction returned: the items that stand in for what was compacted, and the rest of the response. */
+export interface Compacted {
+  readonly items: ReadonlyArray<Received>;
+  readonly metadata: Received;
+}
+
+const compactCaller = { module: "OpenAiResponsesModelClient", method: "compact" };
+
+/**
+ * The provider's own compaction of `context` (`POST /responses/compact`), through the configured
+ * `OpenAiClient`, retried while retryable. The context is shaped as a request's is, without
+ * settings; the response is not streamed. Its `output` items stand in for the input they were made
+ * from, and are returned as received: each goes back unchanged, in order, at the head of the next
+ * request's input, which is where the provider reads them (xAI returns one `compaction` item;
+ * OpenAI returns the user's messages and a `compaction` item).
+ */
+export const openAiCompactions = (
+  retries: Retries = defaultRetries,
+): Effect.Effect<(target: Target, context: ModelContext) => Effect.Effect<Compacted, AiError.AiError>, never, OpenAiClient.OpenAiClient> =>
+  Effect.gen(function* () {
+    const http = (yield* OpenAiClient.OpenAiClient).client;
+    return (target, context) => {
+      const sent = body(target, context);
+      const post: Post = { path: "/responses/compact", headers: {}, body: sent.json as Record<string, Json> };
+      return logSupplied(sent.supplied).pipe(
+        Effect.andThen(
+          postJson(http, compactCaller, post).pipe(
+            Effect.flatMap((response) => {
+              if (!isObject(response) || !Array.isArray(response["output"]))
+                return Effect.fail(invalidOutput(compactCaller, `The compaction has no output: ${JSON.stringify(response)}`));
+              const { output, ...metadata } = response;
+              return Effect.succeed({ items: (output as ReadonlyArray<Json>).map(receivedJson), metadata: receivedJson(metadata) });
+            }),
+            withRetries(retries),
+          ),
+        ),
       );
     };
   });

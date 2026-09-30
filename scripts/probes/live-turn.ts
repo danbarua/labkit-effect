@@ -8,6 +8,7 @@
  *
  *   OPENAI_API_KEY=...    bun scripts/probes/live-turn.ts openai gpt-5.5 observe=all
  *   ANTHROPIC_API_KEY=... bun scripts/probes/live-turn.ts anthropic claude-opus-5-5 observe=all effort=high
+ *   XAI_API_KEY=...       bun scripts/probes/live-turn.ts xai grok-4.7 observe=all
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -25,6 +26,7 @@ import { ModelFromFacts } from "../../src/agent-session/model-choice.ts";
 import { reportedBy } from "../../src/agent-session/origin.ts";
 import { AnthropicModelClient } from "../../src/agent-session/providers/anthropic-client.ts";
 import { OpenAiModelClient } from "../../src/agent-session/providers/openai-client.ts";
+import { XAiModelClient, xAiClient } from "../../src/agent-session/providers/xai-client.ts";
 import { openedWith } from "../../src/agent-session/session-setup.ts";
 import { TurnContextAssembler } from "../../src/agent-session/turn-context.ts";
 import { CountingTurns, NoTurnEndHooks } from "../../src/agent-session/turns.ts";
@@ -42,7 +44,7 @@ const settings = Schema.decodeUnknownSync(ModelSettings)(
   ),
   { onExcessProperty: "error" },
 );
-const variable = provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
+const variable = provider === "anthropic" ? "ANTHROPIC_API_KEY" : provider === "xai" ? "XAI_API_KEY" : "OPENAI_API_KEY";
 const key = process.env[variable];
 if (key === undefined || key === "") {
   console.error(`${variable} is not set`);
@@ -53,7 +55,9 @@ const apiKey = Redacted.make(key);
 const client =
   provider === "anthropic"
     ? AnthropicModelClient.pipe(Layer.provide(AnthropicClient.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))))
-    : OpenAiModelClient.pipe(Layer.provide(OpenAiClient.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))));
+    : provider === "xai"
+      ? XAiModelClient.pipe(Layer.provide(xAiClient(apiKey).pipe(Layer.provide(FetchHttpClient.layer))))
+      : OpenAiModelClient.pipe(Layer.provide(OpenAiClient.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))));
 
 const encodeFact = Schema.encodeSync(Fact);
 
