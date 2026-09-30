@@ -42,6 +42,21 @@ effects can be run ahead and their results put into the next step's context, so 
 is spent asking for them. A lighter form: a per-step tool catalog with pre-filled "hint" calls the
 model might make next. This needs to know which tools are read-only, as a property of the tool.
 
+More of the same kind, all of which need the most signal the model gives (its commentary and
+thinking beside each tool call):
+
+- The opening's tool catalog is the few tools that are always on; the rest is offered per step,
+  chosen from the state of the workspace, with the likely next actions as a menu. It is the "ask
+  the user" tool turned round: the harness tells the model what changed and what it can do next.
+- A small, fast model reads what the model wrote before a tool call, with the call, and the harness
+  proceeds, vetoes or advises. This takes the place of an `intent` argument on every tool.
+- A shell tool replaced by the project's own scripts as tools (`bun pm pkg get scripts` gives the
+  schema).
+- An edit made round the edit tools (a here-document, a regex over many files) is allowed, its diff
+  snapshotted; when it changed a large number of files it is rolled back and the model is told.
+- A change every session working in the repo needs to know (a dependency added to `package.json`)
+  is detected and sent to all of them as a notice.
+
 ### Identity: sessions, turns, forks
 
 A session has an id, and so does a turn. A turn's parent is a pointer to a session and a turn:
