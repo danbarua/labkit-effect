@@ -47,7 +47,6 @@ import {
 import { logKeys } from "../log-keys.ts";
 import { ModelStream } from "../model-stream.ts";
 import type { Received } from "../../agent-machine/received.ts";
-import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { reportEnforced, type Settled } from "../settings.ts";
 import { openAiSettings } from "./openai-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
@@ -276,17 +275,17 @@ const respondOnce = (
 
 /**
  * Requests through the configured `OpenAiClient`, retried while retryable; a failure is the
- * `AiError`. `settle` puts the session's settings into the request: another provider that takes
+ * `AiError`. `settle` puts the session's settings for the target's model into the request: another provider that takes
  * Responses requests takes them differently (`xai-settings.ts`).
  */
 export const openAiRequests = (
   retries: Retries = defaultRetries,
-  settle: (settings: ModelSettings | undefined) => Settled = openAiSettings,
+  settle: (target: Target) => Settled = (target) => openAiSettings(target.settings),
 ): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
     return (target, context, turn) => {
-      const settled = settle(target.settings);
+      const settled = settle(target);
       const sent = body(target, context);
       const post: Post = {
         path: "/responses",

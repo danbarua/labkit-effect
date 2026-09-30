@@ -12,16 +12,24 @@
  * - It caches every request, keeps an entry for as long as the server does, and has no setting for
  *   how long; `prompt_cache_retention` is accepted and ignored, so it is not sent.
  *
- * Thinking `off` is sent as effort `none`, as for OpenAI. Some Grok models take it (grok-4.3) and
- * some refuse the request (grok-4.7); the models list says which effort values each takes.
+ * Thinking `off` is sent as effort `none`, as for OpenAI, to a model that takes it (grok-4.3). The
+ * later models (grok-4.5 to grok-4.7) refuse the request, so for any other model thinking `off` is
+ * returned as enforced, `auto` at effort `low`. What each model takes is listed by `GET /v1/models`
+ * (`capabilities.reasoning_effort`); the list here is written from it, so that settings stay a
+ * function of the model and what was said.
  */
 
+import type { ModelName } from "../../agent-machine/names.ts";
 import type { ModelSettings } from "../../agent-machine/settings.ts";
 import type { Enforcement, Settled } from "../settings.ts";
 
-export function xAiSettings(settings: ModelSettings = {}): Settled {
+/** Whether `model` takes reasoning effort `none`. */
+const takesNone = (model: string): boolean => /^grok-4\.3(-|$)/.test(model);
+
+export function xAiSettings(model: ModelName, settings: ModelSettings = {}): Settled {
   const enforced: Array<Enforcement> = [];
   const { thinking, observe, effort, maxOutputTokens, cache } = settings;
+  const offAllowed = takesNone(model);
   if (cache !== undefined)
     enforced.push({
       enforced: { _tag: "Cache", asked: cache },
@@ -37,17 +45,28 @@ export function xAiSettings(settings: ModelSettings = {}): Settled {
       enforced: { _tag: "Thinking", asked: thinking, used: "auto" },
       reason: "xAI's Responses endpoint has no setting for when the model thinks",
     });
-  if (thinking === "off" && effort !== undefined)
+  if (thinking === "off" && offAllowed && effort !== undefined)
     enforced.push({
       enforced: { _tag: "Effort", asked: effort },
       reason: "thinking is off, which is sent as reasoning effort none",
     });
+  if (thinking === "off" && !offAllowed) {
+    enforced.push({
+      enforced: { _tag: "Thinking", asked: thinking, used: "auto" },
+      reason: "this model does not allow thinking to be turned off (reasoning effort none); it is sent effort low",
+    });
+    if (effort !== undefined && effort !== "low")
+      enforced.push({
+        enforced: { _tag: "Effort", asked: effort, used: "low" },
+        reason: "this model does not allow thinking to be turned off; the least effort, low, is sent",
+      });
+  }
   if (thinking !== "off" && effort === "max")
     enforced.push({
       enforced: { _tag: "Effort", asked: effort, used: "xhigh" },
       reason: "xAI's reasoning efforts go up to xhigh",
     });
-  const sentEffort = thinking === "off" ? "none" : effort === "max" ? "xhigh" : effort;
+  const sentEffort = thinking === "off" ? (offAllowed ? "none" : "low") : effort === "max" ? "xhigh" : effort;
   return {
     fields: {
       ...(sentEffort === undefined ? {} : { reasoning: { effort: sentEffort } }),

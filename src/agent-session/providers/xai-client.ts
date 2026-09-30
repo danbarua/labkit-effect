@@ -19,7 +19,7 @@ export const xAiApiUrl = "https://api.x.ai/v1";
 export const xAiClient = (apiKey: Redacted.Redacted) => OpenAiClient.layer({ apiUrl: xAiApiUrl, apiKey });
 
 /** Requests to Grok through the configured `OpenAiClient`, which `xAiClient` points at xAI. */
-export const xAiRequests = (retries: Retries = defaultRetries) => openAiRequests(retries, xAiSettings);
+export const xAiRequests = (retries: Retries = defaultRetries) => openAiRequests(retries, (target) => xAiSettings(target.model, target.settings));
 
 export const xAiModelClient = (retries: Retries = defaultRetries) =>
   Layer.effect(ModelClient, xAiRequests(retries).pipe(Effect.map(modelClientOf)));
