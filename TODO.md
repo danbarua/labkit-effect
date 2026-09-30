@@ -88,16 +88,17 @@ Built: the gate and what a policy is, pure and not in the loop (agent-policy `MO
 - [ ] `ToolCallDispatched` is reported by the loop when it hands a call to the tool runner. When
       tools run in another process (the ACP host), that adapter reports it.
 
-### Requests left under way
+### Going on from a session's facts
 
-- [ ] A record can stop with a request under way (the process ended while the model was asked, or
-      while a tool ran). The request was made, and that is recorded (`ModelRequestDispatched`,
-      `ToolCallDispatched`); no outcome was observed, so its result is indeterminate. The
-      conversation already says so for a tool call (TC3). Nothing yet gives a turn that waits on
-      such a request its end.
+Built: `resumeSession(facts)` (agent-core X4), tested with facts made in memory.
+
 - [ ] After a turn that got no response (failed, vetoed, interrupted before anything arrived), the
       next request carries that turn's input and the new input as one user message. It is valid
       for both providers, and nothing tells the model the first went unanswered.
+- [ ] A turn identity must not be used twice. A `TurnStarted` that names a turn the facts already
+      hold is taken, and the turn's input is dropped without a word. `countingTurnsAfter` avoids it
+      for the counted identities the tests use; the core does not refuse it.
+- [ ] The count of turn-end holds is not in the facts, so a session gone on from starts it again.
 
 ### Forks
 

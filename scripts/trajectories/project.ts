@@ -8,11 +8,11 @@ import { join } from "node:path";
 import { DateTime, Option, Schema } from "effect";
 import { WindowSummary } from "../../src/agent-context/forks.ts";
 import { Fact } from "../../src/agent-core/fact.ts";
-import { HarnessPart, type ModelName, type ProviderName, Seq, ToolName, type TurnId, Via } from "../../src/agent-core/names.ts";
+import { HarnessPart, type ModelName, type ProviderName, Seq, ToolName, Via } from "../../src/agent-core/names.ts";
 import { Observation } from "../../src/agent-core/observation.ts";
 import type { Origin } from "../../src/agent-core/origin.ts";
-import { Received } from "../../src/agent-core/received.ts";
 import type { EffectRequest } from "../../src/agent-core/request.ts";
+import { notObserved } from "../../src/agent-core/not-observed.ts";
 import { deliver, emptyWorld, type World } from "../../src/agent-core/router.ts";
 
 export type Json = Schema.Json;
@@ -102,7 +102,6 @@ export function projection(harness: string): Projection {
     /** The model the session last asked, as far as the record has said. */
     model: undefined as { readonly provider: ProviderName; readonly model: ModelName } | undefined,
   };
-  const decodeReceived = Schema.decodeUnknownSync(Received);
   const tools = new Map<string, string>();
 
   /** Records the observation and the decisions after it; returns its position and the requests. */
@@ -124,30 +123,6 @@ export function projection(harness: string): Projection {
     return { seq, requests: outcome.requests };
   };
 
-  /** What the requests of `turn`'s step under way report when they are stopped. */
-  const stoppedWork = (turn: TurnId): ReadonlyArray<Observation> => {
-    const step = [...(state.world.steps.get(turn)?.values() ?? [])].map((machine) => machine.state).find(
-      (each) => each._tag === "AwaitingModel" || each._tag === "RunningTools",
-    );
-    if (step === undefined || (step._tag !== "AwaitingModel" && step._tag !== "RunningTools")) return [];
-    const ends = step.unsettled.map(
-      (call): Observation => ({ _tag: "ToolEnded", call, outcome: { _tag: "Failed", reason: { _tag: "Indeterminate" } } }),
-    );
-    if (step._tag === "RunningTools" || state.model === undefined) return ends;
-    return [
-      ...ends,
-      {
-        _tag: "ModelResponded",
-        turn,
-        provider: state.model.provider,
-        model: state.model.model,
-        parts: [],
-        ending: { _tag: "Interrupted" },
-        metadata: decodeReceived(json({})),
-      },
-    ];
-  };
-
   return {
     readAt: (time) => {
       const read = typeof time === "string" ? DateTime.make(time) : Option.none();
@@ -157,11 +132,11 @@ export function projection(harness: string): Projection {
     },
     observe: (raw) => {
       const observed = record(decode(raw));
-      // The record of an interrupted turn does not say how far its requests got. The importer plays
-      // the layer around the core: the response had not arrived, and how each running call ended
-      // was not observed.
+      // The record of an interrupted turn does not say how far its requests got: no response was
+      // observed, and how each running call ended was not either.
       for (const request of observed.requests)
-        if (request._tag === "StopTurnWork") for (const stopped of stoppedWork(request.turn)) record(stopped);
+        if (request._tag === "StopTurnWork" && state.model !== undefined)
+          for (const outcome of notObserved(state.world, request.turn, state.model, [])) record(outcome);
       return observed;
     },
     count: (kind) => {

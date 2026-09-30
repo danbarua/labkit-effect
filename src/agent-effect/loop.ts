@@ -27,8 +27,9 @@
 
 import { Clock, DateTime, Deferred, Effect, FiberSet, PubSub, Ref, type Scope, Semaphore } from "effect";
 import type { Fact } from "../agent-core/fact.ts";
+import { notObserved } from "../agent-core/not-observed.ts";
 import { deliver, emptyWorld, type World } from "../agent-core/router.ts";
-import { InputText, Millis, Seq, type SessionId, type TurnId } from "../agent-core/names.ts";
+import { InputText, Millis, type ModelName, type ProviderName, Seq, type SessionId, type TurnId } from "../agent-core/names.ts";
 import type { CapturedObservation, ModelPart, Observation, ToolOutcome } from "../agent-core/observation.ts";
 import type { Origin } from "../agent-core/origin.ts";
 import type { EffectRequest } from "../agent-core/request.ts";
@@ -37,9 +38,14 @@ import { ContextAssembler, ModelClient, ModelProvider, ToolRunner, TurnEndHooks,
 import { logKeys } from "./log-keys.ts";
 import { receivedJson } from "./received.ts";
 import { ModelStream, ModelStreamInterval, type Streamed } from "./model-stream.ts";
-import { CurrentOrigin, harnessParts } from "./origin.ts";
+import { CurrentOrigin, harnessParts, reportedBy } from "./origin.ts";
 import { Report } from "./report.ts";
+import { modelOf } from "./session-setup.ts";
 import { CurrentWork, type Work } from "./work.ts";
+
+/** The core's machines as `facts` leave them: each observation delivered in order. */
+const worldOf = (facts: ReadonlyArray<Fact>): World =>
+  facts.reduce((world, fact) => (fact._tag === "Observed" ? deliver(world, fact.seq, fact.observation).world : world), emptyWorld);
 
 /** The session the facts opened, if they have. */
 const sessionOf = (facts: ReadonlyArray<Fact>): SessionId | undefined =>
@@ -95,8 +101,9 @@ export interface Session {
   readonly streamed: Effect.Effect<PubSub.Subscription<CapturedObservation>, never, Scope.Scope>;
 }
 
-export const openSession: Effect.Effect<Session, never, Scope.Scope> = Effect.gen(function* () {
-  const held = yield* Ref.make<Held>({ world: emptyWorld, facts: [], holds: new Map() });
+/** A session that holds `facts`, with the core's machines as those facts leave them. */
+const sessionWith = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, never, Scope.Scope> => Effect.gen(function* () {
+  const held = yield* Ref.make<Held>({ world: worldOf(facts), facts, holds: new Map() });
   const recorded = yield* PubSub.unbounded<Fact>();
   const captured = yield* PubSub.unbounded<CapturedObservation>();
   const lock = yield* Semaphore.make(1);
@@ -360,3 +367,61 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope> = Effect.ge
     streamed: PubSub.subscribe(captured),
   };
 });
+
+/** A session with no facts yet. */
+export const openSession: Effect.Effect<Session, never, Scope.Scope> = sessionWith([]);
+
+/** The parts of the response to `turn`'s latest request that are known to have arrived: its tool calls. */
+const arrivedIn = (facts: ReadonlyArray<Fact>, turn: TurnId): ReadonlyArray<ModelPart> => {
+  const asked = facts.reduce(
+    (found, fact, index) =>
+      fact._tag === "Decided" && fact.decision._tag === "ModelAsked" && fact.decision.turn === turn ? index : found,
+    -1,
+  );
+  return facts.slice(asked + 1).flatMap((fact) =>
+    fact._tag === "Observed" && fact.observation._tag === "ToolCallArrived" && fact.observation.turn === turn
+      ? [{ _tag: "ToolCall" as const, call: fact.observation.call, tool: fact.observation.tool, input: fact.observation.input }]
+      : [],
+  );
+};
+
+/** The model `turn`'s latest request was made to, or, when none was made, the one the session asks. */
+const askedIn = (
+  facts: ReadonlyArray<Fact>,
+  turn: TurnId,
+): Effect.Effect<{ readonly provider: ProviderName; readonly model: ModelName }> => {
+  const dispatched = facts
+    .flatMap((fact) =>
+      fact._tag === "Observed" && fact.observation._tag === "ModelRequestDispatched" && fact.observation.turn === turn
+        ? [fact.observation]
+        : [],
+    )
+    .at(-1);
+  return dispatched === undefined ? modelOf(facts) : Effect.succeed(dispatched);
+};
+
+/**
+ * A session that goes on from `facts`: another session's, or this one's before its process ended.
+ * The facts are taken as given, and the core's machines are where those facts leave them.
+ *
+ * Facts may stop while a turn runs, with requests made and no outcome recorded. Nobody is carrying
+ * those out any more, so the turn is interrupted, and each request under way is given what is known
+ * of it: no response was observed (`Indeterminate`, with the tool calls that had arrived), and how
+ * each call still running ended was not observed. The turn ends, and the session waits for input.
+ *
+ * The turns that start from here need identities the facts have not used: that is `Turns`' business.
+ */
+export const resumeSession = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, never, Scope.Scope | Services> =>
+  Effect.gen(function* () {
+    const session = yield* sessionWith(facts);
+    const agent = worldOf(facts).agent.state;
+    if (agent._tag !== "Running") return session;
+    const turn = agent.turn;
+    const asked = yield* askedIn(facts, turn);
+    const outcomes = notObserved(worldOf(facts), turn, asked, arrivedIn(facts, turn));
+    yield* Effect.forEach([{ _tag: "TurnInterrupted" as const, turn }, ...outcomes], session.observe, { discard: true }).pipe(
+      reportedBy(harnessParts.resume),
+    );
+    yield* session.idle;
+    return session;
+  });
