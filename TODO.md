@@ -1,58 +1,104 @@
 # To do
 
-Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review discussion, as of
-2026-09-30. Delete an item when it is done or dropped.
+What is to be built, by capability. What is built is in each module's `MODEL.md`; direction that is
+not yet work is in its `DESIGN.next.md`. Delete an item when it is done or dropped. As of
+2026-09-30.
 
 ## Decisions for Dan
 
-- [ ] The terms T1–T5 in agent-core's `MODEL.md` are all still marked open.
-- [ ] Where the model is chosen. The loop's `ModelProvider` chooses it, so context assembly's
-      model selectors go unused, and `ModelChoice.endpoint` has no counterpart in `Target`.
-      Reconfiguration through the inbox (below) may settle it.
+- [ ] Confirm or reword the terms T1–T5 in agent-core's `MODEL.md`. The code and tests are built on
+      them as worded; none is blocking.
+- [ ] Where tests live. Today all are in `tests/`, with `tests/examples/` for the examples. The
+      other way: each module's tests beside its code (`src/agent-core/*.test.ts`), and `tests/` for
+      what joins modules (the loop, providers, scenarios, examples).
+- [ ] Where the model is chosen. The loop's `ModelProvider` chooses it from the session's facts, so
+      context assembly's model selectors go unused, and `ModelChoice.endpoint` has no counterpart
+      in `Target`.
 
 ## Build
 
+### Caching
+
+- [ ] No request marks anything for a provider's cache. Anthropic caches only what a request marks
+      (`cache_control`, on the request or on a block), so nothing is cached there: every live
+      response so far reports no cache read or write. OpenAI caches a prefix of 1,024 tokens or
+      more without being asked. Send the mark, and record what each response says was read and
+      written.
+- [ ] What keeps a cached prefix alive is already in place and untested against a cache: earlier
+      messages are sent the same way every time, thinking goes back unchanged, notices stay where
+      they were sent. Check it live once requests are cached.
+- [ ] Compaction that knows the provider's cache: when the cache has expired, the next request
+      costs the same whatever it carries (agent-context `DESIGN.next.md`).
+
+### Compaction
+
+Built: the window marker only (agent-core S4, agent-context A5).
+
+- [ ] Requests made in a window: which of a window's summaries a request uses, and the view that
+      sends the summary in place of the span.
+- [ ] A compaction that runs while a session does, and writes a summary.
+- [ ] A provider's own compaction: Anthropic's compaction block (beta `compact-2026-09-04`), OpenAI's
+      `compaction` item. Each works only with its own provider.
+- [ ] Anthropic's rules for its own compaction, for the view: the kept turns follow the summary
+      unchanged, and the first kept turn has a different role from the last summarised message, or
+      the API merges them. The FizzBuzz toy view merges the summary and the next input into one
+      user message.
+- [ ] Our own summary with kept turns breaks the kept turns' thinking on Anthropic (the API accepts
+      the swap only for a summary it wrote). On hold: explore keeping the last turn with its
+      thinking.
+- [ ] Compaction as forks: a revisable summary per fork, summarising ahead of time from the fact
+      stream, strategies compared side by side.
+
+### Tool permissions
+
+Built: the gate and what a policy is, pure and not in the loop (agent-policy `MODEL.md`).
+
+- [ ] Policy as an Effect service, with the gate between the core's requests and the adapters in
+      the loop (a veto before a request is carried out, a dry run).
+- [ ] Which tools only read and which change things, as a property of the tool.
+- [ ] A call that arrived in a response that then failed may have run; the model is not told. When
+      the harness knows which tools change things, tell the model, or do not run those early.
+- [ ] A model's settings function can only shape a request. Refusing one is the same place with
+      another outcome (`ModelVetoed`); build it when a case needs it.
+
+### The session's configuration
+
+- [ ] A user's change of model or settings has no way in. `ModelChangeArrived` will come from the
+      surface the user works through (its origin says so), and the session is not bridged to one
+      yet; today only the fallback chain reports it.
 - [ ] Changes to the system prompt or tools after the session opens, as facts of their own (the
       opening records them; Anthropic takes tool changes mid-conversation as `tool_addition` and
       `tool_removal` blocks). Codex records settings changes as `thread_settings_applied`, which
       the importer reads only for the first model.
-- [ ] A user's change of model or settings has no way in. `ModelChangeArrived` will come from the
-      surface the user works through (its origin says so), and the session is not bridged to one
-      yet; today only the fallback chain reports it.
 - [ ] `InputArrived.from` says what a fact's origin says (the outside world: a user, the system,
       another agent). Fold it into the origin.
-- [ ] A call that arrived in a response that then failed may have run; the model is not told. When
-      the harness knows which tools change things, tell the model, or do not run those early.
-- [ ] `ToolCallDispatched` is reported by the loop when it hands a call to the tool runner. When
-      tools run in another process (the ACP host), that adapter reports it.
-- [ ] The Chat Completions adapter does not stream.
-- [ ] A request retried after its stream had begun passes its parts on a second time.
-- [ ] The Chat Completions adapter sends back none of a response's other fields
-      (`reasoning_content`) and none of the session's settings; it records each as left out or
-      enforced.
 - [ ] A model's own output limit: a `maxOutputTokens` above what a model allows is sent as asked,
       and the provider rejects it. A settings function per model class could enforce the nearest.
-- [ ] A model's settings function can only shape a request. Refusing one is the same place with
-      another outcome (`ModelVetoed`, which nothing produces yet); build it when a case needs it.
 - [ ] Settings functions exist for the Anthropic classes met so far (Opus 5.5, Fable and Mythos 5;
       Sonnet 5.5). A model in no class is sent what was asked.
 - Returning to the primary provider after a fallback is the user's (a manual `/switch`), as other
   harnesses do. Doing it by itself would need the harness to know more of the world: a later
   feature, not ruled out.
-- [ ] Policy as an Effect service, with the gate between the core's requests and the adapters in
-      the loop (pre-flight veto, dry run).
+
+### Providers
+
+- [ ] The Chat Completions adapter does not stream, sends back none of a response's other fields
+      (`reasoning_content`) and none of the session's settings; it records each as left out or
+      enforced.
+- [ ] A request retried after its stream had begun passes its parts on a second time, and would
+      start a tool call a second time.
 - [ ] The call lifecycle through Effect: timeouts and retries with `Schedule`.
-- [ ] Forks and the turn pointer (`session/turn`; turn zero of a root points at itself).
-- [ ] Compaction as forks: a revisable summary per fork, summarising ahead of time from the fact
-      stream, strategies compared side by side.
-- [ ] Starting tools while the response streams: a machine per model request, fed by the stream,
-      that tells the step `CallReady`.
-- [ ] Telemetry: parent spans for sessions and turns; an OTLP exporter; Effect's logs through
-      OpenTelemetry.
-- [ ] The summary view merges the summary and the next input into one user message. Anthropic's
-      rule for its own compaction: the kept turns follow the summary unchanged, and the first kept
-      turn has a different role from the last summarised message, or the API merges them; compacting
-      exactly the messages of a request already sent makes the kept turns start with the reply.
+- [ ] `ToolCallDispatched` is reported by the loop when it hands a call to the tool runner. When
+      tools run in another process (the ACP host), that adapter reports it.
+
+### Forks
+
+- [ ] Forks as sessions, and the turn pointer (`session/turn`; turn zero of a root points at
+      itself). A fact is addressed by its session and its position.
+
+### Telemetry
+
+- [ ] Parent spans for sessions and turns; an OTLP exporter; Effect's logs through OpenTelemetry.
 
 ## Later: worth doing, not core
 
@@ -75,9 +121,11 @@ stream of effects and observations. These build on that.
 
 ## Trajectories
 
-- [ ] Claude Code: 4 observations the core does not expect, in 808 files. Each is an error Claude
-      Code reported after a response the core had already taken as the step's outcome: three after
-      a refusal, one after an answer.
+Run both sweeps after a change to a core machine, and read the counts of observations not expected.
+On 2026-09-30: Codex none in 168 files; Claude Code 4 in 808.
+
+- [ ] Claude Code: the 4 are each an error Claude Code reported after a response the core had
+      already taken as the step's outcome: three after a refusal, one after an answer.
 - [ ] Codex: three responses in files from 2026-08 are split in two by a `token_count` that arrived
       mid-response, and the first half is recorded as `Unfinished`.
 - [ ] Codex: 8 turns still running when Codex completes them; 10 completions while another turn
@@ -86,6 +134,8 @@ stream of effects and observations. These build on that.
       `kept` means the same for both tools.
 - [ ] The request that writes a compaction's summary has no place: Claude Code does not record it,
       and the Codex importer counts and drops it.
+- [ ] Claude Code starts tools while a response streams; the importer gives such results after the
+      message and does not record the early start (`ToolCallArrived`).
 - [ ] Not mapped yet: subagents and messages between agents (for moderated debates and peer review
       later), images, `fork-context-ref`, `model_refusal_no_fallback`, developer messages (system
       prompts).
@@ -94,5 +144,4 @@ stream of effects and observations. These build on that.
 
 - Google (no Effect package).
 - Jev, later, as a tool.
-- Cache-control headers, and compaction that knows the provider's cache.
 - Attachments and system records in Claude Code sessions, including exo's injected memories.

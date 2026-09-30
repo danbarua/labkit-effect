@@ -20,9 +20,17 @@ The domain core of a coding harness, and the layers around it.
 | `src/agent-policy/` | Whether an effect request continues, is vetoed, or waits. See its `MODEL.md`. | `Schema` from `effect`, `agent-core` |
 | `src/agent-effect/` | The layer around them: contracts as Effect services, adapters, the loop (which records every fact, and so owns the journal). | anything |
 | `src/agent-context/` | Context assembly: what the model is sent, from system prompts, tool catalogs and a view of the conversation. See its `MODEL.md`. | anything |
-| `src/instrumentation/` | Tool usage counted from facts, as Effect metrics, and OpenTelemetry. | anything |
-| `src/examples/fizzbuzz` | A synthetic scenario for testing the rest: a scripted model, its tools, a toy compaction. | anything |
+| `src/instrumentation/` | Tool usage counted from facts, as Effect metrics, and OpenTelemetry. See its `README.md`. | anything |
+| `src/examples/` | Examples, not part of the harness: the FizzBuzz session (a scripted model, its tools, a toy compaction) and example policies for the gate. | anything |
+| `scripts/probes/` | Live checks against the providers' APIs. Each reads its key from the environment and writes what it saw to `logs/live/` (not committed). | anything |
 | `scripts/trajectories/` | Importers that project Claude Code and Codex sessions' records through the core's decisions into `trajectories/` (not committed). | anything |
+
+Each module's `MODEL.md` says what it builds, as rules with ids. A rule has at least one test whose
+name starts with its id, and `bun run check:rules` fails when one has none. `DESIGN.next.md`, where
+a module has one, holds direction that is not built. `TODO.md` is what is to be built.
+
+Tests are in `tests/`. `tests/examples/` tests the examples; everything else tests the harness.
+`tests/support/` holds what the tests share.
 
 In the first two, `bun run lint` (oxlint, with Effect's recommended preset and the rules in
 `scripts/oxlint/abstract-layers.js`) enforces their imports and pure functions (no `let`, no loops,
@@ -35,7 +43,9 @@ to a type with no unbranded string, however it is built.
 ```sh
 bun install
 bun run vidaimock:install   # the mock provider server the adapter tests run against
-bun run check               # installs it if missing, then typecheck, lint, check:brands, tests
+bun run check               # installs it if missing, then typecheck, lint, check:brands, check:rules, tests
+bun scripts/trajectories/sweep.ts codex         # run both sweeps after changing a core machine, and
+bun scripts/trajectories/sweep.ts claude-code   # read the counts of observations not expected
 ```
 
 The adapter tests start [VidaiMock](https://github.com/vidaiUK/VidaiMock), a server that answers as

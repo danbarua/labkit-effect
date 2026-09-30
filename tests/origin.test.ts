@@ -40,7 +40,7 @@ const services = () =>
 
 const input = { _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation;
 
-test("what the test gives the session is from the test; what the loop observes is from the provider, the tool or the harness", async () => {
+test("R6: what the test gives the session is from the test; what the loop observes is from the provider, the tool or the harness", async () => {
   const facts = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
@@ -51,7 +51,7 @@ test("what the test gives the session is from the test; what the loop observes i
       return yield* session.facts;
     }).pipe(Effect.provide(services())),
   );
-  const name = "what the test gives the session is from the test; what the loop observes is from the provider, the tool or the harness";
+  const name = "R6: what the test gives the session is from the test; what the loop observes is from the provider, the tool or the harness";
   const origins = facts.flatMap((fact) => (fact._tag === "Observed" ? [[fact.observation._tag, fact.origin]] : []));
   expect(origins as unknown).toEqual([
     ["SessionOpened", { _tag: "Test", name }],
@@ -65,7 +65,7 @@ test("what the test gives the session is from the test; what the loop observes i
   ]);
 });
 
-test("an observation given to a session with no origin set is a defect", async () => {
+test("R6: an observation given to a session with no origin set is a defect", async () => {
   const exit = await Effect.runPromiseExit(
     Effect.gen(function* () {
       const session = yield* openSession;

@@ -24,7 +24,7 @@ const response = (parts: ReadonlyArray<unknown>) => ({
   metadata: json({}),
 });
 
-test("a change of model while no turn runs is taken at once", () => {
+test("M1: a change of model while no turn runs is taken at once", () => {
   const session = open();
   observe(session, opened);
   const change = observe(session, toOpenAi);
@@ -32,7 +32,7 @@ test("a change of model while no turn runs is taken at once", () => {
   expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "ModelChangeTaken", change } });
 });
 
-test("a change of model during a step is taken between steps, before the next request", () => {
+test("M1: a change of model during a step is taken between steps, before the next request", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -49,7 +49,7 @@ test("a change of model during a step is taken between steps, before the next re
   ]);
 });
 
-test("a change of model that arrives while the last step runs is taken once the step has answered", () => {
+test("M1: a change of model that arrives while the last step runs is taken once the step has answered", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
@@ -64,7 +64,7 @@ test("a change of model that arrives while the last step runs is taken once the 
   ]);
 });
 
-test("a change of model still waiting when the turn ends is taken, not dropped", () => {
+test("M1: a change of model still waiting when the turn ends is taken, not dropped", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
@@ -95,7 +95,7 @@ const select = (facts: ReadonlyArray<Fact>) =>
     }).pipe(Effect.provide(ModelFromFacts)),
   );
 
-test("a session's facts say which model it asks: the latest change taken, or the one it opened with", async () => {
+test("M1: a session's facts say which model it asks: the latest change taken, or the one it opened with", async () => {
   const session = open();
   observe(session, opened);
   expect(await select(session.journal) as unknown).toEqual(Exit.succeed({ provider: "boring", model: "boring-1" }));

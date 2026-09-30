@@ -18,7 +18,7 @@ const stopped = (parts: ReadonlyArray<unknown> = []) => ({
   metadata: json({}),
 });
 
-test("an interruption during a step stops the turn's work; the turn ends when the request says how far it got", () => {
+test("X1 X3: an interruption during a step stops the turn's work; the turn ends when the request says how far it got, and input waiting is dropped", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -44,7 +44,7 @@ test("an interruption during a step stops the turn's work; the turn ends when th
   expect(session.world.agent.state._tag).toBe("Idle");
 });
 
-test("interrupted while a tool runs: the turn ends when the tool's end is heard, and every call has a result for the model", () => {
+test("X1 TC3: interrupted while a tool runs: the turn ends when the tool's end is heard, and every call has a result for the model", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -69,7 +69,7 @@ test("interrupted while a tool runs: the turn ends when the tool's end is heard,
   ]);
 });
 
-test("a call with no recorded end still has a result for the model: not observed if it began to run, not run if it did not", () => {
+test("TC3: a call with no recorded end still has a result for the model: not observed if it began to run, not run if it did not", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -90,7 +90,7 @@ test("a call with no recorded end still has a result for the model: not observed
   });
 });
 
-test("an interruption between steps ends the turn at once, and stops what is being carried out for it", () => {
+test("X2: an interruption between steps ends the turn at once, and stops what is being carried out for it", () => {
   const session = open();
   session.reviewsTurnEnds = false;
   observe(session, opened);
@@ -101,7 +101,7 @@ test("an interruption between steps ends the turn at once, and stops what is bei
   expect(session.requests.map((request) => request._tag).slice(-2)).toEqual(["BeforeTurnEnded", "StopTurnWork"]);
 });
 
-test("a response to a turn that has ended is not expected", () => {
+test("R5: a response to a turn that has ended is not expected", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });

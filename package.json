@@ -5,10 +5,11 @@
   "scripts": {
     "prepare": "effect-tsgo patch --oxlint",
     "typecheck": "tsc --noEmit -p .",
-    "check": "bun run vidaimock:install && bun run typecheck && bun run lint && bun run check:brands && bun test tests",
+    "check": "bun run vidaimock:install && bun run typecheck && bun run lint && bun run check:brands && bun run check:rules && bun test tests",
     "vidaimock:install": "bun scripts/vidaimock.ts",
     "lint": "oxlint --type-aware --format default src tests scripts",
-    "check:brands": "bun scripts/check-brands.ts"
+    "check:brands": "bun scripts/check-brands.ts",
+    "check:rules": "bun scripts/check-rules.ts"
   },
   "devDependencies": {
     "@effect/platform-bun": "4.0.0-rc.118",

@@ -38,7 +38,7 @@ function oneTurnWithATool() {
   return session;
 }
 
-test("the turn runs to an answer through one tool call", () => {
+test("R5: the turn runs to an answer through one tool call", () => {
   const session = oneTurnWithATool();
   expect(session.journal.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag))).toEqual([
     "SessionOpened",
@@ -61,7 +61,7 @@ test("the turn runs to an answer through one tool call", () => {
   ]);
 });
 
-test("the recorded response holds every part the model sent", () => {
+test("R2: the recorded response holds every part the model sent, in order, one not recognised as it was received", () => {
   const session = oneTurnWithATool();
   const recorded = session.journal.find(
     (fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded",
@@ -83,7 +83,7 @@ const cutShort = (text: string, stop: string, ending: string) => ({
 const tags = (session: ReturnType<typeof open>) =>
   session.journal.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
 
-test("a response cut short without tool calls ends the turn as cut short: the model is not asked again with nothing new", () => {
+test("I4: a response cut short without tool calls ends the turn as cut short: the model is not asked again with nothing new", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "write the report" });
@@ -102,7 +102,7 @@ test("a response cut short without tool calls ends the turn as cut short: the mo
   expect(session.requests.map((request) => request._tag)).toEqual(["RequestModelResponse", "BeforeTurnEnded"]);
 });
 
-test("a response cut short is followed by another request when input arrived meanwhile", () => {
+test("I3 I4: a response cut short is followed by another request when input arrived meanwhile", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "write the report" });
@@ -123,7 +123,7 @@ test("a response cut short is followed by another request when input arrived mea
   expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Answered" } } });
 });
 
-test("a failed attempt at a model request is recorded and changes nothing; the request's outcome ends the step", () => {
+test("S3: a failed attempt at a model request is recorded and changes nothing; the request's outcome ends the step", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
@@ -152,7 +152,7 @@ test("a failed attempt at a model request is recorded and changes nothing; the r
   expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "ObservationNotExpected", observation: late } });
 });
 
-test("a call that arrives while the response streams is run at once; the response, when it comes, does not run it again", () => {
+test("TC1 TC2: a call that arrives while the response streams is run at once; the response, when it comes, does not run it again", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -182,7 +182,7 @@ test("a call that arrives while the response streams is run at once; the respons
   expect(tags(session)).not.toContain("ObservationNotExpected");
 });
 
-test("a response's calls that did not arrive earlier are run when it comes; the step waits for those still running", () => {
+test("TC2: a response's calls that did not arrive earlier are run when it comes; the step waits for those still running", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -201,7 +201,7 @@ test("a response's calls that did not arrive earlier are run when it comes; the 
   expect(tags(session).slice(-2)).toEqual(["ToolEnded", "ModelAsked"]);
 });
 
-test("a whole response that is not yet an answer is followed by another request", () => {
+test("I7: a whole response that is not yet an answer is followed by another request", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "write the report" });

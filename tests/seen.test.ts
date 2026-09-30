@@ -20,7 +20,7 @@ function asked(journal: ReadonlyArray<Fact>): Array<number> {
   return journal.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "ModelAsked" ? [fact.seq] : []));
 }
 
-test("each request is made after the facts it can carry; after a failed request the next one comes later", () => {
+test("S1 S2: each request is made after the facts it can carry; after a failed request the next one comes later", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "fix the tests" });

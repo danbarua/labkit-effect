@@ -88,7 +88,7 @@ const run = (setup: Setup, messages: ReadonlyArray<ContextMessage>) => {
   ).then((assembled) => ({ assembled, logged }));
 };
 
-test("one provider of each kind: the system prompt and tools recorded at opening, the conversation, the notices", async () => {
+test("A1 A2 A3: one provider of each kind: the system prompt and tools recorded at opening, the conversation, the notices", async () => {
   const messages = conversation("Ping?");
   const { assembled, logged } = await run(oneOfEach, messages);
   expect(assembled as unknown).toEqual({
@@ -101,7 +101,7 @@ test("one provider of each kind: the system prompt and tools recorded at opening
   expect(logged).toEqual([]);
 });
 
-test("the system prompts are joined, and the tool catalogs appended, in the order the providers are listed", async () => {
+test("A1: the system prompts are joined, and the tool catalogs appended, in the order the providers are listed", async () => {
   const { assembled } = await run(
     {
       ...oneOfEach,
