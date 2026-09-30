@@ -4,25 +4,26 @@
  * Out: the system text is `instructions`; the context's messages become input items: text as
  * `input_text` or `output_text` messages, a tool call as a `function_call` item, a tool outcome as
  * a `function_call_output` item carrying the text the model is sent. The catalog is sent as
- * `function` tools. An item it did not recognise (a `reasoning` item, say) goes back to the provider
- * that produced it unchanged and in its place; for any other provider it is left out, as is
- * another provider's thinking, and that is logged. The session's settings go in as `reasoning`
+ * `function` tools. Thinking (a `reasoning` item) and an item it did not recognise go back to the
+ * provider that produced them unchanged and in their place; for any other provider they are left
+ * out, and that is logged. The session's settings go in as `reasoning`
  * (`openai-settings.ts`); what that enforced is recorded before the request.
  *
  * In: the response's `output` items become the observation's parts in order: a `message` whose
  * content is all `output_text` is a `Text` for each, or a `Commentary` for each when its `phase` is
  * `commentary` (sent back with that phase); a `function_call` is `ToolCall` (whatever the
- * tool's name), its arguments kept as the text received; every other item, a `message` with any
+ * tool's name), its arguments kept as the text received; a `reasoning` item is `Thinking` (its
+ * summary as text, and the item as received); every other item, a `message` with any
  * other content included, is `Unrecognised`, whole, so that it can be sent back as it came. The stop is the
  * response's `status` (with the reason when it is `incomplete`); everything else in the response is
  * `metadata`. A request that fails, after retries, is observed as `ModelFailed`.
  */
 
 import { OpenAiClient } from "@effect/ai-openai";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, type Schema } from "effect";
 import type * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
-import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agent-core/names.ts";
+import { CallId, ModelText, StopReason, ThinkingText, ToolName, type TurnId } from "../../agent-core/names.ts";
 import type { ModelPart, Observation } from "../../agent-core/observation.ts";
 import { type ContextMessage, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
 import { defaultRetries, invalidOutput, modelClientOf, postJson, type Retries, withRetries } from "../provider-call.ts";
@@ -35,7 +36,6 @@ import {
   endingOf,
   isObject,
   type Json,
-  leftOut,
   logSupplied,
   renderToolResult,
   type Shaped,
@@ -74,8 +74,6 @@ function items(message: ContextMessage, target: Target, calls: ReadonlyMap<CallI
           json: [{ role: "assistant", phase: "commentary", content: [{ type: "output_text", text: part.text }] }],
           supplied: [],
         };
-      case "Thinking":
-        return leftOut(part, "the Responses API has no thinking block");
       case "ToolCall": {
         const input = toolInputObject(part.call, part.input);
         return {
@@ -94,6 +92,7 @@ function items(message: ContextMessage, target: Target, calls: ReadonlyMap<CallI
           ],
           supplied: [],
         };
+      case "Thinking":
       case "Unrecognised":
         return sentBack(part, target);
       default:
@@ -133,6 +132,15 @@ function isOutputText(content: Json): content is { readonly type: "output_text";
   return isObject(content) && content["type"] === "output_text" && typeof content["text"] === "string";
 }
 
+/** The text of a reasoning item's summary: its parts, a blank line between them; empty when it has none. */
+function summaryOf(item: Schema.JsonObject): ThinkingText {
+  const summary = item["summary"];
+  const texts = Array.isArray(summary)
+    ? summary.flatMap((each) => (isObject(each) && typeof each["text"] === "string" ? [each["text"]] : []))
+    : [];
+  return ThinkingText.make(texts.join("\n\n"));
+}
+
 /** The parts one output item becomes. */
 function parts(item: Json): ReadonlyArray<ModelPart> {
   if (!isObject(item)) return [{ _tag: "Unrecognised", received: receivedJson(item) }];
@@ -146,6 +154,7 @@ function parts(item: Json): ReadonlyArray<ModelPart> {
   const { call_id, name, arguments: args } = item;
   if (type === "function_call" && typeof call_id === "string" && typeof name === "string" && typeof args === "string")
     return [{ _tag: "ToolCall", call: CallId.make(call_id), tool: ToolName.make(name), input: receivedJsonText(args) }];
+  if (type === "reasoning") return [{ _tag: "Thinking", text: summaryOf(item), received: receivedJson(item) }];
   return [{ _tag: "Unrecognised", received: receivedJson(item) }];
 }
 

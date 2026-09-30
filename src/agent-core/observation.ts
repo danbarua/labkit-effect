@@ -19,7 +19,6 @@ import {
   Seq,
   SessionId,
   StopReason,
-  ThinkingSignature,
   ThinkingText,
   ToolName,
   TurnId,
@@ -42,7 +41,12 @@ export const ModelPart = Schema.Union([
    * may call it commentary, or a progress update). It is not the model's answer.
    */
   Schema.TaggedStruct("Commentary", { text: ModelText }),
-  Schema.TaggedStruct("Thinking", { text: ThinkingText, signature: ThinkingSignature }),
+  /**
+   * The model's thinking: `text` is what of it can be read (a summary, a note on its progress, or
+   * nothing), and `received` is the provider's block or item as it came, which the provider needs
+   * back unchanged.
+   */
+  Schema.TaggedStruct("Thinking", { text: ThinkingText, received: Received }),
   Schema.TaggedStruct("ToolCall", { call: CallId, tool: ToolName, input: Received }),
   /** A part the decoder does not recognise, holding what was received. */
   Schema.TaggedStruct("Unrecognised", { received: Received }),

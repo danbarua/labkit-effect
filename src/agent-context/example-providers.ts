@@ -29,7 +29,6 @@ function characters(message: ContextMessage): number {
       case "ToolResult":
         return total + JSON.stringify(part.outcome).length;
       case "Thinking":
-        return total + part.text.length + part.signature.length;
       case "Unrecognised":
         return total + JSON.stringify(part.received).length;
       default:

@@ -53,13 +53,9 @@ export type InputText = typeof InputText.Type;
 export const ModelText = Schema.String.pipe(Schema.brand("agent-core/ModelText"));
 export type ModelText = typeof ModelText.Type;
 
-/** Text a model wrote as its reasoning. */
+/** What can be read of a model's thinking, as the provider returned it. */
 export const ThinkingText = Schema.String.pipe(Schema.brand("agent-core/ThinkingText"));
 export type ThinkingText = typeof ThinkingText.Type;
-
-/** A provider's signature over a model's reasoning, which the provider requires back unchanged. */
-export const ThinkingSignature = Schema.String.pipe(Schema.brand("agent-core/ThinkingSignature"));
-export type ThinkingSignature = typeof ThinkingSignature.Type;
 
 /** Text the harness gives the model as a notice: timely context, such as the current time. */
 export const NoticeText = Schema.String.pipe(Schema.brand("agent-core/NoticeText"));

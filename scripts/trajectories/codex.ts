@@ -25,8 +25,8 @@
  * - the model items of one request (reasoning, assistant messages, tool calls) are one
  *   `ModelResponded`, ended by the `token_count` that follows them, by input, or by the turn's end:
  *   an assistant message's `output_text` is `Text` (`Commentary` when the message's `phase` is
- *   `commentary`), a tool call is `ToolCall`, anything else
- *   (reasoning, a web search the provider ran) is `Unrecognised`. Codex records no stop reason, and
+ *   `commentary`), a tool call is `ToolCall`, a reasoning item is `Thinking` (its
+ *   summary as text), anything else (a web search the provider ran) is `Unrecognised`. Codex records no stop reason, and
  *   its older versions do not mark which message is the final answer, so the response is classified
  *   by what Codex did next: `Complete` when it has a tool call or a message marked as the final
  *   answer, or when the turn ended or input came next; `CutShort` when Codex asked the model again.
@@ -145,6 +145,11 @@ export async function importCodex(source: string): Promise<Imported> {
       ];
     if (type === "tool_search_call")
       return [{ _tag: "ToolCall", call: str(item["call_id"]), tool: "tool_search", input: json(item["arguments"] ?? null) }];
+    if (type === "reasoning") {
+      const summary = Array.isArray(item["summary"]) ? item["summary"] : [];
+      const texts = summary.flatMap((each) => (isRecord(each) && typeof each["text"] === "string" ? [each["text"]] : []));
+      return [{ _tag: "Thinking", text: texts.join("\n\n"), received: json(item) }];
+    }
     return [{ _tag: "Unrecognised", received: json(item) }];
   }
 

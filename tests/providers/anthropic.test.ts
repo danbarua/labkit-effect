@@ -4,7 +4,7 @@ import { afterAll, expect } from "bun:test";
 import { test } from "../support/test.ts";
 import { anthropicAt } from "../support/providers.ts";
 import { Effect, Layer, Logger } from "effect";
-import { ModelName, ProviderName, ThinkingSignature, ThinkingText, TurnId } from "../../src/agent-core/names.ts";
+import { ModelName, ProviderName, ThinkingText, TurnId } from "../../src/agent-core/names.ts";
 import { ModelClient } from "../../src/agent-effect/contracts.ts";
 import { logKeys } from "../../src/agent-effect/log-keys.ts";
 import { json } from "../support/received.ts";
@@ -263,7 +263,7 @@ const respondWith = (provider: ReturnType<typeof recording>) =>
     }).pipe(Effect.provide(AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))))),
   );
 
-test("a thinking block becomes Thinking with its signature; a block type nobody knows is kept whole", async () => {
+test("a thinking block becomes Thinking, its text and the block as received; a block type nobody knows is kept whole", async () => {
   const future = { type: "future_block", payload: { any: "thing" } };
   const provider = recording([
     {
@@ -275,7 +275,7 @@ test("a thinking block becomes Thinking with its signature; a block type nobody 
   expect(observed as unknown).toMatchObject({
     _tag: "ModelResponded",
     parts: [
-      { _tag: "Thinking", text: "Check the file first.", signature: "sig-abc" },
+      { _tag: "Thinking", text: "Check the file first.", received: json({ type: "thinking", thinking: "Check the file first.", signature: "sig-abc" }) },
       { _tag: "Unrecognised", received: json(future) },
     ],
   });
@@ -332,7 +332,7 @@ test("another provider's thinking and blocks are left out and logged; a message 
             {
               role: "assistant",
               parts: [
-                { _tag: "Thinking", provider: other, text: ThinkingText.make(""), signature: ThinkingSignature.make("sig") },
+                { _tag: "Thinking", provider: other, text: ThinkingText.make(""), received: receivedJson({ type: "reasoning", summary: [] }) },
                 { _tag: "Unrecognised", provider: other, received: receivedJson({ type: "reasoning" }) },
               ],
             },

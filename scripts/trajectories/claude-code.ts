@@ -24,7 +24,7 @@
  *   message after it is the window's summary, kept apart from the facts (`summaries.jsonl`). A
  *   boundary with nothing before it in the file is counted, not mapped;
  * - the assistant records with one message id are one `ModelResponded`, however other records
- *   interleave with them: `text` is `Text`, `thinking` with its signature is `Thinking`, `tool_use`
+ *   interleave with them: `text` is `Text`, `thinking` is `Thinking` (the block kept as received), `tool_use`
  *   is `ToolCall`, anything else is `Unrecognised`; the message's id and usage are its metadata,
  *   and its `stop_reason` is classified as the Anthropic adapter classifies it.
  *   Claude Code starts a tool as soon as its call has streamed in, so a result can be recorded
@@ -96,7 +96,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
       const b = block as Record_;
       if (b["type"] === "text" && typeof b["text"] === "string") return { _tag: "Text", text: b["text"] };
       if (b["type"] === "thinking" && typeof b["thinking"] === "string" && typeof b["signature"] === "string")
-        return { _tag: "Thinking", text: b["thinking"], signature: b["signature"] };
+        return { _tag: "Thinking", text: b["thinking"], received: json(b) };
       if (b["type"] === "tool_use" && typeof b["id"] === "string" && typeof b["name"] === "string")
         return { _tag: "ToolCall", call: b["id"], tool: b["name"], input: json(b["input"] ?? {}) };
     }

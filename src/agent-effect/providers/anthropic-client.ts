@@ -12,7 +12,7 @@
  * `anthropic-settings.ts` puts them for the model; what it enforced is recorded before the request.
  *
  * In: a response's `content` blocks become the observation's parts in order: a `text` block is
- * `Text`, a `thinking` block with its signature is `Thinking`, a `tool_use` block is `ToolCall`
+ * `Text`, a `thinking` block is `Thinking` (its text, and the block as received), a `tool_use` block is `ToolCall`
  * (whatever the tool's name), any other block is `Unrecognised` holding the block as received. Everything else in the response is `metadata`. A failure is observed as `ModelFailed`;
  * what was received with it is logged here. The loop annotates these logs with the turn.
  */
@@ -25,7 +25,6 @@ import {
   CallId,
   ModelText,
   StopReason,
-  ThinkingSignature,
   ThinkingText,
   ToolName,
   type TurnId,
@@ -50,7 +49,6 @@ import {
   endingOf,
   isObject,
   type Json,
-  leftOut,
   logSupplied,
   type RenderedResult,
   renderToolResult,
@@ -74,10 +72,6 @@ function blocks(part: ContextPart, target: Target, context: ModelContext, calls:
     case "Text":
     case "Commentary":
       return { json: [{ type: "text", text: part.text }], supplied: [] };
-    case "Thinking":
-      return part.provider === target.provider
-        ? { json: [{ type: "thinking", thinking: part.text, signature: part.signature }], supplied: [] }
-        : leftOut(part, `produced by ${part.provider}, not ${target.provider}`);
     case "ToolCall": {
       const input = toolInputObject(part.call, part.input);
       return {
@@ -96,6 +90,7 @@ function blocks(part: ContextPart, target: Target, context: ModelContext, calls:
         ],
         supplied: [],
       };
+    case "Thinking":
     case "Unrecognised":
       return sentBack(part, target);
     default:
@@ -162,9 +157,9 @@ function part(received: Json): ModelPart {
   if (isObject(received)) {
     const { type, text, id, name, input } = received;
     if (type === "text" && typeof text === "string") return { _tag: "Text", text: ModelText.make(text) };
-    const { thinking, signature } = received;
-    if (type === "thinking" && typeof thinking === "string" && typeof signature === "string")
-      return { _tag: "Thinking", text: ThinkingText.make(thinking), signature: ThinkingSignature.make(signature) };
+    const { thinking } = received;
+    if (type === "thinking" && typeof thinking === "string")
+      return { _tag: "Thinking", text: ThinkingText.make(thinking), received: receivedJson(received) };
     if (type === "tool_use" && typeof id === "string" && typeof name === "string" && input !== undefined)
       return {
         _tag: "ToolCall",

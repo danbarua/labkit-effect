@@ -55,7 +55,7 @@ export function leftOut(part: ContextPart, reason: string): Shaped {
  * The JSON a provider's own part is sent back as: what was received, unchanged. Another provider's
  * part is left out: only the provider that produced it reads it.
  */
-export function sentBack(part: Extract<ContextPart, { _tag: "Unrecognised" }>, target: Target): Shaped {
+export function sentBack(part: Extract<ContextPart, { _tag: "Thinking" | "Unrecognised" }>, target: Target): Shaped {
   if (part.provider !== target.provider) return leftOut(part, `produced by ${part.provider}, not ${target.provider}`);
   const parsed = parseJson(part.received);
   return "value" in parsed ? { json: [parsed.value], supplied: [] } : leftOut(part, parsed.reason);

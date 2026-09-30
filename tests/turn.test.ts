@@ -9,7 +9,7 @@ const responseWithEveryPartKind = {
   provider: "anthropic",
   model: "claude-sonnet-5",
   parts: [
-    { _tag: "Thinking", text: "I should call ls.", signature: "sig-abc" },
+    { _tag: "Thinking", text: "I should call ls.", received: json({ type: "thinking", thinking: "I should call ls.", signature: "sig-abc" }) },
     { _tag: "Text", text: "Listing them." },
     { _tag: "ToolCall", call: "c1", tool: "ls", input: json({ path: "." }) },
     { _tag: "Unrecognised", received: json({ type: "citation", source: "doc-1" }) },

@@ -99,6 +99,32 @@ test("a commentary message is Commentary, and goes back as a message with that p
   });
 });
 
+test("a reasoning item is Thinking: its summary as text to read, and the item to send back as it came", async () => {
+  const reasoning = {
+    type: "reasoning",
+    id: "rs_1",
+    encrypted_content: "opaque",
+    summary: [
+      { type: "summary_text", text: "**Adding**\n\nTwo numbers to add." },
+      { type: "summary_text", text: "Use the tool." },
+    ],
+  };
+  const { provider, facts } = await turn([
+    { status: "completed", output: [reasoning, { type: "function_call", call_id: "call_1", name: "add", arguments: '{"a":2,"b":3}' }] },
+    answers,
+  ]);
+  const responded = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded");
+  expect(responded as unknown).toMatchObject({
+    observation: {
+      parts: [
+        { _tag: "Thinking", text: "**Adding**\n\nTwo numbers to add.\n\nUse the tool.", received: json(reasoning) },
+        { _tag: "ToolCall", call: "call_1" },
+      ],
+    },
+  });
+  expect((provider.bodies[1] as { input: ReadonlyArray<unknown> }).input[1]).toEqual(reasoning);
+});
+
 test("output items become parts: text, calls to any tool name, and everything else kept whole", async () => {
   const refused = { type: "message", role: "assistant", content: [{ type: "output_text", text: "Reading." }, { type: "refusal", refusal: "no" }] };
   const { provider, facts } = await turn([
@@ -123,7 +149,7 @@ test("output items become parts: text, calls to any tool name, and everything el
       stop: "incomplete: max_output_tokens",
       ending: { _tag: "CutShort" },
       parts: [
-        { _tag: "Unrecognised", received: json({ type: "reasoning", id: "rs_1", summary: [] }) },
+        { _tag: "Thinking", text: "", received: json({ type: "reasoning", id: "rs_1", summary: [] }) },
         { _tag: "Unrecognised", received: json(refused) },
         { _tag: "ToolCall", call: "call_9", tool: "___read_", input: { body: { _tag: "Text", text: '{"path":"a.ts"}' } } },
       ],

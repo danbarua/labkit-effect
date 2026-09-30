@@ -36,7 +36,7 @@ function partText(part: ModelPart): string {
     case "Commentary":
       return `**${part._tag}**\n\n${part.text}`;
     case "Thinking":
-      return `**Thinking** (signature of ${part.signature.length} characters)\n\n${part.text === "" ? "_(no text returned)_" : part.text}`;
+      return `**Thinking** (${asText(part.received).length} characters to send back)\n\n${part.text === "" ? "_(no text returned)_" : part.text}`;
     case "ToolCall":
       return `**ToolCall** \`${part.tool}\` (${part.call})\n\n${fenced(asText(part.input), "json")}`;
     case "Unrecognised":

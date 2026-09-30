@@ -9,7 +9,6 @@ import type {
   CallId,
   ModelName,
   ProviderName,
-  ThinkingSignature,
   ThinkingText,
   ToolName,
   TurnId,
@@ -50,12 +49,7 @@ export interface ToolSpec {
 export type ContextPart =
   | { readonly _tag: "Text"; readonly text: string }
   | { readonly _tag: "Commentary"; readonly text: string }
-  | {
-      readonly _tag: "Thinking";
-      readonly provider: ProviderName;
-      readonly text: ThinkingText;
-      readonly signature: ThinkingSignature;
-    }
+  | { readonly _tag: "Thinking"; readonly provider: ProviderName; readonly text: ThinkingText; readonly received: Received }
   | { readonly _tag: "ToolCall"; readonly call: CallId; readonly tool: ToolName; readonly input: Received }
   | { readonly _tag: "ToolResult"; readonly call: CallId; readonly outcome: ToolOutcome }
   | { readonly _tag: "Unrecognised"; readonly provider: ProviderName; readonly received: Received };

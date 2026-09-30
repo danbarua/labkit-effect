@@ -21,16 +21,17 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
       yet; today only the fallback chain reports it.
 - [ ] `InputArrived.from` says what a fact's origin says (the outside world: a user, the system,
       another agent). Fold it into the origin.
-- [ ] Reasoning a person or an advisor can read: OpenAI's reasoning summary is inside the reasoning
-      item, recorded whole as `Unrecognised`; Anthropic's progress updates are `Thinking` parts.
-      Decode the text for readers while the provider's item still goes back unchanged.
 - [ ] Streaming: every adapter waits for the whole response. Stream where the provider streams,
       with cancellation, so a generation can be interrupted.
 - [ ] The Chat Completions adapter sends back none of a response's other fields
       (`reasoning_content`) and none of the session's settings; it records each as left out or
       enforced.
 - [ ] An output limit has no home. The Anthropic adapter supplies `max_tokens: 1024`, which counts
-      thinking tokens, so a model that thinks can be cut short by it.
+      thinking tokens, so a model that thinks is cut short by it (seen live: 916 of 1,024 tokens
+      spent thinking).
+- [ ] A response cut short is followed by another request whose last message is the assistant's.
+      Opus 5.5 rejects that ("does not support assistant message prefill. The conversation must
+      end with a user message"), and the turn fails.
 - [ ] A model's settings function can only shape a request. Refusing one is the same place with
       another outcome (`ModelVetoed`, which nothing produces yet); build it when a case needs it.
 - [ ] Settings functions exist for the Anthropic classes met so far (Opus 5.5, Fable and Mythos 5;

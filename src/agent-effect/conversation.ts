@@ -53,7 +53,7 @@ function message(fact: Fact, texts: ReadonlyMap<Seq, string>): ContextMessage | 
             case "ToolCall":
               return [{ _tag: "ToolCall", call: part.call, tool: part.tool, input: part.input }];
             case "Thinking":
-              return [{ _tag: "Thinking", provider: observation.provider, text: part.text, signature: part.signature }];
+              return [{ _tag: "Thinking", provider: observation.provider, text: part.text, received: part.received }];
             case "Unrecognised":
               return [{ _tag: "Unrecognised", provider: observation.provider, received: part.received }];
             default:
