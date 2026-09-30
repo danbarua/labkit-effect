@@ -203,5 +203,7 @@ export type Observation = typeof Observation.Type;
 export const CapturedObservation = Schema.Union([
   /** Part of a model response while it is still arriving, as received. */
   Schema.TaggedStruct("ModelStreamed", { turn: TurnId, chunk: Received }),
+  /** A part of a model response is complete, while the rest is still arriving. */
+  Schema.TaggedStruct("ModelPartArrived", { turn: TurnId, part: ModelPart }),
 ]);
 export type CapturedObservation = typeof CapturedObservation.Type;

@@ -120,7 +120,10 @@ then continues").
 ## Captured observations
 
 Streamed partial model output is side-band information for display, like a progress bar: a
-captured observation, not recorded (Dan). `throttle.ts` is a machine that releases captured items
+captured observation, not recorded (Dan). Two kinds are passed on while a response arrives: each
+stream event as received (`ModelStreamed`), and each part of the response once it is complete
+(`ModelPartArrived`). The response is recorded whole when the stream ends, with the parts that
+were completed: one still arriving when it was cut short is not part of it. `throttle.ts` is a machine that releases captured items
 in batches at most once per interval; time is an input, so it also serves tests.
 
 ## Direction (Dan, 2026-09-29): not a spec

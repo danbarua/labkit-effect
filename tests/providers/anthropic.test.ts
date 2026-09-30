@@ -16,6 +16,7 @@ import { AnthropicModelClient } from "../../src/agent-effect/providers/anthropic
 import { openSession } from "../../src/agent-effect/loop.ts";
 import { SmolToolRunner, smolCatalog } from "../support/smol-tools.ts";
 import { TurnContextAssembler } from "../../src/agent-effect/turn-context.ts";
+import { anthropicStream } from "../support/streams.ts";
 import { runTest } from "../support/run.ts";
 import { boringOpening } from "../support/boring.ts";
 
@@ -26,7 +27,7 @@ function scripted(call: { name: string; input: unknown }) {
     port: 0,
     async fetch(request) {
       received.push((await request.json()) as (typeof received)[number]);
-      return Response.json(
+      return anthropicStream(
         received.length === 1
           ? { content: [{ type: "tool_use", id: "toolu_1", ...call }], stop_reason: "tool_use" }
           : { content: [{ type: "text", text: "Understood." }], stop_reason: "end_turn" },
@@ -143,7 +144,7 @@ function recording(responses: ReadonlyArray<unknown>) {
     async fetch(request) {
       headers.push(Object.fromEntries(request.headers));
       bodies.push(await request.json());
-      return Response.json(responses[bodies.length - 1]);
+      return anthropicStream(responses[bodies.length - 1]);
     },
   });
   servers.push(server);
@@ -167,7 +168,7 @@ test("a request is the model, the default max_tokens, and the context's messages
     }).pipe(Effect.provide(AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))))),
   );
   expect(provider.bodies).toEqual([
-    { model: "boring-1", max_tokens: 32_768, messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }] },
+    { model: "boring-1", max_tokens: 32_768, stream: true, messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }] },
   ]);
 });
 
@@ -236,10 +237,10 @@ test("a tool turn sends the catalog, then the call and its result, as Messages b
   const tools = smolCatalog.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.input }));
   const question = { role: "user", content: [{ type: "text", text: "What is 2 + 3?" }] };
   expect(provider.bodies).toEqual([
-    { model: "boring-1", max_tokens: 32_768, tools, messages: [question] },
+    { model: "boring-1", max_tokens: 32_768, stream: true, tools, messages: [question] },
     {
       model: "boring-1",
-      max_tokens: 32_768,
+      max_tokens: 32_768, stream: true,
       tools,
       messages: [
         question,

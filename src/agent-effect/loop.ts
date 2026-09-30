@@ -20,17 +20,20 @@
  * besides its outcome (a failed attempt at it, say) is recorded at once through `Report`.
  *
  * Each fact is published as it is recorded; `subscribe` receives every fact recorded after it.
+ * What a model request streams is passed on to `streamed` and not recorded.
  */
 
-import { DateTime, Deferred, Effect, FiberSet, PubSub, Ref, type Scope, Semaphore } from "effect";
+import { Clock, DateTime, Deferred, Effect, FiberSet, PubSub, Ref, type Scope, Semaphore } from "effect";
 import type { Fact } from "../agent-core/fact.ts";
 import { deliver, emptyWorld, type World } from "../agent-core/router.ts";
-import { InputText, Seq, type SessionId, type TurnId } from "../agent-core/names.ts";
-import type { Observation } from "../agent-core/observation.ts";
+import { InputText, Millis, Seq, type SessionId, type TurnId } from "../agent-core/names.ts";
+import type { CapturedObservation, Observation } from "../agent-core/observation.ts";
 import type { Origin } from "../agent-core/origin.ts";
 import type { EffectRequest } from "../agent-core/request.ts";
+import { emptyHeld, type Held as Throttled, throttle, type ThrottleInput } from "../agent-core/throttle.ts";
 import { ContextAssembler, ModelClient, ModelProvider, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
+import { ModelStream, ModelStreamInterval, type Streamed } from "./model-stream.ts";
 import { CurrentOrigin, harnessParts } from "./origin.ts";
 import { Report } from "./report.ts";
 import { CurrentWork, type Work } from "./work.ts";
@@ -80,11 +83,18 @@ export interface Session {
   readonly facts: Effect.Effect<ReadonlyArray<Fact>>;
   /** Every fact recorded from now on, in order, for as long as the scope lasts. */
   readonly subscribe: Effect.Effect<PubSub.Subscription<Fact>, never, Scope.Scope>;
+  /**
+   * What model requests pass on while their responses stream, from now on and for as long as the
+   * scope lasts: stream events, held and released in batches, and each part as it is completed.
+   * None of it is recorded.
+   */
+  readonly streamed: Effect.Effect<PubSub.Subscription<CapturedObservation>, never, Scope.Scope>;
 }
 
 export const openSession: Effect.Effect<Session, never, Scope.Scope> = Effect.gen(function* () {
   const held = yield* Ref.make<Held>({ world: emptyWorld, facts: [], holds: new Map() });
   const recorded = yield* PubSub.unbounded<Fact>();
+  const captured = yield* PubSub.unbounded<CapturedObservation>();
   const lock = yield* Semaphore.make(1);
   const running = yield* FiberSet.make<void, never>();
   const cancels = yield* Ref.make<ReadonlyMap<TurnId, Deferred.Deferred<void>>>(new Map());
@@ -116,18 +126,57 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope> = Effect.ge
       return [...inputs, reviewed];
     });
 
+  /**
+   * Carries out `request` with what it streams passed on to `streamed`: events held and released in
+   * batches at most once per `ModelStreamInterval`; a completed part, and the end of the request,
+   * release what is held.
+   */
+  const passingOn = <A, R>(turn: TurnId, request: Effect.Effect<A, never, R>): Effect.Effect<A, never, R> =>
+    Effect.gen(function* () {
+      const interval = yield* ModelStreamInterval;
+      const held = yield* Ref.make(emptyHeld<CapturedObservation>());
+      const step = (inputs: (at: Millis) => ReadonlyArray<ThrottleInput<CapturedObservation>>) =>
+        Effect.gen(function* () {
+          const at = Millis.make(yield* Clock.currentTimeMillis);
+          const batch = yield* Ref.modify(held, (now) =>
+            inputs(at).reduce<readonly [ReadonlyArray<CapturedObservation>, Throttled<CapturedObservation>]>(
+              ([released, state], input) => {
+                const next = throttle(interval, state, input);
+                return [[...released, ...next.batch], next.held];
+              },
+              [[], now],
+            ),
+          );
+          yield* PubSub.publishAll(captured, batch);
+        });
+      const sink = (streamed: Streamed) =>
+        streamed._tag === "Chunk"
+          ? step((at) => [{ _tag: "Captured", item: { _tag: "ModelStreamed", turn, chunk: streamed.chunk }, at }])
+          : step((at) => [
+              { _tag: "Captured", item: { _tag: "ModelPartArrived", turn, part: streamed.part }, at },
+              { _tag: "Ended", at },
+            ]);
+      return yield* request.pipe(
+        Effect.provideService(ModelStream, sink),
+        Effect.ensuring(step((at) => [{ _tag: "Ended", at }])),
+      );
+    });
+
   const carryOut = (request: EffectRequest): Effect.Effect<ReadonlyArray<Observed>, never, Services> => {
     switch (request._tag) {
       case "RequestModelResponse":
-        return Effect.gen(function* () {
+        return passingOn(
+          request.turn,
+          Effect.gen(function* () {
           const facts = (yield* Ref.get(held)).facts;
           const target = yield* (yield* ModelProvider).select(facts, request.turn);
           const context = yield* (yield* ContextAssembler).assemble(facts, request.turn);
           const outcome = yield* (yield* ModelClient).respond(target, context, request.turn);
           // A response names the provider that gave it, which a fallback makes another than the one asked.
           const provider = outcome._tag === "ModelResponded" ? outcome.provider : target.provider;
-          return [{ origin: { _tag: "Provider", provider }, observation: outcome }];
-        });
+          return [{ origin: { _tag: "Provider", provider }, observation: outcome } satisfies Observed];
+          }),
+        );
       case "RunTool":
         return Effect.gen(function* () {
           const outcome = yield* (yield* ToolRunner).run(request.tool, request.input);
@@ -257,5 +306,6 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope> = Effect.ge
     idle: FiberSet.awaitEmpty(running),
     facts: Ref.get(held).pipe(Effect.map((current) => current.facts)),
     subscribe: PubSub.subscribe(recorded),
+    streamed: PubSub.subscribe(captured),
   };
 });

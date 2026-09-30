@@ -13,6 +13,8 @@ export const logKeys = {
     fellBack: "provider.request.fell_back",
     /** A stored tool input was not a JSON object, so `{}` was sent in its place. */
     toolInputReplaced: "provider.request.tool_input_replaced",
+    /** A response ended while parts of it were still arriving; they are not recorded. The details name them. */
+    partCut: "provider.response.part_cut",
     /** A part of an earlier response was not sent; the details say which part and why. */
     partLeftOut: "provider.request.part_left_out",
   },
@@ -27,5 +29,7 @@ export const logKeys = {
   anthropic: {
     /** The request carried the default `max_tokens`, because the session's settings gave no output limit. */
     maxTokensSupplied: "anthropic.request.max_tokens_supplied",
+    /** A stream's delta was of a type the adapter does not know; the block is recorded without it. */
+    deltaNotApplied: "anthropic.response.delta_not_applied",
   },
 } as const;

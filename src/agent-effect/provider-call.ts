@@ -5,11 +5,13 @@
  * used up. The whole error is logged where it is caught; the core sees a summary.
  */
 
-import { Duration, Effect, Schema } from "effect";
+import { Duration, Effect, Schema, Stream } from "effect";
+import * as Sse from "effect/encoding/Sse";
 import * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
 import type * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { FailureText, type TurnId } from "../agent-core/names.ts";
 import type { Observation } from "../agent-core/observation.ts";
 import type { Received } from "../agent-core/received.ts";
@@ -37,17 +39,17 @@ const failure = (caller: Caller, reason: AiError.AiErrorReason): AiError.AiError
   AiError.make({ module: caller.module, method: caller.method, reason });
 
 /**
- * The response to `payload` posted to `path`, parsed as JSON. A response that is not 2xx fails with
- * the `AiError` reason for its status, however it arrives: as a response, or, from a client that
- * fails such responses itself (Effect's OpenAI client does), inside a `StatusCodeError`.
+ * The response to `payload` posted to `path`. A response that is not 2xx fails with the `AiError`
+ * reason for its status, however it arrives: as a response, or, from a client that fails such
+ * responses itself (Effect's OpenAI client does), inside a `StatusCodeError`.
  */
-export const postJson = (
+const send = (
   http: HttpClient.HttpClient,
   caller: Caller,
   path: string,
   payload: Json,
-  headers: Readonly<Record<string, string>> = {},
-): Effect.Effect<Json, AiError.AiError> =>
+  headers: Readonly<Record<string, string>>,
+): Effect.Effect<HttpClientResponse.HttpClientResponse, AiError.AiError> =>
   HttpClientRequest.post(path).pipe(
     HttpClientRequest.setHeaders(headers),
     HttpClientRequest.bodyJsonUnsafe(payload),
@@ -57,29 +59,85 @@ export const postJson = (
         error.reason._tag === "StatusCodeError",
       (error) => Effect.succeed(error.reason.response),
     ),
-    Effect.flatMap((response) => response.text.pipe(Effect.map((text) => ({ status: response.status, text })))),
-    Effect.mapError((error) => {
-      const reason = error.reason;
-      switch (reason._tag) {
-        case "TransportError":
-        case "EncodeError":
-        case "InvalidUrlError":
-          return failure(caller, AiError.NetworkError.fromRequestError(reason));
+    Effect.mapError(fromHttp(caller)),
+    Effect.filterOrElse(
+      (response) => response.status >= 200 && response.status <= 299,
+      (response) =>
+        response.text.pipe(
+          Effect.mapError(fromHttp(caller)),
+          Effect.flatMap((text) =>
+            Effect.fail(
+              failure(
+                caller,
+                AiError.reasonFromHttpStatus({ status: response.status, body: text, description: `HTTP ${response.status}: ${text}` }),
+              ),
+            ),
+          ),
+        ),
+    ),
+  );
+
+const fromHttp =
+  (caller: Caller) =>
+  (error: HttpClientError.HttpClientError): AiError.AiError => {
+    const reason = error.reason;
+    switch (reason._tag) {
+      case "TransportError":
+      case "EncodeError":
+      case "InvalidUrlError":
+        return failure(caller, AiError.NetworkError.fromRequestError(reason));
+      default:
+        return failure(caller, new AiError.UnknownError({ description: reason.message }));
+    }
+  };
+
+const parsed = (caller: Caller, text: string): Effect.Effect<Json, AiError.AiError> =>
+  Effect.try({
+    try: () => JSON.parse(text) as Json,
+    catch: () => failure(caller, new AiError.InvalidOutputError({ description: `The response is not JSON: ${text}` })),
+  });
+
+/** The response to `payload` posted to `path`, parsed as JSON. */
+export const postJson = (
+  http: HttpClient.HttpClient,
+  caller: Caller,
+  path: string,
+  payload: Json,
+  headers: Readonly<Record<string, string>> = {},
+): Effect.Effect<Json, AiError.AiError> =>
+  send(http, caller, path, payload, headers).pipe(
+    Effect.flatMap((response) => response.text.pipe(Effect.mapError(fromHttp(caller)))),
+    Effect.flatMap((text) => parsed(caller, text)),
+  );
+
+/**
+ * The response to `payload` posted to `path`, as the server-sent events it streams: each event's
+ * data, parsed as JSON, as it arrives.
+ */
+export const postEvents = (
+  http: HttpClient.HttpClient,
+  caller: Caller,
+  path: string,
+  payload: Json,
+  headers: Readonly<Record<string, string>> = {},
+): Stream.Stream<Json, AiError.AiError> =>
+  send(http, caller, path, payload, headers).pipe(
+    Effect.map((response) => response.stream),
+    Stream.unwrap,
+    Stream.decodeText,
+    Stream.pipeThroughChannel(Sse.decode()),
+    Stream.mapError((error) => {
+      if (AiError.isAiError(error)) return error;
+      switch (error._tag) {
+        case "Retry":
+          return failure(caller, new AiError.UnknownError({ description: "The event stream asked to be retried" }));
+        case "SseError":
+          return failure(caller, new AiError.InvalidOutputError({ description: `The event stream could not be read: ${error.message}` }));
         default:
-          return failure(caller, new AiError.UnknownError({ description: reason.message }));
+          return fromHttp(caller)(error);
       }
     }),
-    Effect.flatMap(({ status, text }) => {
-      if (status < 200 || status > 299)
-        return Effect.fail(
-          failure(caller, AiError.reasonFromHttpStatus({ status, body: text, description: `HTTP ${status}: ${text}` })),
-        );
-      return Effect.try({
-        try: () => JSON.parse(text) as Json,
-        catch: () =>
-          failure(caller, new AiError.InvalidOutputError({ description: `The response is not JSON: ${text}` })),
-      });
-    }),
+    Stream.mapEffect((event) => parsed(caller, event.data)),
   );
 
 /** Fails with the response's text, when a provider's response does not have the shape expected. */

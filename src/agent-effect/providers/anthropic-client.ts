@@ -11,15 +11,17 @@
  * any other provider they are left out, and that is logged. The session's settings go in as
  * `anthropic-settings.ts` puts them for the model; what it enforced is recorded before the request.
  *
- * In: a response's `content` blocks become the observation's parts in order: a `text` block is
+ * In: the response streams, and is assembled from its events (`anthropic-stream.ts`); each event
+ * and each completed part is passed on as it arrives. The `content` blocks that were completed
+ * become the observation's parts in order: a `text` block is
  * `Text`, a `thinking` block is `Thinking` (its text, and the block as received), a `tool_use` block is `ToolCall`
  * (whatever the tool's name), any other block is `Unrecognised` holding the block as received. Everything else in the response is `metadata`. A failure is observed as `ModelFailed`;
  * what was received with it is logged here. The loop annotates these logs with the turn.
  */
 
 import { AnthropicClient } from "@effect/ai-anthropic";
-import { Effect, Layer } from "effect";
-import type * as AiError from "effect/ai/AiError";
+import { Effect, Layer, Stream } from "effect";
+import * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
 import {
   CallId,
@@ -39,9 +41,11 @@ import {
   type Target,
 } from "../contracts.ts";
 import { logKeys } from "../log-keys.ts";
-import { defaultRetries, invalidOutput, modelClientOf, postJson, type Retries, withRetries } from "../provider-call.ts";
+import { ModelStream } from "../model-stream.ts";
+import { defaultRetries, invalidOutput, modelClientOf, postEvents, type Retries, withRetries } from "../provider-call.ts";
 import { reportEnforced, type Settled } from "../settings.ts";
 import { anthropicSettings } from "./anthropic-settings.ts";
+import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
 import { receivedJson } from "../received.ts";
 import {
   type Called,
@@ -188,7 +192,36 @@ export const anthropicEndings = new Map([
   ["refusal", "Refused"],
 ] as const);
 
-/** One request: the observation it produced, or the `AiError` it failed with. */
+/** The HTTP status that goes with each error type the API reports, in a stream as in a response. */
+const statusOf = new Map([
+  ["invalid_request_error", 400],
+  ["authentication_error", 401],
+  ["permission_error", 403],
+  ["not_found_error", 404],
+  ["request_too_large", 413],
+  ["rate_limit_error", 429],
+  ["api_error", 500],
+  ["overloaded_error", 529],
+]);
+
+/** An error the stream reported after it started, as the `AiError` its type's HTTP status gives. */
+const failedInStream = (failed: { readonly type: string; readonly message: string }): AiError.AiError => {
+  const status = statusOf.get(failed.type);
+  const description = `The stream reported ${failed.type}: ${failed.message}`;
+  return AiError.make({
+    ...caller,
+    reason:
+      status === undefined
+        ? new AiError.UnknownError({ description })
+        : AiError.reasonFromHttpStatus({ status, body: JSON.stringify(failed), description }),
+  });
+};
+
+/**
+ * One request: the observation it produced, or the `AiError` it failed with. The response streams:
+ * each event is passed on as it arrives and each part as it is completed (`ModelStream`), and the
+ * observation is the message assembled when the stream ends, with the parts that were completed.
+ */
 const respondOnce = (
   http: HttpClient.HttpClient,
   target: Target,
@@ -199,15 +232,32 @@ const respondOnce = (
   Effect.gen(function* () {
     const sent = body(target, context);
     yield* logSupplied(sent.supplied);
-    const response = yield* postJson(
+    const passOn = yield* ModelStream;
+    const arrived = yield* postEvents(
       http,
       caller,
       "/v1/messages",
-      { ...(sent.json as Record<string, Json>), ...settled.fields },
+      { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true },
       settled.headers,
+    ).pipe(
+      Stream.runFoldEffect(
+        () => nothingYet,
+        (state, event) =>
+          Effect.gen(function* () {
+            yield* passOn({ _tag: "Chunk", chunk: receivedJson(event) });
+            const next = assemble(state, event);
+            if (next.failed !== undefined) return yield* failedInStream(next.failed);
+            if (next.notApplied !== undefined)
+              yield* Effect.logWarning(logKeys.anthropic.deltaNotApplied, { delta: next.notApplied });
+            if (next.completed !== undefined) yield* passOn({ _tag: "Part", part: part(next.completed) });
+            return next.state;
+          }),
+      ),
     );
-    if (!isObject(response) || !Array.isArray(response["content"]))
-      return yield* invalidOutput(caller, `The response has no content blocks: ${JSON.stringify(response)}`);
+    const response = assembled(arrived);
+    if (response === undefined) return yield* invalidOutput(caller, "The stream ended before a message started");
+    const notRecorded = cut(arrived);
+    if (notRecorded.length > 0) yield* Effect.logInfo(logKeys.provider.partCut, { parts: notRecorded });
     const { content, stop_reason, ...metadata } = response;
     return {
       _tag: "ModelResponded" as const,

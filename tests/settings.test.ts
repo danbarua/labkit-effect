@@ -19,6 +19,7 @@ import { TurnContextAssembler } from "../src/agent-effect/turn-context.ts";
 import { CountingTurns, NoTurnEndHooks } from "../src/agent-effect/turns.ts";
 import { observe, open, opened } from "./support/drive.ts";
 import { anthropicAt } from "./support/providers.ts";
+import { anthropicStream } from "./support/streams.ts";
 import { runTest } from "./support/run.ts";
 import { SmolToolRunner } from "./support/smol-tools.ts";
 import { test } from "./support/test.ts";
@@ -215,7 +216,7 @@ test("a request carries the settings the model allows; what was enforced is reco
     port: 0,
     async fetch(request) {
       bodies.push((await request.json()) as Record<string, unknown>);
-      return Response.json({ content: [{ type: "text", text: "Hello." }], stop_reason: "end_turn" });
+      return anthropicStream({ content: [{ type: "text", text: "Hello." }], stop_reason: "end_turn" });
     },
   });
   stops.push(() => server.stop(true));

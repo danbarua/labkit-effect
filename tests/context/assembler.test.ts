@@ -21,6 +21,7 @@ import { CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/turns.ts";
 import { BoringModelProvider, boringOpening } from "../support/boring.ts";
 import { observe, open, opened } from "../support/drive.ts";
 import { anthropicAt } from "../support/providers.ts";
+import { anthropicStream } from "../support/streams.ts";
 import { runTest } from "../support/run.ts";
 import { SmolToolRunner, smolCatalog } from "../support/smol-tools.ts";
 
@@ -72,7 +73,7 @@ test("a later request carries each earlier notice where it was sent, and a new o
     port: 0,
     async fetch(request) {
       bodies.push((await request.json()) as (typeof bodies)[number]);
-      return Response.json(responses[bodies.length - 1]);
+      return anthropicStream(responses[bodies.length - 1]);
     },
   });
   stops.push(() => server.stop(true));

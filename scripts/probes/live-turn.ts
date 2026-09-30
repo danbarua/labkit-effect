@@ -4,7 +4,7 @@
  * to `logs/live/` as a transcript to read (`.md`) and as recorded (`.facts.jsonl`), and prints how
  * the turn ended and the transcript's path.
  *
- * Settings follow the model as `name=value` (`thinking`, `observe`, `effort`).
+ * Settings follow the model as `name=value` (`thinking`, `observe`, `effort`, `maxOutputTokens`).
  *
  *   OPENAI_API_KEY=...    bun scripts/probes/live-turn.ts openai gpt-5.5 observe=all
  *   ANTHROPIC_API_KEY=... bun scripts/probes/live-turn.ts anthropic claude-opus-5-5 observe=all effort=high
@@ -33,9 +33,15 @@ import { transcript } from "./transcript.ts";
 
 const [provider = "openai", model = "gpt-5.5", ...said] = process.argv.slice(2);
 // A setting the core does not know fails here, as it would in a recorded opening.
-const settings = Schema.decodeUnknownSync(ModelSettings)(Object.fromEntries(said.map((each) => each.split("="))), {
-  onExcessProperty: "error",
-});
+const settings = Schema.decodeUnknownSync(ModelSettings)(
+  Object.fromEntries(
+    said.map((each) => {
+      const [name, value = ""] = each.split("=");
+      return [name, /^\d+$/.test(value) ? Number(value) : value];
+    }),
+  ),
+  { onExcessProperty: "error" },
+);
 const variable = provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
 const key = process.env[variable];
 if (key === undefined || key === "") {

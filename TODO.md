@@ -21,17 +21,17 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
       yet; today only the fallback chain reports it.
 - [ ] `InputArrived.from` says what a fact's origin says (the outside world: a user, the system,
       another agent). Fold it into the origin.
-- [ ] Streaming: every adapter waits for the whole response. Stream where the provider streams;
-      pass the chunks on through the throttle as `ModelStreamed`, not recorded; record the whole
-      `ModelResponded` when the stream ends. (The loop already carries each request out in a fiber
-      of its own and ends its work when the turn is interrupted.)
-- [ ] A request whose turn is interrupted records nothing more than the interruption. With
-      streaming, record what had arrived, up to its last completed part.
+- [ ] Start each tool as soon as its call is complete in the stream, without waiting for the rest
+      of the response. The adapters already pass each completed part on (`ModelPartArrived`); the
+      core has no way yet to open a call before the response is recorded.
+- [ ] A request whose turn is interrupted records nothing more than the interruption. Record what
+      had arrived, up to its last completed part, with a result for each tool call in it, so the
+      conversation can go on from there.
+- [ ] The Chat Completions adapter does not stream.
+- [ ] A request retried after its stream had begun passes its parts on a second time.
 - [ ] The Chat Completions adapter sends back none of a response's other fields
       (`reasoning_content`) and none of the session's settings; it records each as left out or
       enforced.
-- [ ] A response cut short should end at its last completed part. Without streaming the adapter
-      cannot tell which part was cut, so the last one is recorded as it came.
 - [ ] Requests that follow one observation (several tool calls in one response) now run at the same
       time. Nothing limits how many, and nothing says which tools may not run together.
 - [ ] A model's own output limit: a `maxOutputTokens` above what a model allows is sent as asked,

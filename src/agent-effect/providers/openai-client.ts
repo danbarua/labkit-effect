@@ -9,7 +9,9 @@
  * out, and that is logged. The session's settings go in as `reasoning`
  * (`openai-settings.ts`); what that enforced is recorded before the request.
  *
- * In: the response's `output` items become the observation's parts in order: a `message` whose
+ * In: the response streams; each event and each completed item is passed on as it arrives, and
+ * the stream's last event carries the whole response. Its `output` items that were completed
+ * become the observation's parts in order: a `message` whose
  * content is all `output_text` is a `Text` for each, or a `Commentary` for each when its `phase` is
  * `commentary` (sent back with that phase); a `function_call` is `ToolCall` (whatever the
  * tool's name), its arguments kept as the text received; a `reasoning` item is `Thinking` (its
@@ -20,13 +22,15 @@
  */
 
 import { OpenAiClient } from "@effect/ai-openai";
-import { Effect, Layer, type Schema } from "effect";
-import type * as AiError from "effect/ai/AiError";
+import { Effect, Layer, type Schema, Stream } from "effect";
+import * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
 import { CallId, ModelText, StopReason, ThinkingText, ToolName, type TurnId } from "../../agent-core/names.ts";
 import type { ModelPart, Observation } from "../../agent-core/observation.ts";
 import { type ContextMessage, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
-import { defaultRetries, invalidOutput, modelClientOf, postJson, type Retries, withRetries } from "../provider-call.ts";
+import { defaultRetries, invalidOutput, modelClientOf, postEvents, type Retries, withRetries } from "../provider-call.ts";
+import { logKeys } from "../log-keys.ts";
+import { ModelStream } from "../model-stream.ts";
 import { reportEnforced, type Settled } from "../settings.ts";
 import { openAiSettings } from "./openai-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
@@ -171,6 +175,31 @@ const endings = new Map([
   ["incomplete: content_filter", "Refused"],
 ] as const);
 
+/** Whether an output item was still arriving when its response ended. */
+const stillArriving = (item: Json): boolean =>
+  isObject(item) && (item["status"] === "incomplete" || item["status"] === "in_progress");
+
+/** An error the stream reported, in a `response.failed` event's response or an `error` event. */
+const failedInStream = (event: Schema.JsonObject): AiError.AiError => {
+  const response = event["response"];
+  const error = response !== undefined && isObject(response) ? response["error"] : event;
+  const code = error !== undefined && error !== null && isObject(error) ? error["code"] : undefined;
+  const description = `The stream reported a failure: ${JSON.stringify(error ?? event)}`;
+  const status = code === "rate_limit_exceeded" ? 429 : code === "server_error" ? 500 : undefined;
+  return AiError.make({
+    ...caller,
+    reason:
+      status === undefined
+        ? new AiError.UnknownError({ description })
+        : AiError.reasonFromHttpStatus({ status, body: JSON.stringify(error ?? event), description }),
+  });
+};
+
+/**
+ * One request. The response streams: each event is passed on as it arrives and each output item's
+ * parts when the item is done (`ModelStream`); the observation is made from the response the
+ * stream's last event carries.
+ */
 const respondOnce = (
   http: HttpClient.HttpClient,
   target: Target,
@@ -181,22 +210,51 @@ const respondOnce = (
   Effect.gen(function* () {
     const sent = body(target, context);
     yield* logSupplied(sent.supplied);
-    const response = yield* postJson(
+    const passOn = yield* ModelStream;
+    const ended = yield* postEvents(
       http,
       caller,
       "/responses",
-      { ...(sent.json as Record<string, Json>), ...settled.fields },
+      { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true },
       settled.headers,
+    ).pipe(
+      Stream.runFoldEffect(
+        (): Json | undefined => undefined,
+        (response, event) =>
+          Effect.gen(function* () {
+            yield* passOn({ _tag: "Chunk", chunk: receivedJson(event) });
+            if (!isObject(event)) return response;
+            switch (event["type"]) {
+              case "response.output_item.done":
+                yield* Effect.forEach(parts(event["item"] ?? null), (part) => passOn({ _tag: "Part", part }), { discard: true });
+                return response;
+              case "response.completed":
+              case "response.incomplete":
+                return event["response"];
+              case "response.failed":
+              case "error":
+                return yield* failedInStream(event);
+              default:
+                return response;
+            }
+          }),
+      ),
     );
-    if (!isObject(response) || !Array.isArray(response["output"]))
-      return yield* invalidOutput(caller, `The response has no output items: ${JSON.stringify(response)}`);
-    const { output, status, incomplete_details, ...metadata } = response;
+    if (ended === undefined || !isObject(ended) || !Array.isArray(ended["output"]))
+      return yield* invalidOutput(caller, `The stream ended without a response: ${JSON.stringify(ended ?? null)}`);
+    const { output, status, incomplete_details, ...metadata } = ended;
+    // An item still arriving when the response ended (it was cut short) is not part of it.
+    const items = output as ReadonlyArray<Json>;
+    const whole = items.filter((item) => !stillArriving(item));
+    const cutItems = items.filter(stillArriving);
+    if (cutItems.length > 0)
+      yield* Effect.logInfo(logKeys.provider.partCut, { parts: cutItems.map((item) => (isObject(item) ? item["type"] : null)) });
     return {
       _tag: "ModelResponded" as const,
       turn,
       provider: target.provider,
       model: target.model,
-      parts: (output as ReadonlyArray<Json>).flatMap(parts),
+      parts: whole.flatMap(parts),
       stop: stopOf(status, incomplete_details),
       ending: endingOf(endings, stopOf(status, incomplete_details)),
       metadata: receivedJson(metadata),

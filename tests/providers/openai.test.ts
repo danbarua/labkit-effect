@@ -64,9 +64,10 @@ test("a tool turn sends the catalog, then the reasoning and call as received and
   expect(provider.paths).toEqual(["/responses", "/responses"]);
   expect(provider.headers[0]).toMatchObject({ authorization: "Bearer test-key" });
   expect(provider.bodies).toEqual([
-    { model: "boring-1", tools, input: [question] },
+    { model: "boring-1", stream: true, tools, input: [question] },
     {
       model: "boring-1",
+      stream: true,
       tools,
       input: [
         question,
