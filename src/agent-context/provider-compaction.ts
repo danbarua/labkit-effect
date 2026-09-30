@@ -11,7 +11,7 @@
 import { Effect } from "effect";
 import type * as AiError from "effect/ai/AiError";
 import type { ModelContext, Target } from "../agent-session/contracts.ts";
-import type { Compacted } from "../agent-session/providers/openai-client.ts";
+import type { Compacted } from "../agent-session/providers/openai-compaction.ts";
 import { type Summarizer, summaryMessage } from "./compaction.ts";
 import { SummarizerName } from "./forks.ts";
 

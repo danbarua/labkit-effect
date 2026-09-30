@@ -12,7 +12,7 @@ import { openSession } from "../loop.ts";
 import { receivedJson } from "../received.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
 import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
-import { openAiCompactions } from "./openai-client.ts";
+import { openAiCompactions } from "./openai-compaction.ts";
 import { XAiModelClient } from "./xai-client.ts";
 import grokStream from "./grok-stream.json" with { type: "json" };
 import { boringOpening } from "../../../tests/support/boring.ts";
