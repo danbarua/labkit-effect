@@ -127,6 +127,15 @@ block closes it tells the step `CallReady`, and the step opens and runs that cal
 recorded fact does not change: `ModelResponded` still holds the whole response when the stream
 ends, and calls already opened stay open.
 
+**Streaming, and every kind of thinking content.** Where a provider streams, requests stream; where
+it returns anything about the model's thinking (summaries, progress updates between tool calls,
+commentary before a tool call), requests ask for it. Two reasons: a person watching can interrupt
+a generation that is going off course and fix what misled it (reword the prompt, remove the
+context that was misread); and an advisor agent is given the thinking summaries and tool calls as
+they arrive, can make read-only tool calls of its own, and records nit, concern and blocker
+notices. A compaction can then say what was assumed, what the advisor warned, and what the better
+course was, which steers a model better than a bare rule ("never X").
+
 **Reconfiguring a session.** A change to how a session runs (the same model with different
 thinking, another model, another provider) is an observation recorded like any other, so a session
 loaded from its record, or a fork, goes on with it. It is a message posted to the session's inbox, and the session
