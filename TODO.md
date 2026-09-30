@@ -80,8 +80,18 @@ it (FizzBuzz, 20 turns: 27,556 of 29,032 input tokens).
 - [ ] The Chat Completions adapter against the local Qwen model (`http://localhost:8000/v1`,
       `mlx-community/Qwen3.5-9B-8bit`, as in the ACP log): streaming, `reasoning_content` sent back,
       tool calls.
-- [ ] A request retried after its stream had begun: a tool call that arrived in the first stream
-      has already started, and the retry's response names new calls. Test what the core records.
+- [ ] A stream cut after a tool call from it was passed on is not retried, and the turn fails
+      (`noRetryAfterCalls`): a retry's response names new calls, and the tool ran again for each.
+      Decide whether the turn should instead go on with the call that ran.
+- [ ] Thinking `off` on xAI is effort `low` for the first request only: once enforced, later
+      requests go with no effort (the model's default), because an `Effort` enforcement must name
+      an effort that was asked. Making `asked` optional on `Enforced.Effort` (agent-machine) would
+      record it.
+- [ ] grok-4.20 and grok-build-0.1 refuse `reasoning.effort` of any value; a thinking or effort
+      setting gets a 400 from them.
+- [ ] xAI's own compaction: after each one, Grok answered the last number before it again
+      (FizzBuzz 15 of 25 right; OpenAI's, through the same code, 25 of 25), also outside the
+      harness in 5 of 6 runs. Untested: whether sending the tools with `/compact` changes it.
 
 ### Telemetry
 
