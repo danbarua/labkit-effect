@@ -35,12 +35,12 @@ test("M1: a change of model during a step is taken between steps, before the nex
   observe(session, response([{ _tag: "ToolCall", call: "c1", tool: "ls", input: json({}) }]));
   observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } });
   expect(tags(session).slice(4)).toEqual([
-    "ModelAsked",
+    "AskModel",
     "ModelChangeArrived",
     "ModelResponded",
     "ToolEnded",
     "ModelChangeTaken",
-    "ModelAsked",
+    "TellModel",
   ]);
 });
 

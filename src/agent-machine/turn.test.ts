@@ -45,10 +45,10 @@ test("R5: the turn runs to an answer through one tool call", () => {
     "InputArrived",
     "TurnStarted",
     "InputDelivered",
-    "ModelAsked",
+    "AskModel",
     "ModelResponded",
     "ToolEnded",
-    "ModelAsked",
+    "TellModel",
     "ModelResponded",
     "TurnEndReviewed",
     "TurnEnded",
@@ -93,7 +93,7 @@ test("I4: a response cut short without tool calls ends the turn as cut short: th
     "InputArrived",
     "TurnStarted",
     "InputDelivered",
-    "ModelAsked",
+    "AskModel",
     "ModelResponded",
     "TurnEndReviewed",
     "TurnEnded",
@@ -110,12 +110,12 @@ test("I3 I4: a response cut short is followed by another request when input arri
   observe(session, cutShort("The report, first half", "max_tokens", "CutShort"));
   observe(session, cutShort("and the second half.", "end_turn", "Complete"));
   expect(tags(session).slice(4)).toEqual([
-    "ModelAsked",
+    "AskModel",
     "InputArrived",
     "ModelResponded",
     "InputDelivered",
     "TurnEndReviewed",
-    "ModelAsked",
+    "TellModel",
     "ModelResponded",
     "TurnEndReviewed",
     "TurnEnded",
@@ -171,12 +171,12 @@ test("TC1 TC2: a call that arrives while the response streams is run at once; th
     ],
   });
   expect(tags(session).slice(4)).toEqual([
-    "ModelAsked",
+    "AskModel",
     "ToolCallArrived",
     "ToolCallDispatched",
     "ToolEnded",
     "ModelResponded",
-    "ModelAsked",
+    "TellModel",
   ]);
   expect(session.requests.map((request) => request._tag)).toEqual(["RequestModelResponse", "RunTool", "RequestModelResponse"]);
   expect(tags(session)).not.toContain("ObservationNotExpected");
@@ -198,7 +198,7 @@ test("TC2: a response's calls that did not arrive earlier are run when it comes;
   observe(session, { _tag: "ToolEnded", call: "c2", outcome: { _tag: "Succeeded", output: json([]) } });
   expect(tags(session).at(-1)).toBe("ToolEnded");
   observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json([]) } });
-  expect(tags(session).slice(-2)).toEqual(["ToolEnded", "ModelAsked"]);
+  expect(tags(session).slice(-2)).toEqual(["ToolEnded", "TellModel"]);
 });
 
 test("I7: a whole response that is not yet an answer is followed by another request", () => {
@@ -207,7 +207,7 @@ test("I7: a whole response that is not yet an answer is followed by another requ
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "write the report" });
   observe(session, { ...cutShort("Writing it.", "pause_turn", "Unfinished"), parts: [{ _tag: "Commentary", text: "Writing it." }] });
   observe(session, cutShort("The report.", "end_turn", "Complete"));
-  expect(tags(session).slice(4)).toEqual(["ModelAsked", "ModelResponded", "ModelAsked", "ModelResponded", "TurnEndReviewed", "TurnEnded"]);
+  expect(tags(session).slice(4)).toEqual(["AskModel", "ModelResponded", "TellModel", "ModelResponded", "TurnEndReviewed", "TurnEnded"]);
   expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { ending: { _tag: "Answered" } } });
 });
 
@@ -222,7 +222,7 @@ test("S6: a request that was made is recorded; the step waits for what comes of 
     model: "claude-sonnet-5",
     sent: json({ messages: [{ role: "user", parts: [{ _tag: "Text", text: "hello" }] }] }),
   });
-  expect(tags(session).slice(-2)).toEqual(["ModelAsked", "ModelRequestDispatched"]);
+  expect(tags(session).slice(-2)).toEqual(["AskModel", "ModelRequestDispatched"]);
   expect(session.world.agent.state._tag).toBe("Running");
   observe(session, cutShort("Hello.", "end_turn", "Complete"));
   expect(tags(session).slice(-3)).toEqual(["ModelResponded", "TurnEndReviewed", "TurnEnded"]);

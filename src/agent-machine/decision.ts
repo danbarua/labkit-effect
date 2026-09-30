@@ -3,7 +3,7 @@
  */
 
 import { Schema } from "effect";
-import { FailureText, Inputs, Seq, TurnId } from "./names.ts";
+import { FailureText, Inputs, Seq, TurnId, StepIndex } from "./names.ts";
 import { Received } from "./received.ts";
 
 /** How a turn ended. */
@@ -28,10 +28,17 @@ export const Decision = Schema.Union([
    */
   Schema.TaggedStruct("InputDelivered", { turn: TurnId, inputs: Inputs }),
   /**
-   * The harness asked the model for the next step of `turn`. The request is made from the facts
-   * recorded before this one; which of them it sends is the conversation view's business.
+   * The model is to be asked for `turn`'s first step: the request that carries the turn's input.
+   * The request is made from the facts recorded before this one; which of them it sends is the
+   * conversation view's business.
    */
-  Schema.TaggedStruct("ModelAsked", { turn: TurnId }),
+  Schema.TaggedStruct("AskModel", { turn: TurnId }),
+  /**
+   * The model is to be told what came of `turn`'s previous step (its tool calls' results, input
+   * given between steps) and asked for `step`, the turn's next step. The request is made as for
+   * `AskModel`.
+   */
+  Schema.TaggedStruct("TellModel", { turn: TurnId, step: StepIndex }),
   /**
    * Inputs queued during `turn` were discarded because the turn ended other than by an answer.
    */

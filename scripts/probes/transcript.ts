@@ -202,9 +202,14 @@ export function transcript(title: string, about: string, facts: ReadonlyArray<Fa
               says: `the input at ${decision.inputs.join(", ")} is given to \`${decision.turn}\``,
               body: decision.inputs.map((input) => quoted(inputs.get(input) ?? "(no input is recorded there)")).join("\n\n"),
             };
-          case "ModelAsked":
+          case "AskModel":
             return {
-              says: `the model is to be sent the next request of \`${decision.turn}\``,
+              says: `the model is to be asked for \`${decision.turn}\`'s first step`,
+              body: "The request, with what it carries, is the entry that follows.",
+            };
+          case "TellModel":
+            return {
+              says: `the model is to be told what came of the last step of \`${decision.turn}\` and asked for step ${decision.step}`,
               body: "The request, with what it carries, is the entry that follows.",
             };
           case "TurnEnded":

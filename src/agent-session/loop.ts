@@ -464,7 +464,11 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope> = sessionFr
 const arrivedIn = (facts: ReadonlyArray<Fact>, turn: TurnId): ReadonlyArray<ModelPart> => {
   const asked = facts.reduce(
     (found, fact, index) =>
-      fact._tag === "Decided" && fact.decision._tag === "ModelAsked" && fact.decision.turn === turn ? index : found,
+      fact._tag === "Decided" &&
+      (fact.decision._tag === "AskModel" || fact.decision._tag === "TellModel") &&
+      fact.decision.turn === turn
+        ? index
+        : found,
     -1,
   );
   return facts.slice(asked + 1).flatMap((fact) =>

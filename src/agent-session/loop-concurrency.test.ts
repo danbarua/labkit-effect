@@ -72,12 +72,12 @@ test("observe returns once the observation is recorded; input given while the mo
       }).pipe(Effect.provide(services(model.layer)));
     }),
   );
-  expect(tags(before)).toEqual(["SessionOpened", "InputArrived", "TurnStarted", "InputDelivered", "ModelAsked", "InputArrived"]);
+  expect(tags(before)).toEqual(["SessionOpened", "InputArrived", "TurnStarted", "InputDelivered", "AskModel", "InputArrived"]);
   expect(tags(after).slice(6)).toEqual([
     "ModelResponded",
     "InputDelivered",
     "TurnEndReviewed",
-    "ModelAsked",
+    "TellModel",
     "ModelResponded",
     "TurnEndReviewed",
     "TurnEnded",
@@ -105,7 +105,7 @@ test("an interruption while the model is asked stops the request; the response a
     "InputArrived",
     "TurnStarted",
     "InputDelivered",
-    "ModelAsked",
+    "AskModel",
     "TurnInterrupted",
     "ModelResponded",
     "TurnEnded",

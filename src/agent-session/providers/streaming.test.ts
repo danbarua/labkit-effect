@@ -327,13 +327,13 @@ test("TC2 TC3: a tool call is run as soon as it is complete in the stream, befor
   );
   const recorded = facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
   expect(recorded.slice(4)).toEqual([
-    "ModelAsked",
+    "AskModel",
     "ModelRequestDispatched",
     "ToolCallArrived",
     "ToolCallDispatched",
     "ToolEnded",
     "ModelResponded",
-    "ModelAsked",
+    "TellModel",
     "ModelRequestDispatched",
     "ModelResponded",
     "TurnEndReviewed",
@@ -403,7 +403,7 @@ test("X1: interrupted while a response streams and its tool runs: both are stopp
   );
   const recorded = facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
   expect(recorded.slice(4, 9)).toEqual([
-    "ModelAsked",
+    "AskModel",
     "ModelRequestDispatched",
     "ToolCallArrived",
     "ToolCallDispatched",

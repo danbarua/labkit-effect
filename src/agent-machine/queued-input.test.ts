@@ -50,7 +50,7 @@ test("I1 I3: input from another agent while a tool runs is given to the turn whe
   ]);
 
   const ended = observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json("2 failed") } });
-  expect(tags(session.journal.filter((fact) => fact.seq > ended))).toEqual(["InputDelivered", "ModelAsked"]);
+  expect(tags(session.journal.filter((fact) => fact.seq > ended))).toEqual(["InputDelivered", "TellModel"]);
   expect(session.journal.at(-2)).toMatchObject({ decision: { inputs: [interjection] } });
 });
 
@@ -61,7 +61,7 @@ test("I3 I4: a final answer with input queued does not end the turn: the input i
   expect(tags(session.journal.filter((fact) => fact.seq > answered))).toEqual([
     "InputDelivered",
     "TurnEndReviewed",
-    "ModelAsked",
+    "TellModel",
   ]);
   expect(session.journal.at(-3)).toMatchObject({ decision: { inputs: [interjection] } });
 
@@ -104,7 +104,7 @@ test("I6: input queued when a turn fails is dropped, and no turn starts until th
   expect(session.journal.filter((fact) => fact.seq > next).map((fact) => (fact._tag === "Observed" ? fact.observation : fact.decision)) as unknown).toEqual([
     { _tag: "TurnStarted", turn: "turn-2" },
     { _tag: "InputDelivered", turn: "turn-2", inputs: [next] },
-    { _tag: "ModelAsked", turn: "turn-2" },
+    { _tag: "AskModel", turn: "turn-2" },
   ]);
 });
 
@@ -124,7 +124,7 @@ test("R3: a vetoed call settles the batch and the model is asked again", () => {
     call: "c1",
     outcome: { _tag: "Failed", reason: { _tag: "Vetoed", reason: json({ rule: "no test runs on main" }) } },
   });
-  expect(tags(session.journal.filter((fact) => fact.seq > vetoed))).toEqual(["ModelAsked"]);
+  expect(tags(session.journal.filter((fact) => fact.seq > vetoed))).toEqual(["TellModel"]);
   expect(session.requests.map((request) => request._tag)).toEqual([
     "RequestModelResponse",
     "RunTool",
@@ -143,7 +143,7 @@ test("I2: input that arrives before a turn starts waits in the agent's mailbox, 
   expect(session.journal.filter((fact) => fact.seq > started).map((fact) => (fact as { decision: unknown }).decision)).toEqual([
     { _tag: "InputDelivered", turn: "wake-7", inputs: [first] },
     { _tag: "InputDelivered", turn: "wake-7", inputs: [second] },
-    { _tag: "ModelAsked", turn: "wake-7" },
+    { _tag: "AskModel", turn: "wake-7" },
   ]);
   expect(session.world.agent).toMatchObject({ state: { _tag: "Running", turn: "wake-7" }, mailbox: [] });
 });

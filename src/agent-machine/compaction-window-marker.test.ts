@@ -43,12 +43,12 @@ test("S4: a compaction window during a step waits in the turn's mailbox and is t
     "InputArrived",
     "TurnStarted",
     "InputDelivered",
-    "ModelAsked",
+    "AskModel",
     "ModelResponded",
     "CompactionWindow",
     "ToolEnded",
     "WindowOpened",
-    "ModelAsked",
+    "TellModel",
   ]);
 });
 

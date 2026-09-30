@@ -51,7 +51,11 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
   NotStarted: {
     StepStart: (state) => ({
       state: { _tag: "AwaitingModel", step: state.step, opened: [], unsettled: [] },
-      decisions: [{ _tag: "ModelAsked", turn: state.step.turn }],
+      decisions: [
+        state.step.index === 1
+          ? { _tag: "AskModel", turn: state.step.turn }
+          : { _tag: "TellModel", turn: state.step.turn, step: state.step.index },
+      ],
       requests: [{ _tag: "RequestModelResponse", turn: state.step.turn }],
       sends: [],
     }),

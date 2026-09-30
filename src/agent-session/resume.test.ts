@@ -100,7 +100,7 @@ test("X4: a model request was made and nothing came of it: no response was obser
     "InputArrived",
     "TurnStarted",
     "InputDelivered",
-    "ModelAsked",
+    "AskModel",
     "ModelRequestDispatched",
     "ModelResponded",
     "TurnEndReviewed",

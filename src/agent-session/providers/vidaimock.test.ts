@@ -124,13 +124,13 @@ describe.each([...adapters])("$name at VidaiMock", (adapter) => {
   test("a turn with tools: the model calls one, is sent its outcome, and answers", async () => {
     const { facts } = await oneTurn(client(noRetries));
     const recorded = tags(facts);
-    const second = recorded.lastIndexOf("ModelAsked");
+    const second = recorded.indexOf("TellModel");
     expect(recorded.slice(0, 6)).toEqual([
       "SessionOpened",
       "InputArrived",
       "TurnStarted",
       "InputDelivered",
-      "ModelAsked",
+      "AskModel",
       "ModelRequestDispatched",
     ]);
     // In the first step a streaming adapter's call arrives, and runs, before its response has ended;
@@ -140,7 +140,7 @@ describe.each([...adapters])("$name at VidaiMock", (adapter) => {
     );
     if (adapter.streams) expect(recorded.indexOf("ToolCallArrived")).toBeLessThan(recorded.indexOf("ModelResponded"));
     expect(recorded.slice(second)).toEqual([
-      "ModelAsked",
+      "TellModel",
       "ModelRequestDispatched",
       "ModelResponded",
       "TurnEndReviewed",

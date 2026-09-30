@@ -89,7 +89,7 @@ test("P4: a vetoed tool call, fed back to the core, settles the batch and the mo
   const [output] = run(denyTools(["rm"]), [{ _tag: "Requested", request }]);
   if (output?._tag !== "Observe") throw new Error(`expected a veto, got ${JSON.stringify(output)}`);
   observe(session, output.observation);
-  expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "ModelAsked", turn: "turn-1" } });
+  expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "TellModel", turn: "turn-1" } });
 });
 
 test("P4: a vetoed model request ends the turn, recorded with the policy's reason", () => {

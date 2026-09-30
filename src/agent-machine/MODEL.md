@@ -54,7 +54,7 @@ and report `TurnStarted`.
 
 | Decision | Request | Observed outcome |
 |---|---|---|
-| `ModelAsked` | `RequestModelResponse` | `ModelRequestDispatched` when the request is made, then `ModelResponded`, `ModelFailed` or `ModelVetoed` |
+| `AskModel` (a turn's first step), `TellModel` (each later step) | `RequestModelResponse` | `ModelRequestDispatched` when the request is made, then `ModelResponded`, `ModelFailed` or `ModelVetoed` |
 | (none: every proposed call is requested) | `RunTool` | `ToolCallDispatched` when the tool begins to run, then `ToolEnded` (`Succeeded`, `Failed`) |
 | (none: the model gave a response with no tool calls) | `BeforeTurnEnded` | input, if any, then `TurnEndReviewed` |
 | (none: the turn was interrupted) | `StopTurnWork` | each request under way reports how far it got |
@@ -132,8 +132,10 @@ The model's response to a request is its observation of what the request carried
 result is the harness's observation of the tool (Dan: the LLM "observes the tool result out loud and
 then continues").
 
-- S1. `ModelAsked { turn }` is recorded where the request is made: it is made from the facts before
-  it, and the conversation view decides which of them are sent.
+- S1. `AskModel { turn }` (the turn's first step, which carries its input) or
+  `TellModel { turn, step }` (each later step, after what the step before came to) is recorded
+  where the request is made: it is made from the facts before it, and the conversation view
+  decides which of them are sent.
 - S2. The model has seen a fact once it responds to a request that contained it. A request that
   fails leaves what it carried unseen. Working out what is unseen belongs to whatever reads the
   facts for a purpose (the next request, a person's display, a protocol).
@@ -144,9 +146,9 @@ then continues").
   that failed on the way, after which the request went on, is `ModelAttemptFailed`; it is recorded
   when it happens, and the turn does not end.
 - S6. A request for a model response is three facts, as a tool call is: the core asked
-  (`ModelAsked`), the request was made (`ModelRequestDispatched`, naming the provider and model it
+  (`AskModel` or `TellModel`), the request was made (`ModelRequestDispatched`, naming the provider and model it
   went to and holding what it carried: the system prompt, the tools and the conversation; once
-  for each provider tried), and what came of it. `ModelAsked` holds only the turn: what a request
+  for each provider tried), and what came of it. The decision holds only the turn and step: what a request
   carries is not decided by the core, and is on record in the fact that the request was made. A request that was made and has no
   outcome recorded is indeterminate: whether the model saw what it carried is not known.
 - S4. A compaction window is reported by the layers around the core, as the span they chose:

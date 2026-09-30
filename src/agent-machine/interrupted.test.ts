@@ -32,7 +32,7 @@ test("X1 X3: an interruption during a step stops the turn's work; the turn ends 
     "InputArrived",
     "TurnStarted",
     "InputDelivered",
-    "ModelAsked",
+    "AskModel",
     "InputArrived",
     "TurnInterrupted",
     "ModelResponded",
