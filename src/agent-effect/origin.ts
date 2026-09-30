@@ -21,7 +21,7 @@ export const reportedBy =
   <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
     Effect.provideService(effect, CurrentOrigin, origin);
 
-const harness = (part: string): Origin => ({ _tag: "Harness", part: HarnessPart.make(part) });
+const harness = (part: string): Extract<Origin, { _tag: "Harness" }> => ({ _tag: "Harness", part: HarnessPart.make(part) });
 
 /** The parts of the harness that report observations. */
 export const harnessParts = {

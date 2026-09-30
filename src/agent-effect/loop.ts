@@ -91,10 +91,24 @@ interface Started {
 
 interface Held {
   readonly world: World;
-  /** How many times turn-end hooks have held each turn open. */
-  readonly holds: ReadonlyMap<TurnId, number>;
   readonly facts: ReadonlyArray<Fact>;
 }
+
+/**
+ * How many times the turn-end hooks have held `turn` open: the reviews of it in which they gave
+ * feedback. Each is on record as the feedback, given as input by the hooks, and the review after it.
+ */
+const holdsOf = (facts: ReadonlyArray<Fact>, turn: TurnId): number =>
+  facts.reduce(
+    (state, fact) => {
+      if (fact._tag !== "Observed") return state;
+      const fromHooks = fact.origin._tag === "Harness" && fact.origin.part === harnessParts.turnEndHooks.part;
+      if (fact.observation._tag === "InputArrived" && fromHooks) return { ...state, feedback: true };
+      if (fact.observation._tag !== "TurnEndReviewed" || fact.observation.turn !== turn) return state;
+      return { holds: state.feedback ? state.holds + 1 : state.holds, feedback: false };
+    },
+    { holds: 0, feedback: false },
+  ).holds;
 
 type Services = ModelProvider | ContextAssembler | ModelClient | Turns | ToolRunner | TurnEndHooks;
 
@@ -128,7 +142,7 @@ export interface Session {
  * The turns that start from here need identities the facts have not used: that is `Turns`' business.
  */
 export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, never, Scope.Scope> => Effect.gen(function* () {
-  const held = yield* Ref.make<Held>({ world: worldOf(facts), facts, holds: new Map() });
+  const held = yield* Ref.make<Held>({ world: worldOf(facts), facts });
   const recorded = yield* PubSub.unbounded<Fact>();
   const captured = yield* PubSub.unbounded<CapturedObservation>();
   const lock = yield* Semaphore.make(1);
@@ -142,7 +156,7 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
   const reviewTurnEnd = (turn: TurnId): Effect.Effect<ReadonlyArray<Observed>, never, Services> =>
     Effect.gen(function* () {
       const { hooks, maxHolds } = yield* TurnEndHooks;
-      const holds = (yield* Ref.get(held)).holds.get(turn) ?? 0;
+      const holds = holdsOf((yield* Ref.get(held)).facts, turn);
       const origin = harnessParts.turnEndHooks;
       const reviewed: Observed = { origin, observation: { _tag: "TurnEndReviewed", turn } };
       if (hooks.length > 0 && holds >= maxHolds) {
@@ -151,7 +165,6 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
       }
       const feedback = (yield* Effect.forEach(hooks, (hook) => hook(turn))).flat();
       if (feedback.length === 0) return [reviewed];
-      yield* Ref.update(held, (now) => ({ ...now, holds: new Map([...now.holds, [turn, holds + 1]]) }));
       yield* Effect.logInfo(logKeys.loop.turnHeld, { hold: holds + 1, maxHolds, feedback: feedback.length });
       const inputs = feedback.map(
         (text): Observed => ({
