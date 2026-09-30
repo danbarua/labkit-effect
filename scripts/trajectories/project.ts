@@ -8,9 +8,10 @@ import { join } from "node:path";
 import { DateTime, Option, Schema } from "effect";
 import { WindowSummary } from "../../src/agent-context/forks.ts";
 import { Fact } from "../../src/agent-core/fact.ts";
-import { HarnessPart, Seq, ToolName, Via } from "../../src/agent-core/names.ts";
+import { HarnessPart, type ModelName, type ProviderName, Seq, ToolName, type TurnId, Via } from "../../src/agent-core/names.ts";
 import { Observation } from "../../src/agent-core/observation.ts";
 import type { Origin } from "../../src/agent-core/origin.ts";
+import { Received } from "../../src/agent-core/received.ts";
 import type { EffectRequest } from "../../src/agent-core/request.ts";
 import { deliver, emptyWorld, type World } from "../../src/agent-core/router.ts";
 
@@ -94,8 +95,58 @@ export function projection(harness: string): Projection {
   const unmapped = new Map<string, number>();
   const decode = Schema.decodeUnknownSync(Observation);
   const encodeFact = Schema.encodeSync(Fact);
-  const state = { world: emptyWorld as World, time: undefined as DateTime.Utc | undefined, begun: false };
+  const state = {
+    world: emptyWorld as World,
+    time: undefined as DateTime.Utc | undefined,
+    begun: false,
+    /** The model the session last asked, as far as the record has said. */
+    model: undefined as { readonly provider: ProviderName; readonly model: ModelName } | undefined,
+  };
+  const decodeReceived = Schema.decodeUnknownSync(Received);
   const tools = new Map<string, string>();
+
+  /** Records the observation and the decisions after it; returns its position and the requests. */
+  const record = (observation: Observation) => {
+    const time = state.time;
+    if (time === undefined) throw new Error(`a ${observation._tag} came before any record with a time`);
+    const seq = Seq.make(facts.length + 1);
+    const outcome = deliver(state.world, seq, observation);
+    state.world = outcome.world;
+    if (observation._tag === "SessionOpened") state.model = observation.model;
+    else state.begun = true;
+    if (observation._tag === "ModelResponded") {
+      state.model = { provider: observation.provider, model: observation.model };
+      for (const part of observation.parts) if (part._tag === "ToolCall") tools.set(part.call, part.tool);
+    }
+    facts.push(encodeFact({ _tag: "Observed", seq, time, origin: originOf(observation, harness, tools), observation }));
+    for (const decision of outcome.decisions)
+      facts.push(encodeFact({ _tag: "Decided", seq: Seq.make(facts.length + 1), time, decision }));
+    return { seq, requests: outcome.requests };
+  };
+
+  /** What the requests of `turn`'s step under way report when they are stopped. */
+  const stoppedWork = (turn: TurnId): ReadonlyArray<Observation> => {
+    const step = [...(state.world.steps.get(turn)?.values() ?? [])].map((machine) => machine.state).find(
+      (each) => each._tag === "AwaitingModel" || each._tag === "RunningTools",
+    );
+    if (step === undefined || (step._tag !== "AwaitingModel" && step._tag !== "RunningTools")) return [];
+    const ends = step.unsettled.map(
+      (call): Observation => ({ _tag: "ToolEnded", call, outcome: { _tag: "Failed", reason: { _tag: "Indeterminate" } } }),
+    );
+    if (step._tag === "RunningTools" || state.model === undefined) return ends;
+    return [
+      ...ends,
+      {
+        _tag: "ModelResponded",
+        turn,
+        provider: state.model.provider,
+        model: state.model.model,
+        parts: [],
+        ending: { _tag: "Interrupted" },
+        metadata: decodeReceived(json({})),
+      },
+    ];
+  };
 
   return {
     readAt: (time) => {
@@ -105,19 +156,13 @@ export function projection(harness: string): Projection {
       state.time = state.time === undefined ? utc : DateTime.max(state.time, utc);
     },
     observe: (raw) => {
-      const observation = decode(raw);
-      const time = state.time;
-      if (time === undefined) throw new Error(`a ${observation._tag} came before any record with a time`);
-      const seq = Seq.make(facts.length + 1);
-      const outcome = deliver(state.world, seq, observation);
-      state.world = outcome.world;
-      if (observation._tag !== "SessionOpened") state.begun = true;
-      if (observation._tag === "ModelResponded")
-        for (const part of observation.parts) if (part._tag === "ToolCall") tools.set(part.call, part.tool);
-      facts.push(encodeFact({ _tag: "Observed", seq, time, origin: originOf(observation, harness, tools), observation }));
-      for (const decision of outcome.decisions)
-        facts.push(encodeFact({ _tag: "Decided", seq: Seq.make(facts.length + 1), time, decision }));
-      return { seq, requests: outcome.requests };
+      const observed = record(decode(raw));
+      // The record of an interrupted turn does not say how far its requests got. The importer plays
+      // the layer around the core: the response had not arrived, and how each running call ended
+      // was not observed.
+      for (const request of observed.requests)
+        if (request._tag === "StopTurnWork") for (const stopped of stoppedWork(request.turn)) record(stopped);
+      return observed;
     },
     count: (kind) => {
       unmapped.set(kind, (unmapped.get(kind) ?? 0) + 1);

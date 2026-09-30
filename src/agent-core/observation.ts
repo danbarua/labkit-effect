@@ -79,13 +79,18 @@ export type ToolOutcome = typeof ToolOutcome.Type;
 
 /**
  * Why a model's response stopped, as its adapter classifies the provider's own reason (kept in
- * `stop`): it is complete (with or without tool calls), it was cut short (a length limit, a pause,
- * a stop sequence), the provider refused it, the harness stopped it, or the adapter does not know
+ * `stop`): it is complete (with or without tool calls), it was cut short (a length limit, a stop
+ * sequence), it is whole but not yet an answer, the provider refused it, the harness stopped it, or the adapter does not know
  * the reason.
  */
 export const ResponseEnding = Schema.Union([
   Schema.TaggedStruct("Complete", {}),
   Schema.TaggedStruct("CutShort", {}),
+  /**
+   * The response is whole and is not the model's answer: it said what it is doing, or paused, and
+   * called no tool. The model is asked again.
+   */
+  Schema.TaggedStruct("Unfinished", {}),
   Schema.TaggedStruct("Refused", {}),
   /** The response was stopped while it was arriving; it holds the parts that were complete by then. */
   Schema.TaggedStruct("Interrupted", {}),

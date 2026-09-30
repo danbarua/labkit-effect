@@ -102,6 +102,19 @@ test("a commentary message is Commentary, and goes back as a message with that p
   });
 });
 
+test("a completed response that is only commentary is not an answer: the model is asked again", async () => {
+  const { provider, facts } = await turn([
+    { status: "completed", output: [{ type: "message", role: "assistant", phase: "commentary", content: [{ type: "output_text", text: "Working it out." }] }] },
+    answers,
+  ]);
+  const responses = facts.flatMap((fact) =>
+    fact._tag === "Observed" && fact.observation._tag === "ModelResponded" ? [fact.observation.ending._tag] : [],
+  );
+  expect(responses).toEqual(["Unfinished", "Complete"]);
+  expect(provider.bodies).toHaveLength(2);
+  expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Answered" } } });
+});
+
 test("a reasoning item is Thinking: its summary as text to read, and the item to send back as it came", async () => {
   const reasoning = {
     type: "reasoning",

@@ -200,3 +200,13 @@ test("a response's calls that did not arrive earlier are run when it comes; the 
   observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json([]) } });
   expect(tags(session).slice(-2)).toEqual(["ToolEnded", "ModelAsked"]);
 });
+
+test("a whole response that is not yet an answer is followed by another request", () => {
+  const session = open();
+  observe(session, opened);
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "write the report" });
+  observe(session, { ...cutShort("Writing it.", "pause_turn", "Unfinished"), parts: [{ _tag: "Commentary", text: "Writing it." }] });
+  observe(session, cutShort("The report.", "end_turn", "Complete"));
+  expect(tags(session).slice(4)).toEqual(["ModelAsked", "ModelResponded", "ModelAsked", "ModelResponded", "TurnEndReviewed", "TurnEnded"]);
+  expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { ending: { _tag: "Answered" } } });
+});

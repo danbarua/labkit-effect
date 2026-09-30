@@ -187,7 +187,7 @@ export const anthropicEndings = new Map([
   ["tool_use", "Complete"],
   ["max_tokens", "CutShort"],
   ["stop_sequence", "CutShort"],
-  ["pause_turn", "CutShort"],
+  ["pause_turn", "Unfinished"],
   ["model_context_window_exceeded", "CutShort"],
   ["refusal", "Refused"],
 ] as const);

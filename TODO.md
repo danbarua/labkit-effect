@@ -63,7 +63,10 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
 
 ## Trajectories
 
-- [ ] Claude Code: 7 divergent observations in 5 sessions, not yet examined.
+- [ ] Claude Code: 9 observations the core does not expect, and 49 that follow from two of them.
+      Three follow a refusal that Claude Code asked again after; three are responses with no turn;
+      one follows an answered turn; two follow a response that stopped on a stop sequence, which
+      Claude Code asked again after and the core ends the turn on.
 - [ ] Codex: 8 turns still running when Codex completes them; 10 completions while another turn
       runs. Neither diverges.
 - [ ] Codex compactions copy the user's messages word for word; match them back to positions so

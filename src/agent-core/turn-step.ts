@@ -2,7 +2,8 @@
  * A turn step: one request to the model and what follows from its response. The step asks the
  * model; each tool call opens a call and requests it be run, when it arrives while the response
  * streams or, for one that did not, when the response does; the step waits for each to settle. A
- * response without tool calls is a final answer, unless it was cut short or stopped. An attempt at the request that failed while
+ * response without tool calls is a final answer, unless it was cut short or stopped, or was whole
+ * and not yet an answer, in which case the turn asks again. An attempt at the request that failed while
  * the request goes on changes nothing; the step waits for the request's outcome. The step tells its
  * turn how it finished.
  */
@@ -88,7 +89,12 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
         return done(
           state.step,
           toConversationTurn(state.step.turn, {
-            _tag: message.ending._tag === "Complete" ? "StepAnswered" : "StepCutShort",
+            _tag:
+              message.ending._tag === "Complete"
+                ? "StepAnswered"
+                : message.ending._tag === "Unfinished"
+                  ? "StepUnfinished"
+                  : "StepCutShort",
           }),
         );
       if (unsettled.length === 0) return done(state.step, toConversationTurn(state.step.turn, { _tag: "StepToolsSettled" }));

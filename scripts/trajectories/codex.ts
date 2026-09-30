@@ -29,7 +29,7 @@
  *   summary as text), anything else (a web search the provider ran) is `Unrecognised`. Codex records no stop reason, and
  *   its older versions do not mark which message is the final answer, so the response is classified
  *   by what Codex did next: `Complete` when it has a tool call or a message marked as the final
- *   answer, or when the turn ended or input came next; `CutShort` when Codex asked the model again.
+ *   answer, or when the turn ended or input came next; `Unfinished` when Codex asked the model again.
  *   Tool outputs recorded before the response is complete are given after it;
  * - a tool call's output is `ToolEnded` with `Succeeded`: Codex records no failure flag;
  * - after a final answer the core asks `BeforeTurnEnded`; it is answered (`TurnEndReviewed`) at the
@@ -174,7 +174,7 @@ export async function importCodex(source: string): Promise<Imported> {
       provider: "openai",
       model: state.model,
       parts,
-      ending: { _tag: complete ? "Complete" : "CutShort" },
+      ending: { _tag: complete ? "Complete" : "Unfinished" },
       metadata: json({ items: items.map((item) => item["id"] ?? null), usage }),
     });
     for (const output of state.held.splice(0)) toolEnded(output);
