@@ -15,7 +15,7 @@ import { runTest } from "../../tests/support/run.ts";
 import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { test } from "../../tests/support/test.ts";
 import { ModelClient, type ModelContext } from "./contracts.ts";
-import { resumeSession } from "./loop.ts";
+import { endTurnLeftRunning, resumeSession, sessionFrom } from "./loop.ts";
 import { ModelFromFacts } from "./model-choice.ts";
 import { receivedJson } from "./received.ts";
 import { countingTurnsAfter, NoTurnEndHooks } from "./turns.ts";
@@ -67,6 +67,11 @@ const resumed = (facts: ReadonlyArray<Fact>, then?: string) => {
     ),
   );
 };
+
+/** A model that is never to be asked. */
+const NoModel = Layer.succeed(ModelClient, {
+  respond: () => Effect.die(new Error("the model was asked")),
+});
 
 const tags = (facts: ReadonlyArray<Fact>) => facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
 
@@ -171,4 +176,19 @@ test("X4: facts that stop between turns are gone on from as they are; the next r
     { role: "assistant", parts: [{ _tag: "Text", text: "a.ts and b.ts." }] },
     { role: "user", parts: [{ _tag: "Text", text: "and the tests?" }] },
   ]);
+});
+
+test("X4: a session made from facts holds them as given; a turn they leave running stays so until it is ended", async () => {
+  const driven = asked();
+  observe(driven, dispatched);
+  const { made, ended } = await runTest(
+    Effect.gen(function* () {
+      const session = yield* sessionFrom(driven.journal);
+      const made = yield* session.facts;
+      yield* endTurnLeftRunning(session, driven.journal);
+      return { made, ended: (yield* session.facts).slice(made.length) };
+    }).pipe(Effect.provide(Layer.mergeAll(ModelFromFacts, WholeSessionAssembler, NoModel, countingTurnsAfter(1), NoTurnEndHooks, SmolToolRunner))),
+  );
+  expect(made).toEqual(driven.journal);
+  expect(tags(ended)).toEqual(["TurnInterrupted", "ModelResponded", "TurnEnded"]);
 });

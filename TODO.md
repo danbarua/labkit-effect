@@ -90,7 +90,13 @@ Built: the gate and what a policy is, pure and not in the loop (agent-policy `MO
 
 ### Going on from a session's facts
 
-Built: `resumeSession(facts)` (agent-core X4), tested with facts made in memory.
+Built: `sessionFrom(facts)`, and `endTurnLeftRunning` for a turn the facts leave running
+(agent-core X4), tested with facts made in memory.
+
+- [ ] `sessionFrom` does not check the facts it is given: the decisions recorded are not compared
+      with the ones the machines make again, nor the positions with 1, 2, 3, ….
+- [ ] Every observation is delivered again each time a session is made from its facts, so the cost
+      grows with the session's length.
 
 - [ ] After a turn that got no response (failed, vetoed, interrupted before anything arrived), the
       next request carries that turn's input and the new input as one user message. It is valid

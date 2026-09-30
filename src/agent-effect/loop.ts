@@ -101,8 +101,19 @@ export interface Session {
   readonly streamed: Effect.Effect<PubSub.Subscription<CapturedObservation>, never, Scope.Scope>;
 }
 
-/** A session that holds `facts`, with the core's machines as those facts leave them. */
-const sessionWith = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, never, Scope.Scope> => Effect.gen(function* () {
+/**
+ * A session that goes on from `facts`: another session's, or this one's before its process ended.
+ * This is all there is to resuming. The facts are kept as given, and the core's machines are put
+ * where the facts leave them, by delivering each recorded observation in order (`worldOf`). The
+ * core is pure, so a session's state is its facts and what the machines make of them; nothing else
+ * is restored.
+ *
+ * What it does not do: check the facts (the decisions recorded are not compared with the ones the
+ * machines make again, nor the positions with 1, 2, 3, …), or bring back what is held outside them
+ * (how often a turn's end was held, and where `Turns` has got to with turn identities: the turns
+ * that start from here need identities the facts have not used).
+ */
+export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, never, Scope.Scope> => Effect.gen(function* () {
   const held = yield* Ref.make<Held>({ world: worldOf(facts), facts, holds: new Map() });
   const recorded = yield* PubSub.unbounded<Fact>();
   const captured = yield* PubSub.unbounded<CapturedObservation>();
@@ -369,7 +380,7 @@ const sessionWith = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, never, 
 });
 
 /** A session with no facts yet. */
-export const openSession: Effect.Effect<Session, never, Scope.Scope> = sessionWith([]);
+export const openSession: Effect.Effect<Session, never, Scope.Scope> = sessionFrom([]);
 
 /** The parts of the response to `turn`'s latest request that are known to have arrived: its tool calls. */
 const arrivedIn = (facts: ReadonlyArray<Fact>, turn: TurnId): ReadonlyArray<ModelPart> => {
@@ -401,27 +412,26 @@ const askedIn = (
 };
 
 /**
- * A session that goes on from `facts`: another session's, or this one's before its process ended.
- * The facts are taken as given, and the core's machines are where those facts leave them.
- *
- * Facts may stop while a turn runs, with requests made and no outcome recorded. Nobody is carrying
- * those out any more, so the turn is interrupted, and each request under way is given what is known
- * of it: no response was observed (`Indeterminate`, with the tool calls that had arrived), and how
- * each call still running ended was not observed. The turn ends, and the session waits for input.
- *
- * The turns that start from here need identities the facts have not used: that is `Turns`' business.
+ * Ends the turn that `facts` leave running, in a `session` made from them. Facts can stop while a
+ * turn runs, with requests made and no outcome recorded: the process that was carrying them out has
+ * ended, and nobody will report how they went. The turn is interrupted, and each request under way
+ * is given what is known of it: no response was observed (`Indeterminate`, with the tool calls that
+ * had arrived), and how each call still running ended was not observed. No request is made again.
+ * When the facts leave no turn running, nothing is recorded.
  */
-export const resumeSession = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, never, Scope.Scope | Services> =>
+export const endTurnLeftRunning = (session: Session, facts: ReadonlyArray<Fact>): Effect.Effect<void, never, Services> =>
   Effect.gen(function* () {
-    const session = yield* sessionWith(facts);
-    const agent = worldOf(facts).agent.state;
-    if (agent._tag !== "Running") return session;
+    const world = worldOf(facts);
+    const agent = world.agent.state;
+    if (agent._tag !== "Running") return;
     const turn = agent.turn;
-    const asked = yield* askedIn(facts, turn);
-    const outcomes = notObserved(worldOf(facts), turn, asked, arrivedIn(facts, turn));
+    const outcomes = notObserved(world, turn, yield* askedIn(facts, turn), arrivedIn(facts, turn));
     yield* Effect.forEach([{ _tag: "TurnInterrupted" as const, turn }, ...outcomes], session.observe, { discard: true }).pipe(
       reportedBy(harnessParts.resume),
     );
     yield* session.idle;
-    return session;
   });
+
+/** A session that goes on from `facts`, with the turn they leave running, if any, ended. */
+export const resumeSession = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, never, Scope.Scope | Services> =>
+  sessionFrom(facts).pipe(Effect.tap((session) => endTurnLeftRunning(session, facts)));
