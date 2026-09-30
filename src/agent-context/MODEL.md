@@ -22,7 +22,9 @@ in `DESIGN.next.md`.
   lasts), and one once recorded is not changed. The session's facts grow as if nothing were
   compacted. `compact(session, summarizer)` compacts on request, between turns: the span is every
   fact after the last window's span, the summarizer is given the summaries of the windows before
-  and the messages of the span, the summary is recorded, and then the window is reported. The
+  and the messages of the span, the summary is recorded, and then the window is reported. A
+  `CompactionPolicy` decides from the facts whether to compact now and with which summarizer;
+  `compactIfDue` asks it, run between turns by whoever runs the session. The
   importers write the summaries Claude Code and Codex made to `summaries.jsonl`, written by
   `claude-code` or `codex`.
 - A6. A request carries the messages the request before it carried, as recorded with that request,
@@ -42,8 +44,9 @@ contents are estimated not to fit.
 
 ## What is not built
 
-- Compaction the session decides on itself, by a policy: a window is made only when `compact` is
-  asked for.
+- A policy the loop asks by itself: whoever runs the session asks one between turns.
+- Summaries per provider: every request carries every summary, whichever provider it goes to
+  (`DESIGN.next.md`).
 - A provider's own compaction (Anthropic's compaction block, OpenAI's `compaction` item). Neither
   adapter asks for one or sends one back.
 - Caching. No request marks anything for the provider's cache.
@@ -51,7 +54,8 @@ contents are estimated not to fit.
   facts), so `ModelSelectors` and `assemble` are used only by their tests.
 - Forks as sessions, the turn pointer, and addressing facts by session and position.
 
-The FizzBuzz example compacts on request with two summarizers (`src/examples/fizzbuzz/summarizers.ts`,
+The FizzBuzz example compacts with two summarizers (`src/examples/fizzbuzz/summarizers.ts`) when
+the count reaches given numbers or after every FizzBuzz (`compaction-policies.ts`;
 `tests/examples/fizzbuzz-compaction.test.ts`). It also has an older toy (`FizzBuzzCompaction` in
 `src/examples/fizzbuzz/compaction.ts`): a view that sends the completed turns as one summary,
 computed from the facts for every request, recording nothing and using no window.

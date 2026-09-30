@@ -99,6 +99,19 @@ export const compact = (session: Session, summarizer: Summarizer) =>
   });
 
 /**
+ * Decides, from the session's facts, whether to compact now and with which summarizer. Whoever runs
+ * the session asks it between turns (`compactIfDue`); undefined is not now.
+ */
+export type CompactionPolicy = (facts: ReadonlyArray<Fact>) => Summarizer | undefined;
+
+/** Compacts `session` if `policy` says to. Run it between turns. */
+export const compactIfDue = (session: Session, policy: CompactionPolicy) =>
+  Effect.gen(function* () {
+    const summarizer = policy(yield* session.facts);
+    if (summarizer !== undefined) yield* compact(session, summarizer);
+  });
+
+/**
  * A window's summary, as the text the summarizer wrote, in an instruction message: the harness
  * speaking, so the input that follows it stays a message of its own.
  */

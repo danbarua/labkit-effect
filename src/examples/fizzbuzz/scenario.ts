@@ -15,7 +15,7 @@ import {
   ToolCatalogs,
 } from "../../agent-context/assemble.ts";
 import { AgentContextAssembler, WholeConversation } from "../../agent-context/assembler.ts";
-import { compact, type Summarizer, Summaries, SummariesInMemory } from "../../agent-context/compaction.ts";
+import { type CompactionPolicy, compactIfDue, Summaries, SummariesInMemory } from "../../agent-context/compaction.ts";
 import type { WindowSummary } from "../../agent-context/forks.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
 import type { ModelTarget } from "../../agent-machine/observation.ts";
@@ -43,11 +43,8 @@ export interface Setup {
   readonly session?: string;
   /** The model the session asks, and the client that reaches it; the scripted model when not given. */
   readonly model?: { readonly target: ModelTarget; readonly client: Layer.Layer<ModelClient> };
-  /**
-   * Compactions the user asks for: after the turn in which the count reaches a key (the model's
-   * reply to the user's number), the session is compacted with that key's summarizer.
-   */
-  readonly compactions?: ReadonlyMap<number, Summarizer>;
+  /** Asked after every turn whether to compact, and with which summarizer; never, when not given. */
+  readonly compaction?: CompactionPolicy;
 }
 
 export const basic: Setup = { catalog: FizzBuzzToolCatalog, conversation: WholeConversation };
@@ -88,10 +85,8 @@ const played = (inputs: ReadonlyArray<string>, setup: Setup, summaries: Summarie
   );
   return Effect.gen(function* () {
     const session = yield* openSession;
-    const compactAfter = (text: string) => {
-      const summarizer = setup.compactions?.get(Number(text) + 1);
-      return summarizer === undefined ? Effect.void : compact(session, summarizer).pipe(Effect.andThen(session.idle));
-    };
+    const compaction = setup.compaction;
+    const compactAfter = compaction === undefined ? Effect.void : compactIfDue(session, compaction).pipe(Effect.andThen(session.idle));
     yield* session.observe(
       yield* opening(SessionId.make(setup.session ?? "fizzbuzz"), setup.model?.target ?? scripted),
     );
@@ -102,7 +97,7 @@ const played = (inputs: ReadonlyArray<string>, setup: Setup, summaries: Summarie
       (text) =>
         session
           .observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make(text) })
-          .pipe(Effect.andThen(session.idle), Effect.andThen(compactAfter(text))),
+          .pipe(Effect.andThen(session.idle), Effect.andThen(compactAfter)),
       { discard: true },
     );
     const facts = yield* session.facts;

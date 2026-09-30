@@ -32,8 +32,12 @@ not yet work is in its `DESIGN.next.md`. Delete an item when it is done or dropp
 Built: the window marker (agent-machine S4); compaction on request with a record of summaries and
 who wrote each, and the view that sends them in place of the spans (agent-context A5, A7).
 
-- [ ] Compaction the session decides on itself, by a policy (every n turns, by size, when the
-      provider's cache has expired).
+- [ ] The loop asks a compaction policy by itself (every n turns, by size, when the provider's
+      cache has expired); today whoever runs the session asks it between turns.
+- [ ] Summaries per provider: a request carries only its provider's summaries; after a switch,
+      compaction for the new provider starts from the beginning; switching back goes on from the
+      old provider's last summary (agent-context `DESIGN.next.md`).
+- [ ] Refuse a request to compact that would not fit the summarizer's context window.
 - [ ] A summarizer that asks a model. Its request belongs to the compaction's own record (a fork),
       which is not built.
 - [ ] A provider's own compaction: Anthropic's compaction block (beta `compact-2026-09-04`), OpenAI's

@@ -83,11 +83,18 @@ Both systems write the summary into the append-only journal, where it stays what
 A journal with cheap forks allows more: one log that holds everything is like one process holding
 everything, and cheap forks are like Unix `fork()`.
 
-- The journal records the boundary: which span of the session was compacted. The summary belongs to
-  a fork whose history is the summary and what follows it, and can be revised, replaced or compared
-  without changing the parent.
-- A session's compacted forks form a linked list of episodic summaries, each pointing at the one
-  before.
+- The journal records the boundary: which span of the session was compacted, and carries every
+  user and assistant message as if nothing were compacted. A summary is a piece of text recorded
+  somewhere it can be read back, with the window it covers and who wrote it. What the model is
+  sent is the tail of the journal since the last window, after the summaries of the windows before
+  it. A "fork" is that view: nothing is copied.
+- Summaries are kept per provider. A request to a provider carries that provider's summaries:
+  after a switch to a new provider there are none, so compaction for it starts from the beginning
+  of the session; switching back goes on from the old provider's last summary. Claude and GPT, in
+  one session, can see different conversations; what they see in common is the tail since the last
+  window.
+- A request to compact that would not fit the summarizer's context window is refused before it
+  is made.
 - What that allows:
   - trying compaction strategies side by side over the same parent (A/B tests);
   - forks that keep different facts: a fork made for a purpose keeps what that purpose needs (the
@@ -104,11 +111,12 @@ everything, and cheap forks are like Unix `fork()`.
   "GH: owner/repo/pulls/123". This runs off-line, before compaction is needed, and shrinks what a
   model is later asked to summarise. The same summaries serve an advisor agent, evaluations and
   analytics.
-- Providers compact too: Anthropic returns a compaction block (beta `compact-2026-09-04`), OpenAI
-  an encrypted `compaction` item. Each is opaque and works only with its own provider, so a
-  fallback to another provider after one needs a compaction of its own. That is one more fork over
-  the same window: a fallback compaction, made when the chain switches, or ahead of time.
-- Compaction forks link back to the journal they summarise, so a history can be shown with two or
+- Providers compact too, on the server: Anthropic returns a compaction block (beta
+  `compact-2026-09-04`), OpenAI an encrypted `compaction` item. Each is a summary written by the
+  provider, readable only by it, and it decides when to write one: the window is observed in its
+  response rather than asked for. It is one more provider's summaries: a session that goes to
+  another provider after one is compacted for that provider from the beginning, or ahead of time.
+- Summaries point at the windows they cover, so a history can be shown with two or
   more providers' compactions of the same span side by side, and our own strategies can be tried
   and evaluated against them the same way.
 
