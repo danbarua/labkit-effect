@@ -30,7 +30,8 @@ in `DESIGN.next.md`.
   request is projected again: a change to the projection changes what later requests add, not
   what an earlier request carried. A compaction's view is the one that rebuilds the messages.
 - A7. With `CompactedConversation`, the first request in a window carries the summary of every
-  window opened so far, in the order opened, each as recorded, then the messages of the facts the
+  window opened so far, in the order opened, each as recorded, as one instruction message (the
+  harness speaking, so the input after it stays a user message of its own), then the messages of the facts the
   window keeps and of those after its span. Later requests in the window carry on from it (A6).
   A summary is read from the record and never written again, so a change of summarizer changes
   the summaries of later windows only.

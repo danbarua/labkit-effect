@@ -71,13 +71,19 @@ test("A7: the first request in each window carries every summary so far, as writ
   const texts = summaries.map((each) => asText(each.summary));
   const firsts = requests(facts).filter((request) => request.inNewWindow);
   expect(firsts).toHaveLength(3);
-  expect(firsts.map((request) => request.sent.messages[0]) as unknown).toEqual([
-    { role: "user", parts: [{ _tag: "Text", text: texts[0] }, { _tag: "Text", text: "31" }] },
-    { role: "user", parts: [{ _tag: "Text", text: texts[0] }, { _tag: "Text", text: texts[1] }, { _tag: "Text", text: "61" }] },
-    {
-      role: "user",
-      parts: [{ _tag: "Text", text: texts[0] }, { _tag: "Text", text: texts[1] }, { _tag: "Text", text: texts[2] }, { _tag: "Text", text: "91" }],
-    },
+  expect(firsts.map((request) => request.sent.messages.slice(0, 2)) as unknown).toEqual([
+    [
+      { role: "instruction", parts: [{ _tag: "Text", text: texts[0] }] },
+      { role: "user", parts: [{ _tag: "Text", text: "31" }] },
+    ],
+    [
+      { role: "instruction", parts: [{ _tag: "Text", text: texts[0] }, { _tag: "Text", text: texts[1] }] },
+      { role: "user", parts: [{ _tag: "Text", text: "61" }] },
+    ],
+    [
+      { role: "instruction", parts: [{ _tag: "Text", text: texts[0] }, { _tag: "Text", text: texts[1] }, { _tag: "Text", text: texts[2] }] },
+      { role: "user", parts: [{ _tag: "Text", text: "91" }] },
+    ],
   ]);
 });
 

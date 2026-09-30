@@ -172,6 +172,38 @@ test("a request is the model, the default max_tokens, and the context's messages
   ]);
 });
 
+test("instructions that open the conversation go in the top-level system, after the system prompt; later ones are system messages", async () => {
+  const provider = recording([{ content: [{ type: "text", text: "32" }], stop_reason: "end_turn" }]);
+  await runTest(
+    Effect.gen(function* () {
+      yield* (yield* ModelClient).respond(
+        target,
+        {
+          system: "Count.",
+          tools: [],
+          messages: [
+            { role: "instruction", parts: [{ _tag: "Text", text: "Summary one." }, { _tag: "Text", text: "Summary two." }] },
+            { role: "user", parts: [{ _tag: "Text", text: "31" }] },
+            { role: "instruction", parts: [{ _tag: "Text", text: "A notice." }] },
+          ],
+        },
+        TurnId.make("turn-1"),
+      );
+    }).pipe(Effect.provide(AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))))),
+  );
+  expect(provider.bodies[0]).toMatchObject({
+    system: [
+      { type: "text", text: "Count." },
+      { type: "text", text: "Summary one." },
+      { type: "text", text: "Summary two." },
+    ],
+    messages: [
+      { role: "user", content: [{ type: "text", text: "31" }] },
+      { role: "system", content: [{ type: "text", text: "A notice." }] },
+    ],
+  });
+});
+
 test("a response's text is a Text part, stop_reason is the stop, and everything else is metadata", async () => {
   const provider = recording([
     {

@@ -8,7 +8,8 @@
  *
  * `CompactedConversation` is the view for a session with windows. The session's facts grow as if
  * nothing were compacted; the summaries are a second record beside them. The first request in a
- * window carries the summary of every window opened so far, in order, as each was recorded, then
+ * window carries the summary of every window opened so far, in order, as each was recorded, in one
+ * instruction message (consecutive messages of one role are merged), then
  * the messages of the facts the window keeps and of those after its span. Every later request
  * carries on from the one before it (`nextMessages`). A summary is read from the record and never
  * written again, so changing the summarizer changes the summaries of later windows and nothing
@@ -97,9 +98,12 @@ export const compact = (session: Session, summarizer: Summarizer) =>
     return window;
   });
 
-/** Every window's summary, as a message: the text the summarizer wrote. */
+/**
+ * A window's summary, as the text the summarizer wrote, in an instruction message: the harness
+ * speaking, so the input that follows it stays a message of its own.
+ */
 const summaryMessage = (summary: WindowSummary): ContextMessage => ({
-  role: "user",
+  role: "instruction",
   parts: [{ _tag: "Text", text: asText(summary.summary) }],
 });
 

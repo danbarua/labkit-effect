@@ -104,7 +104,9 @@ function blocks(part: ContextPart, target: Target, context: ModelContext, calls:
 
 /**
  * The Messages API role for a message. An instruction is a mid-conversation `system` message, which
- * not every model accepts; a model that does not fails the request with the provider's error.
+ * not every model accepts; a model that does not fails the request with the provider's error. The
+ * API rejects one as the first message, so instructions before the first user or assistant
+ * message are sent in the top-level `system` instead (`body`).
  */
 function role(message: ContextMessage): string {
   switch (message.role) {
@@ -118,9 +120,25 @@ function role(message: ContextMessage): string {
   }
 }
 
+/**
+ * The top-level `system`: the system prompt, then the text of the instructions that open the
+ * conversation, each a text block; the prompt alone as a string when no instruction opens it.
+ */
+function systemOf(context: ModelContext, opening: ReadonlyArray<ContextMessage>): Json | undefined {
+  const texts = [
+    ...(context.system === undefined ? [] : [context.system]),
+    ...opening.flatMap((message) => message.parts.flatMap((part) => (part._tag === "Text" ? [part.text] : []))),
+  ];
+  if (opening.length === 0) return context.system;
+  return texts.length === 0 ? undefined : texts.map((text) => ({ type: "text", text }));
+}
+
 function body(target: Target, context: ModelContext): Shaped {
   const calls = callsIn(context);
-  const messages = context.messages.flatMap((message) => {
+  const first = context.messages.findIndex((message) => message.role !== "instruction");
+  const opening = context.messages.slice(0, first === -1 ? context.messages.length : first);
+  const system = systemOf(context, opening);
+  const messages = context.messages.slice(opening.length).flatMap((message) => {
     const shaped = message.parts.map((part) => blocks(part, target, context, calls));
     const content = shaped.flatMap((each) => each.json as ReadonlyArray<Json>);
     const supplied = shaped.flatMap((each) => each.supplied);
@@ -131,7 +149,7 @@ function body(target: Target, context: ModelContext): Shaped {
     json: {
       model: target.model,
       max_tokens: target.settings?.maxOutputTokens ?? defaultMaxTokens,
-      ...(context.system === undefined ? {} : { system: context.system }),
+      ...(system === undefined ? {} : { system }),
       ...(context.tools.length === 0
         ? {}
         : {
