@@ -4,14 +4,20 @@
  * against it in `vidaimock.test.ts`.
  */
 
-import { expect } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
 import { OpenAiClient as OpenAiCompatClient } from "@effect/ai-openai-compat";
 import { Effect, Layer, Logger, Redacted } from "effect";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { ModelName, ProviderName, TurnId } from "../../agent-machine/names.ts";
+import type { Observation } from "../../agent-machine/observation.ts";
 import { ModelClient } from "../contracts.ts";
+import { openSession } from "../loop.ts";
+import { TurnContextAssembler } from "../turn-context.ts";
+import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { BoringModelProvider, boringOpening } from "../../../tests/support/boring.ts";
+import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
 import { logKeys } from "../log-keys.ts";
 import { anthropicModelClient } from "./anthropic-client.ts";
 import { openAiModelClient } from "./openai-client.ts";
@@ -50,6 +56,11 @@ test("a provider that cannot be reached fails as a network error, retried first"
  * A server that writes each response as raw HTTP and closes the connection: the n-th request gets
  * `answers[n]`, or the last one.
  */
+const stops: Array<() => unknown> = [];
+afterAll(() => {
+  for (const stop of stops) stop();
+});
+
 function rawServer(answers: ReadonlyArray<string>) {
   let requests = 0;
   const server = Bun.listen({
@@ -125,4 +136,51 @@ test("a body handed over whole whose size is not its Content-Length fails as a t
   expect(short.events(logKeys.provider.requestFailed)).toMatchObject([[logKeys.provider.requestFailed, { reason: "NetworkError", retryable: true }]]);
   const encoded = await asked(client({ "content-type": "application/json", "content-encoding": "gzip", "content-length": "7" }));
   expect(encoded.observed).toMatchObject({ _tag: "ModelResponded" });
+});
+
+test("a stream closed after a tool call of it was passed on is not retried: the tool has run once, and the turn fails", async () => {
+  const call = { type: "function_call", call_id: "call_1", name: "add", arguments: '{"a":2,"b":3}', status: "completed" };
+  const event = `data: ${JSON.stringify({ type: "response.output_item.done", output_index: 0, item: call })}\n\n`;
+  const opened = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+  let requests = 0;
+  // The call's event arrives; the connection closes, before the stream's last chunk, once the loop has had time to run it.
+  const server = Bun.listen({
+    hostname: "127.0.0.1",
+    port: 0,
+    socket: {
+      data(socket) {
+        requests++;
+        socket.write(`${opened}${Buffer.byteLength(event).toString(16)}\r\n${event}\r\n`);
+        setTimeout(() => socket.end(), 300);
+      },
+    },
+  });
+  stops.push(() => server.stop(true));
+  const facts = await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession;
+      yield* session.observe(boringOpening(smolCatalog));
+      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
+      yield* session.idle;
+      return yield* session.facts;
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          BoringModelProvider,
+          TurnContextAssembler,
+          openAiModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiAt(new URL(`http://127.0.0.1:${server.port}`)))),
+          CountingTurns,
+          NoTurnEndHooks,
+          SmolToolRunner,
+        ),
+      ),
+    ),
+  );
+  const tags = facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
+  expect(requests).toBe(1);
+  expect(tags.filter((tag) => tag === "ToolEnded")).toHaveLength(1);
+  expect(facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelFailed") as unknown).toMatchObject({
+    observation: { failure: expect.stringContaining("A tool call had been passed on, so it is not retried") },
+  });
+  expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Failed" } } });
 });

@@ -38,6 +38,7 @@ import {
   failedPosting,
   invalidOutput,
   modelClientOf,
+  noRetryAfterCalls,
   type Post,
   postEvents,
   postJson,
@@ -294,7 +295,7 @@ export const openAiRequests = (
       };
       return reportEnforced(turn, target, settled).pipe(
         Effect.andThen(logSupplied(sent.supplied)),
-        Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
+        Effect.andThen(respondOnce(http, post, target, turn).pipe(noRetryAfterCalls(caller), withRetries(retries), failedPosting(post))),
       );
     };
   });

@@ -97,7 +97,7 @@ const windowNamed = (facts: ReadonlyArray<Fact>, window: WindowId): WindowFact["
 /**
  * Compacts `session` for the provider it is asking, with `summarizer`, as `decidedBy` decided: the
  * span is every fact after that provider's last summary's window, the summarizer is given that
- * provider's summaries and the messages of the span, and the new window is `window-<n>` for the
+ * provider's summaries, the messages of the span and the model the session is asking, and the new window is `window-<n>` for the
  * session's n-th window. Run it between turns.
  */
 export const compact = (session: Session, summarizer: Summarizer, decidedBy: PolicyName) =>

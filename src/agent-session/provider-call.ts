@@ -6,7 +6,7 @@
  * is caught.
  */
 
-import { Data, Duration, Effect, Schema, Stream } from "effect";
+import { Data, Duration, Effect, Ref, Schema, Stream } from "effect";
 import * as Sse from "effect/encoding/Sse";
 import * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
@@ -19,6 +19,7 @@ import type { Received } from "../agent-machine/received.ts";
 import { ModelClient, type ProviderRequest } from "./contracts.ts";
 import { receivedJson } from "./received.ts";
 import { logKeys } from "./log-keys.ts";
+import { ModelStream } from "./model-stream.ts";
 
 type Json = Schema.Json;
 
@@ -163,8 +164,8 @@ export const postJson = (http: HttpClient.HttpClient, caller: Caller, post: Post
 /**
  * The response to `post`, as the server-sent events it streams: each event's data, parsed as JSON,
  * as it arrives. A stream is sent chunked, with no `Content-Length`; one closed before its last
- * chunk fails as a transport error, and is retried from the start, so whatever was passed on from
- * it is passed on again.
+ * chunk fails as a transport error, which is retried from the start (what was passed on from it is
+ * passed on again) unless a tool call of it was passed on (`noRetryAfterCalls`).
  */
 export const postEvents = (http: HttpClient.HttpClient, caller: Caller, post: Post): Stream.Stream<Json, AiError.AiError> =>
   send(http, caller, post).pipe(
@@ -217,6 +218,34 @@ export const withRetries =
       );
     return attempt(0);
   };
+
+/**
+ * `request`, whose response streams, failing as not retryable once a tool call of it has been
+ * passed on (`ModelStream`): the loop runs a call as soon as it is passed on, and a retried request
+ * would run the tool again, for the new call the provider makes. Before a call is passed on, a
+ * failure is as `request` failed.
+ */
+export const noRetryAfterCalls =
+  (caller: Caller) =>
+  <A, R>(request: Effect.Effect<A, AiError.AiError, R>): Effect.Effect<A, AiError.AiError, R> =>
+    Effect.gen(function* () {
+      const passOn = yield* ModelStream;
+      const called = yield* Ref.make(false);
+      return yield* request.pipe(
+        Effect.provideService(ModelStream, (streamed) =>
+          (streamed._tag === "Part" && streamed.part._tag === "ToolCall" ? Ref.set(called, true) : Effect.void).pipe(Effect.andThen(passOn(streamed))),
+        ),
+        Effect.catch((error: AiError.AiError) =>
+          Effect.flatMap(Ref.get(called), (passed) =>
+            Effect.fail(
+              passed && error.reason.isRetryable
+                ? failure(caller, new AiError.UnknownError({ description: `A tool call had been passed on, so it is not retried: ${error.message}` }))
+                : error,
+            ),
+          ),
+        ),
+      );
+    });
 
 /** A model client that makes `request`, and reports a failure as `ModelFailed`. */
 export const modelClientOf = (request: ProviderRequest) =>

@@ -42,7 +42,7 @@ import {
 } from "../contracts.ts";
 import { logKeys } from "../log-keys.ts";
 import { ModelStream } from "../model-stream.ts";
-import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEvents, type Retries, withRetries } from "../provider-call.ts";
+import { defaultRetries, failedPosting, invalidOutput, modelClientOf, noRetryAfterCalls, type Post, postEvents, type Retries, withRetries } from "../provider-call.ts";
 import { reportEnforced } from "../settings.ts";
 import { anthropicSettings } from "./anthropic-settings.ts";
 import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
@@ -300,7 +300,7 @@ export const anthropicRequests = (
       };
       return reportEnforced(turn, target, settled).pipe(
         Effect.andThen(logSupplied(sent.supplied)),
-        Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
+        Effect.andThen(respondOnce(http, post, target, turn).pipe(noRetryAfterCalls(caller), withRetries(retries), failedPosting(post))),
       );
     };
   });
