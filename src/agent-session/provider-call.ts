@@ -10,7 +10,7 @@ import { Data, Duration, Effect, Schema, Stream } from "effect";
 import * as Sse from "effect/encoding/Sse";
 import * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
-import type * as HttpClientError from "effect/http/HttpClientError";
+import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { FailureText, type TurnId } from "../agent-machine/names.ts";
@@ -90,8 +90,7 @@ const send = (
     Effect.filterOrElse(
       (response) => response.status >= 200 && response.status <= 299,
       (response) =>
-        response.text.pipe(
-          Effect.mapError(fromHttp(caller)),
+        bodyText(caller, response).pipe(
           Effect.flatMap((text) =>
             Effect.fail(
               failure(
@@ -104,6 +103,15 @@ const send = (
     ),
   );
 
+/** A response whose body did not arrive whole, as a transport error: `AiError` marks it retryable. */
+const bodyCut = (caller: Caller, request: HttpClientRequest.HttpClientRequest, description: string, cause?: unknown): AiError.AiError =>
+  failure(caller, AiError.NetworkError.fromRequestError(new HttpClientError.TransportError({ request, description, cause })));
+
+/**
+ * `HttpClientError` as `AiError`. A body that could not be read to its end (`DecodeError`: the
+ * connection closed before the `Content-Length` bytes, or before a chunked body's last chunk,
+ * arrived) is a transport error.
+ */
 const fromHttp =
   (caller: Caller) =>
   (error: HttpClientError.HttpClientError): AiError.AiError => {
@@ -113,6 +121,8 @@ const fromHttp =
       case "EncodeError":
       case "InvalidUrlError":
         return failure(caller, AiError.NetworkError.fromRequestError(reason));
+      case "DecodeError":
+        return bodyCut(caller, reason.request, `The response body could not be read to its end: ${reason.cause instanceof Error ? reason.cause.message : reason.message}`, reason.cause);
       default:
         return failure(caller, new AiError.UnknownError({ description: reason.message }));
     }
@@ -124,16 +134,37 @@ const parsed = (caller: Caller, text: string): Effect.Effect<Json, AiError.AiErr
     catch: () => failure(caller, new AiError.InvalidOutputError({ description: `The response is not JSON: ${text}` })),
   });
 
+/**
+ * The response's body as text. A body whose size is not the response's `Content-Length` fails as a
+ * transport error. The header counts the bytes as sent, so it is compared only for a body sent
+ * without a `Content-Encoding`: the client decompresses an encoded body before it is read here.
+ */
+const bodyText = (caller: Caller, response: HttpClientResponse.HttpClientResponse): Effect.Effect<string, AiError.AiError> =>
+  response.arrayBuffer.pipe(
+    Effect.mapError(fromHttp(caller)),
+    Effect.flatMap((bytes) => {
+      const declared = response.headers["content-length"];
+      const encoding = response.headers["content-encoding"];
+      return declared !== undefined && (encoding === undefined || encoding === "identity") && Number(declared) !== bytes.byteLength
+        ? Effect.fail(
+            bodyCut(caller, response.request, `The response body is ${bytes.byteLength} bytes; its Content-Length says ${declared}`),
+          )
+        : Effect.succeed(new TextDecoder().decode(bytes));
+    }),
+  );
+
 /** The response to `post`, parsed as JSON. */
 export const postJson = (http: HttpClient.HttpClient, caller: Caller, post: Post): Effect.Effect<Json, AiError.AiError> =>
   send(http, caller, post).pipe(
-    Effect.flatMap((response) => response.text.pipe(Effect.mapError(fromHttp(caller)))),
+    Effect.flatMap((response) => bodyText(caller, response)),
     Effect.flatMap((text) => parsed(caller, text)),
   );
 
 /**
  * The response to `post`, as the server-sent events it streams: each event's data, parsed as JSON,
- * as it arrives.
+ * as it arrives. A stream is sent chunked, with no `Content-Length`; one closed before its last
+ * chunk fails as a transport error, and is retried from the start, so whatever was passed on from
+ * it is passed on again.
  */
 export const postEvents = (http: HttpClient.HttpClient, caller: Caller, post: Post): Stream.Stream<Json, AiError.AiError> =>
   send(http, caller, post).pipe(
