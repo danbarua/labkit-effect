@@ -163,12 +163,53 @@ test("a session's settings are each as last said: by its opening, or by a change
   } as never);
 });
 
+test("what a model enforced is its setting from then on; what was said stands for another model, and saying it again puts the enforcement aside", async () => {
+  const session = open();
+  const settingsNow = async () => (await Effect.runPromise(modelOf(session.journal))).settings;
+  observe(session, {
+    ...opened,
+    model: { provider: "anthropic", model: "claude-opus-5-5", settings: { thinking: "off", effort: "high" } },
+  });
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
+  observe(session, {
+    _tag: "SettingEnforced",
+    turn: "turn-1",
+    provider: "anthropic",
+    model: "claude-opus-5-5",
+    enforced: { _tag: "Thinking", asked: "off", used: "auto" },
+    reason: "this model does not allow thinking to be turned off",
+  });
+  expect(await settingsNow()).toEqual({ thinking: "auto", effort: "high" } as never);
+  observe(session, { _tag: "ModelChangeArrived", provider: "anthropic", model: "claude-opus-5" });
+  observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "down", error: { mediaType: "text/plain", body: { _tag: "Text", text: "down" } } });
+  expect(await settingsNow()).toEqual({ thinking: "off", effort: "high" } as never);
+  observe(session, { _tag: "ModelChangeArrived", provider: "anthropic", model: "claude-opus-5-5" });
+  expect(await settingsNow()).toEqual({ thinking: "auto", effort: "high" } as never);
+  observe(session, { _tag: "ModelChangeArrived", provider: "anthropic", model: "claude-opus-5-5", settings: { thinking: "off" } });
+  expect(await settingsNow()).toEqual({ thinking: "off", effort: "high" } as never);
+});
+
+test("a setting enforced with nothing used in its place is no longer sent to that model", async () => {
+  const session = open();
+  observe(session, { ...opened, model: { ...opened.model, settings: { thinking: "off", effort: "high" } } });
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
+  observe(session, {
+    _tag: "SettingEnforced",
+    turn: "turn-1",
+    provider: "boring",
+    model: "boring-1",
+    enforced: { _tag: "Effort", asked: "high" },
+    reason: "thinking is off",
+  });
+  expect((await Effect.runPromise(modelOf(session.journal))).settings).toEqual({ thinking: "off" } as never);
+});
+
 const stops: Array<() => unknown> = [];
 afterAll(() => {
   for (const stop of stops) stop();
 });
 
-test("a request carries the settings the model allows, and what was enforced is recorded before the response", async () => {
+test("a request carries the settings the model allows; what was enforced is recorded before the first response, and once", async () => {
   const bodies: Array<Record<string, unknown>> = [];
   const server = Bun.serve({
     port: 0,
@@ -194,6 +235,7 @@ test("a request carries the settings the model allows, and what was enforced is 
         }),
       );
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "Hello" } as unknown as Observation);
+      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "Again" } as unknown as Observation);
       return yield* session.facts;
     }).pipe(
       Effect.provide(
@@ -208,13 +250,20 @@ test("a request carries the settings the model allows, and what was enforced is 
       ),
     ),
   );
-  expect(bodies[0]).toMatchObject({
-    model: "claude-opus-5-5",
-    thinking: { type: "adaptive", display: "summarized" },
-    output_config: { effort: "high" },
-  });
+  const sent = { model: "claude-opus-5-5", thinking: { type: "adaptive", display: "summarized" }, output_config: { effort: "high" } };
+  expect(bodies).toHaveLength(2);
+  expect(bodies[0]).toMatchObject(sent);
+  expect(bodies[1]).toMatchObject(sent);
   const observed = facts.flatMap((fact) => (fact._tag === "Observed" ? [fact] : []));
-  expect(observed.map((fact) => fact.observation._tag).slice(3)).toEqual(["SettingEnforced", "ModelResponded", "TurnEndReviewed"]);
+  expect(observed.map((fact) => fact.observation._tag).slice(3)).toEqual([
+    "SettingEnforced",
+    "ModelResponded",
+    "TurnEndReviewed",
+    "InputArrived",
+    "TurnStarted",
+    "ModelResponded",
+    "TurnEndReviewed",
+  ]);
   expect(observed[3] as unknown).toMatchObject({
     origin: { _tag: "Harness", part: "model settings" },
     observation: {

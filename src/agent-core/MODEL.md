@@ -164,6 +164,8 @@ plain terms, the way one would say it to a colleague. It shows up in the record 
 Each provider's adapter writes the wire format of its API. Each model, or class of models, that
 brings its own constraints has a small function that runs before the request and makes it one the
 provider will accept, doing the sensible thing and recording what it enforced
-(`SettingEnforced`); it is not a validator of every combination. Shaping a request and refusing one are the same place with a
+(`SettingEnforced`); it is not a validator of every combination. An enforcement is a change to the
+session's settings for that model: it is recorded on the first request, the requests after it are
+sent what the model allows, and nothing more is enforced. What was asked stands for any other model. Shaping a request and refusing one are the same place with a
 different outcome. Whoever needs a model without thinking chooses a model that allows it.
 

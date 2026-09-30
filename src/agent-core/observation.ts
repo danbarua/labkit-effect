@@ -173,7 +173,8 @@ export const Observation = Schema.Union([
   Schema.TaggedStruct("NoticeInserted", { turn: TurnId, text: NoticeText }),
   /**
    * A request for a model response went out with a setting other than the one asked for, because
-   * the model does not allow what was asked.
+   * the model does not allow what was asked. From then on what was used is the session's setting
+   * for that model.
    */
   Schema.TaggedStruct("SettingEnforced", {
     turn: TurnId,

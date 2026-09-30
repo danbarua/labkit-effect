@@ -26,12 +26,10 @@ Compiled from the notes (`src/*/MODEL.md`), the trajectory sweeps and review dis
 - [ ] The Chat Completions adapter sends back none of a response's other fields
       (`reasoning_content`) and none of the session's settings; it records each as left out or
       enforced.
-- [ ] An output limit has no home. The Anthropic adapter supplies `max_tokens: 1024`, which counts
-      thinking tokens, so a model that thinks is cut short by it (seen live: 916 of 1,024 tokens
-      spent thinking).
-- [ ] A response cut short is followed by another request whose last message is the assistant's.
-      Opus 5.5 rejects that ("does not support assistant message prefill. The conversation must
-      end with a user message"), and the turn fails.
+- [ ] A response cut short should end at its last completed part. Without streaming the adapter
+      cannot tell which part was cut, so the last one is recorded as it came.
+- [ ] A model's own output limit: a `maxOutputTokens` above what a model allows is sent as asked,
+      and the provider rejects it. A settings function per model class could enforce the nearest.
 - [ ] A model's settings function can only shape a request. Refusing one is the same place with
       another outcome (`ModelVetoed`, which nothing produces yet); build it when a case needs it.
 - [ ] Settings functions exist for the Anthropic classes met so far (Opus 5.5, Fable and Mythos 5;
