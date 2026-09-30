@@ -7,6 +7,7 @@ export const logKeys = {
   provider: {
     /** A model request failed for a reason that is retryable, and is tried again. */
     requestRetried: "provider.request.retried",
+    notRetried: "provider.request.not_retried",
     /** A model request failed and will not be tried again; the details are the whole error. */
     requestFailed: "provider.request.failed",
     /** A provider could not serve a model request, and it goes to the next provider in the chain. */

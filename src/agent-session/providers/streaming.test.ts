@@ -163,6 +163,35 @@ test("Anthropic: a response cut short records the parts that were completed, and
   expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "CutShort" } } });
 });
 
+test("Anthropic: a stream that ends without message_stop fails the request, and the turn fails", async () => {
+  const url = serving(() => anthropicStream({ content: [{ type: "text", text: "5" }], stop_reason: "end_turn" }, { unstopped: true }));
+  const facts = await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession;
+      yield* session.observe(boringOpening(smolCatalog));
+      yield* session.observe(input);
+      yield* session.idle;
+      return yield* session.facts;
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          BoringModelProvider,
+          TurnContextAssembler,
+          AnthropicModelClient.pipe(Layer.provide(anthropicAt(new URL("/v1/messages", url)))),
+          CountingTurns,
+          NoTurnEndHooks,
+          SmolToolRunner,
+        ),
+      ),
+    ),
+  );
+  expect(parts(facts)).toEqual([]);
+  expect(facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelFailed") as unknown).toMatchObject({
+    observation: { failure: expect.stringContaining("without message_stop") },
+  });
+  expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Failed" } } });
+});
+
 test("OpenAI: an item still arriving when the response ended is not recorded", async () => {
   const url = serving(() =>
     openAiStream({

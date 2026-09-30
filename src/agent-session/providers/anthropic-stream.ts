@@ -26,9 +26,18 @@ export interface Assembling {
   readonly usage: JsonObject | undefined;
   readonly arriving: ReadonlyMap<number, Arriving>;
   readonly complete: ReadonlyMap<number, JsonObject>;
+  /** Whether `message_stop` arrived: the stream's own mark that the message is whole. */
+  readonly stopped: boolean;
 }
 
-export const nothingYet: Assembling = { message: undefined, changed: {}, usage: undefined, arriving: new Map(), complete: new Map() };
+export const nothingYet: Assembling = {
+  message: undefined,
+  changed: {},
+  usage: undefined,
+  arriving: new Map(),
+  complete: new Map(),
+  stopped: false,
+};
 
 export interface Assembled {
   readonly state: Assembling;
@@ -109,6 +118,8 @@ export function assemble(state: Assembling, event: Json): Assembled {
           usage: { ...state.usage, ...object(event["usage"]) },
         },
       };
+    case "message_stop":
+      return { state: { ...state, stopped: true } };
     case "error": {
       const error = object(event["error"]);
       return { state, failed: { type: text(error?.["type"]), message: text(error?.["message"]) } };

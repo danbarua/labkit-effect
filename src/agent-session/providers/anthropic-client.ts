@@ -42,7 +42,7 @@ import {
 } from "../contracts.ts";
 import { logKeys } from "../log-keys.ts";
 import { ModelStream } from "../model-stream.ts";
-import { defaultRetries, failedPosting, invalidOutput, modelClientOf, noRetryAfterCalls, type Post, postEvents, type Retries, withRetries } from "../provider-call.ts";
+import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEvents, type Retries, withRetries } from "../provider-call.ts";
 import { reportEnforced } from "../settings.ts";
 import { anthropicSettings } from "./anthropic-settings.ts";
 import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
@@ -265,6 +265,7 @@ const respondOnce = (
     );
     const response = assembled(arrived);
     if (response === undefined) return yield* invalidOutput(caller, "The stream ended before a message started");
+    if (!arrived.stopped) return yield* invalidOutput(caller, "The stream ended without message_stop: the message did not arrive whole");
     const notRecorded = cut(arrived);
     if (notRecorded.length > 0) yield* Effect.logInfo(logKeys.provider.partCut, { parts: notRecorded });
     const { content, stop_reason, ...metadata } = response;
@@ -300,7 +301,7 @@ export const anthropicRequests = (
       };
       return reportEnforced(turn, target, settled).pipe(
         Effect.andThen(logSupplied(sent.supplied)),
-        Effect.andThen(respondOnce(http, post, target, turn).pipe(noRetryAfterCalls(caller), withRetries(retries), failedPosting(post))),
+        Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
       );
     };
   });

@@ -13,6 +13,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { ModelName, ProviderName, TurnId } from "../../agent-machine/names.ts";
 import type { Observation } from "../../agent-machine/observation.ts";
 import { ModelClient } from "../contracts.ts";
+import { conversationOf } from "../conversation.ts";
 import { openSession } from "../loop.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
 import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
@@ -96,18 +97,31 @@ const answer = JSON.stringify({ id: "chatcmpl-1", choices: [{ index: 0, message:
 const jsonWith = (body: string, length: number) =>
   `HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: ${length}\r\n\r\n${body}`;
 
-test("a body that ends before its Content-Length fails as a transport error, and is retried", async () => {
+test("a body that ends before its Content-Length fails the request, which is not made again: the provider had begun to respond", async () => {
   const server = rawServer([jsonWith(answer.slice(0, 40), answer.length), jsonWith(answer, answer.length)]);
+  const { observed, events } = await asked(
+    openAiCompatModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(server.url))),
+  );
+  server.stop();
+  expect(observed as unknown).toMatchObject({ _tag: "ModelFailed" });
+  expect(server.requests()).toBe(1);
+  expect(events(logKeys.provider.requestRetried)).toEqual([]);
+  expect(events(logKeys.provider.notRetried)).toMatchObject([[logKeys.provider.notRetried, { reason: "NetworkError" }]]);
+});
+
+test("a failure before the provider begins to respond is retried", async () => {
+  const unavailable = "HTTP/1.1 503 Service Unavailable\r\ncontent-type: text/plain\r\ncontent-length: 4\r\n\r\nbusy";
+  const server = rawServer([unavailable, jsonWith(answer, answer.length)]);
   const { observed, events } = await asked(
     openAiCompatModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(server.url))),
   );
   server.stop();
   expect(observed).toMatchObject({ _tag: "ModelResponded", parts: [{ _tag: "Text", text: "hi" }] });
   expect(server.requests()).toBe(2);
-  expect(events(logKeys.provider.requestRetried)).toMatchObject([[logKeys.provider.requestRetried, { reason: "NetworkError" }]]);
+  expect(events(logKeys.provider.requestRetried)).toHaveLength(1);
 });
 
-test("a stream closed before its last chunk fails as a transport error, and the retried request streams again", async () => {
+test("a stream closed before its last chunk fails the request, which is not made again", async () => {
   const completed = { type: "response.completed", response: { status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "hi" }] }] } };
   const event = `data: ${JSON.stringify(completed)}\n\n`;
   const chunk = (text: string) => `${Buffer.byteLength(text).toString(16)}\r\n${text}\r\n`;
@@ -115,9 +129,9 @@ test("a stream closed before its last chunk fails as a transport error, and the 
   const server = rawServer([`${head}${chunk(event.slice(0, 30))}`, `${head}${chunk(event)}0\r\n\r\n`]);
   const { observed, events } = await asked(openAiModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiAt(server.url))));
   server.stop();
-  expect(observed).toMatchObject({ _tag: "ModelResponded", parts: [{ _tag: "Text", text: "hi" }] });
-  expect(server.requests()).toBe(2);
-  expect(events(logKeys.provider.requestRetried)).toMatchObject([[logKeys.provider.requestRetried, { reason: "NetworkError" }]]);
+  expect(observed as unknown).toMatchObject({ _tag: "ModelFailed" });
+  expect(server.requests()).toBe(1);
+  expect(events(logKeys.provider.notRetried)).toMatchObject([[logKeys.provider.notRetried, { reason: "NetworkError" }]]);
 });
 
 test("a body handed over whole whose size is not its Content-Length fails as a transport error; an encoded body is not compared", async () => {
@@ -138,7 +152,7 @@ test("a body handed over whole whose size is not its Content-Length fails as a t
   expect(encoded.observed).toMatchObject({ _tag: "ModelResponded" });
 });
 
-test("a stream closed after a tool call of it was passed on is not retried: the tool has run once, and the turn fails", async () => {
+test("TC4: a stream closed after a tool call of it was passed on is not made again: the tool has run once, the turn fails, and the call is not sent to the model", async () => {
   const call = { type: "function_call", call_id: "call_1", name: "add", arguments: '{"a":2,"b":3}', status: "completed" };
   const event = `data: ${JSON.stringify({ type: "response.output_item.done", output_index: 0, item: call })}\n\n`;
   const opened = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
@@ -179,8 +193,7 @@ test("a stream closed after a tool call of it was passed on is not retried: the 
   const tags = facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
   expect(requests).toBe(1);
   expect(tags.filter((tag) => tag === "ToolEnded")).toHaveLength(1);
-  expect(facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelFailed") as unknown).toMatchObject({
-    observation: { failure: expect.stringContaining("A tool call had been passed on, so it is not retried") },
-  });
+  expect(facts.some((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelFailed")).toBe(true);
   expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Failed" } } });
+  expect(conversationOf(facts).flatMap((message) => message.parts.map((part) => part._tag))).toEqual(["Text"]);
 });

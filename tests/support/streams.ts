@@ -34,16 +34,17 @@ function blockEvents(block: Json, index: number): ReadonlyArray<Json> {
 
 /**
  * A Messages API response as its stream. With `cut`, the last block's stop is left out, as when the
- * response is cut short while that block is arriving.
+ * response is cut short while that block is arriving; with `unstopped`, the stream ends without
+ * `message_stop`.
  */
-export function anthropicStream(response: unknown, options: { readonly cut?: boolean } = {}): Response {
+export function anthropicStream(response: unknown, options: { readonly cut?: boolean; readonly unstopped?: boolean } = {}): Response {
   const { content, stop_reason, ...message } = response as Json;
   const blocks = (content as ReadonlyArray<Json>).flatMap(blockEvents);
   return events([
     { type: "message_start", message },
     ...(options.cut === true ? blocks.slice(0, -1) : blocks),
     { type: "message_delta", delta: { stop_reason } },
-    { type: "message_stop" },
+    ...(options.unstopped === true ? [] : [{ type: "message_stop" }]),
   ]);
 }
 

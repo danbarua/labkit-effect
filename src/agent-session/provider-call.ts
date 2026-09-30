@@ -1,12 +1,12 @@
 /**
  * What every provider adapter does around one model request: post JSON through the provider's
  * configured HTTP client, fail with Effect's `AiError` when the request does not produce a usable
- * response, retry the failures `AiError` marks retryable, and end as `ModelFailed` when they are
- * used up, carrying the error and the request as it was posted. The whole error is logged where it
- * is caught.
+ * response, retry the failures `AiError` marks retryable that come before a response begins, and
+ * end as `ModelFailed` otherwise, carrying the error and the request as it was posted. The whole
+ * error is logged where it is caught.
  */
 
-import { Data, Duration, Effect, Ref, Schema, Stream } from "effect";
+import { Context, Data, Duration, Effect, Ref, Schema, Stream } from "effect";
 import * as Sse from "effect/encoding/Sse";
 import * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
@@ -19,7 +19,6 @@ import type { Received } from "../agent-machine/received.ts";
 import { ModelClient, type ProviderRequest } from "./contracts.ts";
 import { receivedJson } from "./received.ts";
 import { logKeys } from "./log-keys.ts";
-import { ModelStream } from "./model-stream.ts";
 
 type Json = Schema.Json;
 
@@ -65,13 +64,22 @@ export const failedPosting =
   <A, R>(request: Effect.Effect<A, AiError.AiError, R>): Effect.Effect<A, RequestFailed, R> =>
     request.pipe(Effect.mapError((error) => new RequestFailed({ error, request: postedAs(post) })));
 
+/**
+ * Marks that the provider has begun to respond to the request being made: a 2xx status arrived.
+ * `withRetries` gives each attempt its own; outside it, marking does nothing.
+ */
+export const ResponseBegan = Context.Reference<{ readonly mark: Effect.Effect<void> }>("agent-session/ResponseBegan", {
+  defaultValue: () => ({ mark: Effect.void }),
+});
+
 const failure = (caller: Caller, reason: AiError.AiErrorReason): AiError.AiError =>
   AiError.make({ module: caller.module, method: caller.method, reason });
 
 /**
  * The response to `post`. A response that is not 2xx fails with the `AiError`
  * reason for its status, however it arrives: as a response, or, from a client that fails such
- * responses itself (Effect's OpenAI client does), inside a `StatusCodeError`.
+ * responses itself (Effect's OpenAI client does), inside a `StatusCodeError`. A 2xx response marks
+ * the response as begun (`ResponseBegan`).
  */
 const send = (
   http: HttpClient.HttpClient,
@@ -102,9 +110,14 @@ const send = (
           ),
         ),
     ),
+    Effect.tap(() =>
+      Effect.gen(function* () {
+        yield* (yield* ResponseBegan).mark;
+      }),
+    ),
   );
 
-/** A response whose body did not arrive whole, as a transport error: `AiError` marks it retryable. */
+/** A response whose body did not arrive whole, as a transport error. */
 const bodyCut = (caller: Caller, request: HttpClientRequest.HttpClientRequest, description: string, cause?: unknown): AiError.AiError =>
   failure(caller, AiError.NetworkError.fromRequestError(new HttpClientError.TransportError({ request, description, cause })));
 
@@ -164,8 +177,7 @@ export const postJson = (http: HttpClient.HttpClient, caller: Caller, post: Post
 /**
  * The response to `post`, as the server-sent events it streams: each event's data, parsed as JSON,
  * as it arrives. A stream is sent chunked, with no `Content-Length`; one closed before its last
- * chunk fails as a transport error, which is retried from the start (what was passed on from it is
- * passed on again) unless a tool call of it was passed on (`noRetryAfterCalls`).
+ * chunk fails as a transport error. The response had begun, so it is not retried.
  */
 export const postEvents = (http: HttpClient.HttpClient, caller: Caller, post: Post): Stream.Stream<Json, AiError.AiError> =>
   send(http, caller, post).pipe(
@@ -192,60 +204,50 @@ export const invalidOutput = (caller: Caller, description: string): AiError.AiEr
   failure(caller, new AiError.InvalidOutputError({ description }));
 
 /**
- * Retries `request` while its failure is retryable, at most `retries.times` times. The wait before
- * a retry is `firstWait`, doubled each time, or what a rate limit says to wait when it says. Each
- * retry is logged before it is made.
+ * Retries `request` while its failure is retryable and came before the provider began to respond
+ * (`ResponseBegan`), at most `retries.times` times. A request whose response had begun is not made
+ * again: what it passed on, and any tool call it started, belong to that response, and the provider
+ * would answer a second request as a new one. The wait before a retry is `firstWait`, doubled each
+ * time, or what a rate limit says to wait when it says. Each retry is logged before it is made.
  */
 export const withRetries =
   (retries: Retries) =>
   <A>(request: Effect.Effect<A, AiError.AiError>): Effect.Effect<A, AiError.AiError> => {
     const attempt = (retried: number): Effect.Effect<A, AiError.AiError> =>
-      request.pipe(
-        Effect.catch((error: AiError.AiError) => {
-          if (!error.reason.isRetryable || retried >= retries.times) return Effect.fail(error);
-          const wait =
-            error.reason._tag === "RateLimitError" && error.reason.retryAfter !== undefined
-              ? error.reason.retryAfter
-              : Duration.times(Duration.fromInputUnsafe(retries.firstWait), 2 ** retried);
-          return Effect.logWarning(logKeys.provider.requestRetried, {
-            reason: error.reason._tag,
-            message: error.message,
-            retry: retried + 1,
-            of: retries.times,
-            wait: Duration.format(wait),
-          }).pipe(Effect.andThen(Effect.sleep(wait)), Effect.andThen(attempt(retried + 1)));
-        }),
-      );
+      Effect.gen(function* () {
+        const began = yield* Ref.make(false);
+        return yield* request.pipe(
+          Effect.provideService(ResponseBegan, { mark: Ref.set(began, true) }),
+          Effect.catch((error: AiError.AiError) =>
+            Effect.gen(function* () {
+              if (!error.reason.isRetryable || retried >= retries.times) return yield* error;
+              if (yield* Ref.get(began)) {
+                yield* Effect.logWarning(logKeys.provider.notRetried, {
+                  reason: error.reason._tag,
+                  message: error.message,
+                  why: "the provider had begun to respond",
+                });
+                return yield* error;
+              }
+              const wait =
+                error.reason._tag === "RateLimitError" && error.reason.retryAfter !== undefined
+                  ? error.reason.retryAfter
+                  : Duration.times(Duration.fromInputUnsafe(retries.firstWait), 2 ** retried);
+              yield* Effect.logWarning(logKeys.provider.requestRetried, {
+                reason: error.reason._tag,
+                message: error.message,
+                retry: retried + 1,
+                of: retries.times,
+                wait: Duration.format(wait),
+              });
+              yield* Effect.sleep(wait);
+              return yield* attempt(retried + 1);
+            }),
+          ),
+        );
+      });
     return attempt(0);
   };
-
-/**
- * `request`, whose response streams, failing as not retryable once a tool call of it has been
- * passed on (`ModelStream`): the loop runs a call as soon as it is passed on, and a retried request
- * would run the tool again, for the new call the provider makes. Before a call is passed on, a
- * failure is as `request` failed.
- */
-export const noRetryAfterCalls =
-  (caller: Caller) =>
-  <A, R>(request: Effect.Effect<A, AiError.AiError, R>): Effect.Effect<A, AiError.AiError, R> =>
-    Effect.gen(function* () {
-      const passOn = yield* ModelStream;
-      const called = yield* Ref.make(false);
-      return yield* request.pipe(
-        Effect.provideService(ModelStream, (streamed) =>
-          (streamed._tag === "Part" && streamed.part._tag === "ToolCall" ? Ref.set(called, true) : Effect.void).pipe(Effect.andThen(passOn(streamed))),
-        ),
-        Effect.catch((error: AiError.AiError) =>
-          Effect.flatMap(Ref.get(called), (passed) =>
-            Effect.fail(
-              passed && error.reason.isRetryable
-                ? failure(caller, new AiError.UnknownError({ description: `A tool call had been passed on, so it is not retried: ${error.message}` }))
-                : error,
-            ),
-          ),
-        ),
-      );
-    });
 
 /** A model client that makes `request`, and reports a failure as `ModelFailed`. */
 export const modelClientOf = (request: ProviderRequest) =>
