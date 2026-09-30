@@ -1,12 +1,11 @@
-/** Rules of the core that no other test demonstrates: see `src/agent-core/MODEL.md`. */
+/** Rules of the core that no other test demonstrates: see `MODEL.md`. */
 
 import { expect } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { conversationOf } from "../src/agent-effect/conversation.ts";
-import { observe, open, opened } from "./support/drive.ts";
-import { json } from "./support/received.ts";
-import { test } from "./support/test.ts";
+import { observe, open, opened } from "../../tests/support/drive.ts";
+import { json } from "../../tests/support/received.ts";
+import { test } from "../../tests/support/test.ts";
 
 test("R1: content from outside is recorded as it arrived, unparsed: text that is not JSON, and bytes", () => {
   const session = open();
@@ -58,7 +57,7 @@ function unguardedSwitches(text: string): ReadonlyArray<number> {
 test("R4: every switch in the core ends in satisfies never", () => {
   const sources = ["src/agent-core", "src/agent-policy"].flatMap((directory) =>
     readdirSync(directory)
-      .filter((file) => file.endsWith(".ts"))
+      .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
       .map((file) => join(directory, file)),
   );
   const texts = sources.map((file) => [file, readFileSync(file, "utf8")] as const);
@@ -68,7 +67,7 @@ test("R4: every switch in the core ends in satisfies never", () => {
   expect(texts.flatMap(([file, text]) => unguardedSwitches(text).map((line) => `${file}:${line}`))).toEqual([]);
 });
 
-test("TC4: a call that arrived in a response that then failed is recorded, and the model is not sent it or its result", () => {
+test("TC4: a call that arrived in a response that then failed is recorded, with its dispatch and its end", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -84,5 +83,4 @@ test("TC4: a call that arrived in a response that then failed is recorded, and t
   const recorded = session.journal.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
   expect(recorded.slice(5)).toEqual(["ToolCallArrived", "ToolCallDispatched", "ModelFailed", "TurnEnded", "ToolEnded"]);
   expect(recorded).not.toContain("ObservationNotExpected");
-  expect(conversationOf(session.journal)).toEqual([{ role: "user", parts: [{ _tag: "Text", text: "list the files" }] }]);
 });

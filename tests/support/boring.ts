@@ -8,8 +8,8 @@ import type { SystemPromptProvider, ToolCatalog } from "../../src/agent-context/
 import type { Fact } from "../../src/agent-core/fact.ts";
 import { ModelName, ProviderName, type Seq, SessionId, ToolName, type TurnId } from "../../src/agent-core/names.ts";
 import { ContextAssembler, type ModelContext, ModelProvider, type ToolSpec } from "../../src/agent-effect/contracts.ts";
-import { inputTexts } from "../../src/agent-effect/conversation.ts";
-import { openedWith } from "../../src/agent-effect/session-setup.ts";
+import { conversationOf, inputTexts } from "../../src/agent-effect/conversation.ts";
+import { openedWith, systemOf, toolsOf } from "../../src/agent-effect/session-setup.ts";
 
 /** The opening of session `session`, asking "boring-1" of "boring", with no system prompt and `tools`. */
 export const boringOpening = (tools: ReadonlyArray<ToolSpec> = [], session = "s1") =>
@@ -69,3 +69,9 @@ export const BoringToolCatalog: ToolCatalog = {
     },
   ]),
 };
+
+/** The session's system prompt and tools, and its whole conversation: every turn of it. */
+export const WholeSessionAssembler = Layer.succeed(ContextAssembler, {
+  assemble: (facts) =>
+    toolsOf(facts).pipe(Effect.map((tools): ModelContext => ({ system: systemOf(facts), tools, messages: conversationOf(facts) }))),
+});

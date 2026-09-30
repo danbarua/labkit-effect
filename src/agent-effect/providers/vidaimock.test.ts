@@ -5,25 +5,25 @@
  */
 
 import { afterAll, beforeAll, describe, expect } from "bun:test";
-import { test } from "../support/test.ts";
+import { test } from "../../../tests/support/test.ts";
 import { Effect, Exit, Layer, Logger, Schema } from "effect";
 import * as AiError from "effect/ai/AiError";
-import type { Fact } from "../../src/agent-core/fact.ts";
-import { InputText, ModelName, ProviderName, TurnId } from "../../src/agent-core/names.ts";
-import type { ModelClient, ModelContext, ProviderRequest } from "../../src/agent-effect/contracts.ts";
-import { BoringModelProvider } from "../support/boring.ts";
-import { CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/turns.ts";
-import { SmolToolRunner, smolCatalog } from "../support/smol-tools.ts";
-import { logKeys } from "../../src/agent-effect/log-keys.ts";
-import { openSession } from "../../src/agent-effect/loop.ts";
-import type { Retries } from "../../src/agent-effect/provider-call.ts";
-import { anthropicModelClient, anthropicRequests } from "../../src/agent-effect/providers/anthropic-client.ts";
-import { openAiModelClient, openAiRequests } from "../../src/agent-effect/providers/openai-client.ts";
-import { openAiCompatModelClient, openAiCompatRequests } from "../../src/agent-effect/providers/openai-compat-client.ts";
-import { TurnContextAssembler } from "../../src/agent-effect/turn-context.ts";
-import { runTest } from "../support/run.ts";
-import { boringOpening } from "../support/boring.ts";
-import { anthropicAtMock, openAiAtMock, openAiCompatAtMock, startVidaiMock, type VidaiMock } from "../support/vidaimock.ts";
+import type { Fact } from "../../agent-core/fact.ts";
+import { InputText, ModelName, ProviderName, TurnId } from "../../agent-core/names.ts";
+import type { ModelClient, ModelContext, ProviderRequest } from "../contracts.ts";
+import { BoringModelProvider } from "../../../tests/support/boring.ts";
+import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
+import { logKeys } from "../log-keys.ts";
+import { openSession } from "../loop.ts";
+import type { Retries } from "../provider-call.ts";
+import { anthropicModelClient, anthropicRequests } from "./anthropic-client.ts";
+import { openAiModelClient, openAiRequests } from "./openai-client.ts";
+import { openAiCompatModelClient, openAiCompatRequests } from "./openai-compat-client.ts";
+import { TurnContextAssembler } from "../turn-context.ts";
+import { runTest } from "../../../tests/support/run.ts";
+import { boringOpening } from "../../../tests/support/boring.ts";
+import { anthropicAtMock, openAiAtMock, openAiCompatAtMock, startVidaiMock, type VidaiMock } from "../../../tests/support/vidaimock.ts";
 
 const state: { mock?: VidaiMock } = {};
 beforeAll(async () => {

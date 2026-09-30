@@ -8,9 +8,6 @@ not yet work is in its `DESIGN.next.md`. Delete an item when it is done or dropp
 
 - [ ] Confirm or reword the terms T1–T5 in agent-core's `MODEL.md`. The code and tests are built on
       them as worded; none is blocking.
-- [ ] Where tests live. Today all are in `tests/`, with `tests/examples/` for the examples. The
-      other way: each module's tests beside its code (`src/agent-core/*.test.ts`), and `tests/` for
-      what joins modules (the loop, providers, scenarios, examples).
 - [ ] Where the model is chosen. The loop's `ModelProvider` chooses it from the session's facts, so
       context assembly's model selectors go unused, and `ModelChoice.endpoint` has no counterpart
       in `Target`.

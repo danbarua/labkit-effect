@@ -5,7 +5,7 @@
   "scripts": {
     "prepare": "effect-tsgo patch --oxlint",
     "typecheck": "tsc --noEmit -p .",
-    "check": "bun run vidaimock:install && bun run typecheck && bun run lint && bun run check:brands && bun run check:rules && bun test tests",
+    "check": "bun run vidaimock:install && bun run typecheck && bun run lint && bun run check:brands && bun run check:rules && bun test",
     "vidaimock:install": "bun scripts/vidaimock.ts",
     "lint": "oxlint --type-aware --format default src tests scripts",
     "check:brands": "bun scripts/check-brands.ts",

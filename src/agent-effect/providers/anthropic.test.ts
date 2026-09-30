@@ -1,24 +1,24 @@
 /** The Anthropic Messages adapter: how the core's types are shaped into its wire format. */
 
 import { afterAll, expect } from "bun:test";
-import { test } from "../support/test.ts";
-import { anthropicAt } from "../support/providers.ts";
+import { test } from "../../../tests/support/test.ts";
+import { anthropicAt } from "../../../tests/support/providers.ts";
 import { Effect, Layer, Logger } from "effect";
-import { ModelName, ProviderName, ThinkingText, TurnId } from "../../src/agent-core/names.ts";
-import { ModelClient } from "../../src/agent-effect/contracts.ts";
-import { logKeys } from "../../src/agent-effect/log-keys.ts";
-import { json } from "../support/received.ts";
-import { receivedJson } from "../../src/agent-effect/received.ts";
-import type { Observation } from "../../src/agent-core/observation.ts";
-import { BoringModelProvider } from "../support/boring.ts";
-import { CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/turns.ts";
-import { AnthropicModelClient } from "../../src/agent-effect/providers/anthropic-client.ts";
-import { openSession } from "../../src/agent-effect/loop.ts";
-import { SmolToolRunner, smolCatalog } from "../support/smol-tools.ts";
-import { TurnContextAssembler } from "../../src/agent-effect/turn-context.ts";
-import { anthropicStream } from "../support/streams.ts";
-import { runTest } from "../support/run.ts";
-import { boringOpening } from "../support/boring.ts";
+import { ModelName, ProviderName, ThinkingText, TurnId } from "../../agent-core/names.ts";
+import { ModelClient } from "../contracts.ts";
+import { logKeys } from "../log-keys.ts";
+import { json } from "../../../tests/support/received.ts";
+import { receivedJson } from "../received.ts";
+import type { Observation } from "../../agent-core/observation.ts";
+import { BoringModelProvider } from "../../../tests/support/boring.ts";
+import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { AnthropicModelClient } from "./anthropic-client.ts";
+import { openSession } from "../loop.ts";
+import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
+import { TurnContextAssembler } from "../turn-context.ts";
+import { anthropicStream } from "../../../tests/support/streams.ts";
+import { runTest } from "../../../tests/support/run.ts";
+import { boringOpening } from "../../../tests/support/boring.ts";
 
 /** A provider that makes one scripted tool call, then answers; it keeps every request it is sent. */
 function scripted(call: { name: string; input: unknown }) {

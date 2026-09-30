@@ -1,19 +1,19 @@
 /** The OpenAI-compatible Chat Completions adapter: how the core's types are shaped into its wire format and back. */
 
 import { afterAll, expect } from "bun:test";
-import { test } from "../support/test.ts";
+import { test } from "../../../tests/support/test.ts";
 import { Effect, Layer } from "effect";
-import type { Observation } from "../../src/agent-core/observation.ts";
-import { BoringModelProvider } from "../support/boring.ts";
-import { CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/turns.ts";
-import { openSession } from "../../src/agent-effect/loop.ts";
-import { OpenAiCompatModelClient } from "../../src/agent-effect/providers/openai-compat-client.ts";
-import { SmolToolRunner, smolCatalog } from "../support/smol-tools.ts";
-import { TurnContextAssembler } from "../../src/agent-effect/turn-context.ts";
-import { openAiCompatAt, recordingServer } from "../support/providers.ts";
-import { json } from "../support/received.ts";
-import { runTest } from "../support/run.ts";
-import { boringOpening } from "../support/boring.ts";
+import type { Observation } from "../../agent-core/observation.ts";
+import { BoringModelProvider } from "../../../tests/support/boring.ts";
+import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { openSession } from "../loop.ts";
+import { OpenAiCompatModelClient } from "./openai-compat-client.ts";
+import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
+import { TurnContextAssembler } from "../turn-context.ts";
+import { openAiCompatAt, recordingServer } from "../../../tests/support/providers.ts";
+import { json } from "../../../tests/support/received.ts";
+import { runTest } from "../../../tests/support/run.ts";
+import { boringOpening } from "../../../tests/support/boring.ts";
 
 const stops: Array<() => unknown> = [];
 afterAll(() => {

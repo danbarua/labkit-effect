@@ -1,7 +1,7 @@
 import { expect } from "bun:test";
-import { test } from "./support/test.ts";
-import { json } from "./support/received.ts";
-import { observe, open, opened } from "./support/drive.ts";
+import { test } from "../../tests/support/test.ts";
+import { json } from "../../tests/support/received.ts";
+import { observe, open, opened } from "../../tests/support/drive.ts";
 
 const responseWithEveryPartKind = {
   _tag: "ModelResponded",

@@ -5,26 +5,24 @@
 
 import { afterAll, expect } from "bun:test";
 import { Effect, Layer, PubSub } from "effect";
-import { Notices } from "../../src/agent-context/assemble.ts";
-import { AgentContextAssembler, WholeConversation } from "../../src/agent-context/assembler.ts";
-import { Millis, TurnId } from "../../src/agent-core/names.ts";
-import type { Observation } from "../../src/agent-core/observation.ts";
-import { openSession } from "../../src/agent-effect/loop.ts";
-import { ModelStreamInterval } from "../../src/agent-effect/model-stream.ts";
-import { AnthropicModelClient } from "../../src/agent-effect/providers/anthropic-client.ts";
-import { assemble, assembled, cut, nothingYet } from "../../src/agent-effect/providers/anthropic-stream.ts";
-import { OpenAiModelClient } from "../../src/agent-effect/providers/openai-client.ts";
-import { receivedJson } from "../../src/agent-effect/received.ts";
-import { ToolRunner } from "../../src/agent-effect/contracts.ts";
-import { TurnContextAssembler } from "../../src/agent-effect/turn-context.ts";
-import { CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/turns.ts";
-import { BoringModelProvider, boringOpening } from "../support/boring.ts";
-import { anthropicAt, openAiAt } from "../support/providers.ts";
-import { json } from "../support/received.ts";
-import { runTest } from "../support/run.ts";
-import { SmolToolRunner, smolCatalog } from "../support/smol-tools.ts";
-import { anthropicStream, openAiStream } from "../support/streams.ts";
-import { test } from "../support/test.ts";
+import { Millis, TurnId } from "../../agent-core/names.ts";
+import type { Observation } from "../../agent-core/observation.ts";
+import { openSession } from "../loop.ts";
+import { ModelStreamInterval } from "../model-stream.ts";
+import { AnthropicModelClient } from "./anthropic-client.ts";
+import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
+import { OpenAiModelClient } from "./openai-client.ts";
+import { receivedJson } from "../received.ts";
+import { ToolRunner } from "../contracts.ts";
+import { TurnContextAssembler } from "../turn-context.ts";
+import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { BoringModelProvider, boringOpening, WholeSessionAssembler } from "../../../tests/support/boring.ts";
+import { anthropicAt, openAiAt } from "../../../tests/support/providers.ts";
+import { json } from "../../../tests/support/received.ts";
+import { runTest } from "../../../tests/support/run.ts";
+import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
+import { anthropicStream, openAiStream } from "../../../tests/support/streams.ts";
+import { test } from "../../../tests/support/test.ts";
 
 const fold = (events: ReadonlyArray<unknown>) =>
   events.reduce<{ state: typeof nothingYet; completed: Array<unknown>; failed: Array<unknown>; notApplied: Array<string> }>(
@@ -363,7 +361,7 @@ test("X1: interrupted while a response streams and its tool runs: both are stopp
       Effect.provide(
         Layer.mergeAll(
           BoringModelProvider,
-          AgentContextAssembler.pipe(Layer.provide(Layer.mergeAll(WholeConversation, Layer.succeed(Notices, [])))),
+          WholeSessionAssembler,
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(new URL("/v1/messages", server.url)))),
           CountingTurns,
           NoTurnEndHooks,

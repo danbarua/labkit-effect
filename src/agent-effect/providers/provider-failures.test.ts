@@ -4,14 +4,14 @@
  */
 
 import { expect } from "bun:test";
-import { test } from "../support/test.ts";
+import { test } from "../../../tests/support/test.ts";
 import { Effect, Layer, Logger } from "effect";
-import { ModelName, ProviderName, TurnId } from "../../src/agent-core/names.ts";
-import { ModelClient } from "../../src/agent-effect/contracts.ts";
-import { logKeys } from "../../src/agent-effect/log-keys.ts";
-import { anthropicModelClient } from "../../src/agent-effect/providers/anthropic-client.ts";
-import { anthropicAt } from "../support/providers.ts";
-import { runTest } from "../support/run.ts";
+import { ModelName, ProviderName, TurnId } from "../../agent-core/names.ts";
+import { ModelClient } from "../contracts.ts";
+import { logKeys } from "../log-keys.ts";
+import { anthropicModelClient } from "./anthropic-client.ts";
+import { anthropicAt } from "../../../tests/support/providers.ts";
+import { runTest } from "../../../tests/support/run.ts";
 
 test("a provider that cannot be reached fails as a network error, retried first", async () => {
   const gone = Bun.serve({ port: 0, fetch: () => new Response() });

@@ -1,8 +1,8 @@
 import { expect } from "bun:test";
-import { test } from "./support/test.ts";
-import { json } from "./support/received.ts";
-import type { Fact } from "../src/agent-core/fact.ts";
-import { observe, open, opened, type Session } from "./support/drive.ts";
+import { test } from "../../tests/support/test.ts";
+import { json } from "../../tests/support/received.ts";
+import type { Fact } from "./fact.ts";
+import { observe, open, opened, type Session } from "../../tests/support/drive.ts";
 
 function tags(facts: ReadonlyArray<Fact>): Array<string> {
   return facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));

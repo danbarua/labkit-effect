@@ -5,16 +5,16 @@
  */
 
 import { afterAll, beforeAll, expect } from "bun:test";
-import { test } from "../support/test.ts";
+import { test } from "../../../tests/support/test.ts";
 import { Effect, Exit, Layer } from "effect";
-import { ModelName, ProviderName, TurnId } from "../../src/agent-core/names.ts";
-import { ModelClient, type ModelContext } from "../../src/agent-effect/contracts.ts";
-import { anthropicModelClient } from "../../src/agent-effect/providers/anthropic-client.ts";
-import { openAiModelClient } from "../../src/agent-effect/providers/openai-client.ts";
-import { openAiCompatModelClient } from "../../src/agent-effect/providers/openai-compat-client.ts";
-import { anthropicAt, openAiAt, openAiCompatAt, recordingServer } from "../support/providers.ts";
-import { runTest } from "../support/run.ts";
-import { anthropicAtMock, openAiAtMock, openAiCompatAtMock, startVidaiMock, type VidaiMock } from "../support/vidaimock.ts";
+import { ModelName, ProviderName, TurnId } from "../../agent-core/names.ts";
+import { ModelClient, type ModelContext } from "../contracts.ts";
+import { anthropicModelClient } from "./anthropic-client.ts";
+import { openAiModelClient } from "./openai-client.ts";
+import { openAiCompatModelClient } from "./openai-compat-client.ts";
+import { anthropicAt, openAiAt, openAiCompatAt, recordingServer } from "../../../tests/support/providers.ts";
+import { runTest } from "../../../tests/support/run.ts";
+import { anthropicAtMock, openAiAtMock, openAiCompatAtMock, startVidaiMock, type VidaiMock } from "../../../tests/support/vidaimock.ts";
 
 const state: { mock?: VidaiMock } = {};
 beforeAll(async () => {

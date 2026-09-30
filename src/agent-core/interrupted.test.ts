@@ -1,8 +1,7 @@
 import { expect } from "bun:test";
-import { conversationOf } from "../src/agent-effect/conversation.ts";
-import { observe, open, opened, type Session } from "./support/drive.ts";
-import { json } from "./support/received.ts";
-import { test } from "./support/test.ts";
+import { observe, open, opened, type Session } from "../../tests/support/drive.ts";
+import { json } from "../../tests/support/received.ts";
+import { test } from "../../tests/support/test.ts";
 
 const tags = (session: Session) =>
   session.journal.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
@@ -44,7 +43,7 @@ test("X1 X3: an interruption during a step stops the turn's work; the turn ends 
   expect(session.world.agent.state._tag).toBe("Idle");
 });
 
-test("X1 TC3: interrupted while a tool runs: the turn ends when the tool's end is heard, and every call has a result for the model", () => {
+test("X1: interrupted while a tool runs: the turn ends when the tool's end is heard", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -57,37 +56,6 @@ test("X1 TC3: interrupted while a tool runs: the turn ends when the tool's end i
   expect(tags(session).slice(-2)).toEqual(["ToolEnded", "TurnEnded"]);
   expect(tags(session)).not.toContain("ObservationNotExpected");
   expect(session.requests.filter((request) => request._tag === "RunTool")).toHaveLength(1);
-  expect(conversationOf(session.journal).slice(1) as unknown).toEqual([
-    {
-      role: "assistant",
-      parts: [
-        { _tag: "Text", text: "Listing." },
-        { _tag: "ToolCall", call: "c1", tool: "ls", input: json({ path: "." }) },
-      ],
-    },
-    { role: "user", parts: [{ _tag: "ToolResult", call: "c1", outcome: { _tag: "Failed", reason: { _tag: "Indeterminate" } } }] },
-  ]);
-});
-
-test("TC3: a call with no recorded end still has a result for the model: not observed if it began to run, not run if it did not", () => {
-  const session = open();
-  observe(session, opened);
-  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
-  observe(session, {
-    ...stopped([
-      { _tag: "ToolCall", call: "c1", tool: "ls", input: json({}) },
-      { _tag: "ToolCall", call: "c2", tool: "ls", input: json({}) },
-    ]),
-    ending: { _tag: "Complete" },
-  });
-  observe(session, { _tag: "ToolCallDispatched", call: "c1" });
-  expect(conversationOf(session.journal).at(-1) as unknown).toEqual({
-    role: "user",
-    parts: [
-      { _tag: "ToolResult", call: "c1", outcome: { _tag: "Failed", reason: { _tag: "Indeterminate" } } },
-      { _tag: "ToolResult", call: "c2", outcome: { _tag: "Failed", reason: { _tag: "NotRun" } } },
-    ],
-  });
 });
 
 test("X2: an interruption between steps ends the turn at once, and stops what is being carried out for it", () => {

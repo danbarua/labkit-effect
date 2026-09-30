@@ -21,6 +21,7 @@ export default defineConfig({
   overrides: [
     {
       files: ["src/agent-core/**"],
+      excludeFiles: ["**/*.test.ts"],
       rules: {
         ...abstractLayer,
         "no-restricted-imports": [
@@ -34,6 +35,7 @@ export default defineConfig({
     },
     {
       files: ["src/agent-policy/**"],
+      excludeFiles: ["**/*.test.ts"],
       rules: {
         ...abstractLayer,
         "no-restricted-imports": [

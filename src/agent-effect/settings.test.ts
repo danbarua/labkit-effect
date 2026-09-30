@@ -5,24 +5,24 @@
 
 import { afterAll, expect } from "bun:test";
 import { Effect, Layer } from "effect";
-import { ModelName, ProviderName, SessionId } from "../src/agent-core/names.ts";
-import type { Observation } from "../src/agent-core/observation.ts";
-import type { ModelSettings } from "../src/agent-core/settings.ts";
-import { openSession } from "../src/agent-effect/loop.ts";
-import { ModelFromFacts } from "../src/agent-effect/model-choice.ts";
-import { AnthropicModelClient } from "../src/agent-effect/providers/anthropic-client.ts";
-import { anthropicSettings } from "../src/agent-effect/providers/anthropic-settings.ts";
-import { openAiCompatSettings } from "../src/agent-effect/providers/openai-compat-settings.ts";
-import { openAiSettings } from "../src/agent-effect/providers/openai-settings.ts";
-import { modelOf, openedWith } from "../src/agent-effect/session-setup.ts";
-import { TurnContextAssembler } from "../src/agent-effect/turn-context.ts";
-import { CountingTurns, NoTurnEndHooks } from "../src/agent-effect/turns.ts";
-import { observe, open, opened } from "./support/drive.ts";
-import { anthropicAt } from "./support/providers.ts";
-import { anthropicStream } from "./support/streams.ts";
-import { runTest } from "./support/run.ts";
-import { SmolToolRunner } from "./support/smol-tools.ts";
-import { test } from "./support/test.ts";
+import { ModelName, ProviderName, SessionId } from "../agent-core/names.ts";
+import type { Observation } from "../agent-core/observation.ts";
+import type { ModelSettings } from "../agent-core/settings.ts";
+import { openSession } from "./loop.ts";
+import { ModelFromFacts } from "./model-choice.ts";
+import { AnthropicModelClient } from "./providers/anthropic-client.ts";
+import { anthropicSettings } from "./providers/anthropic-settings.ts";
+import { openAiCompatSettings } from "./providers/openai-compat-settings.ts";
+import { openAiSettings } from "./providers/openai-settings.ts";
+import { modelOf, openedWith } from "./session-setup.ts";
+import { TurnContextAssembler } from "./turn-context.ts";
+import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
+import { observe, open, opened } from "../../tests/support/drive.ts";
+import { anthropicAt } from "../../tests/support/providers.ts";
+import { anthropicStream } from "../../tests/support/streams.ts";
+import { runTest } from "../../tests/support/run.ts";
+import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
+import { test } from "../../tests/support/test.ts";
 
 const anthropic = (model: string, settings: ModelSettings) => anthropicSettings(ModelName.make(model), settings);
 

@@ -1,20 +1,20 @@
 /** The loop around the core, with stub services: what it does regardless of which adapters run. */
 
 import { expect } from "bun:test";
-import { test } from "./support/test.ts";
+import { test } from "../../tests/support/test.ts";
 import { Effect, Layer, Logger, PubSub, References } from "effect";
-import { ModelName, ModelText, ProviderName, SessionId, StopReason, TurnId } from "../src/agent-core/names.ts";
-import { CurrentWork, type Work } from "../src/agent-effect/work.ts";
-import type { Observation } from "../src/agent-core/observation.ts";
-import { BoringContextAssembler } from "./support/boring.ts";
-import { CountingTurns, NoTurnEndHooks } from "../src/agent-effect/turns.ts";
-import { ModelClient, ModelProvider, TurnEndHooks } from "../src/agent-effect/contracts.ts";
-import { logKeys } from "../src/agent-effect/log-keys.ts";
-import { openSession } from "../src/agent-effect/loop.ts";
-import { receivedJson } from "../src/agent-effect/received.ts";
-import { SmolToolRunner } from "./support/smol-tools.ts";
-import { runTest } from "./support/run.ts";
-import { boringOpening } from "./support/boring.ts";
+import { ModelName, ModelText, ProviderName, SessionId, StopReason, TurnId } from "../agent-core/names.ts";
+import { CurrentWork, type Work } from "./work.ts";
+import type { Observation } from "../agent-core/observation.ts";
+import { BoringContextAssembler } from "../../tests/support/boring.ts";
+import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
+import { ModelClient, ModelProvider, TurnEndHooks } from "./contracts.ts";
+import { logKeys } from "./log-keys.ts";
+import { openSession } from "./loop.ts";
+import { receivedJson } from "./received.ts";
+import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
+import { runTest } from "../../tests/support/run.ts";
+import { boringOpening } from "../../tests/support/boring.ts";
 
 test("while a request is carried out, CurrentWork and every log line name its session and turn; every line names the test", async () => {
   const logged: Array<{ message: unknown; annotations: Record<string, unknown> }> = [];

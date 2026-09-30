@@ -20,7 +20,7 @@ const rules = files("src", "MODEL.md").flatMap((file) =>
 );
 
 const named = new Map<string, number>();
-for (const file of files("tests", ".test.ts"))
+for (const file of [...files("src", ".test.ts"), ...files("tests", ".test.ts")])
   for (const match of readFileSync(file, "utf8").matchAll(/\btest(?:\.each\([^)]*\))?\(\s*"((?:[A-Z]{1,2}\d+ ?)+):/g))
     for (const id of (match[1] ?? "").trim().split(" ")) named.set(id, (named.get(id) ?? 0) + 1);
 

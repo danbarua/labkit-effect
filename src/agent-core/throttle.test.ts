@@ -1,7 +1,7 @@
 import { expect } from "bun:test";
-import { test } from "./support/test.ts";
-import { Millis } from "../src/agent-core/names.ts";
-import { emptyHeld, type Held, type ThrottleInput, throttle } from "../src/agent-core/throttle.ts";
+import { test } from "../../tests/support/test.ts";
+import { Millis } from "./names.ts";
+import { emptyHeld, type Held, type ThrottleInput, throttle } from "./throttle.ts";
 
 function run(interval: number, inputs: ReadonlyArray<ThrottleInput<number>>): Array<Array<number>> {
   let held: Held<number> = emptyHeld();

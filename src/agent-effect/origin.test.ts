@@ -2,17 +2,17 @@
 
 import { expect } from "bun:test";
 import { Cause, Effect, Exit, Layer } from "effect";
-import { CallId, ModelText, StopReason, ToolName } from "../src/agent-core/names.ts";
-import type { Observation } from "../src/agent-core/observation.ts";
-import { ModelClient } from "../src/agent-effect/contracts.ts";
-import { openSession } from "../src/agent-effect/loop.ts";
-import { receivedJson } from "../src/agent-effect/received.ts";
-import { TurnContextAssembler } from "../src/agent-effect/turn-context.ts";
-import { CountingTurns, NoTurnEndHooks } from "../src/agent-effect/turns.ts";
-import { BoringModelProvider, boringOpening } from "./support/boring.ts";
-import { runTest } from "./support/run.ts";
-import { SmolToolRunner, smolCatalog } from "./support/smol-tools.ts";
-import { test } from "./support/test.ts";
+import { CallId, ModelText, StopReason, ToolName } from "../agent-core/names.ts";
+import type { Observation } from "../agent-core/observation.ts";
+import { ModelClient } from "./contracts.ts";
+import { openSession } from "./loop.ts";
+import { receivedJson } from "./received.ts";
+import { TurnContextAssembler } from "./turn-context.ts";
+import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
+import { BoringModelProvider, boringOpening } from "../../tests/support/boring.ts";
+import { runTest } from "../../tests/support/run.ts";
+import { SmolToolRunner, smolCatalog } from "../../tests/support/smol-tools.ts";
+import { test } from "../../tests/support/test.ts";
 
 /** A model that calls `add` once, then answers. */
 const scripted = () => {

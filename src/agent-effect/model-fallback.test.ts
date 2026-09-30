@@ -4,30 +4,30 @@
  */
 
 import { afterAll, beforeAll, expect } from "bun:test";
-import { test } from "./support/test.ts";
+import { test } from "../../tests/support/test.ts";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { Effect, Exit, Layer, Logger, Schema } from "effect";
 import * as AiError from "effect/ai/AiError";
-import type { Fact } from "../src/agent-core/fact.ts";
-import { InputText, ModelName, ProviderName, SessionId, TurnId } from "../src/agent-core/names.ts";
-import type { Observation } from "../src/agent-core/observation.ts";
-import type { Received } from "../src/agent-core/received.ts";
-import { ModelClient, type Target } from "../src/agent-effect/contracts.ts";
-import { ModelFromFacts } from "../src/agent-effect/model-choice.ts";
-import { openedWith } from "../src/agent-effect/session-setup.ts";
-import { BoringContextAssembler } from "./support/boring.ts";
-import { CountingTurns, NoTurnEndHooks } from "../src/agent-effect/turns.ts";
-import { SmolToolRunner } from "./support/smol-tools.ts";
-import { logKeys } from "../src/agent-effect/log-keys.ts";
-import { openSession } from "../src/agent-effect/loop.ts";
-import { FallbackModelClient } from "../src/agent-effect/model-fallback.ts";
-import type { Retries } from "../src/agent-effect/provider-call.ts";
-import { anthropicRequests } from "../src/agent-effect/providers/anthropic-client.ts";
-import { Report } from "../src/agent-effect/report.ts";
-import { openAiRequests } from "../src/agent-effect/providers/openai-client.ts";
-import { AgentTelemetry } from "../src/instrumentation/telemetry.ts";
-import { runTest } from "./support/run.ts";
-import { anthropicAtMock, openAiAtMock, startVidaiMock, type VidaiMock } from "./support/vidaimock.ts";
+import type { Fact } from "../agent-core/fact.ts";
+import { InputText, ModelName, ProviderName, SessionId, TurnId } from "../agent-core/names.ts";
+import type { Observation } from "../agent-core/observation.ts";
+import type { Received } from "../agent-core/received.ts";
+import { ModelClient, type Target } from "./contracts.ts";
+import { ModelFromFacts } from "./model-choice.ts";
+import { openedWith } from "./session-setup.ts";
+import { BoringContextAssembler } from "../../tests/support/boring.ts";
+import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
+import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
+import { logKeys } from "./log-keys.ts";
+import { openSession } from "./loop.ts";
+import { FallbackModelClient } from "./model-fallback.ts";
+import type { Retries } from "./provider-call.ts";
+import { anthropicRequests } from "./providers/anthropic-client.ts";
+import { Report } from "./report.ts";
+import { openAiRequests } from "./providers/openai-client.ts";
+import { AgentTelemetry } from "../instrumentation/telemetry.ts";
+import { runTest } from "../../tests/support/run.ts";
+import { anthropicAtMock, openAiAtMock, startVidaiMock, type VidaiMock } from "../../tests/support/vidaimock.ts";
 
 const state: { mock?: VidaiMock } = {};
 beforeAll(async () => {

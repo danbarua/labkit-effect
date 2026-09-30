@@ -29,11 +29,14 @@ Each module's `MODEL.md` says what it builds, as rules with ids. A rule has at l
 name starts with its id, and `bun run check:rules` fails when one has none. `DESIGN.next.md`, where
 a module has one, holds direction that is not built. `TODO.md` is what is to be built.
 
-Tests are in `tests/`. `tests/examples/` tests the examples; everything else tests the harness.
-`tests/support/` holds what the tests share.
+A module's tests are beside its code (`src/agent-core/turn.test.ts`). The core's tests import only
+the core and `tests/support/`. `tests/` holds what joins modules: `tests/examples/` tests the
+examples, `tests/telemetry.test.ts` the instrumentation through one, and `tests/support/` what
+tests share (a driver for the core's machines, stand-ins for a provider, the test runner).
 
 In the first two, `bun run lint` (oxlint, with Effect's recommended preset and the rules in
-`scripts/oxlint/abstract-layers.js`) enforces their imports and pure functions (no `let`, no loops,
+`scripts/oxlint/abstract-layers.js`) enforces their imports and pure functions, in everything but
+their tests (no `let`, no loops,
 no call that changes a value in place), and refuses the `string` type and an unbranded
 `Schema.String`. `bun run check:brands` asks the TypeScript checker that every schema there decodes
 to a type with no unbranded string, however it is built.

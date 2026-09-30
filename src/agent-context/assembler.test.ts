@@ -5,25 +5,25 @@
  */
 
 import { afterAll, expect } from "bun:test";
-import { test } from "../support/test.ts";
+import { test } from "../../tests/support/test.ts";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
-import { Notices, type NoticeProvider } from "../../src/agent-context/assemble.ts";
-import { AgentContextAssembler, WholeConversation } from "../../src/agent-context/assembler.ts";
-import { SystemTimeNoticeProvider } from "../../src/agent-context/example-providers.ts";
-import { TurnId } from "../../src/agent-core/names.ts";
-import type { Observation } from "../../src/agent-core/observation.ts";
-import { ContextAssembler } from "../../src/agent-effect/contracts.ts";
-import { openSession } from "../../src/agent-effect/loop.ts";
-import { AnthropicModelClient } from "../../src/agent-effect/providers/anthropic-client.ts";
-import { Report } from "../../src/agent-effect/report.ts";
-import { CountingTurns, NoTurnEndHooks } from "../../src/agent-effect/turns.ts";
-import { BoringModelProvider, boringOpening } from "../support/boring.ts";
-import { observe, open, opened } from "../support/drive.ts";
-import { anthropicAt } from "../support/providers.ts";
-import { anthropicStream } from "../support/streams.ts";
-import { runTest } from "../support/run.ts";
-import { SmolToolRunner, smolCatalog } from "../support/smol-tools.ts";
+import { Notices, type NoticeProvider } from "./assemble.ts";
+import { AgentContextAssembler, WholeConversation } from "./assembler.ts";
+import { SystemTimeNoticeProvider } from "./example-providers.ts";
+import { TurnId } from "../agent-core/names.ts";
+import type { Observation } from "../agent-core/observation.ts";
+import { ContextAssembler } from "../agent-effect/contracts.ts";
+import { openSession } from "../agent-effect/loop.ts";
+import { AnthropicModelClient } from "../agent-effect/providers/anthropic-client.ts";
+import { Report } from "../agent-effect/report.ts";
+import { CountingTurns, NoTurnEndHooks } from "../agent-effect/turns.ts";
+import { BoringModelProvider, boringOpening } from "../../tests/support/boring.ts";
+import { observe, open, opened } from "../../tests/support/drive.ts";
+import { anthropicAt } from "../../tests/support/providers.ts";
+import { anthropicStream } from "../../tests/support/streams.ts";
+import { runTest } from "../../tests/support/run.ts";
+import { SmolToolRunner, smolCatalog } from "../../tests/support/smol-tools.ts";
 
 test("A4: the notices are sent last, as an instruction after the latest input, and each is reported", async () => {
   const session = open();

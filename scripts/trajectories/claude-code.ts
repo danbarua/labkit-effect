@@ -33,8 +33,9 @@
  *   before the rest of its message; such results are given after the message, and the early start
  *   is not represented;
  * - an assistant message whose model is `<synthetic>` is one Claude Code wrote itself, and is not a
- *   model response. "No response requested." says Claude Code did not ask the model: it is counted,
- *   not mapped, unless a turn is running, where it is `ModelVetoed`. Any other is an error it
+ *   model response. "No response requested." is one it puts after a user message it did not ask the
+ *   model about, so that the conversation it later sends alternates: it is counted, not mapped,
+ *   unless a turn is running, where it is `ModelVetoed`. Any other is an error it
  *   reports for the request
  *   ("API Error: …", "Not logged in", "Prompt is too long"): `ModelFailed`, or `ModelAttemptFailed`
  *   when Claude Code went on to get a response with nothing given in between. One that comes while

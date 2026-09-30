@@ -1,8 +1,8 @@
 import { expect } from "bun:test";
-import { test } from "./support/test.ts";
-import type { Fact } from "../src/agent-core/fact.ts";
-import { observe, open, opened } from "./support/drive.ts";
-import { json } from "./support/received.ts";
+import { test } from "../../tests/support/test.ts";
+import type { Fact } from "./fact.ts";
+import { observe, open, opened } from "../../tests/support/drive.ts";
+import { json } from "../../tests/support/received.ts";
 
 const callsTool = {
   _tag: "ModelResponded",
