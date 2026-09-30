@@ -38,9 +38,17 @@ who wrote each, and the view that sends them in place of the spans (agent-contex
 
 - [ ] The loop asks a compaction policy by itself (every n turns, by size, when the provider's
       cache has expired); today whoever runs the session asks it between turns.
-- [ ] An estimate of the next request's size, for a policy that compacts at a share of the
-      model's context window: the conversation so far, what the user has typed and attached, the
-      tools and the results the next turn may bring, and room to write a summary.
+- [ ] An estimate of the next request's size (estimated context usage), for a policy that
+      compacts automatically at X% of the current model's context window. It is the sum of:
+      - the conversation so far: the input and output tokens the last response reported (exact,
+        for what that request carried and what came back), plus an estimate for the facts
+        recorded since;
+      - what the user has typed in the composer;
+      - files and other context attached to it;
+      - the tools, and the tool calls and results the next turn may bring;
+      - room for writing a compaction summary.
+      Open: how much room to keep for the next turn's tool results, and for the summary (a
+      share, or the summarizer model's most output tokens).
 - [ ] Use the time since a provider's last summary (`writtenAt`) to tell whether its cache has
       expired, and so whether keeping the request's beginning unchanged still saves anything.
 - [ ] Refuse a request to compact that would not fit the summarizer's context window.
