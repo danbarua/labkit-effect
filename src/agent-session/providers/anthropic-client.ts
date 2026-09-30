@@ -63,8 +63,11 @@ import {
 
 type Outcome = Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" }>;
 
-/** The output limit sent when the session's settings give none; the Messages API requires one. */
-const defaultMaxTokens = 32_768;
+/**
+ * The output limit sent when the session's settings give none, because the Messages API requires
+ * one: 128,000, or the most a model allows when that is less (Haiku 4.5 allows 64,000).
+ */
+const defaultMaxTokens = (model: string): number => (model.startsWith("claude-haiku-4-5") ? 64_000 : 128_000);
 
 function resultContent(result: RenderedResult): { content: string; is_error?: true } {
   return result.isError ? { content: result.text, is_error: true } : { content: result.text };
@@ -148,7 +151,7 @@ function body(target: Target, context: ModelContext): Shaped {
   return {
     json: {
       model: target.model,
-      max_tokens: target.settings?.maxOutputTokens ?? defaultMaxTokens,
+      max_tokens: target.settings?.maxOutputTokens ?? defaultMaxTokens(target.model),
       ...(system === undefined ? {} : { system }),
       ...(context.tools.length === 0
         ? {}
@@ -168,7 +171,7 @@ function body(target: Target, context: ModelContext): Shaped {
               level: "info" as const,
               event: logKeys.anthropic.maxTokensSupplied,
               details: {
-                max_tokens: defaultMaxTokens,
+                max_tokens: defaultMaxTokens(target.model),
                 reason: "the Messages API requires max_tokens and the session's settings give no output limit",
               },
             },
