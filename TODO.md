@@ -2,16 +2,13 @@
 
 What is to be built, by capability. What is built is in each module's `MODEL.md`; direction that is
 not yet work is in its `DESIGN.next.md`. Delete an item when it is done or dropped. As of
-2026-09-30.
+2026-10-01.
 
 ## Decisions for Dan
 
-- [ ] The names of the turn and step terms. Proposed: `AskModel` (the decision to make a turn's
-      first request) and `TellModel` (each later request in the turn, after tool results) in place
-      of the one decision `ModelAsked`; `ModelAnswered` for a response that ends the turn, beside
-      `ModelResponded`. Open: whether `AskModel` replaces `TurnStarted` or follows it; whether
-      "increments Seq" means a step number within the turn; whether `ModelAnswered` is a second
-      observation or stays the turn's ending (`Answered`).
+- [ ] `ModelAnswered`: whether a response that ends the turn is an observation of its own, beside
+      `ModelResponded`, or stays the turn's ending (`TurnEnded { Answered }`), as it is now.
+      (`AskModel` and `TellModel { step }` are built; `AskModel` follows `TurnStarted`.)
 
 ## Build
 
@@ -24,28 +21,32 @@ the first input, stream thinking, the model calls a tool, the user is asked for 
 tool runs, the model answers, and `/export` writes the session to Markdown without going to the
 model.
 
-- [ ] Configuration comes from the host. In the log: the providers on offer are a model catalog
-      (models.dev) filtered by which credentials are set, plus a local server; a session opens with
-      a default configuration (provider, model, thinking off, streaming, 32,768 output tokens, a step
-      limit, permissions `ask`); the user changes the model, thinking and output limit with ACP's
-      `session/set_config_option`, each applied at the next idle point as a new version, and every
-      request is made with the version in force. Here: the opening is the default, a change is
-      `ModelChangeArrived` from `User { via: acp }`, taken between turns (M1–M3).
+- [ ] Configuration comes from the host, and is assembled before a request is made; a change
+      applies between turn N and turn N + 1. A new session is configuring until it is ready to
+      start turn zero: a UI with no default model, thinking level or output limit has nothing to
+      launch, and its submit is not enabled until it has (the same machines can run in the UI).
+      In the log: the providers on offer are a model catalog (models.dev) filtered by which
+      credentials are set, plus a local server; the user changes the model, thinking and output
+      limit with ACP's `session/set_config_option`. Here: the opening is the configuration, a
+      change is `ModelChangeArrived` from `User { via: acp }`, taken between turns (M1–M3); the
+      log's configuration versions are the host's own numbering, as `Seq` is the session's.
 - [ ] Tool permission. In the log: `write_file` (kind `edit`) waits for the user; the options are
       allow once, allow for the session, reject once; allow for the session is a grant for that
       tool, for all arguments, until the session closes or permissions are reset. Build the policy
       gate (agent-policy) into the loop against that flow, with which tools only read and which
       change things as a property of the tool.
 - [ ] Slash commands the host handles itself (`/export`), which are not input to the model.
-- [ ] The default output limit. The Anthropic adapter supplies 32,768 because the Messages API
-      requires one; that is low for a long multi-step coding task (Grok's default is 128,000).
 
 ### Compaction
 
+The proof of concept is shown. Before a session is run up to a compaction as a daily driver, it has
+to be pleasant to live with; this list is expected to grow.
+
 Built: the window marker, naming what decided it (agent-machine S4); compaction for the provider
 being asked, summaries per provider kept in memory or as files, policies asked between turns, and
-the view that sends each provider its own summaries (agent-context A5–A8); the Responses adapter can
-ask OpenAI or xAI for its own compaction (`openAiCompactions`).
+the view that sends each provider its own summaries (agent-context A5–A8); a provider's own
+compaction as a summary, for OpenAI and xAI (`openai-compaction.ts`, `xai-compaction.ts`,
+`provider-compaction.ts`), sent the session's system prompt and tools.
 
 - [ ] The loop asks the compaction policy itself; today whoever runs the session asks it between
       turns.
@@ -64,44 +65,33 @@ ask OpenAI or xAI for its own compaction (`openAiCompactions`).
 - [ ] Anthropic's own compaction (the compaction block, beta `compact-2026-09-04`).
 - [ ] A summarizer that asks a model to write a text summary with our own prompt.
 
-### Caching
-
-Built: the `cache` setting (off, 5m, 1h); Anthropic reads nearly every request from the cache with
-it (FizzBuzz, 20 turns: 27,556 of 29,032 input tokens).
-
-- [ ] OpenAI reported 0 cached tokens in every FizzBuzz run, requests over 1,024 tokens included,
-      with and without `prompt_cache_retention: "24h"`. Find out why before relying on it.
-- [ ] Compaction that knows the provider's cache: from the time since the provider's last
-      summary (`writtenAt`) and its cache's lifetime, whether the next request can still read the
-      cache, and so whether keeping its beginning unchanged saves anything.
-
 ### Providers
 
 - [ ] The Chat Completions adapter against the local Qwen model (`http://localhost:8000/v1`,
       `mlx-community/Qwen3.5-9B-8bit`, as in the ACP log): streaming, `reasoning_content` sent back,
       tool calls.
-- [ ] A stream cut after a tool call from it was passed on is not retried, and the turn fails
-      (`noRetryAfterCalls`): a retry's response names new calls, and the tool ran again for each.
-      Decide whether the turn should instead go on with the call that ran.
-- [ ] Thinking `off` on xAI is effort `low` for the first request only: once enforced, later
-      requests go with no effort (the model's default), because an `Effort` enforcement must name
-      an effort that was asked. Making `asked` optional on `Enforced.Effort` (agent-machine) would
-      record it.
-- [ ] grok-4.20 and grok-build-0.1 refuse `reasoning.effort` of any value; a thinking or effort
-      setting gets a 400 from them.
-- [ ] xAI's own compaction: after each one, Grok answered the last number before it again
-      (FizzBuzz 15 of 25 right; OpenAI's, through the same code, 25 of 25), also outside the
-      harness in 5 of 6 runs. Untested: whether sending the tools with `/compact` changes it.
+- [ ] xAI's own compaction: the two turns after each one answer the number before it again
+      ("16\n18"): FizzBuzz on grok-4.7, 25 turns, 21 right with the system prompt and tools sent to
+      `/responses/compact`, 15 without; OpenAI's through the same code, 25 of 25.
 
 ### Telemetry
 
-- [ ] Each request the loop carries out runs in a span (`agent.model.request`, `agent.tool.run`,
-      `agent.turn.review`), and each fallback attempt in `agent.model.attempt`, but only the tests
-      collect them: nothing exports them. Export them (OTLP), with parent spans for sessions and
-      turns, and send Effect's logs through OpenTelemetry.
+Built: spans and log lines written to `<name>.spans.jsonl` and `<name>.logs.jsonl` beside a probe's
+transcript; the session and each turn are spans, and each request's span sits under its turn
+(`src/instrumentation/README.md`).
+
+- [ ] OTLP, for a collector: OpenTelemetry's `@opentelemetry/exporter-trace-otlp-http` (a new
+      dependency, one more span processor beside the file), or Effect's `OtlpTracer` (no new
+      package, but it replaces the NodeSdk tracer, so not beside the file exporter).
 
 ## Later: worth doing, not core
 
+- [ ] Caching, tuned with compaction. Built: the `cache` setting (off, 5m, 1h); Anthropic reads
+      nearly every request from the cache with it (FizzBuzz, 20 turns: 27,556 of 29,032 input
+      tokens). To do: why OpenAI reported 0 cached tokens in every FizzBuzz run, requests over 1,024
+      tokens included; and compaction that knows the provider's cache: from the time since the
+      provider's last summary (`writtenAt`) and its cache's lifetime, whether the next request can
+      still read the cache, and so whether keeping its beginning unchanged saves anything.
 - [ ] Forks as sessions, and the turn pointer (`session/turn`; turn zero of a root points at
       itself). A fact is addressed by its session and its position.
 - [ ] `prompt_cache_key` (OpenAI, xAI) for cache-aware work.
