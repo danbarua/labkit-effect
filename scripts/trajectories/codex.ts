@@ -322,12 +322,13 @@ export async function importCodex(source: string): Promise<Imported> {
       observe({
         _tag: "CompactionWindow",
         window,
+        decidedBy: "codex",
         ...(typeof previous === "string" ? { previous } : {}),
         through: projected.recorded(),
         kept: [],
       });
       if (state.opened === undefined) count("compaction summary kept nowhere (the session was not opened)");
-      else projected.summarise({ session: state.opened, window, writtenBy: "codex", summary: json(payload["replacement_history"] ?? null) });
+      else projected.summarise({ session: state.opened, window, kind: "openai", writtenBy: "codex", summary: json(payload["replacement_history"] ?? null) });
       return;
     }
     count(kind === "" ? type : `${type}/${kind}`);

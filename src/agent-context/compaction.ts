@@ -1,32 +1,38 @@
 /**
- * Compaction on request, and the conversation it gives.
+ * Compaction, and the conversation it gives each provider.
  *
- * `compact` is run between turns by whoever asks for it (the user, a scenario). It chooses the span
- * since the last window, has a summarizer write a summary of it, records the summary in
- * `Summaries`, and then reports the window (`CompactionWindow`), so the summary is on record before
- * any request is made in the window.
+ * `compact` is run between turns, by the user or by a `CompactionPolicy` (`compactIfDue`). It
+ * compacts for the provider the session is asking: the span is every fact after that provider's
+ * last summary (from the start of the session when it has none), a summarizer writes the summary,
+ * the summary is recorded in `Summaries`, and then the window is reported (`CompactionWindow`),
+ * naming what decided it was due. The session's facts grow as if nothing were compacted; the
+ * window says a summary should exist and nothing about which providers have one.
  *
- * `CompactedConversation` is the view for a session with windows. The session's facts grow as if
- * nothing were compacted; the summaries are a second record beside them. The first request in a
- * window carries the summary of every window opened so far, in order, as each was recorded, in one
- * instruction message (consecutive messages of one role are merged), then
- * the messages of the facts the window keeps and of those after its span. Every later request
- * carries on from the one before it (`nextMessages`). A summary is read from the record and never
- * written again, so changing the summarizer changes the summaries of later windows and nothing
- * already written.
+ * `CompactedConversation` is the view for a session with windows. A request goes to one provider
+ * and carries that provider's summaries only. The first request to it after its latest summary
+ * carries all of its summaries, in the order written, as one instruction message (consecutive
+ * messages of one role are merged), then the messages of the facts that summary's window keeps and
+ * of those after its span. A later request to it carries on from its last request (A6), and so does
+ * a request to a provider whose summaries predate its last request: after a switch back, it goes on
+ * from where it was. So two providers in one session can be sent different conversations; what they
+ * are both sent is the facts since the later of their summaries. A summary is read from the record
+ * and never written again.
  */
 
-import { Context, Effect, Layer, Ref } from "effect";
+import { Context, DateTime, Effect, Layer, Ref } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
-import { type SessionId, type Seq, WindowId } from "../agent-machine/names.ts";
+import type { PolicyName, ProviderName, SessionId, Seq } from "../agent-machine/names.ts";
+import { WindowId } from "../agent-machine/names.ts";
 import type { ContextMessage } from "../agent-session/contracts.ts";
-import { conversationOf, merged, nextMessages } from "../agent-session/conversation.ts";
+import { conversationOf, merged } from "../agent-session/conversation.ts";
 import type { Session } from "../agent-session/loop.ts";
 import { asText, receivedText } from "../agent-session/received.ts";
+import { sentIn } from "../agent-session/sent.ts";
+import { modelOf } from "../agent-session/session-setup.ts";
 import { Conversation } from "./assemble.ts";
 import type { SummarizerName, WindowSummary } from "./forks.ts";
 
-/** Writes the summary of a window's span, given the summaries already written for the windows before it. */
+/** Writes the summary of a span, given the summaries already written for the same provider. */
 export interface Summarizer {
   readonly name: SummarizerName;
   readonly summarize: (
@@ -69,28 +75,51 @@ const sessionOf = (facts: ReadonlyArray<Fact>): SessionId => {
   return opened.observation.session;
 };
 
+/** The summaries of `kind` for the session `facts` open, in the order written. */
+const summariesFor = (recorded: ReadonlyArray<WindowSummary>, facts: ReadonlyArray<Fact>, kind: ProviderName) => {
+  const session = sessionOf(facts);
+  return recorded.filter((each) => each.session === session && each.kind === kind);
+};
+
+const windowNamed = (facts: ReadonlyArray<Fact>, window: WindowId): WindowFact["observation"] => {
+  const found = windowsOf(facts).find((each) => each.observation.window === window);
+  if (found === undefined) throw new Error(`No compaction window ${window} is recorded`);
+  return found.observation;
+};
+
 /**
- * Compacts `session` with `summarizer`: the span is every fact after the last window's span, the
- * summarizer is given the summaries of the windows before and the messages of the span, and the new
- * window is `window-<n>` for the session's n-th window. Run it between turns.
+ * Compacts `session` for the provider it is asking, with `summarizer`, as `decidedBy` decided: the
+ * span is every fact after that provider's last summary's window, the summarizer is given that
+ * provider's summaries and the messages of the span, and the new window is `window-<n>` for the
+ * session's n-th window. Run it between turns.
  */
-export const compact = (session: Session, summarizer: Summarizer) =>
+export const compact = (session: Session, summarizer: Summarizer, decidedBy: PolicyName) =>
   Effect.gen(function* () {
     const facts = yield* session.facts;
-    const windows = windowsOf(facts);
-    const last = windows.at(-1);
     const through = facts.at(-1)?.seq;
     if (through === undefined) return yield* Effect.die(new Error("An empty session has nothing to compact"));
-    const span = last === undefined ? facts : facts.filter((fact) => fact.seq > last.observation.through);
+    const kind = (yield* modelOf(facts)).provider;
     const summaries = yield* Summaries;
-    const id = sessionOf(facts);
-    const previous = (yield* summaries.recorded).filter((each) => each.session === id);
+    const previous = summariesFor(yield* summaries.recorded, facts, kind);
+    const before = previous.at(-1);
+    const from = before === undefined ? undefined : windowNamed(facts, before.window).through;
+    const span = from === undefined ? facts : facts.filter((fact) => fact.seq > from);
+    const windows = windowsOf(facts);
     const window = WindowId.make(`window-${windows.length + 1}`);
     const text = yield* summarizer.summarize(previous, conversationOf(span, facts));
-    yield* summaries.record({ session: id, window, writtenBy: summarizer.name, summary: receivedText(text) });
+    yield* summaries.record({
+      session: sessionOf(facts),
+      window,
+      kind,
+      writtenBy: summarizer.name,
+      writtenAt: yield* DateTime.now,
+      summary: receivedText(text),
+    });
+    const last = windows.at(-1);
     yield* session.observe({
       _tag: "CompactionWindow",
       window,
+      decidedBy,
       ...(last === undefined ? {} : { previous: last.observation.window }),
       through,
       kept: [],
@@ -99,26 +128,38 @@ export const compact = (session: Session, summarizer: Summarizer) =>
   });
 
 /**
- * Decides, from the session's facts, whether to compact now and with which summarizer. Whoever runs
- * the session asks it between turns (`compactIfDue`); undefined is not now.
+ * Decides, from the session's facts, whether to compact now and with which summarizer; undefined is
+ * not now. Its name is recorded with each window it decides on.
  */
-export type CompactionPolicy = (facts: ReadonlyArray<Fact>) => Summarizer | undefined;
+export interface CompactionPolicy {
+  readonly name: PolicyName;
+  readonly decide: (facts: ReadonlyArray<Fact>) => Summarizer | undefined;
+}
 
 /** Compacts `session` if `policy` says to. Run it between turns. */
 export const compactIfDue = (session: Session, policy: CompactionPolicy) =>
   Effect.gen(function* () {
-    const summarizer = policy(yield* session.facts);
-    if (summarizer !== undefined) yield* compact(session, summarizer);
+    const summarizer = policy.decide(yield* session.facts);
+    if (summarizer !== undefined) yield* compact(session, summarizer, policy.name);
   });
 
 /**
- * A window's summary, as the text the summarizer wrote, in an instruction message: the harness
- * speaking, so the input that follows it stays a message of its own.
+ * Summaries, as the text each summarizer wrote, in an instruction message: the harness speaking, so
+ * the input that follows stays a message of its own.
  */
-const summaryMessage = (summary: WindowSummary): ContextMessage => ({
+const summaryMessage = (summaries: ReadonlyArray<WindowSummary>): ContextMessage => ({
   role: "instruction",
-  parts: [{ _tag: "Text", text: asText(summary.summary) }],
+  parts: summaries.map((summary) => ({ _tag: "Text", text: asText(summary.summary) })),
 });
+
+/** The position in `facts` of the last fact that `is`, or -1. */
+function lastAt(facts: ReadonlyArray<Fact>, is: (fact: Fact) => boolean): number {
+  for (let at = facts.length - 1; at >= 0; at--) {
+    const fact = facts[at];
+    if (fact !== undefined && is(fact)) return at;
+  }
+  return -1;
+}
 
 export const CompactedConversation = Layer.effect(
   Conversation,
@@ -127,32 +168,22 @@ export const CompactedConversation = Layer.effect(
     return {
       messages: (facts) =>
         Effect.gen(function* () {
-          const opened = facts.flatMap((fact, at) =>
-            fact._tag === "Decided" && fact.decision._tag === "WindowOpened" ? [{ at, compaction: fact.decision.compaction }] : [],
+          const kind = (yield* modelOf(facts)).provider;
+          const mine = summariesFor(yield* summaries.recorded, facts, kind);
+          const latest = mine.at(-1);
+          const lastRequest = lastAt(
+            facts,
+            (fact) => fact._tag === "Observed" && fact.observation._tag === "ModelRequestDispatched" && fact.observation.provider === kind,
           );
-          const latest = opened.at(-1);
-          const dispatchedSince = facts.some(
-            (fact, at) => latest !== undefined && at > latest.at && fact._tag === "Observed" && fact.observation._tag === "ModelRequestDispatched",
-          );
-          if (latest === undefined || dispatchedSince) return nextMessages(facts);
-          const windows = windowsOf(facts);
-          const windowAt = (seq: Seq): WindowFact["observation"] => {
-            const found = windows.find((each) => each.seq === seq);
-            if (found === undefined) throw new Error(`No compaction window is recorded at ${seq}`);
-            return found.observation;
-          };
-          const id = sessionOf(facts);
-          const recorded = yield* summaries.recorded;
-          const carried = opened.map(({ compaction }) => {
-            const window = windowAt(compaction).window;
-            const summary = recorded.find((each) => each.session === id && each.window === window);
-            if (summary === undefined) throw new Error(`No summary is recorded for ${window}`);
-            return summaryMessage(summary);
-          });
-          const current = windowAt(latest.compaction);
-          const kept = new Set(current.kept);
-          const after = facts.filter((fact) => kept.has(fact.seq) || fact.seq > current.through);
-          return merged([...carried, ...conversationOf(after, facts)]);
+          const window = latest === undefined ? undefined : windowNamed(facts, latest.window);
+          const windowAt = window === undefined ? -1 : lastAt(facts, (fact) => fact.seq === window.through);
+          const request = facts[lastRequest];
+          if (request?._tag === "Observed" && request.observation._tag === "ModelRequestDispatched" && lastRequest > windowAt)
+            return merged([...sentIn(request.observation.sent).messages, ...conversationOf(facts.slice(lastRequest + 1), facts)]);
+          if (window === undefined) return conversationOf(facts);
+          const kept = new Set(window.kept);
+          const after = facts.filter((fact) => kept.has(fact.seq) || fact.seq > window.through);
+          return merged([summaryMessage(mine), ...conversationOf(after, facts)]);
         }),
     };
   }),

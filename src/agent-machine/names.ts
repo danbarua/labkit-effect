@@ -77,6 +77,13 @@ export type TokenCount = typeof TokenCount.Type;
 export const EnforcementReason = Schema.String.pipe(Schema.brand("agent-machine/EnforcementReason"));
 export type EnforcementReason = typeof EnforcementReason.Type;
 
+/**
+ * What decided that a compaction was due: a compaction policy's name, the user, or the harness a
+ * session was imported from and how it says it was triggered.
+ */
+export const PolicyName = Schema.String.pipe(Schema.brand("agent-machine/PolicyName"));
+export type PolicyName = typeof PolicyName.Type;
+
 /** Identifies one window: what the model is sent after a compaction. Assigned by whoever compacted. */
 export const WindowId = Schema.String.pipe(Schema.brand("agent-machine/WindowId"));
 export type WindowId = typeof WindowId.Type;

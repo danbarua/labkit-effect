@@ -9,6 +9,7 @@
 
 import type { CompactionPolicy, Summarizer } from "../../agent-context/compaction.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
+import { PolicyName } from "../../agent-machine/names.ts";
 import { parseJson } from "../../agent-session/received.ts";
 import { isObject } from "../../agent-session/shaping.ts";
 
@@ -28,19 +29,20 @@ function lastTurn(facts: ReadonlyArray<Fact>): ReadonlyArray<Fact> {
   return ended === -1 ? [] : facts.slice(started, ended + 1);
 }
 
-export const whenCountReaches =
-  (summarizers: ReadonlyMap<number, Summarizer>): CompactionPolicy =>
-  (facts) => {
+export const whenCountReaches = (summarizers: ReadonlyMap<number, Summarizer>): CompactionPolicy => ({
+  name: PolicyName.make(`when the count reaches ${[...summarizers.keys()].join(", ")}`),
+  decide: (facts) => {
     // Between turns, the last input is the one the last turn was given.
     const input = facts[lastAt(facts, (fact) => fact._tag === "Observed" && fact.observation._tag === "InputArrived")];
     return input?._tag === "Observed" && input.observation._tag === "InputArrived"
       ? summarizers.get(Number(input.observation.text) + 1)
       : undefined;
-  };
+  },
+});
 
-export const afterFizzBuzz =
-  (chosen: (compacted: number) => Summarizer): CompactionPolicy =>
-  (facts) => {
+export const afterFizzBuzz = (chosen: (compacted: number) => Summarizer): CompactionPolicy => ({
+  name: PolicyName.make("after every FizzBuzz"),
+  decide: (facts) => {
     const fizzBuzz = lastTurn(facts).some(
       (fact) =>
         fact._tag === "Observed" &&
@@ -53,4 +55,5 @@ export const afterFizzBuzz =
     );
     const compacted = facts.filter((fact) => fact._tag === "Observed" && fact.observation._tag === "CompactionWindow").length;
     return fizzBuzz ? chosen(compacted) : undefined;
-  };
+  },
+});

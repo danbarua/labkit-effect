@@ -150,7 +150,8 @@ then continues").
   carries is not decided by the core, and is on record in the fact that the request was made. A request that was made and has no
   outcome recorded is indeterminate: whether the model saw what it carried is not known.
 - S4. A compaction window is reported by the layers around the core, as the span they chose:
-  `CompactionWindow { window, previous, through, kept }`. It goes to the agent like input: taken at
+  `CompactionWindow { window, decidedBy, previous, through, kept }`, where `decidedBy` names what
+  decided the compaction was due. It goes to the agent like input: taken at
   once while no turn runs, otherwise waiting in the turn's mailbox until between steps, or until the
   turn ends. Taking it records `WindowOpened`. The core records the marker and nothing more: what a
   request carries in a window is the layers' business, and a summary is not a fact of the session.

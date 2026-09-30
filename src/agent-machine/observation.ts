@@ -14,6 +14,7 @@ import {
   InputText,
   ModelName,
   ModelText,
+  PolicyName,
   NoticeText,
   ProviderName,
   Seq,
@@ -131,10 +132,13 @@ export const Observation = Schema.Union([
    * at `kept`. Once taken (`WindowOpened`), requests are made in the window, where a summary of the
    * span stands in for it and the facts at `kept` are sent as they are. The summary is not a fact of
    * the session: it belongs to a fork over the window, held apart, so it can be revised, replaced or
-   * set beside others. `previous` is the window this one follows, when there is one.
+   * set beside others. `previous` is the window this one follows, when there is one. `decidedBy` is
+   * what decided the compaction was due. The window says a summary of the span should exist; it
+   * does not say that one does, for any provider.
    */
   Schema.TaggedStruct("CompactionWindow", {
     window: WindowId,
+    decidedBy: PolicyName,
     previous: Schema.optionalKey(WindowId),
     through: Seq,
     kept: Schema.Array(Seq),

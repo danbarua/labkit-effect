@@ -16,27 +16,35 @@ in `DESIGN.next.md`.
   request carries, as one instruction message. Each is reported as `NoticeInserted`, so later
   requests carry it where it was sent (agent-machine S5).
 - A5. A compaction window is a marker: `CompactionWindow` (agent-machine S4) records which span of the
-  session a compaction covers, and nothing else. A summary of a window is a `WindowSummary`
-  (`forks.ts`): the window, the summary, and the summarizer that wrote it. Summaries are a record
-  beside the session's facts (`Summaries`; `SummariesInMemory` holds them for as long as its layer
-  lasts), and one once recorded is not changed. The session's facts grow as if nothing were
-  compacted. `compact(session, summarizer)` compacts on request, between turns: the span is every
-  fact after the last window's span, the summarizer is given the summaries of the windows before
-  and the messages of the span, the summary is recorded, and then the window is reported. A
-  `CompactionPolicy` decides from the facts whether to compact now and with which summarizer;
-  `compactIfDue` asks it, run between turns by whoever runs the session. The
+  session a compaction covers and what decided it was due, and nothing else. A summary of a window
+  is a `WindowSummary` (`forks.ts`): the window, the provider whose requests carry it (`kind`), the
+  summary, the summarizer that wrote it and when. Summaries are a record beside the session's facts
+  (`Summaries`: `SummariesInMemory`, or `SummariesInFolder`, a text file for each summary in a
+  folder for each session and kind), and one once recorded is not changed. The session's facts
+  grow as if nothing were compacted, and a window says nothing about which providers have a summary
+  of it. `compact(session, summarizer, decidedBy)` compacts between turns, for the provider the
+  session is asking: the span is every fact after that provider's last summary's window (from the
+  start when it has none), the summarizer is given that provider's summaries and the messages of
+  the span, the summary is recorded, and then the window is reported. A `CompactionPolicy` has a
+  name and decides from the facts whether to compact now and with which summarizer; `compactIfDue`
+  asks it, run between turns by whoever runs the session, and records its name on the window. The
   importers write the summaries Claude Code and Codex made to `summaries.jsonl`, written by
-  `claude-code` or `codex`.
+  `claude-code` or `codex`, and name `claude-code auto`, `claude-code manual` or `codex` as what
+  decided the window.
 - A6. A request carries the messages the request before it carried, as recorded with that request,
   followed by the messages of the facts recorded since (`nextMessages`). Nothing before the last
   request is projected again: a change to the projection changes what later requests add, not
   what an earlier request carried. A compaction's view is the one that rebuilds the messages.
-- A7. With `CompactedConversation`, the first request in a window carries the summary of every
-  window opened so far, in the order opened, each as recorded, as one instruction message (the
-  harness speaking, so the input after it stays a user message of its own), then the messages of the facts the
-  window keeps and of those after its span. Later requests in the window carry on from it (A6).
-  A summary is read from the record and never written again, so a change of summarizer changes
-  the summaries of later windows only.
+- A7. With `CompactedConversation`, a request carries only the summaries of the provider it goes to.
+  The first request to a provider after its latest summary carries all of its summaries, in the
+  order written, as one instruction message (the harness speaking; the Anthropic adapter sends
+  instructions that open the conversation in the top-level system), then the messages of the facts
+  that summary's window keeps and of those after its span. A summary is read from the record and
+  never written again, so a change of summarizer changes later summaries only.
+- A8. A request to a provider that has been sent a request since its latest summary carries on from
+  its last request (A6), whatever other providers were asked in between; a provider with no
+  summaries and no request before is sent the whole conversation. So after a switch the new
+  provider starts from the beginning, and a switch back goes on from where the old one was.
 
 Each of these is an Effect service, supplied by a layer. `example-providers.ts` holds examples: a
 notice of the current time, a fixed model, and a selector that moves to a larger model when the
@@ -45,8 +53,8 @@ contents are estimated not to fit.
 ## What is not built
 
 - A policy the loop asks by itself: whoever runs the session asks one between turns.
-- Summaries per provider: every request carries every summary, whichever provider it goes to
-  (`DESIGN.next.md`).
+- A compaction policy that applies at a share of the model's context window: that needs an
+  estimate of the next request's size (`TODO.md`).
 - A provider's own compaction (Anthropic's compaction block, OpenAI's `compaction` item). Neither
   adapter asks for one or sends one back.
 - Caching. No request marks anything for the provider's cache.

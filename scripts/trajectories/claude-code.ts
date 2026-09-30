@@ -77,7 +77,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
     /** Each record's type and subtype, by its uuid. */
     kinds: new Map<string, string>(),
     /** A boundary whose summary message has not arrived yet. */
-    boundary: undefined as { window: string; through: number; kept: ReadonlyArray<string> } | undefined,
+    boundary: undefined as { window: string; decidedBy: string; through: number; kept: ReadonlyArray<string> } | undefined,
     /** The window of the file's last boundary. */
     window: undefined as string | undefined,
   };
@@ -254,12 +254,14 @@ export async function importClaudeCode(source: string): Promise<Imported> {
         observe({
           _tag: "CompactionWindow",
           window: boundary.window,
+          decidedBy: boundary.decidedBy,
           ...(state.window === undefined ? {} : { previous: state.window }),
           through: boundary.through,
           kept,
         });
         if (state.session === undefined) count("compaction summary kept nowhere (the session was not opened)");
-        else projected.summarise({ session: state.session, window: boundary.window, writtenBy: "claude-code", summary: text(input) });
+        else
+          projected.summarise({ session: state.session, window: boundary.window, kind: "anthropic", writtenBy: "claude-code", summary: text(input) });
         state.window = boundary.window;
         return;
       }
@@ -282,8 +284,11 @@ export async function importClaudeCode(source: string): Promise<Imported> {
       const metadata = record["compactMetadata"] as Record_ | undefined;
       const preserved = metadata?.["preservedMessages"] as Record_ | undefined;
       const all = preserved?.["allUuids"];
+      const trigger = metadata?.["trigger"];
       state.boundary = {
         window: str(record["uuid"]),
+        // Claude Code records whether it compacted by itself ("auto") or the user asked ("manual").
+        decidedBy: typeof trigger === "string" ? `claude-code ${trigger}` : "claude-code",
         through: projected.recorded(),
         kept: Array.isArray(all) ? all.flatMap((uuid) => (typeof uuid === "string" ? [uuid] : [])) : [],
       };

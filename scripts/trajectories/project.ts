@@ -142,8 +142,11 @@ export function projection(harness: string): Projection {
     count: (kind) => {
       unmapped.set(kind, (unmapped.get(kind) ?? 0) + 1);
     },
+    // A summary is written at the time of the record that holds it.
     summarise: (raw) => {
-      summaries.push(encodeSummary(summary(raw)));
+      const time = state.time;
+      if (time === undefined) throw new Error("a compaction summary came before any record with a time");
+      summaries.push(encodeSummary(summary({ ...(raw as object), writtenAt: DateTime.formatIso(time) })));
     },
     world: () => state.world,
     recorded: () => facts.length,

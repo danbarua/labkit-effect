@@ -12,7 +12,7 @@ import { observe, open, opened, type DrivenMachines } from "../../tests/support/
 const tags = (session: DrivenMachines) =>
   session.journal.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
 
-const window = (through: number, kept: ReadonlyArray<number>) => ({ _tag: "CompactionWindow", window: "w1", through, kept });
+const window = (through: number, kept: ReadonlyArray<number>) => ({ _tag: "CompactionWindow", window: "w1", decidedBy: "test", through, kept });
 
 test("S4: a compaction window while no turn runs is taken at once", () => {
   const session = open();

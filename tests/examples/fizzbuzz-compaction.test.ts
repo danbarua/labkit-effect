@@ -5,7 +5,16 @@
  */
 
 import { expect } from "bun:test";
+import { mkdtempSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
+import * as BunPath from "@effect/platform-bun/BunPath";
+import { Layer } from "effect";
 import { CompactedConversation } from "../../src/agent-context/compaction.ts";
+import { SummariesInFolder } from "../../src/agent-context/summaries-in-folder.ts";
+import { ModelName, ProviderName } from "../../src/agent-machine/names.ts";
+import { scriptedFizzBuzzModel } from "../../src/examples/fizzbuzz/model.ts";
 import type { Fact } from "../../src/agent-machine/fact.ts";
 import type { ModelContext } from "../../src/agent-session/contracts.ts";
 import { asText } from "../../src/agent-session/received.ts";
@@ -134,4 +143,69 @@ test("A5 A7: compacting after every FizzBuzz, the summarizer chosen for each, ea
     [{ role: "instruction", parts: texts.slice(0, 2).map((text) => ({ _tag: "Text", text })) }, { role: "user", parts: [{ _tag: "Text", text: "47" }] }],
     [{ role: "instruction", parts: texts.slice(0, 3).map((text) => ({ _tag: "Text", text })) }, { role: "user", parts: [{ _tag: "Text", text: "77" }] }],
   ]);
+});
+
+const provider = (name: string, model: string) => ({ provider: ProviderName.make(name), model: ModelName.make(model) });
+
+test("A5 A8: switching provider, each is sent its own summaries, and a switch back goes on from where it was", async () => {
+  const folder = mkdtempSync(join(tmpdir(), "summaries-"));
+  const policy = whenCountReaches(
+    new Map([
+      [8, PlainTextFizzBuzzSummarizer],
+      [16, EmojiHappyFizzBuzzSummarizer],
+    ]),
+  );
+  const { facts, summaries } = await runTest(
+    play(countingUser(10), {
+      ...basic,
+      model: { target: provider("anthropic", "claude-fizz"), client: scriptedFizzBuzzModel().layer },
+      conversation: CompactedConversation,
+      compaction: policy,
+      switches: new Map([
+        [8, provider("openai", "gpt-fizz")],
+        [16, provider("anthropic", "claude-fizz")],
+      ]),
+      summaries: SummariesInFolder(folder).pipe(Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))),
+    }),
+  );
+  // Written for the provider that was being asked, from where that provider's summaries end.
+  expect(summaries.map((each) => [each.window, each.kind, each.writtenBy]) as unknown).toEqual([
+    ["window-1", "anthropic", "PlainTextFizzBuzzSummarizer"],
+    ["window-2", "openai", "EmojiHappyFizzBuzzSummarizer"],
+  ]);
+  const [plain, emoji] = summaries.map((each) => asText(each.summary));
+  expect(plain).toContain("exchanged 8 messages");
+  expect(emoji).toContain("since it began, you and the assistant exchanged **16** messages");
+  // Kept as files, one folder for each kind, and read back as written.
+  expect(readdirSync(join(folder, "fizzbuzz")).sort()).toEqual(["anthropic", "openai"]);
+  expect(readdirSync(join(folder, "fizzbuzz", "openai"))[0]).toMatch(/^0001_\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d\.\d{3}Z_EmojiHappyFizzBuzzSummarizer_window-2\.txt$/);
+  // Each window names what decided it.
+  expect(
+    facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "CompactionWindow" ? [fact.observation.decidedBy] : [])) as unknown,
+  ).toEqual([policy.name, policy.name]);
+  const sent = facts.flatMap((fact) =>
+    fact._tag === "Observed" && fact.observation._tag === "ModelRequestDispatched"
+      ? [{ provider: fact.observation.provider, messages: sentIn(fact.observation.sent).messages }]
+      : [],
+  );
+  const firstTo = (name: string, input: string) =>
+    sent.find((request) => {
+      const last = request.messages.at(-1)?.parts.at(-1);
+      return request.provider === name && last?._tag === "Text" && last.text === input;
+    })?.messages;
+  // OpenAI has no summaries: it is sent the whole conversation, from the first input.
+  expect(firstTo("openai", "9")?.[0] as unknown).toEqual({ role: "user", parts: [{ _tag: "Text", text: "1" }] });
+  // Back on Anthropic: its own summary, then everything after that summary's window, OpenAI's turns included.
+  const back = firstTo("anthropic", "17");
+  expect(back?.slice(0, 2) as unknown).toEqual([
+    { role: "instruction", parts: [{ _tag: "Text", text: plain }] },
+    { role: "user", parts: [{ _tag: "Text", text: "9" }] },
+  ]);
+  expect(JSON.stringify(back)).not.toContain("Journey");
+  const replies = facts.flatMap((fact) =>
+    fact._tag === "Observed" && fact.observation._tag === "ModelResponded"
+      ? fact.observation.parts.flatMap((part) => (part._tag === "Text" ? [part.text] : []))
+      : [],
+  );
+  expect(replies as unknown).toEqual(countingUser(10).map((n) => String(Number(n) + 1)));
 });

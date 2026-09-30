@@ -38,9 +38,11 @@ who wrote each, and the view that sends them in place of the spans (agent-contex
 
 - [ ] The loop asks a compaction policy by itself (every n turns, by size, when the provider's
       cache has expired); today whoever runs the session asks it between turns.
-- [ ] Summaries per provider: a request carries only its provider's summaries; after a switch,
-      compaction for the new provider starts from the beginning; switching back goes on from the
-      old provider's last summary (agent-context `DESIGN.next.md`).
+- [ ] An estimate of the next request's size, for a policy that compacts at a share of the
+      model's context window: the conversation so far, what the user has typed and attached, the
+      tools and the results the next turn may bring, and room to write a summary.
+- [ ] Use the time since a provider's last summary (`writtenAt`) to tell whether its cache has
+      expired, and so whether keeping the request's beginning unchanged still saves anything.
 - [ ] Refuse a request to compact that would not fit the summarizer's context window.
 - [ ] A summarizer that asks a model. Its request belongs to the compaction's own record (a fork),
       which is not built.

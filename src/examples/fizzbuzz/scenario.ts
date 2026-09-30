@@ -45,6 +45,13 @@ export interface Setup {
   readonly model?: { readonly target: ModelTarget; readonly client: Layer.Layer<ModelClient> };
   /** Asked after every turn whether to compact, and with which summarizer; never, when not given. */
   readonly compaction?: CompactionPolicy;
+  /**
+   * Changes of model the user makes: after the turn in which the count reaches a key (and after any
+   * compaction then), the session is told to ask that key's model from then on.
+   */
+  readonly switches?: ReadonlyMap<number, ModelTarget>;
+  /** Where the summaries are kept; in memory, for the one play, when not given. */
+  readonly summaries?: Layer.Layer<Summaries>;
 }
 
 export const basic: Setup = { catalog: FizzBuzzToolCatalog, conversation: WholeConversation };
@@ -63,7 +70,7 @@ const scripted: ModelTarget = { provider: ProviderName.make("scripted"), model: 
 
 export const play = (inputs: ReadonlyArray<string>, setup: Setup = basic): Effect.Effect<Played> =>
   Effect.gen(function* () {
-    const summaries = yield* Summaries.pipe(Effect.provide(SummariesInMemory));
+    const summaries = yield* Summaries.pipe(Effect.provide(setup.summaries ?? SummariesInMemory));
     return yield* played(inputs, setup, summaries);
   });
 
@@ -87,6 +94,12 @@ const played = (inputs: ReadonlyArray<string>, setup: Setup, summaries: Summarie
     const session = yield* openSession;
     const compaction = setup.compaction;
     const compactAfter = compaction === undefined ? Effect.void : compactIfDue(session, compaction).pipe(Effect.andThen(session.idle));
+    const switchAfter = (text: string) => {
+      const target = setup.switches?.get(Number(text) + 1);
+      return target === undefined
+        ? Effect.void
+        : session.observe({ _tag: "ModelChangeArrived", ...target }).pipe(Effect.andThen(session.idle));
+    };
     yield* session.observe(
       yield* opening(SessionId.make(setup.session ?? "fizzbuzz"), setup.model?.target ?? scripted),
     );
@@ -97,7 +110,7 @@ const played = (inputs: ReadonlyArray<string>, setup: Setup, summaries: Summarie
       (text) =>
         session
           .observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make(text) })
-          .pipe(Effect.andThen(session.idle), Effect.andThen(compactAfter)),
+          .pipe(Effect.andThen(session.idle), Effect.andThen(compactAfter), Effect.andThen(switchAfter(text))),
       { discard: true },
     );
     const facts = yield* session.facts;
