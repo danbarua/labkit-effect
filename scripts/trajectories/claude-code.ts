@@ -16,8 +16,10 @@
  *   model of its first assistant message through `anthropic`. Claude Code does not record the system
  *   prompt or the tools a session is given, so neither is recorded, and the report counts that;
  * - a user message with text is `InputArrived`, from the user, or from the system when Claude Code
- *   marks it meta (a hook's feedback, a message from another session); while the agent is idle a
- *   turn is started, as the loop does;
+ *   marks it meta (a hook's feedback, a message from another session). Input waits until the model
+ *   is asked: a turn is started at the first model response, or error, after it, and takes all the
+ *   input waiting. Claude Code records input it does not ask the model about (a local command and
+ *   its output), which the model is sent with the next input;
  * - a `compact_boundary` record is a `CompactionWindow`: the window is the boundary's uuid, the
  *   previous window the file's previous boundary, `through` the last position before the boundary,
  *   and `kept` the positions of the messages the boundary names as kept verbatim. The summary
@@ -30,6 +32,13 @@
  *   Claude Code starts a tool as soon as its call has streamed in, so a result can be recorded
  *   before the rest of its message; such results are given after the message, and the early start
  *   is not represented;
+ * - an assistant message whose model is `<synthetic>` is one Claude Code wrote itself, and is not a
+ *   model response. "No response requested." says Claude Code did not ask the model: it is counted,
+ *   not mapped, unless a turn is running, where it is `ModelVetoed`. Any other is an error it
+ *   reports for the request
+ *   ("API Error: …", "Not logged in", "Prompt is too long"): `ModelFailed`, or `ModelAttemptFailed`
+ *   when Claude Code went on to get a response with nothing given in between. One that comes while
+ *   no turn is running is counted, not mapped;
  * - a `tool_result` block is `ToolEnded`: `Failed` (the tool's own report) when `is_error`,
  *   otherwise `Succeeded`;
  * - after a final answer the core asks `BeforeTurnEnded`; a Stop hook's feedback that follows is
@@ -54,6 +63,10 @@ export async function importClaudeCode(source: string): Promise<Imported> {
     pending: undefined as
       | { id: string; uuids: Array<Json>; model: string; blocks: Array<Json>; usage: Json; stop: Json }
       | undefined,
+    /** The model of the last assistant message that named one. */
+    model: undefined as string | undefined,
+    /** An error Claude Code reported for a request; what it did next says whether the request went on. */
+    failure: undefined as string | undefined,
     /** Tool results recorded while their message was still arriving, given after it. */
     held: [] as Array<{ result: Record_; uuid: Json | undefined }>,
     /** A turn whose `BeforeTurnEnded` is not answered yet: a Stop hook's feedback may still come. */
@@ -78,12 +91,19 @@ export async function importClaudeCode(source: string): Promise<Imported> {
   function observe(raw: unknown): number {
     const { seq, requests } = projected.observe(raw);
     for (const request of requests) if (request._tag === "BeforeTurnEnded") state.review = request.turn;
-    const observation = raw as { _tag: string };
-    if (observation._tag === "InputArrived" && projected.world().agent.state._tag === "Idle") {
-      state.turns += 1;
-      observe({ _tag: "TurnStarted", turn: `turn-${state.turns}` });
-    }
     return seq;
+  }
+
+  /**
+   * Starts a turn when none is running and input is waiting. Input alone does not start one:
+   * Claude Code records input it does not ask the model about (a local command and its output), and
+   * that input waits until the model is next asked.
+   */
+  function startTurn(): void {
+    const agent = projected.world().agent;
+    if (agent.state._tag !== "Idle" || !agent.mailbox.some((waiting) => waiting.message._tag === "InputArrived")) return;
+    state.turns += 1;
+    observe({ _tag: "TurnStarted", turn: `turn-${state.turns}` });
   }
 
   function currentTurn(): string {
@@ -131,6 +151,33 @@ export async function importClaudeCode(source: string): Promise<Imported> {
     for (const { result, uuid } of held) toolEnded(result, uuid);
   }
 
+  /** Records the error held, as the end of the request or, when Claude Code `wentOn`, as one attempt at it. */
+  function flushFailure(wentOn: boolean): void {
+    const failure = state.failure;
+    if (failure === undefined) return;
+    state.failure = undefined;
+    startTurn();
+    if (projected.world().agent.state._tag !== "Running") return count("assistant (synthetic: an error with no turn running)");
+    const failed = { turn: currentTurn(), failure, error: text(failure) };
+    observe(
+      wentOn
+        ? { _tag: "ModelAttemptFailed", provider: "anthropic", model: state.model ?? "unknown", ...failed }
+        : { _tag: "ModelFailed", ...failed },
+    );
+  }
+
+  /** A message Claude Code wrote itself: it did not ask the model, or it reports an error for the request. */
+  function synthetic(written: string): void {
+    flushResponse();
+    flushFailure(false);
+    if (!written.startsWith("No response requested")) {
+      state.failure = written;
+      return;
+    }
+    if (projected.world().agent.state._tag !== "Running") return count("assistant (synthetic: no response requested, with no turn running)");
+    observe({ _tag: "ModelVetoed", turn: currentTurn(), reason: text(written) });
+  }
+
   function toolEnded(result: Record_, uuid: Json | undefined): void {
     const seq = observe({
       _tag: "ToolEnded",
@@ -157,10 +204,17 @@ export async function importClaudeCode(source: string): Promise<Imported> {
     if (record["isSidechain"] === true) return count(`${type} (sidechain: a subagent)`);
     if (type === "assistant" && typeof message === "object" && message !== null && !Array.isArray(message)) {
       const m = message as Record_;
+      const blocks = Array.isArray(m["content"]) ? (m["content"] as Array<Json>) : [];
+      if (m["model"] === "<synthetic>")
+        return synthetic(
+          blocks.flatMap((block) => (typeof (block as Record_ | null)?.["text"] === "string" ? [str((block as Record_)["text"])] : [])).join("\n"),
+        );
+      flushFailure(true);
+      startTurn();
+      if (typeof m["model"] === "string") state.model = m["model"];
       const id = typeof m["id"] === "string" ? m["id"] : "";
       if (state.pending !== undefined && state.pending.id !== id) flushResponse();
       if (state.pending === undefined) flushReview();
-      const blocks = Array.isArray(m["content"]) ? (m["content"] as Array<Json>) : [];
       state.pending = {
         id,
         uuids: [...(state.pending?.uuids ?? []), record["uuid"] ?? null],
@@ -172,6 +226,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
       return;
     }
     if (type === "user" && typeof message === "object" && message !== null && !Array.isArray(message)) {
+      flushFailure(false);
       const content = (message as Record_)["content"];
       const blocks = Array.isArray(content) ? (content as Array<Json>) : [];
       const results = blocks.filter((b) => (b as Record_ | null)?.["type"] === "tool_result") as Array<Record_>;
@@ -219,6 +274,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
       return;
     }
     if (type === "system" && record["subtype"] === "compact_boundary") {
+      flushFailure(false);
       flushResponse();
       flushReview();
       if (!projected.begun()) return count("system/compact_boundary (nothing before it in the file)");
@@ -258,6 +314,7 @@ export async function importClaudeCode(source: string): Promise<Imported> {
       count(`<record not mapped: ${error instanceof Error ? error.message.slice(0, 60) : "?"}>`);
     }
   }
+  flushFailure(false);
   flushResponse();
   flushReview();
   if (state.boundary !== undefined) count("system/compact_boundary (no summary after it)");

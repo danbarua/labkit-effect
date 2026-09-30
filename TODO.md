@@ -75,12 +75,9 @@ stream of effects and observations. These build on that.
 
 ## Trajectories
 
-- [ ] Claude Code: 9 observations the core does not expect, and 49 that follow from two of them.
-      Three follow a refusal that Claude Code asked again after; three are responses with no turn;
-      one follows an answered turn; two follow a message Claude Code wrote itself.
-- [ ] Claude Code writes messages of its own as assistant messages with model `<synthetic>` and
-      `stop_reason: "stop_sequence"` (137 in 808 files: "No response requested.", API errors, "Not
-      logged in"). The importer records them as model responses; they are the harness's.
+- [ ] Claude Code: 4 observations the core does not expect, in 808 files. Each is an error Claude
+      Code reported after a response the core had already taken as the step's outcome: three after
+      a refusal, one after an answer.
 - [ ] Codex: three responses in files from 2026-08 are split in two by a `token_count` that arrived
       mid-response, and the first half is recorded as `Unfinished`.
 - [ ] Codex: 8 turns still running when Codex completes them; 10 completions while another turn
