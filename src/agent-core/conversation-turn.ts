@@ -29,13 +29,19 @@ export type ConversationTurnState =
   /** Opened; taking its first input before the first step. */
   | { readonly _tag: "Opening"; readonly turn: TurnId }
   | { readonly _tag: "Stepping"; readonly turn: TurnId; readonly step: StepIndex }
-  /** Between steps after a tool batch settled or a response was cut short. */
+  /** Between steps after a tool batch settled. */
   | { readonly _tag: "Continuing"; readonly turn: TurnId; readonly step: StepIndex }
-  /** Between steps after a final answer, with no input taken since. */
-  | { readonly _tag: "AfterAnswer"; readonly turn: TurnId; readonly step: StepIndex }
-  /** Between steps after a final answer, with input taken since. */
+  /**
+   * Between steps after a response with no tool calls (a final answer, or one cut short), with no
+   * input taken since. `ending` is how the turn ends if none is taken.
+   */
+  | { readonly _tag: "AfterAnswer"; readonly turn: TurnId; readonly step: StepIndex; readonly ending: LastResponse }
+  /** Between steps after a response with no tool calls, with input taken since. */
   | { readonly _tag: "AfterAnswerSteered"; readonly turn: TurnId; readonly step: StepIndex }
   | { readonly _tag: "Ended"; readonly turn: TurnId };
+
+/** How a turn ends when its last response had no tool calls and no input follows it. */
+type LastResponse = Extract<Ending, { _tag: "Answered" | "CutShort" }>;
 
 export type ConversationTurnMessage = ToConversationTurn | ModelObservation | TurnObservation;
 
@@ -63,21 +69,24 @@ const take = (state: ConversationTurnState, input: Seq, next: ConversationTurnSt
   sends: [],
 });
 
-/** After a tool batch, or a response cut short, the turn goes on once its waiting input is taken. */
+/** After a tool batch the turn goes on once its waiting input is taken. */
 const continuing = (state: Extract<ConversationTurnState, { _tag: "Stepping" }>): TurnStep => ({
   ...becomes({ _tag: "Continuing", turn: state.turn, step: state.step }),
   sends: [proceed(state.turn)],
 });
 
 /**
- * After an answer the layers around the core are asked for anything more before the turn ends
- * (`BeforeTurnEnded`); `TurnEndReviewed` then decides: input taken meanwhile means a next step,
- * none means the turn ends.
+ * After a response with no tool calls the layers around the core are asked for anything more before
+ * the turn ends (`BeforeTurnEnded`); `TurnEndReviewed` then decides: input taken meanwhile means a
+ * next step, none means the turn ends as `ending`. A response cut short is not followed by another
+ * request unless input gives the model something new to answer.
  */
-const afterAnswer = (state: Extract<ConversationTurnState, { _tag: "Stepping" }>): TurnStep => ({
-  ...becomes({ _tag: "AfterAnswer", turn: state.turn, step: state.step }),
-  requests: [{ _tag: "BeforeTurnEnded", turn: state.turn }],
-});
+const afterAnswer =
+  (ending: LastResponse) =>
+  (state: Extract<ConversationTurnState, { _tag: "Stepping" }>): TurnStep => ({
+    ...becomes({ _tag: "AfterAnswer", turn: state.turn, step: state.step, ending }),
+    requests: [{ _tag: "BeforeTurnEnded", turn: state.turn }],
+  });
 
 /** The compaction's window is in effect from here. */
 const compact = (state: ConversationTurnState, compaction: Seq): TurnStep => ({
@@ -154,8 +163,8 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ChangeModel: "deferred",
     Proceed: "ignored",
     StepToolsSettled: continuing,
-    StepCutShort: continuing,
-    StepAnswered: afterAnswer,
+    StepCutShort: afterAnswer({ _tag: "CutShort" }),
+    StepAnswered: afterAnswer({ _tag: "Answered" }),
     StepStopped: (state, message) => ended(state.turn, message.ending),
     ModelResponded: passOn,
     ModelFailed: passOn,
@@ -194,7 +203,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     Compact: (state, message) => compact(state, message.compaction),
     ChangeModel: (state, message) => changeModel(state, message.change),
     Proceed: "ignored",
-    TurnEndReviewed: (state) => ended(state.turn, { _tag: "Answered" }),
+    TurnEndReviewed: (state) => ended(state.turn, state.ending),
     /** Recorded; the review goes on, without the hooks. */
     TurnHoldsExhausted: (state) => becomes(state),
     StepToolsSettled: "ignored",

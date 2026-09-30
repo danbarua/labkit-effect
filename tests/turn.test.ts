@@ -69,39 +69,58 @@ test("the recorded response holds every part the model sent", () => {
   expect(recorded as unknown).toMatchObject({ observation: responseWithEveryPartKind });
 });
 
-test("a response cut short without tool calls is not an answer: the turn asks the model again", () => {
+const cutShort = (text: string, stop: string, ending: string) => ({
+  _tag: "ModelResponded",
+  turn: "turn-1",
+  provider: "anthropic",
+  model: "claude-sonnet-5",
+  parts: [{ _tag: "Text", text }],
+  stop,
+  ending: { _tag: ending },
+  metadata: json({}),
+});
+
+const tags = (session: ReturnType<typeof open>) =>
+  session.journal.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
+
+test("a response cut short without tool calls ends the turn as cut short: the model is not asked again with nothing new", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "write the report" });
-  const response = (text: string, stop: string, ending: string) => ({
-    _tag: "ModelResponded",
-    turn: "turn-1",
-    provider: "anthropic",
-    model: "claude-sonnet-5",
-    parts: [{ _tag: "Text", text }],
-    stop,
-    ending: { _tag: ending },
-    metadata: json({}),
-  });
-  observe(session, response("The report, first half", "max_tokens", "CutShort"));
-  observe(session, response("and the second half.", "end_turn", "Complete"));
-  expect(session.journal.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag))).toEqual([
+  observe(session, cutShort("The report, first half", "max_tokens", "CutShort"));
+  expect(tags(session)).toEqual([
     "SessionOpened",
     "InputArrived",
     "TurnStarted",
     "InputDelivered",
     "ModelAsked",
     "ModelResponded",
+    "TurnEndReviewed",
+    "TurnEnded",
+  ]);
+  expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "CutShort" } } });
+  expect(session.requests.map((request) => request._tag)).toEqual(["RequestModelResponse", "BeforeTurnEnded"]);
+});
+
+test("a response cut short is followed by another request when input arrived meanwhile", () => {
+  const session = open();
+  observe(session, opened);
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "write the report" });
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "keep it short" });
+  observe(session, cutShort("The report, first half", "max_tokens", "CutShort"));
+  observe(session, cutShort("and the second half.", "end_turn", "Complete"));
+  expect(tags(session).slice(4)).toEqual([
+    "ModelAsked",
+    "InputArrived",
+    "ModelResponded",
+    "InputDelivered",
+    "TurnEndReviewed",
     "ModelAsked",
     "ModelResponded",
     "TurnEndReviewed",
     "TurnEnded",
   ]);
-  expect(session.requests.map((request) => request._tag)).toEqual([
-    "RequestModelResponse",
-    "RequestModelResponse",
-    "BeforeTurnEnded",
-  ]);
+  expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Answered" } } });
 });
 
 test("a failed attempt at a model request is recorded and changes nothing; the request's outcome ends the step", () => {

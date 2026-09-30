@@ -10,6 +10,8 @@ import { Received } from "./received.ts";
 export const Ending = Schema.Union([
   /** The model gave a final answer and no input was queued. */
   Schema.TaggedStruct("Answered", {}),
+  /** The model's response was cut short (a length limit, a pause) and no input was queued to go on with. */
+  Schema.TaggedStruct("CutShort", {}),
   /** A request for a model response failed. */
   Schema.TaggedStruct("Failed", { failure: FailureText }),
   /** A policy vetoed a request for a model response. */
