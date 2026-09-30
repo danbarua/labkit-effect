@@ -133,7 +133,10 @@ Completions adapter keeps it as `Unrecognised` and does not send it back.
 - Efforts: grok-4.7 takes `low` to `xhigh` and refuses `none` and `max` with a 400. grok-4.3 takes
   `none`. `GET /v1/models` lists each model's efforts under `capabilities.reasoning_effort`.
 - `max_output_tokens` limits the answer only. With 20, a response took 62 output tokens, 42 of them
-  reasoning, and ended `incomplete` with the reason `max_output_tokens`.
+  reasoning, and ended `incomplete` with the reason `max_output_tokens`. Streamed, the cut message
+  has no `response.output_item.done`, the stream ends with `response.incomplete`, and the message is
+  `incomplete` in that response, as OpenAI marks it; without streaming, the cut message is marked
+  `completed`.
 - `prompt_cache_retention` is accepted and ignored: the response does not echo it.
 - Cache: each request reports about 1,152 cached tokens, the first one too; a one-line question
   counts 1,380 input tokens, so xAI adds a prefix of its own. Four conversations of about 7,000
@@ -147,4 +150,6 @@ Completions adapter keeps it as `Unrecognised` and does not send it back.
   request starting with it and a new question counted 1,802 input tokens, against 3,049 for the
   items themselves, and answered from what was compacted. It takes `instructions` and `tools`, and
   answers as JSON when asked to stream. OpenAI's endpoint of the same name returns the user's
-  messages and then a `compaction` item.
+  messages and then a `compaction` item. Through the adapter (`openAiCompactions` with `xAiClient`), four
+  messages became one `compaction` item, and a request that began with it as an `Unrecognised`
+  part from `xai` answered three questions about what was compacted, at 1,551 input tokens.
