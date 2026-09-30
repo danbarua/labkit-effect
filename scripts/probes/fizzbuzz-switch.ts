@@ -3,7 +3,8 @@
  * 5.5; at a count of 8 it is compacted for Claude (plain text summary) and switched to GPT-5.5; at
  * 16 it is compacted for GPT (emoji summary) and switched back; it goes on to 20. Each provider is
  * sent its own summaries only (`CompactedConversation`), which are kept as files beside the
- * transcript. Prints how many replies were the number plus one, and the transcript's path.
+ * transcript, with its spans (`.spans.jsonl`) and log lines (`.logs.jsonl`). Prints how many
+ * replies were the number plus one, and the paths of the transcript and the spans.
  *
  *   ANTHROPIC_API_KEY=... OPENAI_API_KEY=... bun scripts/probes/fizzbuzz-switch.ts
  */
@@ -27,6 +28,7 @@ import { openAiRequests } from "../../src/agent-session/providers/openai-client.
 import { whenCountReaches } from "../../src/examples/fizzbuzz/compaction-policies.ts";
 import { basic, countingUser, play } from "../../src/examples/fizzbuzz/scenario.ts";
 import { EmojiHappyFizzBuzzSummarizer, PlainTextFizzBuzzSummarizer } from "../../src/examples/fizzbuzz/summarizers.ts";
+import { TelemetryToFiles } from "../../src/instrumentation/telemetry.ts";
 import { transcript } from "./transcript.ts";
 
 const keyOf = (variable: string) => {
@@ -77,7 +79,7 @@ const { facts } = await Effect.runPromise(
       [16, claude],
     ]),
     summaries: SummariesInFolder(folder).pipe(Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))),
-  }).pipe(reportedBy({ _tag: "Test", name: TestName.make("fizzbuzz-switch") })),
+  }).pipe(reportedBy({ _tag: "Test", name: TestName.make("fizzbuzz-switch") }), Effect.provide(TelemetryToFiles(join("logs/live", name)))),
 );
 
 const replies = facts.flatMap((fact) => {
@@ -103,3 +105,4 @@ for (const [index, [provider, reply]] of replies.entries())
   if (reply !== expected[index]) console.log(`reply ${index + 1} from ${provider}: ${JSON.stringify(reply)} (expected ${expected[index]})`);
 console.log(`${replies.filter(([, reply], index) => reply === expected[index]).length} of ${expected.length} replies right`);
 console.log(`logs/live/${name}.md`);
+console.log(`logs/live/${name}.spans.jsonl`);

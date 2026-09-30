@@ -2,8 +2,9 @@
  * Live probe: the FizzBuzz scenario against a real model. The counting user sends 1, 3, 5, … up to
  * `count` messages; the model should classify each multiple of 3 or 5 with the `classify` tool and
  * reply with the number plus one. Writes the session's facts to `logs/live/` as a transcript
- * (`.md`) and as recorded (`.facts.jsonl`), and prints each turn the model got wrong and how many
- * it got right.
+ * (`.md`) and as recorded (`.facts.jsonl`), with its spans (`.spans.jsonl`) and log lines
+ * (`.logs.jsonl`) beside them, and prints each turn the model got wrong, how many it got right, and
+ * the paths of the transcript and the spans.
  *
  * With `compact`, the session is compacted when the count reaches 30, 60 and 90; with `fizzbuzz`,
  * after every turn in which the model classified FizzBuzz. The compactions are written by the
@@ -43,6 +44,7 @@ import { isObject } from "../../src/agent-session/shaping.ts";
 import { afterFizzBuzz, whenCountReaches } from "../../src/examples/fizzbuzz/compaction-policies.ts";
 import { basic, countingUser, play } from "../../src/examples/fizzbuzz/scenario.ts";
 import { EmojiHappyFizzBuzzSummarizer, PlainTextFizzBuzzSummarizer } from "../../src/examples/fizzbuzz/summarizers.ts";
+import { TelemetryToFiles } from "../../src/instrumentation/telemetry.ts";
 import { transcript } from "./transcript.ts";
 
 const [provider = "openai", model = "gpt-5.5", counted = "45", ...rest] = process.argv.slice(2);
@@ -80,6 +82,9 @@ const client =
       ? XAiModelClient.pipe(Layer.provide(xAiClient(apiKey).pipe(Layer.provide(FetchHttpClient.layer))))
       : OpenAiModelClient.pipe(Layer.provide(OpenAiClient.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))));
 
+const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+const name = [stamp, "fizzbuzz", provider, model, counted, ...rest].join("-");
+
 const { facts, summaries } = await Effect.runPromise(
   play(countingUser(count), {
     ...basic,
@@ -95,7 +100,10 @@ const { facts, summaries } = await Effect.runPromise(
               : whenCountReaches(new Map([30, 60, 90].map((count, index) => [count, summarizers[index] ?? PlainTextFizzBuzzSummarizer]))),
         }),
     model: { target: { provider: ProviderName.make(provider), model: ModelName.make(model), settings }, client },
-  }).pipe(reportedBy({ _tag: "Test", name: TestName.make(`fizzbuzz-live ${provider} ${model}`) })),
+  }).pipe(
+    reportedBy({ _tag: "Test", name: TestName.make(`fizzbuzz-live ${provider} ${model}`) }),
+    Effect.provide(TelemetryToFiles(join("logs/live", name))),
+  ),
 );
 
 /** What each turn was given, what it classified it as, and what it replied, in order. */
@@ -134,8 +142,6 @@ const wrong = [...turns.entries()].flatMap(([turn, { asked, labels, reply }]) =>
     : [`${turn}: asked ${asked}; classified ${labels.join(", ") || "nothing"} (expected ${label ?? "nothing"}); replied ${JSON.stringify(reply ?? null)} (expected ${n + 1})`];
 });
 
-const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-const name = [stamp, "fizzbuzz", provider, model, counted, ...rest].join("-");
 mkdirSync("logs/live", { recursive: true });
 writeFileSync(
   join("logs/live", `${name}.md`),
@@ -177,3 +183,4 @@ for (const line of wrong) console.log(line);
 console.log(`input tokens: ${JSON.stringify(usage)}`);
 console.log(`${turns.size - wrong.length} of ${turns.size} turns right`);
 console.log(`logs/live/${name}.md`);
+console.log(`logs/live/${name}.spans.jsonl`);

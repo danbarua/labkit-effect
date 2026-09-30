@@ -1,8 +1,9 @@
 /**
  * Live probe: one tool-calling turn through the loop and a real provider's adapter, so a change to
  * what an adapter sends back can be checked against the provider itself. Writes the session's facts
- * to `logs/live/` as a transcript to read (`.md`) and as recorded (`.facts.jsonl`), and prints how
- * the turn ended and the transcript's path.
+ * to `logs/live/` as a transcript to read (`.md`) and as recorded (`.facts.jsonl`), with its spans
+ * (`.spans.jsonl`) and log lines (`.logs.jsonl`) beside them, and prints how the turn ended and the
+ * paths of the transcript and the spans.
  *
  * Settings follow the model as `name=value` (`thinking`, `observe`, `effort`, `maxOutputTokens`).
  *
@@ -31,6 +32,7 @@ import { openedWith } from "../../src/agent-session/session-setup.ts";
 import { TurnContextAssembler } from "../../src/agent-session/turn-context.ts";
 import { CountingTurns, NoTurnEndHooks } from "../../src/agent-session/turns.ts";
 import { SmolToolRunner, smolCatalog } from "../../tests/support/smol-tools.ts";
+import { TelemetryToFiles } from "../../src/instrumentation/telemetry.ts";
 import { transcript } from "./transcript.ts";
 
 const [provider = "openai", model = "gpt-5.5", ...said] = process.argv.slice(2);
@@ -60,6 +62,8 @@ const client =
       : OpenAiModelClient.pipe(Layer.provide(OpenAiClient.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))));
 
 const encodeFact = Schema.encodeSync(Fact);
+const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+const name = [stamp, provider, model, ...said].join("-");
 
 const facts = await Effect.runPromise(
   Effect.gen(function* () {
@@ -86,12 +90,20 @@ const facts = await Effect.runPromise(
   }).pipe(
     reportedBy({ _tag: "Test", name: TestName.make(`live-turn ${provider} ${model}`) }),
     Effect.scoped,
-    Effect.provide(Layer.mergeAll(ModelFromFacts, TurnContextAssembler, client, CountingTurns, NoTurnEndHooks, SmolToolRunner)),
+    Effect.provide(
+      Layer.mergeAll(
+        ModelFromFacts,
+        TurnContextAssembler,
+        client,
+        CountingTurns,
+        NoTurnEndHooks,
+        SmolToolRunner,
+        TelemetryToFiles(join("logs/live", name)),
+      ),
+    ),
   ),
 );
 
-const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-const name = [stamp, provider, model, ...said].join("-");
 mkdirSync("logs/live", { recursive: true });
 writeFileSync(
   join("logs/live", `${name}.md`),
@@ -106,3 +118,4 @@ writeFileSync(join("logs/live", `${name}.facts.jsonl`), `${facts.map((fact) => J
 const ended = facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? [fact.decision.ending._tag] : []));
 console.log(`turn ended: ${ended.join(", ") || "not ended"}`);
 console.log(`logs/live/${name}.md`);
+console.log(`logs/live/${name}.spans.jsonl`);

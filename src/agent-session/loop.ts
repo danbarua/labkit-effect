@@ -18,14 +18,19 @@
  * for a tool run its call and tool), and every log line written is annotated with the same, so the
  * services it calls do not pass those along themselves. Each request is carried out in a span named
  * for its kind (`agent.model.request`, `agent.tool.run`, `agent.turn.review`), with the same as its
- * attributes; the observations that follow are recorded outside it. What happens during a request
- * besides its outcome (a failed attempt at it, say) is recorded at once through `Report`.
+ * attributes; the observations that follow are recorded outside it. The session is a span
+ * (`agent.session`) from when it is opened until its scope closes, and each turn a span under it
+ * (`agent.turn`) from `TurnStarted` until `TurnEnded`, or until the scope closes. A request's span
+ * is under its turn's, or the session's when its turn has no span (a turn started before a resume).
+ * What happens during a request besides its outcome (a failed attempt at it, say) is recorded at
+ * once through `Report`.
  *
  * Each fact is published as it is recorded; `subscribe` receives every fact recorded after it.
  * What a model request streams is passed on to `streamed` and not recorded.
  */
 
-import { Clock, DateTime, Deferred, Effect, FiberSet, PubSub, Ref, type Scope, Semaphore } from "effect";
+import { Clock, DateTime, Deferred, Effect, Exit, FiberSet, PubSub, Ref, type Scope, Semaphore, type Tracer } from "effect";
+import type { Decision } from "../agent-machine/decision.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { notObserved } from "../agent-machine/not-observed.ts";
 import { deliver, emptyWorld, type World } from "../agent-machine/router.ts";
@@ -142,6 +147,42 @@ export interface Session {
  * The turns that start from here need identities the facts have not used: that is `Turns`' business.
  */
 export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, never, Scope.Scope> => Effect.gen(function* () {
+  // Made before `running`, so closing the scope ends the requests' spans, then the turns', then this.
+  const sessionSpan = yield* Effect.makeSpanScoped("agent.session");
+  // A turn's span stays here after it ends: requests that follow from its ending are still under it.
+  const turnSpans = yield* Ref.make<ReadonlyMap<TurnId, Tracer.Span>>(new Map());
+  yield* Effect.addFinalizer(() =>
+    Effect.gen(function* () {
+      const now = yield* Clock.currentTimeNanos;
+      const open = [...(yield* Ref.get(turnSpans)).values()].filter((span) => span.status._tag === "Started");
+      yield* Effect.forEach(open, (span) => Effect.sync(() => span.end(now, Exit.void)), { discard: true });
+    }),
+  );
+  /** Names the session on its span when it opens, opens a turn's span when it starts, and ends it when it ends. */
+  const traceTurns = (observation: Observation, decisions: ReadonlyArray<Decision>, session: SessionId | undefined) =>
+    Effect.gen(function* () {
+      if (observation._tag === "SessionOpened") sessionSpan.attribute("session", observation.session);
+      if (observation._tag === "TurnStarted") {
+        const span = yield* Effect.makeSpan("agent.turn", {
+          parent: sessionSpan,
+          attributes: { ...(session === undefined ? {} : { session }), turn: observation.turn },
+        });
+        yield* Ref.update(turnSpans, (now) => new Map([...now, [observation.turn, span]]));
+      }
+      const spans = yield* Ref.get(turnSpans);
+      const now = yield* Clock.currentTimeNanos;
+      const ended = decisions.flatMap((decision) => (decision._tag === "TurnEnded" ? [decision] : []));
+      yield* Effect.forEach(
+        ended,
+        (decision) =>
+          Effect.sync(() => {
+            const span = spans.get(decision.turn);
+            span?.attribute("ending", decision.ending._tag);
+            span?.end(now, Exit.void);
+          }),
+        { discard: true },
+      );
+    });
   const held = yield* Ref.make<Held>({ world: worldOf(facts), facts });
   const recorded = yield* PubSub.unbounded<Fact>();
   const captured = yield* PubSub.unbounded<CapturedObservation>();
@@ -356,6 +397,7 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
       }));
       yield* PubSub.publishAll(recorded, facts);
       const session = sessionOf(now.facts);
+      yield* traceTurns(observation, outcome.decisions, session);
       yield* Effect.forEach(facts, (fact) =>
         fact._tag === "Decided"
           ? Effect.logInfo(logKeys.loop.decisionRecorded, {
@@ -378,8 +420,11 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
       const services = yield* Effect.context<Services>();
       const report = (reported: Observation, by: Origin) => record(by, reported).pipe(Effect.provideContext(services));
       const stop = work.turn === undefined ? undefined : yield* cancelOf(work.turn);
+      // Given, not inherited: this fiber was started from whichever fiber recorded the observation.
+      const parent = (work.turn === undefined ? undefined : (yield* Ref.get(turnSpans)).get(work.turn)) ?? sessionSpan;
       const observed = yield* carryOut(request, stop).pipe(
         Effect.withSpan(spanNames[request._tag], { attributes: { ...work } }),
+        Effect.withParentSpan(parent),
         Effect.annotateLogs({ ...work }),
         Effect.provideService(CurrentWork, work),
         Effect.provideService(Report, report),
