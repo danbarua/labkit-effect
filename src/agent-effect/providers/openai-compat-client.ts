@@ -62,7 +62,7 @@ function chatMessages(message: ContextMessage, calls: ReadonlyMap<CallId, Called
       ? leftOut(part, "this adapter does not send an earlier response's other fields back").supplied
       : [],
   );
-  const text = message.parts.flatMap((part) => (part._tag === "Text" ? [{ type: "text", text: part.text }] : []));
+  const text = message.parts.flatMap((part) => (part._tag === "Text" || part._tag === "Commentary" ? [{ type: "text", text: part.text }] : []));
   const toolCalls = message.parts.flatMap((part) =>
     part._tag === "ToolCall" ? [{ call: part.call, tool: part.tool, input: toolInputObject(part.call, part.input) }] : [],
   );

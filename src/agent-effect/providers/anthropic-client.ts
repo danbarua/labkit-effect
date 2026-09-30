@@ -69,6 +69,7 @@ function resultContent(result: RenderedResult): { content: string; is_error?: tr
 function blocks(part: ContextPart, target: Target, context: ModelContext, calls: ReadonlyMap<CallId, Called>): Shaped {
   switch (part._tag) {
     case "Text":
+    case "Commentary":
       return { json: [{ type: "text", text: part.text }], supplied: [] };
     case "Thinking":
       return part.provider === target.provider

@@ -22,6 +22,7 @@ function characters(message: ContextMessage): number {
   return message.parts.reduce((total, part) => {
     switch (part._tag) {
       case "Text":
+      case "Commentary":
         return total + part.text.length;
       case "ToolCall":
         return total + part.tool.length + JSON.stringify(part.input).length;

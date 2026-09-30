@@ -37,12 +37,14 @@ export interface ToolSpec {
 }
 
 /**
- * One part of a message the model is sent. `Thinking` and `Unrecognised` are parts of a response
- * that only the provider that produced it reads: its adapter sends them back unchanged, in their
- * place; any other provider's adapter leaves them out.
+ * One part of a message the model is sent. `Commentary` is what a model wrote for whoever is
+ * watching, which is not its answer. `Thinking` and `Unrecognised` are parts of a response that
+ * only the provider that produced it reads: its adapter sends them back unchanged, in their place;
+ * any other provider's adapter leaves them out.
  */
 export type ContextPart =
   | { readonly _tag: "Text"; readonly text: string }
+  | { readonly _tag: "Commentary"; readonly text: string }
   | {
       readonly _tag: "Thinking";
       readonly provider: ProviderName;

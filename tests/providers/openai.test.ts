@@ -76,6 +76,28 @@ test("a tool turn sends the catalog, then the reasoning and call as received and
   expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Answered" } } });
 });
 
+test("a commentary message is Commentary, and goes back as a message with that phase", async () => {
+  const { provider, facts } = await turn([
+    {
+      status: "completed",
+      output: [
+        { type: "message", role: "assistant", phase: "commentary", content: [{ type: "output_text", text: "Adding them." }] },
+        { type: "function_call", call_id: "call_1", name: "add", arguments: '{"a":2,"b":3}' },
+      ],
+    },
+    { status: "completed", output: [{ type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "5." }] }] },
+  ]);
+  const responses = facts.flatMap((fact) =>
+    fact._tag === "Observed" && fact.observation._tag === "ModelResponded" ? [fact.observation.parts.map((part) => part._tag)] : [],
+  );
+  expect(responses).toEqual([["Commentary", "ToolCall"], ["Text"]]);
+  expect((provider.bodies[1] as { input: ReadonlyArray<unknown> }).input[1]).toEqual({
+    role: "assistant",
+    phase: "commentary",
+    content: [{ type: "output_text", text: "Adding them." }],
+  });
+});
+
 test("output items become parts: text, calls to any tool name, and everything else kept whole", async () => {
   const refused = { type: "message", role: "assistant", content: [{ type: "output_text", text: "Reading." }, { type: "refusal", refusal: "no" }] };
   const { provider, facts } = await turn([

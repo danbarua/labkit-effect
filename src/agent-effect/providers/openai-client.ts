@@ -9,7 +9,8 @@
  * another provider's thinking, and that is logged.
  *
  * In: the response's `output` items become the observation's parts in order: a `message` whose
- * content is all `output_text` is a `Text` for each; a `function_call` is `ToolCall` (whatever the
+ * content is all `output_text` is a `Text` for each, or a `Commentary` for each when its `phase` is
+ * `commentary` (sent back with that phase); a `function_call` is `ToolCall` (whatever the
  * tool's name), its arguments kept as the text received; every other item, a `message` with any
  * other content included, is `Unrecognised`, whole, so that it can be sent back as it came. The stop is the
  * response's `status` (with the reason when it is `incomplete`); everything else in the response is
@@ -65,6 +66,11 @@ function items(message: ContextMessage, target: Target, calls: ReadonlyMap<CallI
         const { role, type } = textAs(message);
         return { json: [{ role, content: [{ type, text: part.text }] }], supplied: [] };
       }
+      case "Commentary":
+        return {
+          json: [{ role: "assistant", phase: "commentary", content: [{ type: "output_text", text: part.text }] }],
+          supplied: [],
+        };
       case "Thinking":
         return leftOut(part, "the Responses API has no thinking block");
       case "ToolCall": {
@@ -130,7 +136,10 @@ function parts(item: Json): ReadonlyArray<ModelPart> {
   const { type } = item;
   const content = item["content"];
   if (type === "message" && Array.isArray(content) && content.every(isOutputText))
-    return content.map((each): ModelPart => ({ _tag: "Text", text: ModelText.make(each.text) }));
+    return content.map((each): ModelPart => ({
+      _tag: item["phase"] === "commentary" ? "Commentary" : "Text",
+      text: ModelText.make(each.text),
+    }));
   const { call_id, name, arguments: args } = item;
   if (type === "function_call" && typeof call_id === "string" && typeof name === "string" && typeof args === "string")
     return [{ _tag: "ToolCall", call: CallId.make(call_id), tool: ToolName.make(name), input: receivedJsonText(args) }];

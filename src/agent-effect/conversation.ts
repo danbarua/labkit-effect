@@ -48,6 +48,8 @@ function message(fact: Fact, texts: ReadonlyMap<Seq, string>): ContextMessage | 
           switch (part._tag) {
             case "Text":
               return [{ _tag: "Text", text: part.text }];
+            case "Commentary":
+              return [{ _tag: "Commentary", text: part.text }];
             case "ToolCall":
               return [{ _tag: "ToolCall", call: part.call, tool: part.tool, input: part.input }];
             case "Thinking":

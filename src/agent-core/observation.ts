@@ -35,6 +35,11 @@ export type InputSource = typeof InputSource.Type;
 /** One part of a model's response. */
 export const ModelPart = Schema.Union([
   Schema.TaggedStruct("Text", { text: ModelText }),
+  /**
+   * Text a model wrote for whoever is watching, saying what it found or is about to do (a provider
+   * may call it commentary, or a progress update). It is not the model's answer.
+   */
+  Schema.TaggedStruct("Commentary", { text: ModelText }),
   Schema.TaggedStruct("Thinking", { text: ThinkingText, signature: ThinkingSignature }),
   Schema.TaggedStruct("ToolCall", { call: CallId, tool: ToolName, input: Received }),
   /** A part the decoder does not recognise, holding what was received. */

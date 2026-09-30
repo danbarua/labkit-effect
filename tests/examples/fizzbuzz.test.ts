@@ -22,6 +22,8 @@ const transcript = (messages: ReadonlyArray<ContextMessage>): ReadonlyArray<stri
       switch (part._tag) {
         case "Text":
           return `${message.role}: ${part.text}`;
+        case "Commentary":
+          return `${message.role}: commentary ${part.text}`;
         case "ToolCall":
           return `${message.role}: ${part.tool}(${asText(part.input)})`;
         case "ToolResult":
