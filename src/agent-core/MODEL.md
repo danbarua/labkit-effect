@@ -145,7 +145,9 @@ then continues").
   when it happens, and the turn does not end.
 - S6. A request for a model response is three facts, as a tool call is: the core asked
   (`ModelAsked`), the request was made (`ModelRequestDispatched`, naming the provider and model it
-  went to, once for each provider tried), and what came of it. A request that was made and has no
+  went to and holding what it carried: the system prompt, the tools and the conversation; once
+  for each provider tried), and what came of it. `ModelAsked` holds only the turn: what a request
+  carries is not decided by the core, and is on record in the fact that the request was made. A request that was made and has no
   outcome recorded is indeterminate: whether the model saw what it carried is not known.
 - S4. A compaction window is reported by the layers around the core, as the span they chose:
   `CompactionWindow { window, previous, through, kept }`. It goes to the agent like input: taken at

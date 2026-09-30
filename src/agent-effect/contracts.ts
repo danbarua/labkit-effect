@@ -2,19 +2,12 @@
  * What the loop needs from the outside world, one service per job. Each adapter implements one.
  */
 
-import { Context, type Effect, type Schema } from "effect";
+import { Context, type Effect, Schema } from "effect";
 import type * as AiError from "effect/ai/AiError";
 import type { Fact } from "../agent-core/fact.ts";
-import type {
-  CallId,
-  ModelName,
-  ProviderName,
-  ThinkingText,
-  ToolName,
-  TurnId,
-} from "../agent-core/names.ts";
-import type { Observation, ToolOutcome } from "../agent-core/observation.ts";
-import type { Received } from "../agent-core/received.ts";
+import { CallId, type ModelName, ProviderName, ThinkingText, ToolName, type TurnId } from "../agent-core/names.ts";
+import { type Observation, ToolOutcome } from "../agent-core/observation.ts";
+import { Received } from "../agent-core/received.ts";
 import type { ModelSettings } from "../agent-core/settings.ts";
 
 /**
@@ -34,11 +27,8 @@ export class ModelProvider extends Context.Service<
 >()("agent-effect/ModelProvider") {}
 
 /** A tool the model may call: its name, what it does, and the JSON Schema of its input. */
-export interface ToolSpec {
-  readonly name: ToolName;
-  readonly description: string;
-  readonly input: Schema.Json;
-}
+export const ToolSpec = Schema.Struct({ name: ToolName, description: Schema.String, input: Schema.Json });
+export type ToolSpec = typeof ToolSpec.Type;
 
 /**
  * One part of a message the model is sent. `Commentary` is what a model wrote for whoever is
@@ -46,30 +36,37 @@ export interface ToolSpec {
  * only the provider that produced it reads: its adapter sends them back unchanged, in their place;
  * any other provider's adapter leaves them out.
  */
-export type ContextPart =
-  | { readonly _tag: "Text"; readonly text: string }
-  | { readonly _tag: "Commentary"; readonly text: string }
-  | { readonly _tag: "Thinking"; readonly provider: ProviderName; readonly text: ThinkingText; readonly received: Received }
-  | { readonly _tag: "ToolCall"; readonly call: CallId; readonly tool: ToolName; readonly input: Received }
-  | { readonly _tag: "ToolResult"; readonly call: CallId; readonly outcome: ToolOutcome }
-  | { readonly _tag: "Unrecognised"; readonly provider: ProviderName; readonly received: Received };
+export const ContextPart = Schema.Union([
+  Schema.TaggedStruct("Text", { text: Schema.String }),
+  Schema.TaggedStruct("Commentary", { text: Schema.String }),
+  Schema.TaggedStruct("Thinking", { provider: ProviderName, text: ThinkingText, received: Received }),
+  Schema.TaggedStruct("ToolCall", { call: CallId, tool: ToolName, input: Received }),
+  Schema.TaggedStruct("ToolResult", { call: CallId, outcome: ToolOutcome }),
+  Schema.TaggedStruct("Unrecognised", { provider: ProviderName, received: Received }),
+]);
+export type ContextPart = typeof ContextPart.Type;
 
 /**
  * One message of what the model is sent. An `instruction` is the harness speaking to the model in
  * the middle of the conversation (a notice, a changed rule); each provider adapter sends it as its
  * provider takes such messages.
  */
-export interface ContextMessage {
-  readonly role: "user" | "assistant" | "instruction";
-  readonly parts: ReadonlyArray<ContextPart>;
-}
+export const ContextMessage = Schema.Struct({
+  role: Schema.Literals(["user", "assistant", "instruction"]),
+  parts: Schema.Array(ContextPart),
+});
+export type ContextMessage = typeof ContextMessage.Type;
 
-/** What the model is sent for one request, before any provider's wire format. */
-export interface ModelContext {
-  readonly system: string | undefined;
-  readonly tools: ReadonlyArray<ToolSpec>;
-  readonly messages: ReadonlyArray<ContextMessage>;
-}
+/**
+ * What the model is sent for one request, before any provider's wire format. It is recorded with
+ * the request (`ModelRequestDispatched.sent`), so the record says what each request carried.
+ */
+export const ModelContext = Schema.Struct({
+  system: Schema.UndefinedOr(Schema.String),
+  tools: Schema.Array(ToolSpec),
+  messages: Schema.Array(ContextMessage),
+});
+export type ModelContext = typeof ModelContext.Type;
 
 /** Builds what the model is sent for a turn's next request, from the session's facts. */
 export class ContextAssembler extends Context.Service<

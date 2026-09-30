@@ -24,6 +24,7 @@ import { logKeys } from "./log-keys.ts";
 import { failedAs, receivedAiError } from "./provider-call.ts";
 import { harnessParts } from "./origin.ts";
 import { Report } from "./report.ts";
+import { sentAs } from "./sent.ts";
 
 /** The `AiError` reasons after which the next provider is tried. */
 export const fallsBackOn: ReadonlySet<AiError.AiErrorReason["_tag"]> = new Set([
@@ -63,7 +64,7 @@ const attempt = (
   const dispatched = fellBack
     ? Effect.gen(function* () {
         yield* (yield* Report)(
-          { _tag: "ModelRequestDispatched", turn, provider: target.provider, model: target.model },
+          { _tag: "ModelRequestDispatched", turn, provider: target.provider, model: target.model, sent: sentAs(context) },
           harnessParts.fallbackChain,
         );
       })

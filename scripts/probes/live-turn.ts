@@ -89,7 +89,14 @@ const facts = await Effect.runPromise(
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const name = [stamp, provider, model, ...said].join("-");
 mkdirSync("logs/live", { recursive: true });
-writeFileSync(join("logs/live", `${name}.md`), transcript(["live-turn", provider, model, ...said].join(" "), facts));
+writeFileSync(
+  join("logs/live", `${name}.md`),
+  transcript(
+    ["live-turn", provider, model, ...said].join(" "),
+    `One turn with a tool call, run through the loop against ${provider}'s API by \`bun scripts/probes/live-turn.ts ${[provider, model, ...said].join(" ")}\`. It is a probe, not one of the tests. The facts as recorded are beside this file, in \`${name}.facts.jsonl\`.`,
+    facts,
+  ),
+);
 writeFileSync(join("logs/live", `${name}.facts.jsonl`), `${facts.map((fact) => JSON.stringify(encodeFact(fact))).join("\n")}\n`);
 
 const ended = facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? [fact.decision.ending._tag] : []));

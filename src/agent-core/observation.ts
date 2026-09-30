@@ -153,10 +153,12 @@ export const Observation = Schema.Union([
   /** The input recorded at `input`, still queued, was cancelled by its sender. */
   Schema.TaggedStruct("InputCancelled", { input: Seq }),
   /**
-   * A request for a model response was made: it was handed to `provider` for `model`. What comes of
-   * it is observed after: a response, a failure, or nothing, in which case how it ended is not known.
+   * A request for a model response was made: it was handed to `provider` for `model`, carrying
+   * `sent` (the system prompt, the tools and the conversation, as the layer that assembled them
+   * wrote them down). What comes of it is observed after: a response, a failure, or nothing, in
+   * which case how it ended is not known.
    */
-  Schema.TaggedStruct("ModelRequestDispatched", { turn: TurnId, provider: ProviderName, model: ModelName }),
+  Schema.TaggedStruct("ModelRequestDispatched", { turn: TurnId, provider: ProviderName, model: ModelName, sent: Received }),
   /**
    * A model responded. `parts` are the response's parts in the order received; `stop` is why it
    * stopped in the provider's words, when the record has them, and `ending` that reason classified; `metadata` is everything

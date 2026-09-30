@@ -215,7 +215,13 @@ test("S6: a request that was made is recorded; the step waits for what comes of 
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
-  observe(session, { _tag: "ModelRequestDispatched", turn: "turn-1", provider: "anthropic", model: "claude-sonnet-5" });
+  observe(session, {
+    _tag: "ModelRequestDispatched",
+    turn: "turn-1",
+    provider: "anthropic",
+    model: "claude-sonnet-5",
+    sent: json({ messages: [{ role: "user", parts: [{ _tag: "Text", text: "hello" }] }] }),
+  });
   expect(tags(session).slice(-2)).toEqual(["ModelAsked", "ModelRequestDispatched"]);
   expect(session.world.agent.state._tag).toBe("Running");
   observe(session, cutShort("Hello.", "end_turn", "Complete"));

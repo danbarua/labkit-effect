@@ -14,6 +14,7 @@ import { AnthropicModelClient } from "./providers/anthropic-client.ts";
 import { anthropicSettings } from "./providers/anthropic-settings.ts";
 import { openAiCompatSettings } from "./providers/openai-compat-settings.ts";
 import { openAiSettings } from "./providers/openai-settings.ts";
+import { sentIn } from "./sent.ts";
 import { modelOf, openedWith } from "./session-setup.ts";
 import { TurnContextAssembler } from "./turn-context.ts";
 import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
@@ -270,11 +271,18 @@ test("M3: a request carries the settings the model allows; what was enforced is 
     "ModelResponded",
     "TurnEndReviewed",
   ]);
-  expect(observed[3]?.observation as unknown).toEqual({
+  const dispatched = observed[3]?.observation;
+  expect(dispatched as unknown).toMatchObject({
     _tag: "ModelRequestDispatched",
     turn: "turn-1",
     provider: "anthropic",
     model: "claude-opus-5-5",
+  });
+  // The request is recorded with what it carried.
+  expect(dispatched?._tag === "ModelRequestDispatched" ? sentIn(dispatched.sent) : undefined).toEqual({
+    system: undefined,
+    tools: [],
+    messages: [{ role: "user", parts: [{ _tag: "Text", text: "Hello" }] }],
   });
   expect(observed[4] as unknown).toMatchObject({
     origin: { _tag: "Harness", part: "model settings" },

@@ -40,6 +40,7 @@ import { receivedJson } from "./received.ts";
 import { ModelStream, ModelStreamInterval, type Streamed } from "./model-stream.ts";
 import { CurrentOrigin, harnessParts, reportedBy } from "./origin.ts";
 import { Report } from "./report.ts";
+import { sentAs } from "./sent.ts";
 import { modelOf } from "./session-setup.ts";
 import { CurrentWork, type Work } from "./work.ts";
 
@@ -255,7 +256,13 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
               ),
             );
             yield* report(
-              { _tag: "ModelRequestDispatched", turn: request.turn, provider: target.provider, model: target.model },
+              {
+                _tag: "ModelRequestDispatched",
+                turn: request.turn,
+                provider: target.provider,
+                model: target.model,
+                sent: sentAs(context),
+              },
               harnessParts.loop,
             );
             const outcome = yield* (yield* ModelClient)

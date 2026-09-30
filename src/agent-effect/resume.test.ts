@@ -28,7 +28,13 @@ function asked(): Driven {
   return session;
 }
 
-const dispatched = { _tag: "ModelRequestDispatched", turn: "turn-1", provider: "boring", model: "boring-1" };
+const dispatched = {
+  _tag: "ModelRequestDispatched",
+  turn: "turn-1",
+  provider: "boring",
+  model: "boring-1",
+  sent: json({ tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "list the files" }] }] }),
+};
 const call = { _tag: "ToolCall", call: "c1", tool: "ls", input: json({ path: "." }) };
 
 /**

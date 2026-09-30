@@ -8,14 +8,14 @@
 
 import { Effect, Schema } from "effect";
 import type { Fact } from "../agent-core/fact.ts";
-import { ToolName, type SessionId } from "../agent-core/names.ts";
+import type { SessionId } from "../agent-core/names.ts";
 import type { ModelTarget, Observation } from "../agent-core/observation.ts";
 import type { Enforced, ModelSettings } from "../agent-core/settings.ts";
-import type { Target, ToolSpec } from "./contracts.ts";
+import { type Target, ToolSpec } from "./contracts.ts";
 import { asText, parseJson, receivedJson, receivedText } from "./received.ts";
 
 /** Tools as they are recorded: each one's name, description, and the JSON Schema of its input. */
-export const ToolSpecs = Schema.Array(Schema.Struct({ name: ToolName, description: Schema.String, input: Schema.Json }));
+export const ToolSpecs = Schema.Array(ToolSpec);
 
 type Opened = Extract<Observation, { _tag: "SessionOpened" }>;
 
