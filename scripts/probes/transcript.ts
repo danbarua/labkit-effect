@@ -48,6 +48,12 @@ function partText(part: ModelPart): string {
 
 function observationText(observation: Observation): string {
   switch (observation._tag) {
+    case "SessionOpened":
+      return [
+        `session \`${observation.session}\`, asking ${observation.model.provider} / ${observation.model.model}`,
+        observation.system === undefined ? "no system prompt" : `**System prompt**\n\n${asText(observation.system)}`,
+        observation.tools === undefined ? "no tools" : `**Tools**\n\n${fenced(asText(observation.tools), "json")}`,
+      ].join("\n\n");
     case "InputArrived":
       return observation.text;
     case "NoticeInserted":
