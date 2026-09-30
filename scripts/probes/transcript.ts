@@ -6,13 +6,13 @@
  */
 
 import { DateTime, Schema } from "effect";
-import { Fact } from "../../src/agent-core/fact.ts";
-import type { Seq, TurnId } from "../../src/agent-core/names.ts";
-import type { ModelPart, Observation, ToolOutcome } from "../../src/agent-core/observation.ts";
-import type { Origin } from "../../src/agent-core/origin.ts";
-import type { ContextMessage, ContextPart } from "../../src/agent-effect/contracts.ts";
-import { asText } from "../../src/agent-effect/received.ts";
-import { sentIn } from "../../src/agent-effect/sent.ts";
+import { Fact } from "../../src/agent-machine/fact.ts";
+import type { Seq, TurnId } from "../../src/agent-machine/names.ts";
+import type { ModelPart, Observation, ToolOutcome } from "../../src/agent-machine/observation.ts";
+import type { Origin } from "../../src/agent-machine/origin.ts";
+import type { ContextMessage, ContextPart } from "../../src/agent-session/contracts.ts";
+import { asText } from "../../src/agent-session/received.ts";
+import { sentIn } from "../../src/agent-session/sent.ts";
 
 const fenced = (text: string, language = ""): string => `\`\`\`${language}\n${text}\n\`\`\``;
 const quoted = (text: string): string => text.split("\n").map((line) => `> ${line}`).join("\n");

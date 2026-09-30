@@ -8,14 +8,14 @@
  */
 
 import { DateTime, Schema } from "effect";
-import type { Fact } from "../../src/agent-core/fact.ts";
-import { deliver, emptyWorld, type World } from "../../src/agent-core/router.ts";
-import { Seq } from "../../src/agent-core/names.ts";
-import { Observation } from "../../src/agent-core/observation.ts";
-import type { EffectRequest } from "../../src/agent-core/request.ts";
+import type { Fact } from "../../src/agent-machine/fact.ts";
+import { deliver, emptyWorld, type World } from "../../src/agent-machine/router.ts";
+import { Seq } from "../../src/agent-machine/names.ts";
+import { Observation } from "../../src/agent-machine/observation.ts";
+import type { EffectRequest } from "../../src/agent-machine/request.ts";
 import { testOrigin } from "./test.ts";
 
-export interface Session {
+export interface DrivenMachines {
   world: World;
   journal: Array<Fact>;
   requests: Array<EffectRequest>;
@@ -29,16 +29,16 @@ export interface Session {
 /** The opening of session "s1", asking model "boring-1", with no system prompt or tools. */
 export const opened = { _tag: "SessionOpened", session: "s1", model: { provider: "boring", model: "boring-1" } };
 
-export function open(): Session {
+export function open(): DrivenMachines {
   return { world: emptyWorld, journal: [], requests: [], turns: 0, startsTurns: true, reviewsTurnEnds: true };
 }
 
-function record(session: Session, fact: Fact): void {
+function record(session: DrivenMachines, fact: Fact): void {
   session.journal.push(fact);
 }
 
 /** Records `raw` as an observation, then everything that follows from it. Returns its position. */
-export function observe(session: Session, raw: unknown): Seq {
+export function observe(session: DrivenMachines, raw: unknown): Seq {
   // Refusing unknown fields here catches a mistyped field in a test's own data.
   const observation = Schema.decodeUnknownSync(Observation)(raw, { onExcessProperty: "error" });
   const seq = Seq.make(session.journal.length + 1);
@@ -61,6 +61,6 @@ export function observe(session: Session, raw: unknown): Seq {
 }
 
 /** The decisions recorded after position `seq`, by tag. */
-export function decidedAfter(session: Session, seq: Seq): Array<Fact> {
+export function decidedAfter(session: DrivenMachines, seq: Seq): Array<Fact> {
   return session.journal.filter((fact) => fact.seq > seq && fact._tag === "Decided");
 }

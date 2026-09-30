@@ -9,8 +9,8 @@
  */
 
 import { Schema } from "effect";
-import { SessionId, WindowId } from "../agent-core/names.ts";
-import { Received } from "../agent-core/received.ts";
+import { SessionId, WindowId } from "../agent-machine/names.ts";
+import { Received } from "../agent-machine/received.ts";
 
 export const WindowSummary = Schema.Struct({ session: SessionId, window: WindowId, summary: Received });
 export type WindowSummary = typeof WindowSummary.Type;

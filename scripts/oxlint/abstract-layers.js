@@ -1,5 +1,5 @@
 /**
- * Rules for the abstract layers (src/agent-core, src/agent-policy), which are data and pure
+ * Rules for the abstract layers (src/agent-machine, src/agent-policy), which are data and pure
  * machines: no `let` or `var`, no loop statements, no call that changes a value in place, and every
  * string branded. The rules read syntax only; a method named `push` or `set` on a type of our own is
  * reported too.

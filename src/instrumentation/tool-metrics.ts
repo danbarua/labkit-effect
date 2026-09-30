@@ -8,9 +8,9 @@
  */
 
 import { Effect, Layer, Metric } from "effect";
-import type { ToolOutcome } from "../agent-core/observation.ts";
-import { ToolRunner } from "../agent-effect/contracts.ts";
-import { CurrentWork } from "../agent-effect/work.ts";
+import type { ToolOutcome } from "../agent-machine/observation.ts";
+import { ToolRunner } from "../agent-session/contracts.ts";
+import { CurrentWork } from "../agent-session/work.ts";
 
 export const toolRuns = Metric.counter("agent.tool.runs", { description: "Tool runs, by session, tool and outcome." });
 

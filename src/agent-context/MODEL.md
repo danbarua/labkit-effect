@@ -14,8 +14,8 @@ in `DESIGN.next.md`.
   `Conversation` service. `WholeConversation` is every turn of it.
 - A4. Notices come from their providers, in order, for each request, and go at the end of what the
   request carries, as one instruction message. Each is reported as `NoticeInserted`, so later
-  requests carry it where it was sent (agent-core S5).
-- A5. A compaction window is a marker: `CompactionWindow` (agent-core S4) records which span of the
+  requests carry it where it was sent (agent-machine S5).
+- A5. A compaction window is a marker: `CompactionWindow` (agent-machine S4) records which span of the
   session a compaction would cover, and nothing else. A summary of a window is a `WindowSummary`
   (`forks.ts`), held apart from the session's facts; the importers write the ones Claude Code and
   Codex made to `summaries.jsonl`.

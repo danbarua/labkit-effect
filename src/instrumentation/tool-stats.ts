@@ -4,9 +4,9 @@
  * counted as unfinished. Nothing is recorded: the numbers are recomputed from the facts on each read.
  */
 
-import type { Fact } from "../agent-core/fact.ts";
-import type { CallId, ToolName } from "../agent-core/names.ts";
-import type { ToolOutcome } from "../agent-core/observation.ts";
+import type { Fact } from "../agent-machine/fact.ts";
+import type { CallId, ToolName } from "../agent-machine/names.ts";
+import type { ToolOutcome } from "../agent-machine/observation.ts";
 
 export interface ToolStats {
   readonly calls: number;

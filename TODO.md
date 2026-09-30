@@ -6,7 +6,7 @@ not yet work is in its `DESIGN.next.md`. Delete an item when it is done or dropp
 
 ## Decisions for Dan
 
-- [ ] Confirm or reword the terms T1–T5 in agent-core's `MODEL.md`. The code and tests are built on
+- [ ] Confirm or reword the terms T1–T5 in agent-machine's `MODEL.md`. The code and tests are built on
       them as worded; none is blocking.
 - [ ] Where the model is chosen. The loop's `ModelProvider` chooses it from the session's facts, so
       context assembly's model selectors go unused, and `ModelChoice.endpoint` has no counterpart
@@ -29,7 +29,7 @@ not yet work is in its `DESIGN.next.md`. Delete an item when it is done or dropp
 
 ### Compaction
 
-Built: the window marker only (agent-core S4, agent-context A5).
+Built: the window marker only (agent-machine S4, agent-context A5).
 
 - [ ] Requests made in a window: which of a window's summaries a request uses, and the view that
       sends the summary in place of the span.
@@ -91,7 +91,7 @@ Built: the gate and what a policy is, pure and not in the loop (agent-policy `MO
 ### Going on from a session's facts
 
 Built: `sessionFrom(facts)`, and `endTurnLeftRunning` for a turn the facts leave running
-(agent-core X4), tested with facts made in memory.
+(agent-machine X4), tested with facts made in memory.
 
 
 - [ ] After a turn that got no response (failed, vetoed, interrupted before anything arrived), the

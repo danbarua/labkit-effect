@@ -15,12 +15,12 @@ import {
   ToolCatalogs,
 } from "../../agent-context/assemble.ts";
 import { AgentContextAssembler, WholeConversation } from "../../agent-context/assembler.ts";
-import type { Fact } from "../../agent-core/fact.ts";
-import { InputText, ModelName, ProviderName, SessionId } from "../../agent-core/names.ts";
-import type { ModelContext, ToolRunner } from "../../agent-effect/contracts.ts";
-import { openSession } from "../../agent-effect/loop.ts";
-import { ModelFromFacts } from "../../agent-effect/model-choice.ts";
-import { CountingTurns, NoTurnEndHooks } from "../../agent-effect/turns.ts";
+import type { Fact } from "../../agent-machine/fact.ts";
+import { InputText, ModelName, ProviderName, SessionId } from "../../agent-machine/names.ts";
+import type { ModelContext, ToolRunner } from "../../agent-session/contracts.ts";
+import { openSession } from "../../agent-session/loop.ts";
+import { ModelFromFacts } from "../../agent-session/model-choice.ts";
+import { CountingTurns, NoTurnEndHooks } from "../../agent-session/turns.ts";
 import { scriptedFizzBuzzModel } from "./model.ts";
 import { FizzBuzzSystemPromptProvider } from "./prompt.ts";
 import { AdvancedFizzBuzzToolCatalog, FizzBuzzToolCatalog, FizzBuzzToolRunner } from "./tools.ts";

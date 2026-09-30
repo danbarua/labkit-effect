@@ -10,11 +10,11 @@
  */
 
 import { Effect, Layer } from "effect";
-import { NoticeText } from "../agent-core/names.ts";
-import { ContextAssembler, type ModelContext } from "../agent-effect/contracts.ts";
-import { conversationOf, noticeMessage } from "../agent-effect/conversation.ts";
-import { harnessParts } from "../agent-effect/origin.ts";
-import { Report } from "../agent-effect/report.ts";
+import { NoticeText } from "../agent-machine/names.ts";
+import { ContextAssembler, type ModelContext } from "../agent-session/contracts.ts";
+import { conversationOf, noticeMessage } from "../agent-session/conversation.ts";
+import { harnessParts } from "../agent-session/origin.ts";
+import { Report } from "../agent-session/report.ts";
 import { assembleContents, Conversation, Notices } from "./assemble.ts";
 
 export const AgentContextAssembler = Layer.effect(

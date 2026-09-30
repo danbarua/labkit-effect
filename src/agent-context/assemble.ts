@@ -9,11 +9,11 @@
  */
 
 import { Context, Effect } from "effect";
-import type { Fact } from "../agent-core/fact.ts";
-import type { ModelName, ProviderName, SessionId } from "../agent-core/names.ts";
-import type { ModelTarget, Observation } from "../agent-core/observation.ts";
-import type { ContextMessage, ToolSpec } from "../agent-effect/contracts.ts";
-import { openedWith, systemOf, toolsOf } from "../agent-effect/session-setup.ts";
+import type { Fact } from "../agent-machine/fact.ts";
+import type { ModelName, ProviderName, SessionId } from "../agent-machine/names.ts";
+import type { ModelTarget, Observation } from "../agent-machine/observation.ts";
+import type { ContextMessage, ToolSpec } from "../agent-session/contracts.ts";
+import { openedWith, systemOf, toolsOf } from "../agent-session/session-setup.ts";
 
 /** A model a request can go to, and how much context it takes. */
 export interface ModelChoice {

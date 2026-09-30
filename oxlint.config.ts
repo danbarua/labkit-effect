@@ -20,7 +20,7 @@ export default defineConfig({
   jsPlugins: ["./scripts/oxlint/abstract-layers.js"],
   overrides: [
     {
-      files: ["src/agent-core/**"],
+      files: ["src/agent-machine/**"],
       excludeFiles: ["**/*.test.ts"],
       rules: {
         ...abstractLayer,
@@ -28,7 +28,7 @@ export default defineConfig({
           "error",
           {
             paths: [effectSchemaOnly],
-            patterns: [{ group: ["*", "!effect", "!./*"], message: "agent-core imports only `Schema` from effect, and its own files." }],
+            patterns: [{ group: ["*", "!effect", "!./*"], message: "agent-machine imports only `Schema` from effect, and its own files." }],
           },
         ],
       },
@@ -44,8 +44,8 @@ export default defineConfig({
             paths: [effectSchemaOnly],
             patterns: [
               {
-                group: ["*", "!effect", "!./*", "!../agent-core/*"],
-                message: "agent-policy imports only `Schema` from effect, agent-core, and its own files.",
+                group: ["*", "!effect", "!./*", "!../agent-machine/*"],
+                message: "agent-policy imports only `Schema` from effect, agent-machine, and its own files.",
               },
             ],
           },

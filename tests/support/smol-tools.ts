@@ -7,10 +7,10 @@
  */
 
 import { Effect, Layer, type Schema } from "effect";
-import { FailureText, ToolName } from "../../src/agent-core/names.ts";
-import type { ToolOutcome } from "../../src/agent-core/observation.ts";
-import { ToolRunner, type ToolSpec } from "../../src/agent-effect/contracts.ts";
-import { parseJson, receivedJson } from "../../src/agent-effect/received.ts";
+import { FailureText, ToolName } from "../../src/agent-machine/names.ts";
+import type { ToolOutcome } from "../../src/agent-machine/observation.ts";
+import { ToolRunner, type ToolSpec } from "../../src/agent-session/contracts.ts";
+import { parseJson, receivedJson } from "../../src/agent-session/received.ts";
 
 /** A tool's result: its output, or why the input does not fit. */
 type Ran = { readonly output: Schema.Json } | { readonly misfit: string };

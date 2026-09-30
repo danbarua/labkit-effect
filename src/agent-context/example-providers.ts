@@ -4,7 +4,7 @@
  */
 
 import { DateTime, Effect } from "effect";
-import type { ContextMessage } from "../agent-effect/contracts.ts";
+import type { ContextMessage } from "../agent-session/contracts.ts";
 import type { Contents, ModelChoice, ModelSelector, NoticeProvider } from "./assemble.ts";
 import { logKeys } from "./log-keys.ts";
 

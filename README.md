@@ -16,9 +16,9 @@ The domain core of a coding harness, and the layers around it.
 
 | Directory | What it is | May import |
 |---|---|---|
-| `src/agent-core/` | Machines with mailboxes that pass messages (agent, conversation turn, turn step, call), the router, and the facts, decisions and effect requests they record. See its `MODEL.md`. | `Schema` from `effect` |
-| `src/agent-policy/` | Whether an effect request continues, is vetoed, or waits. See its `MODEL.md`. | `Schema` from `effect`, `agent-core` |
-| `src/agent-effect/` | The layer around them: contracts as Effect services, adapters, the loop (which records every fact, and so owns the journal). | anything |
+| `src/agent-machine/` | Machines with mailboxes that pass messages (agent, conversation turn, turn step, call), the router, and the facts, decisions and effect requests they record. See its `MODEL.md`. | `Schema` from `effect` |
+| `src/agent-policy/` | Whether an effect request continues, is vetoed, or waits. See its `MODEL.md`. | `Schema` from `effect`, `agent-machine` |
+| `src/agent-session/` | The layer around them: contracts as Effect services, adapters, the loop (which records every fact, and so owns the journal). | anything |
 | `src/agent-context/` | Context assembly: what the model is sent, from system prompts, tool catalogs and a view of the conversation. See its `MODEL.md`. | anything |
 | `src/instrumentation/` | Tool usage counted from facts, as Effect metrics, and OpenTelemetry. See its `README.md`. | anything |
 | `src/examples/` | Examples, not part of the harness: the FizzBuzz session (a scripted model, its tools, a toy compaction) and example policies for the gate. | anything |
@@ -29,7 +29,7 @@ Each module's `MODEL.md` says what it builds, as rules with ids. A rule has at l
 name starts with its id, and `bun run check:rules` fails when one has none. `DESIGN.next.md`, where
 a module has one, holds direction that is not built. `TODO.md` is what is to be built.
 
-A module's tests are beside its code (`src/agent-core/turn.test.ts`). The core's tests import only
+A module's tests are beside its code (`src/agent-machine/turn.test.ts`). The core's tests import only
 the core and `tests/support/`. `tests/` holds what joins modules: `tests/examples/` tests the
 examples, `tests/telemetry.test.ts` the instrumentation through one, and `tests/support/` what
 tests share (a driver for the core's machines, stand-ins for a provider, the test runner).

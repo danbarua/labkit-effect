@@ -6,9 +6,9 @@
  */
 
 import { Schema } from "effect";
-import { Millis } from "../agent-core/names.ts";
-import { Received } from "../agent-core/received.ts";
-import type { EffectRequest } from "../agent-core/request.ts";
+import { Millis } from "../agent-machine/names.ts";
+import { Received } from "../agent-machine/received.ts";
+import type { EffectRequest } from "../agent-machine/request.ts";
 
 export const Verdict = Schema.Union([
   Schema.TaggedStruct("Continue", {}),

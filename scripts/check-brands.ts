@@ -1,5 +1,5 @@
 /**
- * Checks that every schema declared in the abstract layers (src/agent-core, src/agent-policy)
+ * Checks that every schema declared in the abstract layers (src/agent-machine, src/agent-policy)
  * decodes to a type with no unbranded `string` in it, however the schema is built. It asks the
  * TypeScript 7 checker through its API, which runs the compiler as a separate process.
  *

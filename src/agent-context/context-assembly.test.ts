@@ -4,7 +4,7 @@ import { expect } from "bun:test";
 import { test, testOrigin } from "../../tests/support/test.ts";
 import { DateTime, Effect, Layer, Logger } from "effect";
 import { TestClock } from "effect/testing";
-import type { Fact } from "../agent-core/fact.ts";
+import type { Fact } from "../agent-machine/fact.ts";
 import {
   assemble,
   Conversation,
@@ -19,14 +19,14 @@ import {
   type ToolCatalog,
   ToolCatalogs,
 } from "./assemble.ts";
-import type { ContextMessage } from "../agent-effect/contracts.ts";
+import type { ContextMessage } from "../agent-session/contracts.ts";
 import { logKeys } from "./log-keys.ts";
 import {
   ContextWindowAwareModelSelector,
   FixedModelSelector,
   SystemTimeNoticeProvider,
 } from "./example-providers.ts";
-import { ModelName, ProviderName, Seq, SessionId } from "../agent-core/names.ts";
+import { ModelName, ProviderName, Seq, SessionId } from "../agent-machine/names.ts";
 import { BoringSystemPromptProvider, BoringToolCatalog } from "../../tests/support/boring.ts";
 import { runTest } from "../../tests/support/run.ts";
 

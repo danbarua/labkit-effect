@@ -7,11 +7,11 @@
 
 import { Effect, Layer, Schema } from "effect";
 import type { ToolCatalog } from "../../agent-context/assemble.ts";
-import { FailureText, ToolName } from "../../agent-core/names.ts";
-import type { ToolOutcome } from "../../agent-core/observation.ts";
-import type { Received } from "../../agent-core/received.ts";
-import { ToolRunner, type ToolSpec } from "../../agent-effect/contracts.ts";
-import { parseJson, receivedJson } from "../../agent-effect/received.ts";
+import { FailureText, ToolName } from "../../agent-machine/names.ts";
+import type { ToolOutcome } from "../../agent-machine/observation.ts";
+import type { Received } from "../../agent-machine/received.ts";
+import { ToolRunner, type ToolSpec } from "../../agent-session/contracts.ts";
+import { parseJson, receivedJson } from "../../agent-session/received.ts";
 
 export const Label = Schema.Literals(["Fizz", "Buzz", "FizzBuzz"]);
 export type Label = typeof Label.Type;

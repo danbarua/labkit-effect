@@ -7,7 +7,7 @@
 
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import { Effect, Layer, Logger, type Scope } from "effect";
-import { reportedBy } from "../../src/agent-effect/origin.ts";
+import { reportedBy } from "../../src/agent-session/origin.ts";
 import { testOrigin } from "./test.ts";
 
 export const testLogPath = "logs/test.log";

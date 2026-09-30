@@ -4,9 +4,9 @@
  */
 
 import { expect } from "bun:test";
-import { Millis } from "../../src/agent-core/names.ts";
-import type { EffectRequest } from "../../src/agent-core/request.ts";
-import { receivedText } from "../../src/agent-effect/received.ts";
+import { Millis } from "../../src/agent-machine/names.ts";
+import type { EffectRequest } from "../../src/agent-machine/request.ts";
+import { receivedText } from "../../src/agent-session/received.ts";
 import { emptyGate, type GateInput, type GateOutput, type GateState, gate, RequestKey } from "../../src/agent-policy/gate.ts";
 import { every, type Policy } from "../../src/agent-policy/policy.ts";
 import { askPerson, budgetSpent, denyTools, notBefore } from "../../src/examples/policies.ts";

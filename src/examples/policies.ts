@@ -5,7 +5,7 @@
  */
 
 import type { Policy } from "../agent-policy/policy.ts";
-import { asText, receivedJson } from "../agent-effect/received.ts";
+import { asText, receivedJson } from "../agent-session/received.ts";
 
 /** Vetoes running any tool named in `denied`. */
 export const denyTools = (denied: ReadonlyArray<string>): Policy<unknown> => ({

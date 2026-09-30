@@ -33,7 +33,7 @@ Whoever builds permissions starts from these:
 - The gate is the only code that makes them from a policy's verdict. The Claude Code importer also
   records `ModelVetoed`, where Claude Code wrote "No response requested." in a running turn.
 - A model's settings are not vetoed. A setting the model does not allow is changed to the nearest
-  one it does, and recorded (`SettingEnforced`, agent-core M3). That is an adjustment made by the
+  one it does, and recorded (`SettingEnforced`, agent-machine M3). That is an adjustment made by the
   provider's adapter, not a verdict.
 
 ## Rules

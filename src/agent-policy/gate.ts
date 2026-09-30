@@ -6,9 +6,9 @@
  */
 
 import { Schema } from "effect";
-import type { Observation } from "../agent-core/observation.ts";
-import type { EffectRequest } from "../agent-core/request.ts";
-import type { Received } from "../agent-core/received.ts";
+import type { Observation } from "../agent-machine/observation.ts";
+import type { EffectRequest } from "../agent-machine/request.ts";
+import type { Received } from "../agent-machine/received.ts";
 import type { Policy, PolicyMessage, PolicyStep } from "./policy.ts";
 
 /** Identifies a request under review: one model request per turn, one run per tool call. */

@@ -18,18 +18,18 @@
 
 import { Effect, Layer } from "effect";
 import * as AiError from "effect/ai/AiError";
-import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agent-core/names.ts";
-import type { ModelPart, Observation } from "../../agent-core/observation.ts";
+import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agent-machine/names.ts";
+import type { ModelPart, Observation } from "../../agent-machine/observation.ts";
 import {
   type ContextMessage,
   ModelClient,
   type ModelContext,
   type ProviderRequest,
   type Target,
-} from "../../agent-effect/contracts.ts";
-import { modelClientOf } from "../../agent-effect/provider-call.ts";
-import { parseJson, receivedJson } from "../../agent-effect/received.ts";
-import { isObject } from "../../agent-effect/shaping.ts";
+} from "../../agent-session/contracts.ts";
+import { modelClientOf } from "../../agent-session/provider-call.ts";
+import { parseJson, receivedJson } from "../../agent-session/received.ts";
+import { isObject } from "../../agent-session/shaping.ts";
 import type { ErrorCode, Label } from "./tools.ts";
 
 type Responded = Effect.Effect<Extract<Observation, { _tag: "ModelResponded" }>, AiError.AiError>;

@@ -5,8 +5,8 @@
  */
 
 import { test as bunTest } from "bun:test";
-import { TestName } from "../../src/agent-core/names.ts";
-import type { Origin } from "../../src/agent-core/origin.ts";
+import { TestName } from "../../src/agent-machine/names.ts";
+import type { Origin } from "../../src/agent-machine/origin.ts";
 
 let running: string | undefined;
 

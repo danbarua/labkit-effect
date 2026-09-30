@@ -1,9 +1,9 @@
 import { expect } from "bun:test";
 import { test } from "../support/test.ts";
 import { Effect, type Schema } from "effect";
-import { ToolName } from "../../src/agent-core/names.ts";
-import { ToolRunner } from "../../src/agent-effect/contracts.ts";
-import { receivedJson } from "../../src/agent-effect/received.ts";
+import { ToolName } from "../../src/agent-machine/names.ts";
+import { ToolRunner } from "../../src/agent-session/contracts.ts";
+import { receivedJson } from "../../src/agent-session/received.ts";
 import { SmolToolRunner } from "./smol-tools.ts";
 import { runTest } from "./run.ts";
 
