@@ -130,8 +130,10 @@ Completions adapter keeps it as `Unrecognised` and does not send it back.
   `encrypted_content` of a reasoning item sent back: without it, a request is counted as if the
   item were not there.
 - Messages have no `phase`. A message sent back with `phase: commentary` is taken.
-- Efforts: grok-4.7 takes `low` to `xhigh` and refuses `none` and `max` with a 400. grok-4.3 takes
-  `none`. `GET /v1/models` lists each model's efforts under `capabilities.reasoning_effort`.
+- Efforts: grok-4.5 to grok-4.7 take `low` to `xhigh` and refuse `none` and `max` with a 400;
+  grok-4.20 and grok-build-0.1 refuse `reasoning.effort` of any value. `GET /v1/models` lists each
+  model's efforts under `capabilities.reasoning_effort`. The adapter supports the latest three
+  (4.5 to 4.7) and sends an effort only when one was said.
 - `max_output_tokens` limits the answer only. With 20, a response took 62 output tokens, 42 of them
   reasoning, and ended `incomplete` with the reason `max_output_tokens`. Streamed, the cut message
   has no `response.output_item.done`, the stream ends with `response.incomplete`, and the message is

@@ -27,7 +27,6 @@ import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { test } from "../../tests/support/test.ts";
 
 const anthropic = (model: string, settings: ModelSettings) => anthropicSettings(ModelName.make(model), settings);
-const xAi = (model: string, settings: ModelSettings) => xAiSettings(ModelName.make(model), settings);
 
 test("Anthropic: nothing said sends nothing; what is said goes into thinking and output_config", () => {
   expect(anthropic("claude-opus-5-5", {})).toEqual({ fields: {}, headers: {}, enforced: [] });
@@ -157,13 +156,13 @@ test("the cache: Anthropic marks the request for five minutes or an hour, OpenAI
 });
 
 test("xAI: effort goes into reasoning, max as xhigh; the summary always comes back; the cache and its retention cannot be set", () => {
-  expect(xAi("grok-4.7", {})).toEqual({ fields: {}, headers: {}, enforced: [] });
-  expect(xAi("grok-4.7", { thinking: "auto", observe: "all", effort: "high", maxOutputTokens: TokenCount.make(2000) })).toEqual({
+  expect(xAiSettings({})).toEqual({ fields: {}, headers: {}, enforced: [] });
+  expect(xAiSettings({ thinking: "auto", observe: "all", effort: "high", maxOutputTokens: TokenCount.make(2000) })).toEqual({
     fields: { reasoning: { effort: "high" }, max_output_tokens: 2000 },
     headers: {},
     enforced: [],
   });
-  expect(xAi("grok-4.7", { effort: "max", observe: "off" })).toEqual({
+  expect(xAiSettings({ effort: "max", observe: "off" })).toEqual({
     fields: { reasoning: { effort: "xhigh" } },
     headers: {},
     enforced: [
@@ -175,7 +174,7 @@ test("xAI: effort goes into reasoning, max as xhigh; the summary always comes ba
     ],
   });
   for (const cache of ["off", "5m", "1h"] as const)
-    expect(xAi("grok-4.7", { cache })).toEqual({
+    expect(xAiSettings({ cache })).toEqual({
       fields: {},
       headers: {},
       enforced: [
@@ -187,27 +186,18 @@ test("xAI: effort goes into reasoning, max as xhigh; the summary always comes ba
     });
 });
 
-test("xAI: thinking off is effort none for a model that takes it, and auto at effort low for one that refuses none", () => {
-  expect(xAi("grok-4.3", { thinking: "off", effort: "max" })).toEqual({
-    fields: { reasoning: { effort: "none" } },
-    headers: {},
-    enforced: [{ enforced: { _tag: "Effort", asked: "max" }, reason: "thinking is off, which is sent as reasoning effort none" }],
-  });
-  expect(xAi("grok-4.7", { thinking: "off", effort: "high" })).toEqual({
-    fields: { reasoning: { effort: "low" } },
+test("xAI: thinking off cannot be turned off, so it is auto, and no effort is sent that was not said", () => {
+  expect(xAiSettings({ thinking: "off" })).toEqual({
+    fields: {},
     headers: {},
     enforced: [
       {
         enforced: { _tag: "Thinking", asked: "off", used: "auto" },
-        reason: "this model does not allow thinking to be turned off (reasoning effort none); it is sent effort low",
-      },
-      {
-        enforced: { _tag: "Effort", asked: "high", used: "low" },
-        reason: "this model does not allow thinking to be turned off; the least effort, low, is sent",
+        reason: "xAI's models do not allow thinking to be turned off (reasoning effort none is refused)",
       },
     ],
   });
-  expect(xAi("grok-4.6", { thinking: "off" }).fields).toEqual({ reasoning: { effort: "low" } });
+  expect(xAiSettings({ thinking: "off", effort: "high" }).fields).toEqual({ reasoning: { effort: "high" } });
 });
 
 test("Chat Completions: no setting is sent, and each one asked for is enforced", () => {
