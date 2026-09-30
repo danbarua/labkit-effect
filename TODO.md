@@ -88,13 +88,13 @@ Built: the gate and what a policy is, pure and not in the loop (agent-policy `MO
 - [ ] `ToolCallDispatched` is reported by the loop when it hands a call to the tool runner. When
       tools run in another process (the ACP host), that adapter reports it.
 
-### Loading a session
+### Requests left under way
 
-- [ ] A session cannot be opened from its record: `openSession` starts with no facts.
 - [ ] A record can stop with a request under way (the process ended while the model was asked, or
-      while a tool ran). Loaded as it is, the turn waits for an outcome nobody will report, and new
-      input queues behind it. On loading, each such request is either made again or given its
-      outcome: the model request failed, or the tool's end was not observed (`Indeterminate`).
+      while a tool ran). The request was made, and that is recorded (`ModelRequestDispatched`,
+      `ToolCallDispatched`); no outcome was observed, so its result is indeterminate. The
+      conversation already says so for a tool call (TC3). Nothing yet gives a turn that waits on
+      such a request its end.
 - [ ] After a turn that got no response (failed, vetoed, interrupted before anything arrived), the
       next request carries that turn's input and the new input as one user message. It is valid
       for both providers, and nothing tells the model the first went unanswered.
@@ -150,6 +150,9 @@ On 2026-09-30: Codex none in 168 files; Claude Code 4 in 808.
 
 ## Parked by Dan
 
+- A session's record: its format, and opening a session from it. Deferred until something needs
+  it, so that the format does not dictate the design. Everything that can be built and tested
+  without it comes first.
 - Google (no Effect package).
 - Jev, later, as a tool.
 - Attachments and system records in Claude Code sessions, including exo's injected memories.

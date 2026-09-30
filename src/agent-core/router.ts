@@ -187,6 +187,7 @@ function isPassedOn(sent: Send): boolean {
     case "ModelFailed":
     case "ModelAttemptFailed":
     case "NoticeInserted":
+    case "ModelRequestDispatched":
     case "SettingEnforced":
     case "ToolCallArrived":
     case "ModelVetoed":
@@ -262,6 +263,7 @@ export function deliver(world: World, seq: Seq, observation: Observation): Deliv
       case "ModelFailed":
       case "ModelAttemptFailed":
       case "NoticeInserted":
+      case "ModelRequestDispatched":
       case "SettingEnforced":
       case "ToolCallArrived":
       case "ModelVetoed":

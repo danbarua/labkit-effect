@@ -59,7 +59,17 @@ const attempt = (
   fellBack: boolean,
 ): ReturnType<ProviderRequest> => {
   const [target, next, ...rest] = targets;
+  // The loop records the request to the target it chose; a request to a fallback is recorded here.
+  const dispatched = fellBack
+    ? Effect.gen(function* () {
+        yield* (yield* Report)(
+          { _tag: "ModelRequestDispatched", turn, provider: target.provider, model: target.model },
+          harnessParts.fallbackChain,
+        );
+      })
+    : Effect.void;
   const tried = requestFor(chain, target).pipe(
+    Effect.tap(() => dispatched),
     Effect.flatMap((request) => request(target, context, turn)),
     Effect.withSpan("agent.model.attempt", { attributes: { provider: target.provider, model: target.model } }),
     Effect.tap(() =>

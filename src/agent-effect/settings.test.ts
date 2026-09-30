@@ -260,15 +260,23 @@ test("M3: a request carries the settings the model allows; what was enforced is 
   expect(bodies[1]).toMatchObject(sent);
   const observed = facts.flatMap((fact) => (fact._tag === "Observed" ? [fact] : []));
   expect(observed.map((fact) => fact.observation._tag).slice(3)).toEqual([
+    "ModelRequestDispatched",
     "SettingEnforced",
     "ModelResponded",
     "TurnEndReviewed",
     "InputArrived",
     "TurnStarted",
+    "ModelRequestDispatched",
     "ModelResponded",
     "TurnEndReviewed",
   ]);
-  expect(observed[3] as unknown).toMatchObject({
+  expect(observed[3]?.observation as unknown).toEqual({
+    _tag: "ModelRequestDispatched",
+    turn: "turn-1",
+    provider: "anthropic",
+    model: "claude-opus-5-5",
+  });
+  expect(observed[4] as unknown).toMatchObject({
     origin: { _tag: "Harness", part: "model settings" },
     observation: {
       turn: "turn-1",

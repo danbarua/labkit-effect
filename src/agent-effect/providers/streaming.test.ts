@@ -299,11 +299,13 @@ test("TC2 TC3: a tool call is run as soon as it is complete in the stream, befor
   const recorded = facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
   expect(recorded.slice(4)).toEqual([
     "ModelAsked",
+    "ModelRequestDispatched",
     "ToolCallArrived",
     "ToolCallDispatched",
     "ToolEnded",
     "ModelResponded",
     "ModelAsked",
+    "ModelRequestDispatched",
     "ModelResponded",
     "TurnEndReviewed",
     "TurnEnded",
@@ -371,10 +373,16 @@ test("X1: interrupted while a response streams and its tool runs: both are stopp
     ),
   );
   const recorded = facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
-  expect(recorded.slice(4, 8)).toEqual(["ModelAsked", "ToolCallArrived", "ToolCallDispatched", "TurnInterrupted"]);
+  expect(recorded.slice(4, 9)).toEqual([
+    "ModelAsked",
+    "ModelRequestDispatched",
+    "ToolCallArrived",
+    "ToolCallDispatched",
+    "TurnInterrupted",
+  ]);
   // The response and the tool are stopped together; which is heard from first is not fixed.
-  expect(recorded.slice(8, 10).sort() as ReadonlyArray<string>).toEqual(["ModelResponded", "ToolEnded"]);
-  expect(recorded[10]).toBe("TurnEnded");
+  expect(recorded.slice(9, 11).sort() as ReadonlyArray<string>).toEqual(["ModelResponded", "ToolEnded"]);
+  expect(recorded[11]).toBe("TurnEnded");
   expect(recorded).not.toContain("ObservationNotExpected");
   const observed = facts.flatMap((fact) => (fact._tag === "Observed" ? [fact.observation] : []));
   expect(observed.find((each) => each._tag === "ModelResponded") as unknown).toMatchObject({

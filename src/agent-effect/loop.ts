@@ -7,7 +7,8 @@
  * in a fiber of its own, so the session takes further observations meanwhile: input is queued in
  * the core's mailboxes. When the core asks for a turn's work to stop (it was interrupted), each
  * request under way ends what it is doing and reports how far it got: a model request, the response
- * as far as it had arrived; a tool run, that how it ended was not observed. `idle` waits until no request is being carried out. The session lives in a scope;
+ * as far as it had arrived; a tool run, that how it ended was not observed. That a request was made
+ * is recorded before it goes out: `ModelRequestDispatched`, `ToolCallDispatched`. `idle` waits until no request is being carried out. The session lives in a scope;
  * closing it ends whatever is still being carried out.
  *
  * When a turn starts is decided here: when input arrives and the agent is idle, the loop starts a
@@ -221,6 +222,10 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope> = Effect.ge
                   metadata: receivedJson({}),
                 }),
               ),
+            );
+            yield* report(
+              { _tag: "ModelRequestDispatched", turn: request.turn, provider: target.provider, model: target.model },
+              harnessParts.loop,
             );
             const outcome = yield* (yield* ModelClient)
               .respond(target, context, request.turn)

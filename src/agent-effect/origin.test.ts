@@ -57,9 +57,11 @@ test("R6: what the test gives the session is from the test; what the loop observ
     ["SessionOpened", { _tag: "Test", name }],
     ["InputArrived", { _tag: "Test", name }],
     ["TurnStarted", { _tag: "Harness", part: "loop" }],
+    ["ModelRequestDispatched", { _tag: "Harness", part: "loop" }],
     ["ModelResponded", { _tag: "Provider", provider: "boring" }],
     ["ToolCallDispatched", { _tag: "Harness", part: "tool runner" }],
     ["ToolEnded", { _tag: "Tool", tool: "add" }],
+    ["ModelRequestDispatched", { _tag: "Harness", part: "loop" }],
     ["ModelResponded", { _tag: "Provider", provider: "boring" }],
     ["TurnEndReviewed", { _tag: "Harness", part: "turn-end hooks" }],
   ]);

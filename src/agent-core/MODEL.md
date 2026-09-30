@@ -54,7 +54,7 @@ and report `TurnStarted`.
 
 | Decision | Request | Observed outcome |
 |---|---|---|
-| `ModelAsked` | `RequestModelResponse` | `ModelResponded`, `ModelFailed`, `ModelVetoed` |
+| `ModelAsked` | `RequestModelResponse` | `ModelRequestDispatched` when the request is made, then `ModelResponded`, `ModelFailed` or `ModelVetoed` |
 | (none: every proposed call is requested) | `RunTool` | `ToolCallDispatched` when the tool begins to run, then `ToolEnded` (`Succeeded`, `Failed`) |
 | (none: the model gave a response with no tool calls) | `BeforeTurnEnded` | input, if any, then `TurnEndReviewed` |
 | (none: the turn was interrupted) | `StopTurnWork` | each request under way reports how far it got |
@@ -135,6 +135,10 @@ then continues").
   carries the error as the layer encoded it (`error`), beside the words (`failure`). An attempt
   that failed on the way, after which the request went on, is `ModelAttemptFailed`; it is recorded
   when it happens, and the turn does not end.
+- S6. A request for a model response is three facts, as a tool call is: the core asked
+  (`ModelAsked`), the request was made (`ModelRequestDispatched`, naming the provider and model it
+  went to, once for each provider tried), and what came of it. A request that was made and has no
+  outcome recorded is indeterminate: whether the model saw what it carried is not known.
 - S4. A compaction window is reported by the layers around the core, as the span they chose:
   `CompactionWindow { window, previous, through, kept }`. It goes to the agent like input: taken at
   once while no turn runs, otherwise waiting in the turn's mailbox until between steps, or until the

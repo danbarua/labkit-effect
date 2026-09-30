@@ -129,16 +129,18 @@ test("I4: a turn-end hook's feedback holds the turn open; the turn ends when the
     "TurnStarted",
     "InputDelivered",
     "ModelAsked",
+    "ModelRequestDispatched",
     "ModelResponded",
     "InputArrived",
     "InputDelivered",
     "TurnEndReviewed",
     "ModelAsked",
+    "ModelRequestDispatched",
     "ModelResponded",
     "TurnEndReviewed",
     "TurnEnded",
   ]);
-  expect(facts[6] as unknown).toMatchObject({
+  expect(facts[7] as unknown).toMatchObject({
     observation: { from: { _tag: "System" }, text: "Write the session up before stopping." },
   });
   expect(logged).toContainEqual([logKeys.loop.turnHeld, { hold: 1, maxHolds: 5, feedback: 1 }]);

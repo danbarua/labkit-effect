@@ -104,8 +104,16 @@ const reasonIn = (error: Received): string =>
 
 test("Anthropic is overloaded (HTTP 529), so OpenAI answers; the failed attempt is recorded with its error", async () => {
   const { model, ended, fellBack } = await oneTurn({ anthropic: 529 });
-  expect(model.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed", "ModelChangeArrived", "ModelResponded"]);
-  const [attempt, change, response] = model;
+  expect(model.map((observation) => observation._tag)).toEqual([
+    "ModelRequestDispatched",
+    "ModelAttemptFailed",
+    "ModelRequestDispatched",
+    "ModelChangeArrived",
+    "ModelResponded",
+  ]);
+  const [first, attempt, second, change, response] = model;
+  expect(first).toMatchObject({ provider: "anthropic", model: "claude-sonnet-5" });
+  expect(second).toMatchObject({ provider: "openai", model: "gpt-5.6" });
   expect(attempt).toMatchObject({ provider: "anthropic", model: "claude-sonnet-5" });
   expect(attempt?._tag === "ModelAttemptFailed" ? reasonIn(attempt.error) : undefined).toBe("InternalProviderError");
   expect(change).toMatchObject({ provider: "openai", model: "gpt-5.6" });
@@ -116,18 +124,28 @@ test("Anthropic is overloaded (HTTP 529), so OpenAI answers; the failed attempt 
 
 test("Anthropic's rate limit (HTTP 429) falls back too", async () => {
   const { model, ended } = await oneTurn({ anthropic: 429 });
-  expect(model.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed", "ModelChangeArrived", "ModelResponded"]);
+  expect(model.map((observation) => observation._tag)).toEqual([
+    "ModelRequestDispatched",
+    "ModelAttemptFailed",
+    "ModelRequestDispatched",
+    "ModelChangeArrived",
+    "ModelResponded",
+  ]);
   expect(ended).toEqual(["Answered"]);
 });
 
 test("after falling back, the session stays on OpenAI: the next turn asks it first, and Anthropic is not tried again", async () => {
   const { model, ended, fellBack } = await oneTurn({ anthropic: 529 }, ["hello", "and again"]);
   expect(model.map((observation) => observation._tag)).toEqual([
+    "ModelRequestDispatched",
     "ModelAttemptFailed",
+    "ModelRequestDispatched",
     "ModelChangeArrived",
     "ModelResponded",
+    "ModelRequestDispatched",
     "ModelResponded",
   ]);
+  expect(model.at(-2)).toMatchObject({ provider: "openai", model: "gpt-5.6" });
   expect(model.at(-1)).toMatchObject({ provider: "openai", model: "gpt-5.6" });
   expect(ended).toEqual(["Answered", "Answered"]);
   expect(fellBack).toBe(1);
@@ -135,8 +153,8 @@ test("after falling back, the session stays on OpenAI: the next turn asks it fir
 
 test("both providers are down, so the turn fails with OpenAI's error; Anthropic's is recorded as the failed attempt", async () => {
   const { model, ended } = await oneTurn({ anthropic: 503, openAi: 429 });
-  expect(model.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed", "ModelFailed"]);
-  const [attempt, failed] = model;
+  expect(model.map((observation) => observation._tag)).toEqual(["ModelRequestDispatched", "ModelAttemptFailed", "ModelRequestDispatched", "ModelFailed"]);
+  const [, attempt, , failed] = model;
   expect(attempt?._tag === "ModelAttemptFailed" ? reasonIn(attempt.error) : undefined).toBe("InternalProviderError");
   expect(failed?._tag === "ModelFailed" ? reasonIn(failed.error) : undefined).toBe("RateLimitError");
   expect(ended).toEqual(["Failed"]);
@@ -144,8 +162,8 @@ test("both providers are down, so the turn fails with OpenAI's error; Anthropic'
 
 test("Anthropic rejects the key (HTTP 401): the turn fails with it, and OpenAI is not asked", async () => {
   const { model, ended, fellBack } = await oneTurn({ anthropic: 401 });
-  expect(model.map((observation) => observation._tag)).toEqual(["ModelFailed"]);
-  expect(model[0]?._tag === "ModelFailed" ? reasonIn(model[0].error) : undefined).toBe("AuthenticationError");
+  expect(model.map((observation) => observation._tag)).toEqual(["ModelRequestDispatched", "ModelFailed"]);
+  expect(model[1]?._tag === "ModelFailed" ? reasonIn(model[1].error) : undefined).toBe("AuthenticationError");
   expect(ended).toEqual(["Failed"]);
   expect(fellBack).toBe(0);
 });
@@ -183,5 +201,5 @@ test("each attempt runs in its own span, with its provider and model", async () 
     { name: "agent.model.attempt", attributes: { provider: "anthropic", model: "claude-sonnet-5" } },
     { name: "agent.model.attempt", attributes: { provider: "openai", model: "gpt-5.6" } },
   ]);
-  expect(reported.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed", "ModelChangeArrived"]);
+  expect(reported.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed", "ModelRequestDispatched", "ModelChangeArrived"]);
 });

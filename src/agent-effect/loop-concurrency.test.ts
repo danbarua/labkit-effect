@@ -48,8 +48,12 @@ const services = (model: Layer.Layer<ModelClient>) =>
 
 const input = (text: string) => ({ _tag: "InputArrived", from: { _tag: "User" }, text }) as unknown as Observation;
 
+/**
+ * What was recorded, in order, without `ModelRequestDispatched`: the request is made in a fiber of
+ * its own, so where its record falls among what the test gives the session meanwhile is not fixed.
+ */
 const tags = (facts: ReadonlyArray<{ _tag: string; observation?: { _tag: string }; decision?: { _tag: string } }>) =>
-  facts.map((fact) => fact.observation?._tag ?? fact.decision?._tag);
+  facts.map((fact) => fact.observation?._tag ?? fact.decision?._tag).filter((tag) => tag !== "ModelRequestDispatched");
 
 test("observe returns once the observation is recorded; input given while the model is asked is taken when it answers", async () => {
   const { before, after, seen } = await runTest(
@@ -107,6 +111,7 @@ test("an interruption while the model is asked stops the request; the response a
     "TurnEnded",
   ]);
   expect(facts.at(-2) as unknown).toMatchObject({ observation: { parts: [], ending: { _tag: "Interrupted" } } });
+  expect(facts.filter((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelRequestDispatched")).toHaveLength(1);
   expect(facts.at(-1) as unknown).toMatchObject({ decision: { ending: { _tag: "Interrupted" } } });
   expect(interrupted).toBe(true);
 });

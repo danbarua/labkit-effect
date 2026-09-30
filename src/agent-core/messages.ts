@@ -25,6 +25,7 @@ export type ModelObservation = Extract<
   Observation,
   {
     _tag:
+      | "ModelRequestDispatched"
       | "ModelResponded"
       | "ModelFailed"
       | "ModelAttemptFailed"

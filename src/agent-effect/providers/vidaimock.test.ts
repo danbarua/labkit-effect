@@ -125,14 +125,27 @@ describe.each([...adapters])("$name at VidaiMock", (adapter) => {
     const { facts } = await oneTurn(client(noRetries));
     const recorded = tags(facts);
     const second = recorded.lastIndexOf("ModelAsked");
-    expect(recorded.slice(0, 5)).toEqual(["SessionOpened", "InputArrived", "TurnStarted", "InputDelivered", "ModelAsked"]);
+    expect(recorded.slice(0, 6)).toEqual([
+      "SessionOpened",
+      "InputArrived",
+      "TurnStarted",
+      "InputDelivered",
+      "ModelAsked",
+      "ModelRequestDispatched",
+    ]);
     // In the first step a streaming adapter's call arrives, and runs, before its response has ended;
     // whether the tool or the response ends first is not fixed.
-    expect(recorded.slice(5, second).sort() as ReadonlyArray<string>).toEqual(
+    expect(recorded.slice(6, second).sort() as ReadonlyArray<string>).toEqual(
       [...(adapter.streams ? ["ToolCallArrived"] : []), "ModelResponded", "ToolCallDispatched", "ToolEnded"].sort(),
     );
     if (adapter.streams) expect(recorded.indexOf("ToolCallArrived")).toBeLessThan(recorded.indexOf("ModelResponded"));
-    expect(recorded.slice(second)).toEqual(["ModelAsked", "ModelResponded", "TurnEndReviewed", "TurnEnded"]);
+    expect(recorded.slice(second)).toEqual([
+      "ModelAsked",
+      "ModelRequestDispatched",
+      "ModelResponded",
+      "TurnEndReviewed",
+      "TurnEnded",
+    ]);
     const responses = facts.flatMap((fact) =>
       fact._tag === "Observed" && fact.observation._tag === "ModelResponded" ? [fact.observation] : [],
     );

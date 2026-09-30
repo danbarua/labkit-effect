@@ -210,3 +210,15 @@ test("I7: a whole response that is not yet an answer is followed by another requ
   expect(tags(session).slice(4)).toEqual(["ModelAsked", "ModelResponded", "ModelAsked", "ModelResponded", "TurnEndReviewed", "TurnEnded"]);
   expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { ending: { _tag: "Answered" } } });
 });
+
+test("S6: a request that was made is recorded; the step waits for what comes of it", () => {
+  const session = open();
+  observe(session, opened);
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
+  observe(session, { _tag: "ModelRequestDispatched", turn: "turn-1", provider: "anthropic", model: "claude-sonnet-5" });
+  expect(tags(session).slice(-2)).toEqual(["ModelAsked", "ModelRequestDispatched"]);
+  expect(session.world.agent.state._tag).toBe("Running");
+  observe(session, cutShort("Hello.", "end_turn", "Complete"));
+  expect(tags(session).slice(-3)).toEqual(["ModelResponded", "TurnEndReviewed", "TurnEnded"]);
+  expect(tags(session)).not.toContain("ObservationNotExpected");
+});
