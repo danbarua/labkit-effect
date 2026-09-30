@@ -12,7 +12,7 @@
 import { Effect, Layer } from "effect";
 import { NoticeText } from "../agent-machine/names.ts";
 import { ContextAssembler, type ModelContext } from "../agent-session/contracts.ts";
-import { conversationOf, noticeMessage } from "../agent-session/conversation.ts";
+import { nextMessages, noticeMessage } from "../agent-session/conversation.ts";
 import { harnessParts } from "../agent-session/origin.ts";
 import { Report } from "../agent-session/report.ts";
 import { assembleContents, Conversation, Notices } from "./assemble.ts";
@@ -43,7 +43,10 @@ export const AgentContextAssembler = Layer.effect(
   }),
 );
 
-/** The whole session's conversation, every turn of it. */
+/**
+ * The whole session's conversation, every turn of it: what the last request carried, as recorded,
+ * and what the facts since add (`nextMessages`).
+ */
 export const WholeConversation = Layer.succeed(Conversation, {
-  messages: (facts) => Effect.succeed(conversationOf(facts)),
+  messages: (facts) => Effect.succeed(nextMessages(facts)),
 });

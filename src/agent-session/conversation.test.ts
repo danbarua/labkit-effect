@@ -4,7 +4,9 @@ import { expect } from "bun:test";
 import { observe, open, opened } from "../../tests/support/drive.ts";
 import { json } from "../../tests/support/received.ts";
 import { test } from "../../tests/support/test.ts";
-import { conversationOf } from "./conversation.ts";
+import { Schema } from "effect";
+import { type ContextMessage, ModelContext } from "./contracts.ts";
+import { conversationOf, nextMessages } from "./conversation.ts";
 
 const responded = (parts: ReadonlyArray<unknown>, ending = "Complete") => ({
   _tag: "ModelResponded",
@@ -61,4 +63,26 @@ test("TC4: a call that arrived in a response that then failed is not sent to the
   });
   observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } });
   expect(conversationOf(session.journal)).toEqual([{ role: "user", parts: [{ _tag: "Text", text: "list the files" }] }]);
+});
+
+const sent = (messages: ReadonlyArray<ContextMessage>) =>
+  json(Schema.encodeSync(Schema.toCodecJson(ModelContext))({ system: undefined, tools: [], messages }));
+
+test("A6: the next request carries the last request's messages as recorded, though the facts would now project them otherwise", () => {
+  const session = open();
+  observe(session, opened);
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
+  observe(session, responded([call("c1")]));
+  observe(session, { _tag: "ToolCallDispatched", call: "c1" });
+  const carried = conversationOf(session.journal);
+  observe(session, { _tag: "ModelRequestDispatched", turn: "turn-1", provider: "boring", model: "boring-1", sent: sent(carried) });
+  observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } });
+  observe(session, responded([{ _tag: "Text", text: "Done." }]));
+  const indeterminate = { _tag: "ToolResult", call: "c1", outcome: { _tag: "Failed", reason: { _tag: "Indeterminate" } } };
+  expect(carried.at(-1) as unknown).toEqual({ role: "user", parts: [indeterminate] });
+  expect(nextMessages(session.journal) as unknown).toEqual([...carried, { role: "assistant", parts: [{ _tag: "Text", text: "Done." }] }]);
+  expect(conversationOf(session.journal)[2] as unknown).toEqual({
+    role: "user",
+    parts: [{ _tag: "ToolResult", call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } }],
+  });
 });

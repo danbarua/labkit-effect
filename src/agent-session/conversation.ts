@@ -12,6 +12,7 @@ import type { Fact } from "../agent-machine/fact.ts";
 import type { CallId, NoticeText, Seq } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import type { ContextMessage, ContextPart } from "./contracts.ts";
+import { sentIn } from "./sent.ts";
 
 /** The text of each input, by its position. */
 export function inputTexts(facts: ReadonlyArray<Fact>): ReadonlyMap<Seq, string> {
@@ -121,4 +122,21 @@ export function conversationOf(facts: ReadonlyArray<Fact>, all: ReadonlyArray<Fa
   const texts = inputTexts(all);
   const calls = callsOf(all);
   return merged(facts.flatMap((fact) => messages(fact, texts, calls).filter((added) => added.parts.length > 0)));
+}
+
+/**
+ * The messages the next request carries: the messages the last request in `facts` carried, as
+ * recorded with it, followed by the messages of the facts recorded after it. Nothing before that
+ * request is projected again, so a change to `conversationOf` changes what later requests add and
+ * never what an earlier one carried. With no request in `facts`, the messages all of `facts` add.
+ * Input texts and how tool calls ended are looked up in `all`, as for `conversationOf`.
+ */
+export function nextMessages(facts: ReadonlyArray<Fact>, all: ReadonlyArray<Fact> = facts): ReadonlyArray<ContextMessage> {
+  for (let at = facts.length - 1; at >= 0; at--) {
+    const fact = facts[at];
+    if (fact?._tag === "Observed" && fact.observation._tag === "ModelRequestDispatched") {
+      return merged([...sentIn(fact.observation.sent).messages, ...conversationOf(facts.slice(at + 1), all)]);
+    }
+  }
+  return conversationOf(facts, all);
 }

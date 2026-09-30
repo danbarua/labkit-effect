@@ -10,8 +10,8 @@ in `DESIGN.next.md`.
   and appends the catalogs, and makes the `SessionOpened` observation that holds them.
 - A2. Every request's system prompt and tools are read from the session's facts, not asked for
   again: the facts are the one place they are held.
-- A3. The conversation a request carries is a view of the session's facts, given by the
-  `Conversation` service. `WholeConversation` is every turn of it.
+- A3. The conversation a request carries is given by the `Conversation` service.
+  `WholeConversation` is every turn of it (A6).
 - A4. Notices come from their providers, in order, for each request, and go at the end of what the
   request carries, as one instruction message. Each is reported as `NoticeInserted`, so later
   requests carry it where it was sent (agent-machine S5).
@@ -19,6 +19,10 @@ in `DESIGN.next.md`.
   session a compaction would cover, and nothing else. A summary of a window is a `WindowSummary`
   (`forks.ts`), held apart from the session's facts; the importers write the ones Claude Code and
   Codex made to `summaries.jsonl`.
+- A6. A request carries the messages the request before it carried, as recorded with that request,
+  followed by the messages of the facts recorded since (`nextMessages`). Nothing before the last
+  request is projected again: a change to the projection changes what later requests add, not
+  what an earlier request carried. A compaction's view is the one that rebuilds the messages.
 
 Each of these is an Effect service, supplied by a layer. `example-providers.ts` holds examples: a
 notice of the current time, a fixed model, and a selector that moves to a larger model when the
