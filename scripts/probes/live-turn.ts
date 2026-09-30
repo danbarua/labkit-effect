@@ -62,6 +62,7 @@ const facts = await Effect.runPromise(
         tools: smolCatalog,
       }),
     );
+    yield* session.idle;
     yield* session.observe({
       _tag: "InputArrived",
       from: { _tag: "User" },
@@ -70,9 +71,11 @@ const facts = await Effect.runPromise(
         "Of 1873, 4127, 2946, 6054, 3381 and 7519, exactly two are the smallest and largest primes in the list. " +
         "Work out which, add those two with the tool, then tell me the result.",
     } as unknown as Observation);
+    yield* session.idle;
     return yield* session.facts;
   }).pipe(
     reportedBy({ _tag: "Test", name: TestName.make(`live-turn ${provider} ${model}`) }),
+    Effect.scoped,
     Effect.provide(Layer.mergeAll(ModelFromFacts, TurnContextAssembler, client, CountingTurns, NoTurnEndHooks, SmolToolRunner)),
   ),
 );

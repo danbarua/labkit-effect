@@ -51,7 +51,9 @@ test("while a request is carried out, CurrentWork and every log line name its se
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe(boringOpening());
+      yield* session.idle;
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
+      yield* session.idle;
     }).pipe(
       Effect.provide(
         Layer.mergeAll(provider, client, BoringContextAssembler, CountingTurns, NoTurnEndHooks, SmolToolRunner, Logger.layer([capture])),
@@ -104,7 +106,9 @@ async function answeringTurn(hooks: ReadonlyArray<() => ReadonlyArray<string>>, 
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe(boringOpening());
+      yield* session.idle;
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
+      yield* session.idle;
       return yield* session.facts;
     }).pipe(
       Effect.provide(
@@ -169,8 +173,10 @@ test("a subscriber receives every fact recorded after it subscribed, in order", 
       Effect.gen(function* () {
         const session = yield* openSession;
         yield* session.observe(boringOpening());
+        yield* session.idle;
         const subscription = yield* session.subscribe;
         yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
+        yield* session.idle;
         return { received: yield* PubSub.takeAll(subscription), facts: yield* session.facts };
       }),
     ).pipe(Effect.provide(Layer.mergeAll(provider, client, BoringContextAssembler, CountingTurns, NoTurnEndHooks, SmolToolRunner))),

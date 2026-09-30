@@ -88,7 +88,9 @@ const oneTurn = (client: Layer.Layer<ModelClient>) => {
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe(boringOpening(smolCatalog));
+      yield* session.idle;
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make("What is 2 + 3?") });
+      yield* session.idle;
       return yield* session.facts;
     }).pipe(Effect.provide(services)),
   ).then((facts) => ({ facts, logged }));

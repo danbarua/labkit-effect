@@ -68,11 +68,16 @@ export const play = (inputs: ReadonlyArray<string>, setup: Setup = basic): Effec
         model: ModelName.make("fizzbuzz-1"),
       }),
     );
+    yield* session.idle;
     yield* Effect.forEach(
       inputs,
-      (text) => session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make(text) }),
+      // Each input waits for the turn before it, so every input starts a turn of its own.
+      (text) =>
+        session
+          .observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make(text) })
+          .pipe(Effect.andThen(session.idle)),
       { discard: true },
     );
     return { facts: yield* session.facts, seen: model.seen };
-  }).pipe(Effect.provide(services));
+  }).pipe(Effect.provide(services), Effect.scoped);
 };

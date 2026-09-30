@@ -49,7 +49,9 @@ async function toolResultSent(call: { name: string; input: unknown }) {
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe(boringOpening(smolCatalog));
+      yield* session.idle;
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "go" } as unknown as Observation);
+      yield* session.idle;
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
@@ -215,7 +217,9 @@ test("a tool turn sends the catalog, then the call and its result, as Messages b
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe(boringOpening(smolCatalog));
+      yield* session.idle;
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
+      yield* session.idle;
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
@@ -293,7 +297,9 @@ test("thinking, an empty one included, and blocks nobody knows go back to the pr
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe(boringOpening(smolCatalog));
+      yield* session.idle;
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
+      yield* session.idle;
     }).pipe(
       Effect.provide(
         Layer.mergeAll(

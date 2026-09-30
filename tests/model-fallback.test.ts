@@ -68,9 +68,13 @@ const oneTurn = async (
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe(openedWith({ session: SessionId.make("s1"), model: anthropic, system: undefined, tools: [] }));
+      yield* session.idle;
       yield* Effect.forEach(
         inputs,
-        (input) => session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make(input) }),
+        (input) =>
+          session
+            .observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make(input) })
+            .pipe(Effect.andThen(session.idle)),
         { discard: true },
       );
       return yield* session.facts;

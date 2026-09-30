@@ -45,7 +45,9 @@ test("what the test gives the session is from the test; what the loop observes i
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe(boringOpening(smolCatalog));
+      yield* session.idle;
       yield* session.observe(input);
+      yield* session.idle;
       return yield* session.facts;
     }).pipe(Effect.provide(services())),
   );
@@ -67,7 +69,8 @@ test("an observation given to a session with no origin set is a defect", async (
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe(boringOpening());
-    }).pipe(Effect.provide(services())),
+      yield* session.idle;
+    }).pipe(Effect.provide(services()), Effect.scoped),
   );
   expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toContain("SessionOpened was given to a session with no origin set");
 });

@@ -234,8 +234,11 @@ test("a request carries the settings the model allows; what was enforced is reco
           tools: [],
         }),
       );
+      yield* session.idle;
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "Hello" } as unknown as Observation);
+      yield* session.idle;
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "Again" } as unknown as Observation);
+      yield* session.idle;
       return yield* session.facts;
     }).pipe(
       Effect.provide(

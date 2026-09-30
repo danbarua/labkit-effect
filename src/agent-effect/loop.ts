@@ -3,6 +3,12 @@
  * decisions, and carries out the requests, each of whose outcome is the next observation. The
  * session's facts are held in memory.
  *
+ * Observations are recorded one at a time, in the order they arrive. Each request is carried out
+ * in a fiber of its own, so the session takes further observations meanwhile: input is queued in
+ * the core's mailboxes, and an interruption ends the turn and the work its requests are doing in
+ * the world. `idle` waits until no request is being carried out. The session lives in a scope;
+ * closing it ends whatever is still being carried out.
+ *
  * When a turn starts is decided here: when input arrives and the agent is idle, the loop starts a
  * turn through `Turns` and reports `TurnStarted`.
  *
@@ -16,7 +22,7 @@
  * Each fact is published as it is recorded; `subscribe` receives every fact recorded after it.
  */
 
-import { DateTime, Effect, PubSub, Ref, type Scope } from "effect";
+import { DateTime, Deferred, Effect, FiberSet, PubSub, Ref, type Scope, Semaphore } from "effect";
 import type { Fact } from "../agent-core/fact.ts";
 import { deliver, emptyWorld, type World } from "../agent-core/router.ts";
 import { InputText, Seq, type SessionId, type TurnId } from "../agent-core/names.ts";
@@ -48,6 +54,12 @@ interface Observed {
   readonly observation: Observation;
 }
 
+/** A request the core made, and what it is about. */
+interface Started {
+  readonly request: EffectRequest;
+  readonly work: Work;
+}
+
 interface Held {
   readonly world: World;
   /** How many times turn-end hooks have held each turn open. */
@@ -59,18 +71,23 @@ type Services = ModelProvider | ContextAssembler | ModelClient | Turns | ToolRun
 
 export interface Session {
   /**
-   * Records an observation, with the origin `CurrentOrigin` gives, and carries out everything that
-   * follows from it.
+   * Records an observation, with the origin `CurrentOrigin` gives, and starts what follows from it.
+   * It returns once the observation is recorded; the requests that follow are carried out after.
    */
   readonly observe: (observation: Observation) => Effect.Effect<void, never, Services>;
+  /** Waits until no request is being carried out. */
+  readonly idle: Effect.Effect<void>;
   readonly facts: Effect.Effect<ReadonlyArray<Fact>>;
   /** Every fact recorded from now on, in order, for as long as the scope lasts. */
   readonly subscribe: Effect.Effect<PubSub.Subscription<Fact>, never, Scope.Scope>;
 }
 
-export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
+export const openSession: Effect.Effect<Session, never, Scope.Scope> = Effect.gen(function* () {
   const held = yield* Ref.make<Held>({ world: emptyWorld, facts: [], holds: new Map() });
   const recorded = yield* PubSub.unbounded<Fact>();
+  const lock = yield* Semaphore.make(1);
+  const running = yield* FiberSet.make<void, never>();
+  const cancels = yield* Ref.make<ReadonlyMap<TurnId, Deferred.Deferred<void>>>(new Map());
 
   /**
    * The turn-end hooks' feedback as input, then the review. After `maxHolds` holds the hooks are not
@@ -142,7 +159,19 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
     }
   };
 
-  const record = (origin: Origin, observation: Observation): Effect.Effect<void, never, Services> =>
+  /** The signal that ends what `turn`'s requests are doing in the world, made when first asked for. */
+  const cancelOf = (turn: TurnId): Effect.Effect<Deferred.Deferred<void>> =>
+    Ref.modify(cancels, (now) => {
+      const made = now.get(turn) ?? Deferred.makeUnsafe<void>();
+      return [made, now.has(turn) ? now : new Map([...now, [turn, made]])];
+    });
+
+  /**
+   * Records the observation and the decisions that follow from it, and returns the requests that
+   * follow, each with what it is about. One observation is recorded at a time: callers hold `lock`.
+   * A turn interrupted has its requests' work in the world ended.
+   */
+  const write = (origin: Origin, observation: Observation): Effect.Effect<ReadonlyArray<Started>, never, Services> =>
     Effect.gen(function* () {
       const before = yield* Ref.get(held);
       const seq = Seq.make(before.facts.length + 1);
@@ -174,26 +203,46 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
             }).pipe(Effect.annotateLogs(session === undefined ? {} : { session }))
           : Effect.void,
       );
+      yield* Effect.forEach(outcome.decisions, (decision) =>
+        decision._tag === "TurnEnded" && decision.ending._tag === "Interrupted"
+          ? cancelOf(decision.turn).pipe(Effect.flatMap((cancel) => Deferred.succeed(cancel, undefined)))
+          : Effect.void,
+      );
+      const started = outcome.requests.map((request) => ({ request, work: about(request, now.world, now.facts) }));
+      if (observation._tag !== "InputArrived" || now.world.agent.state._tag !== "Idle") return started;
+      const turn = yield* (yield* Turns).start;
+      return [...started, ...(yield* write(harnessParts.loop, { _tag: "TurnStarted", turn }))];
+    });
+
+  /**
+   * Carries out one request in the world and records each observation that comes of it. The work in
+   * the world ends when the request's turn is interrupted; what it had already returned is recorded.
+   */
+  const carry = ({ request, work }: Started): Effect.Effect<void, never, Services> =>
+    Effect.gen(function* () {
       const services = yield* Effect.context<Services>();
       const report = (reported: Observation, by: Origin) => record(by, reported).pipe(Effect.provideContext(services));
-      yield* Effect.forEach(outcome.requests, (request) => {
-        const work = about(request, now.world, now.facts);
-        return carryOut(request).pipe(
-          Effect.withSpan(spanNames[request._tag], { attributes: { ...work } }),
-          Effect.annotateLogs({ ...work }),
-          Effect.provideService(CurrentWork, work),
-          Effect.provideService(Report, report),
-          Effect.flatMap((observed) =>
-            Effect.forEach(observed, (each) => record(each.origin, each.observation), { discard: true }),
-          ),
-        );
-      });
-      const after = now.world;
-      if (observation._tag === "InputArrived" && after.agent.state._tag === "Idle") {
-        const turn = yield* (yield* Turns).start;
-        yield* record(harnessParts.loop, { _tag: "TurnStarted", turn });
-      }
+      const cancelled: Effect.Effect<ReadonlyArray<Observed>> =
+        work.turn === undefined
+          ? Effect.never
+          : cancelOf(work.turn).pipe(Effect.flatMap((cancel) => Deferred.await(cancel)), Effect.as([]));
+      const observed = yield* carryOut(request).pipe(
+        Effect.withSpan(spanNames[request._tag], { attributes: { ...work } }),
+        Effect.annotateLogs({ ...work }),
+        Effect.provideService(CurrentWork, work),
+        Effect.provideService(Report, report),
+        Effect.raceFirst(cancelled),
+      );
+      yield* Effect.forEach(observed, (each) => record(each.origin, each.observation), { discard: true });
     });
+
+  /** Records the observation, then starts each request that follows in a fiber of its own. */
+  const record = (origin: Origin, observation: Observation): Effect.Effect<void, never, Services> =>
+    write(origin, observation).pipe(
+      Semaphore.withPermit(lock),
+      Effect.flatMap((started) => Effect.forEach(started, (each) => FiberSet.run(running, carry(each)), { discard: true })),
+      Effect.uninterruptible,
+    );
 
   const observe = (observation: Observation): Effect.Effect<void, never, Services> =>
     Effect.gen(function* () {
@@ -205,6 +254,7 @@ export const openSession: Effect.Effect<Session> = Effect.gen(function* () {
 
   return {
     observe,
+    idle: FiberSet.awaitEmpty(running),
     facts: Ref.get(held).pipe(Effect.map((current) => current.facts)),
     subscribe: PubSub.subscribe(recorded),
   };

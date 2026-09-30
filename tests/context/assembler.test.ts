@@ -82,7 +82,9 @@ test("a later request carries each earlier notice where it was sent, and a new o
     Effect.gen(function* () {
       const session = yield* openSession;
       yield* session.observe(boringOpening(smolCatalog));
+      yield* session.idle;
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
+      yield* session.idle;
       return yield* session.facts;
     }).pipe(
       Effect.provide(
