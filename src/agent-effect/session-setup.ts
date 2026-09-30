@@ -34,8 +34,12 @@ export function openedWith(opening: {
   };
 }
 
-/** The session's opening, if its facts hold one. */
-export function openingOf(facts: ReadonlyArray<Fact>): Opened | undefined {
+/**
+ * The session's opening, if its facts hold one. It is not exported: the opening names the model the
+ * session started with, which is not the model it asks once a change has been taken. `modelOf` is
+ * the one reader of the model.
+ */
+function openingOf(facts: ReadonlyArray<Fact>): Opened | undefined {
   const found = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "SessionOpened");
   return found?._tag === "Observed" && found.observation._tag === "SessionOpened" ? found.observation : undefined;
 }
