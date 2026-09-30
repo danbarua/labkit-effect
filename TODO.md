@@ -6,38 +6,49 @@ not yet work is in its `DESIGN.next.md`. Delete an item when it is done or dropp
 
 ## Decisions for Dan
 
-- [ ] Confirm or reword the terms T1–T5 in agent-machine's `MODEL.md`. The code and tests are built on
-      them as worded; none is blocking.
-- [ ] Where the model is chosen. The loop's `ModelProvider` chooses it from the session's facts, so
-      context assembly's model selectors go unused, and `ModelChoice.endpoint` has no counterpart
-      in `Target`.
+- [ ] The names of the turn and step terms. Proposed: `AskModel` (the decision to make a turn's
+      first request) and `TellModel` (each later request in the turn, after tool results) in place
+      of the one decision `ModelAsked`; `ModelAnswered` for a response that ends the turn, beside
+      `ModelResponded`. Open: whether `AskModel` replaces `TurnStarted` or follows it; whether
+      "increments Seq" means a step number within the turn; whether `ModelAnswered` is a second
+      observation or stays the turn's ending (`Answered`).
 
 ## Build
 
-### Caching
+### The host (ACP)
 
-- [ ] No request marks anything for a provider's cache. Anthropic caches only what a request marks
-      (`cache_control`, on the request or on a block), so nothing is cached there: every live
-      response so far reports no cache read or write. OpenAI caches a prefix of 1,024 tokens or
-      more without being asked. Send the mark, and record what each response says was read and
-      written.
-- [ ] What keeps a cached prefix alive is already in place and untested against a cache: earlier
-      messages are sent the same way every time, thinking goes back unchanged, notices stay where
-      they were sent. Check it live once requests are cached.
-- [ ] Compaction that knows the provider's cache: when the cache has expired, the next request
-      costs the same whatever it carries (agent-context `DESIGN.next.md`).
+The session's interface with the user. A real ACP session's log
+(`~/.labkit/logs/acp-44517-ec9d22b3-8c0d-465a-83c7-9c227e0aec77.jsonl`, labkit-agent, local Qwen)
+is the set of capabilities a first working host needs: choose a model and a thinking level, send
+the first input, stream thinking, the model calls a tool, the user is asked for permission, the
+tool runs, the model answers, and `/export` writes the session to Markdown without going to the
+model.
 
-- [ ] OpenAI reported 0 cached tokens in every FizzBuzz run (2026-09-30), requests over 1,024
-      tokens included, with and without `prompt_cache_retention: "24h"`. Find out why before
-      relying on it.
+- [ ] Configuration comes from the host. In the log: the providers on offer are a model catalog
+      (models.dev) filtered by which credentials are set, plus a local server; a session opens with
+      a default configuration (provider, model, thinking off, streaming, 32,768 output tokens, a step
+      limit, permissions `ask`); the user changes the model, thinking and output limit with ACP's
+      `session/set_config_option`, each applied at the next idle point as a new version, and every
+      request is made with the version in force. Here: the opening is the default, a change is
+      `ModelChangeArrived` from `User { via: acp }`, taken between turns (M1–M3).
+- [ ] Tool permission. In the log: `write_file` (kind `edit`) waits for the user; the options are
+      allow once, allow for the session, reject once; allow for the session is a grant for that
+      tool, for all arguments, until the session closes or permissions are reset. Build the policy
+      gate (agent-policy) into the loop against that flow, with which tools only read and which
+      change things as a property of the tool.
+- [ ] Slash commands the host handles itself (`/export`), which are not input to the model.
+- [ ] The default output limit. The Anthropic adapter supplies 32,768 because the Messages API
+      requires one; that is low for a long multi-step coding task (Grok's default is 128,000).
 
 ### Compaction
 
-Built: the window marker (agent-machine S4); compaction on request with a record of summaries and
-who wrote each, and the view that sends them in place of the spans (agent-context A5, A7).
+Built: the window marker, naming what decided it (agent-machine S4); compaction for the provider
+being asked, summaries per provider kept in memory or as files, policies asked between turns, and
+the view that sends each provider its own summaries (agent-context A5–A8); the Responses adapter can
+ask OpenAI or xAI for its own compaction (`openAiCompactions`).
 
-- [ ] The loop asks a compaction policy by itself (every n turns, by size, when the provider's
-      cache has expired); today whoever runs the session asks it between turns.
+- [ ] The loop asks the compaction policy itself; today whoever runs the session asks it between
+      turns.
 - [ ] An estimate of the next request's size (estimated context usage), for a policy that
       compacts automatically at X% of the current model's context window. It is the sum of:
       - the conversation so far: the input and output tokens the last response reported (exact,
@@ -49,92 +60,45 @@ who wrote each, and the view that sends them in place of the spans (agent-contex
       - room for writing a compaction summary.
       Open: how much room to keep for the next turn's tool results, and for the summary (a
       share, or the summarizer model's most output tokens).
-- [ ] Use the time since a provider's last summary (`writtenAt`) to tell whether its cache has
-      expired, and so whether keeping the request's beginning unchanged still saves anything.
 - [ ] Refuse a request to compact that would not fit the summarizer's context window.
-- [ ] A summarizer that asks a model. Its request belongs to the compaction's own record (a fork),
-      which is not built.
-- [ ] A provider's own compaction: Anthropic's compaction block (beta `compact-2026-09-04`), OpenAI's
-      `compaction` item. Each works only with its own provider.
-- [ ] Anthropic's rules for its own compaction, for the view: the kept turns follow the summary
-      unchanged, and the first kept turn has a different role from the last summarised message, or
-      the API merges them. `CompactedConversation` and the FizzBuzz toy view merge the summaries
-      and the next input into one user message.
-- [ ] Our own summary with kept turns breaks the kept turns' thinking on Anthropic (the API accepts
-      the swap only for a summary it wrote). On hold: explore keeping the last turn with its
-      thinking.
-- [ ] Compaction as forks: a revisable summary per fork, summarising ahead of time from the fact
-      stream, strategies compared side by side.
+- [ ] Anthropic's own compaction (the compaction block, beta `compact-2026-09-04`).
+- [ ] A summarizer that asks a model to write a text summary with our own prompt.
 
-### Tool permissions
+### Caching
 
-Built: the gate and what a policy is, pure and not in the loop (agent-policy `MODEL.md`).
+Built: the `cache` setting (off, 5m, 1h); Anthropic reads nearly every request from the cache with
+it (FizzBuzz, 20 turns: 27,556 of 29,032 input tokens).
 
-- [ ] Policy as an Effect service, with the gate between the core's requests and the adapters in
-      the loop (a veto before a request is carried out, a dry run).
-- [ ] Which tools only read and which change things, as a property of the tool.
-- [ ] A call that arrived in a response that then failed may have run; the model is not told. When
-      the harness knows which tools change things, tell the model, or do not run those early.
-- [ ] A model's settings function can only shape a request. Refusing one is the same place with
-      another outcome (`ModelVetoed`); build it when a case needs it.
-
-### The session's configuration
-
-- [ ] A user's change of model or settings has no way in. `ModelChangeArrived` will come from the
-      surface the user works through (its origin says so), and the session is not bridged to one
-      yet; today only the fallback chain reports it.
-- [ ] Changes to the system prompt or tools after the session opens, as facts of their own (the
-      opening records them; Anthropic takes tool changes mid-conversation as `tool_addition` and
-      `tool_removal` blocks). Codex records settings changes as `thread_settings_applied`, which
-      the importer reads only for the first model.
-- [ ] `InputArrived.from` says what a fact's origin says (the outside world: a user, the system,
-      another agent). Fold it into the origin.
-- [ ] A model's own output limit: a `maxOutputTokens` above what a model allows is sent as asked,
-      and the provider rejects it. A settings function per model class could enforce the nearest.
-- [ ] Settings functions exist for the Anthropic classes met so far (Opus 5.5, Fable and Mythos 5;
-      Sonnet 5.5). A model in no class is sent what was asked.
-- Returning to the primary provider after a fallback is the user's (a manual `/switch`), as other
-  harnesses do. Doing it by itself would need the harness to know more of the world: a later
-  feature, not ruled out.
+- [ ] OpenAI reported 0 cached tokens in every FizzBuzz run, requests over 1,024 tokens included,
+      with and without `prompt_cache_retention: "24h"`. Find out why before relying on it.
+- [ ] Compaction that knows the provider's cache: from the time since the provider's last
+      summary (`writtenAt`) and its cache's lifetime, whether the next request can still read the
+      cache, and so whether keeping its beginning unchanged saves anything.
 
 ### Providers
 
-- [ ] The Chat Completions adapter does not stream, sends back none of a response's other fields
-      (`reasoning_content`) and none of the session's settings; it records each as left out or
-      enforced.
-- [ ] A request retried after its stream had begun passes its parts on a second time, and would
-      start a tool call a second time.
-- [ ] The call lifecycle through Effect: timeouts and retries with `Schedule`.
-- [ ] `ToolCallDispatched` is reported by the loop when it hands a call to the tool runner. When
-      tools run in another process (the ACP host), that adapter reports it.
-
-### Going on from a session's facts
-
-Built: `sessionFrom(facts)`, and `endTurnLeftRunning` for a turn the facts leave running
-(agent-machine X4), tested with facts made in memory.
-
-
-- [ ] After a turn that got no response (failed, vetoed, interrupted before anything arrived), the
-      next request carries that turn's input and the new input as one user message. It is valid
-      for both providers, and nothing tells the model the first went unanswered.
-- [ ] A turn identity must not be used twice. A `TurnStarted` that names a turn the facts already
-      hold is taken, and the turn's input is dropped without a word. `countingTurnsAfter` avoids it
-      for the counted identities the tests use; the core does not refuse it.
-
-### Forks
-
-- [ ] Forks as sessions, and the turn pointer (`session/turn`; turn zero of a root points at
-      itself). A fact is addressed by its session and its position.
+- [ ] The Chat Completions adapter against the local Qwen model (`http://localhost:8000/v1`,
+      `mlx-community/Qwen3.5-9B-8bit`, as in the ACP log): streaming, `reasoning_content` sent back,
+      tool calls.
+- [ ] A request retried after its stream had begun: a tool call that arrived in the first stream
+      has already started, and the retry's response names new calls. Test what the core records.
 
 ### Telemetry
 
-- [ ] Parent spans for sessions and turns; an OTLP exporter; Effect's logs through OpenTelemetry.
+- [ ] Each request the loop carries out runs in a span (`agent.model.request`, `agent.tool.run`,
+      `agent.turn.review`), and each fallback attempt in `agent.model.attempt`, but only the tests
+      collect them: nothing exports them. Export them (OTLP), with parent spans for sessions and
+      turns, and send Effect's logs through OpenTelemetry.
 
 ## Later: worth doing, not core
 
-The request and response with each provider come first: whatever goes up or down becomes the same
-stream of effects and observations. These build on that.
-
+- [ ] Forks as sessions, and the turn pointer (`session/turn`; turn zero of a root points at
+      itself). A fact is addressed by its session and its position.
+- [ ] `prompt_cache_key` (OpenAI, xAI) for cache-aware work.
+- [ ] Changes to the system prompt or tools after the session opens, as facts of their own
+      (Anthropic takes tool changes mid-conversation as `tool_addition` and `tool_removal` blocks;
+      Codex records settings changes as `thread_settings_applied`).
+- [ ] Returning to the first provider after a fallback by itself; today it is the user's to switch.
 - [ ] OpenAI `async: true` on a tool: the model goes on past a call before its output is returned.
 - [ ] OpenAI mid-turn steering (GPT-6, over a WebSocket to the Responses API): new input during a
       response. The core delivers input at a step's boundary; this would deliver it sooner.
@@ -146,13 +110,12 @@ stream of effects and observations. These build on that.
 
 ## Try
 
-- [ ] FizzBuzz against a real model through the Anthropic adapter (costs a little).
 - [ ] FizzBuzz runs written out as trajectories, as sample data for the UI.
 
 ## Trajectories
 
 Run both sweeps after a change to a core machine, and read the counts of observations not expected.
-On 2026-09-30: Codex none in 168 files; Claude Code 4 in 808.
+On 2026-09-30: Codex none in 168 files; Claude Code 4 in 787.
 
 - [ ] Claude Code: the 4 are each an error Claude Code reported after a response the core had
       already taken as the step's outcome: three after a refusal, one after an answer.
