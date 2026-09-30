@@ -74,7 +74,7 @@ const failureOf = async (adapter: AtMock, status: number): Promise<AiError.AiErr
   const exit = await Effect.runPromiseExit(
     adapter.requests(status).pipe(Effect.flatMap((respond) => respond(target, context, TurnId.make("turn-1")))),
   );
-  return Exit.isFailure(exit) ? exit.cause.reasons.flatMap((cause) => (cause._tag === "Fail" ? [cause.error] : []))[0] : undefined;
+  return Exit.isFailure(exit) ? exit.cause.reasons.flatMap((cause) => (cause._tag === "Fail" ? [cause.error.error] : []))[0] : undefined;
 };
 
 /** A session with one input, through the loop, with `adapter`'s model client; its facts and log. */
@@ -170,6 +170,19 @@ describe.each([...adapters])("$name at VidaiMock", (adapter) => {
       "RateLimitError",
     );
     expect(tags(facts).at(-1)).toBe("TurnEnded");
+  });
+
+  test("a failed request is recorded with the request as posted: its path, the headers the adapter set, and its body", async () => {
+    const { facts } = await oneTurn(client({ times: 0, firstWait: "1 millis" }, 400));
+    const failed = facts.flatMap((fact) =>
+      fact._tag === "Observed" && fact.observation._tag === "ModelFailed" ? [fact.observation] : [],
+    );
+    const posted = failed[0]?.request;
+    const request = JSON.parse(posted?.body._tag === "Text" ? posted.body.text : "null");
+    expect(Object.keys(request)).toEqual(["path", "headers", "body"]);
+    expect(["/v1/messages", "/responses", "/chat/completions"]).toContain(request.path);
+    expect(JSON.stringify(request.body)).toContain("What is 2 + 3?");
+    expect(Object.keys(request.headers).map((name) => name.toLowerCase())).not.toContainAnyValues(["authorization", "x-api-key"]);
   });
 
   test("a rejected key is not retried", async () => {

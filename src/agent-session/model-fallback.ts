@@ -87,8 +87,8 @@ const attempt = (
   if (next === undefined) return tried;
   return tried.pipe(
     Effect.catchIf(
-      (error) => fallsBackOn.has(error.reason._tag),
-      (error) =>
+      (failed) => fallsBackOn.has(failed.error.reason._tag),
+      ({ error, request }) =>
         Effect.gen(function* () {
           yield* (yield* Report)(
             {
@@ -98,6 +98,7 @@ const attempt = (
               model: target.model,
               failure: FailureText.make(error.message),
               error: receivedAiError(error),
+              request,
             },
             { _tag: "Provider", provider: target.provider },
           );

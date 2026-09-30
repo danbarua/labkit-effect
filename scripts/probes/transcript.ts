@@ -169,7 +169,16 @@ export function transcript(title: string, about: string, facts: ReadonlyArray<Fa
           ].join("\n\n"),
         };
       case "ModelFailed":
-        return { says: `the request of \`${observation.turn}\` failed`, body: `${observation.failure}\n\n${fenced(pretty(asText(observation.error)), "json")}` };
+        return {
+          says: `the request of \`${observation.turn}\` failed`,
+          body: [
+            observation.failure,
+            fenced(pretty(asText(observation.error)), "json"),
+            ...(observation.request === undefined
+              ? []
+              : [`<details><summary>The request as it was posted</summary>\n\n${fenced(pretty(asText(observation.request)), "json")}\n\n</details>`]),
+          ].join("\n\n"),
+        };
       case "NoticeInserted":
         return { says: `a notice went into the request of \`${observation.turn}\``, body: quoted(observation.text) };
       case "TurnEndReviewed":

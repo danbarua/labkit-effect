@@ -24,8 +24,8 @@ import type * as HttpClient from "effect/http/HttpClient";
 import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agent-machine/names.ts";
 import type { ModelPart, Observation } from "../../agent-machine/observation.ts";
 import { type ContextMessage, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
-import { defaultRetries, invalidOutput, modelClientOf, postJson, type Retries, withRetries } from "../provider-call.ts";
-import { reportEnforced, type Settled } from "../settings.ts";
+import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postJson, type Retries, withRetries } from "../provider-call.ts";
+import { reportEnforced } from "../settings.ts";
 import { openAiCompatSettings } from "./openai-compat-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
 import {
@@ -165,21 +165,12 @@ const endings = new Map([
 
 const respondOnce = (
   http: HttpClient.HttpClient,
+  post: Post,
   target: Target,
-  context: ModelContext,
   turn: TurnId,
-  settled: Settled,
 ): Effect.Effect<Responded, AiError.AiError> =>
   Effect.gen(function* () {
-    const sent = body(target, context);
-    yield* logSupplied(sent.supplied);
-    const response = yield* postJson(
-      http,
-      caller,
-      "/chat/completions",
-      { ...(sent.json as Record<string, Json>), ...settled.fields },
-      settled.headers,
-    );
+    const response = yield* postJson(http, caller, post);
     const choices = isObject(response) ? response["choices"] : undefined;
     const choice = Array.isArray(choices) ? (choices as ReadonlyArray<Json>)[0] : undefined;
     const message = choice !== undefined && isObject(choice) ? choice["message"] : undefined;
@@ -207,8 +198,15 @@ export const openAiCompatRequests = (
     const http = (yield* OpenAiClient.OpenAiClient).client;
     return (target, context, turn) => {
       const settled = openAiCompatSettings(target.settings);
+      const sent = body(target, context);
+      const post: Post = {
+        path: "/chat/completions",
+        headers: settled.headers,
+        body: { ...(sent.json as Record<string, Json>), ...settled.fields },
+      };
       return reportEnforced(turn, target, settled).pipe(
-        Effect.andThen(respondOnce(http, target, context, turn, settled).pipe(withRetries(retries))),
+        Effect.andThen(logSupplied(sent.supplied)),
+        Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
       );
     };
   });

@@ -28,10 +28,10 @@ import type * as HttpClient from "effect/http/HttpClient";
 import { CallId, ModelText, StopReason, ThinkingText, ToolName, type TurnId } from "../../agent-machine/names.ts";
 import type { ModelPart, Observation } from "../../agent-machine/observation.ts";
 import { type ContextMessage, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
-import { defaultRetries, invalidOutput, modelClientOf, postEvents, type Retries, withRetries } from "../provider-call.ts";
+import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEvents, type Retries, withRetries } from "../provider-call.ts";
 import { logKeys } from "../log-keys.ts";
 import { ModelStream } from "../model-stream.ts";
-import { reportEnforced, type Settled } from "../settings.ts";
+import { reportEnforced } from "../settings.ts";
 import { openAiSettings } from "./openai-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
 import {
@@ -202,22 +202,13 @@ const failedInStream = (event: Schema.JsonObject): AiError.AiError => {
  */
 const respondOnce = (
   http: HttpClient.HttpClient,
+  post: Post,
   target: Target,
-  context: ModelContext,
   turn: TurnId,
-  settled: Settled,
 ): Effect.Effect<Responded, AiError.AiError> =>
   Effect.gen(function* () {
-    const sent = body(target, context);
-    yield* logSupplied(sent.supplied);
     const passOn = yield* ModelStream;
-    const ended = yield* postEvents(
-      http,
-      caller,
-      "/responses",
-      { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true },
-      settled.headers,
-    ).pipe(
+    const ended = yield* postEvents(http, caller, post).pipe(
       Stream.runFoldEffect(
         (): Json | undefined => undefined,
         (response, event) =>
@@ -274,8 +265,15 @@ export const openAiRequests = (
     const http = (yield* OpenAiClient.OpenAiClient).client;
     return (target, context, turn) => {
       const settled = openAiSettings(target.settings);
+      const sent = body(target, context);
+      const post: Post = {
+        path: "/responses",
+        headers: settled.headers,
+        body: { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true },
+      };
       return reportEnforced(turn, target, settled).pipe(
-        Effect.andThen(respondOnce(http, target, context, turn, settled).pipe(withRetries(retries))),
+        Effect.andThen(logSupplied(sent.supplied)),
+        Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
       );
     };
   });

@@ -42,8 +42,8 @@ import {
 } from "../contracts.ts";
 import { logKeys } from "../log-keys.ts";
 import { ModelStream } from "../model-stream.ts";
-import { defaultRetries, invalidOutput, modelClientOf, postEvents, type Retries, withRetries } from "../provider-call.ts";
-import { reportEnforced, type Settled } from "../settings.ts";
+import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEvents, type Retries, withRetries } from "../provider-call.ts";
+import { reportEnforced } from "../settings.ts";
 import { anthropicSettings } from "./anthropic-settings.ts";
 import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
 import { receivedJson } from "../received.ts";
@@ -224,22 +224,13 @@ const failedInStream = (failed: { readonly type: string; readonly message: strin
  */
 const respondOnce = (
   http: HttpClient.HttpClient,
+  post: Post,
   target: Target,
-  context: ModelContext,
   turn: TurnId,
-  settled: Settled,
 ): Effect.Effect<Extract<Outcome, { _tag: "ModelResponded" }>, AiError.AiError> =>
   Effect.gen(function* () {
-    const sent = body(target, context);
-    yield* logSupplied(sent.supplied);
     const passOn = yield* ModelStream;
-    const arrived = yield* postEvents(
-      http,
-      caller,
-      "/v1/messages",
-      { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true },
-      settled.headers,
-    ).pipe(
+    const arrived = yield* postEvents(http, caller, post).pipe(
       Stream.runFoldEffect(
         () => nothingYet,
         (state, event) =>
@@ -283,8 +274,15 @@ export const anthropicRequests = (
     const http = (yield* AnthropicClient.AnthropicClient).client.httpClient;
     return (target, context, turn) => {
       const settled = anthropicSettings(target.model, target.settings);
+      const sent = body(target, context);
+      const post: Post = {
+        path: "/v1/messages",
+        headers: settled.headers,
+        body: { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true },
+      };
       return reportEnforced(turn, target, settled).pipe(
-        Effect.andThen(respondOnce(http, target, context, turn, settled).pipe(withRetries(retries))),
+        Effect.andThen(logSupplied(sent.supplied)),
+        Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
       );
     };
   });

@@ -2,10 +2,11 @@
  * What every provider adapter does around one model request: post JSON through the provider's
  * configured HTTP client, fail with Effect's `AiError` when the request does not produce a usable
  * response, retry the failures `AiError` marks retryable, and end as `ModelFailed` when they are
- * used up. The whole error is logged where it is caught; the core sees a summary.
+ * used up, carrying the error and the request as it was posted. The whole error is logged where it
+ * is caught.
  */
 
-import { Duration, Effect, Schema, Stream } from "effect";
+import { Data, Duration, Effect, Schema, Stream } from "effect";
 import * as Sse from "effect/encoding/Sse";
 import * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
@@ -35,24 +36,50 @@ export interface Retries {
 
 export const defaultRetries: Retries = { times: 3, firstWait: "500 millis" };
 
+/**
+ * A request as it is posted: the path, the headers the adapter sets, and the body. The client's own
+ * headers (the key, the API version) are set by the configured client and are not among them.
+ */
+export interface Post {
+  readonly path: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: Json;
+}
+
+/** `post` as it is recorded with a failure. */
+export const postedAs = (post: Post): Received => receivedJson({ path: post.path, headers: post.headers, body: post.body });
+
+/**
+ * A request that failed, once its retries are used up: the error, and the request as the model
+ * client made it (`postedAs` for an adapter that posts over HTTP).
+ */
+export class RequestFailed extends Data.TaggedError("RequestFailed")<{
+  readonly error: AiError.AiError;
+  readonly request: Received;
+}> {}
+
+/** Fails with `RequestFailed`, carrying `post`, where `request` fails with an `AiError`. */
+export const failedPosting =
+  (post: Post) =>
+  <A, R>(request: Effect.Effect<A, AiError.AiError, R>): Effect.Effect<A, RequestFailed, R> =>
+    request.pipe(Effect.mapError((error) => new RequestFailed({ error, request: postedAs(post) })));
+
 const failure = (caller: Caller, reason: AiError.AiErrorReason): AiError.AiError =>
   AiError.make({ module: caller.module, method: caller.method, reason });
 
 /**
- * The response to `payload` posted to `path`. A response that is not 2xx fails with the `AiError`
+ * The response to `post`. A response that is not 2xx fails with the `AiError`
  * reason for its status, however it arrives: as a response, or, from a client that fails such
  * responses itself (Effect's OpenAI client does), inside a `StatusCodeError`.
  */
 const send = (
   http: HttpClient.HttpClient,
   caller: Caller,
-  path: string,
-  payload: Json,
-  headers: Readonly<Record<string, string>>,
+  post: Post,
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, AiError.AiError> =>
-  HttpClientRequest.post(path).pipe(
-    HttpClientRequest.setHeaders(headers),
-    HttpClientRequest.bodyJsonUnsafe(payload),
+  HttpClientRequest.post(post.path).pipe(
+    HttpClientRequest.setHeaders(post.headers),
+    HttpClientRequest.bodyJsonUnsafe(post.body),
     http.execute,
     Effect.catchIf(
       (error): error is HttpClientError.HttpClientError & { readonly reason: HttpClientError.StatusCodeError } =>
@@ -97,31 +124,19 @@ const parsed = (caller: Caller, text: string): Effect.Effect<Json, AiError.AiErr
     catch: () => failure(caller, new AiError.InvalidOutputError({ description: `The response is not JSON: ${text}` })),
   });
 
-/** The response to `payload` posted to `path`, parsed as JSON. */
-export const postJson = (
-  http: HttpClient.HttpClient,
-  caller: Caller,
-  path: string,
-  payload: Json,
-  headers: Readonly<Record<string, string>> = {},
-): Effect.Effect<Json, AiError.AiError> =>
-  send(http, caller, path, payload, headers).pipe(
+/** The response to `post`, parsed as JSON. */
+export const postJson = (http: HttpClient.HttpClient, caller: Caller, post: Post): Effect.Effect<Json, AiError.AiError> =>
+  send(http, caller, post).pipe(
     Effect.flatMap((response) => response.text.pipe(Effect.mapError(fromHttp(caller)))),
     Effect.flatMap((text) => parsed(caller, text)),
   );
 
 /**
- * The response to `payload` posted to `path`, as the server-sent events it streams: each event's
- * data, parsed as JSON, as it arrives.
+ * The response to `post`, as the server-sent events it streams: each event's data, parsed as JSON,
+ * as it arrives.
  */
-export const postEvents = (
-  http: HttpClient.HttpClient,
-  caller: Caller,
-  path: string,
-  payload: Json,
-  headers: Readonly<Record<string, string>> = {},
-): Stream.Stream<Json, AiError.AiError> =>
-  send(http, caller, path, payload, headers).pipe(
+export const postEvents = (http: HttpClient.HttpClient, caller: Caller, post: Post): Stream.Stream<Json, AiError.AiError> =>
+  send(http, caller, post).pipe(
     Effect.map((response) => response.stream),
     Stream.unwrap,
     Stream.decodeText,
@@ -183,10 +198,10 @@ const encodeAiError = Schema.encodeSync(Schema.toCodecJson(AiError.AiError));
 /** The error as JSON, in `AiError`'s own encoding, which decodes back to the same error. */
 export const receivedAiError = (error: AiError.AiError): Received => receivedJson(encodeAiError(error) as Json);
 
-/** Ends as `ModelFailed` for `turn`, carrying the encoded error, and logs the whole error. */
+/** Ends as `ModelFailed` for `turn`, carrying the encoded error and the request, and logs the whole error. */
 export const failedAs =
   (turn: TurnId) =>
-  (error: AiError.AiError): Effect.Effect<Extract<Observation, { _tag: "ModelFailed" }>> =>
+  ({ error, request }: RequestFailed): Effect.Effect<Extract<Observation, { _tag: "ModelFailed" }>> =>
     Effect.logError(logKeys.provider.requestFailed, {
       reason: error.reason._tag,
       retryable: error.reason.isRetryable,
@@ -199,5 +214,6 @@ export const failedAs =
         turn,
         failure: FailureText.make(error.message),
         error: receivedAiError(error),
+        request,
       }),
     );

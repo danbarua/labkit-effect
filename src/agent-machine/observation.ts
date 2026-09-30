@@ -175,12 +175,19 @@ export const Observation = Schema.Union([
   }),
   /**
    * A request for a model response failed. `failure` says why in words; `error` is the error as the
-   * adapter that failed encoded it, as received.
+   * adapter that failed encoded it, as received; `request` is the request as the adapter made it
+   * (for one that posts over HTTP, the path, the headers it set and the body), when the record has it.
    */
-  Schema.TaggedStruct("ModelFailed", { turn: TurnId, failure: FailureText, error: Received }),
+  Schema.TaggedStruct("ModelFailed", {
+    turn: TurnId,
+    failure: FailureText,
+    error: Received,
+    request: Schema.optionalKey(Received),
+  }),
   /**
    * One attempt at a request for a model response failed, and the request goes on (to another
-   * provider, say). The turn does not end: the request's outcome is still to come.
+   * provider, say). The turn does not end: the request's outcome is still to come. `error` and
+   * `request` are as for `ModelFailed`.
    */
   Schema.TaggedStruct("ModelAttemptFailed", {
     turn: TurnId,
@@ -188,6 +195,7 @@ export const Observation = Schema.Union([
     model: ModelName,
     failure: FailureText,
     error: Received,
+    request: Schema.optionalKey(Received),
   }),
   /**
    * A notice went into a request for a model response, after everything else it carried; later

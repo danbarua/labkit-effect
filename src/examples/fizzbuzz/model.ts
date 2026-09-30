@@ -27,8 +27,9 @@ import {
   type ProviderRequest,
   type Target,
 } from "../../agent-session/contracts.ts";
-import { modelClientOf } from "../../agent-session/provider-call.ts";
+import { modelClientOf, RequestFailed } from "../../agent-session/provider-call.ts";
 import { parseJson, receivedJson } from "../../agent-session/received.ts";
+import { sentAs } from "../../agent-session/sent.ts";
 import { isObject } from "../../agent-session/shaping.ts";
 import type { ErrorCode, Label } from "./tools.ts";
 
@@ -146,6 +147,10 @@ export function scriptedFizzBuzzModel(): {
     return responded(target, turn, [label === undefined ? say(String(judgement.n + 1)) : call("classify", { label })]);
   }
 
-  const request: ProviderRequest = (target, context, turn) => Effect.suspend(() => respond(target, context, turn));
+  // What this model is given is the context itself, so a failure records that as the request.
+  const request: ProviderRequest = (target, context, turn) =>
+    Effect.suspend(() => respond(target, context, turn)).pipe(
+      Effect.mapError((error) => new RequestFailed({ error, request: sentAs(context) })),
+    );
   return { layer: Layer.succeed(ModelClient, modelClientOf(request)), seen };
 }
