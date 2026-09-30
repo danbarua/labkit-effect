@@ -1,3 +1,9 @@
+/**
+ * The compaction window marker: the core records which span a compaction would cover, and when the
+ * marker is taken. No compaction is carried out: nothing summarises, and no request is made in a
+ * window.
+ */
+
 import { expect } from "bun:test";
 import { test } from "../support/test.ts";
 import { json } from "../support/received.ts";
@@ -8,7 +14,7 @@ const tags = (session: Session) =>
 
 const window = (through: number, kept: ReadonlyArray<number>) => ({ _tag: "CompactionWindow", window: "w1", through, kept });
 
-test("a compaction window while no turn runs is taken at once", () => {
+test("S4: a compaction window while no turn runs is taken at once", () => {
   const session = open();
   observe(session, opened);
   const at = observe(session, window(1, []));
@@ -16,7 +22,7 @@ test("a compaction window while no turn runs is taken at once", () => {
   expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "WindowOpened", compaction: at } });
 });
 
-test("a compaction window during a step waits in the turn's mailbox and is taken before the next request", () => {
+test("S4: a compaction window during a step waits in the turn's mailbox and is taken before the next request", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -46,7 +52,7 @@ test("a compaction window during a step waits in the turn's mailbox and is taken
   ]);
 });
 
-test("a compaction window records the span only; a summary on it is not part of the fact", () => {
+test("S4 A5: a compaction window records the span only; a summary on it is not part of the fact", () => {
   const session = open();
   observe(session, opened);
   expect(() =>
