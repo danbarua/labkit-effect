@@ -16,8 +16,10 @@ import {
 } from "../../agent-context/assemble.ts";
 import { AgentContextAssembler, WholeConversation } from "../../agent-context/assembler.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
+import type { ModelTarget } from "../../agent-machine/observation.ts";
 import { InputText, ModelName, ProviderName, SessionId } from "../../agent-machine/names.ts";
-import type { ModelContext, ToolRunner } from "../../agent-session/contracts.ts";
+import type { ModelClient, ModelContext, ToolRunner } from "../../agent-session/contracts.ts";
+import { sentIn } from "../../agent-session/sent.ts";
 import { openSession } from "../../agent-session/loop.ts";
 import { ModelFromFacts } from "../../agent-session/model-choice.ts";
 import { CountingTurns, NoTurnEndHooks } from "../../agent-session/turns.ts";
@@ -37,6 +39,8 @@ export interface Setup {
   readonly tools?: Layer.Layer<ToolRunner>;
   /** The session's id; "fizzbuzz" when not given. */
   readonly session?: string;
+  /** The model the session asks, and the client that reaches it; the scripted model when not given. */
+  readonly model?: { readonly target: ModelTarget; readonly client: Layer.Layer<ModelClient> };
 }
 
 export const basic: Setup = { catalog: FizzBuzzToolCatalog, conversation: WholeConversation };
@@ -45,14 +49,16 @@ export const advanced: Setup = { catalog: AdvancedFizzBuzzToolCatalog, conversat
 
 export interface Played {
   readonly facts: ReadonlyArray<Fact>;
+  /** What each request carried, as recorded with it. */
   readonly seen: ReadonlyArray<ModelContext>;
 }
 
+const scripted: ModelTarget = { provider: ProviderName.make("scripted"), model: ModelName.make("fizzbuzz-1") };
+
 export const play = (inputs: ReadonlyArray<string>, setup: Setup = basic): Effect.Effect<Played> => {
-  const model = scriptedFizzBuzzModel();
   const services = Layer.mergeAll(
     ModelFromFacts,
-    model.layer,
+    setup.model?.client ?? scriptedFizzBuzzModel().layer,
     AgentContextAssembler.pipe(Layer.provide(Layer.mergeAll(setup.conversation, Layer.succeed(Notices, [])))),
     CountingTurns,
     NoTurnEndHooks,
@@ -63,10 +69,7 @@ export const play = (inputs: ReadonlyArray<string>, setup: Setup = basic): Effec
   return Effect.gen(function* () {
     const session = yield* openSession;
     yield* session.observe(
-      yield* opening(SessionId.make(setup.session ?? "fizzbuzz"), {
-        provider: ProviderName.make("scripted"),
-        model: ModelName.make("fizzbuzz-1"),
-      }),
+      yield* opening(SessionId.make(setup.session ?? "fizzbuzz"), setup.model?.target ?? scripted),
     );
     yield* session.idle;
     yield* Effect.forEach(
@@ -78,6 +81,10 @@ export const play = (inputs: ReadonlyArray<string>, setup: Setup = basic): Effec
           .pipe(Effect.andThen(session.idle)),
       { discard: true },
     );
-    return { facts: yield* session.facts, seen: model.seen };
+    const facts = yield* session.facts;
+    const seen = facts.flatMap((fact) =>
+      fact._tag === "Observed" && fact.observation._tag === "ModelRequestDispatched" ? [sentIn(fact.observation.sent)] : [],
+    );
+    return { facts, seen };
   }).pipe(Effect.provide(services), Effect.scoped);
 };
