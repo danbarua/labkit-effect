@@ -45,15 +45,16 @@ model.
       stop reason for it). Open: after a compaction `used` is the last response's until the next one
       reports (an estimate would come from the next-request size estimate); a summarizer's own
       requests are not counted in `cost`. `PromptResponse.usage` is a draft; not built.
-- [ ] Attachments. Built: input carries files by reference (`InputArrived.attachments`, a `BlobRef`
-      with the bytes' SHA-256); bytes in the blob store (`Blobs`: in memory, or a folder); each
-      adapter sends images and PDFs as its provider takes them, a text file as its text, and
-      anything a model is not known to take (`frontier.json` `input`) as a pointer, logged. Live:
-      an image and a PDF read right by Claude Sonnet 5.5, gpt-5.5 and grok-4.7. Next: images in tool
-      results (`renderToolResult`), tool output stored as blobs, the host's intake of ACP prompt
-      content as typed parts, counting attachment tokens before a request (Anthropic's and OpenAI's
-      count endpoints; xAI has none). The client half (sending, drawing, resolving `blob://`) is
-      labkit-web's.
+- [ ] Attachments. Built: input carries files by reference (`InputArrived.attachments`); a tool's
+      output that arrives as bytes is kept in the blob store and recorded by reference (`Received`
+      body `Stored`); bytes in the blob store (`Blobs`: in memory by default, or a folder); each
+      adapter sends images and PDFs as its provider takes them, in a user message or a tool result,
+      a text file as its text, and anything a model is not known to take as a pointer, logged;
+      counting a request's input before it is sent (`anthropic-count.ts`, `openai-count.ts`; xAI has
+      no endpoint). Live: all three read an attached image and PDF, and an image a tool returned;
+      the counts before sending matched what the responses reported. Left: the host's intake of ACP
+      prompt content as typed parts (labkit-agent's `app-acp`); the client half (sending, drawing,
+      resolving `blob://`), labkit-web's.
 - [ ] Slash commands the host handles itself (`/export`), which are not input to the model.
 
 ### Compaction

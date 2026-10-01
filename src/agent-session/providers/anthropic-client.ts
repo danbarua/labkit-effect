@@ -160,7 +160,7 @@ function systemOf(context: ModelContext, opening: ReadonlyArray<ContextMessage>)
   return texts.length === 0 ? undefined : texts.map((text) => ({ type: "text", text }));
 }
 
-function body(target: Target, context: ModelContext, files: ReadonlyMap<BlobId, Uint8Array> = new Map()): Shaped {
+export function body(target: Target, context: ModelContext, files: ReadonlyMap<BlobId, Uint8Array> = new Map()): Shaped {
   const calls = callsIn(context);
   const first = context.messages.findIndex((message) => message.role !== "instruction");
   const opening = context.messages.slice(0, first === -1 ? context.messages.length : first);

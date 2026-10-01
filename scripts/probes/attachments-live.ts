@@ -21,10 +21,12 @@ import { Effect, Layer, Redacted, Schema } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { Fact } from "../../src/agent-machine/fact.ts";
 import { InputText, ModelName, ProviderName, SessionId, TestName, ToolName } from "../../src/agent-machine/names.ts";
-import { ToolRunner, type ToolSpec } from "../../src/agent-session/contracts.ts";
+import { type ModelContext, ToolRunner, type ToolSpec } from "../../src/agent-session/contracts.ts";
 import { MediaType } from "../../src/agent-machine/received.ts";
 import { Blobs, BlobsInMemory } from "../../src/agent-session/blobs.ts";
 import { openSession } from "../../src/agent-session/loop.ts";
+import { anthropicInputTokens } from "../../src/agent-session/providers/anthropic-count.ts";
+import { openAiInputTokens } from "../../src/agent-session/providers/openai-count.ts";
 import { ModelFromFacts } from "../../src/agent-session/model-choice.ts";
 import { reportedBy } from "../../src/agent-session/origin.ts";
 import { AnthropicModelClient } from "../../src/agent-session/providers/anthropic-client.ts";
@@ -111,11 +113,27 @@ const Looking = Layer.succeed(ToolRunner, {
   run: () => Effect.succeed({ _tag: "Succeeded" as const, output: { mediaType: MediaType.make("image/png"), body: { _tag: "Bytes" as const, bytes: halves() } } }),
 });
 
+const question = "What colours does the image show, left and right? What is the secret word in the PDF? Answer in one line.";
+
 const facts = await Effect.runPromise(
   Effect.gen(function* () {
     const blobs = yield* Blobs;
     const image = yield* blobs.store(halves(), MediaType.make("image/png"), "halves.png");
     const document = yield* blobs.store(papaya(), MediaType.make("application/pdf"), "papaya.pdf");
+    // Counted before it is sent, by the provider's count endpoint, where it has one.
+    const target = { provider: ProviderName.make(provider), model: ModelName.make(model) };
+    const context: ModelContext = {
+      system: undefined,
+      tools: [],
+      messages: [{ role: "user", parts: [{ _tag: "Text", text: question }, { _tag: "File", blob: image }, { _tag: "File", blob: document }] }],
+    };
+    const counted =
+      viaTool || provider === "xai"
+        ? undefined
+        : provider === "anthropic"
+          ? yield* Effect.flatMap(anthropicInputTokens(), (count) => count(target, context)).pipe(Effect.provide(AnthropicClient.layer({ apiKey }).pipe(Layer.provide(http))))
+          : yield* Effect.flatMap(openAiInputTokens(), (count) => count(target, context)).pipe(Effect.provide(OpenAiClient.layer({ apiKey }).pipe(Layer.provide(http))));
+    if (counted !== undefined) console.log(`counted before sending: ${counted} input tokens`);
     const session = yield* openSession;
     yield* session.observe(
       openedWith({
@@ -132,7 +150,7 @@ const facts = await Effect.runPromise(
         : {
             _tag: "InputArrived",
             from: { _tag: "User" },
-            text: InputText.make("What colours does the image show, left and right? What is the secret word in the PDF? Answer in one line."),
+            text: InputText.make(question),
             attachments: [image, document],
           },
     );
@@ -159,5 +177,7 @@ writeFileSync(
 );
 const encodeFact = Schema.encodeSync(Fact);
 writeFileSync(join("logs/live", `${name}.facts.jsonl`), `${facts.map((fact) => JSON.stringify(encodeFact(fact))).join("\n")}\n`);
+const reported = facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "ModelResponded" ? [fact.observation.usage?.input] : []));
+console.log(`reported by the response: ${reported[0] ?? "nothing"} input tokens`);
 console.log(`answer: ${answer.join(" ") || "(none)"}`);
 console.log(`logs/live/${name}.md`);
