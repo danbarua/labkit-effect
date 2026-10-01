@@ -10,6 +10,9 @@
  *   ANTHROPIC_API_KEY=... bun scripts/probes/attachments-live.ts anthropic claude-sonnet-5-5
  *   OPENAI_API_KEY=...    bun scripts/probes/attachments-live.ts openai gpt-5.5
  *   XAI_API_KEY=...       bun scripts/probes/attachments-live.ts xai grok-4.7
+ *   bun scripts/probes/attachments-live.ts localhost mlx-community/Qwen3.5-9B-8bit
+ *
+ * `localhost` is a local server's Chat Completions endpoint at http://localhost:8000/v1, with no key.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -17,6 +20,7 @@ import { join } from "node:path";
 import { deflateSync } from "node:zlib";
 import { AnthropicClient } from "@effect/ai-anthropic";
 import { OpenAiClient } from "@effect/ai-openai";
+import { OpenAiClient as OpenAiCompatClient } from "@effect/ai-openai-compat";
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import * as BunPath from "@effect/platform-bun/BunPath";
 import { Effect, Layer, Redacted, Schema } from "effect";
@@ -33,6 +37,7 @@ import { ModelFromFacts } from "../../src/agent-session/model-choice.ts";
 import { reportedBy } from "../../src/agent-session/origin.ts";
 import { AnthropicModelClient } from "../../src/agent-session/providers/anthropic-client.ts";
 import { OpenAiModelClient } from "../../src/agent-session/providers/openai-client.ts";
+import { OpenAiCompatModelClient } from "../../src/agent-session/providers/openai-compat-client.ts";
 import { xAiClient, XAiModelClient } from "../../src/agent-session/providers/xai-client.ts";
 import { openedWith } from "../../src/agent-session/session-setup.ts";
 import { TurnContextAssembler } from "../../src/agent-session/turn-context.ts";
@@ -43,7 +48,7 @@ import { transcript } from "./transcript.ts";
 const [provider = "anthropic", model = "claude-sonnet-5-5", mode] = process.argv.slice(2);
 const viaTool = mode === "tool";
 const variable = provider === "anthropic" ? "ANTHROPIC_API_KEY" : provider === "xai" ? "XAI_API_KEY" : "OPENAI_API_KEY";
-const key = process.env[variable];
+const key = provider === "localhost" ? "none" : process.env[variable];
 if (key === undefined || key === "") {
   console.error(`${variable} is not set`);
   process.exit(2);
@@ -51,7 +56,9 @@ if (key === undefined || key === "") {
 const apiKey = Redacted.make(key);
 const http = FetchHttpClient.layer;
 const client =
-  provider === "anthropic"
+  provider === "localhost"
+    ? OpenAiCompatModelClient.pipe(Layer.provide(OpenAiCompatClient.layer({ apiUrl: "http://localhost:8000/v1", apiKey }).pipe(Layer.provide(http))))
+    : provider === "anthropic"
     ? AnthropicModelClient.pipe(Layer.provide(AnthropicClient.layer({ apiKey }).pipe(Layer.provide(http))))
     : provider === "xai"
       ? XAiModelClient.pipe(Layer.provide(xAiClient(apiKey).pipe(Layer.provide(http))))
@@ -118,7 +125,7 @@ const Looking = Layer.succeed(ToolRunner, {
 const question = "What colours does the image show, left and right? What is the secret word in the PDF? Answer in one line.";
 
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-const name = [stamp, "attachments", provider, model, ...(viaTool ? ["tool"] : [])].join("-");
+const name = [stamp, "attachments", provider, model.replaceAll("/", "_"), ...(viaTool ? ["tool"] : [])].join("-");
 // The blobs are kept as files beside the transcript.
 const blobFolder = join("logs/live", `${name}.blobs`);
 
@@ -135,7 +142,7 @@ const facts = await Effect.runPromise(
       messages: [{ role: "user", parts: [{ _tag: "Text", text: question }, { _tag: "File", blob: image }, { _tag: "File", blob: document }] }],
     };
     const counted =
-      viaTool || provider === "xai"
+      viaTool || provider === "xai" || provider === "localhost"
         ? undefined
         : provider === "anthropic"
           ? yield* Effect.flatMap(anthropicInputTokens(), (count) => count(target, context)).pipe(Effect.provide(AnthropicClient.layer({ apiKey }).pipe(Layer.provide(http))))
