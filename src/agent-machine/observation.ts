@@ -107,8 +107,10 @@ export type ResponseEnding = typeof ResponseEnding.Type;
 /**
  * The tokens a request and its response took, as the provider reported them, in the same terms for
  * every provider. `input` is everything the request carried, what was read from the cache
- * (`cacheRead`) and written to it (`cacheWrite`) included; `output` is everything the response
- * took, its thinking (`thinking`) included. A part the provider did not report is absent.
+ * (`cacheRead`) and written to it (`cacheWrite`) included; `cacheWrite1h` is the part of
+ * `cacheWrite` kept for an hour rather than five minutes, where the provider prices the two apart.
+ * `output` is everything the response took, its thinking (`thinking`) included. A part the
+ * provider did not report is absent.
  */
 export const Usage = Schema.Struct({
   input: TokenCount,
@@ -116,6 +118,7 @@ export const Usage = Schema.Struct({
   thinking: Schema.optionalKey(TokenCount),
   cacheRead: Schema.optionalKey(TokenCount),
   cacheWrite: Schema.optionalKey(TokenCount),
+  cacheWrite1h: Schema.optionalKey(TokenCount),
 });
 export type Usage = typeof Usage.Type;
 

@@ -216,6 +216,7 @@ const usageIn = (reported: Json | undefined) => {
     thinking: numberAt(reported, "output_tokens_details", "thinking_tokens"),
     cacheRead,
     cacheWrite,
+    cacheWrite1h: numberAt(reported, "cache_creation", "ephemeral_1h_input_tokens"),
   });
   return usage === undefined ? {} : { usage };
 };

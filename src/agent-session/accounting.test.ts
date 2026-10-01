@@ -29,6 +29,15 @@ test("a response's cost: input not cached, cache reads, cache writes and output,
   expect(cost).toBeCloseTo((1000 * 2 + 3000 * 0.2 + 1000 * 2.5 + 500 * 10) / 1_000_000, 12);
 });
 
+test("cache writes kept for an hour are priced at their own rate, the rest at the five-minute rate", () => {
+  const sonnet = limitsOf("anthropic", "claude-sonnet-5-5")?.price;
+  if (sonnet === undefined) throw new Error("claude-sonnet-5-5 is not in frontier.json");
+  expect(costOf({ input: tokens(3000), cacheWrite: tokens(3000), cacheWrite1h: tokens(1000), output: tokens(0) }, sonnet)).toBeCloseTo(
+    (2000 * 2.5 + 1000 * 4) / 1_000_000,
+    12,
+  );
+});
+
 test("a request whose input is over a tier's context is priced at the higher tier", () => {
   const sol = limitsOf("openai", "gpt-6.1-sol")?.price;
   if (sol === undefined) throw new Error("gpt-6.1-sol is not in frontier.json");
@@ -46,11 +55,15 @@ test("the context gauge: tokens in context after the last response, the model's 
   const gauge = contextGauge(session.journal, "anthropic", "claude-sonnet-5-5");
   expect(gauge).toMatchObject({ used: 1800, size: 1_000_000, cost: { currency: "USD" } });
   expect(gauge?.cost?.amount).toBeCloseTo((1200 * 2 + 300 * 10 + 400 * 2 + 1200 * 0.2 + 200 * 10) / 1_000_000, 12);
-  // A model whose window is not known has no gauge; a response with no usage leaves the cost unknown.
+  // A model whose window is not known has no gauge. A response with no usage (interrupted, say), or
+  // from a model with no price, adds nothing to the cost.
   expect(contextGauge(session.journal, "boring", "boring-1")).toBeUndefined();
+  const before = gauge?.cost.amount;
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "once more" });
   observe(session, responded(undefined));
-  expect(contextGauge(session.journal, "anthropic", "claude-sonnet-5-5")?.cost).toBeUndefined();
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "and locally" });
+  observe(session, { ...responded({ input: 900, output: 100 }), provider: "localhost", model: "qwen" });
+  expect(contextGauge(session.journal, "anthropic", "claude-sonnet-5-5")?.cost.amount).toBe(before);
 });
 
 test("a turn's requests are its steps", () => {

@@ -188,9 +188,10 @@ export function usageOf(counts: {
   readonly thinking?: number | undefined;
   readonly cacheRead?: number | undefined;
   readonly cacheWrite?: number | undefined;
+  readonly cacheWrite1h?: number | undefined;
 }): Usage | undefined {
   if (counts.input === undefined || counts.output === undefined) return undefined;
-  const optional = (key: "thinking" | "cacheRead" | "cacheWrite") => {
+  const optional = (key: "thinking" | "cacheRead" | "cacheWrite" | "cacheWrite1h") => {
     const value = counts[key];
     return value === undefined ? {} : { [key]: TokenCount.make(value) };
   };
@@ -200,5 +201,6 @@ export function usageOf(counts: {
     ...optional("thinking"),
     ...optional("cacheRead"),
     ...optional("cacheWrite"),
+    ...optional("cacheWrite1h"),
   };
 }

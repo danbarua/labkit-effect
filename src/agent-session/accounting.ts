@@ -6,9 +6,10 @@
  *   and what it returned, as the provider reported them); `size`, the context window of the model
  *   the session asks now (`frontier.json`); and `cost`, the session's cost so far in US dollars.
  *   There is no gauge when the model's window is not known. After a compaction `used` stays the last
- *   response's figure until the next response reports a new one. `cost` is absent when a response
- *   has no usage, or its model no price; the requests a summarizer makes are not among the facts,
- *   so their cost is not in it.
+ *   response's figure until the next response reports a new one. `cost` is the cost of the
+ *   responses that reported their usage to a model with a price: one interrupted, or not observed,
+ *   or from a model not in `frontier.json` (a local model) adds nothing. The requests a summarizer
+ *   makes are not among the facts, so their cost is not in it.
  * - `requestsIn`: how many model requests a turn has made, which is how many steps it has taken
  *   (`AskModel`, `TellModel`). A request a fallback sends to another provider is the same request.
  */
@@ -23,7 +24,7 @@ type Responded = Extract<Observation, { _tag: "ModelResponded" }>;
 export interface ContextGauge {
   readonly used: number;
   readonly size: number;
-  readonly cost?: { readonly amount: number; readonly currency: "USD" };
+  readonly cost: { readonly amount: number; readonly currency: "USD" };
 }
 
 const responses = (facts: ReadonlyArray<Fact>): ReadonlyArray<Responded> =>
@@ -34,24 +35,26 @@ export function costOf(usage: Usage, price: Limits["price"]): number {
   const at: Price = price.above !== undefined && usage.input > price.above.context ? price.above : price;
   const cacheRead = usage.cacheRead ?? 0;
   const cacheWrite = usage.cacheWrite ?? 0;
+  const hour = usage.cacheWrite1h ?? 0;
   const uncached = usage.input - cacheRead - cacheWrite;
   return (
-    (uncached * at.input + cacheRead * (at.cacheRead ?? at.input) + cacheWrite * (at.cacheWrite ?? at.input) + usage.output * at.output) /
+    (uncached * at.input +
+      cacheRead * (at.cacheRead ?? at.input) +
+      (cacheWrite - hour) * (at.cacheWrite ?? at.input) +
+      hour * (at.cacheWrite1h ?? at.cacheWrite ?? at.input) +
+      usage.output * at.output) /
     1_000_000
   );
 }
 
 type Limits = NonNullable<ReturnType<typeof limitsOf>>;
 
-/** The session's cost so far, in US dollars; undefined when a response has no usage or no price. */
-export function costIn(facts: ReadonlyArray<Fact>): number | undefined {
-  let total = 0;
-  for (const response of responses(facts)) {
+/** The session's cost so far, in US dollars: the responses with usage, to a model with a price. */
+export function costIn(facts: ReadonlyArray<Fact>): number {
+  return responses(facts).reduce((total, response) => {
     const limits = limitsOf(response.provider, response.model);
-    if (response.usage === undefined || limits === undefined) return undefined;
-    total += costOf(response.usage, limits.price);
-  }
-  return total;
+    return response.usage === undefined || limits === undefined ? total : total + costOf(response.usage, limits.price);
+  }, 0);
 }
 
 /** The context gauge for a session asking `model` of `provider`; undefined when the model's window is not known. */
@@ -59,12 +62,7 @@ export function contextGauge(facts: ReadonlyArray<Fact>, provider: string, model
   const size = limitsOf(provider, model)?.context;
   if (size === undefined) return undefined;
   const last = [...responses(facts)].reverse().find((response) => response.usage !== undefined)?.usage;
-  const cost = costIn(facts);
-  return {
-    used: last === undefined ? 0 : last.input + last.output,
-    size,
-    ...(cost === undefined ? {} : { cost: { amount: cost, currency: "USD" as const } }),
-  };
+  return { used: last === undefined ? 0 : last.input + last.output, size, cost: { amount: costIn(facts), currency: "USD" } };
 }
 
 /** How many model requests `turn` has made: its steps. */

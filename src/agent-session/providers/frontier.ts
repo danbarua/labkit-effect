@@ -2,7 +2,9 @@
  * The frontier models this harness knows: for each provider, the models of its latest three
  * releases, with the most tokens of context each takes, the most it writes in one response, and
  * its price in US dollars per million tokens (input not read from or written to the cache, output,
- * cache reads, cache writes; `above` is the price of a request whose input is over its `context`).
+ * cache reads, cache writes, cache writes kept for an hour; `above` is the price of a request whose
+ * input is over its `context`). Anthropic's hour-long cache writes are twice the input price
+ * (Anthropic's pricing; models.dev lists only the five-minute rate).
  * The numbers are models.dev's catalog (https://models.dev/api.json) as of 2026-10-01. Measured
  * against them: Anthropic refuses `max_tokens` above a model's output (Haiku 4.5: 64,000); OpenAI
  * accepts any `max_output_tokens`, 10,000,000 included, so its limit cannot be read from a refusal.
@@ -19,6 +21,7 @@ export interface Price {
   readonly output: number;
   readonly cacheRead?: number;
   readonly cacheWrite?: number;
+  readonly cacheWrite1h?: number;
 }
 
 export interface Limits {
