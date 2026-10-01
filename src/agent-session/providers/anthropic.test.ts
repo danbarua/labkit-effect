@@ -18,6 +18,7 @@ import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.t
 import { TurnContextAssembler } from "../turn-context.ts";
 import { anthropicStream } from "../../../tests/support/streams.ts";
 import { runTest } from "../../../tests/support/run.ts";
+import { limitsOf } from "./frontier.ts";
 import { boringOpening } from "../../../tests/support/boring.ts";
 
 /** A provider that makes one scripted tool call, then answers; it keeps every request it is sent. */
@@ -99,7 +100,7 @@ test("a failed call with input that does not fit is sent as the tool's schema an
   });
 });
 
-test("the max_tokens the Messages API requires is supplied and logged, with the reason", async () => {
+test("the max_tokens the Messages API requires is supplied when none was said, and logged", async () => {
   const logged: Array<{ level: string; message: unknown }> = [];
   const capture = Logger.make((options) => {
     logged.push({ level: options.logLevel, message: options.message });
@@ -127,10 +128,7 @@ test("the max_tokens the Messages API requires is supplied and logged, with the 
     level: "Info",
     message: [
       logKeys.anthropic.maxTokensSupplied,
-      {
-        max_tokens: 128_000,
-        reason: "the Messages API requires max_tokens and the session's settings give no output limit",
-      },
+      { message: "no max_tokens parameter supplied, defaulting to 128000" },
     ],
   });
 });
@@ -155,6 +153,13 @@ const target = {
   provider: ProviderName.make("boring"),
   model: ModelName.make("boring-1"),
 };
+
+test("the default max_tokens is a frontier model's most output; a model not listed gets 128,000", () => {
+  expect(limitsOf("anthropic", "claude-haiku-4-5-20251001")).toEqual({ context: 200_000, output: 64_000 });
+  expect(limitsOf("anthropic", "claude-sonnet-5-5")?.output).toBe(128_000);
+  expect(limitsOf("anthropic", "boring-1")).toBeUndefined();
+  expect(limitsOf("openai", "gpt-6.1-sol")).toEqual({ context: 1_050_000, output: 128_000 });
+});
 
 test("a request is the model, the default max_tokens, and the context's messages as Messages blocks", async () => {
   const provider = recording([{ content: [{ type: "text", text: "Hello back." }], stop_reason: "end_turn" }]);

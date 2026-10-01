@@ -1,0 +1,23 @@
+{
+  "anthropic": {
+    "claude-fable-5-1": { "context": 1000000, "output": 128000 },
+    "claude-opus-5-5": { "context": 1000000, "output": 128000 },
+    "claude-sonnet-5-5": { "context": 1000000, "output": 128000 },
+    "claude-haiku-4-5": { "context": 200000, "output": 64000 }
+  },
+  "openai": {
+    "gpt-6.1-sol": { "context": 1050000, "output": 128000 },
+    "gpt-6-sol": { "context": 1050000, "output": 128000 },
+    "gpt-6-luna": { "context": 1050000, "output": 128000 },
+    "gpt-6-astra": { "context": 1050000, "output": 128000 },
+    "gpt-5.6-sol": { "context": 1050000, "output": 128000 },
+    "gpt-5.6-terra": { "context": 1050000, "output": 128000 },
+    "gpt-5.6-luna": { "context": 1050000, "output": 128000 },
+    "gpt-5.5": { "context": 1050000, "output": 128000 }
+  },
+  "xai": {
+    "grok-4.7": { "context": 500000, "output": 500000 },
+    "grok-4.6": { "context": 500000, "output": 500000 },
+    "grok-4.5": { "context": 500000, "output": 500000 }
+  }
+}
