@@ -7,7 +7,9 @@
  * cache reads, cache writes, cache writes kept for an hour; `above` is the price of a request whose
  * input is over its `context`). Anthropic's hour-long cache writes are twice the input price
  * (Anthropic's pricing; models.dev lists only the five-minute rate).
- * The numbers are models.dev's catalog (https://models.dev/api.json) as of 2026-10-01. Measured
+ * The input kinds are models.dev's, except where measured: models.dev lists ten GPT-5 models as
+ * taking no PDF (gpt-5, -mini, -nano, -pro, 5.1, 5.2, 5.2-pro, 5.4-mini, -nano, -pro), and each read
+ * one when sent it (2026-10-01). The numbers are models.dev's catalog (https://models.dev/api.json) as of 2026-10-01. Measured
  * against them: Anthropic refuses `max_tokens` above a model's output (Haiku 4.5: 64,000); OpenAI
  * accepts any `max_output_tokens`, 10,000,000 included, so its limit cannot be read from a refusal.
  *

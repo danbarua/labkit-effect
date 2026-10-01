@@ -159,7 +159,7 @@ test("the default max_tokens is a frontier model's most output; a model not list
   expect(limitsOf("anthropic", "claude-sonnet-5-5")?.output).toBe(128_000);
   expect(limitsOf("anthropic", "boring-1")).toBeUndefined();
   // A name with a release date after it is the named model; another model whose name begins the same is not.
-  expect(limitsOf("openai", "gpt-5-2025-08-07")?.input).toEqual(["text", "image"]);
+  expect(limitsOf("openai", "gpt-5-2025-08-07")?.input).toEqual(["text", "image", "pdf"]);
   expect(limitsOf("openai", "gpt-5-mini")?.price.input).toBe(0.25);
   expect(limitsOf("openai", "gpt-5.1-codex")).toBeUndefined();
   expect(limitsOf("openai", "gpt-6.1-sol")).toMatchObject({ context: 1_050_000, output: 128_000 });
