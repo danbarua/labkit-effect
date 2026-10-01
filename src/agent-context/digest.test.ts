@@ -60,13 +60,25 @@ test("the digest lists the span's attachments as their pointers, each once, and 
   );
 });
 
-test("a tool with no digest of its own is listed by its input, with why it failed, or as not ended", () => {
+test("a tool with no digest of its own is listed by its input, long texts as their lengths, with why it failed, or as not ended", () => {
   const messages: ReadonlyArray<ContextMessage> = [
-    { role: "assistant", parts: [call("c1", "grep", { pattern: "TODO" }), call("c2", "fetch", { url: "https://example.com" })] },
-    { role: "user", parts: [result("c1", { _tag: "Failed", reason: { _tag: "NotRun" } })] },
+    {
+      role: "assistant",
+      parts: [
+        call("c1", "grep", { pattern: "TODO" }),
+        call("c2", "fetch", { url: "https://example.com" }),
+        call("c3", "write_file", { path: "src/a.ts", content: "x".repeat(12_345) }),
+      ],
+    },
+    { role: "user", parts: [result("c1", { _tag: "Failed", reason: { _tag: "NotRun" } }), result("c3", succeeded("ok"))] },
   ];
   expect(digestOf(messages)).toBe(
-    ["Tool Calls:", '`grep` :   {"pattern":"TODO"} (failed: NotRun)', '`fetch`:   {"url":"https://example.com"} (not ended)'].join("\n"),
+    [
+      "Tool Calls:",
+      '`grep`      :   {"pattern":"TODO"} (failed: NotRun)',
+      '`fetch`     :   {"url":"https://example.com"} (not ended)',
+      '`write_file`:   {"path":"src/a.ts","content":"<12345 chars>"}',
+    ].join("\n"),
   );
 });
 

@@ -11,8 +11,9 @@
  *
  * The attachments are every file the span carried, a user's or a tool's output kept in the blob
  * store, as its pointer, in order, each once. Each tool call is one line: what the tool's own
- * `ToolDigest` says of its input and outcome, or, for a tool with none, its input as JSON and, when
- * it failed, why. A call with no result in the span is listed as not ended.
+ * `ToolDigest` says of its input and outcome, or, for a tool with none, its input as JSON with
+ * every long text given as its length (`{"path":"a.ts","content":"<12345 chars>"}`) and, when it
+ * failed, why. A call with no result in the span is listed as not ended.
  *
  * `DigestSummarizer(digests)` is a summarizer whose summary is the digest.
  */
@@ -22,8 +23,8 @@ import type { BlobRef } from "../agent-machine/blob.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
 import type { ContextMessage } from "../agent-session/contracts.ts";
-import { asText, receivedText } from "../agent-session/received.ts";
-import { blobPointer } from "../agent-session/shaping.ts";
+import { asText, parseJson, receivedText } from "../agent-session/received.ts";
+import { blobPointer, isObject, type Json } from "../agent-session/shaping.ts";
 import type { Summarizer } from "./compaction.ts";
 import { SummarizerName } from "./forks.ts";
 
@@ -33,13 +34,30 @@ export type ToolDigest = (input: Received, outcome: ToolOutcome | undefined) => 
 /** Each tool's digest, by its name; a tool not here gets the default line. */
 export type ToolDigests = ReadonlyMap<string, ToolDigest>;
 
-const shortened = (text: string, most = 80): string => (text.length <= most ? text : `${text.slice(0, most - 1)}…`);
+/** Texts longer than this are given as their length. */
+const longText = 40;
+
+/** A value with every long text in it replaced by its length. */
+function sized(value: Json): Json {
+  if (typeof value === "string") return value.length > longText ? `<${value.length} chars>` : value;
+  if (Array.isArray(value)) return value.map(sized);
+  if (isObject(value)) return Object.fromEntries(Object.entries(value).map(([key, each]) => [key, sized(each)]));
+  return value;
+}
+
+/** A call's input in a line: JSON with its long texts as their lengths; input that is not JSON, as its length. */
+function given(input: Received): string {
+  const parsed = parseJson(input);
+  if ("value" in parsed) return JSON.stringify(sized(parsed.value));
+  const text = asText(input);
+  return text.length > longText ? `<${text.length} chars>` : text;
+}
 
 /** A call's line when its tool has no digest of its own: its input, and why it failed when it did. */
 const defaultDigest: ToolDigest = (input, outcome) => {
-  const given = shortened(asText(input).replace(/\s+/g, " "));
-  if (outcome === undefined) return `${given} (not ended)`;
-  return outcome._tag === "Succeeded" ? given : `${given} (failed: ${outcome.reason._tag})`;
+  const shown = given(input);
+  if (outcome === undefined) return `${shown} (not ended)`;
+  return outcome._tag === "Succeeded" ? shown : `${shown} (failed: ${outcome.reason._tag})`;
 };
 
 /** Every file the messages carried, by reference, in order, each once. */
