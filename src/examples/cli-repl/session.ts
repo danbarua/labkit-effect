@@ -14,18 +14,24 @@ import type { Fact } from "../../agent-machine/fact.ts";
 import { InputText, SessionId, type TurnId, Via } from "../../agent-machine/names.ts";
 import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { ToolRunner } from "../../agent-session/contracts.ts";
-import { openSession, type Session } from "../../agent-session/loop.ts";
+import { openSession, resumeSession, type Session } from "../../agent-session/loop.ts";
 import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
 import { reportedBy } from "../../agent-session/origin.ts";
-import { openedWith } from "../../agent-session/configuration/session-setup.ts";
-import { CountingTurns, NoTurnEndHooks } from "../../agent-session/turns.ts";
+import { modelOf, openedWith } from "../../agent-session/configuration/session-setup.ts";
+import { countingTurnsAfter, NoTurnEndHooks } from "../../agent-session/turns.ts";
 import { type Asked, Clients, KnownToCli, SettlingForCli } from "./models.ts";
+import { storeFileOf, storing } from "./store.ts";
 
 export interface Config {
   readonly sessionId: string;
   readonly target: Asked;
   readonly settings: ModelSettings;
   readonly system: string | undefined;
+  /**
+   * The facts of the session this one goes on from (`--continue`). The session keeps its opening;
+   * a model or settings in this configuration that differ from its own are taken as a change.
+   */
+  readonly continues?: ReadonlyArray<Fact>;
 }
 
 /** Log lines to stderr: for print mode, where stdout holds the answer alone, as a caller parsing it expects. */
@@ -46,29 +52,40 @@ export const LogsToFile = (sessionId: string) =>
 /** The session has no tools yet: a call names none that exists. */
 const NoTools = Layer.succeed(ToolRunner, { run: () => Effect.succeed({ _tag: "Failed" as const, reason: { _tag: "NotFound" as const } }) });
 
-/** What the loop needs, for a CLI session. */
-const Services = Layer.mergeAll(
+/** What the loop needs, for a CLI session whose facts so far started `turns` turns. */
+const Services = (turns: number) => Layer.mergeAll(
     ModelFromFacts.pipe(Layer.provide(KnownToCli)),
   KnownToCli,
   SettlingForCli,
     AgentContextAssembler.pipe(Layer.provide(Layer.mergeAll(WholeConversation, Layer.succeed(Notices, [])))),
     Clients,
-    CountingTurns,
+    countingTurnsAfter(turns),
     NoTurnEndHooks,
   NoTools,
 );
 
 /**
- * Opens a session with `config` and runs `use` with it, with the loop's services and `logs`. What
- * `use` reports is the user's, through the CLI.
+ * Opens a session with `config`, or goes on from the one it continues, and runs `use` with it, with
+ * the loop's services and `logs`. Its facts are kept in the session store as they are recorded.
+ * What `use` reports is the user's, through the CLI.
  */
-export const withSession = <A, E, R, L>(config: Config, logs: Layer.Layer<never, never, L>, use: (session: Session) => Effect.Effect<A, E, R>) =>
-  Effect.gen(function* () {
-    const session = yield* openSession;
-    yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: config.settings }, system: config.system, tools: [] }));
+export const withSession = <A, E, R, L>(config: Config, logs: Layer.Layer<never, never, L>, use: (session: Session) => Effect.Effect<A, E, R>) => {
+  const before = config.continues ?? [];
+  const turns = before.filter((fact) => fact._tag === "Observed" && fact.observation._tag === "TurnStarted").length;
+  return Effect.gen(function* () {
+    const session = before.length === 0 ? yield* openSession : yield* resumeSession(before);
+    const store = yield* storing(session, storeFileOf(config.sessionId));
+    if (before.length === 0)
+      yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: config.settings }, system: config.system, tools: [] }));
+    else {
+      const now = yield* modelOf(before);
+      const changed = now.provider !== config.target.provider || now.model !== config.target.model || Object.keys(config.settings).length > 0;
+      if (changed) yield* session.observe({ _tag: "ModelChangeArrived", provider: config.target.provider, model: config.target.model, settings: config.settings });
+    }
     yield* session.idle;
-    return yield* use(session);
-  }).pipe(reportedBy({ _tag: "User", via: Via.make("cli") }), Effect.scoped, Effect.provide(Layer.mergeAll(Services, logs)));
+    return yield* use(session).pipe(Effect.ensuring(store.finish));
+  }).pipe(reportedBy({ _tag: "User", via: Via.make("cli") }), Effect.scoped, Effect.provide(Layer.mergeAll(Services(turns), logs)));
+};
 
 /** Sends `text` to the session as the user's input, and waits until nothing is under way. */
 export const ask = (session: Session, text: string) =>

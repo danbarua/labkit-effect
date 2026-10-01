@@ -11,7 +11,8 @@
     "check:brands": "bun scripts/check-brands.ts",
     "check:rules": "bun scripts/check-rules.ts",
     "cli": "bun run src/examples/cli-repl/index.ts",
-    "models:refresh": "bun scripts/models/refresh.ts"
+    "models:refresh": "bun scripts/models/refresh.ts",
+    "cli:watch": "bun --watch src/examples/cli-repl/index.ts"
   },
   "devDependencies": {
     "@effect/platform-bun": "4.0.0-rc.118",

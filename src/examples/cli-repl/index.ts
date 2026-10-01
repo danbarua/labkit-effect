@@ -14,6 +14,10 @@
  * With `--output-format json` the answer comes with the session's figures; with `stream-json` each
  * fact is printed as it is recorded, then the result.
  *
+ * Each session's facts are kept in `logs/sessions/` (`store.ts`); `--continue` goes on from the
+ * one written to last, so `bun run cli:watch --continue` restarts on a change to the code and
+ * keeps the conversation.
+ *
  * Calling it from an agent's shell tool, use `-p` with the prompt as an argument: without `-p` the
  * REPL waits for input, and without a prompt `-p` reads it from stdin to its end. `bun --silent
  * cli` keeps bun's echo of the script off stdout.
@@ -23,10 +27,13 @@ import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Console, Effect, Option, Stdio, Stream } from "effect";
 import { Argument, Command, Flag } from "effect/cli";
 import { Effort, type ModelSettings, ThinkingMode } from "../../agent-machine/settings.ts";
+import { modelOf } from "../../agent-session/configuration/session-setup.ts";
+import { invalid } from "./invalid.ts";
 import { keyOf, keyVariables, known, targetOf } from "./models.ts";
 import { printOnce } from "./print.ts";
 import { repl } from "./repl.ts";
 import { type Config, LogsToFile, LogsToStderr, withSession } from "./session.ts";
+import { latestSession } from "./store.ts";
 
 const optional = <A>(flag: Flag.Flag<A>) => flag.pipe(Flag.optional, Flag.map(Option.getOrUndefined));
 const text = (name: string, description: string, ...aliases: Array<string>) =>
@@ -48,8 +55,8 @@ const flags = {
   appendSystemPromptFile: text("append-system-prompt-file", "A file whose text is added after the system prompt"),
   outputFormat: choice("output-format", ["text", "json", "stream-json"], "How the answer is printed (print mode)"),
   verbose: toggle("verbose", "Print the session's facts as they are recorded"),
+  continue: toggle("continue", "Continue the latest conversation", "c"),
   // Not built yet:
-  // continue: toggle("continue", "Continue the latest conversation", "c"),
   // resume: text("resume", "Resume a session", "r"),
   // sessionId: text("session-id", "The session's id"),
   // name: text("name", "Session display name", "n"),
@@ -90,14 +97,26 @@ const systemOf = (options: Options) =>
     return parts.length === 0 ? undefined : parts.join("\n\n");
   });
 
-/** The session's configuration, as the flags give it. */
+/**
+ * The session's configuration, as the flags give it. With `--continue`, the session written to
+ * last, asking the model the flags name or the one it asked; the settings are the ones the flags
+ * name, which change those it had.
+ */
 const configOf = (options: Options) =>
   Effect.gen(function* () {
     const settings: ModelSettings = {
       ...(options.effort === undefined ? {} : { effort: options.effort }),
       ...(options.thinking === undefined ? {} : { thinking: options.thinking }),
     };
-    const config: Config = { sessionId: crypto.randomUUID(), target: yield* targetOf(options.model), settings, system: yield* systemOf(options) };
+    const system = yield* systemOf(options);
+    if (!options.continue) {
+      const config: Config = { sessionId: crypto.randomUUID(), target: yield* targetOf(options.model), settings, system };
+      return config;
+    }
+    if (system !== undefined) return yield* invalid("A continued session keeps the system prompt it opened with; changing it is not built yet.");
+    const latest = yield* latestSession;
+    const now = yield* modelOf(latest.facts);
+    const config: Config = { sessionId: latest.sessionId, target: yield* targetOf(options.model ?? `${now.provider}/${now.model}`), settings, system, continues: latest.facts };
     return config;
   });
 
