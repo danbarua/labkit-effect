@@ -23,8 +23,9 @@ in `DESIGN.next.md`.
   folder for each session and kind), and one once recorded is not changed. The session's facts
   grow as if nothing were compacted, and a window says nothing about which providers have a summary
   of it. `compact(session, summarizer, decidedBy)` compacts between turns, for the provider the
-  session is asking: the span is every fact after that provider's last summary's window (from the
-  start when it has none), the summarizer is given that provider's summaries, the messages of
+  session is asking: the span is every fact after that provider's last summary's window, from the turn that window
+  kept (from the start when it has none); the span's last turn is kept as it was, to follow the
+  summary, when the span holds a turn before it, and the rest is summarised, the summarizer is given that provider's summaries, the messages of
   the span and the model the session is asking, the summary is recorded, and then the window is
   reported. A summary is text, or JSON: `providerCompaction` asks the provider for its own
   compaction (the Responses adapter's `openAiCompactions`, for OpenAI and xAI), sending it the

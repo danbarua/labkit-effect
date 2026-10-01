@@ -3,7 +3,9 @@
  *
  * `compact` is run between turns, by the user or by a `CompactionPolicy` (`compactIfDue`). It
  * compacts for the provider the session is asking: the span is every fact after that provider's
- * last summary (from the start of the session when it has none), a summarizer writes the summary,
+ * last summary (from the start of the session when it has none). The span's last turn is kept as it
+ * was, to follow the summary, when the span holds a turn before it; a summarizer writes the summary
+ * of the rest,
  * the summary is recorded in `Summaries`, and then the window is reported (`CompactionWindow`),
  * naming what decided it was due. The session's facts grow as if nothing were compacted; the
  * window says a summary should exist and nothing about which providers have one.
@@ -118,11 +120,19 @@ export const compact = (session: Session, summarizer: Summarizer, decidedBy: Pol
     const summaries = yield* Summaries;
     const previous = summariesFor(yield* summaries.recorded, facts, kind);
     const before = previous.at(-1);
-    const from = before === undefined ? undefined : windowNamed(facts, before.window).through;
-    const span = from === undefined ? facts : facts.filter((fact) => fact.seq > from);
+    // The span starts after the last summary's span; the turn that window kept was not summarised.
+    const window_ = before === undefined ? undefined : windowNamed(facts, before.window);
+    const from = window_ === undefined ? undefined : Math.min(window_.through + 1, ...window_.kept);
+    const span = from === undefined ? facts : facts.filter((fact) => fact.seq >= from);
+    // The last turn is kept as it was, after the summary, when the span holds a turn before it.
+    const lastTurn = lastAt(span, (fact) => fact._tag === "Observed" && fact.observation._tag === "TurnStarted");
+    const firstTurn = span.findIndex((fact) => fact._tag === "Observed" && fact.observation._tag === "TurnStarted");
+    const keeps = lastTurn > firstTurn;
+    const summarised = keeps ? span.slice(0, lastTurn) : span;
+    const kept = keeps ? span.slice(lastTurn).map((fact) => fact.seq) : [];
     const windows = windowsOf(facts);
     const window = WindowId.make(`window-${windows.length + 1}`);
-    const summary = yield* summarizer.summarize(previous, conversationOf(span, facts), target, {
+    const summary = yield* summarizer.summarize(previous, conversationOf(summarised, facts), target, {
       system: systemOf(facts),
       tools: yield* toolsOf(facts),
     });
@@ -141,7 +151,7 @@ export const compact = (session: Session, summarizer: Summarizer, decidedBy: Pol
       decidedBy,
       ...(last === undefined ? {} : { previous: last.observation.window }),
       through,
-      kept: [],
+      kept,
     });
     return window;
   });

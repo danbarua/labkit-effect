@@ -71,10 +71,6 @@ compaction as a summary, for OpenAI and xAI (`openai-compaction.ts`, `xai-compac
 - [ ] The Chat Completions adapter against the local Qwen model (`http://localhost:8000/v1`,
       `mlx-community/Qwen3.5-9B-8bit`, as in the ACP log): streaming, `reasoning_content` sent back,
       tool calls.
-- [ ] xAI's own compaction: the two turns after each one answer the number before it again
-      ("16\n18"): FizzBuzz on grok-4.7, 25 turns, 21 right with the system prompt and tools sent to
-      `/responses/compact`, 15 without; OpenAI's through the same code, 25 of 25.
-
 ### Telemetry
 
 Built: spans and log lines written to `<name>.spans.jsonl` and `<name>.logs.jsonl` beside a probe's

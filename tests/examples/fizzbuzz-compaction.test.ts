@@ -73,9 +73,9 @@ test("A5: each compaction's summary is recorded with the summarizer that wrote i
   expect(second).toMatch(emoji);
   expect(second).toMatch(offer);
   expect(second).toContain("**");
-  expect(first).toContain("The last number the assistant returned was 30.");
-  expect(second).toContain("The last number returned was **60**");
-  expect(third).toContain("The last number the assistant returned was 90.");
+  expect(first).toContain("The last number the assistant returned was 28.");
+  expect(second).toContain("The last number returned was **58**");
+  expect(third).toContain("The last number the assistant returned was 88.");
   expect(first).toContain("Classified as Fizz: 3, 9, 21, 27.");
   expect(third).toContain("Classified as FizzBuzz: 75.");
 });
@@ -88,15 +88,15 @@ test("A7: the first request in each window carries every summary so far, as writ
   expect(firsts.map((request) => request.sent.messages.slice(0, 2)) as unknown).toEqual([
     [
       { role: "instruction", parts: [{ _tag: "Text", text: texts[0] }] },
-      { role: "user", parts: [{ _tag: "Text", text: "31" }] },
+      { role: "user", parts: [{ _tag: "Text", text: "29" }] },
     ],
     [
       { role: "instruction", parts: [{ _tag: "Text", text: texts[0] }, { _tag: "Text", text: texts[1] }] },
-      { role: "user", parts: [{ _tag: "Text", text: "61" }] },
+      { role: "user", parts: [{ _tag: "Text", text: "59" }] },
     ],
     [
       { role: "instruction", parts: [{ _tag: "Text", text: texts[0] }, { _tag: "Text", text: texts[1] }, { _tag: "Text", text: texts[2] }] },
-      { role: "user", parts: [{ _tag: "Text", text: "91" }] },
+      { role: "user", parts: [{ _tag: "Text", text: "89" }] },
     ],
   ]);
 });
@@ -128,12 +128,12 @@ test("A7: a provider's own compaction is sent as its items, to that provider onl
     { role: "instruction", parts: [{ _tag: "Text", text: plain }] },
     { role: "instruction", parts: [item(1)] },
   ]);
-  expect(asked[1]?.messages[1] as unknown).toEqual({ role: "user", parts: [{ _tag: "Text", text: "61" }] });
+  expect(asked[1]?.messages[1] as unknown).toEqual({ role: "user", parts: [{ _tag: "Text", text: "59" }] });
   const firsts = requests(facts).filter((request) => request.inNewWindow);
   expect(firsts.map((request) => request.sent.messages.slice(0, 2)) as unknown).toEqual([
-    [{ role: "instruction", parts: [{ _tag: "Text", text: plain }] }, { role: "user", parts: [{ _tag: "Text", text: "31" }] }],
-    [{ role: "instruction", parts: [item(1)] }, { role: "user", parts: [{ _tag: "Text", text: "61" }] }],
-    [{ role: "instruction", parts: [item(2)] }, { role: "user", parts: [{ _tag: "Text", text: "91" }] }],
+    [{ role: "instruction", parts: [{ _tag: "Text", text: plain }] }, { role: "user", parts: [{ _tag: "Text", text: "29" }] }],
+    [{ role: "instruction", parts: [item(1)] }, { role: "user", parts: [{ _tag: "Text", text: "59" }] }],
+    [{ role: "instruction", parts: [item(2)] }, { role: "user", parts: [{ _tag: "Text", text: "89" }] }],
   ]);
 });
 
@@ -172,14 +172,14 @@ test("A5 A7: compacting after every FizzBuzz, the summarizer chosen for each, ea
     "PlainTextFizzBuzzSummarizer",
   ]);
   const texts = summaries.map((each) => asText(each.summary));
-  expect(texts[0]).toContain("The last number the assistant returned was 16.");
-  expect(texts[1]).toContain("The last number returned was **46**");
-  expect(texts[2]).toContain("The last number the assistant returned was 76.");
+  expect(texts[0]).toContain("The last number the assistant returned was 14.");
+  expect(texts[1]).toContain("The last number returned was **44**");
+  expect(texts[2]).toContain("The last number the assistant returned was 74.");
   const firsts = requests(facts).filter((request) => request.inNewWindow);
   expect(firsts.map((request) => request.sent.messages.slice(0, 2)) as unknown).toEqual([
-    [{ role: "instruction", parts: texts.slice(0, 1).map((text) => ({ _tag: "Text", text })) }, { role: "user", parts: [{ _tag: "Text", text: "17" }] }],
-    [{ role: "instruction", parts: texts.slice(0, 2).map((text) => ({ _tag: "Text", text })) }, { role: "user", parts: [{ _tag: "Text", text: "47" }] }],
-    [{ role: "instruction", parts: texts.slice(0, 3).map((text) => ({ _tag: "Text", text })) }, { role: "user", parts: [{ _tag: "Text", text: "77" }] }],
+    [{ role: "instruction", parts: texts.slice(0, 1).map((text) => ({ _tag: "Text", text })) }, { role: "user", parts: [{ _tag: "Text", text: "15" }] }],
+    [{ role: "instruction", parts: texts.slice(0, 2).map((text) => ({ _tag: "Text", text })) }, { role: "user", parts: [{ _tag: "Text", text: "45" }] }],
+    [{ role: "instruction", parts: texts.slice(0, 3).map((text) => ({ _tag: "Text", text })) }, { role: "user", parts: [{ _tag: "Text", text: "75" }] }],
   ]);
 });
 
@@ -212,8 +212,8 @@ test("A5 A8: switching provider, each is sent its own summaries, and a switch ba
     ["window-2", "openai", "EmojiHappyFizzBuzzSummarizer"],
   ]);
   const [plain, emoji] = summaries.map((each) => asText(each.summary));
-  expect(plain).toContain("exchanged 8 messages");
-  expect(emoji).toContain("since it began, you and the assistant exchanged **16** messages");
+  expect(plain).toContain("exchanged 6 messages");
+  expect(emoji).toContain("since it began, you and the assistant exchanged **14** messages");
   // Kept as files, one folder for each kind, and read back as written.
   expect(readdirSync(join(folder, "fizzbuzz")).sort()).toEqual(["anthropic", "openai"]);
   expect(readdirSync(join(folder, "fizzbuzz", "openai"))[0]).toMatch(/^0001_\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d\.\d{3}Z_EmojiHappyFizzBuzzSummarizer_window-2\.txt$/);
@@ -233,12 +233,14 @@ test("A5 A8: switching provider, each is sent its own summaries, and a switch ba
     })?.messages;
   // OpenAI has no summaries: it is sent the whole conversation, from the first input.
   expect(firstTo("openai", "9")?.[0] as unknown).toEqual({ role: "user", parts: [{ _tag: "Text", text: "1" }] });
-  // Back on Anthropic: its own summary, then everything after that summary's window, OpenAI's turns included.
+  // Back on Anthropic: its own summary, the turn that summary's window kept, then everything after
+  // the window, OpenAI's turns included.
   const back = firstTo("anthropic", "17");
   expect(back?.slice(0, 2) as unknown).toEqual([
     { role: "instruction", parts: [{ _tag: "Text", text: plain }] },
-    { role: "user", parts: [{ _tag: "Text", text: "9" }] },
+    { role: "user", parts: [{ _tag: "Text", text: "7" }] },
   ]);
+  expect(JSON.stringify(back)).toContain('"text":"9"');
   expect(JSON.stringify(back)).not.toContain("Journey");
   const replies = facts.flatMap((fact) =>
     fact._tag === "Observed" && fact.observation._tag === "ModelResponded"
@@ -246,4 +248,15 @@ test("A5 A8: switching provider, each is sent its own summaries, and a switch ba
       : [],
   );
   expect(replies as unknown).toEqual(countingUser(10).map((n) => String(Number(n) + 1)));
+});
+
+test("A5: a compaction keeps the span's last turn as it was, after the summary; the next compaction summarises it", async () => {
+  const { facts, summaries } = await played();
+  const windows = facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "CompactionWindow" ? [fact.observation] : []));
+  // Each window keeps one turn: the one that reached the count.
+  const delivered = (seqs: ReadonlyArray<number>) =>
+    facts.flatMap((fact) => (seqs.includes(fact.seq) && fact._tag === "Decided" && fact.decision._tag === "InputDelivered" ? [fact.seq] : []));
+  expect(windows.map((window) => delivered(window.kept).length)).toEqual([1, 1, 1]);
+  // The second summary covers the turn the first window kept (29) through 57: 15 turns, 30 messages.
+  expect(asText(summaries[1]?.summary ?? receivedJson(null))).toContain("exchanged **30** messages");
 });
