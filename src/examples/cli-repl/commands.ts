@@ -31,12 +31,30 @@ export const help = (): string => {
   return [...commands.map(([name, says]) => `${name.padEnd(width)}${says}`), "Anything else goes to the model."].join("\n");
 };
 
-/** The model and settings the session's next request goes with, in a line. */
+/**
+ * The model and settings the session's next request goes with, in a line; then the settings that
+ * were said and that this model was not sent, with the adapter's reason, so they are not taken for
+ * never said.
+ */
 export const inForce = (session: Session) =>
   Effect.gen(function* () {
-    const target = yield* modelOf(yield* session.facts);
-    const said = Object.entries(target.settings ?? {}).map(([name, value]) => `${name}=${String(value)}`);
-    return `${target.provider}/${target.model}${said.length === 0 ? " (no settings said)" : ` ${said.join(" ")}`}`;
+    const facts = yield* session.facts;
+    const target = yield* modelOf(facts);
+    const sent = Object.entries(target.settings ?? {}).map(([name, value]) => `${name}=${String(value)}`);
+    const notSent = new Map(
+      facts.flatMap((fact) => {
+        if (fact._tag !== "Observed" || fact.observation._tag !== "SettingEnforced") return [];
+        const { provider, model, enforced, reason } = fact.observation;
+        const name = enforced._tag.charAt(0).toLowerCase() + enforced._tag.slice(1);
+        return provider === target.provider && model === target.model && enforced.used === undefined && enforced.asked !== undefined && !(name in (target.settings ?? {}))
+          ? [[name, `${name}=${String(enforced.asked)} (${reason})`] as const]
+          : [];
+      }),
+    );
+    return [
+      `${target.provider}/${target.model}${sent.length === 0 ? (notSent.size === 0 ? " (no settings said)" : "") : ` ${sent.join(" ")}`}`,
+      ...(notSent.size === 0 ? [] : [`not sent to this model: ${[...notSent.values()].join(", ")}`]),
+    ].join("\n");
   });
 
 /** The settings `name=value …` names, as the core's grammar reads them; a name or value it does not know is said. */
