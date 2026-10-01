@@ -1,15 +1,29 @@
+# labkit-effect
 
-Default to using Bun instead of Node.js.
+`src/agent-machine`: pure machines (agent, conversation turn, turn step, call).
+Facts are Observations (each with an Origin) or Decisions. Effects are requested.
 
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
-- Use `bunx <package> <command>` instead of `npx <package> <command>`
-- Bun automatically loads .env, so don't use dotenv.
+`src/agent-session`: `loop.ts` is the agentic loop.
+Everything else is composable, extensible logic plugged in at sensible seams.
+
+What is built is in each module's `MODEL.md`; what is not, in `TODO.md`.
+
+## Commands
+
+- `bun run check`: typecheck, lint and tests. Run it before committing.
+- Don't pipe `bun test`: redirect its output to a file under `logs/` and read the file.
+- `bun cli` is a REPL and waits for input. From an agent's shell, use
+  `bun --silent cli -p "<prompt>" --model <model>`.
+
+## Bun
+
+Use Bun, not Node.js: `bun <file>`, `bun test`, `bun install`, `bun run <script>`, `bunx <package>`.
+`bun pm pkg get scripts` lists the scripts. Bun loads `.env` itself.
 
 ## Effect source
+
+When you need to find information about Effect, start at `repos/effect/LLMS.md`
+and the Effect source code available in your environment.
 
 `repos/effect` is the Effect repository at the tag of the version installed
 (`effect@4.0.0-rc.118`), vendored with `git subtree --squash`. It is reference
