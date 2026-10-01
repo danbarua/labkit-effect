@@ -35,14 +35,14 @@ import type { Decision } from "../agent-machine/decision.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { notObserved } from "../agent-machine/not-observed.ts";
 import { deliver, emptyWorld, type World } from "../agent-machine/router.ts";
-import { InputText, Millis, type ModelName, type ProviderName, Seq, type SessionId, type TurnId } from "../agent-machine/names.ts";
+import { FailureText, InputText, Millis, type ModelName, type ProviderName, Seq, type SessionId, type TurnId } from "../agent-machine/names.ts";
 import type { CapturedObservation, ModelPart, Observation, ToolOutcome } from "../agent-machine/observation.ts";
 import type { Origin } from "../agent-machine/origin.ts";
 import type { EffectRequest } from "../agent-machine/request.ts";
 import { emptyHeld, type Held as Throttled, throttle, type ThrottleInput } from "../agent-machine/throttle.ts";
 import { ContextAssembler, ModelClient, ModelProvider, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
-import { receivedJson } from "./received.ts";
+import { receivedJson, receivedText } from "./received.ts";
 import { ModelStream, ModelStreamInterval, type Streamed } from "./model-stream.ts";
 import { CurrentOrigin, harnessParts, reportedBy } from "./origin.ts";
 import { Report } from "./report.ts";
@@ -432,11 +432,35 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
       );
       yield* Effect.forEach(observed, (each) => record(each.origin, each.observation), { discard: true });
     }).pipe(
-      // A request that dies (a defect: a provider with no client configured, say) records nothing,
-      // so its turn does not end. What it died of is logged here, where it is last seen.
-      Effect.tapDefect((defect) =>
-        Effect.logError(logKeys.loop.requestDied, { request: request._tag, ...work, defect: defect instanceof Error ? (defect.stack ?? defect.message) : String(defect) }),
-      ),
+      // A request that dies (a defect: a provider with no client configured, say) is logged with what
+      // it died of, and an outcome is recorded for it, so that its turn goes on to its end and whoever
+      // runs the session gets it back: a model request failed, a tool's end was not observed, a
+      // turn-end review gave nothing more.
+      Effect.catchDefect((defect) => {
+        const died = defect instanceof Error ? (defect.stack ?? defect.message) : String(defect);
+        const outcome = ((): Observation | undefined => {
+          switch (request._tag) {
+            case "RequestModelResponse":
+              return {
+                _tag: "ModelFailed",
+                turn: request.turn,
+                failure: FailureText.make(`The request died: ${defect instanceof Error ? defect.message : String(defect)}`),
+                error: receivedText(died),
+              };
+            case "RunTool":
+              return { _tag: "ToolEnded", call: request.call, outcome: { _tag: "Failed", reason: { _tag: "Indeterminate" } } };
+            case "BeforeTurnEnded":
+              return { _tag: "TurnEndReviewed", turn: request.turn };
+            case "StopTurnWork":
+              return undefined;
+            default:
+              return request satisfies never;
+          }
+        })();
+        return Effect.logError(logKeys.loop.requestDied, { request: request._tag, ...work, defect: died }).pipe(
+          Effect.andThen(outcome === undefined ? Effect.void : record(harnessParts.loop, outcome)),
+        );
+      }),
     );
 
   /** Records the observation, then starts each request that follows in a fiber of its own. */

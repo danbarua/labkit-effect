@@ -24,7 +24,7 @@ import { AnthropicClient } from "@effect/ai-anthropic";
 import { OpenAiClient } from "@effect/ai-openai";
 import { OpenAiClient as OpenAiCompatClient } from "@effect/ai-openai-compat";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Console, Effect, Fiber, Layer, Logger, Option, PubSub, Redacted, Ref, Schema, Stdio, Stream } from "effect";
+import { Console, Effect, Fiber, FileSystem, Layer, Logger, Option, PubSub, Redacted, Ref, Schema, Stdio, Stream } from "effect";
 import { Argument, CliError, Command, Flag, Prompt } from "effect/cli";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { AgentContextAssembler, WholeConversation } from "../../agent-context/assembler.ts";
@@ -168,10 +168,29 @@ const answerTo = (facts: ReadonlyArray<Fact>, turn: TurnId | undefined): string 
 const lastTurn = (facts: ReadonlyArray<Fact>): TurnId | undefined =>
   facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "TurnStarted" ? [fact.observation.turn] : [])).at(-1);
 
+/** What the REPL prints after a turn: the answer, or how the turn ended when it gave none. */
+const replyTo = (facts: ReadonlyArray<Fact>): string => {
+  const turn = lastTurn(facts);
+  const ending = facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" && fact.decision.turn === turn ? [fact.decision.ending] : [])).at(-1);
+  const answer = answerTo(facts, turn);
+  if (ending?._tag === "Failed") return `(the turn failed: ${ending.failure})`;
+  return answer !== "" ? answer : `(the turn ended ${ending?._tag ?? "with nothing recorded"}, with no answer)`;
+};
+
 const encodeFact = Schema.encodeSync(Fact);
 
-/** Log lines go to stderr, so stdout holds the answer alone, as a caller parsing it expects. */
+/** In print mode log lines go to stderr, so stdout holds the answer alone, as a caller parsing it expects. */
 const LogsToStderr = Logger.layer([Logger.withConsoleError(Logger.formatLogFmt)]);
+
+/** In the REPL log lines go to a file, so the terminal holds the conversation alone. */
+const logFileOf = (sessionId: string): string => `logs/cli/${sessionId}.log`;
+const LogsToFile = (path: string) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      yield* (yield* FileSystem.FileSystem).makeDirectory("logs/cli", { recursive: true });
+      return Logger.layer([Logger.toFile(Logger.formatLogFmt, path, { batchWindow: "100 millis" })]);
+    }),
+  ).pipe(Layer.orDie);
 
 /** The session has no tools yet: a call names none that exists. */
 const NoTools = Layer.succeed(ToolRunner, { run: () => Effect.succeed({ _tag: "Failed" as const, reason: { _tag: "NotFound" as const } }) });
@@ -249,10 +268,10 @@ export const cli = Command.make(
         if (result.is_error) return yield* invalid(`The turn ended ${result.subtype}.`);
         return;
       }
-      yield* Console.log(`${target.provider}/${target.model} · /help for commands, /exit to quit.`);
+      yield* Console.log(`${target.provider}/${target.model} · /help for commands, /exit to quit. Log: ${logFileOf(sessionId)}`);
       if (options.prompt !== undefined) {
         yield* ask(session, options.prompt);
-        yield* Console.log(answerTo(yield* session.facts, lastTurn(yield* session.facts)));
+        yield* Console.log(replyTo(yield* session.facts));
       }
       if (!interactive) return;
       while (true) {
@@ -264,8 +283,7 @@ export const cli = Command.make(
           continue;
         }
         yield* ask(session, input);
-        const facts = yield* session.facts;
-        yield* Console.log(answerTo(facts, lastTurn(facts)));
+        yield* Console.log(replyTo(yield* session.facts));
       }
     });
 
@@ -280,7 +298,7 @@ export const cli = Command.make(
           CountingTurns,
           NoTurnEndHooks,
           NoTools,
-          LogsToStderr,
+          options.print ? LogsToStderr : LogsToFile(logFileOf(sessionId)),
         ),
       ),
     );

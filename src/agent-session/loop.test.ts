@@ -188,7 +188,7 @@ test("a subscriber receives every fact recorded after it subscribed, in order", 
   expect([...received]).toEqual(facts.slice(1));
 });
 
-test("a request that dies of a defect is logged with what it died of; nothing is recorded for it", async () => {
+test("a request that dies of a defect is logged with what it died of, and recorded as failed, so the turn ends", async () => {
   const logged: Array<unknown> = [];
   const dying = Layer.succeed(ModelClient, { respond: () => Effect.die(new Error("No request is configured for provider boring")) });
   const facts = await runTest(
@@ -212,7 +212,10 @@ test("a request that dies of a defect is logged with what it died of; nothing is
       ),
     ),
   );
-  expect(facts.at(-1) as unknown).toMatchObject({ observation: { _tag: "ModelRequestDispatched" } });
+  expect(facts.slice(-2) as unknown).toMatchObject([
+    { origin: { _tag: "Harness", part: "loop" }, observation: { _tag: "ModelFailed", failure: "The request died: No request is configured for provider boring" } },
+    { decision: { _tag: "TurnEnded", ending: { _tag: "Failed" } } },
+  ]);
   expect(logged).toContainEqual([
     logKeys.loop.requestDied,
     expect.objectContaining({ request: "RequestModelResponse", turn: "turn-1", defect: expect.stringContaining("No request is configured for provider boring") }),
