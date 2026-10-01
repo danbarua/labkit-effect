@@ -113,7 +113,7 @@ const configOf = (options: Options) =>
       const config: Config = { sessionId: crypto.randomUUID(), target: yield* targetOf(options.model), settings, system };
       return config;
     }
-    if (system !== undefined) return yield* invalid("A continued session keeps the system prompt it opened with; changing it is not built yet.");
+    if (system !== undefined) return yield* invalid("A continued session keeps the system prompt it opened with: all sessions have ImmutableSystemPrompt until further notice.");
     const latest = yield* latestSession;
     const now = yield* modelOf(latest.facts);
     const config: Config = { sessionId: latest.sessionId, target: yield* targetOf(options.model ?? `${now.provider}/${now.model}`), settings, system, continues: latest.facts };

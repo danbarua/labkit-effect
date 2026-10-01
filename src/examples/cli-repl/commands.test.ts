@@ -82,6 +82,11 @@ test("/settings shows the settings in force, and changes the ones named", async 
   expect(asked[0]?.settings as unknown).toEqual({ effort: "high", maxOutputTokens: 2000 });
 });
 
+test("/tools shows the tools the session opened with: here, none", async () => {
+  const { printed } = await session(["/tools"]);
+  expect(printed).toEqual(["No tools: the model is offered none."]);
+});
+
 test("a mistake in a command is said and changes nothing; a line that names no command is not one", async () => {
   const { printed } = await session(["/settings effort=loud", "/settings volume=11", "/model gpt-99", "/model grok-4.7", "/nope", "/settings"]);
   expect(printed[0]).toStartWith("error: Not settings the session takes:");
@@ -97,7 +102,7 @@ test("a mistake in a command is said and changes nothing; a line that names no c
 test("a line that starts with / completes to a command, a model, a setting not yet named, and a value the model takes", async () => {
   const { printed } = await session(["(offered)", "/model grok-4.7", "/model claude-sonnet-5-5", "(offered)"]);
   const complete = completions(JSON.parse(printed[0] ?? "") as Parameters<typeof completions>[0]);
-  expect(complete("/")).toEqual(["/model ", "/settings ", "/help", "/exit", "/quit"]);
+  expect(complete("/")).toEqual(["/model ", "/settings ", "/tools", "/help", "/exit", "/quit"]);
   expect(complete("/se")).toEqual(["/settings "]);
   expect(complete("/model openai/gpt-6-s")).toEqual(["/model openai/gpt-6-sol"]);
   expect(complete("/model xai/")).toEqual([]);

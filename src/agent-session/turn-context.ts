@@ -11,7 +11,7 @@ import type { Fact } from "../agent-machine/fact.ts";
 import type { TurnId } from "../agent-machine/names.ts";
 import { ContextAssembler, type ModelContext } from "./contracts.ts";
 import { nextMessages } from "./conversation.ts";
-import { systemOf, toolsOf } from "./configuration/session-setup.ts";
+import { immutableSystemPromptOf, immutableToolCatalogOf } from "./configuration/session-setup.ts";
 
 /** The facts from the start of `turn` onwards. */
 function turnFacts(facts: ReadonlyArray<Fact>, turn: TurnId): ReadonlyArray<Fact> {
@@ -23,10 +23,10 @@ function turnFacts(facts: ReadonlyArray<Fact>, turn: TurnId): ReadonlyArray<Fact
 
 export const TurnContextAssembler = Layer.succeed(ContextAssembler, {
   assemble: (facts, turn) =>
-    toolsOf(facts).pipe(
+    immutableToolCatalogOf(facts).pipe(
       Effect.map(
         (tools): ModelContext => ({
-          system: systemOf(facts),
+          system: immutableSystemPromptOf(facts),
           tools,
           messages: nextMessages(turnFacts(facts, turn), facts),
         }),

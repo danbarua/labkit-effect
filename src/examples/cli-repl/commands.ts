@@ -8,6 +8,8 @@
  *   in force and offers each to change. What is offered is what the provider's adapter applies as
  *   asked, beside the settings in force: a setting or value it would adjust is not offered. Typed
  *   out, it is still taken, and adjusted.
+ * - `/tools` shows the tools every request offers the model: the session's, as it opened with them
+ *   (ImmutableToolCatalog).
  *
  * `completions` gives the prompt what a line that starts with `/` could become: a command, then a
  * model's name or a setting and its values.
@@ -21,7 +23,7 @@ import { Prompt } from "effect/cli";
 import { ModelSettings } from "../../agent-machine/settings.ts";
 import type { Session } from "../../agent-session/loop.ts";
 import { KnownModels } from "../../agent-session/configuration/well-known-models.ts";
-import { modelOf } from "../../agent-session/configuration/session-setup.ts";
+import { immutableToolCatalogOf, modelOf } from "../../agent-session/configuration/session-setup.ts";
 import { optionsOf, type SettingOption } from "../../agent-session/configuration/options.ts";
 import { invalid } from "./invalid.ts";
 import { keyOf, known, targetOf } from "./models.ts";
@@ -30,6 +32,7 @@ import { keyOf, known, targetOf } from "./models.ts";
 export const commands: ReadonlyArray<readonly [string, string]> = [
   ["/model [name]", "Ask another model; with no name, pick one"],
   ["/settings [name=value …]", "Change the settings named; with none, show them and pick one to change"],
+  ["/tools", "Show the tools the model is offered"],
   ["/help", "Show these commands"],
   ["/exit", "Quit (also /quit)"],
 ];
@@ -158,6 +161,10 @@ export const command = (session: Session, line: string) =>
     switch (name) {
       case "/help":
         return help();
+      case "/tools": {
+        const tools = yield* immutableToolCatalogOf(yield* session.facts);
+        return tools.length === 0 ? "No tools: the model is offered none." : tools.map((tool) => `${tool.name}: ${tool.description}`).join("\n");
+      }
       case "/model": {
         const now = yield* modelOf(yield* session.facts);
         const chosen = words[0] ?? (yield* Prompt.Select({ message: `Asking ${now.provider}/${now.model}. Ask which model?`, choices: pickable() }));

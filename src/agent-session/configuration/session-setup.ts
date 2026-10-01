@@ -99,14 +99,21 @@ export const modelOf = (facts: ReadonlyArray<Fact>): Effect.Effect<Target> => {
   });
 };
 
-/** The system prompt the session opened with, if it has one. */
-export const systemOf = (facts: ReadonlyArray<Fact>): string | undefined => {
+/**
+ * ImmutableSystemPrompt: every session's system prompt is the one it opened with, if it has one, for
+ * every request. Nothing records a system prompt after the opening.
+ */
+export const immutableSystemPromptOf = (facts: ReadonlyArray<Fact>): string | undefined => {
   const system = openingOf(facts)?.system;
   return system === undefined ? undefined : asText(system);
 };
 
-/** The tools the session opened with. Tools recorded in a shape they do not decode from are a defect. */
-export const toolsOf = (facts: ReadonlyArray<Fact>): Effect.Effect<ReadonlyArray<ToolSpec>> => {
+/**
+ * ImmutableToolCatalog: every session's tools are the ones it opened with, for every request.
+ * Nothing records tools after the opening. Tools recorded in a shape they do not decode from are a
+ * defect.
+ */
+export const immutableToolCatalogOf = (facts: ReadonlyArray<Fact>): Effect.Effect<ReadonlyArray<ToolSpec>> => {
   const tools = openingOf(facts)?.tools;
   if (tools === undefined) return Effect.succeed([]);
   const parsed = parseJson(tools);

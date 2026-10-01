@@ -13,7 +13,7 @@ import type { Fact } from "../agent-machine/fact.ts";
 import type { ModelName, ProviderName, SessionId } from "../agent-machine/names.ts";
 import type { ModelTarget, Observation } from "../agent-machine/observation.ts";
 import type { ContextMessage, ToolSpec } from "../agent-session/contracts.ts";
-import { openedWith, systemOf, toolsOf } from "../agent-session/configuration/session-setup.ts";
+import { openedWith, immutableSystemPromptOf, immutableToolCatalogOf } from "../agent-session/configuration/session-setup.ts";
 
 /** A model a request can go to, and how much context it takes. */
 export interface ModelChoice {
@@ -102,10 +102,10 @@ export const assembleContents = (
   facts: ReadonlyArray<Fact>,
 ): Effect.Effect<Contents, never, Conversation | Notices> =>
   Effect.gen(function* () {
-    const system = systemOf(facts);
+    const system = immutableSystemPromptOf(facts);
     return {
       system: system === undefined ? [] : [system],
-      tools: yield* toolsOf(facts),
+      tools: yield* immutableToolCatalogOf(facts),
       messages: yield* (yield* Conversation).messages(facts),
       notices: yield* appended((yield* Notices).map((provider) => provider.notices)),
     };

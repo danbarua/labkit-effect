@@ -32,7 +32,7 @@ import { conversationOf, merged } from "../agent-session/conversation.ts";
 import type { Session } from "../agent-session/loop.ts";
 import { asText, parseJson, receivedJson } from "../agent-session/received.ts";
 import { sentIn } from "../agent-session/sent.ts";
-import { modelOf, systemOf, toolsOf } from "../agent-session/configuration/session-setup.ts";
+import { modelOf, immutableSystemPromptOf, immutableToolCatalogOf } from "../agent-session/configuration/session-setup.ts";
 import { Conversation } from "./assemble.ts";
 import type { SummarizerName, WindowSummary } from "./forks.ts";
 
@@ -133,8 +133,8 @@ export const compact = (session: Session, summarizer: Summarizer, decidedBy: Pol
     const windows = windowsOf(facts);
     const window = WindowId.make(`window-${windows.length + 1}`);
     const summary = yield* summarizer.summarize(previous, conversationOf(summarised, facts), target, {
-      system: systemOf(facts),
-      tools: yield* toolsOf(facts),
+      system: immutableSystemPromptOf(facts),
+      tools: yield* immutableToolCatalogOf(facts),
     });
     yield* summaries.record({
       session: sessionOf(facts),
