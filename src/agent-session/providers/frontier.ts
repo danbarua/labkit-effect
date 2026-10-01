@@ -1,7 +1,8 @@
 /**
  * The frontier models this harness knows: for each provider, the models of its latest three
  * releases, with the most tokens of context each takes, the most it writes in one response, the
- * kinds of file it takes as input (`text`, `image`, `pdf`), and
+ * kinds of file it takes as input (`text`, `image`, `pdf`), the reasoning efforts it accepts, where
+ * they were measured (`efforts`, OpenAI's models: each was asked every effort on 2026-10-01), and
  * its price in US dollars per million tokens (input not read from or written to the cache, output,
  * cache reads, cache writes, cache writes kept for an hour; `above` is the price of a request whose
  * input is over its `context`). Anthropic's hour-long cache writes are twice the input price
@@ -31,6 +32,7 @@ export interface Limits {
   /** The most tokens the model writes in one response. */
   readonly output: number;
   readonly input: ReadonlyArray<string>;
+  readonly efforts?: ReadonlyArray<string>;
   readonly price: Price & { readonly above?: Price & { readonly context: number } };
 }
 

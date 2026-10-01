@@ -24,7 +24,7 @@
  */
 
 import type { BlobId } from "../../agent-machine/blob.ts";
-import { acceptsFile } from "./frontier.ts";
+import { acceptsFile, limitsOf } from "./frontier.ts";
 import { OpenAiClient } from "@effect/ai-openai";
 import { Effect, Layer, type Schema, Stream } from "effect";
 import * as AiError from "effect/ai/AiError";
@@ -314,7 +314,7 @@ const respondOnce = (
  */
 export const openAiRequests = (
   retries: Retries = defaultRetries,
-  settle: (target: Target) => Settled = (target) => openAiSettings(target.settings),
+  settle: (target: Target) => Settled = (target) => openAiSettings(target.settings, limitsOf(target.provider, target.model)?.efforts),
 ): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;

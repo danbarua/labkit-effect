@@ -3,6 +3,7 @@
  * enforces where the model does not allow what was asked, and how a session's facts give them.
  */
 
+import { limitsOf } from "./providers/frontier.ts";
 import { afterAll, expect } from "bun:test";
 import { Effect, Layer } from "effect";
 import { ModelName, ProviderName, SessionId, TokenCount } from "../agent-machine/names.ts";
@@ -198,6 +199,27 @@ test("xAI: thinking off cannot be turned off, so it is auto, and no effort is se
     ],
   });
   expect(xAiSettings({ thinking: "off", effort: "high" }).fields).toEqual({ reasoning: { effort: "high" } });
+});
+
+test("OpenAI: an effort a model does not accept is sent as the nearest it does, the higher of two as near, and enforced", () => {
+  const efforts = (model: string) => limitsOf("openai", model)?.efforts;
+  // gpt-5 takes minimal to high: thinking off is sent as minimal, xhigh as high.
+  expect(openAiSettings({ thinking: "off" }, efforts("gpt-5"))).toMatchObject({
+    fields: { reasoning: { effort: "minimal" } },
+    enforced: [{ enforced: { _tag: "Thinking", asked: "off", used: "auto" }, reason: "this model's reasoning efforts are minimal, low, medium, high; it is sent minimal" }],
+  });
+  expect(openAiSettings({ effort: "xhigh" }, efforts("gpt-5")).fields).toEqual({ reasoning: { effort: "high" } });
+  // gpt-5-pro takes only high; the 5.5 pro takes medium to xhigh, so low goes up to medium and max down to xhigh.
+  expect(openAiSettings({ effort: "low" }, efforts("gpt-5-pro")).enforced).toEqual([
+    { enforced: { _tag: "Effort", asked: "low", used: "high" }, reason: "this model's reasoning efforts are high; it is sent high" },
+  ]);
+  expect(openAiSettings({ effort: "low" }, efforts("gpt-5.5-pro")).fields).toEqual({ reasoning: { effort: "medium" } });
+  expect(openAiSettings({ effort: "max" }, efforts("gpt-5.5")).fields).toEqual({ reasoning: { effort: "xhigh" } });
+  // gpt-6.1-sol takes no none: thinking off is its least effort, low.
+  expect(openAiSettings({ thinking: "off" }, efforts("gpt-6.1-sol")).fields).toEqual({ reasoning: { effort: "low" } });
+  // What a model accepts is sent as asked; a model with no list is sent what was asked.
+  expect(openAiSettings({ thinking: "off" }, efforts("gpt-5.5"))).toEqual({ fields: { reasoning: { effort: "none" } }, headers: {}, enforced: [] });
+  expect(openAiSettings({ effort: "max" }).fields).toEqual({ reasoning: { effort: "max" } });
 });
 
 test("Chat Completions: no setting is sent, and each one asked for is enforced", () => {
