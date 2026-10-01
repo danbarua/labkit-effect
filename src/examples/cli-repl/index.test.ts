@@ -44,3 +44,9 @@ test("print mode with no prompt and nothing piped says there is no prompt", asyn
   expect(result.code).not.toBe(0);
   expect(result.stdout + result.stderr).toContain("No prompt: pass one, or pipe it in.");
 });
+
+test("a model whose provider has no key set is not asked: it names the variable", async () => {
+  const result = await invoke(["-p", "Hello", "--model", "gpt-5.5"]);
+  expect(result.code).not.toBe(0);
+  expect(result.stdout + result.stderr).toContain("OPENAI_API_KEY is not set, so openai/gpt-5.5 cannot be asked.");
+});

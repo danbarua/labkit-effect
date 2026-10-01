@@ -207,6 +207,9 @@ export const cli = Command.make(
     const stdio = yield* Stdio.Stdio;
     const interactive = yield* stdio.stdinIsTerminal;
     const target = yield* targetOf(options.model);
+    const variable = keyVariables[target.provider];
+    if (variable !== undefined && keyOf(target.provider) === undefined)
+      return yield* invalid(`${variable} is not set, so ${target.provider}/${target.model} cannot be asked.`);
     const settings: ModelSettings = {
       ...(options.effort === undefined ? {} : { effort: options.effort }),
       ...(options.thinking === undefined ? {} : { thinking: options.thinking }),

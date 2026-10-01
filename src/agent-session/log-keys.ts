@@ -27,6 +27,8 @@ export const logKeys = {
   loop: {
     /** The core made a decision, and it was recorded; the details are the decision and where. */
     decisionRecorded: "loop.decision.recorded",
+    /** Carrying out a request died of a defect; nothing was recorded for it, and its turn has not ended. */
+    requestDied: "loop.request.died",
     /** A turn-end hook's feedback held a turn open. */
     turnHeld: "loop.turn_end.held",
     /** A turn reached `maxHolds`; its turn-end hooks were not run again. */

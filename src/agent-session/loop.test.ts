@@ -6,7 +6,7 @@ import { Effect, Layer, Logger, PubSub, References } from "effect";
 import { ModelName, ModelText, ProviderName, SessionId, StopReason, TurnId } from "../agent-machine/names.ts";
 import { CurrentWork, type Work } from "./work.ts";
 import type { Observation } from "../agent-machine/observation.ts";
-import { BoringContextAssembler } from "../../tests/support/boring.ts";
+import { BoringContextAssembler, BoringModelProvider } from "../../tests/support/boring.ts";
 import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
 import { ModelClient, ModelProvider, TurnEndHooks } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
@@ -186,4 +186,35 @@ test("a subscriber receives every fact recorded after it subscribed, in order", 
     ).pipe(Effect.provide(Layer.mergeAll(provider, client, BoringContextAssembler, CountingTurns, NoTurnEndHooks, SmolToolRunner))),
   );
   expect([...received]).toEqual(facts.slice(1));
+});
+
+test("a request that dies of a defect is logged with what it died of; nothing is recorded for it", async () => {
+  const logged: Array<unknown> = [];
+  const dying = Layer.succeed(ModelClient, { respond: () => Effect.die(new Error("No request is configured for provider boring")) });
+  const facts = await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession;
+      yield* session.observe(boringOpening());
+      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hello" } as unknown as Observation);
+      yield* session.idle;
+      return yield* session.facts;
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          BoringModelProvider,
+          BoringContextAssembler,
+          dying,
+          CountingTurns,
+          NoTurnEndHooks,
+          SmolToolRunner,
+          Logger.layer([Logger.make((options) => logged.push(options.message))]),
+        ),
+      ),
+    ),
+  );
+  expect(facts.at(-1) as unknown).toMatchObject({ observation: { _tag: "ModelRequestDispatched" } });
+  expect(logged).toContainEqual([
+    logKeys.loop.requestDied,
+    expect.objectContaining({ request: "RequestModelResponse", turn: "turn-1", defect: expect.stringContaining("No request is configured for provider boring") }),
+  ]);
 });

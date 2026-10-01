@@ -431,7 +431,13 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
         Effect.provideService(Report, report),
       );
       yield* Effect.forEach(observed, (each) => record(each.origin, each.observation), { discard: true });
-    });
+    }).pipe(
+      // A request that dies (a defect: a provider with no client configured, say) records nothing,
+      // so its turn does not end. What it died of is logged here, where it is last seen.
+      Effect.tapDefect((defect) =>
+        Effect.logError(logKeys.loop.requestDied, { request: request._tag, ...work, defect: defect instanceof Error ? (defect.stack ?? defect.message) : String(defect) }),
+      ),
+    );
 
   /** Records the observation, then starts each request that follows in a fiber of its own. */
   const record = (origin: Origin, observation: Observation): Effect.Effect<void, never, Services> =>
