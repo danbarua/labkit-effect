@@ -9,7 +9,8 @@
     "vidaimock:install": "bun scripts/vidaimock.ts",
     "lint": "oxlint --type-aware --format default src tests scripts",
     "check:brands": "bun scripts/check-brands.ts",
-    "check:rules": "bun scripts/check-rules.ts"
+    "check:rules": "bun scripts/check-rules.ts",
+    "cli": "bun run src/examples/cli-repl/index.ts"
   },
   "devDependencies": {
     "@effect/platform-bun": "4.0.0-rc.118",
