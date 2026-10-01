@@ -20,7 +20,7 @@
  */
 
 import type { BlobId } from "../../agent-machine/blob.ts";
-import { acceptsFile } from "./frontier.ts";
+import { knownOf, takesFile } from "./frontier.ts";
 import { AnthropicClient } from "@effect/ai-anthropic";
 import { Effect, Layer, Stream } from "effect";
 import * as AiError from "effect/ai/AiError";
@@ -46,7 +46,6 @@ import { logKeys } from "../log-keys.ts";
 import { ModelStream } from "../model-stream.ts";
 import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEvents, type Retries, withRetries } from "../provider-call.ts";
 import { reportEnforced } from "../settings.ts";
-import { limitsOf } from "./frontier.ts";
 import { anthropicSettings } from "./anthropic-settings.ts";
 import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
 import { receivedJson } from "../received.ts";
@@ -74,7 +73,7 @@ type Outcome = Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" }>;
  * The output limit sent when the session's settings give none, because the Messages API requires
  * one: the model's most output when it is a frontier model (`frontier.json`), otherwise 128,000.
  */
-const defaultMaxTokens = (model: string): number => limitsOf("anthropic", model)?.output ?? 128_000;
+const defaultMaxTokens = (target: Target): number => knownOf(target)?.output ?? 128_000;
 
 function resultContent(result: RenderedResult): { content: string; is_error?: true } {
   return result.isError ? { content: result.text, is_error: true } : { content: result.text };
@@ -102,7 +101,7 @@ function blocks(
     case "ToolResult": {
       // A tool's image or PDF goes in the result as an image or document block; anything else as text.
       const rendered = renderToolResult(part.outcome, calls.get(part.call), context.tools);
-      const file = rendered.file === undefined ? undefined : fileAs(rendered.file, files, (mediaType) => acceptsFile(target.provider, target.model, mediaType));
+      const file = rendered.file === undefined ? undefined : fileAs(rendered.file, files, (mediaType) => takesFile(knownOf(target), mediaType));
       if (file?._tag !== "Bytes")
         return {
           json: [{ type: "tool_result", tool_use_id: part.call, ...resultContent(rendered) }],
@@ -119,7 +118,7 @@ function blocks(
       return sentBack(part, target);
     case "File": {
       // An image goes as an `image` block, a PDF as a `document` block, both in base64.
-      const file = fileAs(part.blob, files, (mediaType) => acceptsFile(target.provider, target.model, mediaType));
+      const file = fileAs(part.blob, files, (mediaType) => takesFile(knownOf(target), mediaType));
       if (file._tag === "Text") return { json: [{ type: "text", text: file.text }], supplied: file.supplied };
       const source = { type: "base64", media_type: file.blob.mediaType, data: file.base64 };
       return { json: [{ type: file.blob.mediaType === "application/pdf" ? "document" : "image", source }], supplied: [] };
@@ -175,7 +174,7 @@ export function body(target: Target, context: ModelContext, files: ReadonlyMap<B
   return {
     json: {
       model: target.model,
-      max_tokens: target.settings?.maxOutputTokens ?? defaultMaxTokens(target.model),
+      max_tokens: target.settings?.maxOutputTokens ?? defaultMaxTokens(target),
       ...(system === undefined ? {} : { system }),
       ...(context.tools.length === 0
         ? {}
@@ -194,7 +193,7 @@ export function body(target: Target, context: ModelContext, files: ReadonlyMap<B
             {
               level: "info" as const,
               event: logKeys.anthropic.maxTokensSupplied,
-              details: { message: `no max_tokens parameter supplied, defaulting to ${defaultMaxTokens(target.model)}` },
+              details: { message: `no max_tokens parameter supplied, defaulting to ${defaultMaxTokens(target)}` },
             },
           ]
         : []),

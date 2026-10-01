@@ -3,7 +3,7 @@
  * enforces where the model does not allow what was asked, and how a session's facts give them.
  */
 
-import { limitsOf } from "./providers/frontier.ts";
+import { capabilitiesOf } from "./providers/frontier.ts";
 import { afterAll, expect } from "bun:test";
 import { Effect, Layer } from "effect";
 import { ModelName, ProviderName, SessionId, TokenCount } from "../agent-machine/names.ts";
@@ -156,7 +156,7 @@ test("the cache: Anthropic marks the request for five minutes or an hour, OpenAI
   ]);
 });
 
-const grok = limitsOf("xai", "grok-4.7")?.efforts;
+const grok = capabilitiesOf("xai", "grok-4.7")?.efforts;
 
 test("xAI: effort goes into reasoning, max as xhigh, the nearest grok takes; the summary always comes back; the cache and its retention cannot be set", () => {
   expect(xAiSettings({}, grok)).toEqual({ fields: {}, headers: {}, enforced: [] });
@@ -210,7 +210,7 @@ test("xAI: thinking off is grok's least effort, minimal, enforced; an effort sai
 });
 
 test("OpenAI: an effort a model does not accept is sent as the nearest it does, the higher of two as near, and enforced", () => {
-  const efforts = (model: string) => limitsOf("openai", model)?.efforts;
+  const efforts = (model: string) => capabilitiesOf("openai", model)?.efforts;
   // gpt-5 takes minimal to high: thinking off is sent as minimal, xhigh as high.
   expect(openAiSettings({ thinking: "off" }, efforts("gpt-5"))).toMatchObject({
     fields: { reasoning: { effort: "minimal" } },

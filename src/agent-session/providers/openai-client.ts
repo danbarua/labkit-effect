@@ -24,7 +24,7 @@
  */
 
 import type { BlobId } from "../../agent-machine/blob.ts";
-import { acceptsFile, limitsOf } from "./frontier.ts";
+import { knownOf, takesFile } from "./frontier.ts";
 import { OpenAiClient } from "@effect/ai-openai";
 import { Effect, Layer, type Schema, Stream } from "effect";
 import * as AiError from "effect/ai/AiError";
@@ -111,7 +111,7 @@ function items(
       case "ToolResult": {
         // A tool's image or PDF goes in the output as an input_image or input_file; anything else as text.
         const rendered = renderToolResult(part.outcome, calls.get(part.call), context.tools);
-        const file = rendered.file === undefined ? undefined : fileAs(rendered.file, files, (mediaType) => acceptsFile(target.provider, target.model, mediaType));
+        const file = rendered.file === undefined ? undefined : fileAs(rendered.file, files, (mediaType) => takesFile(knownOf(target), mediaType));
         const output =
           file?._tag === "Bytes"
             ? [
@@ -128,7 +128,7 @@ function items(
       case "File": {
         // An image goes as `input_image`, a PDF as `input_file`, each as a data URL, in a message of its own.
         const { role, type } = textAs(message);
-        const file = fileAs(part.blob, files, (mediaType) => acceptsFile(target.provider, target.model, mediaType));
+        const file = fileAs(part.blob, files, (mediaType) => takesFile(knownOf(target), mediaType));
         if (file._tag === "Text") return { json: [{ role, content: [{ type, text: file.text }] }], supplied: file.supplied };
         const content =
           file.blob.mediaType === "application/pdf"
@@ -314,7 +314,7 @@ const respondOnce = (
  */
 export const openAiRequests = (
   retries: Retries = defaultRetries,
-  settle: (target: Target) => Settled = (target) => openAiSettings(target.settings, limitsOf(target.provider, target.model)?.efforts),
+  settle: (target: Target) => Settled = (target) => openAiSettings(target.settings, knownOf(target)?.efforts),
 ): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;

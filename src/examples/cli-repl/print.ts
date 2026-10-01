@@ -9,6 +9,7 @@ import { Console, Effect, Fiber, PubSub, Ref, Schema } from "effect";
 import { Fact } from "../../agent-machine/fact.ts";
 import { contextGauge } from "../../agent-session/accounting.ts";
 import type { Session } from "../../agent-session/loop.ts";
+import { type Capabilities, KnownModels } from "../../agent-session/providers/frontier.ts";
 import { invalid } from "./invalid.ts";
 import { answerTo, ask, type Config, endingOf, lastTurn } from "./session.ts";
 
@@ -17,10 +18,10 @@ export type OutputFormat = "text" | "json" | "stream-json";
 const encodeFact = Schema.encodeSync(Fact);
 
 /** The result of the session's last turn. */
-const resultOf = (facts: ReadonlyArray<Fact>, config: Config, started: number) => {
+const resultOf = (facts: ReadonlyArray<Fact>, config: Config, started: number, known: Capabilities | undefined) => {
   const turn = lastTurn(facts);
   const ended = endingOf(facts, turn);
-  const gauge = contextGauge(facts, config.target.provider, config.target.model);
+  const gauge = contextGauge(facts, config.target.provider, config.target.model, known);
   return {
     type: "result",
     subtype: ended?._tag ?? "NotEnded",
@@ -58,7 +59,8 @@ export const printOnce = (session: Session, config: Config, prompt: string, form
     const printer = facts || format === "stream-json" ? yield* printingFacts(session) : undefined;
     yield* ask(session, prompt);
     if (printer !== undefined) yield* printer.finish;
-    const result = resultOf(yield* session.facts, config, started);
+    const known = yield* (yield* KnownModels)(config.target.provider, config.target.model);
+    const result = resultOf(yield* session.facts, config, started, known);
     yield* Console.log(format === "json" ? JSON.stringify(result, null, 2) : format === "stream-json" ? JSON.stringify(result) : result.result);
     if (result.is_error) return yield* invalid(`The turn ended ${result.subtype}.`);
   });

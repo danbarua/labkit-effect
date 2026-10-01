@@ -18,7 +18,7 @@
  */
 
 import type { BlobId } from "../../agent-machine/blob.ts";
-import { acceptsFile, limitsOf } from "./frontier.ts";
+import { knownOf, takesFile } from "./frontier.ts";
 import { OpenAiClient } from "@effect/ai-openai-compat";
 import { Effect, Layer, type Schema } from "effect";
 import type * as AiError from "effect/ai/AiError";
@@ -79,7 +79,7 @@ function chatMessages(
   );
   // A file goes in the message's content: an image as `image_url` with a data URL; anything else as its pointer.
   const filed = message.parts.flatMap((part) =>
-    part._tag === "File" ? [fileAs(part.blob, files, (mediaType) => mediaType.startsWith("image/") && acceptsFile(target.provider, target.model, mediaType))] : [],
+    part._tag === "File" ? [fileAs(part.blob, files, (mediaType) => mediaType.startsWith("image/") && takesFile(knownOf(target), mediaType))] : [],
   );
   const text = [
     ...message.parts.flatMap((part) => (part._tag === "Text" || part._tag === "Commentary" ? [{ type: "text", text: part.text }] : [])),
@@ -231,7 +231,7 @@ export const openAiCompatRequests = (
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
     return (target, context, turn) => {
-      const settled = openAiCompatSettings(target.settings, limitsOf(target.provider, target.model)?.efforts);
+      const settled = openAiCompatSettings(target.settings, knownOf(target)?.efforts);
       return filesIn(context).pipe(
         Effect.flatMap((files) => {
         const sent = body(target, context, files);

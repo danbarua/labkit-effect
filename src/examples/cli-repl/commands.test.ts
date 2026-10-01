@@ -72,9 +72,9 @@ test("/model asks another model from the next turn on, and the settings said sta
 test("/settings shows the settings in force, and changes the ones named", async () => {
   const { printed, asked } = await session(["/settings", "/settings effort=high maxOutputTokens=2000", "/settings", "hello"]);
   expect(printed).toEqual([
-    "openai/gpt-5.5 effort=low",
-    "Asking openai/gpt-5.5 effort=high maxOutputTokens=2000",
-    "openai/gpt-5.5 effort=high maxOutputTokens=2000",
+    "openai/gpt-5.5 effort=low\nthis model takes effort: none, low, medium, high, xhigh",
+    "Asking openai/gpt-5.5 effort=high maxOutputTokens=2000\nthis model takes effort: none, low, medium, high, xhigh",
+    "openai/gpt-5.5 effort=high maxOutputTokens=2000\nthis model takes effort: none, low, medium, high, xhigh",
   ]);
   expect(asked[0]?.settings as unknown).toEqual({ effort: "high", maxOutputTokens: 2000 });
 });
@@ -87,6 +87,6 @@ test("a mistake in a command is said and changes nothing; a line that names no c
     "error: No model gpt-99 in models.json; name it as provider/model.",
     "error: XAI_API_KEY is not set, so xai/grok-4.7 cannot be asked.",
     undefined,
-    "openai/gpt-5.5 effort=low",
+    "openai/gpt-5.5 effort=low\nthis model takes effort: none, low, medium, high, xhigh",
   ]);
 });

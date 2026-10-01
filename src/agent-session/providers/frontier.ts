@@ -18,6 +18,7 @@
  * (`claude-haiku-4-5-20251001` is `claude-haiku-4-5`; `gpt-5-mini` is not `gpt-5`).
  */
 
+import { Context, Effect } from "effect";
 import type { ModelName, ProviderName } from "../../agent-machine/names.ts";
 import frontier from "./frontier.json" with { type: "json" };
 
@@ -29,34 +30,55 @@ export interface Price {
   readonly cacheWrite1h?: number;
 }
 
-export interface Limits {
-  /** The most tokens of context the model takes. */
-  readonly context: number;
-  /** The most tokens the model writes in one response. */
-  readonly output: number;
+/**
+ * What is known of a model: what it takes and what it costs. A request is shaped to it: a setting
+ * outside what the model takes is sent as the nearest it does (an effort above its highest, as its
+ * highest).
+ */
+export interface Capabilities {
+  /** The most tokens of context the model takes, when known. */
+  readonly context?: number;
+  /** The most tokens the model writes in one response, when known. */
+  readonly output?: number;
+  /** The kinds of input it takes: `text`, `image`, `pdf`. */
   readonly input: ReadonlyArray<string>;
+  /** The reasoning efforts it takes, least first, when known. */
   readonly efforts?: ReadonlyArray<string>;
   readonly price: Price & { readonly above?: Price & { readonly context: number } };
 }
 
-const known: Readonly<Record<string, Readonly<Record<string, Limits>>>> = frontier;
+const known: Readonly<Record<string, Readonly<Record<string, Capabilities>>>> = frontier;
 
 /** `model` is `name` with its release date after it: `-2025-08-07` (OpenAI) or `-20251001` (Anthropic). */
 const datedFrom = (name: string, model: string): boolean =>
   model.startsWith(`${name}-`) && /^(\d{4}-\d{2}-\d{2}|\d{8})$/.test(model.slice(name.length + 1));
 
-/** The limits of `model` of `provider`, when it is one of the frontier models listed, by its name or a dated name. */
-export function limitsOf(provider: ProviderName | string, model: ModelName | string): Limits | undefined {
+/** What `frontier.json` says of `model` of `provider`, found by its name or a dated name. */
+export function capabilitiesOf(provider: ProviderName | string, model: ModelName | string): Capabilities | undefined {
   const models = known[provider] ?? {};
   const name = model in models ? model : Object.keys(models).find((each) => datedFrom(each, model));
   return name === undefined ? undefined : models[name];
 }
 
 /**
- * Whether `model` of `provider` takes a file of `mediaType` as input: an image (`image/*`) or a PDF
- * when `frontier.json` lists the kind for it. A model not listed is not known to take either.
+ * What is known of each model, for whoever chooses the model for a request (`ModelFromFacts` puts
+ * it on the request's target). By default it is what `frontier.json` lists; a host that knows more
+ * (a local server that says what its models take) provides its own.
  */
-export function acceptsFile(provider: ProviderName | string, model: ModelName | string, mediaType: string): boolean {
-  const kinds = limitsOf(provider, model)?.input ?? [];
+export const KnownModels = Context.Reference<(provider: ProviderName, model: ModelName) => Effect.Effect<Capabilities | undefined>>(
+  "agent-session/KnownModels",
+  { defaultValue: () => (provider, model) => Effect.succeed(capabilitiesOf(provider, model)) },
+);
+
+/** What is known of the model a request goes to: what its target carries, or what `frontier.json` lists. */
+export const knownOf = (target: { readonly provider: ProviderName; readonly model: ModelName; readonly capabilities?: Capabilities }): Capabilities | undefined =>
+  target.capabilities ?? capabilitiesOf(target.provider, target.model);
+
+/**
+ * Whether a model with `capabilities` takes a file of `mediaType` as input: an image (`image/*`) or
+ * a PDF when it lists the kind. A model nothing is known of is not known to take either.
+ */
+export function takesFile(capabilities: Capabilities | undefined, mediaType: string): boolean {
+  const kinds = capabilities?.input ?? [];
   return (mediaType.startsWith("image/") && kinds.includes("image")) || (mediaType === "application/pdf" && kinds.includes("pdf"));
 }

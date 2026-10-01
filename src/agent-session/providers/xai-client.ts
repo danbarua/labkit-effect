@@ -11,7 +11,7 @@ import { Effect, Layer, type Redacted } from "effect";
 import { ModelClient } from "../contracts.ts";
 import { defaultRetries, modelClientOf, type Retries } from "../provider-call.ts";
 import { openAiRequests } from "./openai-client.ts";
-import { limitsOf } from "./frontier.ts";
+import { knownOf } from "./frontier.ts";
 import { xAiSettings } from "./xai-settings.ts";
 
 export const xAiApiUrl = "https://api.x.ai/v1";
@@ -20,7 +20,7 @@ export const xAiApiUrl = "https://api.x.ai/v1";
 export const xAiClient = (apiKey: Redacted.Redacted) => OpenAiClient.layer({ apiUrl: xAiApiUrl, apiKey });
 
 /** Requests to Grok through the configured `OpenAiClient`, which `xAiClient` points at xAI. */
-export const xAiRequests = (retries: Retries = defaultRetries) => openAiRequests(retries, (target) => xAiSettings(target.settings, limitsOf(target.provider, target.model)?.efforts));
+export const xAiRequests = (retries: Retries = defaultRetries) => openAiRequests(retries, (target) => xAiSettings(target.settings, knownOf(target)?.efforts));
 
 export const xAiModelClient = (retries: Retries = defaultRetries) =>
   Layer.effect(ModelClient, xAiRequests(retries).pipe(Effect.map(modelClientOf)));

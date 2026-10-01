@@ -14,6 +14,7 @@ import { Effect, Schema } from "effect";
 import { Prompt } from "effect/cli";
 import { ModelSettings } from "../../agent-machine/settings.ts";
 import type { Session } from "../../agent-session/loop.ts";
+import { KnownModels } from "../../agent-session/providers/frontier.ts";
 import { modelOf } from "../../agent-session/session-setup.ts";
 import { invalid } from "./invalid.ts";
 import { keyOf, known, targetOf } from "./models.ts";
@@ -51,9 +52,11 @@ export const inForce = (session: Session) =>
           : [];
       }),
     );
+    const known = yield* (yield* KnownModels)(target.provider, target.model);
     return [
       `${target.provider}/${target.model}${sent.length === 0 ? (notSent.size === 0 ? " (no settings said)" : "") : ` ${sent.join(" ")}`}`,
       ...(notSent.size === 0 ? [] : [`not sent to this model: ${[...notSent.values()].join(", ")}`]),
+      ...(known?.efforts === undefined ? [] : [`this model takes effort: ${known.efforts.join(", ")}`]),
     ].join("\n");
   });
 

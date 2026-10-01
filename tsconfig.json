@@ -38,5 +38,5 @@
         }
       ]
   },
-  "exclude": ["repos", "node_modules"]
+  "exclude": ["repos", "node_modules", "logs"]
 }

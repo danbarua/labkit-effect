@@ -92,11 +92,12 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       `http://localhost:8000/v1`; OpenAPI docs at `/docs`). Built: the reasoning effort is sent as
       `reasoning_effort` (Qwen3.5-9B takes `none` to `xhigh` and refuses `max`). To do: streaming;
       `reasoning_content` sent back; tool calls; the other settings.
-- [ ] Configuration for local and unknown models, which `frontier.json` does not list: their
-      efforts, context window and input kinds. The local server says some of it itself:
-      `GET /v1/models` gives `context_window`, `capabilities`, and under `models`
-      `supported_reasoning_levels` and `default_reasoning_level`. Until then such a model is sent
-      the effort asked, and a server that does not take it refuses the request.
+- [ ] Models `frontier.json` does not list. Built: what is known of a model (`Capabilities`: context,
+      input kinds, efforts, price) travels on each request's target, from `KnownModels`, which a host
+      can provide; the CLI gives a `localhost` model what the server's `GET /v1/models` lists, so an
+      effort above its highest is sent as its highest. To do: a settings type per model, from its
+      capabilities, for a UI to bind to (static for the listed models needs them as `const` data,
+      which a JSON import is not).
 - [ ] OTLP, for a collector: OpenTelemetry's `@opentelemetry/exporter-trace-otlp-http` (a new
       dependency, one more span processor beside the file), or Effect's `OtlpTracer` (no new
       package, but it replaces the NodeSdk tracer, so not beside the file exporter).

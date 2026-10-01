@@ -5,6 +5,7 @@
 
 import { expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
+import { localCapabilities } from "./models.ts";
 
 const invoke = async (args: ReadonlyArray<string>, env: Record<string, string> = {}) => {
   const child = Bun.spawn([process.execPath, "src/examples/cli-repl/index.ts", ...args], {
@@ -49,4 +50,25 @@ test("a model whose provider has no key set is not asked: it names the variable"
   const result = await invoke(["-p", "Hello", "--model", "gpt-5.5"]);
   expect(result.code).not.toBe(0);
   expect(result.stdout + result.stderr).toContain("OPENAI_API_KEY is not set, so openai/gpt-5.5 cannot be asked.");
+});
+
+test("what the local server lists of a model is what is known of it: its context window, input and reasoning efforts", () => {
+  const listed = {
+    data: [{ id: "qwen3.5-9b-8bit", context_window: null, capabilities: ["text", "tools"] }],
+    models: [
+      {
+        slug: "qwen3.5-9b-8bit",
+        context_window: 262144,
+        input_modalities: ["text"],
+        default_reasoning_level: "none",
+        supported_reasoning_levels: [{ effort: "none" }, { effort: "low" }, { effort: "medium" }, { effort: "high" }],
+      },
+      { slug: "bare" },
+    ],
+  };
+  expect([...localCapabilities(listed)]).toEqual([
+    ["qwen3.5-9b-8bit", { context: 262144, input: ["text"], efforts: ["none", "low", "medium", "high"], price: { input: 0, output: 0 } }],
+    ["bare", { input: ["text"], price: { input: 0, output: 0 } }],
+  ]);
+  expect(localCapabilities("not a list").size).toBe(0);
 });

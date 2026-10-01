@@ -18,7 +18,7 @@
 import type { Fact } from "../agent-machine/fact.ts";
 import type { TurnId } from "../agent-machine/names.ts";
 import type { Observation, Usage } from "../agent-machine/observation.ts";
-import { limitsOf, type Price } from "./providers/frontier.ts";
+import { type Capabilities, capabilitiesOf, type Price } from "./providers/frontier.ts";
 
 type Responded = Extract<Observation, { _tag: "ModelResponded" }>;
 
@@ -32,7 +32,7 @@ const responses = (facts: ReadonlyArray<Fact>): ReadonlyArray<Responded> =>
   facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "ModelResponded" ? [fact.observation] : []));
 
 /** What one response cost, in US dollars, at `price`: its input above `price.above.context` at the higher price. */
-export function costOf(usage: Usage, price: Limits["price"]): number {
+export function costOf(usage: Usage, price: Capabilities["price"]): number {
   const at: Price = price.above !== undefined && usage.input > price.above.context ? price.above : price;
   const cacheRead = usage.cacheRead ?? 0;
   const cacheWrite = usage.cacheWrite ?? 0;
@@ -48,19 +48,20 @@ export function costOf(usage: Usage, price: Limits["price"]): number {
   );
 }
 
-type Limits = NonNullable<ReturnType<typeof limitsOf>>;
-
 /** The session's cost so far, in US dollars: the responses with usage, to a model with a price. */
 export function costIn(facts: ReadonlyArray<Fact>): number {
   return responses(facts).reduce((total, response) => {
-    const limits = limitsOf(response.provider, response.model);
+    const limits = capabilitiesOf(response.provider, response.model);
     return response.usage === undefined || limits === undefined ? total : total + costOf(response.usage, limits.price);
   }, 0);
 }
 
-/** The context gauge for a session asking `model` of `provider`; undefined when the model's window is not known. */
-export function contextGauge(facts: ReadonlyArray<Fact>, provider: string, model: string): ContextGauge | undefined {
-  const size = limitsOf(provider, model)?.context;
+/**
+ * The context gauge for a session asking `model` of `provider`; undefined when the model's window is
+ * not known. `known` is what is known of the model, when it is not one `frontier.json` lists.
+ */
+export function contextGauge(facts: ReadonlyArray<Fact>, provider: string, model: string, known?: Capabilities): ContextGauge | undefined {
+  const size = (known ?? capabilitiesOf(provider, model))?.context;
   if (size === undefined) return undefined;
   const last = [...responses(facts)].reverse().find((response) => response.usage !== undefined)?.usage;
   const used = last === undefined ? 0 : last.input + last.output - (last.thinking ?? 0);

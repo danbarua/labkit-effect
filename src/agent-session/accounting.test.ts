@@ -6,7 +6,7 @@ import { json } from "../../tests/support/received.ts";
 import { test } from "../../tests/support/test.ts";
 import { TokenCount, TurnId } from "../agent-machine/names.ts";
 import { contextGauge, costOf, requestsIn } from "./accounting.ts";
-import { limitsOf } from "./providers/frontier.ts";
+import { capabilitiesOf } from "./providers/frontier.ts";
 
 const tokens = (count: number) => TokenCount.make(count);
 
@@ -22,7 +22,7 @@ const responded = (usage: unknown, parts: ReadonlyArray<unknown> = [{ _tag: "Tex
 });
 
 test("a response's cost: input not cached, cache reads, cache writes and output, each at its price per million", () => {
-  const sonnet = limitsOf("anthropic", "claude-sonnet-5-5")?.price;
+  const sonnet = capabilitiesOf("anthropic", "claude-sonnet-5-5")?.price;
   if (sonnet === undefined) throw new Error("claude-sonnet-5-5 is not in frontier.json");
   // 1,000 uncached at $2, 3,000 read at $0.20, 1,000 written at $2.50, 500 out at $10, per million.
   const cost = costOf({ input: tokens(5000), cacheRead: tokens(3000), cacheWrite: tokens(1000), output: tokens(500) }, sonnet);
@@ -30,7 +30,7 @@ test("a response's cost: input not cached, cache reads, cache writes and output,
 });
 
 test("cache writes kept for an hour are priced at their own rate, the rest at the five-minute rate", () => {
-  const sonnet = limitsOf("anthropic", "claude-sonnet-5-5")?.price;
+  const sonnet = capabilitiesOf("anthropic", "claude-sonnet-5-5")?.price;
   if (sonnet === undefined) throw new Error("claude-sonnet-5-5 is not in frontier.json");
   expect(costOf({ input: tokens(3000), cacheWrite: tokens(3000), cacheWrite1h: tokens(1000), output: tokens(0) }, sonnet)).toBeCloseTo(
     (2000 * 2.5 + 1000 * 4) / 1_000_000,
@@ -39,7 +39,7 @@ test("cache writes kept for an hour are priced at their own rate, the rest at th
 });
 
 test("a request whose input is over a tier's context is priced at the higher tier", () => {
-  const sol = limitsOf("openai", "gpt-6.1-sol")?.price;
+  const sol = capabilitiesOf("openai", "gpt-6.1-sol")?.price;
   if (sol === undefined) throw new Error("gpt-6.1-sol is not in frontier.json");
   expect(costOf({ input: tokens(100_000), output: tokens(0) }, sol)).toBeCloseTo((100_000 * 2) / 1_000_000, 12);
   expect(costOf({ input: tokens(300_000), output: tokens(0) }, sol)).toBeCloseTo((300_000 * 4) / 1_000_000, 12);

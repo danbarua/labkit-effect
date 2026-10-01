@@ -2,6 +2,7 @@
  * What the loop needs from the outside world, one service per job. Each adapter implements one.
  */
 
+import type { Capabilities } from "./providers/frontier.ts";
 import { BlobRef } from "../agent-machine/blob.ts";
 import { Context, type Effect, Schema } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
@@ -19,6 +20,8 @@ export interface Target {
   readonly provider: ProviderName;
   readonly model: ModelName;
   readonly settings?: ModelSettings;
+  /** What is known of the model, which the request is shaped to; `frontier.json`'s when absent. */
+  readonly capabilities?: Capabilities;
 }
 
 /** Chooses the model for a turn's next request, given the session's facts. */

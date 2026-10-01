@@ -19,7 +19,7 @@ import { ModelFromFacts } from "../../agent-session/model-choice.ts";
 import { reportedBy } from "../../agent-session/origin.ts";
 import { openedWith } from "../../agent-session/session-setup.ts";
 import { CountingTurns, NoTurnEndHooks } from "../../agent-session/turns.ts";
-import { type Asked, Clients } from "./models.ts";
+import { type Asked, Clients, KnownToCli } from "./models.ts";
 
 export interface Config {
   readonly sessionId: string;
@@ -48,7 +48,8 @@ const NoTools = Layer.succeed(ToolRunner, { run: () => Effect.succeed({ _tag: "F
 
 /** What the loop needs, for a CLI session. */
 const Services = Layer.mergeAll(
-    ModelFromFacts,
+    ModelFromFacts.pipe(Layer.provide(KnownToCli)),
+  KnownToCli,
     AgentContextAssembler.pipe(Layer.provide(Layer.mergeAll(WholeConversation, Layer.succeed(Notices, [])))),
     Clients,
     CountingTurns,
