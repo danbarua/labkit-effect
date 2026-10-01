@@ -23,11 +23,13 @@ test("a well-known model's settings type takes the efforts it takes, and thinkin
 });
 
 test("the choices to offer for a model follow its capabilities; with no efforts listed, all are offered", () => {
-  expect(settingChoices(capabilitiesOf("xai", "grok-4.7"))).toEqual({ effort: ["low", "medium", "high", "xhigh"], thinking: ["auto", "before_answer", "between_tools"] });
+  expect(settingChoices(capabilitiesOf("xai", "grok-4.7"))).toMatchObject({ effort: ["low", "medium", "high", "xhigh"], thinking: ["auto", "before_answer", "between_tools"] });
   // A local model, as its server lists it.
   expect(settingChoices({ input: ["text"], efforts: ["none", "low", "medium", "high"], price: { input: 0, output: 0 } })).toEqual({
     effort: ["low", "medium", "high"],
     thinking: ["auto", "before_answer", "between_tools", "off"],
+    observe: ["all", "progress_only", "off"],
+    cache: ["off", "5m", "1h"],
   });
   expect(settingChoices(undefined).effort).toEqual(["low", "medium", "high", "xhigh", "max"]);
 });

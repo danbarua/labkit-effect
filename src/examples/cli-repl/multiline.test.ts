@@ -3,7 +3,7 @@
 import { expect } from "bun:test";
 import { Option, type Terminal } from "effect";
 import { test } from "../../../tests/support/test.ts";
-import { keyed, rowsOf, type Typed } from "./multiline.ts";
+import { hinted, keyed, rowsOf, type Typed } from "./multiline.ts";
 
 const key = (name: string, input?: string, modifiers: { meta?: boolean; ctrl?: boolean } = {}): Terminal.UserInput => ({
   input: input === undefined ? Option.none() : Option.some(input),
@@ -49,4 +49,24 @@ test("during a paste the frame on the screen stays as it was, and the paste is d
   const pasting = after([key("a", "a"), key("paste-start"), key("x", "x"), key("return", "\r"), key("y", "y")]);
   expect(pasting.state).toEqual({ text: "ax\ny", pasting: true, drawn: "a" });
   expect(after([key("a", "a"), key("paste-start"), key("x", "x"), key("paste-end")]).state).toEqual({ text: "ax", pasting: false, drawn: "ax" });
+});
+
+test("Tab makes the text what every completion begins with; with nothing to add it types nothing", () => {
+  const complete = (text: string) => ["/model ", "/more", "/settings "].filter((each) => each.startsWith(text));
+  const tab = (text: string) => keyed({ text, pasting: false, drawn: text }, key("tab", "\t"), complete);
+  expect(tab("/")).toEqual({ _tag: "Beep" });
+  expect(tab("/m")).toMatchObject({ _tag: "NextFrame", state: { text: "/mo" } });
+  expect(tab("/s")).toMatchObject({ _tag: "NextFrame", state: { text: "/settings " } });
+  expect(tab("hello")).toEqual({ _tag: "Beep" });
+});
+
+test("the hint is each completion's last word, cut to the room the row has", () => {
+  const complete = (text: string) => ["/settings effort=low", "/settings effort=medium", "/settings effort=high"].filter((each) => each.startsWith(text));
+  expect(hinted("/settings eff", complete, 60)).toBe("  effort=low  effort=medium  effort=high");
+  expect(hinted("/settings eff", complete, 20)).toBe("  effort=low  effor…");
+  expect(hinted("/settings eff", complete, 5)).toBe("");
+  expect(hinted("/settings effort=low", complete, 60)).toBe("");
+  expect(hinted("hello", complete, 60)).toBe("");
+  // A completion that adds only the space before the next word shows nothing.
+  expect(hinted("/settings", () => ["/settings "], 60)).toBe("");
 });

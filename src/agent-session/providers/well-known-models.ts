@@ -21,7 +21,7 @@
 
 import { Context, Effect } from "effect";
 import type { ModelName, ProviderName } from "../../agent-machine/names.ts";
-import type { Effort, ModelSettings, ThinkingMode } from "../../agent-machine/settings.ts";
+import { CacheFor, type Effort, type ModelSettings, Observe, type ThinkingMode } from "../../agent-machine/settings.ts";
 import { wellKnownModels } from "./well-known-models.gen.ts";
 
 export interface Price {
@@ -106,15 +106,25 @@ export type SettingsFor<P extends WellKnownProvider, M extends WellKnownModel<P>
 const everyEffort = ["low", "medium", "high", "xhigh", "max"] as const satisfies ReadonlyArray<Effort>;
 const everyThinking = ["auto", "before_answer", "between_tools", "off"] as const satisfies ReadonlyArray<ThinkingMode>;
 
+export interface SettingChoices {
+  readonly effort: ReadonlyArray<Effort>;
+  readonly thinking: ReadonlyArray<ThinkingMode>;
+  readonly observe: ReadonlyArray<Observe>;
+  readonly cache: ReadonlyArray<CacheFor>;
+}
+
 /**
- * The same as values, for a model known only at run time: the efforts and thinking modes to offer
- * for a model with `capabilities`. With no efforts listed, all are offered.
+ * The same as values, for a model known only at run time: the values to offer for each setting
+ * that has a set of them, for a model with `capabilities`. With no efforts listed, every effort and
+ * thinking mode is offered. Capabilities say nothing of `observe` and `cache`, so every value of
+ * those is offered.
  */
-export function settingChoices(capabilities: Capabilities | undefined): { readonly effort: ReadonlyArray<Effort>; readonly thinking: ReadonlyArray<ThinkingMode> } {
+export function settingChoices(capabilities: Capabilities | undefined): SettingChoices {
   const taken = capabilities?.efforts;
-  if (taken === undefined) return { effort: everyEffort, thinking: everyThinking };
   return {
-    effort: everyEffort.filter((effort) => taken.includes(effort)),
-    thinking: everyThinking.filter((mode) => mode !== "off" || taken.includes("none")),
+    effort: taken === undefined ? everyEffort : everyEffort.filter((effort) => taken.includes(effort)),
+    thinking: taken === undefined ? everyThinking : everyThinking.filter((mode) => mode !== "off" || taken.includes("none")),
+    observe: Observe.literals,
+    cache: CacheFor.literals,
   };
 }

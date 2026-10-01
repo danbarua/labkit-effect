@@ -9,6 +9,9 @@
  *   the same byte for Enter and Shift+Enter, and Effect's `Terminal` does not name the key that the
  *   kitty keyboard protocol sends for it.
  * - Editing is at the end of the text: typing adds, Backspace removes.
+ * - Tab completes: the prompt is given a function from the text typed to the texts it could become.
+ *   Tab makes the text what they all begin with; what each would add to the last word is shown
+ *   after the text, dimmed, as far as the row has room.
  * - The frame is redrawn after each key: the rows it took are erased, a line wider than the terminal
  *   counted as the rows it wraps to. A paste is drawn once, when it ends.
  */
@@ -44,8 +47,34 @@ const isControl = (text: string): boolean => {
   return code < 0x20 || code === 0x7f;
 };
 
+/** The texts that `text` could become. */
+export type Complete = (text: string) => ReadonlyArray<string>;
+
+const nothing: Complete = () => [];
+
+/** What every one of `texts` begins with. */
+const sharedStart = (texts: ReadonlyArray<string>): string =>
+  texts.reduce((shared, text) => {
+    let length = 0;
+    while (length < shared.length && shared[length] === text[length]) length++;
+    return shared.slice(0, length);
+  });
+
+/**
+ * What is shown after `text` of the texts it could become: each one's last word, in a row with
+ * `room` columns left; nothing when there are none, or no room.
+ */
+export function hinted(text: string, complete: Complete, room: number): string {
+  const from = text.lastIndexOf(" ") + 1;
+  const words = complete(text).map((each) => each.slice(from).trimEnd()).filter((word) => word !== text.slice(from));
+  if (words.length === 0) return "";
+  const all = `  ${words.join("  ")}`;
+  if (Bun.stringWidth(all) <= room) return all;
+  return room < 8 ? "" : `${all.slice(0, room - 1)}…`;
+}
+
 /** What a key, or a piece of a paste, does to what is typed so far. */
-export function keyed(state: Typed, input: Terminal.UserInput): Prompt.Action<Typed, string> {
+export function keyed(state: Typed, input: Terminal.UserInput, complete: Complete = nothing): Prompt.Action<Typed, string> {
   const next = (changed: Partial<Typed>): Prompt.Action<Typed, string> => {
     const to = { ...state, ...changed };
     return { _tag: "NextFrame", state: { ...to, drawn: to.pasting ? state.drawn : to.text } };
@@ -57,34 +86,47 @@ export function keyed(state: Typed, input: Terminal.UserInput): Prompt.Action<Ty
   if (name === "enter" || (name === "return" && (meta || state.pasting))) return next({ text: `${state.text}\n` });
   if (name === "return") return { _tag: "Submit", value: state.text };
   if (name === "backspace") return next({ text: state.text.slice(0, -1) });
+  if (name === "tab") {
+    const could = complete(state.text);
+    const shared = could.length === 0 ? state.text : sharedStart(could);
+    return shared.length > state.text.length ? next({ text: shared }) : { _tag: "Beep" };
+  }
   const typed = Option.getOrUndefined(input.input);
   if (typed !== undefined && !ctrl && !meta && !isControl(typed)) return next({ text: state.text + typed });
   return { _tag: "Beep" };
 }
 
-export const Multiline: Prompt.Prompt<string> = Prompt.Custom<Typed, string>(
-  { text: "", pasting: false, drawn: "" },
-  {
-    // During a paste nothing is drawn: the frame from before it stays, and the whole paste is drawn when it ends.
-    render: (state, action) =>
-      Effect.succeed(
+/** The frame for `text`, and after it the hint, dimmed; the cursor is left at the end of the text. */
+const drawn = (text: string, complete: Complete) =>
+  Effect.gen(function* () {
+    const columns = yield* (yield* Terminal.Terminal).columns;
+    const last = frame(text).split("\n").at(-1) ?? "";
+    const hint = hinted(text, complete, columns - 1 - (Bun.stringWidth(last) % columns));
+    return hint === "" ? frame(text) : `${frame(text)}\x1b7\x1b[2m${hint}\x1b[0m\x1b8`;
+  });
+
+export const Multiline = (complete: Complete = nothing): Prompt.Prompt<string> =>
+  Prompt.Custom<Typed, string>(
+    { text: "", pasting: false, drawn: "" },
+    {
+      // During a paste nothing is drawn: the frame from before it stays, and the whole paste is drawn when it ends.
+      render: (state, action) =>
         action._tag === "Submit"
-          ? `✔ You … ${action.value.split("\n").join(`\n${indent}`)}\n`
+          ? Effect.succeed(`✔ You … ${action.value.split("\n").join(`\n${indent}`)}\n`)
           : action._tag === "Beep"
-            ? "\x07"
+            ? Effect.succeed("\x07")
             : state.pasting
-              ? ""
-              : frame(state.text),
-      ),
-    clear: (state, action) =>
-      action._tag === "NextFrame" && action.state.pasting
-        ? Effect.succeed("")
-        : Effect.gen(function* () {
-            return erased(state.drawn, yield* (yield* Terminal.Terminal).columns);
-          }),
-    process: (input, state) => Effect.succeed(keyed(state, input)),
-  },
-);
+              ? Effect.succeed("")
+              : drawn(state.text, complete),
+      clear: (state, action) =>
+        action._tag === "NextFrame" && action.state.pasting
+          ? Effect.succeed("")
+          : Effect.gen(function* () {
+              return erased(state.drawn, yield* (yield* Terminal.Terminal).columns);
+            }),
+      process: (input, state) => Effect.succeed(keyed(state, input, complete)),
+    },
+  );
 
 /** Bracketed paste mode, on for as long as the scope lasts. */
 export const bracketedPaste = Effect.gen(function* () {

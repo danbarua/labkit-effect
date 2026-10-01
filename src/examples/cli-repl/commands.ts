@@ -3,8 +3,12 @@
  *
  * - `/model <name>` asks another model from the next turn on: a well-known model, or
  *   `provider/model`. `/model` alone shows the model being asked and offers the known ones to pick.
- * - `/settings` shows the settings in force. `/settings name=value …` changes the ones named
- *   (`thinking`, `observe`, `effort`, `maxOutputTokens`, `cache`); the rest stay as they were.
+ * - `/settings name=value …` changes the settings named (`thinking`, `observe`, `effort`,
+ *   `maxOutputTokens`, `cache`); the rest stay as they were. `/settings` alone shows the settings
+ *   in force and offers each to change, with the values the model being asked takes.
+ *
+ * `completions` gives the prompt what a line that starts with `/` could become: a command, then a
+ * model's name or a setting and its values.
  *
  * Both report a change of model to the session (`ModelChangeArrived`), which takes it between
  * turns; what a model does not allow is adjusted, and recorded, when it is next asked.
@@ -14,7 +18,7 @@ import { Effect, Schema } from "effect";
 import { Prompt } from "effect/cli";
 import { ModelSettings } from "../../agent-machine/settings.ts";
 import type { Session } from "../../agent-session/loop.ts";
-import { KnownModels } from "../../agent-session/providers/well-known-models.ts";
+import { KnownModels, type SettingChoices, settingChoices } from "../../agent-session/providers/well-known-models.ts";
 import { modelOf } from "../../agent-session/session-setup.ts";
 import { invalid } from "./invalid.ts";
 import { keyOf, known, targetOf } from "./models.ts";
@@ -22,7 +26,7 @@ import { keyOf, known, targetOf } from "./models.ts";
 /** Each command and what it says of itself in `/help`. */
 export const commands: ReadonlyArray<readonly [string, string]> = [
   ["/model [name]", "Ask another model; with no name, pick one"],
-  ["/settings [name=value …]", "Show the settings, or change the ones named"],
+  ["/settings [name=value …]", "Change the settings named; with none, show them and pick one to change"],
   ["/help", "Show these commands"],
   ["/exit", "Quit (also /quit)"],
 ];
@@ -81,6 +85,75 @@ const pickable = () =>
     keyOf(provider) === undefined ? [] : Object.keys(models).map((model) => ({ title: `${provider}/${model}`, value: `${provider}/${model}` })),
   );
 
+/** What a line can be completed from: the models that can be asked, and each setting's values for the model being asked. */
+export interface Offered {
+  readonly models: ReadonlyArray<string>;
+  readonly settings: SettingChoices;
+}
+
+export const offered = (session: Session) =>
+  Effect.gen(function* () {
+    const now = yield* modelOf(yield* session.facts);
+    const settings = settingChoices(yield* (yield* KnownModels)(now.provider, now.model));
+    const result: Offered = { models: pickable().map((each) => each.value), settings };
+    return result;
+  });
+
+/** The settings by name, each with the values to offer; `maxOutputTokens` is a number, and has none. */
+const valuesOf = (settings: SettingChoices): Readonly<Record<string, ReadonlyArray<string>>> => ({ ...settings, maxOutputTokens: [] });
+
+/** A command's name as it is typed: with a space after it when words can follow. */
+const typedAs = [...commands.map(([usage]) => (usage.includes(" ") ? `${usage.slice(0, usage.indexOf(" "))} ` : usage)), "/quit"];
+
+/**
+ * The lines that `text` could become, when it starts with `/`: its last word completed to a command,
+ * to a model after `/model`, or after `/settings` to a setting not yet named on the line and then to
+ * one of its values.
+ */
+export const completions =
+  (from: Offered) =>
+  (text: string): ReadonlyArray<string> => {
+    if (!text.startsWith("/") || text.includes("\n")) return [];
+    const words = text.split(" ");
+    const last = words.at(-1) ?? "";
+    const before = text.slice(0, text.length - last.length);
+    const values = valuesOf(from.settings);
+    const candidates = (): ReadonlyArray<string> => {
+      if (words.length === 1) return typedAs;
+      if (words[0] === "/model") return words.length === 2 ? from.models : [];
+      if (words[0] !== "/settings") return [];
+      const equals = last.indexOf("=");
+      if (equals >= 0) return (values[last.slice(0, equals)] ?? []).map((value) => `${last.slice(0, equals)}=${value}`);
+      const named = new Set(words.slice(1, -1).map((word) => word.split("=")[0]));
+      return Object.keys(values).flatMap((name) => (named.has(name) ? [] : [`${name}=`]));
+    };
+    return candidates().flatMap((each) => (each.startsWith(last) ? [before + each] : []));
+  };
+
+const leave = "(leave)";
+
+/** Asks which setting to change and to what, among the values the model being asked takes; undefined when none is to change. */
+const picked = (session: Session) =>
+  Effect.gen(function* () {
+    const now = yield* modelOf(yield* session.facts);
+    const values = valuesOf((yield* offered(session)).settings);
+    const said: Readonly<Record<string, string | number | undefined>> = now.settings ?? {};
+    const name = yield* Prompt.Select({
+      message: `${(yield* inForce(session)).split("\n")[0] ?? ""}. Change which setting?`,
+      choices: [
+        { title: "Leave them as they are", value: leave },
+        ...Object.keys(values).map((each) => ({ title: said[each] === undefined ? each : `${each} (now ${String(said[each])})`, value: each })),
+      ],
+    });
+    if (name === leave) return undefined;
+    const choices = values[name] ?? [];
+    const value =
+      choices.length === 0
+        ? String(yield* Prompt.Int({ message: name, min: 1 }))
+        : yield* Prompt.Select({ message: name, choices: choices.map((each) => ({ title: each, value: each })) });
+    return `${name}=${value}`;
+  });
+
 /** Runs the command `line` names, and returns what to print; undefined when `line` is not one of these commands. */
 export const command = (session: Session, line: string) =>
   Effect.gen(function* () {
@@ -97,8 +170,9 @@ export const command = (session: Session, line: string) =>
         return `Asking ${yield* inForce(session)}`;
       }
       case "/settings": {
-        if (words.length === 0) return yield* inForce(session);
-        const settings = yield* settingsFrom(words);
+        const change = words.length === 0 ? yield* picked(session) : undefined;
+        if (words.length === 0 && change === undefined) return yield* inForce(session);
+        const settings = yield* settingsFrom(change === undefined ? words : [change]);
         const now = yield* modelOf(yield* session.facts);
         yield* session.observe({ _tag: "ModelChangeArrived", provider: now.provider, model: now.model, settings });
         yield* session.idle;

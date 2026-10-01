@@ -1,6 +1,7 @@
 /**
  * The REPL: a prompt, the user's input to the model, its answer, and again, until `/exit`. A line
- * that starts with `/` is one of the REPL's own commands (`commands.ts`) and does not go to the model.
+ * that starts with `/` is one of the REPL's own commands (`commands.ts`) and does not go to the model;
+ * Tab completes a command, a model's name and a setting, from what the session's model takes.
  * With input that is not a terminal there is nothing to prompt: it answers the first prompt, if one
  * was given, and ends.
  */
@@ -8,7 +9,7 @@
 import { Console, Effect } from "effect";
 import type { Fact } from "../../agent-machine/fact.ts";
 import type { Session } from "../../agent-session/loop.ts";
-import { command } from "./commands.ts";
+import { command, completions, offered } from "./commands.ts";
 import { bracketedPaste, Multiline } from "./multiline.ts";
 import { answerTo, ask, type Config, endingOf, lastTurn, logFileOf } from "./session.ts";
 
@@ -34,7 +35,7 @@ export const repl = (session: Session, config: Config, first: string | undefined
     if (!interactive) return;
     yield* bracketedPaste;
     while (true) {
-      const input = yield* Multiline;
+      const input = yield* Multiline(completions(yield* offered(session)));
       if (input === "/exit" || input === "/quit") break;
       if (input.trim() === "") continue;
       if (input.startsWith("/")) {

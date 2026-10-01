@@ -13,7 +13,7 @@ import { ModelFromFacts } from "../../agent-session/model-choice.ts";
 import { receivedJson } from "../../agent-session/received.ts";
 import { openedWith } from "../../agent-session/session-setup.ts";
 import { CountingTurns, NoTurnEndHooks } from "../../agent-session/turns.ts";
-import { command } from "./commands.ts";
+import { command, completions, inForce, offered } from "./commands.ts";
 import { ask } from "./session.ts";
 
 /** Runs `lines` in order (a command, or input to the model) and returns what each command printed and what the model was asked with. */
@@ -46,12 +46,15 @@ const session = (lines: ReadonlyArray<string>) => {
       );
       const printed: Array<string | undefined> = [];
       for (const line of lines) {
-        if (line.startsWith("/")) printed.push(yield* command(opened, line).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(`error: ${String(error.userMessage)}`))));
+        // `/settings` alone asks at the terminal which setting to change; here it stands for what it shows first.
+        if (line === "/settings") printed.push(yield* inForce(opened));
+        else if (line === "(offered)") printed.push(JSON.stringify(yield* offered(opened)));
+        else if (line.startsWith("/")) printed.push(yield* command(opened, line).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(`error: ${String(error.userMessage)}`))));
         else yield* ask(opened, line);
       }
       return { printed, asked };
     }).pipe(
-      // No command here prompts; the terminal is there because `/model` alone would.
+      // No command here prompts; the terminal is there because `/model` and `/settings` alone would.
       Effect.orDie,
       Effect.provide(
         Layer.mergeAll(BunServices.layer, ModelFromFacts, BoringContextAssembler, recording, CountingTurns, NoTurnEndHooks, Layer.succeed(ToolRunner, { run: () => Effect.die("no tools") })),
@@ -89,4 +92,23 @@ test("a mistake in a command is said and changes nothing; a line that names no c
     undefined,
     "openai/gpt-5.5 effort=low\nthis model takes effort: none, low, medium, high, xhigh",
   ]);
+});
+
+test("a line that starts with / completes to a command, a model, a setting not yet named, and a value the model takes", async () => {
+  const { printed } = await session(["(offered)", "/model grok-4.7", "/model claude-sonnet-5-5", "(offered)"]);
+  const complete = completions(JSON.parse(printed[0] ?? "") as Parameters<typeof completions>[0]);
+  expect(complete("/")).toEqual(["/model ", "/settings ", "/help", "/exit", "/quit"]);
+  expect(complete("/se")).toEqual(["/settings "]);
+  expect(complete("/model openai/gpt-6-s")).toEqual(["/model openai/gpt-6-sol"]);
+  expect(complete("/model xai/")).toEqual([]);
+  expect(complete("/settings ")).toEqual(["effort=", "thinking=", "observe=", "cache=", "maxOutputTokens="].map((each) => `/settings ${each}`));
+  expect(complete("/settings effort=high c")).toEqual(["/settings effort=high cache="]);
+  expect(complete("/settings effort=high e")).toEqual([]);
+  // gpt-5.5 takes none to xhigh: no max, and thinking can be off.
+  expect(complete("/settings effort=")).toEqual(["low", "medium", "high", "xhigh"].map((each) => `/settings effort=${each}`));
+  expect(complete("/settings thinking=o")).toEqual(["/settings thinking=off"]);
+  expect(complete("hello /se")).toEqual([]);
+  // The values follow the model being asked: no efforts are listed for claude-sonnet-5-5, so every one is offered.
+  const later = completions(JSON.parse(printed[3] ?? "") as Parameters<typeof completions>[0]);
+  expect(later("/settings effort=m")).toEqual(["/settings effort=medium", "/settings effort=max"]);
 });

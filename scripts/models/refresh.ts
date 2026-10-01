@@ -8,8 +8,8 @@
  * and is not in the catalog, or differs from it: the reasoning efforts it takes, the kinds of input
  * it took when sent them, and the price of an hour-long cache write. What was measured wins.
  *
- *   bun scripts/models/refresh.ts              # from models.dev
- *   bun scripts/models/refresh.ts <api.json>   # from a copy of the catalog
+ *   bun run models:refresh              # from models.dev
+ *   bun run models:refresh <api.json>   # from a copy of the catalog
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
