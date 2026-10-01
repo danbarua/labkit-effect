@@ -108,17 +108,20 @@ function items(
           supplied: input.supplied,
         };
       }
-      case "ToolResult":
-        return {
-          json: [
-            {
-              type: "function_call_output",
-              call_id: part.call,
-              output: renderToolResult(part.outcome, calls.get(part.call), context.tools).text,
-            },
-          ],
-          supplied: [],
-        };
+      case "ToolResult": {
+        // A tool's image or PDF goes in the output as an input_image or input_file; anything else as text.
+        const rendered = renderToolResult(part.outcome, calls.get(part.call), context.tools);
+        const file = rendered.file === undefined ? undefined : fileAs(rendered.file, files, (mediaType) => acceptsFile(target.provider, target.model, mediaType));
+        const output =
+          file?._tag === "Bytes"
+            ? [
+                file.blob.mediaType === "application/pdf"
+                  ? { type: "input_file", filename: `${file.blob.id}.pdf`, file_data: file.dataUrl }
+                  : { type: "input_image", image_url: file.dataUrl },
+              ]
+            : rendered.text;
+        return { json: [{ type: "function_call_output", call_id: part.call, output }], supplied: file?._tag === "Text" ? file.supplied : [] };
+      }
       case "Thinking":
       case "Unrecognised":
         return sentBack(part, target);

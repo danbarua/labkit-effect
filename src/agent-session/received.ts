@@ -26,6 +26,8 @@ export function receivedText(text: string): Received {
 export function parseJson(received: Received): { readonly value: Schema.Json } | { readonly reason: string } {
   if (received.body._tag === "Bytes")
     return { reason: `the content is ${received.body.bytes.length} bytes of ${received.mediaType}, not text` };
+  if (received.body._tag === "Stored")
+    return { reason: `the content is ${received.body.size} bytes of ${received.mediaType} in the blob store, not text` };
   try {
     return { value: JSON.parse(received.body.text) as Schema.Json };
   } catch (error) {
@@ -33,9 +35,16 @@ export function parseJson(received: Received): { readonly value: Schema.Json } |
   }
 }
 
-/** The content as text for a reader: the text itself, or a note of what the bytes are. */
+/** The content as text for a reader: the text itself, or a note of what the bytes are and, when stored, where. */
 export function asText(received: Received): string {
-  return received.body._tag === "Text"
-    ? received.body.text
-    : `[${received.body.bytes.length} bytes of ${received.mediaType}]`;
+  switch (received.body._tag) {
+    case "Text":
+      return received.body.text;
+    case "Bytes":
+      return `[${received.body.bytes.length} bytes of ${received.mediaType}]`;
+    case "Stored":
+      return `[${received.body.size} bytes of ${received.mediaType}: blob://${received.body.id}]`;
+    default:
+      return received.body satisfies never;
+  }
 }

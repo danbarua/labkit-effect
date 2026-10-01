@@ -3,14 +3,18 @@
  * the bytes (`BlobRef`, agent-machine). Storing the same bytes twice gives the same reference. The
  * facts hold references; an adapter reads the bytes when it makes a request.
  *
- * `Blobs` is a reference with an empty store as its default: outside a session that provides one,
- * nothing is stored and every read finds nothing. `BlobsInMemory` holds bytes for as long as its
+ * `Blobs` is a reference whose default holds bytes in memory for as long as the process runs, so a
+ * session given no store still finds what it stored. `BlobsInMemory` holds bytes for as long as its
  * layer lasts; `BlobsInFolder(folder)` keeps each as a file named for its id.
+ *
+ * `keptOutcome` puts a tool's output that arrived as bytes in the store, so the facts hold its
+ * reference (`Received` body `Stored`).
  */
 
 import { createHash } from "node:crypto";
-import { Context, Effect, FileSystem, Layer, Path, Ref } from "effect";
+import { Context, Effect, FileSystem, Layer, Path } from "effect";
 import { BlobId, type BlobRef, FileName } from "../agent-machine/blob.ts";
+import type { ToolOutcome } from "../agent-machine/observation.ts";
 import type { MediaType } from "../agent-machine/received.ts";
 
 export interface BlobStore {
@@ -30,26 +34,28 @@ const referenceTo = (bytes: Uint8Array, mediaType: MediaType, name: string | und
   ...(name === undefined ? {} : { name: FileName.make(name) }),
 });
 
-const empty: BlobStore = {
-  store: (bytes, mediaType, name) => Effect.succeed(referenceTo(bytes, mediaType, name)),
-  read: () => Effect.undefined,
-};
+/** A store over a map it is given: what `BlobsInMemory` and the default hold. */
+const inMap = (held: Map<BlobId, Uint8Array>): BlobStore => ({
+  store: (bytes, mediaType, name) =>
+    Effect.sync(() => {
+      const reference = referenceTo(bytes, mediaType, name);
+      held.set(reference.id, bytes);
+      return reference;
+    }),
+  read: (id) => Effect.sync(() => held.get(id)),
+});
 
-export const Blobs = Context.Reference<BlobStore>("agent-session/Blobs", { defaultValue: () => empty });
+export const Blobs = Context.Reference<BlobStore>("agent-session/Blobs", { defaultValue: () => inMap(new Map()) });
 
-export const BlobsInMemory = Layer.effect(
-  Blobs,
+/** `outcome`, with an output that arrived as bytes put in the store and held by reference. */
+export const keptOutcome = (outcome: ToolOutcome): Effect.Effect<ToolOutcome> =>
   Effect.gen(function* () {
-    const held = yield* Ref.make<ReadonlyMap<BlobId, Uint8Array>>(new Map());
-    return {
-      store: (bytes, mediaType, name) => {
-        const reference = referenceTo(bytes, mediaType, name);
-        return Ref.update(held, (before) => new Map([...before, [reference.id, bytes]])).pipe(Effect.as(reference));
-      },
-      read: (id) => Ref.get(held).pipe(Effect.map((all) => all.get(id))),
-    };
-  }),
-);
+    if (outcome._tag !== "Succeeded" || outcome.output.body._tag !== "Bytes") return outcome;
+    const stored = yield* (yield* Blobs).store(outcome.output.body.bytes, outcome.output.mediaType);
+    return { ...outcome, output: { mediaType: outcome.output.mediaType, body: { _tag: "Stored", id: stored.id, size: stored.size } } };
+  });
+
+export const BlobsInMemory = Layer.sync(Blobs, () => inMap(new Map()));
 
 /** A file that cannot be written or read is a defect: the bytes the facts refer to cannot be kept. */
 export const BlobsInFolder = (folder: string) =>

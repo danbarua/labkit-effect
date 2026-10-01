@@ -5,10 +5,9 @@
  */
 
 import { Schema } from "effect";
-import { MediaType } from "./received.ts";
+import { BlobId, MediaType } from "./received.ts";
 
-export const BlobId = Schema.String.pipe(Schema.brand("agent-machine/BlobId"));
-export type BlobId = typeof BlobId.Type;
+export { BlobId };
 
 /** The file name a blob came with. */
 export const FileName = Schema.String.pipe(Schema.brand("agent-machine/FileName"));

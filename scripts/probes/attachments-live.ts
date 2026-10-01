@@ -4,6 +4,9 @@
  * go in the blob store and the facts hold references. Prints the model's answer and the transcript's
  * path; the answer should name both colours and the word.
  *
+ * With `tool`, the image comes from a tool instead: the model is given a `look` tool that returns
+ * it, and asked what colours it shows; the answer should name both.
+ *
  *   ANTHROPIC_API_KEY=... bun scripts/probes/attachments-live.ts anthropic claude-sonnet-5-5
  *   OPENAI_API_KEY=...    bun scripts/probes/attachments-live.ts openai gpt-5.5
  *   XAI_API_KEY=...       bun scripts/probes/attachments-live.ts xai grok-4.7
@@ -17,7 +20,8 @@ import { OpenAiClient } from "@effect/ai-openai";
 import { Effect, Layer, Redacted, Schema } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { Fact } from "../../src/agent-machine/fact.ts";
-import { InputText, ModelName, ProviderName, SessionId, TestName } from "../../src/agent-machine/names.ts";
+import { InputText, ModelName, ProviderName, SessionId, TestName, ToolName } from "../../src/agent-machine/names.ts";
+import { ToolRunner, type ToolSpec } from "../../src/agent-session/contracts.ts";
 import { MediaType } from "../../src/agent-machine/received.ts";
 import { Blobs, BlobsInMemory } from "../../src/agent-session/blobs.ts";
 import { openSession } from "../../src/agent-session/loop.ts";
@@ -32,7 +36,8 @@ import { CountingTurns, NoTurnEndHooks } from "../../src/agent-session/turns.ts"
 import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { transcript } from "./transcript.ts";
 
-const [provider = "anthropic", model = "claude-sonnet-5-5"] = process.argv.slice(2);
+const [provider = "anthropic", model = "claude-sonnet-5-5", mode] = process.argv.slice(2);
+const viaTool = mode === "tool";
 const variable = provider === "anthropic" ? "ANTHROPIC_API_KEY" : provider === "xai" ? "XAI_API_KEY" : "OPENAI_API_KEY";
 const key = process.env[variable];
 if (key === undefined || key === "") {
@@ -100,6 +105,12 @@ function papaya(): Uint8Array {
   return new TextEncoder().encode(out);
 }
 
+const look: ToolSpec = { name: ToolName.make("look"), description: "Returns the picture in front of you, as an image.", input: { type: "object", properties: {} } };
+/** Runs `look`: its output is the image, as bytes, which the loop puts in the blob store. */
+const Looking = Layer.succeed(ToolRunner, {
+  run: () => Effect.succeed({ _tag: "Succeeded" as const, output: { mediaType: MediaType.make("image/png"), body: { _tag: "Bytes" as const, bytes: halves() } } }),
+});
+
 const facts = await Effect.runPromise(
   Effect.gen(function* () {
     const blobs = yield* Blobs;
@@ -107,21 +118,30 @@ const facts = await Effect.runPromise(
     const document = yield* blobs.store(papaya(), MediaType.make("application/pdf"), "papaya.pdf");
     const session = yield* openSession;
     yield* session.observe(
-      openedWith({ session: SessionId.make("attachments"), model: { provider: ProviderName.make(provider), model: ModelName.make(model) }, system: undefined, tools: [] }),
+      openedWith({
+        session: SessionId.make("attachments"),
+        model: { provider: ProviderName.make(provider), model: ModelName.make(model) },
+        system: undefined,
+        tools: viaTool ? [look] : [],
+      }),
     );
     yield* session.idle;
-    yield* session.observe({
-      _tag: "InputArrived",
-      from: { _tag: "User" },
-      text: InputText.make("What colours does the image show, left and right? What is the secret word in the PDF? Answer in one line."),
-      attachments: [image, document],
-    });
+    yield* session.observe(
+      viaTool
+        ? { _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make("Use the look tool, then say what colours the image shows, left and right, in one line.") }
+        : {
+            _tag: "InputArrived",
+            from: { _tag: "User" },
+            text: InputText.make("What colours does the image show, left and right? What is the secret word in the PDF? Answer in one line."),
+            attachments: [image, document],
+          },
+    );
     yield* session.idle;
     return yield* session.facts;
   }).pipe(
     reportedBy({ _tag: "Test", name: TestName.make(`attachments-live ${provider} ${model}`) }),
     Effect.scoped,
-    Effect.provide(Layer.mergeAll(ModelFromFacts, TurnContextAssembler, client, CountingTurns, NoTurnEndHooks, SmolToolRunner, BlobsInMemory)),
+    Effect.provide(Layer.mergeAll(ModelFromFacts, TurnContextAssembler, client, CountingTurns, NoTurnEndHooks, viaTool ? Looking : SmolToolRunner, BlobsInMemory)),
   ),
 );
 

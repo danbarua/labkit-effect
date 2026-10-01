@@ -129,3 +129,46 @@ test("what a request carried is recorded with its files by reference: no bytes",
   expect(recorded).not.toContain(base64(png));
   expect(recorded).toContain('"_tag":"File"');
 });
+
+/** A context whose last message is a tool's image result, the image kept in the store. */
+const toolImage = (client: Layer.Layer<ModelClient>, provider: string, model: string) =>
+  runTest(
+    Effect.gen(function* () {
+      const stored = yield* (yield* Blobs).store(png, MediaType.make("image/png"));
+      const output = { mediaType: MediaType.make("image/png"), body: { _tag: "Stored" as const, id: stored.id, size: stored.size } };
+      const context: ModelContext = {
+        system: undefined,
+        tools: [],
+        messages: [
+          { role: "user", parts: [{ _tag: "Text", text: "Take a screenshot." }] },
+          { role: "assistant", parts: [{ _tag: "ToolCall", call: "c1" as never, tool: "screenshot" as never, input: { mediaType: MediaType.make("application/json"), body: { _tag: "Text", text: "{}" as never } } }] },
+          { role: "user", parts: [{ _tag: "ToolResult", call: "c1" as never, outcome: { _tag: "Succeeded", output } }] },
+        ],
+      };
+      yield* (yield* ModelClient).respond({ provider: ProviderName.make(provider), model: ModelName.make(model) }, context, TurnId.make("turn-1"));
+    }).pipe(Effect.provide(Layer.mergeAll(client, BlobsInMemory))),
+  );
+
+test("a tool's image goes back in its result: an image block in Anthropic's tool_result, an input_image in OpenAI's function_call_output", async () => {
+  const bodies: Array<{ messages: Array<{ content: Array<Record<string, unknown>> }> }> = [];
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      bodies.push((await request.json()) as never);
+      return anthropicStream({ content: [{ type: "text", text: "A chart." }], stop_reason: "end_turn" });
+    },
+  });
+  stops.push(() => server.stop(true));
+  await toolImage(AnthropicModelClient.pipe(Layer.provide(anthropicAt(new URL("/v1/messages", server.url)))), "anthropic", "claude-sonnet-5-5");
+  expect(bodies[0]?.messages.at(-1)?.content[0] as unknown).toEqual({
+    type: "tool_result",
+    tool_use_id: "c1",
+    content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: base64(png) } }],
+  });
+
+  const openai = recordingServer([{ status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "A chart." }] }] }]);
+  stops.push(openai.stop);
+  await toolImage(OpenAiModelClient.pipe(Layer.provide(openAiAt(openai.url))), "openai", "gpt-5.5");
+  const input = (openai.bodies[0] as { input: Array<Record<string, unknown>> }).input;
+  expect(input.at(-1) as unknown).toEqual({ type: "function_call_output", call_id: "c1", output: [{ type: "input_image", image_url: `data:image/png;base64,${base64(png)}` }] });
+});

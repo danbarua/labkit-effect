@@ -99,17 +99,21 @@ function blocks(
         supplied: input.supplied,
       };
     }
-    case "ToolResult":
+    case "ToolResult": {
+      // A tool's image or PDF goes in the result as an image or document block; anything else as text.
+      const rendered = renderToolResult(part.outcome, calls.get(part.call), context.tools);
+      const file = rendered.file === undefined ? undefined : fileAs(rendered.file, files, (mediaType) => acceptsFile(target.provider, target.model, mediaType));
+      if (file?._tag !== "Bytes")
+        return {
+          json: [{ type: "tool_result", tool_use_id: part.call, ...resultContent(rendered) }],
+          supplied: file?.supplied ?? [],
+        };
+      const source = { type: "base64", media_type: file.blob.mediaType, data: file.base64 };
       return {
-        json: [
-          {
-            type: "tool_result",
-            tool_use_id: part.call,
-            ...resultContent(renderToolResult(part.outcome, calls.get(part.call), context.tools)),
-          },
-        ],
+        json: [{ type: "tool_result", tool_use_id: part.call, content: [{ type: file.blob.mediaType === "application/pdf" ? "document" : "image", source }] }],
         supplied: [],
       };
+    }
     case "Thinking":
     case "Unrecognised":
       return sentBack(part, target);

@@ -29,6 +29,7 @@
  * What a model request streams is passed on to `streamed` and not recorded.
  */
 
+import { keptOutcome } from "./blobs.ts";
 import { Clock, DateTime, Deferred, Effect, Exit, FiberSet, PubSub, Ref, type Scope, Semaphore, type Tracer } from "effect";
 import type { Decision } from "../agent-machine/decision.ts";
 import type { Fact } from "../agent-machine/fact.ts";
@@ -338,7 +339,7 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
           const outcome = yield* (yield* ToolRunner)
             .run(request.tool, request.input)
             .pipe(Effect.raceFirst(stopped.pipe(Effect.as<ToolOutcome>({ _tag: "Failed", reason: { _tag: "Indeterminate" } }))));
-          return ended(outcome);
+          return ended(yield* keptOutcome(outcome));
         });
       }
       case "BeforeTurnEnded":

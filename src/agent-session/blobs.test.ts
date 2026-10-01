@@ -11,7 +11,7 @@ import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
 import { BlobId } from "../agent-machine/blob.ts";
 import { MediaType } from "../agent-machine/received.ts";
-import { Blobs, BlobsInFolder, BlobsInMemory } from "./blobs.ts";
+import { Blobs, BlobsInFolder, BlobsInMemory, keptOutcome } from "./blobs.ts";
 
 const bytes = new TextEncoder().encode("hello");
 // sha256("hello")
@@ -50,7 +50,7 @@ test("in a folder, each blob is a file named for its id", async () => {
   expect(readdirSync(folder)).toEqual([helloId]);
 });
 
-test("with no store provided, nothing is held: a read finds nothing", async () => {
+test("with no store provided, the default holds the bytes in memory", async () => {
   const { read } = await runTest(
     Effect.gen(function* () {
       const blobs = yield* Blobs;
@@ -58,5 +58,17 @@ test("with no store provided, nothing is held: a read finds nothing", async () =
       return { read: yield* blobs.read(stored.id) };
     }),
   );
-  expect(read).toBeUndefined();
+  expect(read).toEqual(bytes);
+});
+
+test("a tool's output that arrives as bytes is put in the store, and the outcome holds its reference", async () => {
+  const { kept, read } = await runTest(
+    Effect.gen(function* () {
+      const kept = yield* keptOutcome({ _tag: "Succeeded", output: { mediaType: MediaType.make("image/png"), body: { _tag: "Bytes", bytes } } });
+      const body = kept._tag === "Succeeded" ? kept.output.body : undefined;
+      return { kept, read: body?._tag === "Stored" ? yield* (yield* Blobs).read(body.id) : undefined };
+    }).pipe(Effect.provide(BlobsInMemory)),
+  );
+  expect(kept as unknown).toEqual({ _tag: "Succeeded", output: { mediaType: "image/png", body: { _tag: "Stored", id: helloId, size: 5 } } });
+  expect(read).toEqual(bytes);
 });

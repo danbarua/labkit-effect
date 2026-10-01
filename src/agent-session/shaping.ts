@@ -105,6 +105,8 @@ function given(input: Received): Json {
 export interface RenderedResult {
   readonly text: string;
   readonly isError: boolean;
+  /** The output's bytes, when they are in the blob store; `text` is then their pointer. */
+  readonly file?: BlobRef;
 }
 
 /**
@@ -118,8 +120,12 @@ export function renderToolResult(
   catalog: ReadonlyArray<ToolSpec>,
 ): RenderedResult {
   switch (outcome._tag) {
-    case "Succeeded":
-      return { text: asText(outcome.output), isError: false };
+    case "Succeeded": {
+      const body = outcome.output.body;
+      if (body._tag !== "Stored") return { text: asText(outcome.output), isError: false };
+      const file: BlobRef = { id: body.id, mediaType: outcome.output.mediaType, size: body.size };
+      return { text: blobPointer(file), isError: false, file };
+    }
     case "Failed": {
       const reason = outcome.reason;
       switch (reason._tag) {
@@ -211,7 +217,19 @@ export function usageOf(counts: {
 export const filesIn = (context: ModelContext): Effect.Effect<ReadonlyMap<BlobId, Uint8Array>> =>
   Effect.gen(function* () {
     const blobs = yield* Blobs;
-    const ids = [...new Set(context.messages.flatMap((message) => message.parts.flatMap((part) => (part._tag === "File" ? [part.blob.id] : []))))];
+    const ids = [
+      ...new Set(
+        context.messages.flatMap((message) =>
+          message.parts.flatMap((part) =>
+            part._tag === "File"
+              ? [part.blob.id]
+              : part._tag === "ToolResult" && part.outcome._tag === "Succeeded" && part.outcome.output.body._tag === "Stored"
+                ? [part.outcome.output.body.id]
+                : [],
+          ),
+        ),
+      ),
+    ];
     const read = yield* Effect.forEach(ids, (id) => blobs.read(id).pipe(Effect.map((bytes) => [id, bytes] as const)));
     return new Map(read.flatMap(([id, bytes]) => (bytes === undefined ? [] : [[id, bytes] as const])));
   });
