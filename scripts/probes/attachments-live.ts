@@ -1,7 +1,7 @@
 /**
  * Live probe: one input with two attachments, an image (left half red, right half blue) and a PDF
  * (one page saying "The secret word is papaya."), sent to a real model through the loop. The bytes
- * go in the blob store and the facts hold references. Prints the model's answer and the transcript's
+ * go in the blob store, as files beside the transcript (`<name>.blobs/`), and the facts hold references. Prints the model's answer and the transcript's
  * path; the answer should name both colours and the word.
  *
  * With `tool`, the image comes from a tool instead: the model is given a `look` tool that returns
@@ -17,13 +17,15 @@ import { join } from "node:path";
 import { deflateSync } from "node:zlib";
 import { AnthropicClient } from "@effect/ai-anthropic";
 import { OpenAiClient } from "@effect/ai-openai";
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
+import * as BunPath from "@effect/platform-bun/BunPath";
 import { Effect, Layer, Redacted, Schema } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { Fact } from "../../src/agent-machine/fact.ts";
 import { InputText, ModelName, ProviderName, SessionId, TestName, ToolName } from "../../src/agent-machine/names.ts";
 import { type ModelContext, ToolRunner, type ToolSpec } from "../../src/agent-session/contracts.ts";
 import { MediaType } from "../../src/agent-machine/received.ts";
-import { Blobs, BlobsInMemory } from "../../src/agent-session/blobs.ts";
+import { Blobs, BlobsInFolder } from "../../src/agent-session/blobs.ts";
 import { openSession } from "../../src/agent-session/loop.ts";
 import { anthropicInputTokens } from "../../src/agent-session/providers/anthropic-count.ts";
 import { openAiInputTokens } from "../../src/agent-session/providers/openai-count.ts";
@@ -115,6 +117,11 @@ const Looking = Layer.succeed(ToolRunner, {
 
 const question = "What colours does the image show, left and right? What is the secret word in the PDF? Answer in one line.";
 
+const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+const name = [stamp, "attachments", provider, model, ...(viaTool ? ["tool"] : [])].join("-");
+// The blobs are kept as files beside the transcript.
+const blobFolder = join("logs/live", `${name}.blobs`);
+
 const facts = await Effect.runPromise(
   Effect.gen(function* () {
     const blobs = yield* Blobs;
@@ -159,7 +166,7 @@ const facts = await Effect.runPromise(
   }).pipe(
     reportedBy({ _tag: "Test", name: TestName.make(`attachments-live ${provider} ${model}`) }),
     Effect.scoped,
-    Effect.provide(Layer.mergeAll(ModelFromFacts, TurnContextAssembler, client, CountingTurns, NoTurnEndHooks, viaTool ? Looking : SmolToolRunner, BlobsInMemory)),
+    Effect.provide(Layer.mergeAll(ModelFromFacts, TurnContextAssembler, client, CountingTurns, NoTurnEndHooks, viaTool ? Looking : SmolToolRunner, BlobsInFolder(blobFolder).pipe(Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))))),
   ),
 );
 
@@ -168,8 +175,6 @@ const answer = facts.flatMap((fact) =>
     ? fact.observation.parts.flatMap((part) => (part._tag === "Text" ? [part.text] : []))
     : [],
 );
-const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-const name = [stamp, "attachments", provider, model].join("-");
 mkdirSync("logs/live", { recursive: true });
 writeFileSync(
   join("logs/live", `${name}.md`),

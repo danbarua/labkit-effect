@@ -1,17 +1,18 @@
 /** The blob store: bytes by their SHA-256, the same bytes the same reference, kept in memory or in a folder. */
 
 import { expect } from "bun:test";
-import { mkdtempSync, readdirSync } from "node:fs";
+import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import * as BunPath from "@effect/platform-bun/BunPath";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Logger } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
 import { BlobId } from "../agent-machine/blob.ts";
 import { MediaType } from "../agent-machine/received.ts";
 import { Blobs, BlobsInFolder, BlobsInMemory, keptOutcome } from "./blobs.ts";
+import { logKeys } from "./log-keys.ts";
 
 const bytes = new TextEncoder().encode("hello");
 // sha256("hello")
@@ -71,4 +72,49 @@ test("a tool's output that arrives as bytes is put in the store, and the outcome
   );
   expect(kept as unknown).toEqual({ _tag: "Succeeded", output: { mediaType: "image/png", body: { _tag: "Stored", id: helloId, size: 5 } } });
   expect(read).toEqual(bytes);
+});
+
+const inFolder = (folder: string) => BlobsInFolder(folder).pipe(Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)));
+
+test("in a folder, the store reads only ids that name a file in it: anything else finds nothing", async () => {
+  const folder = mkdtempSync(join(tmpdir(), "blobs-"));
+  writeFileSync(join(folder, "..", `outside-${helloId}`), bytes);
+  const read = await runTest(
+    Effect.gen(function* () {
+      const blobs = yield* Blobs;
+      return [
+        yield* blobs.read(BlobId.make(`../outside-${helloId}`)),
+        yield* blobs.read(BlobId.make(helloId.toUpperCase())),
+        yield* blobs.read(BlobId.make("")),
+      ];
+    }).pipe(Effect.provide(inFolder(folder))),
+  );
+  expect(read).toEqual([undefined, undefined, undefined]);
+});
+
+test("in a folder, a file whose bytes no longer match its id is found to be nothing, and logged", async () => {
+  const folder = mkdtempSync(join(tmpdir(), "blobs-"));
+  const logged: Array<unknown> = [];
+  const read = await runTest(
+    Effect.gen(function* () {
+      const blobs = yield* Blobs;
+      const stored = yield* blobs.store(bytes, MediaType.make("text/plain"));
+      writeFileSync(join(folder, stored.id), "changed");
+      return yield* blobs.read(stored.id);
+    }).pipe(Effect.provide(Layer.mergeAll(inFolder(folder), Logger.layer([Logger.make((options) => logged.push(options.message))])))),
+  );
+  expect(read).toBeUndefined();
+  expect(logged).toContainEqual([logKeys.blobs.notAsStored, expect.objectContaining({ blob: helloId, size: 7 })]);
+});
+
+test("in a folder, the same bytes stored twice are one file, and no temporary file is left", async () => {
+  const folder = mkdtempSync(join(tmpdir(), "blobs-"));
+  await runTest(
+    Effect.gen(function* () {
+      const blobs = yield* Blobs;
+      yield* blobs.store(bytes, MediaType.make("text/plain"));
+      yield* blobs.store(bytes, MediaType.make("text/plain"), "again.txt");
+    }).pipe(Effect.provide(inFolder(folder))),
+  );
+  expect(readdirSync(folder)).toEqual([helloId]);
 });

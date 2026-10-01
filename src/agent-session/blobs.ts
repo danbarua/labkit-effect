@@ -5,7 +5,7 @@
  *
  * `Blobs` is a reference whose default holds bytes in memory for as long as the process runs, so a
  * session given no store still finds what it stored. `BlobsInMemory` holds bytes for as long as its
- * layer lasts; `BlobsInFolder(folder)` keeps each as a file named for its id.
+ * layer lasts; `BlobsInFolder(folder)` keeps each as a file named for its id, in that folder only.
  *
  * `keptOutcome` puts a tool's output that arrived as bytes in the store, so the facts hold its
  * reference (`Received` body `Stored`).
@@ -16,6 +16,7 @@ import { Context, Effect, FileSystem, Layer, Path } from "effect";
 import { BlobId, type BlobRef, FileName } from "../agent-machine/blob.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import type { MediaType } from "../agent-machine/received.ts";
+import { logKeys } from "./log-keys.ts";
 
 export interface BlobStore {
   /** Stores `bytes`, and returns the reference the facts hold. */
@@ -57,7 +58,22 @@ export const keptOutcome = (outcome: ToolOutcome): Effect.Effect<ToolOutcome> =>
 
 export const BlobsInMemory = Layer.sync(Blobs, () => inMap(new Map()));
 
-/** A file that cannot be written or read is a defect: the bytes the facts refer to cannot be kept. */
+/** A blob id as this store writes them: 64 lowercase hex digits, so it names a file in the folder and nothing else. */
+const isBlobId = (id: string): boolean => /^[0-9a-f]{64}$/.test(id);
+
+/**
+ * Blobs as files in `folder`, each named for its id; the store reads and writes nothing outside
+ * it. The folder is made when the first blob is stored. Swap it in for the default by providing
+ * the layer; it needs a `FileSystem` and a `Path` (`@effect/platform-bun` gives both).
+ *
+ * - A blob is written to a temporary file in the folder and renamed to its id, so a file named for
+ *   an id holds the whole of its bytes; bytes already held are not written again.
+ * - An id that is not 64 lowercase hex digits finds nothing, so no id read from the facts names a
+ *   path outside the folder.
+ * - A read hashes what it read: a file whose bytes no longer match its id is found to be nothing,
+ *   and logged, so the model is sent the file's pointer rather than other bytes.
+ * - A file that cannot be written or read is a defect: the bytes the facts refer to cannot be kept.
+ */
 export const BlobsInFolder = (folder: string) =>
   Layer.effect(
     Blobs,
@@ -68,14 +84,23 @@ export const BlobsInFolder = (folder: string) =>
         store: (bytes, mediaType, name) =>
           Effect.gen(function* () {
             const reference = referenceTo(bytes, mediaType, name);
+            const file = path.join(folder, reference.id);
             yield* fs.makeDirectory(folder, { recursive: true });
-            yield* fs.writeFile(path.join(folder, reference.id), bytes);
+            if (yield* fs.exists(file)) return reference;
+            const writing = path.join(folder, `.${reference.id}.${crypto.randomUUID()}`);
+            yield* fs.writeFile(writing, bytes);
+            yield* fs.rename(writing, file);
             return reference;
           }).pipe(Effect.orDie),
         read: (id) =>
           Effect.gen(function* () {
+            if (!isBlobId(id)) return undefined;
             const file = path.join(folder, id);
-            return (yield* fs.exists(file)) ? yield* fs.readFile(file) : undefined;
+            if (!(yield* fs.exists(file))) return undefined;
+            const bytes = yield* fs.readFile(file);
+            if (blobIdOf(bytes) === id) return bytes;
+            yield* Effect.logWarning(logKeys.blobs.notAsStored, { blob: id, file, size: bytes.byteLength });
+            return undefined;
           }).pipe(Effect.orDie),
       };
     }),

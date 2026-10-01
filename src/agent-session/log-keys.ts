@@ -4,6 +4,10 @@
  */
 
 export const logKeys = {
+  blobs: {
+    /** A blob's file holds bytes whose hash is not its id; the store finds nothing for it. */
+    notAsStored: "blobs.file.not_as_stored",
+  },
   provider: {
     /** A model request failed for a reason that is retryable, and is tried again. */
     requestRetried: "provider.request.retried",
