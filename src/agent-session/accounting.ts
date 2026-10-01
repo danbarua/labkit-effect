@@ -1,15 +1,16 @@
 /**
  * What a session has used, read from its facts: what a host shows as the context gauge (ACP's
- * `usage_update`) and counts against its limits.
+ * `usage_update`) and counts against its limits. Every count is a best guess: the tokenizer is the
+ * provider's, and the counts are what it reported.
  *
- * - `contextGauge`: `used`, the tokens in context after the last response (what its request carried
- *   and what it returned, as the provider reported them); `size`, the context window of the model
- *   the session asks now (`frontier.json`); and `cost`, the session's cost so far in US dollars.
- *   There is no gauge when the model's window is not known. After a compaction `used` stays the last
- *   response's figure until the next response reports a new one. `cost` is the cost of the
- *   responses that reported their usage to a model with a price: one interrupted, or not observed,
- *   or from a model not in `frontier.json` (a local model) adds nothing. The requests a summarizer
- *   makes are not among the facts, so their cost is not in it.
+ * - `contextGauge`: `used`, the visible tokens of the last request and its response: everything the
+ *   request carried, and what the response returned less its thinking; `size`, the context window
+ *   of the model the session asks now (`frontier.json`); and `cost`, the session's cost so far in
+ *   US dollars. There is no gauge when the model's window is not known. After a compaction `used`
+ *   stays the last response's figure until the next response reports a new one. `cost` is the cost
+ *   of the responses that reported their usage to a model with a price: one interrupted, or not
+ *   observed, or from a model not in `frontier.json` (a local model) adds nothing. The requests a
+ *   summarizer makes are not among the facts, so their cost is not in it.
  * - `requestsIn`: how many model requests a turn has made, which is how many steps it has taken
  *   (`AskModel`, `TellModel`). A request a fallback sends to another provider is the same request.
  */
@@ -62,7 +63,8 @@ export function contextGauge(facts: ReadonlyArray<Fact>, provider: string, model
   const size = limitsOf(provider, model)?.context;
   if (size === undefined) return undefined;
   const last = [...responses(facts)].reverse().find((response) => response.usage !== undefined)?.usage;
-  return { used: last === undefined ? 0 : last.input + last.output, size, cost: { amount: costIn(facts), currency: "USD" } };
+  const used = last === undefined ? 0 : last.input + last.output - (last.thinking ?? 0);
+  return { used, size, cost: { amount: costIn(facts), currency: "USD" } };
 }
 
 /** How many model requests `turn` has made: its steps. */

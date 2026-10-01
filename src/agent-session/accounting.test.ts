@@ -51,9 +51,10 @@ test("the context gauge: tokens in context after the last response, the model's 
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
   observe(session, responded({ input: 1200, output: 300 }));
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "and again" });
-  observe(session, responded({ input: 1600, output: 200, cacheRead: 1200 }));
+  observe(session, responded({ input: 1600, output: 200, thinking: 50, cacheRead: 1200 }));
   const gauge = contextGauge(session.journal, "anthropic", "claude-sonnet-5-5");
-  expect(gauge).toMatchObject({ used: 1800, size: 1_000_000, cost: { currency: "USD" } });
+  // Visible tokens: the request's 1,600 and the response's 200 less its 50 of thinking.
+  expect(gauge).toMatchObject({ used: 1750, size: 1_000_000, cost: { currency: "USD" } });
   expect(gauge?.cost?.amount).toBeCloseTo((1200 * 2 + 300 * 10 + 400 * 2 + 1200 * 0.2 + 200 * 10) / 1_000_000, 12);
   // A model whose window is not known has no gauge. A response with no usage (interrupted, say), or
   // from a model with no price, adds nothing to the cost.
