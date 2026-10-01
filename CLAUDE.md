@@ -19,3 +19,9 @@ is installed.
 
 To move to another version, install it, then:
 `git subtree pull --prefix=repos/effect https://github.com/Effect-TS/effect.git "effect@<version>" --squash`
+
+## Output written to files
+
+Run commands whose output goes to a file with `FORCE_COLOR=0 NO_COLOR=1`. Claude Code's shell sets
+`FORCE_COLOR`, which overrides `NO_COLOR`, so without both the files under `logs/` fill with
+terminal colour codes.

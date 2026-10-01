@@ -29,7 +29,8 @@ model.
       credentials are set, plus a local server; the user changes the model, thinking and output
       limit with ACP's `session/set_config_option`. Here: the opening is the configuration, a
       change is `ModelChangeArrived` from `User { via: acp }`, taken between turns (M1–M3); the
-      log's configuration versions are the host's own numbering, as `Seq` is the session's.
+      log's configuration versions are our host's numbering (labkit-agent), ours to change, as
+      `Seq` is the session's.
 - [ ] Tool permission. In the log: `write_file` (kind `edit`) waits for the user; the options are
       allow once, allow for the session, reject once; allow for the session is a grant for that
       tool, for all arguments, until the session closes or permissions are reset. Build the policy
