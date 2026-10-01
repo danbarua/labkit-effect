@@ -18,7 +18,7 @@ import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.t
 import { TurnContextAssembler } from "../turn-context.ts";
 import { anthropicStream } from "../../../tests/support/streams.ts";
 import { runTest } from "../../../tests/support/run.ts";
-import { capabilitiesOf } from "./well-known-models.ts";
+import { capabilitiesOf } from "../configuration/well-known-models.ts";
 import { boringOpening } from "../../../tests/support/boring.ts";
 
 /** A provider that makes one scripted tool call, then answers; it keeps every request it is sent. */

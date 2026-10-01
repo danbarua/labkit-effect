@@ -18,7 +18,7 @@
 import type { Fact } from "../agent-machine/fact.ts";
 import type { TurnId } from "../agent-machine/names.ts";
 import type { Observation, Usage } from "../agent-machine/observation.ts";
-import { type Capabilities, capabilitiesOf, type Price } from "./providers/well-known-models.ts";
+import { type Capabilities, capabilitiesOf, type Price } from "./configuration/well-known-models.ts";
 
 type Responded = Extract<Observation, { _tag: "ModelResponded" }>;
 

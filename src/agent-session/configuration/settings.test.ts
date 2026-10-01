@@ -3,30 +3,30 @@
  * adjusts where the model does not allow what was asked, and how a session's facts give them.
  */
 
-import { capabilitiesOf } from "./providers/well-known-models.ts";
+import { capabilitiesOf } from "./well-known-models.ts";
 import { afterAll, expect } from "bun:test";
 import { Effect, Layer } from "effect";
-import { ModelName, ProviderName, SessionId, TokenCount } from "../agent-machine/names.ts";
-import type { Observation } from "../agent-machine/observation.ts";
-import type { ModelSettings } from "../agent-machine/settings.ts";
-import { openSession } from "./loop.ts";
+import { ModelName, ProviderName, SessionId, TokenCount } from "../../agent-machine/names.ts";
+import type { Observation } from "../../agent-machine/observation.ts";
+import type { ModelSettings } from "../../agent-machine/settings.ts";
+import { openSession } from "../loop.ts";
 import { ModelFromFacts } from "./model-choice.ts";
-import { AnthropicModelClient } from "./providers/anthropic-client.ts";
-import { anthropicSettings, anthropicSettle } from "./providers/anthropic-settings.ts";
-import { openAiCompatSettings, openAiCompatSettle } from "./providers/openai-compat-settings.ts";
-import { openAiSettings, openAiSettle } from "./providers/openai-settings.ts";
-import { xAiSettings, xAiSettle } from "./providers/xai-settings.ts";
+import { AnthropicModelClient } from "../providers/anthropic-client.ts";
+import { anthropicSettings, anthropicSettle } from "../providers/anthropic-settings.ts";
+import { openAiCompatSettings, openAiCompatSettle } from "../providers/openai-compat-settings.ts";
+import { openAiSettings, openAiSettle } from "../providers/openai-settings.ts";
+import { xAiSettings, xAiSettle } from "../providers/xai-settings.ts";
 import { choicesFor } from "./settings.ts";
-import { sentIn } from "./sent.ts";
+import { sentIn } from "../sent.ts";
 import { modelOf, openedWith } from "./session-setup.ts";
-import { TurnContextAssembler } from "./turn-context.ts";
-import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
-import { observe, open, opened } from "../../tests/support/drive.ts";
-import { anthropicAt } from "../../tests/support/providers.ts";
-import { anthropicStream } from "../../tests/support/streams.ts";
-import { runTest } from "../../tests/support/run.ts";
-import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
-import { test } from "../../tests/support/test.ts";
+import { TurnContextAssembler } from "../turn-context.ts";
+import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { observe, open, opened } from "../../../tests/support/drive.ts";
+import { anthropicAt } from "../../../tests/support/providers.ts";
+import { anthropicStream } from "../../../tests/support/streams.ts";
+import { runTest } from "../../../tests/support/run.ts";
+import { SmolToolRunner } from "../../../tests/support/smol-tools.ts";
+import { test } from "../../../tests/support/test.ts";
 
 const anthropic = (model: string, settings: ModelSettings) => anthropicSettings(ModelName.make(model), settings);
 

@@ -9,7 +9,7 @@ import type { Fact } from "../../src/agent-machine/fact.ts";
 import { ModelName, ProviderName, type Seq, SessionId, ToolName, type TurnId } from "../../src/agent-machine/names.ts";
 import { ContextAssembler, type ModelContext, ModelProvider, type ToolSpec } from "../../src/agent-session/contracts.ts";
 import { conversationOf, inputTexts } from "../../src/agent-session/conversation.ts";
-import { openedWith, systemOf, toolsOf } from "../../src/agent-session/session-setup.ts";
+import { openedWith, systemOf, toolsOf } from "../../src/agent-session/configuration/session-setup.ts";
 
 /** The opening of session `session`, asking "boring-1" of "boring", with no system prompt and `tools`. */
 export const boringOpening = (tools: ReadonlyArray<ToolSpec> = [], session = "s1") =>

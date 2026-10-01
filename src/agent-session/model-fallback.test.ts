@@ -12,8 +12,8 @@ import { InputText, ModelName, ProviderName, SessionId, TurnId } from "../agent-
 import type { Observation } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { ModelClient, type Target } from "./contracts.ts";
-import { ModelFromFacts } from "./model-choice.ts";
-import { openedWith } from "./session-setup.ts";
+import { ModelFromFacts } from "./configuration/model-choice.ts";
+import { openedWith } from "./configuration/session-setup.ts";
 import { BoringContextAssembler } from "../../tests/support/boring.ts";
 import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
 import { SmolToolRunner } from "../../tests/support/smol-tools.ts";

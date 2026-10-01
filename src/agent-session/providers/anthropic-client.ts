@@ -20,7 +20,7 @@
  */
 
 import type { BlobId } from "../../agent-machine/blob.ts";
-import { knownOf, takesFile } from "./well-known-models.ts";
+import { knownOf, takesFile } from "../configuration/well-known-models.ts";
 import { AnthropicClient } from "@effect/ai-anthropic";
 import { Effect, Layer, Stream } from "effect";
 import * as AiError from "effect/ai/AiError";
@@ -45,7 +45,7 @@ import {
 import { logKeys } from "../log-keys.ts";
 import { ModelStream } from "../model-stream.ts";
 import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEvents, type Retries, withRetries } from "../provider-call.ts";
-import { reportAdjusted } from "../settings.ts";
+import { reportAdjusted } from "../configuration/settings.ts";
 import { anthropicSettle } from "./anthropic-settings.ts";
 import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
 import { receivedJson } from "../received.ts";

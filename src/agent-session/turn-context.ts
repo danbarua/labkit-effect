@@ -11,7 +11,7 @@ import type { Fact } from "../agent-machine/fact.ts";
 import type { TurnId } from "../agent-machine/names.ts";
 import { ContextAssembler, type ModelContext } from "./contracts.ts";
 import { nextMessages } from "./conversation.ts";
-import { systemOf, toolsOf } from "./session-setup.ts";
+import { systemOf, toolsOf } from "./configuration/session-setup.ts";
 
 /** The facts from the start of `turn` onwards. */
 function turnFacts(facts: ReadonlyArray<Fact>, turn: TurnId): ReadonlyArray<Fact> {

@@ -11,7 +11,7 @@
 import type { ModelName } from "../../agent-machine/names.ts";
 import type { Effort, ModelSettings, Observe, ThinkingMode } from "../../agent-machine/settings.ts";
 import type { Target } from "../contracts.ts";
-import type { Adjustment, Settled } from "../settings.ts";
+import type { Adjustment, Settled } from "../configuration/settings.ts";
 import type { Json } from "../shaping.ts";
 
 interface Allowed {

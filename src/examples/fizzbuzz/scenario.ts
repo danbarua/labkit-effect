@@ -23,7 +23,7 @@ import { InputText, ModelName, ProviderName, SessionId } from "../../agent-machi
 import type { ModelClient, ModelContext, ToolRunner } from "../../agent-session/contracts.ts";
 import { sentIn } from "../../agent-session/sent.ts";
 import { openSession } from "../../agent-session/loop.ts";
-import { ModelFromFacts } from "../../agent-session/model-choice.ts";
+import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
 import { CountingTurns, NoTurnEndHooks } from "../../agent-session/turns.ts";
 import { scriptedFizzBuzzModel } from "./model.ts";
 import { FizzBuzzSystemPromptProvider } from "./prompt.ts";

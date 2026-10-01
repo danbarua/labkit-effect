@@ -7,12 +7,12 @@
  */
 
 import { Effect, Schema } from "effect";
-import type { Fact } from "../agent-machine/fact.ts";
-import type { SessionId } from "../agent-machine/names.ts";
-import type { ModelTarget, Observation } from "../agent-machine/observation.ts";
-import type { ModelSettings } from "../agent-machine/settings.ts";
-import { type Target, ToolSpec } from "./contracts.ts";
-import { asText, parseJson, receivedJson, receivedText } from "./received.ts";
+import type { Fact } from "../../agent-machine/fact.ts";
+import type { SessionId } from "../../agent-machine/names.ts";
+import type { ModelTarget, Observation } from "../../agent-machine/observation.ts";
+import type { ModelSettings } from "../../agent-machine/settings.ts";
+import { type Target, ToolSpec } from "../contracts.ts";
+import { asText, parseJson, receivedJson, receivedText } from "../received.ts";
 import { settingOf } from "./settings.ts";
 
 /** Tools as they are recorded: each one's name, description, and the JSON Schema of its input. */

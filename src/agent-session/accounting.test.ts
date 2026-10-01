@@ -6,7 +6,7 @@ import { json } from "../../tests/support/received.ts";
 import { test } from "../../tests/support/test.ts";
 import { TokenCount, TurnId } from "../agent-machine/names.ts";
 import { contextGauge, costOf, requestsIn } from "./accounting.ts";
-import { capabilitiesOf } from "./providers/well-known-models.ts";
+import { capabilitiesOf } from "./configuration/well-known-models.ts";
 
 const tokens = (count: number) => TokenCount.make(count);
 

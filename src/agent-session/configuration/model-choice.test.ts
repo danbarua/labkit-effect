@@ -2,11 +2,11 @@
 
 import { expect } from "bun:test";
 import { Effect, Exit } from "effect";
-import type { Fact } from "../agent-machine/fact.ts";
-import { TurnId } from "../agent-machine/names.ts";
-import { observe, open, opened } from "../../tests/support/drive.ts";
-import { test } from "../../tests/support/test.ts";
-import { ModelProvider } from "./contracts.ts";
+import type { Fact } from "../../agent-machine/fact.ts";
+import { TurnId } from "../../agent-machine/names.ts";
+import { observe, open, opened } from "../../../tests/support/drive.ts";
+import { test } from "../../../tests/support/test.ts";
+import { ModelProvider } from "../contracts.ts";
 import { ModelFromFacts } from "./model-choice.ts";
 
 const toOpenAi = { _tag: "ModelChangeArrived", provider: "openai", model: "gpt-5.6" };

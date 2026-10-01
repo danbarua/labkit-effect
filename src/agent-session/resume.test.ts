@@ -16,7 +16,7 @@ import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { test } from "../../tests/support/test.ts";
 import { ModelClient, type ModelContext } from "./contracts.ts";
 import { endTurnLeftRunning, resumeSession, sessionFrom } from "./loop.ts";
-import { ModelFromFacts } from "./model-choice.ts";
+import { ModelFromFacts } from "./configuration/model-choice.ts";
 import { receivedJson } from "./received.ts";
 import { countingTurnsAfter, NoTurnEndHooks } from "./turns.ts";
 

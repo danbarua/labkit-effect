@@ -24,7 +24,7 @@
  */
 
 import type { BlobId } from "../../agent-machine/blob.ts";
-import { knownOf, takesFile } from "./well-known-models.ts";
+import { knownOf, takesFile } from "../configuration/well-known-models.ts";
 import { OpenAiClient } from "@effect/ai-openai";
 import { Effect, Layer, type Schema, Stream } from "effect";
 import * as AiError from "effect/ai/AiError";
@@ -44,7 +44,7 @@ import {
 } from "../provider-call.ts";
 import { logKeys } from "../log-keys.ts";
 import { ModelStream } from "../model-stream.ts";
-import { reportAdjusted, type Settled } from "../settings.ts";
+import { reportAdjusted, type Settled } from "../configuration/settings.ts";
 import { openAiSettle } from "./openai-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
 import {

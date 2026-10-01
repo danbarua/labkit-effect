@@ -20,11 +20,11 @@ import { Effect, Schema } from "effect";
 import { Prompt } from "effect/cli";
 import { ModelSettings } from "../../agent-machine/settings.ts";
 import type { Session } from "../../agent-session/loop.ts";
-import { KnownModels } from "../../agent-session/providers/well-known-models.ts";
-import { modelOf } from "../../agent-session/session-setup.ts";
-import { choicesFor, type SettingChoices } from "../../agent-session/settings.ts";
+import { KnownModels } from "../../agent-session/configuration/well-known-models.ts";
+import { modelOf } from "../../agent-session/configuration/session-setup.ts";
+import { optionsOf, type SettingOption } from "../../agent-session/configuration/options.ts";
 import { invalid } from "./invalid.ts";
-import { keyOf, known, settling, targetOf } from "./models.ts";
+import { keyOf, known, targetOf } from "./models.ts";
 
 /** Each command and what it says of itself in `/help`. */
 export const commands: ReadonlyArray<readonly [string, string]> = [
@@ -88,27 +88,17 @@ const pickable = () =>
     keyOf(provider) === undefined ? [] : Object.keys(models).map((model) => ({ title: `${provider}/${model}`, value: `${provider}/${model}` })),
   );
 
-/** What a line can be completed from: the models that can be asked, and each setting's values for the model being asked, as it is set now. */
+/** What a line can be completed from: the models that can be asked, and the settings to offer for the model being asked, as it is set now. */
 export interface Offered {
   readonly models: ReadonlyArray<string>;
-  readonly settings: SettingChoices;
+  readonly settings: ReadonlyArray<SettingOption>;
 }
 
 export const offered = (session: Session) =>
   Effect.gen(function* () {
-    const now = yield* modelOf(yield* session.facts);
-    const capabilities = yield* (yield* KnownModels)(now.provider, now.model);
-    const settle = settling[now.provider] ?? (() => ({ fields: {}, headers: {}, adjusted: [] }));
-    const settings = choicesFor({ ...now, ...(capabilities === undefined ? {} : { capabilities }) }, settle);
-    const result: Offered = { models: pickable().map((each) => each.value), settings };
+    const result: Offered = { models: pickable().map((each) => each.value), settings: (yield* optionsOf(yield* session.facts)).offered };
     return result;
   });
-
-/** The settings to offer, by name, each with its values; `maxOutputTokens` is a number, and has none. A setting with no value to offer is left out. */
-const valuesOf = ({ maxOutputTokens, ...listed }: SettingChoices): Readonly<Record<string, ReadonlyArray<string>>> => ({
-  ...Object.fromEntries(Object.entries(listed).filter(([, values]) => values.length > 0)),
-  ...(maxOutputTokens ? { maxOutputTokens: [] } : {}),
-});
 
 /** A command's name as it is typed: with a space after it when words can follow. */
 const typedAs = [...commands.map(([usage]) => (usage.includes(" ") ? `${usage.slice(0, usage.indexOf(" "))} ` : usage)), "/quit"];
@@ -125,41 +115,40 @@ export const completions =
     const words = text.split(" ");
     const last = words.at(-1) ?? "";
     const before = text.slice(0, text.length - last.length);
-    const values = valuesOf(from.settings);
     const candidates = (): ReadonlyArray<string> => {
       if (words.length === 1) return typedAs;
       if (words[0] === "/model") return words.length === 2 ? from.models : [];
       if (words[0] !== "/settings") return [];
       const equals = last.indexOf("=");
-      if (equals >= 0) return (values[last.slice(0, equals)] ?? []).map((value) => `${last.slice(0, equals)}=${value}`);
+      if (equals >= 0) {
+        const option = from.settings.find((each) => each.name === last.slice(0, equals));
+        return option?._tag === "OneOf" ? option.values.map((value) => `${option.name}=${value}`) : [];
+      }
       const named = new Set(words.slice(1, -1).map((word) => word.split("=")[0]));
-      return Object.keys(values).flatMap((name) => (named.has(name) ? [] : [`${name}=`]));
+      return from.settings.flatMap(({ name }) => (named.has(name) ? [] : [`${name}=`]));
     };
     return candidates().flatMap((each) => (each.startsWith(last) ? [before + each] : []));
   };
 
 const leave = "(leave)";
 
-/** Asks which setting to change and to what, among the values the model being asked takes; undefined when none is to change. */
+/** Asks which setting to change and to what, among the ones offered; undefined when none is to change. */
 const picked = (session: Session) =>
   Effect.gen(function* () {
-    const now = yield* modelOf(yield* session.facts);
-    const values = valuesOf((yield* offered(session)).settings);
-    const said: Readonly<Record<string, string | number | undefined>> = now.settings ?? {};
-    const name = yield* Prompt.Select({
+    const { offered: settings } = yield* optionsOf(yield* session.facts);
+    const option = yield* Prompt.Select<SettingOption | typeof leave>({
       message: `${(yield* inForce(session)).split("\n")[0] ?? ""}. Change which setting?`,
       choices: [
         { title: "Leave them as they are", value: leave },
-        ...Object.keys(values).map((each) => ({ title: said[each] === undefined ? each : `${each} (now ${String(said[each])})`, value: each })),
+        ...settings.map((each) => ({ title: each.now === undefined ? each.name : `${each.name} (now ${each.now})`, value: each })),
       ],
     });
-    if (name === leave) return undefined;
-    const choices = values[name] ?? [];
+    if (option === leave) return undefined;
     const value =
-      choices.length === 0
-        ? String(yield* Prompt.Int({ message: name, min: 1 }))
-        : yield* Prompt.Select({ message: name, choices: choices.map((each) => ({ title: each, value: each })) });
-    return `${name}=${value}`;
+      option._tag === "Number"
+        ? String(yield* Prompt.Int({ message: option.name, min: 1 }))
+        : yield* Prompt.Select({ message: option.name, choices: option.values.map((each) => ({ title: each, value: each })) });
+    return `${option.name}=${value}`;
   });
 
 /** Runs the command `line` names, and returns what to print; undefined when `line` is not one of these commands. */

@@ -1,5 +1,5 @@
 /**
- * Writes `src/agent-session/providers/well-known-models.gen.ts`: what is known of each well-known
+ * Writes `src/agent-session/configuration/well-known-models.gen.ts`: what is known of each well-known
  * model, as `const` data, so that a model's settings can be typed from it.
  *
  * Two sources are merged. models.dev's catalog (https://models.dev/api.json) gives each model's
@@ -16,8 +16,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 type Json = Record<string, unknown>;
 
-const measuredPath = "src/agent-session/providers/well-known-models.measured.json";
-const generatedPath = "src/agent-session/providers/well-known-models.gen.ts";
+const measuredPath = "src/agent-session/configuration/well-known-models.measured.json";
+const generatedPath = "src/agent-session/configuration/well-known-models.gen.ts";
 
 const [from] = process.argv.slice(2);
 const catalog = (from === undefined ? await fetch("https://models.dev/api.json").then((response) => response.json()) : JSON.parse(readFileSync(from, "utf8"))) as Record<

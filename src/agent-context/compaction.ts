@@ -32,7 +32,7 @@ import { conversationOf, merged } from "../agent-session/conversation.ts";
 import type { Session } from "../agent-session/loop.ts";
 import { asText, parseJson, receivedJson } from "../agent-session/received.ts";
 import { sentIn } from "../agent-session/sent.ts";
-import { modelOf, systemOf, toolsOf } from "../agent-session/session-setup.ts";
+import { modelOf, systemOf, toolsOf } from "../agent-session/configuration/session-setup.ts";
 import { Conversation } from "./assemble.ts";
 import type { SummarizerName, WindowSummary } from "./forks.ts";
 

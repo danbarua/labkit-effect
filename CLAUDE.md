@@ -6,6 +6,9 @@ Facts are Observations (each with an Origin) or Decisions. Effects are requested
 `src/agent-session`: `loop.ts` is the agentic loop.
 Everything else is composable, extensible logic plugged in at sensible seams.
 
+`src/agent-session/configuration`: the model a session asks and its settings, read from its facts;
+what is known of each model; what a host offers to change (`options.ts`).
+
 What is built is in each module's `MODEL.md`; what is not, in `TODO.md`.
 
 ## Commands

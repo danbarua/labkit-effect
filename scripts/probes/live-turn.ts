@@ -23,12 +23,12 @@ import { ModelName, ProviderName, SessionId, TestName } from "../../src/agent-ma
 import type { Observation } from "../../src/agent-machine/observation.ts";
 import { ModelSettings } from "../../src/agent-machine/settings.ts";
 import { openSession } from "../../src/agent-session/loop.ts";
-import { ModelFromFacts } from "../../src/agent-session/model-choice.ts";
+import { ModelFromFacts } from "../../src/agent-session/configuration/model-choice.ts";
 import { reportedBy } from "../../src/agent-session/origin.ts";
 import { AnthropicModelClient } from "../../src/agent-session/providers/anthropic-client.ts";
 import { OpenAiModelClient } from "../../src/agent-session/providers/openai-client.ts";
 import { XAiModelClient, xAiClient } from "../../src/agent-session/providers/xai-client.ts";
-import { openedWith } from "../../src/agent-session/session-setup.ts";
+import { openedWith } from "../../src/agent-session/configuration/session-setup.ts";
 import { TurnContextAssembler } from "../../src/agent-session/turn-context.ts";
 import { CountingTurns, NoTurnEndHooks } from "../../src/agent-session/turns.ts";
 import { SmolToolRunner, smolCatalog } from "../../tests/support/smol-tools.ts";

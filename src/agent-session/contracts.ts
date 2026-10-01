@@ -2,7 +2,7 @@
  * What the loop needs from the outside world, one service per job. Each adapter implements one.
  */
 
-import type { Capabilities } from "./providers/well-known-models.ts";
+import type { Capabilities } from "./configuration/well-known-models.ts";
 import { BlobRef } from "../agent-machine/blob.ts";
 import { Context, type Effect, Schema } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";

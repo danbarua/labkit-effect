@@ -15,11 +15,11 @@ import { InputText, SessionId, type TurnId, Via } from "../../agent-machine/name
 import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { ToolRunner } from "../../agent-session/contracts.ts";
 import { openSession, type Session } from "../../agent-session/loop.ts";
-import { ModelFromFacts } from "../../agent-session/model-choice.ts";
+import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
 import { reportedBy } from "../../agent-session/origin.ts";
-import { openedWith } from "../../agent-session/session-setup.ts";
+import { openedWith } from "../../agent-session/configuration/session-setup.ts";
 import { CountingTurns, NoTurnEndHooks } from "../../agent-session/turns.ts";
-import { type Asked, Clients, KnownToCli } from "./models.ts";
+import { type Asked, Clients, KnownToCli, SettlingForCli } from "./models.ts";
 
 export interface Config {
   readonly sessionId: string;
@@ -50,6 +50,7 @@ const NoTools = Layer.succeed(ToolRunner, { run: () => Effect.succeed({ _tag: "F
 const Services = Layer.mergeAll(
     ModelFromFacts.pipe(Layer.provide(KnownToCli)),
   KnownToCli,
+  SettlingForCli,
     AgentContextAssembler.pipe(Layer.provide(Layer.mergeAll(WholeConversation, Layer.succeed(Notices, [])))),
     Clients,
     CountingTurns,

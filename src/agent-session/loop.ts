@@ -47,7 +47,7 @@ import { ModelStream, ModelStreamInterval, type Streamed } from "./model-stream.
 import { CurrentOrigin, harnessParts, reportedBy } from "./origin.ts";
 import { Report } from "./report.ts";
 import { sentAs } from "./sent.ts";
-import { modelOf } from "./session-setup.ts";
+import { modelOf } from "./configuration/session-setup.ts";
 import { CurrentWork, type Work } from "./work.ts";
 
 /**

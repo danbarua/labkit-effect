@@ -13,12 +13,12 @@
  */
 
 import { Effect } from "effect";
-import { AdjustmentReason, TokenCount, type TurnId } from "../agent-machine/names.ts";
-import { CacheFor, Effort, type Adjusted, type ModelSettings, Observe, ThinkingMode } from "../agent-machine/settings.ts";
-import type { Target } from "./contracts.ts";
-import { harnessParts } from "./origin.ts";
-import { Report } from "./report.ts";
-import type { Json } from "./shaping.ts";
+import { AdjustmentReason, TokenCount, type TurnId } from "../../agent-machine/names.ts";
+import { CacheFor, Effort, type Adjusted, type ModelSettings, Observe, ThinkingMode } from "../../agent-machine/settings.ts";
+import type { Target } from "../contracts.ts";
+import { harnessParts } from "../origin.ts";
+import { Report } from "../report.ts";
+import type { Json } from "../shaping.ts";
 
 export interface Adjustment {
   readonly adjusted: Adjusted;

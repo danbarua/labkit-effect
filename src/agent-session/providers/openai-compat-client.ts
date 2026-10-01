@@ -18,7 +18,7 @@
  */
 
 import type { BlobId } from "../../agent-machine/blob.ts";
-import { knownOf, takesFile } from "./well-known-models.ts";
+import { knownOf, takesFile } from "../configuration/well-known-models.ts";
 import { OpenAiClient } from "@effect/ai-openai-compat";
 import { Effect, Layer, type Schema } from "effect";
 import type * as AiError from "effect/ai/AiError";
@@ -27,7 +27,7 @@ import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agen
 import type { ModelPart, Observation } from "../../agent-machine/observation.ts";
 import { type ContextMessage, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
 import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postJson, type Retries, withRetries } from "../provider-call.ts";
-import { reportAdjusted } from "../settings.ts";
+import { reportAdjusted } from "../configuration/settings.ts";
 import { openAiCompatSettle } from "./openai-compat-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
 import {
