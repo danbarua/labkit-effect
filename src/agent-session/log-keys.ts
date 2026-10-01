@@ -18,6 +18,7 @@ export const logKeys = {
     partCut: "provider.response.part_cut",
     /** A part of an earlier response was not sent; the details say which part and why. */
     partLeftOut: "provider.request.part_left_out",
+    fileAsPointer: "provider.request.file_as_pointer",
   },
   loop: {
     /** The core made a decision, and it was recorded; the details are the decision and where. */

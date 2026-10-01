@@ -31,6 +31,8 @@ function characters(message: ContextMessage): number {
       case "Thinking":
       case "Unrecognised":
         return total + JSON.stringify(part.received).length;
+      case "File":
+        return total + part.blob.size;
       default:
         return part satisfies never;
     }

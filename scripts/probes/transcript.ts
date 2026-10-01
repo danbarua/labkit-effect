@@ -13,6 +13,7 @@ import type { Origin } from "../../src/agent-machine/origin.ts";
 import type { ContextMessage, ContextPart } from "../../src/agent-session/contracts.ts";
 import { asText } from "../../src/agent-session/received.ts";
 import { sentIn } from "../../src/agent-session/sent.ts";
+import { blobPointer } from "../../src/agent-session/shaping.ts";
 
 const fenced = (text: string, language = ""): string => `\`\`\`${language}\n${text}\n\`\`\``;
 const quoted = (text: string): string => text.split("\n").map((line) => `> ${line}`).join("\n");
@@ -84,6 +85,8 @@ function partText(part: ModelPart | ContextPart): string {
       return `the result of call \`${part.call}\`: ${outcomeText(part.outcome)}`;
     case "Unrecognised":
       return `a part the adapter does not recognise, kept as received:\n\n${fenced(pretty(asText(part.received)), "json")}`;
+    case "File":
+      return `a file: ${blobPointer(part.blob)}`;
     default:
       return part satisfies never;
   }

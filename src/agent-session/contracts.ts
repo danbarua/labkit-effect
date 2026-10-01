@@ -2,6 +2,7 @@
  * What the loop needs from the outside world, one service per job. Each adapter implements one.
  */
 
+import { BlobRef } from "../agent-machine/blob.ts";
 import { Context, type Effect, Schema } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 import { CallId, type ModelName, ProviderName, ThinkingText, ToolName, type TurnId } from "../agent-machine/names.ts";
@@ -43,6 +44,8 @@ export const ContextPart = Schema.Union([
   Schema.TaggedStruct("ToolCall", { call: CallId, tool: ToolName, input: Received }),
   Schema.TaggedStruct("ToolResult", { call: CallId, outcome: ToolOutcome }),
   Schema.TaggedStruct("Unrecognised", { provider: ProviderName, received: Received }),
+  /** A file, by reference: the adapter reads its bytes from the blob store when it makes the request. */
+  Schema.TaggedStruct("File", { blob: BlobRef }),
 ]);
 export type ContextPart = typeof ContextPart.Type;
 

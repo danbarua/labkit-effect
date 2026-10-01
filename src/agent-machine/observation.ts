@@ -3,6 +3,7 @@
  * received; a captured observation is passed on for display and not kept.
  */
 
+import { BlobRef } from "./blob.ts";
 import { Schema } from "effect";
 import { Received } from "./received.ts";
 import { Enforced, ModelSettings } from "./settings.ts";
@@ -144,7 +145,12 @@ export const Observation = Schema.Union([
     tools: Schema.optionalKey(Received),
   }),
   /** An input arrived. It can arrive at any time, including while a turn is under way. */
-  Schema.TaggedStruct("InputArrived", { from: InputSource, text: InputText }),
+  Schema.TaggedStruct("InputArrived", {
+    from: InputSource,
+    text: InputText,
+    /** Files that came with the input, by reference; the bytes are in the blob store. */
+    attachments: Schema.optionalKey(Schema.Array(BlobRef)),
+  }),
   /**
    * A span of the conversation was chosen for compaction: the facts through `through`, except those
    * at `kept`. Once taken (`WindowOpened`), requests are made in the window, where a summary of the

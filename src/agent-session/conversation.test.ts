@@ -86,3 +86,13 @@ test("A6: the next request carries the last request's messages as recorded, thou
     parts: [{ _tag: "ToolResult", call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } }],
   });
 });
+
+test("an input's files follow its text in the user's message, by reference", () => {
+  const session = open();
+  observe(session, opened);
+  const chart = { id: "a".repeat(64), mediaType: "image/png", size: 7, name: "chart.png" };
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "What does this show?", attachments: [chart] });
+  expect(conversationOf(session.journal) as unknown).toEqual([
+    { role: "user", parts: [{ _tag: "Text", text: "What does this show?" }, { _tag: "File", blob: chart }] },
+  ]);
+});

@@ -17,6 +17,8 @@
  * the response is `metadata`. A request that fails, after retries, is observed as `ModelFailed`.
  */
 
+import type { BlobId } from "../../agent-machine/blob.ts";
+import { acceptsFile } from "./frontier.ts";
 import { OpenAiClient } from "@effect/ai-openai-compat";
 import { Effect, Layer, type Schema } from "effect";
 import type * as AiError from "effect/ai/AiError";
@@ -41,6 +43,8 @@ import {
   numberAt,
   toolInputObject,
   usageOf,
+  fileAs,
+  filesIn,
 } from "../shaping.ts";
 
 type Responded = Extract<Observation, { _tag: "ModelResponded" }>;
@@ -61,13 +65,26 @@ function role(message: ContextMessage): string {
 }
 
 /** The chat messages one context message becomes: tool outcomes each become their own message. */
-function chatMessages(message: ContextMessage, calls: ReadonlyMap<CallId, Called>, context: ModelContext): Shaped {
+function chatMessages(
+  message: ContextMessage,
+  target: Target,
+  calls: ReadonlyMap<CallId, Called>,
+  context: ModelContext,
+  files: ReadonlyMap<BlobId, Uint8Array>,
+): Shaped {
   const notSent = message.parts.flatMap((part) =>
     part._tag === "Thinking" || part._tag === "Unrecognised"
       ? leftOut(part, "this adapter does not send an earlier response's other fields back").supplied
       : [],
   );
-  const text = message.parts.flatMap((part) => (part._tag === "Text" || part._tag === "Commentary" ? [{ type: "text", text: part.text }] : []));
+  // A file goes in the message's content: an image as `image_url` with a data URL; anything else as its pointer.
+  const filed = message.parts.flatMap((part) =>
+    part._tag === "File" ? [fileAs(part.blob, files, (mediaType) => mediaType.startsWith("image/") && acceptsFile(target.provider, target.model, mediaType))] : [],
+  );
+  const text = [
+    ...message.parts.flatMap((part) => (part._tag === "Text" || part._tag === "Commentary" ? [{ type: "text", text: part.text }] : [])),
+    ...filed.map((file) => (file._tag === "Text" ? { type: "text", text: file.text } : { type: "image_url", image_url: { url: file.dataUrl } })),
+  ];
   const toolCalls = message.parts.flatMap((part) =>
     part._tag === "ToolCall" ? [{ call: part.call, tool: part.tool, input: toolInputObject(part.call, part.input) }] : [],
   );
@@ -100,12 +117,15 @@ function chatMessages(message: ContextMessage, calls: ReadonlyMap<CallId, Called
                 }),
           },
         ];
-  return { json: [...results, ...own], supplied: [...toolCalls.flatMap((call) => call.input.supplied), ...notSent] };
+  return {
+    json: [...results, ...own],
+    supplied: [...toolCalls.flatMap((call) => call.input.supplied), ...notSent, ...filed.flatMap((file) => (file._tag === "Text" ? file.supplied : []))],
+  };
 }
 
-function body(target: Target, context: ModelContext): Shaped {
+function body(target: Target, context: ModelContext, files: ReadonlyMap<BlobId, Uint8Array> = new Map()): Shaped {
   const calls = callsIn(context);
-  const messages = context.messages.map((message) => chatMessages(message, calls, context));
+  const messages = context.messages.map((message) => chatMessages(message, target, calls, context, files));
   return {
     json: {
       model: target.model,
@@ -212,15 +232,19 @@ export const openAiCompatRequests = (
     const http = (yield* OpenAiClient.OpenAiClient).client;
     return (target, context, turn) => {
       const settled = openAiCompatSettings(target.settings);
-      const sent = body(target, context);
-      const post: Post = {
-        path: "/chat/completions",
-        headers: settled.headers,
-        body: { ...(sent.json as Record<string, Json>), ...settled.fields },
-      };
-      return reportEnforced(turn, target, settled).pipe(
-        Effect.andThen(logSupplied(sent.supplied)),
-        Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
+      return filesIn(context).pipe(
+        Effect.flatMap((files) => {
+        const sent = body(target, context, files);
+        const post: Post = {
+          path: "/chat/completions",
+          headers: settled.headers,
+          body: { ...(sent.json as Record<string, Json>), ...settled.fields },
+        };
+        return reportEnforced(turn, target, settled).pipe(
+          Effect.andThen(logSupplied(sent.supplied)),
+          Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
+        );
+        }),
       );
     };
   });

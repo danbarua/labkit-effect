@@ -10,7 +10,7 @@ import type { Received } from "../../agent-machine/received.ts";
 import type { ModelContext, Target } from "../contracts.ts";
 import { defaultRetries, invalidOutput, type Post, postJson, type Retries, withRetries } from "../provider-call.ts";
 import { receivedJson } from "../received.ts";
-import { isObject, type Json, logSupplied } from "../shaping.ts";
+import { filesIn, isObject, type Json, logSupplied } from "../shaping.ts";
 import { body } from "./openai-client.ts";
 
 /**
@@ -39,7 +39,8 @@ export const openAiCompactions = (
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
     return (target, context) => {
-      const sent = body(target, context);
+      return filesIn(context).pipe(Effect.flatMap((files) => {
+      const sent = body(target, context, files);
       const post: Post = { path: "/responses/compact", headers: {}, body: sent.json as Record<string, Json> };
       return logSupplied(sent.supplied).pipe(
         Effect.andThen(
@@ -54,6 +55,7 @@ export const openAiCompactions = (
           ),
         ),
       );
+      }));
     };
   });
 

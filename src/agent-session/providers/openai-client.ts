@@ -23,6 +23,8 @@
  * xAI takes the same requests (`xai-client.ts`).
  */
 
+import type { BlobId } from "../../agent-machine/blob.ts";
+import { acceptsFile } from "./frontier.ts";
 import { OpenAiClient } from "@effect/ai-openai";
 import { Effect, Layer, type Schema, Stream } from "effect";
 import * as AiError from "effect/ai/AiError";
@@ -58,6 +60,8 @@ import {
   numberAt,
   toolInputObject,
   usageOf,
+  fileAs,
+  filesIn,
 } from "../shaping.ts";
 
 type Responded = Extract<Observation, { _tag: "ModelResponded" }>;
@@ -79,7 +83,13 @@ function textAs(message: ContextMessage): { readonly role: string; readonly type
 }
 
 /** The input items one message becomes, in order. */
-function items(message: ContextMessage, target: Target, calls: ReadonlyMap<CallId, Called>, context: ModelContext): Shaped {
+function items(
+  message: ContextMessage,
+  target: Target,
+  calls: ReadonlyMap<CallId, Called>,
+  context: ModelContext,
+  files: ReadonlyMap<BlobId, Uint8Array>,
+): Shaped {
   const shaped = message.parts.map((part): Shaped => {
     switch (part._tag) {
       case "Text": {
@@ -112,6 +122,17 @@ function items(message: ContextMessage, target: Target, calls: ReadonlyMap<CallI
       case "Thinking":
       case "Unrecognised":
         return sentBack(part, target);
+      case "File": {
+        // An image goes as `input_image`, a PDF as `input_file`, each as a data URL, in a message of its own.
+        const { role, type } = textAs(message);
+        const file = fileAs(part.blob, files, (mediaType) => acceptsFile(target.provider, target.model, mediaType));
+        if (file._tag === "Text") return { json: [{ role, content: [{ type, text: file.text }] }], supplied: file.supplied };
+        const content =
+          file.blob.mediaType === "application/pdf"
+            ? { type: "input_file", filename: file.blob.name ?? `${file.blob.id}.pdf`, file_data: file.dataUrl }
+            : { type: "input_image", image_url: file.dataUrl };
+        return { json: [{ role, content: [content] }], supplied: [] };
+      }
       default:
         return part satisfies never;
     }
@@ -123,9 +144,9 @@ function items(message: ContextMessage, target: Target, calls: ReadonlyMap<CallI
 }
 
 /** A request's body for `context`, without settings, and what was supplied or left out in shaping it. */
-export function body(target: Target, context: ModelContext): Shaped {
+export function body(target: Target, context: ModelContext, files: ReadonlyMap<BlobId, Uint8Array> = new Map()): Shaped {
   const calls = callsIn(context);
-  const input = context.messages.map((message) => items(message, target, calls, context));
+  const input = context.messages.map((message) => items(message, target, calls, context, files));
   return {
     json: {
       model: target.model,
@@ -296,15 +317,19 @@ export const openAiRequests = (
     const http = (yield* OpenAiClient.OpenAiClient).client;
     return (target, context, turn) => {
       const settled = settle(target);
-      const sent = body(target, context);
-      const post: Post = {
-        path: "/responses",
-        headers: settled.headers,
-        body: { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true },
-      };
-      return reportEnforced(turn, target, settled).pipe(
-        Effect.andThen(logSupplied(sent.supplied)),
-        Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
+      return filesIn(context).pipe(
+        Effect.flatMap((files) => {
+        const sent = body(target, context, files);
+        const post: Post = {
+          path: "/responses",
+          headers: settled.headers,
+          body: { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true },
+        };
+        return reportEnforced(turn, target, settled).pipe(
+          Effect.andThen(logSupplied(sent.supplied)),
+          Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
+        );
+        }),
       );
     };
   });

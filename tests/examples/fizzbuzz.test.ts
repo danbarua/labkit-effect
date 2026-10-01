@@ -33,6 +33,8 @@ const transcript = (messages: ReadonlyArray<ContextMessage>): ReadonlyArray<stri
           return `${message.role}: thinking ${part.text}`;
         case "Unrecognised":
           return `${message.role}: unrecognised ${asText(part.received)}`;
+        case "File":
+          return `${message.role}: file ${part.blob.id}`;
         default:
           return part satisfies never;
       }

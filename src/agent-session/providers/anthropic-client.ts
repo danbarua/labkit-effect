@@ -19,6 +19,8 @@
  * what was received with it is logged here. The loop annotates these logs with the turn.
  */
 
+import type { BlobId } from "../../agent-machine/blob.ts";
+import { acceptsFile } from "./frontier.ts";
 import { AnthropicClient } from "@effect/ai-anthropic";
 import { Effect, Layer, Stream } from "effect";
 import * as AiError from "effect/ai/AiError";
@@ -62,6 +64,8 @@ import {
   numberAt,
   toolInputObject,
   usageOf,
+  fileAs,
+  filesIn,
 } from "../shaping.ts";
 
 type Outcome = Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" }>;
@@ -77,7 +81,13 @@ function resultContent(result: RenderedResult): { content: string; is_error?: tr
 }
 
 /** The blocks one part becomes: one, or none when it is left out. */
-function blocks(part: ContextPart, target: Target, context: ModelContext, calls: ReadonlyMap<CallId, Called>): Shaped {
+function blocks(
+  part: ContextPart,
+  target: Target,
+  context: ModelContext,
+  calls: ReadonlyMap<CallId, Called>,
+  files: ReadonlyMap<BlobId, Uint8Array>,
+): Shaped {
   switch (part._tag) {
     case "Text":
     case "Commentary":
@@ -103,6 +113,13 @@ function blocks(part: ContextPart, target: Target, context: ModelContext, calls:
     case "Thinking":
     case "Unrecognised":
       return sentBack(part, target);
+    case "File": {
+      // An image goes as an `image` block, a PDF as a `document` block, both in base64.
+      const file = fileAs(part.blob, files, (mediaType) => acceptsFile(target.provider, target.model, mediaType));
+      if (file._tag === "Text") return { json: [{ type: "text", text: file.text }], supplied: file.supplied };
+      const source = { type: "base64", media_type: file.blob.mediaType, data: file.base64 };
+      return { json: [{ type: file.blob.mediaType === "application/pdf" ? "document" : "image", source }], supplied: [] };
+    }
     default:
       return part satisfies never;
   }
@@ -139,13 +156,13 @@ function systemOf(context: ModelContext, opening: ReadonlyArray<ContextMessage>)
   return texts.length === 0 ? undefined : texts.map((text) => ({ type: "text", text }));
 }
 
-function body(target: Target, context: ModelContext): Shaped {
+function body(target: Target, context: ModelContext, files: ReadonlyMap<BlobId, Uint8Array> = new Map()): Shaped {
   const calls = callsIn(context);
   const first = context.messages.findIndex((message) => message.role !== "instruction");
   const opening = context.messages.slice(0, first === -1 ? context.messages.length : first);
   const system = systemOf(context, opening);
   const messages = context.messages.slice(opening.length).flatMap((message) => {
-    const shaped = message.parts.map((part) => blocks(part, target, context, calls));
+    const shaped = message.parts.map((part) => blocks(part, target, context, calls, files));
     const content = shaped.flatMap((each) => each.json as ReadonlyArray<Json>);
     const supplied = shaped.flatMap((each) => each.supplied);
     // A message whose every part was left out is not sent: the API rejects empty content.
@@ -316,15 +333,19 @@ export const anthropicRequests = (
     const http = (yield* AnthropicClient.AnthropicClient).client.httpClient;
     return (target, context, turn) => {
       const settled = anthropicSettings(target.model, target.settings);
-      const sent = body(target, context);
-      const post: Post = {
-        path: "/v1/messages",
-        headers: settled.headers,
-        body: { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true },
-      };
-      return reportEnforced(turn, target, settled).pipe(
-        Effect.andThen(logSupplied(sent.supplied)),
-        Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
+      return filesIn(context).pipe(
+        Effect.flatMap((files) => {
+        const sent = body(target, context, files);
+        const post: Post = {
+          path: "/v1/messages",
+          headers: settled.headers,
+          body: { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true },
+        };
+        return reportEnforced(turn, target, settled).pipe(
+          Effect.andThen(logSupplied(sent.supplied)),
+          Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
+        );
+        }),
       );
     };
   });

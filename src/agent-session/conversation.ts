@@ -8,18 +8,19 @@
  * with the provider that produced them; which provider reads them is its adapter's business.
  */
 
+import type { BlobRef } from "../agent-machine/blob.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { CallId, NoticeText, Seq } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import type { ContextMessage, ContextPart } from "./contracts.ts";
 import { sentIn } from "./sent.ts";
 
-/** The text of each input, by its position. */
-export function inputTexts(facts: ReadonlyArray<Fact>): ReadonlyMap<Seq, string> {
+/** Each input's text and the files that came with it, by its position. */
+export function inputTexts(facts: ReadonlyArray<Fact>): ReadonlyMap<Seq, { readonly text: string; readonly attachments: ReadonlyArray<BlobRef> }> {
   return new Map(
     facts.flatMap((fact) =>
       fact._tag === "Observed" && fact.observation._tag === "InputArrived"
-        ? [[fact.seq, fact.observation.text] as const]
+        ? [[fact.seq, { text: fact.observation.text, attachments: fact.observation.attachments ?? [] }] as const]
         : [],
     ),
   );
@@ -56,12 +57,15 @@ function outcomeOf(call: CallId, calls: Calls): ToolOutcome {
 }
 
 /** The messages a fact adds. */
-function messages(fact: Fact, texts: ReadonlyMap<Seq, string>, calls: Calls): ReadonlyArray<ContextMessage> {
+function messages(fact: Fact, texts: ReturnType<typeof inputTexts>, calls: Calls): ReadonlyArray<ContextMessage> {
+  // Each input is its text, then the files that came with it.
   const inputs = (seqs: ReadonlyArray<Seq>): ContextMessage => ({
     role: "user",
-    parts: seqs.flatMap((seq) => {
-      const text = texts.get(seq);
-      return text === undefined ? [] : [{ _tag: "Text" as const, text }];
+    parts: seqs.flatMap((seq): ReadonlyArray<ContextPart> => {
+      const input = texts.get(seq);
+      return input === undefined
+        ? []
+        : [{ _tag: "Text", text: input.text }, ...input.attachments.map((blob): ContextPart => ({ _tag: "File", blob }))];
     }),
   });
   if (fact._tag === "Decided") return fact.decision._tag === "InputDelivered" ? [inputs(fact.decision.inputs)] : [];

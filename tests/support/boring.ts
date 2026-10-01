@@ -45,8 +45,8 @@ export const BoringContextAssembler = Layer.succeed(ContextAssembler, {
         {
           role: "user",
           parts: turnInputs(facts, turn).flatMap((input) => {
-            const text = texts.get(input);
-            return text === undefined ? [] : [{ _tag: "Text" as const, text }];
+            const given = texts.get(input);
+            return given === undefined ? [] : [{ _tag: "Text" as const, text: given.text }];
           }),
         },
       ],

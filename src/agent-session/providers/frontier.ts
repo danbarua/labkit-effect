@@ -1,6 +1,7 @@
 /**
  * The frontier models this harness knows: for each provider, the models of its latest three
- * releases, with the most tokens of context each takes, the most it writes in one response, and
+ * releases, with the most tokens of context each takes, the most it writes in one response, the
+ * kinds of file it takes as input (`text`, `image`, `pdf`), and
  * its price in US dollars per million tokens (input not read from or written to the cache, output,
  * cache reads, cache writes, cache writes kept for an hour; `above` is the price of a request whose
  * input is over its `context`). Anthropic's hour-long cache writes are twice the input price
@@ -29,6 +30,7 @@ export interface Limits {
   readonly context: number;
   /** The most tokens the model writes in one response. */
   readonly output: number;
+  readonly input: ReadonlyArray<string>;
   readonly price: Price & { readonly above?: Price & { readonly context: number } };
 }
 
@@ -39,4 +41,13 @@ export function limitsOf(provider: ProviderName | string, model: ModelName | str
   const models = known[provider] ?? {};
   const name = Object.keys(models).find((each) => model === each || model.startsWith(`${each}-`));
   return name === undefined ? undefined : models[name];
+}
+
+/**
+ * Whether `model` of `provider` takes a file of `mediaType` as input: an image (`image/*`) or a PDF
+ * when `frontier.json` lists the kind for it. A model not listed is not known to take either.
+ */
+export function acceptsFile(provider: ProviderName | string, model: ModelName | string, mediaType: string): boolean {
+  const kinds = limitsOf(provider, model)?.input ?? [];
+  return (mediaType.startsWith("image/") && kinds.includes("image")) || (mediaType === "application/pdf" && kinds.includes("pdf"));
 }

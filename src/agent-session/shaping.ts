@@ -6,10 +6,12 @@
  */
 
 import { Effect, type Schema } from "effect";
+import type { BlobId, BlobRef } from "../agent-machine/blob.ts";
 import { type CallId, TokenCount, type ToolName } from "../agent-machine/names.ts";
 import type { ResponseEnding, ToolOutcome, Usage } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
 import type { ContextPart, ModelContext, Target, ToolSpec } from "./contracts.ts";
+import { Blobs } from "./blobs.ts";
 import { logKeys } from "./log-keys.ts";
 import { asText, parseJson } from "./received.ts";
 
@@ -203,4 +205,41 @@ export function usageOf(counts: {
     ...optional("cacheWrite"),
     ...optional("cacheWrite1h"),
   };
+}
+
+/** The bytes of every file `context` carries, read from the blob store; a file it does not hold is absent. */
+export const filesIn = (context: ModelContext): Effect.Effect<ReadonlyMap<BlobId, Uint8Array>> =>
+  Effect.gen(function* () {
+    const blobs = yield* Blobs;
+    const ids = [...new Set(context.messages.flatMap((message) => message.parts.flatMap((part) => (part._tag === "File" ? [part.blob.id] : []))))];
+    const read = yield* Effect.forEach(ids, (id) => blobs.read(id).pipe(Effect.map((bytes) => [id, bytes] as const)));
+    return new Map(read.flatMap(([id, bytes]) => (bytes === undefined ? [] : [[id, bytes] as const])));
+  });
+
+/** A file as pointer text the model can quote or follow with a tool: `[image/png, 68 KiB, a.png: blob://<id>]`. */
+export function blobPointer(blob: BlobRef): string {
+  const size = blob.size < 1024 ? `${blob.size} B` : blob.size < 1024 * 1024 ? `${Math.round(blob.size / 1024)} KiB` : `${(blob.size / 1024 / 1024).toFixed(1)} MiB`;
+  return `[${blob.mediaType}, ${size}${blob.name === undefined ? "" : `, ${blob.name}`}: blob://${blob.id}]`;
+}
+
+/**
+ * How a file goes to the model: its bytes, when the model takes its kind (`accepts`) and the store
+ * holds them; a text file's text, after its pointer; otherwise its pointer, and why is logged.
+ */
+export type FileAs =
+  | { readonly _tag: "Bytes"; readonly blob: BlobRef; readonly base64: string; readonly dataUrl: string }
+  | { readonly _tag: "Text"; readonly text: string; readonly supplied: ReadonlyArray<Supplied> };
+
+export function fileAs(blob: BlobRef, files: ReadonlyMap<BlobId, Uint8Array>, accepts: (mediaType: string) => boolean): FileAs {
+  const bytes = files.get(blob.id);
+  const pointer = (reason: string): FileAs => ({
+    _tag: "Text",
+    text: blobPointer(blob),
+    supplied: [{ level: "warning", event: logKeys.provider.fileAsPointer, details: { blob: blob.id, mediaType: blob.mediaType, reason } }],
+  });
+  if (bytes === undefined) return pointer("the blob store does not hold the file's bytes");
+  if (blob.mediaType.startsWith("text/")) return { _tag: "Text", text: `${blobPointer(blob)}\n${new TextDecoder().decode(bytes)}`, supplied: [] };
+  if (!accepts(blob.mediaType)) return pointer("the model is not known to take files of this type");
+  const base64 = Buffer.from(bytes).toString("base64");
+  return { _tag: "Bytes", blob, base64, dataUrl: `data:${blob.mediaType};base64,${base64}` };
 }
