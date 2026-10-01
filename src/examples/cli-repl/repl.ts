@@ -6,10 +6,10 @@
  */
 
 import { Console, Effect } from "effect";
-import { Prompt } from "effect/cli";
 import type { Fact } from "../../agent-machine/fact.ts";
 import type { Session } from "../../agent-session/loop.ts";
 import { command } from "./commands.ts";
+import { bracketedPaste, Multiline } from "./multiline.ts";
 import { answerTo, ask, type Config, endingOf, lastTurn, logFileOf } from "./session.ts";
 
 /** What is printed after a turn: the answer, or how the turn ended when it gave none. */
@@ -28,12 +28,13 @@ const turn = (session: Session, input: string) =>
   );
 
 export const repl = (session: Session, config: Config, first: string | undefined, interactive: boolean) =>
-  Effect.gen(function* () {
+  Effect.scoped(Effect.gen(function* () {
     yield* Console.log(`${config.target.provider}/${config.target.model} · /help for commands, /exit to quit. Log: ${logFileOf(config.sessionId)}`);
     if (first !== undefined) yield* turn(session, first);
     if (!interactive) return;
+    yield* bracketedPaste;
     while (true) {
-      const input = yield* Prompt.String({ message: "You" });
+      const input = yield* Multiline;
       if (input === "/exit" || input === "/quit") break;
       if (input.trim() === "") continue;
       if (input.startsWith("/")) {
@@ -44,4 +45,4 @@ export const repl = (session: Session, config: Config, first: string | undefined
       }
       yield* turn(session, input);
     }
-  });
+  }));
