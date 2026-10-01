@@ -5,8 +5,8 @@
  */
 
 import { Effect } from "effect";
-import { AdjustmentReason, type TurnId } from "../agent-machine/names.ts";
-import type { Effort, Adjusted, ModelSettings } from "../agent-machine/settings.ts";
+import { AdjustmentReason, TokenCount, type TurnId } from "../agent-machine/names.ts";
+import { CacheFor, Effort, type Adjusted, type ModelSettings, Observe, ThinkingMode } from "../agent-machine/settings.ts";
 import type { Target } from "./contracts.ts";
 import { harnessParts } from "./origin.ts";
 import { Report } from "./report.ts";
@@ -52,7 +52,7 @@ export const reportAdjusted = (turn: TurnId, target: Target, settled: Settled): 
 /** Reasoning efforts in order, least first, as the Responses API names them. */
 const efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-const isEffort = (effort: string): effort is Effort => (["low", "medium", "high", "xhigh", "max"] as const).some((each) => each === effort);
+const isEffort = (effort: string): effort is Effort => Effort.literals.some((each) => each === effort);
 
 /**
  * The reasoning effort to send for `settings` to a model that accepts `accepted`: the effort asked,
@@ -79,4 +79,40 @@ export function effortFor(
   if (off) return { sent, adjusted: [{ adjusted: { _tag: "Thinking", asked: "off", used: "auto" }, reason }, ...set(sent)] };
   const asked = settings.effort;
   return { sent, adjusted: asked === undefined ? [] : [{ adjusted: { _tag: "Effort", asked, ...(isEffort(sent) ? { used: sent } : {}) }, reason }] };
+}
+
+/** The setting an adjustment is about. */
+export const settingOf = {
+  Thinking: "thinking",
+  Observe: "observe",
+  Effort: "effort",
+  MaxOutputTokens: "maxOutputTokens",
+  Cache: "cache",
+} as const satisfies Record<Adjusted["_tag"], keyof ModelSettings>;
+
+/** The values to offer for each setting; for `maxOutputTokens`, a number, whether to offer it. */
+export interface SettingChoices {
+  readonly effort: ReadonlyArray<Effort>;
+  readonly thinking: ReadonlyArray<ThinkingMode>;
+  readonly observe: ReadonlyArray<Observe>;
+  readonly cache: ReadonlyArray<CacheFor>;
+  readonly maxOutputTokens: boolean;
+}
+
+/**
+ * The values to offer for each setting of `target`, as it is set now: those its provider's adapter
+ * (`settle`) applies as asked, beside the target's other settings. A value the adapter would adjust
+ * is not offered, so a setting the provider has nothing for is offered no values, and what is
+ * offered for one setting follows the others (no effort while thinking is off).
+ */
+export function choicesFor(target: Target, settle: (target: Target) => Settled): SettingChoices {
+  const applied = <K extends keyof ModelSettings>(name: K, value: NonNullable<ModelSettings[K]>): boolean =>
+    !settle({ ...target, settings: { ...target.settings, [name]: value } }).adjusted.some(({ adjusted }) => settingOf[adjusted._tag] === name);
+  return {
+    effort: Effort.literals.filter((value) => applied("effort", value)),
+    thinking: ThinkingMode.literals.filter((value) => applied("thinking", value)),
+    observe: Observe.literals.filter((value) => applied("observe", value)),
+    cache: CacheFor.literals.filter((value) => applied("cache", value)),
+    maxOutputTokens: applied("maxOutputTokens", TokenCount.make(1)),
+  };
 }

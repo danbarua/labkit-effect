@@ -46,7 +46,7 @@ import { logKeys } from "../log-keys.ts";
 import { ModelStream } from "../model-stream.ts";
 import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEvents, type Retries, withRetries } from "../provider-call.ts";
 import { reportAdjusted } from "../settings.ts";
-import { anthropicSettings } from "./anthropic-settings.ts";
+import { anthropicSettle } from "./anthropic-settings.ts";
 import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
 import { receivedJson } from "../received.ts";
 import {
@@ -335,7 +335,7 @@ export const anthropicRequests = (
   Effect.gen(function* () {
     const http = (yield* AnthropicClient.AnthropicClient).client.httpClient;
     return (target, context, turn) => {
-      const settled = anthropicSettings(target.model, target.settings);
+      const settled = anthropicSettle(target);
       return filesIn(context).pipe(
         Effect.flatMap((files) => {
         const sent = body(target, context, files);

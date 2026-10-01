@@ -45,7 +45,7 @@ import {
 import { logKeys } from "../log-keys.ts";
 import { ModelStream } from "../model-stream.ts";
 import { reportAdjusted, type Settled } from "../settings.ts";
-import { openAiSettings } from "./openai-settings.ts";
+import { openAiSettle } from "./openai-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
 import {
   type Called,
@@ -314,7 +314,7 @@ const respondOnce = (
  */
 export const openAiRequests = (
   retries: Retries = defaultRetries,
-  settle: (target: Target) => Settled = (target) => openAiSettings(target.settings, knownOf(target)?.efforts),
+  settle: (target: Target) => Settled = openAiSettle,
 ): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;

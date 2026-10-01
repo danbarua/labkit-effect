@@ -16,6 +16,8 @@
 
 import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { type Adjustment, effortFor, type Settled } from "../settings.ts";
+import type { Target } from "../contracts.ts";
+import { knownOf } from "./well-known-models.ts";
 
 const reason = "the Chat Completions adapter does not send this setting";
 
@@ -34,3 +36,6 @@ export function openAiCompatSettings(settings: ModelSettings = {}, efforts?: Rea
   ];
   return { fields: sent === undefined ? {} : { reasoning_effort: sent }, headers: {}, adjusted };
 }
+
+/** The same for a request's target: its settings, and the efforts known of its model. */
+export const openAiCompatSettle = (target: Target): Settled => openAiCompatSettings(target.settings, knownOf(target)?.efforts);

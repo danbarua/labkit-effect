@@ -13,7 +13,7 @@ import { OpenAiClient as OpenAiCompatClient } from "@effect/ai-openai-compat";
 import { Effect, Layer, Redacted } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { ModelName, ProviderName } from "../../agent-machine/names.ts";
-import type { ProviderRequest } from "../../agent-session/contracts.ts";
+import type { ProviderRequest, Target } from "../../agent-session/contracts.ts";
 import { FallbackModelClient } from "../../agent-session/model-fallback.ts";
 import { anthropicRequests } from "../../agent-session/providers/anthropic-client.ts";
 import { openAiRequests } from "../../agent-session/providers/openai-client.ts";
@@ -21,6 +21,11 @@ import { openAiCompatRequests } from "../../agent-session/providers/openai-compa
 import { xAiClient, xAiRequests } from "../../agent-session/providers/xai-client.ts";
 import { type Capabilities, capabilitiesOf, KnownModels } from "../../agent-session/providers/well-known-models.ts";
 import { wellKnownModels } from "../../agent-session/providers/well-known-models.gen.ts";
+import { anthropicSettle } from "../../agent-session/providers/anthropic-settings.ts";
+import { openAiCompatSettle } from "../../agent-session/providers/openai-compat-settings.ts";
+import { openAiSettle } from "../../agent-session/providers/openai-settings.ts";
+import { xAiSettle } from "../../agent-session/providers/xai-settings.ts";
+import type { Settled } from "../../agent-session/settings.ts";
 import { invalid } from "./invalid.ts";
 
 const localUrl = "http://localhost:8000/v1";
@@ -35,6 +40,14 @@ export const keyOf = (provider: string): string | undefined => {
   const variable = keyVariables[provider];
   const key = variable === undefined ? undefined : process.env[variable];
   return key === undefined || key === "" ? undefined : key;
+};
+
+/** What each provider's adapter makes of a target's settings: the adapters `Clients` reaches each provider with. */
+export const settling: Readonly<Record<string, (target: Target) => Settled>> = {
+  anthropic: anthropicSettle,
+  openai: openAiSettle,
+  xai: xAiSettle,
+  localhost: openAiCompatSettle,
 };
 
 export interface Asked {

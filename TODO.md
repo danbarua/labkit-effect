@@ -94,8 +94,8 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       `reasoning_content` sent back; tool calls; the other settings.
 - [ ] Models. Built: the well-known models as generated `const` data (`bun run models:refresh`:
       models.dev's catalog merged with `well-known-models.measured.json`); a settings type per
-      well-known model (`SettingsFor`) and the choices to offer for one known at run time
-      (`settingChoices`); what is known of a model travels on each request's target, from
+      well-known model (`SettingsFor`); the values to offer for each setting of a model as it is
+      set now, which are the ones its provider's adapter applies as asked (`choicesFor`); what is known of a model travels on each request's target, from
       `KnownModels`, which a host can provide (the CLI gives a `localhost` model what its server
       lists); the CLI's `/settings` picks among the choices, and its prompt completes commands,
       models and settings with Tab. To do: run the refresh on a schedule; measure the efforts of

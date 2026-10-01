@@ -12,10 +12,11 @@ import type { ModelSettings } from "../agent-machine/settings.ts";
 import { openSession } from "./loop.ts";
 import { ModelFromFacts } from "./model-choice.ts";
 import { AnthropicModelClient } from "./providers/anthropic-client.ts";
-import { anthropicSettings } from "./providers/anthropic-settings.ts";
-import { openAiCompatSettings } from "./providers/openai-compat-settings.ts";
-import { openAiSettings } from "./providers/openai-settings.ts";
-import { xAiSettings } from "./providers/xai-settings.ts";
+import { anthropicSettings, anthropicSettle } from "./providers/anthropic-settings.ts";
+import { openAiCompatSettings, openAiCompatSettle } from "./providers/openai-compat-settings.ts";
+import { openAiSettings, openAiSettle } from "./providers/openai-settings.ts";
+import { xAiSettings, xAiSettle } from "./providers/xai-settings.ts";
+import { choicesFor } from "./settings.ts";
 import { sentIn } from "./sent.ts";
 import { modelOf, openedWith } from "./session-setup.ts";
 import { TurnContextAssembler } from "./turn-context.ts";
@@ -398,4 +399,45 @@ test("M3: a request carries the settings the model allows; what was adjusted is 
     },
   });
   expect(facts.some((fact) => fact._tag === "Decided" && fact.decision._tag === "ObservationNotExpected")).toBe(false);
+});
+
+test("the values offered for a setting are the ones the provider's adapter applies as asked", () => {
+  const target = (provider: string, model: string, settings: ModelSettings = {}) => {
+    const capabilities = capabilitiesOf(provider, model);
+    return { provider: ProviderName.make(provider), model: ModelName.make(model), settings, ...(capabilities === undefined ? {} : { capabilities }) };
+  };
+  // OpenAI cannot be asked not to cache, and has no setting for when a model thinks.
+  expect(choicesFor(target("openai", "gpt-5.5"), openAiSettle)).toEqual({
+    effort: ["low", "medium", "high", "xhigh"],
+    thinking: ["auto", "off"],
+    observe: ["all", "progress_only", "off"],
+    cache: ["5m", "1h"],
+    maxOutputTokens: true,
+  });
+  // xAI has no setting for the cache, always returns its reasoning's summary, and grok-4.7 takes no effort `none`.
+  expect(choicesFor(target("xai", "grok-4.7"), xAiSettle)).toEqual({
+    effort: ["low", "medium", "high", "xhigh"],
+    thinking: ["auto"],
+    observe: ["all"],
+    cache: [],
+    maxOutputTokens: true,
+  });
+  expect(choicesFor(target("anthropic", "claude-sonnet-5-5"), anthropicSettle)).toMatchObject({ thinking: ["auto", "between_tools"], cache: ["off", "5m", "1h"] });
+  // The Chat Completions adapter sends the effort alone; a model nothing is known of is offered every effort.
+  expect(choicesFor(target("localhost", "some-model"), openAiCompatSettle)).toEqual({
+    effort: ["low", "medium", "high", "xhigh", "max"],
+    thinking: ["auto", "off"],
+    observe: [],
+    cache: [],
+    maxOutputTokens: false,
+  });
+});
+
+test("what is offered for one setting follows the others in force", () => {
+  const target = (settings: ModelSettings) => ({ provider: ProviderName.make("anthropic"), model: ModelName.make("claude-sonnet-5-5"), settings });
+  // Sonnet 5.5 does not accept between-tools thinking above high effort.
+  expect(choicesFor(target({ effort: "max" }), anthropicSettle).thinking).toEqual(["auto"]);
+  // With thinking off, the effort sent is `none`: an effort said beside it would be adjusted.
+  const gpt = { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5"), settings: { thinking: "off" as const } };
+  expect(choicesFor(gpt, openAiSettle).effort).toEqual([]);
 });

@@ -10,6 +10,7 @@
 
 import type { ModelName } from "../../agent-machine/names.ts";
 import type { Effort, ModelSettings, Observe, ThinkingMode } from "../../agent-machine/settings.ts";
+import type { Target } from "../contracts.ts";
 import type { Adjustment, Settled } from "../settings.ts";
 import type { Json } from "../shaping.ts";
 
@@ -106,3 +107,6 @@ export function anthropicSettings(model: ModelName, settings: ModelSettings = {}
     adjusted,
   };
 }
+
+/** The same for a request's target. */
+export const anthropicSettle = (target: Target): Settled => anthropicSettings(target.model, target.settings);

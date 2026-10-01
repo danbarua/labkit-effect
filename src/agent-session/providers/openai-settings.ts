@@ -14,6 +14,8 @@
 
 import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { type Adjustment, effortFor, type Settled } from "../settings.ts";
+import type { Target } from "../contracts.ts";
+import { knownOf } from "./well-known-models.ts";
 
 export function openAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyArray<string>): Settled {
   const adjusted: Array<Adjustment> = [];
@@ -45,3 +47,6 @@ export function openAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyA
     adjusted,
   };
 }
+
+/** The same for a request's target: its settings, and the efforts known of its model. */
+export const openAiSettle = (target: Target): Settled => openAiSettings(target.settings, knownOf(target)?.efforts);

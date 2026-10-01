@@ -28,7 +28,7 @@ import type { ModelPart, Observation } from "../../agent-machine/observation.ts"
 import { type ContextMessage, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
 import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postJson, type Retries, withRetries } from "../provider-call.ts";
 import { reportAdjusted } from "../settings.ts";
-import { openAiCompatSettings } from "./openai-compat-settings.ts";
+import { openAiCompatSettle } from "./openai-compat-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
 import {
   type Called,
@@ -231,7 +231,7 @@ export const openAiCompatRequests = (
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
     return (target, context, turn) => {
-      const settled = openAiCompatSettings(target.settings, knownOf(target)?.efforts);
+      const settled = openAiCompatSettle(target);
       return filesIn(context).pipe(
         Effect.flatMap((files) => {
         const sent = body(target, context, files);

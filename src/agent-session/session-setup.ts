@@ -10,9 +10,10 @@ import { Effect, Schema } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { SessionId } from "../agent-machine/names.ts";
 import type { ModelTarget, Observation } from "../agent-machine/observation.ts";
-import type { Adjusted, ModelSettings } from "../agent-machine/settings.ts";
+import type { ModelSettings } from "../agent-machine/settings.ts";
 import { type Target, ToolSpec } from "./contracts.ts";
 import { asText, parseJson, receivedJson, receivedText } from "./received.ts";
+import { settingOf } from "./settings.ts";
 
 /** Tools as they are recorded: each one's name, description, and the JSON Schema of its input. */
 export const ToolSpecs = Schema.Array(ToolSpec);
@@ -43,15 +44,6 @@ function openingOf(facts: ReadonlyArray<Fact>): Opened | undefined {
   const found = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "SessionOpened");
   return found?._tag === "Observed" && found.observation._tag === "SessionOpened" ? found.observation : undefined;
 }
-
-/** The setting an adjustment is about. */
-const settingOf = {
-  Thinking: "thinking",
-  Observe: "observe",
-  Effort: "effort",
-  MaxOutputTokens: "maxOutputTokens",
-  Cache: "cache",
-} as const satisfies Record<Adjusted["_tag"], keyof ModelSettings>;
 
 type Adjustment = Extract<Observation, { _tag: "SettingAdjusted" }>;
 

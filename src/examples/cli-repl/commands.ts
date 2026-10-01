@@ -5,7 +5,9 @@
  *   `provider/model`. `/model` alone shows the model being asked and offers the known ones to pick.
  * - `/settings name=value …` changes the settings named (`thinking`, `observe`, `effort`,
  *   `maxOutputTokens`, `cache`); the rest stay as they were. `/settings` alone shows the settings
- *   in force and offers each to change, with the values the model being asked takes.
+ *   in force and offers each to change. What is offered is what the provider's adapter applies as
+ *   asked, beside the settings in force: a setting or value it would adjust is not offered. Typed
+ *   out, it is still taken, and adjusted.
  *
  * `completions` gives the prompt what a line that starts with `/` could become: a command, then a
  * model's name or a setting and its values.
@@ -18,10 +20,11 @@ import { Effect, Schema } from "effect";
 import { Prompt } from "effect/cli";
 import { ModelSettings } from "../../agent-machine/settings.ts";
 import type { Session } from "../../agent-session/loop.ts";
-import { KnownModels, type SettingChoices, settingChoices } from "../../agent-session/providers/well-known-models.ts";
+import { KnownModels } from "../../agent-session/providers/well-known-models.ts";
 import { modelOf } from "../../agent-session/session-setup.ts";
+import { choicesFor, type SettingChoices } from "../../agent-session/settings.ts";
 import { invalid } from "./invalid.ts";
-import { keyOf, known, targetOf } from "./models.ts";
+import { keyOf, known, settling, targetOf } from "./models.ts";
 
 /** Each command and what it says of itself in `/help`. */
 export const commands: ReadonlyArray<readonly [string, string]> = [
@@ -85,7 +88,7 @@ const pickable = () =>
     keyOf(provider) === undefined ? [] : Object.keys(models).map((model) => ({ title: `${provider}/${model}`, value: `${provider}/${model}` })),
   );
 
-/** What a line can be completed from: the models that can be asked, and each setting's values for the model being asked. */
+/** What a line can be completed from: the models that can be asked, and each setting's values for the model being asked, as it is set now. */
 export interface Offered {
   readonly models: ReadonlyArray<string>;
   readonly settings: SettingChoices;
@@ -94,13 +97,18 @@ export interface Offered {
 export const offered = (session: Session) =>
   Effect.gen(function* () {
     const now = yield* modelOf(yield* session.facts);
-    const settings = settingChoices(yield* (yield* KnownModels)(now.provider, now.model));
+    const capabilities = yield* (yield* KnownModels)(now.provider, now.model);
+    const settle = settling[now.provider] ?? (() => ({ fields: {}, headers: {}, adjusted: [] }));
+    const settings = choicesFor({ ...now, ...(capabilities === undefined ? {} : { capabilities }) }, settle);
     const result: Offered = { models: pickable().map((each) => each.value), settings };
     return result;
   });
 
-/** The settings by name, each with the values to offer; `maxOutputTokens` is a number, and has none. */
-const valuesOf = (settings: SettingChoices): Readonly<Record<string, ReadonlyArray<string>>> => ({ ...settings, maxOutputTokens: [] });
+/** The settings to offer, by name, each with its values; `maxOutputTokens` is a number, and has none. A setting with no value to offer is left out. */
+const valuesOf = ({ maxOutputTokens, ...listed }: SettingChoices): Readonly<Record<string, ReadonlyArray<string>>> => ({
+  ...Object.fromEntries(Object.entries(listed).filter(([, values]) => values.length > 0)),
+  ...(maxOutputTokens ? { maxOutputTokens: [] } : {}),
+});
 
 /** A command's name as it is typed: with a space after it when words can follow. */
 const typedAs = [...commands.map(([usage]) => (usage.includes(" ") ? `${usage.slice(0, usage.indexOf(" "))} ` : usage)), "/quit"];

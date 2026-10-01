@@ -108,7 +108,10 @@ test("a line that starts with / completes to a command, a model, a setting not y
   expect(complete("/settings effort=")).toEqual(["low", "medium", "high", "xhigh"].map((each) => `/settings effort=${each}`));
   expect(complete("/settings thinking=o")).toEqual(["/settings thinking=off"]);
   expect(complete("hello /se")).toEqual([]);
+  // OpenAI caches for minutes whatever is asked, so `off` is not offered.
+  expect(complete("/settings cache=")).toEqual(["/settings cache=5m", "/settings cache=1h"]);
   // The values follow the model being asked: no efforts are listed for claude-sonnet-5-5, so every one is offered.
   const later = completions(JSON.parse(printed[3] ?? "") as Parameters<typeof completions>[0]);
   expect(later("/settings effort=m")).toEqual(["/settings effort=medium", "/settings effort=max"]);
+  expect(later("/settings cache=")).toEqual(["off", "5m", "1h"].map((each) => `/settings cache=${each}`));
 });
