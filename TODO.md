@@ -66,7 +66,8 @@ Built: the window marker, naming what decided it (agent-machine S4); compaction 
 being asked, summaries per provider kept in memory or as files, policies asked between turns, and
 the view that sends each provider its own summaries (agent-context A5–A8); a provider's own
 compaction as a summary, for OpenAI and xAI (`openai-compaction.ts`, `xai-compaction.ts`,
-`provider-compaction.ts`), sent the session's system prompt and tools.
+`provider-compaction.ts`), sent the session's system prompt and tools; a digest of a span made
+with no model, its attachments as pointers and one line for each tool call (`digest.ts`).
 
 - [ ] The loop asks the compaction policy itself; today whoever runs the session asks it between
       turns.
