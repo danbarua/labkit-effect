@@ -36,6 +36,15 @@ model.
       tool, for all arguments, until the session closes or permissions are reset. Build the policy
       gate (agent-policy) into the loop against that flow, with which tools only read and which
       change things as a property of the tool.
+- [ ] Accounting for ACP. Built: a provider-neutral `usage` on each response; `contextGauge` (used,
+      size, cost) and `requestsIn` (a turn's model requests) read from the facts (`accounting.ts`);
+      prices in `frontier.json`; `maxTurnRequests` as an example host policy. To do in the host: send
+      `usage_update` after `session/new` or `session/load`, after a prompt, and when the numbers
+      change; answer a vetoed request with `max_turn_requests`, a cut-short response with
+      `max_tokens`; refuse the next prompt with an error at a session-level turn limit (ACP has no
+      stop reason for it). Open: after a compaction `used` is the last response's until the next one
+      reports (an estimate would come from the next-request size estimate); a summarizer's own
+      requests are not counted in `cost`. `PromptResponse.usage` is a draft; not built.
 - [ ] Slash commands the host handles itself (`/export`), which are not input to the model.
 
 ### Compaction

@@ -55,7 +55,9 @@ import {
   renderToolResult,
   type Shaped,
   sentBack,
+  numberAt,
   toolInputObject,
+  usageOf,
 } from "../shaping.ts";
 
 type Responded = Extract<Observation, { _tag: "ModelResponded" }>;
@@ -207,6 +209,17 @@ const failedInStream = (event: Schema.JsonObject): AiError.AiError => {
   });
 };
 
+/** A Responses API usage in the core's terms: its `input_tokens` include those read from the cache. */
+export const responsesUsageIn = (reported: Json | undefined) => {
+  const usage = usageOf({
+    input: numberAt(reported, "input_tokens"),
+    output: numberAt(reported, "output_tokens"),
+    thinking: numberAt(reported, "output_tokens_details", "reasoning_tokens"),
+    cacheRead: numberAt(reported, "input_tokens_details", "cached_tokens"),
+  });
+  return usage === undefined ? {} : { usage };
+};
+
 /**
  * One request. The response streams: each event is passed on as it arrives and each output item's
  * parts when the item is done (`ModelStream`); the observation is made from the response the
@@ -265,6 +278,7 @@ const respondOnce = (
       parts: responded,
       stop,
       ending: endingOf(endings, stop),
+      ...responsesUsageIn(metadata["usage"]),
       metadata: receivedJson(metadata),
     };
   });

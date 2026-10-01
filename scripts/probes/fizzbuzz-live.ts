@@ -31,6 +31,7 @@ import { Effect, Layer, Redacted, Schema } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { CompactedConversation } from "../../src/agent-context/compaction.ts";
 import { Fact } from "../../src/agent-machine/fact.ts";
+import { contextGauge } from "../../src/agent-session/accounting.ts";
 import { ModelSettings } from "../../src/agent-machine/settings.ts";
 import { ModelName, ProviderName, TestName } from "../../src/agent-machine/names.ts";
 import { reportedBy } from "../../src/agent-session/origin.ts";
@@ -181,6 +182,7 @@ for (const summary of summaries) {
 }
 for (const line of wrong) console.log(line);
 console.log(`input tokens: ${JSON.stringify(usage)}`);
+console.log(`context gauge: ${JSON.stringify(contextGauge(facts, provider, model) ?? null)}`);
 console.log(`${turns.size - wrong.length} of ${turns.size} turns right`);
 console.log(`logs/live/${name}.md`);
 console.log(`logs/live/${name}.spans.jsonl`);

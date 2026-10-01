@@ -23,8 +23,7 @@ import {
   ThinkingText,
   ToolName,
   TurnId,
-  WindowId,
-} from "./names.ts";
+  WindowId, TokenCount } from "./names.ts";
 
 /** Who sent an input: the user, the system (a wake-up, a scheduled prompt), or another agent. */
 export const InputSource = Schema.Union([
@@ -80,8 +79,9 @@ export type ToolOutcome = typeof ToolOutcome.Type;
 
 /**
  * Why a model's response stopped, as its adapter classifies the provider's own reason (kept in
- * `stop`): it is complete (with or without tool calls), it was cut short (a length limit, a stop
- * sequence), it is whole but not yet an answer, the provider refused it, the harness stopped it,
+ * `stop`): it is complete (with or without tool calls; a stop sequence the request named ends it
+ * complete), it was cut short by a length limit (the output limit, or the context window), it is
+ * whole but not yet an answer, the provider refused it, the harness stopped it,
  * nothing of it was observed, or the adapter does not know the reason.
  */
 export const ResponseEnding = Schema.Union([
@@ -103,6 +103,21 @@ export const ResponseEnding = Schema.Union([
   Schema.TaggedStruct("Unclassified", {}),
 ]);
 export type ResponseEnding = typeof ResponseEnding.Type;
+
+/**
+ * The tokens a request and its response took, as the provider reported them, in the same terms for
+ * every provider. `input` is everything the request carried, what was read from the cache
+ * (`cacheRead`) and written to it (`cacheWrite`) included; `output` is everything the response
+ * took, its thinking (`thinking`) included. A part the provider did not report is absent.
+ */
+export const Usage = Schema.Struct({
+  input: TokenCount,
+  output: TokenCount,
+  thinking: Schema.optionalKey(TokenCount),
+  cacheRead: Schema.optionalKey(TokenCount),
+  cacheWrite: Schema.optionalKey(TokenCount),
+});
+export type Usage = typeof Usage.Type;
 
 /** A model, the provider it is asked through, and how it is to process requests, where that is said. */
 export const ModelTarget = Schema.Struct({
@@ -175,6 +190,7 @@ export const Observation = Schema.Union([
     parts: Schema.Array(ModelPart),
     stop: Schema.optionalKey(StopReason),
     ending: ResponseEnding,
+    usage: Schema.optionalKey(Usage),
     metadata: Received,
   }),
   /**

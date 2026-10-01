@@ -6,8 +6,8 @@
  */
 
 import { Effect, type Schema } from "effect";
-import type { CallId, ToolName } from "../agent-machine/names.ts";
-import type { ResponseEnding, ToolOutcome } from "../agent-machine/observation.ts";
+import { type CallId, TokenCount, type ToolName } from "../agent-machine/names.ts";
+import type { ResponseEnding, ToolOutcome, Usage } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
 import type { ContextPart, ModelContext, Target, ToolSpec } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
@@ -174,3 +174,31 @@ export const logSupplied = (supplied: ReadonlyArray<Supplied>): Effect.Effect<vo
       entry.level === "warning" ? Effect.logWarning(entry.event, entry.details) : Effect.logInfo(entry.event, entry.details),
     { discard: true },
   );
+
+/** The number at `path` in `json`, when there is one. */
+export function numberAt(json: Json | undefined, ...path: ReadonlyArray<string>): number | undefined {
+  const found = path.reduce<Json | undefined>((at, key) => (at !== undefined && isObject(at) ? at[key] : undefined), json);
+  return typeof found === "number" ? found : undefined;
+}
+
+/** A usage figure from the counts a provider reported; none without both input and output. */
+export function usageOf(counts: {
+  readonly input: number | undefined;
+  readonly output: number | undefined;
+  readonly thinking?: number | undefined;
+  readonly cacheRead?: number | undefined;
+  readonly cacheWrite?: number | undefined;
+}): Usage | undefined {
+  if (counts.input === undefined || counts.output === undefined) return undefined;
+  const optional = (key: "thinking" | "cacheRead" | "cacheWrite") => {
+    const value = counts[key];
+    return value === undefined ? {} : { [key]: TokenCount.make(value) };
+  };
+  return {
+    input: TokenCount.make(counts.input),
+    output: TokenCount.make(counts.output),
+    ...optional("thinking"),
+    ...optional("cacheRead"),
+    ...optional("cacheWrite"),
+  };
+}

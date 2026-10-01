@@ -38,7 +38,9 @@ import {
   logSupplied,
   renderToolResult,
   type Shaped,
+  numberAt,
   toolInputObject,
+  usageOf,
 } from "../shaping.ts";
 
 type Responded = Extract<Observation, { _tag: "ModelResponded" }>;
@@ -163,6 +165,17 @@ const endings = new Map([
   ["content_filter", "Refused"],
 ] as const);
 
+/** A Chat Completions usage in the core's terms: its `prompt_tokens` include those read from the cache. */
+const chatUsageIn = (reported: Json | undefined) => {
+  const usage = usageOf({
+    input: numberAt(reported, "prompt_tokens"),
+    output: numberAt(reported, "completion_tokens"),
+    thinking: numberAt(reported, "completion_tokens_details", "reasoning_tokens"),
+    cacheRead: numberAt(reported, "prompt_tokens_details", "cached_tokens"),
+  });
+  return usage === undefined ? {} : { usage };
+};
+
 const respondOnce = (
   http: HttpClient.HttpClient,
   post: Post,
@@ -186,6 +199,7 @@ const respondOnce = (
       parts: parts(message),
       stop: StopReason.make(typeof finish_reason === "string" ? finish_reason : JSON.stringify(finish_reason ?? null)),
       ending: endingOf(endings, finish_reason),
+      ...chatUsageIn(metadata["usage"]),
       metadata: receivedJson({ ...metadata, choice: choiceRest }),
     };
   });

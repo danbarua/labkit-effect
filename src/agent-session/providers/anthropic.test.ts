@@ -155,10 +155,10 @@ const target = {
 };
 
 test("the default max_tokens is a frontier model's most output; a model not listed gets 128,000", () => {
-  expect(limitsOf("anthropic", "claude-haiku-4-5-20251001")).toEqual({ context: 200_000, output: 64_000 });
+  expect(limitsOf("anthropic", "claude-haiku-4-5-20251001")).toMatchObject({ context: 200_000, output: 64_000 });
   expect(limitsOf("anthropic", "claude-sonnet-5-5")?.output).toBe(128_000);
   expect(limitsOf("anthropic", "boring-1")).toBeUndefined();
-  expect(limitsOf("openai", "gpt-6.1-sol")).toEqual({ context: 1_050_000, output: 128_000 });
+  expect(limitsOf("openai", "gpt-6.1-sol")).toMatchObject({ context: 1_050_000, output: 128_000 });
 });
 
 test("a request is the model, the default max_tokens, and the context's messages as Messages blocks", async () => {
@@ -209,14 +209,14 @@ test("instructions that open the conversation go in the top-level system, after 
   });
 });
 
-test("a response's text is a Text part, stop_reason is the stop, and everything else is metadata", async () => {
+test("a response's text is a Text part, stop_reason is the stop, its usage is in the core's terms (input with cache reads and writes), and everything else is metadata", async () => {
   const provider = recording([
     {
       id: "msg_1",
       type: "message",
       content: [{ type: "text", text: "Hello back." }],
       stop_reason: "end_turn",
-      usage: { input_tokens: 3, output_tokens: 3 },
+      usage: { input_tokens: 3, cache_read_input_tokens: 40, cache_creation_input_tokens: 10, output_tokens: 3 },
     },
   ]);
   const observed = await runTest(
@@ -236,7 +236,12 @@ test("a response's text is a Text part, stop_reason is the stop, and everything 
     parts: [{ _tag: "Text", text: "Hello back." }],
     stop: "end_turn",
     ending: { _tag: "Complete" },
-    metadata: json({ id: "msg_1", type: "message", usage: { input_tokens: 3, output_tokens: 3 } }),
+    usage: { input: 53, output: 3, cacheRead: 40, cacheWrite: 10 },
+    metadata: json({
+      id: "msg_1",
+      type: "message",
+      usage: { input_tokens: 3, cache_read_input_tokens: 40, cache_creation_input_tokens: 10, output_tokens: 3 },
+    }),
   });
 });
 

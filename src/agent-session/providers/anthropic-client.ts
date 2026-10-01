@@ -59,7 +59,9 @@ import {
   renderToolResult,
   type Shaped,
   sentBack,
+  numberAt,
   toolInputObject,
+  usageOf,
 } from "../shaping.ts";
 
 type Outcome = Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" }>;
@@ -200,12 +202,30 @@ function part(received: Json): ModelPart {
 
 const caller = { module: "AnthropicModelClient", method: "respond" };
 
+/**
+ * The response's usage in the core's terms. The Messages API counts the input it did not read from
+ * or write to the cache as `input_tokens`, so the input carried is the three together.
+ */
+const usageIn = (reported: Json | undefined) => {
+  const uncached = numberAt(reported, "input_tokens");
+  const cacheRead = numberAt(reported, "cache_read_input_tokens");
+  const cacheWrite = numberAt(reported, "cache_creation_input_tokens");
+  const usage = usageOf({
+    input: uncached === undefined ? undefined : uncached + (cacheRead ?? 0) + (cacheWrite ?? 0),
+    output: numberAt(reported, "output_tokens"),
+    thinking: numberAt(reported, "output_tokens_details", "thinking_tokens"),
+    cacheRead,
+    cacheWrite,
+  });
+  return usage === undefined ? {} : { usage };
+};
+
 /** Anthropic's `stop_reason` values. */
 export const anthropicEndings = new Map([
   ["end_turn", "Complete"],
   ["tool_use", "Complete"],
   ["max_tokens", "CutShort"],
-  ["stop_sequence", "CutShort"],
+  ["stop_sequence", "Complete"],
   ["pause_turn", "Unfinished"],
   ["model_context_window_exceeded", "CutShort"],
   ["refusal", "Refused"],
@@ -278,6 +298,7 @@ const respondOnce = (
       parts: (content as ReadonlyArray<Json>).map(part),
       stop: StopReason.make(typeof stop_reason === "string" ? stop_reason : JSON.stringify(stop_reason ?? null)),
       ending: endingOf(anthropicEndings, stop_reason),
+      ...usageIn(metadata["usage"]),
       metadata: receivedJson(metadata),
     };
   });
