@@ -18,7 +18,7 @@
  */
 
 import type { BlobId } from "../../agent-machine/blob.ts";
-import { knownOf, takesFile } from "./frontier.ts";
+import { knownOf, takesFile } from "./well-known-models.ts";
 import { OpenAiClient } from "@effect/ai-openai-compat";
 import { Effect, Layer, type Schema } from "effect";
 import type * as AiError from "effect/ai/AiError";

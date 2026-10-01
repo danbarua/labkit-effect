@@ -38,7 +38,7 @@ model.
       change things as a property of the tool.
 - [ ] Accounting for ACP. Built: a provider-neutral `usage` on each response; `contextGauge` (used,
       size, cost) and `requestsIn` (a turn's model requests) read from the facts (`accounting.ts`);
-      prices in `frontier.json`; `maxTurnRequests` as an example host policy. To do in the host: send
+      prices with the well-known models; `maxTurnRequests` as an example host policy. To do in the host: send
       `usage_update` after `session/new` or `session/load`, after a prompt, and when the numbers
       change; answer a vetoed request with `max_turn_requests`, a cut-short response with
       `max_tokens`; refuse the next prompt with an error at a session-level turn limit (ACP has no
@@ -92,15 +92,13 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       `http://localhost:8000/v1`; OpenAPI docs at `/docs`). Built: the reasoning effort is sent as
       `reasoning_effort` (Qwen3.5-9B takes `none` to `xhigh` and refuses `max`). To do: streaming;
       `reasoning_content` sent back; tool calls; the other settings.
-- [ ] Models `frontier.json` does not list. Built: what is known of a model (`Capabilities`: context,
-      input kinds, efforts, price) travels on each request's target, from `KnownModels`, which a host
-      can provide; the CLI gives a `localhost` model what the server's `GET /v1/models` lists, so an
-      effort above its highest is sent as its highest. To do: a settings type per model, from its
-      capabilities, for a UI to bind to (static for the listed models needs them as `const` data,
-      which a JSON import is not).
-- [ ] OTLP, for a collector: OpenTelemetry's `@opentelemetry/exporter-trace-otlp-http` (a new
-      dependency, one more span processor beside the file), or Effect's `OtlpTracer` (no new
-      package, but it replaces the NodeSdk tracer, so not beside the file exporter).
+- [ ] Models. Built: the well-known models as generated `const` data (`bun scripts/models/refresh.ts`:
+      models.dev's catalog merged with `well-known-models.measured.json`); a settings type per
+      well-known model (`SettingsFor`) and the choices to offer for one known at run time
+      (`settingChoices`); what is known of a model travels on each request's target, from
+      `KnownModels`, which a host can provide (the CLI gives a `localhost` model what its server
+      lists). To do: run the refresh on a schedule; bind the CLI's `/settings` to the choices (a
+      picker); measure the efforts of Anthropic's models.
 
 ## Later: worth doing, not core
 

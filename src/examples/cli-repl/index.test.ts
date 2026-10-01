@@ -19,7 +19,7 @@ const invoke = async (args: ReadonlyArray<string>, env: Record<string, string> =
   return { stdout, stderr, code };
 };
 
-test("models lists each provider's models from models.json, and whether its key is set", async () => {
+test("models lists each provider's well-known models, and whether its key is set", async () => {
   const { stdout, code } = await invoke(["models"], { OPENAI_API_KEY: "set" });
   const lines = stdout.trim().split("\n");
   expect(code).toBe(0);
@@ -34,10 +34,10 @@ test("with no model there is nothing to ask: it says so and fails", async () => 
   expect(result.stdout + result.stderr).toContain("No model: pass --model");
 });
 
-test("a model that is not in models.json and names no provider is refused by name", async () => {
+test("a model that is not well-known and names no provider is refused by name", async () => {
   const result = await invoke(["-p", "Hello", "--model", "gpt-99"]);
   expect(result.code).not.toBe(0);
-  expect(result.stdout + result.stderr).toContain("No model gpt-99 in models.json; name it as provider/model.");
+  expect(result.stdout + result.stderr).toContain("No model gpt-99 among the well-known models; name it as provider/model.");
 });
 
 test("print mode with no prompt and nothing piped says there is no prompt", async () => {

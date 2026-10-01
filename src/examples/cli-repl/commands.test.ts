@@ -84,7 +84,7 @@ test("a mistake in a command is said and changes nothing; a line that names no c
   expect(printed[0]).toStartWith("error: Not settings the session takes:");
   expect(printed[1]).toStartWith("error: Not settings the session takes:");
   expect(printed.slice(2)).toEqual([
-    "error: No model gpt-99 in models.json; name it as provider/model.",
+    "error: No model gpt-99 among the well-known models; name it as provider/model.",
     "error: XAI_API_KEY is not set, so xai/grok-4.7 cannot be asked.",
     undefined,
     "openai/gpt-5.5 effort=low\nthis model takes effort: none, low, medium, high, xhigh",

@@ -1,6 +1,5 @@
 /**
- * The models the CLI can ask: those `models.json` lists (a link to the providers' `frontier.json`),
- * each provider's key from the environment, and one model client that reaches every provider with a
+ * The models the CLI can ask: the well-known models, each provider's key from the environment, and one model client that reaches every provider with a
  * key set and a local Chat Completions server at http://localhost:8000/v1.
  *
  * What is known of a `localhost` model is what the server says of it (`GET /v1/models`): its context
@@ -20,14 +19,14 @@ import { anthropicRequests } from "../../agent-session/providers/anthropic-clien
 import { openAiRequests } from "../../agent-session/providers/openai-client.ts";
 import { openAiCompatRequests } from "../../agent-session/providers/openai-compat-client.ts";
 import { xAiClient, xAiRequests } from "../../agent-session/providers/xai-client.ts";
-import { type Capabilities, capabilitiesOf, KnownModels } from "../../agent-session/providers/frontier.ts";
+import { type Capabilities, capabilitiesOf, KnownModels } from "../../agent-session/providers/well-known-models.ts";
+import { wellKnownModels } from "../../agent-session/providers/well-known-models.gen.ts";
 import { invalid } from "./invalid.ts";
-import models from "./models.json" with { type: "json" };
 
 const localUrl = "http://localhost:8000/v1";
 
-/** The known models, by provider, as `models.json` lists them. */
-export const known: Readonly<Record<string, Readonly<Record<string, unknown>>>> = models;
+/** The well-known models, by provider. */
+export const known: Readonly<Record<string, Readonly<Record<string, unknown>>>> = wellKnownModels;
 
 /** The environment variable that holds each provider's key; a local server needs none. */
 export const keyVariables: Readonly<Record<string, string>> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", xai: "XAI_API_KEY" };
@@ -44,7 +43,7 @@ export interface Asked {
 }
 
 /**
- * The provider and model a name gives: `provider/model`, or a model `models.json` lists. A provider
+ * The provider and model a name gives: `provider/model`, or a well-known model. A provider
  * whose key is not set cannot be asked, and the variable is named.
  */
 export const targetOf = (model: string | undefined) =>
@@ -53,7 +52,7 @@ export const targetOf = (model: string | undefined) =>
     const slash = model.indexOf("/");
     const named = slash > 0 && (model.slice(0, slash) in known || model.slice(0, slash) === "localhost");
     const provider = named ? model.slice(0, slash) : Object.keys(known).find((each) => model in (known[each] ?? {}));
-    if (provider === undefined) return yield* invalid(`No model ${model} in models.json; name it as provider/model.`);
+    if (provider === undefined) return yield* invalid(`No model ${model} among the well-known models; name it as provider/model.`);
     const target: Asked = { provider: ProviderName.make(provider), model: ModelName.make(named ? model.slice(slash + 1) : model) };
     const variable = keyVariables[provider];
     if (variable !== undefined && keyOf(provider) === undefined)
@@ -128,7 +127,7 @@ export function localCapabilities(listed: unknown): ReadonlyMap<string, Capabili
 
 /**
  * What is known of each model: for `localhost`, what the local server lists, asked once when first
- * needed; for the others, `frontier.json`. A server that does not answer leaves its models unknown,
+ * needed; for the others, the well-known models. A server that does not answer leaves its models unknown,
  * and that is logged.
  */
 export const KnownToCli = Layer.effect(

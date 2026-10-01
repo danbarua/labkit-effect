@@ -1,7 +1,7 @@
 /**
  * The REPL's own commands: lines that start with `/` and do not go to the model.
  *
- * - `/model <name>` asks another model from the next turn on: a model `models.json` lists, or
+ * - `/model <name>` asks another model from the next turn on: a well-known model, or
  *   `provider/model`. `/model` alone shows the model being asked and offers the known ones to pick.
  * - `/settings` shows the settings in force. `/settings name=value …` changes the ones named
  *   (`thinking`, `observe`, `effort`, `maxOutputTokens`, `cache`); the rest stay as they were.
@@ -14,7 +14,7 @@ import { Effect, Schema } from "effect";
 import { Prompt } from "effect/cli";
 import { ModelSettings } from "../../agent-machine/settings.ts";
 import type { Session } from "../../agent-session/loop.ts";
-import { KnownModels } from "../../agent-session/providers/frontier.ts";
+import { KnownModels } from "../../agent-session/providers/well-known-models.ts";
 import { modelOf } from "../../agent-session/session-setup.ts";
 import { invalid } from "./invalid.ts";
 import { keyOf, known, targetOf } from "./models.ts";

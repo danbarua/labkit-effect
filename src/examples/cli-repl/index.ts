@@ -4,8 +4,7 @@
  * Claude Code's CLI (https://code.claude.com/docs/en/cli-reference); the ones not built yet are
  * kept here, commented out, and the ones only Claude Code has are left out.
  *
- * The model is `--model`: a model in `models.json` (the frontier models, a link to the providers'
- * `frontier.json`), found with its provider, or `provider/model` (`localhost/<model>` is a local
+ * The model is `--model`: a well-known model, found with its provider, or `provider/model` (`localhost/<model>` is a local
  * Chat Completions server at http://localhost:8000/v1). With no model there is nothing to ask:
  * `bun cli models` lists them, and which providers have a key set (`ANTHROPIC_API_KEY`,
  * `OPENAI_API_KEY`, `XAI_API_KEY`).
@@ -40,7 +39,7 @@ const arg = (name: string) => Argument.String(name).pipe(Argument.optional, Argu
 
 const flags = {
   print: toggle("print", "Ask once, print the answer and exit", "p"),
-  model: text("model", "A model in models.json, or provider/model"),
+  model: text("model", "A well-known model, or provider/model"),
   effort: choice("effort", Effort.literals, "Reasoning effort; a model that does not take it is sent the nearest it does"),
   thinking: choice("thinking", ThinkingMode.literals, "When the model thinks"),
   systemPrompt: text("system-prompt", "The system prompt"),

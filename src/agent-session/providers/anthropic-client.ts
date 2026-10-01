@@ -20,7 +20,7 @@
  */
 
 import type { BlobId } from "../../agent-machine/blob.ts";
-import { knownOf, takesFile } from "./frontier.ts";
+import { knownOf, takesFile } from "./well-known-models.ts";
 import { AnthropicClient } from "@effect/ai-anthropic";
 import { Effect, Layer, Stream } from "effect";
 import * as AiError from "effect/ai/AiError";
@@ -71,7 +71,7 @@ type Outcome = Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" }>;
 
 /**
  * The output limit sent when the session's settings give none, because the Messages API requires
- * one: the model's most output when it is a frontier model (`frontier.json`), otherwise 128,000.
+ * one: the model's most output when it is a well-known model, otherwise 128,000.
  */
 const defaultMaxTokens = (target: Target): number => knownOf(target)?.output ?? 128_000;
 

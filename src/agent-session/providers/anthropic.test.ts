@@ -18,7 +18,7 @@ import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.t
 import { TurnContextAssembler } from "../turn-context.ts";
 import { anthropicStream } from "../../../tests/support/streams.ts";
 import { runTest } from "../../../tests/support/run.ts";
-import { capabilitiesOf } from "./frontier.ts";
+import { capabilitiesOf } from "./well-known-models.ts";
 import { boringOpening } from "../../../tests/support/boring.ts";
 
 /** A provider that makes one scripted tool call, then answers; it keeps every request it is sent. */
@@ -154,7 +154,7 @@ const target = {
   model: ModelName.make("boring-1"),
 };
 
-test("the default max_tokens is a frontier model's most output; a model not listed gets 128,000", () => {
+test("the default max_tokens is a well-known model's most output; a model not listed gets 128,000", () => {
   expect(capabilitiesOf("anthropic", "claude-haiku-4-5-20251001")).toMatchObject({ context: 200_000, output: 64_000 });
   expect(capabilitiesOf("anthropic", "claude-sonnet-5-5")?.output).toBe(128_000);
   expect(capabilitiesOf("anthropic", "boring-1")).toBeUndefined();

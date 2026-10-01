@@ -11,7 +11,7 @@
  * - It caches every request, keeps an entry for as long as the server does, and has no setting for
  *   how long; `prompt_cache_retention` is accepted and ignored, so it is not sent.
  *
- * As for OpenAI, each model accepts its own reasoning efforts (`efforts`, from `frontier.json`:
+ * As for OpenAI, each model accepts its own reasoning efforts (`efforts`, of the well-known models:
  * grok-4.5 to 4.7 take `minimal` to `xhigh`, no `none` and no `max`), and an effort a model does
  * not accept, thinking `off` (effort `none`) included, is sent as the nearest it does
  * (`effortFor`), and adjusted.

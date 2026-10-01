@@ -133,7 +133,7 @@ Completions adapter keeps it as `Unrecognised` and does not send it back.
 - Efforts: grok-4.5 to grok-4.7 take `minimal` to `xhigh` and refuse `none` and `max` with a 400;
   grok-4.20 and grok-build-0.1 refuse `reasoning.effort` of any value. `GET /v1/models` lists each
   model's efforts under `capabilities.reasoning_effort`. The adapter supports the latest three
-  (4.5 to 4.7); their efforts are in `frontier.json`, and an effort a model does not take, thinking
+  (4.5 to 4.7); their efforts are among the well-known models', and an effort a model does not take, thinking
   off included, is sent as the nearest it does.
 - `max_output_tokens` limits the answer only. With 20, a response took 62 output tokens, 42 of them
   reasoning, and ended `incomplete` with the reason `max_output_tokens`. Streamed, the cut message

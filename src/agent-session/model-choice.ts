@@ -7,7 +7,7 @@
 
 import { Effect, Layer } from "effect";
 import { ModelProvider } from "./contracts.ts";
-import { KnownModels } from "./providers/frontier.ts";
+import { KnownModels } from "./providers/well-known-models.ts";
 import { modelOf } from "./session-setup.ts";
 
 export const ModelFromFacts = Layer.effect(

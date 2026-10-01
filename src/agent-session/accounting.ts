@@ -5,11 +5,11 @@
  *
  * - `contextGauge`: `used`, the visible tokens of the last request and its response: everything the
  *   request carried, and what the response returned less its thinking; `size`, the context window
- *   of the model the session asks now (`frontier.json`); and `cost`, the session's cost so far in
+ *   of the model the session asks now (the well-known models'); and `cost`, the session's cost so far in
  *   US dollars. There is no gauge when the model's window is not known. After a compaction `used`
  *   stays the last response's figure until the next response reports a new one. `cost` is the cost
  *   of the responses that reported their usage to a model with a price: one interrupted, or not
- *   observed, or from a model not in `frontier.json` (a local model) adds nothing. The requests a
+ *   observed, or from a model that is not well-known (a local model) adds nothing. The requests a
  *   summarizer makes are not among the facts, so their cost is not in it.
  * - `requestsIn`: how many model requests a turn has made, which is how many steps it has taken
  *   (`AskModel`, `TellModel`). A request a fallback sends to another provider is the same request.
@@ -18,7 +18,7 @@
 import type { Fact } from "../agent-machine/fact.ts";
 import type { TurnId } from "../agent-machine/names.ts";
 import type { Observation, Usage } from "../agent-machine/observation.ts";
-import { type Capabilities, capabilitiesOf, type Price } from "./providers/frontier.ts";
+import { type Capabilities, capabilitiesOf, type Price } from "./providers/well-known-models.ts";
 
 type Responded = Extract<Observation, { _tag: "ModelResponded" }>;
 
@@ -58,7 +58,7 @@ export function costIn(facts: ReadonlyArray<Fact>): number {
 
 /**
  * The context gauge for a session asking `model` of `provider`; undefined when the model's window is
- * not known. `known` is what is known of the model, when it is not one `frontier.json` lists.
+ * not known. `known` is what is known of the model, when it is not a well-known one.
  */
 export function contextGauge(facts: ReadonlyArray<Fact>, provider: string, model: string, known?: Capabilities): ContextGauge | undefined {
   const size = (known ?? capabilitiesOf(provider, model))?.context;

@@ -11,7 +11,7 @@ import { Effect, Layer, type Redacted } from "effect";
 import { ModelClient } from "../contracts.ts";
 import { defaultRetries, modelClientOf, type Retries } from "../provider-call.ts";
 import { openAiRequests } from "./openai-client.ts";
-import { knownOf } from "./frontier.ts";
+import { knownOf } from "./well-known-models.ts";
 import { xAiSettings } from "./xai-settings.ts";
 
 export const xAiApiUrl = "https://api.x.ai/v1";

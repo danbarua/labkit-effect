@@ -3,7 +3,7 @@
  * adjusts where the model does not allow what was asked, and how a session's facts give them.
  */
 
-import { capabilitiesOf } from "./providers/frontier.ts";
+import { capabilitiesOf } from "./providers/well-known-models.ts";
 import { afterAll, expect } from "bun:test";
 import { Effect, Layer } from "effect";
 import { ModelName, ProviderName, SessionId, TokenCount } from "../agent-machine/names.ts";

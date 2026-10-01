@@ -5,7 +5,7 @@
  * memory; asked to keep it for an hour, it is asked for its longer retention, 24 hours. A setting
  * it cannot take is returned as adjusted.
  *
- * Each model accepts its own reasoning efforts (`efforts`, from `frontier.json`): gpt-5 takes
+ * Each model accepts its own reasoning efforts (`efforts`, of the well-known models): gpt-5 takes
  * `minimal` to `high`, the pro models `medium` to `xhigh` (gpt-5-pro only `high`), and some take no
  * `none`. An effort a model does not accept, thinking `off` (effort `none`) included, is sent as
  * the nearest one it does, the higher of two as near, and that is returned as adjusted. A model

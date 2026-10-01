@@ -9,7 +9,7 @@ import { Console, Effect, Fiber, PubSub, Ref, Schema } from "effect";
 import { Fact } from "../../agent-machine/fact.ts";
 import { contextGauge } from "../../agent-session/accounting.ts";
 import type { Session } from "../../agent-session/loop.ts";
-import { type Capabilities, KnownModels } from "../../agent-session/providers/frontier.ts";
+import { type Capabilities, KnownModels } from "../../agent-session/providers/well-known-models.ts";
 import { invalid } from "./invalid.ts";
 import { answerTo, ask, type Config, endingOf, lastTurn } from "./session.ts";
 
