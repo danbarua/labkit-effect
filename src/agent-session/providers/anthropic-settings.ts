@@ -5,12 +5,12 @@
  * marked when the cache is off). The adapter sends the output
  * limit itself, as `max_tokens`, which the API requires. Where a class of models does not
  * allow what was asked, the nearest thing it allows is sent and the difference is returned as
- * enforced. A model in no class here is sent what was asked, and the provider answers for it.
+ * adjusted. A model in no class here is sent what was asked, and the provider answers for it.
  */
 
 import type { ModelName } from "../../agent-machine/names.ts";
 import type { Effort, ModelSettings, Observe, ThinkingMode } from "../../agent-machine/settings.ts";
-import type { Enforcement, Settled } from "../settings.ts";
+import type { Adjustment, Settled } from "../settings.ts";
 import type { Json } from "../shaping.ts";
 
 interface Allowed {
@@ -63,7 +63,7 @@ const displays: Record<Observe, string> = { all: "summarized", progress_only: "u
 const updatesBeta = "thinking-display-updates-2026-08-18";
 
 export function anthropicSettings(model: ModelName, settings: ModelSettings = {}): Settled {
-  const enforced: Array<Enforcement> = [];
+  const adjusted: Array<Adjustment> = [];
   const thinking = ((): Exclude<ThinkingMode, "before_answer"> | undefined => {
     const asked = settings.thinking;
     if (asked === undefined) return undefined;
@@ -74,7 +74,7 @@ export function anthropicSettings(model: ModelName, settings: ModelSettings = {}
         : { used: asked };
     const allowed = classes.find((each) => each.matches(model))?.thinking(sayable.used, settings.effort) ?? { used: sayable.used };
     const reason = allowed.reason ?? sayable.reason;
-    if (reason !== undefined) enforced.push({ enforced: { _tag: "Thinking", asked, used: allowed.used }, reason });
+    if (reason !== undefined) adjusted.push({ adjusted: { _tag: "Thinking", asked, used: allowed.used }, reason });
     return allowed.used === "before_answer" ? "auto" : allowed.used;
   })();
 
@@ -84,8 +84,8 @@ export function anthropicSettings(model: ModelName, settings: ModelSettings = {}
     if (thinking !== "between_tools") return displays[observe];
     // `between_tools` takes no `display`, and returns its progress updates as text whatever is asked.
     if (observe === "off")
-      enforced.push({
-        enforced: { _tag: "Observe", asked: observe, used: "progress_only" },
+      adjusted.push({
+        adjusted: { _tag: "Observe", asked: observe, used: "progress_only" },
         reason: "between-tools thinking returns its progress updates as text",
       });
     return undefined;
@@ -103,6 +103,6 @@ export function anthropicSettings(model: ModelName, settings: ModelSettings = {}
       ...(settings.cache === "1h" ? { cache_control: { type: "ephemeral", ttl: "1h" } } : {}),
     },
     headers: display === displays.progress_only ? { "anthropic-beta": updatesBeta } : {},
-    enforced,
+    adjusted,
   };
 }

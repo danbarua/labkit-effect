@@ -1,7 +1,7 @@
 /**
  * How a model is to process a request, in the core's own terms. Each setting is optional: one left
  * unsaid is left to the provider. A provider's adapter puts them into its wire format, and where a
- * model cannot do what was asked it does the nearest thing and reports `SettingEnforced`.
+ * model cannot do what was asked it does the nearest thing and reports `SettingAdjusted`.
  */
 
 import { Schema } from "effect";
@@ -48,11 +48,11 @@ export type ModelSettings = typeof ModelSettings.Type;
  * A setting that was not applied as asked: what was asked, and what was used; `used` absent means
  * nothing was. An effort can be used where none was asked, when the model needs one.
  */
-export const Enforced = Schema.Union([
+export const Adjusted = Schema.Union([
   Schema.TaggedStruct("Thinking", { asked: ThinkingMode, used: Schema.optionalKey(ThinkingMode) }),
   Schema.TaggedStruct("Observe", { asked: Observe, used: Schema.optionalKey(Observe) }),
   Schema.TaggedStruct("Effort", { asked: Schema.optionalKey(Effort), used: Schema.optionalKey(Effort) }),
   Schema.TaggedStruct("MaxOutputTokens", { asked: TokenCount, used: Schema.optionalKey(TokenCount) }),
   Schema.TaggedStruct("Cache", { asked: CacheFor, used: Schema.optionalKey(CacheFor) }),
 ]);
-export type Enforced = typeof Enforced.Type;
+export type Adjusted = typeof Adjusted.Type;

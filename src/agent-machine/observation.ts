@@ -6,11 +6,11 @@
 import { BlobRef } from "./blob.ts";
 import { Schema } from "effect";
 import { Received } from "./received.ts";
-import { Enforced, ModelSettings } from "./settings.ts";
+import { Adjusted, ModelSettings } from "./settings.ts";
 import {
   AgentName,
   CallId,
-  EnforcementReason,
+  AdjustmentReason,
   FailureText,
   InputText,
   ModelName,
@@ -237,12 +237,12 @@ export const Observation = Schema.Union([
    * the model does not allow what was asked. From then on what was used is the session's setting
    * for that model.
    */
-  Schema.TaggedStruct("SettingEnforced", {
+  Schema.TaggedStruct("SettingAdjusted", {
     turn: TurnId,
     provider: ProviderName,
     model: ModelName,
-    enforced: Enforced,
-    reason: EnforcementReason,
+    adjusted: Adjusted,
+    reason: AdjustmentReason,
   }),
   /** A policy vetoed a request for a model response, for the reason it gave. */
   Schema.TaggedStruct("ModelVetoed", { turn: TurnId, reason: Received }),

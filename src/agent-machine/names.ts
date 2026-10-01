@@ -73,9 +73,9 @@ export type FailureText = typeof FailureText.Type;
 export const TokenCount = Schema.Int.pipe(Schema.brand("agent-machine/TokenCount"));
 export type TokenCount = typeof TokenCount.Type;
 
-/** Why a setting was not applied as asked, in the words of whatever enforced it. */
-export const EnforcementReason = Schema.String.pipe(Schema.brand("agent-machine/EnforcementReason"));
-export type EnforcementReason = typeof EnforcementReason.Type;
+/** Why a setting was not applied as asked, in the words of whatever adjusted it. */
+export const AdjustmentReason = Schema.String.pipe(Schema.brand("agent-machine/AdjustmentReason"));
+export type AdjustmentReason = typeof AdjustmentReason.Type;
 
 /**
  * What decided that a compaction was due: a compaction policy's name, the user, or the harness a

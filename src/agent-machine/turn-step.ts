@@ -65,7 +65,7 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
     ModelAttemptFailed: "ignored",
     NoticeInserted: "ignored",
     ModelRequestDispatched: "ignored",
-    SettingEnforced: "ignored",
+    SettingAdjusted: "ignored",
     ToolCallArrived: "ignored",
     ModelVetoed: "ignored",
   },
@@ -126,8 +126,8 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
     NoticeInserted: (state) => becomes(state),
     /** The request was made; the step waits for what comes of it. */
     ModelRequestDispatched: (state) => becomes(state),
-    /** A setting was enforced on the request; the step waits for its outcome. */
-    SettingEnforced: (state) => becomes(state),
+    /** A setting was adjusted on the request; the step waits for its outcome. */
+    SettingAdjusted: (state) => becomes(state),
     ModelVetoed: (state, message) =>
       done(
         state.step,
@@ -151,7 +151,7 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
     ModelAttemptFailed: "ignored",
     NoticeInserted: "ignored",
     ModelRequestDispatched: "ignored",
-    SettingEnforced: "ignored",
+    SettingAdjusted: "ignored",
     ToolCallArrived: "ignored",
     ModelVetoed: "ignored",
   },
@@ -163,7 +163,7 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
     ModelAttemptFailed: "ignored",
     NoticeInserted: "ignored",
     ModelRequestDispatched: "ignored",
-    SettingEnforced: "ignored",
+    SettingAdjusted: "ignored",
     ToolCallArrived: "ignored",
     ModelVetoed: "ignored",
   },

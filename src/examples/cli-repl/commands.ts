@@ -7,7 +7,7 @@
  *   (`thinking`, `observe`, `effort`, `maxOutputTokens`, `cache`); the rest stay as they were.
  *
  * Both report a change of model to the session (`ModelChangeArrived`), which takes it between
- * turns; what a model does not allow is enforced, and recorded, when it is next asked.
+ * turns; what a model does not allow is adjusted, and recorded, when it is next asked.
  */
 
 import { Effect, Schema } from "effect";
@@ -44,11 +44,11 @@ export const inForce = (session: Session) =>
     const sent = Object.entries(target.settings ?? {}).map(([name, value]) => `${name}=${String(value)}`);
     const notSent = new Map(
       facts.flatMap((fact) => {
-        if (fact._tag !== "Observed" || fact.observation._tag !== "SettingEnforced") return [];
-        const { provider, model, enforced, reason } = fact.observation;
-        const name = enforced._tag.charAt(0).toLowerCase() + enforced._tag.slice(1);
-        return provider === target.provider && model === target.model && enforced.used === undefined && enforced.asked !== undefined && !(name in (target.settings ?? {}))
-          ? [[name, `${name}=${String(enforced.asked)} (${reason})`] as const]
+        if (fact._tag !== "Observed" || fact.observation._tag !== "SettingAdjusted") return [];
+        const { provider, model, adjusted, reason } = fact.observation;
+        const name = adjusted._tag.charAt(0).toLowerCase() + adjusted._tag.slice(1);
+        return provider === target.provider && model === target.model && adjusted.used === undefined && adjusted.asked !== undefined && !(name in (target.settings ?? {}))
+          ? [[name, `${name}=${String(adjusted.asked)} (${reason})`] as const]
           : [];
       }),
     );

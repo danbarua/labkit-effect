@@ -1,6 +1,6 @@
 /**
  * A session's settings: how each provider's adapter puts them into a request for a model, what it
- * enforces where the model does not allow what was asked, and how a session's facts give them.
+ * adjusts where the model does not allow what was asked, and how a session's facts give them.
  */
 
 import { capabilitiesOf } from "./providers/frontier.ts";
@@ -30,11 +30,11 @@ import { test } from "../../tests/support/test.ts";
 const anthropic = (model: string, settings: ModelSettings) => anthropicSettings(ModelName.make(model), settings);
 
 test("Anthropic: nothing said sends nothing; what is said goes into thinking and output_config", () => {
-  expect(anthropic("claude-opus-5-5", {})).toEqual({ fields: {}, headers: {}, enforced: [] });
+  expect(anthropic("claude-opus-5-5", {})).toEqual({ fields: {}, headers: {}, adjusted: [] });
   expect(anthropic("claude-opus-5-5", { thinking: "auto", observe: "all", effort: "high" })).toEqual({
     fields: { thinking: { type: "adaptive", display: "summarized" }, output_config: { effort: "high" } },
     headers: {},
-    enforced: [],
+    adjusted: [],
   });
   // Asking to observe says nothing of when to think: the model thinks as it sees fit.
   expect(anthropic("claude-opus-5-5", { observe: "off" }).fields).toEqual({ thinking: { type: "adaptive", display: "omitted" } });
@@ -44,21 +44,21 @@ test("Anthropic: observing progress only needs the display-updates beta", () => 
   expect(anthropic("claude-fable-5-1", { observe: "progress_only" })).toEqual({
     fields: { thinking: { type: "adaptive", display: "updates" } },
     headers: { "anthropic-beta": "thinking-display-updates-2026-08-18" },
-    enforced: [],
+    adjusted: [],
   });
 });
 
-test("Anthropic: a model that cannot turn thinking off thinks as it sees fit, and that is enforced", () => {
+test("Anthropic: a model that cannot turn thinking off thinks as it sees fit, and that is adjusted", () => {
   for (const model of ["claude-opus-5-5", "claude-fable-5-1"]) {
     expect(anthropic(model, { thinking: "off" })).toEqual({
       fields: { thinking: { type: "adaptive" } },
       headers: {},
-      enforced: [
-        { enforced: { _tag: "Thinking", asked: "off", used: "auto" }, reason: "this model does not allow thinking to be turned off" },
+      adjusted: [
+        { adjusted: { _tag: "Thinking", asked: "off", used: "auto" }, reason: "this model does not allow thinking to be turned off" },
       ],
     });
-    expect(anthropic(model, { thinking: "between_tools" }).enforced).toEqual([
-      { enforced: { _tag: "Thinking", asked: "between_tools", used: "auto" }, reason: "this model has no between-tools thinking" },
+    expect(anthropic(model, { thinking: "between_tools" }).adjusted).toEqual([
+      { adjusted: { _tag: "Thinking", asked: "between_tools", used: "auto" }, reason: "this model has no between-tools thinking" },
     ]);
   }
 });
@@ -67,13 +67,13 @@ test("Anthropic: Sonnet 5.5's lowest setting is between tools, which takes no di
   expect(anthropic("claude-sonnet-5-5", { thinking: "off", observe: "off" })).toEqual({
     fields: { thinking: { type: "between_tools" } },
     headers: {},
-    enforced: [
+    adjusted: [
       {
-        enforced: { _tag: "Thinking", asked: "off", used: "between_tools" },
+        adjusted: { _tag: "Thinking", asked: "off", used: "between_tools" },
         reason: "this model does not allow thinking to be turned off; between tools is its lowest setting",
       },
       {
-        enforced: { _tag: "Observe", asked: "off", used: "progress_only" },
+        adjusted: { _tag: "Observe", asked: "off", used: "progress_only" },
         reason: "between-tools thinking returns its progress updates as text",
       },
     ],
@@ -81,14 +81,14 @@ test("Anthropic: Sonnet 5.5's lowest setting is between tools, which takes no di
   expect(anthropic("claude-sonnet-5-5", { thinking: "between_tools", observe: "all", effort: "high" })).toEqual({
     fields: { thinking: { type: "between_tools" }, output_config: { effort: "high" } },
     headers: {},
-    enforced: [],
+    adjusted: [],
   });
   expect(anthropic("claude-sonnet-5-5", { thinking: "between_tools", effort: "max" })).toEqual({
     fields: { thinking: { type: "adaptive" }, output_config: { effort: "max" } },
     headers: {},
-    enforced: [
+    adjusted: [
       {
-        enforced: { _tag: "Thinking", asked: "between_tools", used: "auto" },
+        adjusted: { _tag: "Thinking", asked: "between_tools", used: "auto" },
         reason: "between-tools thinking is not accepted at max effort",
       },
     ],
@@ -99,9 +99,9 @@ test("Anthropic: no model is made to think before every answer; a model in no cl
   expect(anthropic("claude-opus-5", { thinking: "before_answer" })).toEqual({
     fields: { thinking: { type: "adaptive" } },
     headers: {},
-    enforced: [
+    adjusted: [
       {
-        enforced: { _tag: "Thinking", asked: "before_answer", used: "auto" },
+        adjusted: { _tag: "Thinking", asked: "before_answer", used: "auto" },
         reason: "the Messages API has no setting for thinking before every answer",
       },
     ],
@@ -109,30 +109,30 @@ test("Anthropic: no model is made to think before every answer; a model in no cl
   expect(anthropic("claude-opus-5", { thinking: "off", observe: "all" })).toEqual({
     fields: { thinking: { type: "disabled" } },
     headers: {},
-    enforced: [],
+    adjusted: [],
   });
 });
 
 test("OpenAI: effort and a summary go into reasoning; off is effort none; when to think cannot be said", () => {
-  expect(openAiSettings({})).toEqual({ fields: {}, headers: {}, enforced: [] });
+  expect(openAiSettings({})).toEqual({ fields: {}, headers: {}, adjusted: [] });
   expect(openAiSettings({ thinking: "auto", observe: "all", effort: "xhigh" })).toEqual({
     fields: { reasoning: { effort: "xhigh", summary: "auto" } },
     headers: {},
-    enforced: [],
+    adjusted: [],
   });
   expect(openAiSettings({ thinking: "off", effort: "high" })).toEqual({
     fields: { reasoning: { effort: "none" } },
     headers: {},
-    enforced: [
-      { enforced: { _tag: "Effort", asked: "high" }, reason: "thinking is off, which is sent as reasoning effort none" },
+    adjusted: [
+      { adjusted: { _tag: "Effort", asked: "high" }, reason: "thinking is off, which is sent as reasoning effort none" },
     ],
   });
   expect(openAiSettings({ thinking: "between_tools", observe: "progress_only" })).toEqual({
     fields: {},
     headers: {},
-    enforced: [
+    adjusted: [
       {
-        enforced: { _tag: "Thinking", asked: "between_tools", used: "auto" },
+        adjusted: { _tag: "Thinking", asked: "between_tools", used: "auto" },
         reason: "the Responses API has no setting for when the model thinks",
       },
     ],
@@ -143,38 +143,38 @@ test("the cache: Anthropic marks the request for five minutes or an hour, OpenAI
   expect(anthropic("claude-sonnet-5-5", { cache: "off" }).fields).toEqual({});
   expect(anthropic("claude-sonnet-5-5", { cache: "5m" }).fields).toEqual({ cache_control: { type: "ephemeral" } });
   expect(anthropic("claude-sonnet-5-5", { cache: "1h" }).fields).toEqual({ cache_control: { type: "ephemeral", ttl: "1h" } });
-  expect(openAiSettings({ cache: "5m" })).toEqual({ fields: {}, headers: {}, enforced: [] });
-  expect(openAiSettings({ cache: "1h" })).toEqual({ fields: { prompt_cache_retention: "24h" }, headers: {}, enforced: [] });
-  expect(openAiSettings({ cache: "off" }).enforced).toEqual([
+  expect(openAiSettings({ cache: "5m" })).toEqual({ fields: {}, headers: {}, adjusted: [] });
+  expect(openAiSettings({ cache: "1h" })).toEqual({ fields: { prompt_cache_retention: "24h" }, headers: {}, adjusted: [] });
+  expect(openAiSettings({ cache: "off" }).adjusted).toEqual([
     {
-      enforced: { _tag: "Cache", asked: "off", used: "5m" },
+      adjusted: { _tag: "Cache", asked: "off", used: "5m" },
       reason: "the Responses API caches every long enough request for minutes, and cannot be asked not to",
     },
   ]);
-  expect(openAiCompatSettings({ cache: "1h" }).enforced).toEqual([
-    { enforced: { _tag: "Cache", asked: "1h" }, reason: "the Chat Completions adapter does not send this setting" },
+  expect(openAiCompatSettings({ cache: "1h" }).adjusted).toEqual([
+    { adjusted: { _tag: "Cache", asked: "1h" }, reason: "the Chat Completions adapter does not send this setting" },
   ]);
 });
 
 const grok = capabilitiesOf("xai", "grok-4.7")?.efforts;
 
 test("xAI: effort goes into reasoning, max as xhigh, the nearest grok takes; the summary always comes back; the cache and its retention cannot be set", () => {
-  expect(xAiSettings({}, grok)).toEqual({ fields: {}, headers: {}, enforced: [] });
+  expect(xAiSettings({}, grok)).toEqual({ fields: {}, headers: {}, adjusted: [] });
   expect(xAiSettings({ thinking: "auto", observe: "all", effort: "high", maxOutputTokens: TokenCount.make(2000) }, grok)).toEqual({
     fields: { reasoning: { effort: "high" }, max_output_tokens: 2000 },
     headers: {},
-    enforced: [],
+    adjusted: [],
   });
   expect(xAiSettings({ effort: "max", observe: "off" }, grok)).toEqual({
     fields: { reasoning: { effort: "xhigh" } },
     headers: {},
-    enforced: [
+    adjusted: [
       {
-        enforced: { _tag: "Observe", asked: "off", used: "all" },
+        adjusted: { _tag: "Observe", asked: "off", used: "all" },
         reason: "xAI returns the reasoning's summary with every response, and cannot be asked not to",
       },
       {
-        enforced: { _tag: "Effort", asked: "max", used: "xhigh" },
+        adjusted: { _tag: "Effort", asked: "max", used: "xhigh" },
         reason: "this model's reasoning efforts are minimal, low, medium, high, xhigh; it is sent xhigh",
       },
     ],
@@ -183,60 +183,60 @@ test("xAI: effort goes into reasoning, max as xhigh, the nearest grok takes; the
     expect(xAiSettings({ cache }, grok)).toEqual({
       fields: {},
       headers: {},
-      enforced: [
+      adjusted: [
         {
-          enforced: { _tag: "Cache", asked: cache },
+          adjusted: { _tag: "Cache", asked: cache },
           reason: "xAI caches every request for as long as the server keeps it, and has no setting for how long",
         },
       ],
     });
 });
 
-test("xAI: thinking off is grok's least effort, minimal, enforced; an effort said beside it is not sent", () => {
+test("xAI: thinking off is grok's least effort, minimal, adjusted; an effort said beside it is not sent", () => {
   expect(xAiSettings({ thinking: "off" }, grok)).toEqual({
     fields: { reasoning: { effort: "minimal" } },
     headers: {},
-    enforced: [
+    adjusted: [
       {
-        enforced: { _tag: "Thinking", asked: "off", used: "auto" },
+        adjusted: { _tag: "Thinking", asked: "off", used: "auto" },
         reason: "this model's reasoning efforts are minimal, low, medium, high, xhigh; it is sent minimal",
       },
     ],
   });
   expect(xAiSettings({ thinking: "off", effort: "high" }, grok)).toMatchObject({
     fields: { reasoning: { effort: "minimal" } },
-    enforced: [{ enforced: { _tag: "Thinking" } }, { enforced: { _tag: "Effort", asked: "high" }, reason: "thinking is off, which is sent as reasoning effort minimal" }],
+    adjusted: [{ adjusted: { _tag: "Thinking" } }, { adjusted: { _tag: "Effort", asked: "high" }, reason: "thinking is off, which is sent as reasoning effort minimal" }],
   });
 });
 
-test("OpenAI: an effort a model does not accept is sent as the nearest it does, the higher of two as near, and enforced", () => {
+test("OpenAI: an effort a model does not accept is sent as the nearest it does, the higher of two as near, and adjusted", () => {
   const efforts = (model: string) => capabilitiesOf("openai", model)?.efforts;
   // gpt-5 takes minimal to high: thinking off is sent as minimal, xhigh as high.
   expect(openAiSettings({ thinking: "off" }, efforts("gpt-5"))).toMatchObject({
     fields: { reasoning: { effort: "minimal" } },
-    enforced: [{ enforced: { _tag: "Thinking", asked: "off", used: "auto" }, reason: "this model's reasoning efforts are minimal, low, medium, high; it is sent minimal" }],
+    adjusted: [{ adjusted: { _tag: "Thinking", asked: "off", used: "auto" }, reason: "this model's reasoning efforts are minimal, low, medium, high; it is sent minimal" }],
   });
   expect(openAiSettings({ effort: "xhigh" }, efforts("gpt-5")).fields).toEqual({ reasoning: { effort: "high" } });
   // gpt-5-pro takes only high; the 5.5 pro takes medium to xhigh, so low goes up to medium and max down to xhigh.
-  expect(openAiSettings({ effort: "low" }, efforts("gpt-5-pro")).enforced).toEqual([
-    { enforced: { _tag: "Effort", asked: "low", used: "high" }, reason: "this model's reasoning efforts are high; it is sent high" },
+  expect(openAiSettings({ effort: "low" }, efforts("gpt-5-pro")).adjusted).toEqual([
+    { adjusted: { _tag: "Effort", asked: "low", used: "high" }, reason: "this model's reasoning efforts are high; it is sent high" },
   ]);
   expect(openAiSettings({ effort: "low" }, efforts("gpt-5.5-pro")).fields).toEqual({ reasoning: { effort: "medium" } });
   expect(openAiSettings({ effort: "max" }, efforts("gpt-5.5")).fields).toEqual({ reasoning: { effort: "xhigh" } });
   // gpt-6.1-sol takes no none: thinking off is its least effort, low.
   expect(openAiSettings({ thinking: "off" }, efforts("gpt-6.1-sol")).fields).toEqual({ reasoning: { effort: "low" } });
   // What a model accepts is sent as asked; a model with no list is sent what was asked.
-  expect(openAiSettings({ thinking: "off" }, efforts("gpt-5.5"))).toEqual({ fields: { reasoning: { effort: "none" } }, headers: {}, enforced: [] });
+  expect(openAiSettings({ thinking: "off" }, efforts("gpt-5.5"))).toEqual({ fields: { reasoning: { effort: "none" } }, headers: {}, adjusted: [] });
   expect(openAiSettings({ effort: "max" }).fields).toEqual({ reasoning: { effort: "max" } });
 });
 
-test("Chat Completions: the effort is sent as reasoning_effort, none for thinking off; the other settings are enforced as not sent", () => {
-  expect(openAiCompatSettings({})).toEqual({ fields: {}, headers: {}, enforced: [] });
-  expect(openAiCompatSettings({ effort: "high", thinking: "auto" })).toEqual({ fields: { reasoning_effort: "high" }, headers: {}, enforced: [] });
+test("Chat Completions: the effort is sent as reasoning_effort, none for thinking off; the other settings are adjusted as not sent", () => {
+  expect(openAiCompatSettings({})).toEqual({ fields: {}, headers: {}, adjusted: [] });
+  expect(openAiCompatSettings({ effort: "high", thinking: "auto" })).toEqual({ fields: { reasoning_effort: "high" }, headers: {}, adjusted: [] });
   expect(openAiCompatSettings({ thinking: "off", effort: "low" })).toEqual({
     fields: { reasoning_effort: "none" },
     headers: {},
-    enforced: [{ enforced: { _tag: "Effort", asked: "low" }, reason: "thinking is off, which is sent as reasoning effort none" }],
+    adjusted: [{ adjusted: { _tag: "Effort", asked: "low" }, reason: "thinking is off, which is sent as reasoning effort none" }],
   });
   // A model with no list of efforts is sent what was asked; one with a list, the nearest it takes.
   expect(openAiCompatSettings({ effort: "max" }).fields).toEqual({ reasoning_effort: "max" });
@@ -244,9 +244,9 @@ test("Chat Completions: the effort is sent as reasoning_effort, none for thinkin
   expect(openAiCompatSettings({ observe: "all", maxOutputTokens: TokenCount.make(2000) }) as unknown).toEqual({
     fields: {},
     headers: {},
-    enforced: [
-      { enforced: { _tag: "Observe", asked: "all" }, reason: "the Chat Completions adapter does not send this setting" },
-      { enforced: { _tag: "MaxOutputTokens", asked: 2000 }, reason: "the Chat Completions adapter does not send this setting" },
+    adjusted: [
+      { adjusted: { _tag: "Observe", asked: "all" }, reason: "the Chat Completions adapter does not send this setting" },
+      { adjusted: { _tag: "MaxOutputTokens", asked: 2000 }, reason: "the Chat Completions adapter does not send this setting" },
     ],
   });
 });
@@ -268,7 +268,7 @@ test("M2: a session's settings are each as last said: by its opening, or by a ch
   } as never);
 });
 
-test("M3: what a model enforced is its setting from then on; what was said stands for another model, and saying it again puts the enforcement aside", async () => {
+test("M3: what a model adjusted is its setting from then on; what was said stands for another model, and saying it again puts the adjustment aside", async () => {
   const session = open();
   const settingsNow = async () => (await Effect.runPromise(modelOf(session.journal))).settings;
   observe(session, {
@@ -277,11 +277,11 @@ test("M3: what a model enforced is its setting from then on; what was said stand
   });
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
   observe(session, {
-    _tag: "SettingEnforced",
+    _tag: "SettingAdjusted",
     turn: "turn-1",
     provider: "anthropic",
     model: "claude-opus-5-5",
-    enforced: { _tag: "Thinking", asked: "off", used: "auto" },
+    adjusted: { _tag: "Thinking", asked: "off", used: "auto" },
     reason: "this model does not allow thinking to be turned off",
   });
   expect(await settingsNow()).toEqual({ thinking: "auto", effort: "high" } as never);
@@ -294,16 +294,16 @@ test("M3: what a model enforced is its setting from then on; what was said stand
   expect(await settingsNow()).toEqual({ thinking: "off", effort: "high" } as never);
 });
 
-test("M3: a setting enforced with nothing used in its place is no longer sent to that model", async () => {
+test("M3: a setting adjusted with nothing used in its place is no longer sent to that model", async () => {
   const session = open();
   observe(session, { ...opened, model: { ...opened.model, settings: { thinking: "off", effort: "high" } } });
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
   observe(session, {
-    _tag: "SettingEnforced",
+    _tag: "SettingAdjusted",
     turn: "turn-1",
     provider: "boring",
     model: "boring-1",
-    enforced: { _tag: "Effort", asked: "high" },
+    adjusted: { _tag: "Effort", asked: "high" },
     reason: "thinking is off",
   });
   expect((await Effect.runPromise(modelOf(session.journal))).settings).toEqual({ thinking: "off" } as never);
@@ -314,7 +314,7 @@ afterAll(() => {
   for (const stop of stops) stop();
 });
 
-test("M3: a request carries the settings the model allows; what was enforced is recorded before the first response, and once", async () => {
+test("M3: a request carries the settings the model allows; what was adjusted is recorded before the first response, and once", async () => {
   const bodies: Array<Record<string, unknown>> = [];
   const server = Bun.serve({
     port: 0,
@@ -365,7 +365,7 @@ test("M3: a request carries the settings the model allows; what was enforced is 
   const observed = facts.flatMap((fact) => (fact._tag === "Observed" ? [fact] : []));
   expect(observed.map((fact) => fact.observation._tag).slice(3)).toEqual([
     "ModelRequestDispatched",
-    "SettingEnforced",
+    "SettingAdjusted",
     "ModelResponded",
     "TurnEndReviewed",
     "InputArrived",
@@ -393,7 +393,7 @@ test("M3: a request carries the settings the model allows; what was enforced is 
       turn: "turn-1",
       provider: "anthropic",
       model: "claude-opus-5-5",
-      enforced: { _tag: "Thinking", asked: "off", used: "auto" },
+      adjusted: { _tag: "Thinking", asked: "off", used: "auto" },
       reason: "this model does not allow thinking to be turned off",
     },
   });

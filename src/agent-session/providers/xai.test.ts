@@ -105,13 +105,13 @@ test("Grok's stream as it sends it: the reasoning item is Thinking and the call 
   expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Completed" } } });
 });
 
-test("settings go in as xAI takes them, and what it cannot take is recorded as enforced before the request", async () => {
+test("settings go in as xAI takes them, and what it cannot take is recorded as adjusted before the request", async () => {
   const provider = serving(openAiStream(answers), answers);
   const facts = await session(provider.url, { effort: "max", observe: "off", cache: "1h" });
   expect(provider.bodies[0]).toMatchObject({ model: "grok-4.7", stream: true, reasoning: { effort: "xhigh" } });
   expect(provider.bodies[0]).not.toHaveProperty("prompt_cache_retention");
-  const enforced = facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "SettingEnforced" ? [fact.observation.enforced] : []));
-  expect(enforced as unknown).toEqual([
+  const adjusted = facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "SettingAdjusted" ? [fact.observation.adjusted] : []));
+  expect(adjusted as unknown).toEqual([
     { _tag: "Cache", asked: "1h" },
     { _tag: "Observe", asked: "off", used: "all" },
     { _tag: "Effort", asked: "max", used: "xhigh" },

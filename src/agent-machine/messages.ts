@@ -30,7 +30,7 @@ export type ModelObservation = Extract<
       | "ModelFailed"
       | "ModelAttemptFailed"
       | "NoticeInserted"
-      | "SettingEnforced"
+      | "SettingAdjusted"
       | "ToolCallArrived"
       | "ModelVetoed";
   }

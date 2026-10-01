@@ -28,7 +28,7 @@ How a request is to be processed shows up in the record as:
 
 - a preference: what the user, or whoever started the session, asked for;
 - a decision: what the harness chose, such as a fallback to another provider;
-- an enforcement: what a model requires whatever was asked (Opus 5.5 was asked for, so thinking
+- an adjustment: what a model requires whatever was asked (Opus 5.5 was asked for, so thinking
   is on).
 
 A fact's origin says which (built: MODEL.md R6, M3). Not built: a way for a user to change the

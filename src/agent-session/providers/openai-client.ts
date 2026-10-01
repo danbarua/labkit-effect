@@ -7,7 +7,7 @@
  * `function` tools. Thinking (a `reasoning` item) and an item it did not recognise go back to the
  * provider that produced them unchanged and in their place; for any other provider they are left
  * out, and that is logged. The session's settings go in as `reasoning`
- * (`openai-settings.ts`); what that enforced is recorded before the request.
+ * (`openai-settings.ts`); what that adjusted is recorded before the request.
  *
  * In: the response streams; each event and each completed item is passed on as it arrives, and
  * the stream's last event carries the whole response. Its `output` items that were completed
@@ -44,7 +44,7 @@ import {
 } from "../provider-call.ts";
 import { logKeys } from "../log-keys.ts";
 import { ModelStream } from "../model-stream.ts";
-import { reportEnforced, type Settled } from "../settings.ts";
+import { reportAdjusted, type Settled } from "../settings.ts";
 import { openAiSettings } from "./openai-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
 import {
@@ -328,7 +328,7 @@ export const openAiRequests = (
           headers: settled.headers,
           body: { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true },
         };
-        return reportEnforced(turn, target, settled).pipe(
+        return reportAdjusted(turn, target, settled).pipe(
           Effect.andThen(logSupplied(sent.supplied)),
           Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
         );

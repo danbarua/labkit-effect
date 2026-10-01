@@ -177,9 +177,11 @@ then continues").
   and `maxOutputTokens`. Each is optional, said in the opening or in a change of model, and stays
   as last said. One left unsaid is left to the provider.
 - M3. Where a model does not allow what was said, the provider's adapter sends the nearest thing it
-  allows and reports `SettingEnforced` on the first request. From then on what was used is the
-  session's setting for that model, so nothing more is enforced. What was said stands for any
-  other model, and saying a setting again puts the enforcement aside.
+  allows and reports `SettingAdjusted` on the first request. From then on what was used is the
+  session's setting for that model, so nothing more is adjusted. What was said stands for any
+  other model, and saying a setting again puts the adjustment aside. A setting is adjusted so that
+  the request can go on. Enforcing is something else: a request the harness or an extension
+  refuses is vetoed (`ModelVetoed`).
 
 ## What is passed on and not recorded
 

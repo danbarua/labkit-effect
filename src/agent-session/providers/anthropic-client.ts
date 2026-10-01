@@ -9,7 +9,7 @@
  * it and logs that it did. Thinking, and blocks it did not recognise, go back to the provider that
  * produced them unchanged and in their place, as the API requires for thinking to stay valid; for
  * any other provider they are left out, and that is logged. The session's settings go in as
- * `anthropic-settings.ts` puts them for the model; what it enforced is recorded before the request.
+ * `anthropic-settings.ts` puts them for the model; what it adjusted is recorded before the request.
  *
  * In: the response streams, and is assembled from its events (`anthropic-stream.ts`); each event
  * and each completed part is passed on as it arrives. The `content` blocks that were completed
@@ -45,7 +45,7 @@ import {
 import { logKeys } from "../log-keys.ts";
 import { ModelStream } from "../model-stream.ts";
 import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEvents, type Retries, withRetries } from "../provider-call.ts";
-import { reportEnforced } from "../settings.ts";
+import { reportAdjusted } from "../settings.ts";
 import { anthropicSettings } from "./anthropic-settings.ts";
 import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
 import { receivedJson } from "../received.ts";
@@ -344,7 +344,7 @@ export const anthropicRequests = (
           headers: settled.headers,
           body: { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true },
         };
-        return reportEnforced(turn, target, settled).pipe(
+        return reportAdjusted(turn, target, settled).pipe(
           Effect.andThen(logSupplied(sent.supplied)),
           Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
         );

@@ -8,7 +8,7 @@
  * outcome as a `tool` message carrying the text the model is sent. The catalog is sent as
  * `function` tools. An earlier response's other fields (`reasoning_content`, ...) are not sent back
  * yet; each one left out is logged. Of the session's settings the reasoning effort is sent, as
- * `reasoning_effort` (`openai-compat-settings.ts`); each other one asked for is recorded as enforced.
+ * `reasoning_effort` (`openai-compat-settings.ts`); each other one asked for is recorded as adjusted.
  *
  * In: the first choice's message becomes the observation's parts in order: its `content` is
  * `Text`, each of its `tool_calls` is `ToolCall` (whatever the tool's name), its arguments kept as
@@ -27,7 +27,7 @@ import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agen
 import type { ModelPart, Observation } from "../../agent-machine/observation.ts";
 import { type ContextMessage, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
 import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postJson, type Retries, withRetries } from "../provider-call.ts";
-import { reportEnforced } from "../settings.ts";
+import { reportAdjusted } from "../settings.ts";
 import { openAiCompatSettings } from "./openai-compat-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
 import {
@@ -240,7 +240,7 @@ export const openAiCompatRequests = (
           headers: settled.headers,
           body: { ...(sent.json as Record<string, Json>), ...settled.fields },
         };
-        return reportEnforced(turn, target, settled).pipe(
+        return reportAdjusted(turn, target, settled).pipe(
           Effect.andThen(logSupplied(sent.supplied)),
           Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
         );

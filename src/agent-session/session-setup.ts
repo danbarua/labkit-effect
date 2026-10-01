@@ -10,7 +10,7 @@ import { Effect, Schema } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { SessionId } from "../agent-machine/names.ts";
 import type { ModelTarget, Observation } from "../agent-machine/observation.ts";
-import type { Enforced, ModelSettings } from "../agent-machine/settings.ts";
+import type { Adjusted, ModelSettings } from "../agent-machine/settings.ts";
 import { type Target, ToolSpec } from "./contracts.ts";
 import { asText, parseJson, receivedJson, receivedText } from "./received.ts";
 
@@ -44,20 +44,20 @@ function openingOf(facts: ReadonlyArray<Fact>): Opened | undefined {
   return found?._tag === "Observed" && found.observation._tag === "SessionOpened" ? found.observation : undefined;
 }
 
-/** The setting an enforcement is about. */
+/** The setting an adjustment is about. */
 const settingOf = {
   Thinking: "thinking",
   Observe: "observe",
   Effort: "effort",
   MaxOutputTokens: "maxOutputTokens",
   Cache: "cache",
-} as const satisfies Record<Enforced["_tag"], keyof ModelSettings>;
+} as const satisfies Record<Adjusted["_tag"], keyof ModelSettings>;
 
-type Enforcement = Extract<Observation, { _tag: "SettingEnforced" }>;
+type Adjustment = Extract<Observation, { _tag: "SettingAdjusted" }>;
 
-/** `settings` with what was enforced for a model in place of what was asked. */
-function withEnforced(settings: ModelSettings, enforced: ReadonlyArray<Enforcement>): ModelSettings {
-  return enforced.reduce<ModelSettings>((now, { enforced: each }) => {
+/** `settings` with what was adjusted for a model in place of what was asked. */
+function withAdjusted(settings: ModelSettings, adjusted: ReadonlyArray<Adjustment>): ModelSettings {
+  return adjusted.reduce<ModelSettings>((now, { adjusted: each }) => {
     const { [settingOf[each._tag]]: _asked, ...rest } = now;
     return each.used === undefined ? rest : { ...rest, [settingOf[each._tag]]: each.used };
   }, settings);
@@ -67,9 +67,9 @@ function withEnforced(settings: ModelSettings, enforced: ReadonlyArray<Enforceme
  * The model the session asks now: the one named by the latest change taken, or the one it opened
  * with; and its settings. Each setting is as last said, by the opening or a change taken. Where
  * that model does not allow what was said, the first request to it records what it used instead
- * (`SettingEnforced`), and from then on that is the setting for that model: the requests after it
- * are sent what the model allows, and nothing more is enforced. What was said stands for any other
- * model, and saying a setting again puts what was enforced for it aside.
+ * (`SettingAdjusted`), and from then on that is the setting for that model: the requests after it
+ * are sent what the model allows, and nothing more is adjusted. What was said stands for any other
+ * model, and saying a setting again puts what was adjusted for it aside.
  *
  * A session's facts without its opening is a session that was never opened: asking for its model
  * is a defect.
@@ -82,10 +82,10 @@ export const modelOf = (facts: ReadonlyArray<Fact>): Effect.Effect<Target> => {
       fact._tag === "Observed" && fact.observation._tag === "ModelChangeArrived" ? [[fact.seq, fact.observation] as const] : [],
     ),
   );
-  const start = { provider: opened.provider, model: opened.model, said: { ...opened.settings }, enforced: [] as ReadonlyArray<Enforcement> };
+  const start = { provider: opened.provider, model: opened.model, said: { ...opened.settings }, adjusted: [] as ReadonlyArray<Adjustment> };
   const now = facts.reduce((state, fact) => {
     if (fact._tag === "Observed")
-      return fact.observation._tag === "SettingEnforced" ? { ...state, enforced: [...state.enforced, fact.observation] } : state;
+      return fact.observation._tag === "SettingAdjusted" ? { ...state, adjusted: [...state.adjusted, fact.observation] } : state;
     const change = fact.decision._tag === "ModelChangeTaken" ? changes.get(fact.decision.change) : undefined;
     if (change === undefined) return state;
     const restated = new Set(Object.keys(change.settings ?? {}));
@@ -93,12 +93,12 @@ export const modelOf = (facts: ReadonlyArray<Fact>): Effect.Effect<Target> => {
       provider: change.provider,
       model: change.model,
       said: { ...state.said, ...change.settings },
-      enforced: state.enforced.filter((each) => !restated.has(settingOf[each.enforced._tag])),
+      adjusted: state.adjusted.filter((each) => !restated.has(settingOf[each.adjusted._tag])),
     };
   }, start);
-  const settings = withEnforced(
+  const settings = withAdjusted(
     now.said,
-    now.enforced.filter((each) => each.provider === now.provider && each.model === now.model),
+    now.adjusted.filter((each) => each.provider === now.provider && each.model === now.model),
   );
   return Effect.succeed({
     provider: now.provider,

@@ -11,26 +11,26 @@
  * `none`; with any effort but `none` the response carries `reasoning_content`.
  *
  * The other settings are not sent, because what each compatible provider takes for them differs;
- * each one asked for is returned as enforced.
+ * each one asked for is returned as adjusted.
  */
 
 import type { ModelSettings } from "../../agent-machine/settings.ts";
-import { type Enforcement, effortFor, type Settled } from "../settings.ts";
+import { type Adjustment, effortFor, type Settled } from "../settings.ts";
 
 const reason = "the Chat Completions adapter does not send this setting";
 
 export function openAiCompatSettings(settings: ModelSettings = {}, efforts?: ReadonlyArray<string>): Settled {
-  const { sent, enforced: effortEnforced } = effortFor(settings, efforts);
-  const enforced: ReadonlyArray<Enforcement> = [
+  const { sent, adjusted: effortAdjusted } = effortFor(settings, efforts);
+  const adjusted: ReadonlyArray<Adjustment> = [
     ...(settings.thinking === "before_answer" || settings.thinking === "between_tools"
-      ? [{ enforced: { _tag: "Thinking" as const, asked: settings.thinking, used: "auto" as const }, reason: "Chat Completions has no setting for when the model thinks" }]
+      ? [{ adjusted: { _tag: "Thinking" as const, asked: settings.thinking, used: "auto" as const }, reason: "Chat Completions has no setting for when the model thinks" }]
       : []),
-    ...effortEnforced,
-    ...(settings.observe === undefined ? [] : [{ enforced: { _tag: "Observe" as const, asked: settings.observe }, reason }]),
+    ...effortAdjusted,
+    ...(settings.observe === undefined ? [] : [{ adjusted: { _tag: "Observe" as const, asked: settings.observe }, reason }]),
     ...(settings.maxOutputTokens === undefined
       ? []
-      : [{ enforced: { _tag: "MaxOutputTokens" as const, asked: settings.maxOutputTokens }, reason }]),
-    ...(settings.cache === undefined ? [] : [{ enforced: { _tag: "Cache" as const, asked: settings.cache }, reason }]),
+      : [{ adjusted: { _tag: "MaxOutputTokens" as const, asked: settings.maxOutputTokens }, reason }]),
+    ...(settings.cache === undefined ? [] : [{ adjusted: { _tag: "Cache" as const, asked: settings.cache }, reason }]),
   ];
-  return { fields: sent === undefined ? {} : { reasoning_effort: sent }, headers: {}, enforced };
+  return { fields: sent === undefined ? {} : { reasoning_effort: sent }, headers: {}, adjusted };
 }
