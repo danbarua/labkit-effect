@@ -3,7 +3,7 @@
 import { expect } from "bun:test";
 import { Option, type Terminal } from "effect";
 import { test } from "../../../tests/support/test.ts";
-import { keyed, type Typed } from "./multiline.ts";
+import { keyed, rowsOf, type Typed } from "./multiline.ts";
 
 const key = (name: string, input?: string, modifiers: { meta?: boolean; ctrl?: boolean } = {}): Terminal.UserInput => ({
   input: input === undefined ? Option.none() : Option.some(input),
@@ -18,7 +18,7 @@ const after = (keys: ReadonlyArray<Terminal.UserInput>) =>
       if (action._tag === "NextFrame") return { state: action.state, last: action._tag };
       return action._tag === "Submit" ? { state: so.state, last: action._tag, submitted: action.value } : { state: so.state, last: action._tag };
     },
-    { state: { text: "", pasting: false }, last: "" },
+    { state: { text: "", pasting: false, drawn: "" }, last: "" },
   );
 
 test("Enter submits; Alt+Enter and a line feed (Ctrl+J) are a new line", () => {
@@ -35,4 +35,18 @@ test("a paste keeps its line breaks and does not submit; Enter after it does", (
 test("Backspace removes the last character; a key with no text is not typed", () => {
   expect(after([key("a", "a"), key("b", "b"), key("backspace", "\x7f"), key("d", "d")]).state.text).toBe("ad");
   expect(after([key("a", "a"), key("up"), key("c", "\x03", { ctrl: true })])).toMatchObject({ state: { text: "a" }, last: "Beep" });
+});
+
+test("the frame's rows count a line wider than the terminal as the rows it wraps to", () => {
+  // The prompt's lead is 8 columns wide, and so is the indent of the lines after the first.
+  expect(rowsOf("", 80)).toBe(1);
+  expect(rowsOf("x".repeat(72), 80)).toBe(1);
+  expect(rowsOf("x".repeat(73), 80)).toBe(2);
+  expect(rowsOf(`short\n${"x".repeat(200)}\nend`, 80)).toBe(1 + 3 + 1);
+});
+
+test("during a paste the frame on the screen stays as it was, and the paste is drawn when it ends", () => {
+  const pasting = after([key("a", "a"), key("paste-start"), key("x", "x"), key("return", "\r"), key("y", "y")]);
+  expect(pasting.state).toEqual({ text: "ax\ny", pasting: true, drawn: "a" });
+  expect(after([key("a", "a"), key("paste-start"), key("x", "x"), key("paste-end")]).state).toEqual({ text: "ax", pasting: false, drawn: "ax" });
 });

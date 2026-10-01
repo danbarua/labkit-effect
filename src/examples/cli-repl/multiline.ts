@@ -8,8 +8,9 @@
  *   Escape then Enter for it (iTerm2, VS Code, Ghostty and others can be). By default a terminal sends
  *   the same byte for Enter and Shift+Enter, and Effect's `Terminal` does not name the key that the
  *   kitty keyboard protocol sends for it.
- * - Editing is at the end of the text: typing adds, Backspace removes. A line wider than the terminal
- *   is not counted as two when the frame is redrawn.
+ * - Editing is at the end of the text: typing adds, Backspace removes.
+ * - The frame is redrawn after each key: the rows it took are erased, a line wider than the terminal
+ *   counted as the rows it wraps to. A paste is drawn once, when it ends.
  */
 
 import { Effect, Option, Terminal } from "effect";
@@ -19,13 +20,23 @@ export interface Typed {
   readonly text: string;
   /** Between the terminal's marks of a paste's start and end. */
   readonly pasting: boolean;
+  /** The text of the frame on the screen: `text`, except during a paste, which is drawn when it ends. */
+  readonly drawn: string;
 }
 
 const lead = "? You › ";
 const indent = " ".repeat(lead.length);
 
-/** Erases the frame drawn for `text`, leaving the cursor at the start of its first line. */
-const erased = (text: string): string => `\r\x1b[2K${"\x1b[1A\x1b[2K".repeat(text.split("\n").length - 1)}`;
+const frame = (text: string): string => lead + text.split("\n").join(`\n${indent}`);
+
+/** How many rows of a terminal `columns` wide the frame for `text` takes: a line wider than the terminal wraps. */
+export const rowsOf = (text: string, columns: number): number =>
+  frame(text)
+    .split("\n")
+    .reduce((rows, line) => rows + Math.max(1, Math.ceil(Bun.stringWidth(line) / columns)), 0);
+
+/** Erases the frame drawn for `text`, leaving the cursor at the start of its first row. */
+const erased = (text: string, columns: number): string => `\r\x1b[2K${"\x1b[1A\x1b[2K".repeat(rowsOf(text, columns) - 1)}`;
 
 /** Whether `text` starts with a control character: a key that types nothing. */
 const isControl = (text: string): boolean => {
@@ -35,7 +46,10 @@ const isControl = (text: string): boolean => {
 
 /** What a key, or a piece of a paste, does to what is typed so far. */
 export function keyed(state: Typed, input: Terminal.UserInput): Prompt.Action<Typed, string> {
-  const next = (changed: Partial<Typed>): Prompt.Action<Typed, string> => ({ _tag: "NextFrame", state: { ...state, ...changed } });
+  const next = (changed: Partial<Typed>): Prompt.Action<Typed, string> => {
+    const to = { ...state, ...changed };
+    return { _tag: "NextFrame", state: { ...to, drawn: to.pasting ? state.drawn : to.text } };
+  };
   const { name, ctrl, meta } = input.key;
   if (name === "paste-start") return next({ pasting: true });
   if (name === "paste-end") return next({ pasting: false });
@@ -49,11 +63,25 @@ export function keyed(state: Typed, input: Terminal.UserInput): Prompt.Action<Ty
 }
 
 export const Multiline: Prompt.Prompt<string> = Prompt.Custom<Typed, string>(
-  { text: "", pasting: false },
+  { text: "", pasting: false, drawn: "" },
   {
+    // During a paste nothing is drawn: the frame from before it stays, and the whole paste is drawn when it ends.
     render: (state, action) =>
-      Effect.succeed(action._tag === "Submit" ? `✔ You … ${action.value.split("\n").join(`\n${indent}`)}\n` : lead + state.text.split("\n").join(`\n${indent}`)),
-    clear: (state) => Effect.succeed(erased(state.text)),
+      Effect.succeed(
+        action._tag === "Submit"
+          ? `✔ You … ${action.value.split("\n").join(`\n${indent}`)}\n`
+          : action._tag === "Beep"
+            ? "\x07"
+            : state.pasting
+              ? ""
+              : frame(state.text),
+      ),
+    clear: (state, action) =>
+      action._tag === "NextFrame" && action.state.pasting
+        ? Effect.succeed("")
+        : Effect.gen(function* () {
+            return erased(state.drawn, yield* (yield* Terminal.Terminal).columns);
+          }),
     process: (input, state) => Effect.succeed(keyed(state, input)),
   },
 );
