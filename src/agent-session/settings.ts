@@ -2,6 +2,14 @@
  * What a provider's adapter makes of a session's settings for one model: the fields and headers it
  * adds to the request, and every setting it could not apply as asked, with the reason. The
  * function that makes it is pure; `reportAdjusted` records what was adjusted.
+ *
+ * What each provider does with `cache`, in its own terms:
+ *
+ * | provider  | its setting                          | values             | `off`        | `5m`             | `1h`                 |
+ * | --------- | ------------------------------------ | ------------------ | ------------ | ---------------- | -------------------- |
+ * | anthropic | `cache_control` (`ttl`)              | absent, 5m, 1h     | nothing sent | `ephemeral`      | `ephemeral`, ttl 1h  |
+ * | openai    | `prompt_cache_retention`             | no (minutes), yes (24h) | adjusted to `5m` | nothing sent | `"24h"`              |
+ * | xai       | none: it always caches               | always             | not sent     | not sent         | not sent             |
  */
 
 import { Effect } from "effect";
