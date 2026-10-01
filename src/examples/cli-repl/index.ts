@@ -20,31 +20,14 @@
  * cli` keeps bun's echo of the script off stdout.
  */
 
-import { AnthropicClient } from "@effect/ai-anthropic";
-import { OpenAiClient } from "@effect/ai-openai";
-import { OpenAiClient as OpenAiCompatClient } from "@effect/ai-openai-compat";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Console, Effect, Fiber, FileSystem, Layer, Logger, Option, PubSub, Redacted, Ref, Schema, Stdio, Stream } from "effect";
-import { Argument, CliError, Command, Flag, Prompt } from "effect/cli";
-import * as FetchHttpClient from "effect/http/FetchHttpClient";
-import { AgentContextAssembler, WholeConversation } from "../../agent-context/assembler.ts";
-import { Notices } from "../../agent-context/assemble.ts";
-import { Fact } from "../../agent-machine/fact.ts";
-import { InputText, ModelName, ProviderName, SessionId, type TurnId, Via } from "../../agent-machine/names.ts";
+import { Console, Effect, Option, Stdio, Stream } from "effect";
+import { Argument, Command, Flag } from "effect/cli";
 import { Effort, type ModelSettings, ThinkingMode } from "../../agent-machine/settings.ts";
-import { contextGauge } from "../../agent-session/accounting.ts";
-import { type ProviderRequest, ToolRunner } from "../../agent-session/contracts.ts";
-import { openSession, type Session } from "../../agent-session/loop.ts";
-import { FallbackModelClient } from "../../agent-session/model-fallback.ts";
-import { ModelFromFacts } from "../../agent-session/model-choice.ts";
-import { reportedBy } from "../../agent-session/origin.ts";
-import { anthropicRequests } from "../../agent-session/providers/anthropic-client.ts";
-import { openAiRequests } from "../../agent-session/providers/openai-client.ts";
-import { openAiCompatRequests } from "../../agent-session/providers/openai-compat-client.ts";
-import { xAiClient, xAiRequests } from "../../agent-session/providers/xai-client.ts";
-import { openedWith } from "../../agent-session/session-setup.ts";
-import { CountingTurns, NoTurnEndHooks } from "../../agent-session/turns.ts";
-import models from "./models.json" with { type: "json" };
+import { keyOf, keyVariables, known, targetOf } from "./models.ts";
+import { printOnce } from "./print.ts";
+import { repl } from "./repl.ts";
+import { type Config, LogsToFile, LogsToStderr, withSession } from "./session.ts";
 
 const optional = <A>(flag: Flag.Flag<A>) => flag.pipe(Flag.optional, Flag.map(Option.getOrUndefined));
 const text = (name: string, description: string, ...aliases: Array<string>) =>
@@ -96,54 +79,7 @@ const flags = {
   // debugFile: text("debug-file", "Debug log destination"),
 };
 
-type Options = Command.Command.Config.Infer<typeof flags> & { readonly prompt: string | undefined };
-
-const invalid = (message: string) => new CliError.UserError({ cause: message, userMessage: message });
-
-/** The known models, by provider, as `models.json` lists them. */
-const known: Readonly<Record<string, Readonly<Record<string, unknown>>>> = models;
-
-/** The environment variable that holds each provider's key; a local server needs none. */
-const keyVariables: Readonly<Record<string, string>> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", xai: "XAI_API_KEY" };
-const keyOf = (provider: string): string | undefined => {
-  const variable = keyVariables[provider];
-  const key = variable === undefined ? undefined : process.env[variable];
-  return key === undefined || key === "" ? undefined : key;
-};
-
-/** The provider and model `--model` names: `provider/model`, or a model `models.json` lists. */
-const targetOf = (model: string | undefined) =>
-  Effect.gen(function* () {
-    if (model === undefined) return yield* invalid("No model: pass --model (bun cli models lists them).");
-    const slash = model.indexOf("/");
-    if (slash > 0 && (model.slice(0, slash) in known || model.slice(0, slash) === "localhost"))
-      return { provider: ProviderName.make(model.slice(0, slash)), model: ModelName.make(model.slice(slash + 1)) };
-    const provider = Object.keys(known).find((each) => model in (known[each] ?? {}));
-    if (provider === undefined) return yield* invalid(`No model ${model} in models.json; name it as provider/model.`);
-    return { provider: ProviderName.make(provider), model: ModelName.make(model) };
-  });
-
-/** One model client reaching every provider with a key set, and the local server. */
-const clients = () => {
-  const http = FetchHttpClient.layer;
-  const requests: Array<Effect.Effect<readonly [ProviderName, ProviderRequest], never, never>> = [];
-  const anthropic = keyOf("anthropic");
-  if (anthropic !== undefined)
-    requests.push(anthropicRequests().pipe(Effect.map((request) => [ProviderName.make("anthropic"), request] as const), Effect.provide(AnthropicClient.layer({ apiKey: Redacted.make(anthropic) }).pipe(Layer.provide(http)))));
-  const openai = keyOf("openai");
-  if (openai !== undefined)
-    requests.push(openAiRequests().pipe(Effect.map((request) => [ProviderName.make("openai"), request] as const), Effect.provide(OpenAiClient.layer({ apiKey: Redacted.make(openai) }).pipe(Layer.provide(http)))));
-  const xai = keyOf("xai");
-  if (xai !== undefined)
-    requests.push(xAiRequests().pipe(Effect.map((request) => [ProviderName.make("xai"), request] as const), Effect.provide(xAiClient(Redacted.make(xai)).pipe(Layer.provide(http)))));
-  requests.push(
-    openAiCompatRequests().pipe(
-      Effect.map((request) => [ProviderName.make("localhost"), request] as const),
-      Effect.provide(OpenAiCompatClient.layer({ apiUrl: "http://localhost:8000/v1", apiKey: Redacted.make("none") }).pipe(Layer.provide(http))),
-    ),
-  );
-  return Layer.unwrap(Effect.all(requests).pipe(Effect.map((each) => FallbackModelClient({ requests: new Map(each), fallbacks: [] }))));
-};
+type Options = Command.Command.Config.Infer<typeof flags>;
 
 /** The system prompt the flags give: the prompt or its file, then the appended text or its file. */
 const systemOf = (options: Options) =>
@@ -155,153 +91,29 @@ const systemOf = (options: Options) =>
     return parts.length === 0 ? undefined : parts.join("\n\n");
   });
 
-/** The text of the last response to `turn`. */
-const answerTo = (facts: ReadonlyArray<Fact>, turn: TurnId | undefined): string =>
-  facts
-    .flatMap((fact) =>
-      fact._tag === "Observed" && fact.observation._tag === "ModelResponded" && fact.observation.turn === turn
-        ? [fact.observation.parts.flatMap((part) => (part._tag === "Text" ? [part.text] : [])).join("")]
-        : [],
-    )
-    .at(-1) ?? "";
-
-const lastTurn = (facts: ReadonlyArray<Fact>): TurnId | undefined =>
-  facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "TurnStarted" ? [fact.observation.turn] : [])).at(-1);
-
-/** What the REPL prints after a turn: the answer, or how the turn ended when it gave none. */
-const replyTo = (facts: ReadonlyArray<Fact>): string => {
-  const turn = lastTurn(facts);
-  const ending = facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" && fact.decision.turn === turn ? [fact.decision.ending] : [])).at(-1);
-  const answer = answerTo(facts, turn);
-  if (ending?._tag === "Failed") return `(the turn failed: ${ending.failure})`;
-  return answer !== "" ? answer : `(the turn ended ${ending?._tag ?? "with nothing recorded"}, with no answer)`;
-};
-
-const encodeFact = Schema.encodeSync(Fact);
-
-/** In print mode log lines go to stderr, so stdout holds the answer alone, as a caller parsing it expects. */
-const LogsToStderr = Logger.layer([Logger.withConsoleError(Logger.formatLogFmt)]);
-
-/** In the REPL log lines go to a file, so the terminal holds the conversation alone. */
-const logFileOf = (sessionId: string): string => `logs/cli/${sessionId}.log`;
-const LogsToFile = (path: string) =>
-  Layer.unwrap(
-    Effect.gen(function* () {
-      yield* (yield* FileSystem.FileSystem).makeDirectory("logs/cli", { recursive: true });
-      return Logger.layer([Logger.toFile(Logger.formatLogFmt, path, { batchWindow: "100 millis" })]);
-    }),
-  ).pipe(Layer.orDie);
-
-/** The session has no tools yet: a call names none that exists. */
-const NoTools = Layer.succeed(ToolRunner, { run: () => Effect.succeed({ _tag: "Failed" as const, reason: { _tag: "NotFound" as const } }) });
-
-/** Sends `text` to the session as the user's input, and waits until nothing is under way. */
-const ask = (session: Session, text: string) =>
-  session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make(text) }).pipe(Effect.andThen(session.idle));
-
-/** The result of a print-mode session, in the shape of Claude Code's `--output-format json`. */
-const resultOf = (facts: ReadonlyArray<Fact>, sessionId: string, provider: string, model: string, started: number) => {
-  const turn = lastTurn(facts);
-  const ended = facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" && fact.decision.turn === turn ? [fact.decision.ending] : [])).at(-1);
-  const gauge = contextGauge(facts, provider, model);
-  const failed = ended === undefined || ended._tag === "Failed" || ended._tag === "Vetoed" || ended._tag === "Interrupted";
-  return {
-    type: "result",
-    subtype: ended?._tag ?? "NotEnded",
-    is_error: failed,
-    duration_ms: Date.now() - started,
-    num_turns: facts.filter((fact) => fact._tag === "Decided" && (fact.decision._tag === "AskModel" || fact.decision._tag === "TellModel")).length,
-    result: ended?._tag === "Failed" ? ended.failure : answerTo(facts, turn),
-    session_id: sessionId,
-    model: `${provider}/${model}`,
-    ...(gauge === undefined ? {} : { total_cost_usd: gauge.cost.amount, context: { used: gauge.used, size: gauge.size } }),
-  };
-};
+/** The session's configuration, as the flags give it. */
+const configOf = (options: Options) =>
+  Effect.gen(function* () {
+    const settings: ModelSettings = {
+      ...(options.effort === undefined ? {} : { effort: options.effort }),
+      ...(options.thinking === undefined ? {} : { thinking: options.thinking }),
+    };
+    const config: Config = { sessionId: crypto.randomUUID(), target: yield* targetOf(options.model), settings, system: yield* systemOf(options) };
+    return config;
+  });
 
 export const cli = Command.make(
   "cli",
   { prompt: arg("prompt"), ...flags },
   Effect.fnUntraced(function* (options) {
-    const started = Date.now();
     const stdio = yield* Stdio.Stdio;
     const interactive = yield* stdio.stdinIsTerminal;
-    const target = yield* targetOf(options.model);
-    const variable = keyVariables[target.provider];
-    if (variable !== undefined && keyOf(target.provider) === undefined)
-      return yield* invalid(`${variable} is not set, so ${target.provider}/${target.model} cannot be asked.`);
-    const settings: ModelSettings = {
-      ...(options.effort === undefined ? {} : { effort: options.effort }),
-      ...(options.thinking === undefined ? {} : { thinking: options.thinking }),
-    };
-    const system = yield* systemOf(options);
-    const sessionId = crypto.randomUUID();
+    const config = yield* configOf(options);
+    if (!options.print) return yield* withSession(config, LogsToFile(config.sessionId), (session) => repl(session, config, options.prompt, interactive));
     // Piped input is read only when no prompt was given: a shell that leaves stdin open would
     // otherwise keep a prompted run waiting for an end of input that never comes.
-    const piped = options.print && options.prompt === undefined && !interactive ? yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString) : "";
-
-    const run = Effect.gen(function* () {
-      const session = yield* openSession;
-      // Facts are printed as they are recorded, in order, each once: a new fact wakes the printer,
-      // which prints the session's facts from where it had got to. Before the result is printed the
-      // printer is stopped and the rest are printed.
-      const printed = yield* Ref.make(0);
-      const printRest = Effect.gen(function* () {
-        const all = yield* session.facts;
-        const from = yield* Ref.getAndSet(printed, all.length);
-        yield* Effect.forEach(all.slice(from), (fact) => Console.log(JSON.stringify({ type: "fact", fact: encodeFact(fact) })), { discard: true });
-      });
-      const following = options.verbose || options.outputFormat === "stream-json";
-      const recorded = following ? yield* session.subscribe : undefined;
-      const follower = recorded === undefined ? undefined : yield* Effect.forkScoped(Effect.forever(PubSub.take(recorded).pipe(Effect.andThen(printRest))));
-      const catchUp = follower === undefined ? Effect.void : Fiber.interrupt(follower).pipe(Effect.andThen(printRest));
-      yield* session.observe(openedWith({ session: SessionId.make(sessionId), model: { ...target, settings }, system, tools: [] }));
-      yield* session.idle;
-      if (options.print) {
-        const prompt = [options.prompt ?? "", piped].filter((part) => part !== "").join("\n\n");
-        if (prompt === "") return yield* invalid("No prompt: pass one, or pipe it in.");
-        yield* ask(session, prompt);
-        yield* catchUp;
-        const result = resultOf(yield* session.facts, sessionId, target.provider, target.model, started);
-        if (options.outputFormat === "json") yield* Console.log(JSON.stringify(result, null, 2));
-        else if (options.outputFormat === "stream-json") yield* Console.log(JSON.stringify(result));
-        else yield* Console.log(result.result);
-        if (result.is_error) return yield* invalid(`The turn ended ${result.subtype}.`);
-        return;
-      }
-      yield* Console.log(`${target.provider}/${target.model} · /help for commands, /exit to quit. Log: ${logFileOf(sessionId)}`);
-      if (options.prompt !== undefined) {
-        yield* ask(session, options.prompt);
-        yield* Console.log(replyTo(yield* session.facts));
-      }
-      if (!interactive) return;
-      while (true) {
-        const input = yield* Prompt.String({ message: "You" });
-        if (input === "/exit" || input === "/quit") break;
-        if (input.trim() === "") continue;
-        if (input === "/help") {
-          yield* Console.log("/help  Show these commands\n/exit  Quit\nAnything else goes to the model.");
-          continue;
-        }
-        yield* ask(session, input);
-        yield* Console.log(replyTo(yield* session.facts));
-      }
-    });
-
-    yield* run.pipe(
-      reportedBy({ _tag: "User", via: Via.make("cli") }),
-      Effect.scoped,
-      Effect.provide(
-        Layer.mergeAll(
-          ModelFromFacts,
-          AgentContextAssembler.pipe(Layer.provide(Layer.mergeAll(WholeConversation, Layer.succeed(Notices, [])))),
-          clients(),
-          CountingTurns,
-          NoTurnEndHooks,
-          NoTools,
-          options.print ? LogsToStderr : LogsToFile(logFileOf(sessionId)),
-        ),
-      ),
-    );
+    const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));
+    yield* withSession(config, LogsToStderr, (session) => printOnce(session, config, prompt, options.outputFormat ?? "text", options.verbose));
   }),
 ).pipe(
   Command.withDescription("An agent at the command line: a REPL, or -p to ask once."),
