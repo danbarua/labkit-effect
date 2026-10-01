@@ -10,8 +10,8 @@
  * against them: Anthropic refuses `max_tokens` above a model's output (Haiku 4.5: 64,000); OpenAI
  * accepts any `max_output_tokens`, 10,000,000 included, so its limit cannot be read from a refusal.
  *
- * A model is found by its name or by a dated name that begins with it
- * (`claude-haiku-4-5-20251001` is `claude-haiku-4-5`).
+ * A model is found by its name or by its name with a release date after it
+ * (`claude-haiku-4-5-20251001` is `claude-haiku-4-5`; `gpt-5-mini` is not `gpt-5`).
  */
 
 import type { ModelName, ProviderName } from "../../agent-machine/names.ts";
@@ -36,10 +36,14 @@ export interface Limits {
 
 const known: Readonly<Record<string, Readonly<Record<string, Limits>>>> = frontier;
 
-/** The limits of `model` of `provider`, when it is one of the frontier models listed. */
+/** `model` is `name` with its release date after it: `-2025-08-07` (OpenAI) or `-20251001` (Anthropic). */
+const datedFrom = (name: string, model: string): boolean =>
+  model.startsWith(`${name}-`) && /^(\d{4}-\d{2}-\d{2}|\d{8})$/.test(model.slice(name.length + 1));
+
+/** The limits of `model` of `provider`, when it is one of the frontier models listed, by its name or a dated name. */
 export function limitsOf(provider: ProviderName | string, model: ModelName | string): Limits | undefined {
   const models = known[provider] ?? {};
-  const name = Object.keys(models).find((each) => model === each || model.startsWith(`${each}-`));
+  const name = model in models ? model : Object.keys(models).find((each) => datedFrom(each, model));
   return name === undefined ? undefined : models[name];
 }
 
