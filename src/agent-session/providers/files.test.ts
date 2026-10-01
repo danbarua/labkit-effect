@@ -15,7 +15,7 @@ import { ModelName, ProviderName, TurnId } from "../../agent-machine/names.ts";
 import { MediaType } from "../../agent-machine/received.ts";
 import { Blobs, BlobsInMemory } from "../blobs.ts";
 import { type ContextPart, ModelClient, ModelContext } from "../contracts.ts";
-import { blobPointer } from "../shaping.ts";
+import { blobPointer, notShown } from "../shaping.ts";
 import { AnthropicModelClient } from "./anthropic-client.ts";
 import { OpenAiModelClient } from "./openai-client.ts";
 import { OpenAiCompatModelClient } from "./openai-compat-client.ts";
@@ -77,7 +77,7 @@ test("Anthropic: an image as an image block, a PDF as a document block, a text f
     { type: "image", source: { type: "base64", media_type: "image/png", data: base64(png) } },
     { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64(pdf) } },
     { type: "text", text: `${blobPointer(list)}\nRemember the milk.` },
-    { type: "text", text: blobPointer(missing) },
+    { type: "text", text: notShown(missing) },
   ]);
   expect(chart.id).toMatch(/^[0-9a-f]{64}$/);
   expect(report.size).toBe(pdf.byteLength);
@@ -97,7 +97,7 @@ test("OpenAI Responses: an image as input_image, a PDF as input_file, each a dat
   stops.push(unknown.stop);
   const { files } = await sent(OpenAiModelClient.pipe(Layer.provide(openAiAt(unknown.url))), "openai", "boring-1");
   const unknownInput = (unknown.bodies[0] as { input: Array<{ content: Array<Record<string, unknown>> }> }).input;
-  expect(unknownInput[1]?.content[0]).toEqual({ type: "input_text", text: blobPointer(files[0] as BlobRef) });
+  expect(unknownInput[1]?.content[0]).toEqual({ type: "input_text", text: notShown(files[0] as BlobRef) });
 });
 
 test("Chat Completions: an image as image_url, a PDF as its pointer", async () => {
@@ -106,7 +106,8 @@ test("Chat Completions: an image as image_url, a PDF as its pointer", async () =
   const { files } = await sent(OpenAiCompatModelClient.pipe(Layer.provide(openAiCompatAt(provider.url))), "openai", "gpt-5.5");
   const content = (provider.bodies[0] as { messages: Array<{ content: Array<Record<string, unknown>> }> }).messages[0]?.content;
   expect(content?.[1]).toEqual({ type: "image_url", image_url: { url: `data:image/png;base64,${base64(png)}` } });
-  expect(content?.[2]).toEqual({ type: "text", text: blobPointer(files[1] as BlobRef) });
+  expect(content?.[2]).toEqual({ type: "text", text: notShown(files[1] as BlobRef) });
+  expect(notShown(files[1] as BlobRef)).toMatch(/^\[not shown to you: application\/pdf, 15 B, report\.pdf: blob:\/\/[0-9a-f]{64}\]$/);
 });
 
 /** A model client that answers without sending anything, for the record's test. */

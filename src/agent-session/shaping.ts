@@ -124,7 +124,7 @@ export function renderToolResult(
       const body = outcome.output.body;
       if (body._tag !== "Stored") return { text: asText(outcome.output), isError: false };
       const file: BlobRef = { id: body.id, mediaType: outcome.output.mediaType, size: body.size };
-      return { text: blobPointer(file), isError: false, file };
+      return { text: notShown(file), isError: false, file };
     }
     case "Failed": {
       const reason = outcome.reason;
@@ -240,9 +240,13 @@ export function blobPointer(blob: BlobRef): string {
   return `[${blob.mediaType}, ${size}${blob.name === undefined ? "" : `, ${blob.name}`}: blob://${blob.id}]`;
 }
 
+/** A file the model is not sent, as its pointer, saying so: `[not shown to you: image/png, 68 KiB, a.png: blob://<id>]`. */
+export const notShown = (blob: BlobRef): string => `[not shown to you: ${blobPointer(blob).slice(1)}`;
+
 /**
  * How a file goes to the model: its bytes, when the model takes its kind (`accepts`) and the store
- * holds them; a text file's text, after its pointer; otherwise its pointer, and why is logged.
+ * holds them; a text file's text, after its pointer; otherwise its pointer saying it is not shown
+ * (`notShown`), and why is logged.
  */
 export type FileAs =
   | { readonly _tag: "Bytes"; readonly blob: BlobRef; readonly base64: string; readonly dataUrl: string }
@@ -252,7 +256,7 @@ export function fileAs(blob: BlobRef, files: ReadonlyMap<BlobId, Uint8Array>, ac
   const bytes = files.get(blob.id);
   const pointer = (reason: string): FileAs => ({
     _tag: "Text",
-    text: blobPointer(blob),
+    text: notShown(blob),
     supplied: [{ level: "warning", event: logKeys.provider.fileAsPointer, details: { blob: blob.id, mediaType: blob.mediaType, reason } }],
   });
   if (bytes === undefined) return pointer("the blob store does not hold the file's bytes");
