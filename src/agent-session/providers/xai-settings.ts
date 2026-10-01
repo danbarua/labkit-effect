@@ -2,7 +2,6 @@
  * A session's settings as xAI's Responses endpoint takes them: `reasoning.effort` and
  * `max_output_tokens`, as OpenAI's are named. Where xAI differs from OpenAI:
  *
- * - Its efforts go up to `xhigh`; `max` is refused, so `xhigh` is sent.
  * - It returns the reasoning's summary with every response and ignores `reasoning.summary`, so
  *   `observe` short of `all` is returned as enforced and nothing is sent for it.
  * - `max_output_tokens` limits the answer only: the reasoning is not counted against it, so a
@@ -12,17 +11,18 @@
  * - It caches every request, keeps an entry for as long as the server does, and has no setting for
  *   how long; `prompt_cache_retention` is accepted and ignored, so it is not sent.
  *
- * The models supported are the latest three (grok-4.5 to grok-4.7). None of them allows thinking to
- * be turned off (effort `none` is refused), so thinking `off` is returned as enforced, `auto`, and
- * no effort is sent for it. Effort is sent only when one was said.
+ * As for OpenAI, each model accepts its own reasoning efforts (`efforts`, from `frontier.json`:
+ * grok-4.5 to 4.7 take `minimal` to `xhigh`, no `none` and no `max`), and an effort a model does
+ * not accept, thinking `off` (effort `none`) included, is sent as the nearest it does
+ * (`effortFor`), and enforced.
  */
 
 import type { ModelSettings } from "../../agent-machine/settings.ts";
-import type { Enforcement, Settled } from "../settings.ts";
+import { type Enforcement, effortFor, type Settled } from "../settings.ts";
 
-export function xAiSettings(settings: ModelSettings = {}): Settled {
+export function xAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyArray<string>): Settled {
   const enforced: Array<Enforcement> = [];
-  const { thinking, observe, effort, maxOutputTokens, cache } = settings;
+  const { thinking, observe, maxOutputTokens, cache } = settings;
   if (cache !== undefined)
     enforced.push({
       enforced: { _tag: "Cache", asked: cache },
@@ -38,17 +38,8 @@ export function xAiSettings(settings: ModelSettings = {}): Settled {
       enforced: { _tag: "Thinking", asked: thinking, used: "auto" },
       reason: "xAI's Responses endpoint has no setting for when the model thinks",
     });
-  if (thinking === "off")
-    enforced.push({
-      enforced: { _tag: "Thinking", asked: thinking, used: "auto" },
-      reason: "xAI's models do not allow thinking to be turned off (reasoning effort none is refused)",
-    });
-  if (effort === "max")
-    enforced.push({
-      enforced: { _tag: "Effort", asked: effort, used: "xhigh" },
-      reason: "xAI's reasoning efforts go up to xhigh",
-    });
-  const sentEffort = effort === "max" ? "xhigh" : effort;
+  const { sent: sentEffort, enforced: effortEnforced } = effortFor(settings, efforts);
+  enforced.push(...effortEnforced);
   return {
     fields: {
       ...(sentEffort === undefined ? {} : { reasoning: { effort: sentEffort } }),

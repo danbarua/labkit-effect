@@ -124,7 +124,7 @@ test("OpenAI: effort and a summary go into reasoning; off is effort none; when t
     fields: { reasoning: { effort: "none" } },
     headers: {},
     enforced: [
-      { enforced: { _tag: "Effort", asked: "high" }, reason: "thinking is off, which the Responses API takes as reasoning effort none" },
+      { enforced: { _tag: "Effort", asked: "high" }, reason: "thinking is off, which is sent as reasoning effort none" },
     ],
   });
   expect(openAiSettings({ thinking: "between_tools", observe: "progress_only" })).toEqual({
@@ -156,14 +156,16 @@ test("the cache: Anthropic marks the request for five minutes or an hour, OpenAI
   ]);
 });
 
-test("xAI: effort goes into reasoning, max as xhigh; the summary always comes back; the cache and its retention cannot be set", () => {
-  expect(xAiSettings({})).toEqual({ fields: {}, headers: {}, enforced: [] });
-  expect(xAiSettings({ thinking: "auto", observe: "all", effort: "high", maxOutputTokens: TokenCount.make(2000) })).toEqual({
+const grok = limitsOf("xai", "grok-4.7")?.efforts;
+
+test("xAI: effort goes into reasoning, max as xhigh, the nearest grok takes; the summary always comes back; the cache and its retention cannot be set", () => {
+  expect(xAiSettings({}, grok)).toEqual({ fields: {}, headers: {}, enforced: [] });
+  expect(xAiSettings({ thinking: "auto", observe: "all", effort: "high", maxOutputTokens: TokenCount.make(2000) }, grok)).toEqual({
     fields: { reasoning: { effort: "high" }, max_output_tokens: 2000 },
     headers: {},
     enforced: [],
   });
-  expect(xAiSettings({ effort: "max", observe: "off" })).toEqual({
+  expect(xAiSettings({ effort: "max", observe: "off" }, grok)).toEqual({
     fields: { reasoning: { effort: "xhigh" } },
     headers: {},
     enforced: [
@@ -171,11 +173,14 @@ test("xAI: effort goes into reasoning, max as xhigh; the summary always comes ba
         enforced: { _tag: "Observe", asked: "off", used: "all" },
         reason: "xAI returns the reasoning's summary with every response, and cannot be asked not to",
       },
-      { enforced: { _tag: "Effort", asked: "max", used: "xhigh" }, reason: "xAI's reasoning efforts go up to xhigh" },
+      {
+        enforced: { _tag: "Effort", asked: "max", used: "xhigh" },
+        reason: "this model's reasoning efforts are minimal, low, medium, high, xhigh; it is sent xhigh",
+      },
     ],
   });
   for (const cache of ["off", "5m", "1h"] as const)
-    expect(xAiSettings({ cache })).toEqual({
+    expect(xAiSettings({ cache }, grok)).toEqual({
       fields: {},
       headers: {},
       enforced: [
@@ -187,18 +192,21 @@ test("xAI: effort goes into reasoning, max as xhigh; the summary always comes ba
     });
 });
 
-test("xAI: thinking off cannot be turned off, so it is auto, and no effort is sent that was not said", () => {
-  expect(xAiSettings({ thinking: "off" })).toEqual({
-    fields: {},
+test("xAI: thinking off is grok's least effort, minimal, enforced; an effort said beside it is not sent", () => {
+  expect(xAiSettings({ thinking: "off" }, grok)).toEqual({
+    fields: { reasoning: { effort: "minimal" } },
     headers: {},
     enforced: [
       {
         enforced: { _tag: "Thinking", asked: "off", used: "auto" },
-        reason: "xAI's models do not allow thinking to be turned off (reasoning effort none is refused)",
+        reason: "this model's reasoning efforts are minimal, low, medium, high, xhigh; it is sent minimal",
       },
     ],
   });
-  expect(xAiSettings({ thinking: "off", effort: "high" }).fields).toEqual({ reasoning: { effort: "high" } });
+  expect(xAiSettings({ thinking: "off", effort: "high" }, grok)).toMatchObject({
+    fields: { reasoning: { effort: "minimal" } },
+    enforced: [{ enforced: { _tag: "Thinking" } }, { enforced: { _tag: "Effort", asked: "high" }, reason: "thinking is off, which is sent as reasoning effort minimal" }],
+  });
 });
 
 test("OpenAI: an effort a model does not accept is sent as the nearest it does, the higher of two as near, and enforced", () => {

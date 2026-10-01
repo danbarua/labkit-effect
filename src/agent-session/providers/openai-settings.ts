@@ -12,24 +12,12 @@
  * with no list is sent what was asked.
  */
 
-import type { Effort, ModelSettings } from "../../agent-machine/settings.ts";
-import type { Enforcement, Settled } from "../settings.ts";
-
-/** The efforts in order, least first. */
-const order = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
-
-/** The effort in `accepted` nearest `wanted`; the higher of two as near. */
-function nearest(wanted: string, accepted: ReadonlyArray<string>): string {
-  const at = order.indexOf(wanted);
-  const distance = (effort: string) => Math.abs(order.indexOf(effort) - at);
-  return [...accepted].sort((a, b) => distance(a) - distance(b) || order.indexOf(b) - order.indexOf(a))[0] ?? wanted;
-}
-
-const isEffort = (effort: string): effort is Effort => (["low", "medium", "high", "xhigh", "max"] as const).some((each) => each === effort);
+import type { ModelSettings } from "../../agent-machine/settings.ts";
+import { type Enforcement, effortFor, type Settled } from "../settings.ts";
 
 export function openAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyArray<string>): Settled {
   const enforced: Array<Enforcement> = [];
-  const { thinking, observe, effort, maxOutputTokens, cache } = settings;
+  const { thinking, observe, maxOutputTokens, cache } = settings;
   if (cache === "off")
     enforced.push({
       enforced: { _tag: "Cache", asked: cache, used: "5m" },
@@ -40,18 +28,8 @@ export function openAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyA
       enforced: { _tag: "Thinking", asked: thinking, used: "auto" },
       reason: "the Responses API has no setting for when the model thinks",
     });
-  if (thinking === "off" && effort !== undefined)
-    enforced.push({
-      enforced: { _tag: "Effort", asked: effort },
-      reason: "thinking is off, which the Responses API takes as reasoning effort none",
-    });
-  const wanted = thinking === "off" ? "none" : effort;
-  const sent = wanted === undefined || efforts === undefined || efforts.includes(wanted) ? wanted : nearest(wanted, efforts);
-  if (sent !== wanted && wanted !== undefined && sent !== undefined) {
-    const reason = `this model's reasoning efforts are ${efforts?.join(", ")}; it is sent ${sent}`;
-    if (thinking === "off") enforced.push({ enforced: { _tag: "Thinking", asked: "off", used: "auto" }, reason });
-    else if (effort !== undefined) enforced.push({ enforced: { _tag: "Effort", asked: effort, ...(isEffort(sent) ? { used: sent } : {}) }, reason });
-  }
+  const { sent, enforced: effortEnforced } = effortFor(settings, efforts);
+  enforced.push(...effortEnforced);
   const reasoning = {
     ...(sent === undefined ? {} : { effort: sent }),
     // A summary is the only thinking content the API returns on request; commentary comes unasked.

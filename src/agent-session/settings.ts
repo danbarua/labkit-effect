@@ -6,7 +6,7 @@
 
 import { Effect } from "effect";
 import { EnforcementReason, type TurnId } from "../agent-machine/names.ts";
-import type { Enforced } from "../agent-machine/settings.ts";
+import type { Effort, Enforced, ModelSettings } from "../agent-machine/settings.ts";
 import type { Target } from "./contracts.ts";
 import { harnessParts } from "./origin.ts";
 import { Report } from "./report.ts";
@@ -48,3 +48,35 @@ export const reportEnforced = (turn: TurnId, target: Target, settled: Settled): 
           { discard: true },
         );
       });
+
+/** Reasoning efforts in order, least first, as the Responses API names them. */
+const efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+const isEffort = (effort: string): effort is Effort => (["low", "medium", "high", "xhigh", "max"] as const).some((each) => each === effort);
+
+/**
+ * The reasoning effort to send for `settings` to a model that accepts `accepted`: the effort asked,
+ * or `none` for thinking `off`, when an effort said beside it is returned as enforced; one the model
+ * does not accept is sent as the nearest it does, the higher of two as near, and that is returned as
+ * enforced. With no list, what was asked is sent.
+ */
+export function effortFor(
+  settings: ModelSettings,
+  accepted: ReadonlyArray<string> | undefined,
+): { readonly sent: string | undefined; readonly enforced: ReadonlyArray<Enforcement> } {
+  const off = settings.thinking === "off";
+  const wanted = off ? "none" : settings.effort;
+  const set = (sent: string | undefined): ReadonlyArray<Enforcement> =>
+    off && settings.effort !== undefined
+      ? [{ enforced: { _tag: "Effort", asked: settings.effort, ...(sent !== undefined && isEffort(sent) ? { used: sent } : {}) }, reason: `thinking is off, which is sent as reasoning effort ${sent ?? "none"}` }]
+      : [];
+  if (wanted === undefined || accepted === undefined || accepted.includes(wanted)) return { sent: wanted, enforced: set(wanted) };
+  const at = efforts.indexOf(wanted);
+  const distance = (effort: string) => Math.abs(efforts.indexOf(effort) - at);
+  const sent = [...accepted].sort((a, b) => distance(a) - distance(b) || efforts.indexOf(b) - efforts.indexOf(a))[0];
+  if (sent === undefined) return { sent: wanted, enforced: [] };
+  const reason = `this model's reasoning efforts are ${accepted.join(", ")}; it is sent ${sent}`;
+  if (off) return { sent, enforced: [{ enforced: { _tag: "Thinking", asked: "off", used: "auto" }, reason }, ...set(sent)] };
+  const asked = settings.effort;
+  return { sent, enforced: asked === undefined ? [] : [{ enforced: { _tag: "Effort", asked, ...(isEffort(sent) ? { used: sent } : {}) }, reason }] };
+}
