@@ -32,6 +32,21 @@ const indent = " ".repeat(lead.length);
 
 const frame = (text: string): string => lead + text.split("\n").join(`\n${indent}`);
 
+const reset = "\x1b[0m";
+const bold = "\x1b[1m";
+
+/**
+ * The frame for `text` in the colours and symbols of Effect's prompts (`Prompt.Theme`): while it is
+ * typed, or once it is submitted. It takes the same columns as `frame`, whose rows are counted.
+ */
+const painted = (text: string, submitted: boolean) =>
+  Effect.map(Prompt.Theme, (theme) => {
+    const lines = text.split("\n").join(`\n${indent}`);
+    return submitted
+      ? `${theme.successColor}${theme.tick}${reset} ${bold}You${reset} ${theme.mutedColor}${theme.ellipsis}${reset} ${theme.submittedColor}${lines}${reset}`
+      : `${theme.primaryColor}${theme.prefix}${reset} ${bold}You${reset} ${theme.mutedColor}${theme.pointerSmall}${reset} ${lines}`;
+  });
+
 /** How many rows of a terminal `columns` wide the frame for `text` takes: a line wider than the terminal wraps. */
 export const rowsOf = (text: string, columns: number): number =>
   frame(text)
@@ -102,7 +117,8 @@ const drawn = (text: string, complete: Complete) =>
     const columns = yield* (yield* Terminal.Terminal).columns;
     const last = frame(text).split("\n").at(-1) ?? "";
     const hint = hinted(text, complete, columns - 1 - (Bun.stringWidth(last) % columns));
-    return hint === "" ? frame(text) : `${frame(text)}\x1b7\x1b[2m${hint}\x1b[0m\x1b8`;
+    const typed = yield* painted(text, false);
+    return hint === "" ? typed : `${typed}\x1b7\x1b[2m${hint}${reset}\x1b8`;
   });
 
 export const Multiline = (complete: Complete = nothing): Prompt.Prompt<string> =>
@@ -112,7 +128,7 @@ export const Multiline = (complete: Complete = nothing): Prompt.Prompt<string> =
       // During a paste nothing is drawn: the frame from before it stays, and the whole paste is drawn when it ends.
       render: (state, action) =>
         action._tag === "Submit"
-          ? Effect.succeed(`✔ You … ${action.value.split("\n").join(`\n${indent}`)}\n`)
+          ? Effect.map(painted(action.value, true), (line) => `${line}\n`)
           : action._tag === "Beep"
             ? Effect.succeed("\x07")
             : state.pasting
