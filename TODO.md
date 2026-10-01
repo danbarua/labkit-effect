@@ -88,9 +88,9 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 
 ### Providers
 
-- [ ] A session store, at its most basic: a session's facts appended to a JSONL file as they are
-      recorded, and `--continue` opening the latest one from it; with that, the CLI under
-      `bun --watch` reloads without losing the conversation.
+- [ ] A session store. Built, in the CLI (`store.ts`): a session's facts appended to
+      `logs/sessions/<session>.jsonl` as they are recorded; `--continue` goes on from the latest;
+      `bun run cli:watch`. To do: look at what was built, and decide what the store is.
 - [ ] Effect's `Response.Usage` shape for a response's token counts, in place of our own.
 - [ ] Each provider's image and file formats, from what was measured, in place of models.dev's
       "takes images: yes or no".
