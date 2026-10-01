@@ -88,25 +88,35 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 
 ### Providers
 
+- [ ] A session store, at its most basic: a session's facts appended to a JSONL file as they are
+      recorded, and `--continue` opening the latest one from it; with that, the CLI under
+      `bun --watch` reloads without losing the conversation.
+- [ ] Effect's `Response.Usage` shape for a response's token counts, in place of our own.
+- [ ] Each provider's image and file formats, from what was measured, in place of models.dev's
+      "takes images: yes or no".
 - [ ] The Chat Completions adapter against the local server (Rapid-MLX, vLLM-compatible, at
       `http://localhost:8000/v1`; OpenAPI docs at `/docs`). Built: the reasoning effort is sent as
-      `reasoning_effort` (Qwen3.5-9B takes `none` to `xhigh` and refuses `max`). To do: streaming;
-      `reasoning_content` sent back; tool calls; the other settings.
+      `reasoning_effort` (Qwen3.5-9B takes `none` to `xhigh` and refuses `max`). To do, for parity
+      with core-agent and for small tasks on the local model: streaming; `reasoning_content` sent
+      back; an output limit; tool calls; the other settings.
 - [ ] Models. Built: the well-known models as generated `const` data (`bun run models:refresh`:
       models.dev's catalog merged with `well-known-models.measured.json`); a settings type per
       well-known model (`SettingsFor`); the values to offer for each setting of a model as it is
-      set now, which are the ones its provider's adapter applies as asked (`choicesFor`); what is known of a model travels on each request's target, from
-      `KnownModels`, which a host can provide (the CLI gives a `localhost` model what its server
-      lists); the CLI's `/settings` picks among the choices, and its prompt completes commands,
-      models and settings with Tab. To do: run the refresh on a schedule; measure the efforts of
-      Anthropic's models.
+      set now, which are the ones its provider's adapter applies as asked (`choicesFor`); what is
+      known of a model travels on each request's target, from `KnownModels`, which a host can
+      provide (the CLI gives a `localhost` model what its server lists); the CLI's `/settings`
+      picks among the choices, and its prompt completes commands, models and settings with Tab.
+      To do: when a setting is changed, `/settings` says what this provider does with the value
+      (OpenAI caches for minutes whatever is asked; xAI has no cache setting), so the user knows
+      before a request is sent; measure the efforts of Anthropic's models.
 
 ## Later: worth doing, not core
 
 - [ ] Caching, tuned with compaction. Built: the `cache` setting (off, 5m, 1h); Anthropic reads
       nearly every request from the cache with it (FizzBuzz, 20 turns: 27,556 of 29,032 input
-      tokens). To do: why OpenAI reported 0 cached tokens in every FizzBuzz run, requests over 1,024
-      tokens included; and compaction that knows the provider's cache: from the time since the
+      tokens). To do: OpenAI reported 0 cached tokens in every FizzBuzz run; the runs' input token counts
+      were not looked at, so whether caching was to be expected is not known, and they come first;
+      and compaction that knows the provider's cache: from the time since the
       provider's last summary (`writtenAt`) and its cache's lifetime, whether the next request can
       still read the cache, and so whether keeping its beginning unchanged saves anything.
 - [ ] Forks as sessions, and the turn pointer (`session/turn`; turn zero of a root points at
@@ -152,9 +162,11 @@ On 2026-09-30: Codex none in 168 files; Claude Code 4 in 787.
 
 ## Parked by Dan
 
-- A session's record: its format, and opening a session from it. Deferred until something needs
-  it, so that the format does not dictate the design. Everything that can be built and tested
-  without it comes first.
+- How much room to reserve in the estimate of the next request's size: not until the usage
+  figures are shown to be reliable, which needs the agent in daily use for coding.
+- Running `models:refresh` on a schedule: it is run by hand when a provider releases models.
+- A hook that retries a refused request with another model: a downgrade after a refusal mostly
+  ends with the conversation abandoned. Not worth automating yet.
 - Google (no Effect package).
 - Jev, later, as a tool.
 - Attachments and system records in Claude Code sessions, including exo's injected memories.
