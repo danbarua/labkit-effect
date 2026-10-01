@@ -7,8 +7,8 @@
  * as `text` content parts, the model's tool calls as an assistant message's `tool_calls`, each tool
  * outcome as a `tool` message carrying the text the model is sent. The catalog is sent as
  * `function` tools. An earlier response's other fields (`reasoning_content`, ...) are not sent back
- * yet; each one left out is logged. The session's settings are not sent; each one asked for is
- * recorded as enforced.
+ * yet; each one left out is logged. Of the session's settings the reasoning effort is sent, as
+ * `reasoning_effort` (`openai-compat-settings.ts`); each other one asked for is recorded as enforced.
  *
  * In: the first choice's message becomes the observation's parts in order: its `content` is
  * `Text`, each of its `tool_calls` is `ToolCall` (whatever the tool's name), its arguments kept as
@@ -18,7 +18,7 @@
  */
 
 import type { BlobId } from "../../agent-machine/blob.ts";
-import { acceptsFile } from "./frontier.ts";
+import { acceptsFile, limitsOf } from "./frontier.ts";
 import { OpenAiClient } from "@effect/ai-openai-compat";
 import { Effect, Layer, type Schema } from "effect";
 import type * as AiError from "effect/ai/AiError";
@@ -231,7 +231,7 @@ export const openAiCompatRequests = (
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
     return (target, context, turn) => {
-      const settled = openAiCompatSettings(target.settings);
+      const settled = openAiCompatSettings(target.settings, limitsOf(target.provider, target.model)?.efforts);
       return filesIn(context).pipe(
         Effect.flatMap((files) => {
         const sent = body(target, context, files);

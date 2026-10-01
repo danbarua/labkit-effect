@@ -152,7 +152,7 @@ test("the cache: Anthropic marks the request for five minutes or an hour, OpenAI
     },
   ]);
   expect(openAiCompatSettings({ cache: "1h" }).enforced).toEqual([
-    { enforced: { _tag: "Cache", asked: "1h" }, reason: "the Chat Completions adapter sends no settings" },
+    { enforced: { _tag: "Cache", asked: "1h" }, reason: "the Chat Completions adapter does not send this setting" },
   ]);
 });
 
@@ -230,13 +230,23 @@ test("OpenAI: an effort a model does not accept is sent as the nearest it does, 
   expect(openAiSettings({ effort: "max" }).fields).toEqual({ reasoning: { effort: "max" } });
 });
 
-test("Chat Completions: no setting is sent, and each one asked for is enforced", () => {
+test("Chat Completions: the effort is sent as reasoning_effort, none for thinking off; the other settings are enforced as not sent", () => {
+  expect(openAiCompatSettings({})).toEqual({ fields: {}, headers: {}, enforced: [] });
+  expect(openAiCompatSettings({ effort: "high", thinking: "auto" })).toEqual({ fields: { reasoning_effort: "high" }, headers: {}, enforced: [] });
   expect(openAiCompatSettings({ thinking: "off", effort: "low" })).toEqual({
+    fields: { reasoning_effort: "none" },
+    headers: {},
+    enforced: [{ enforced: { _tag: "Effort", asked: "low" }, reason: "thinking is off, which is sent as reasoning effort none" }],
+  });
+  // A model with no list of efforts is sent what was asked; one with a list, the nearest it takes.
+  expect(openAiCompatSettings({ effort: "max" }).fields).toEqual({ reasoning_effort: "max" });
+  expect(openAiCompatSettings({ effort: "max" }, ["none", "low", "medium", "high", "xhigh"]).fields).toEqual({ reasoning_effort: "xhigh" });
+  expect(openAiCompatSettings({ observe: "all", maxOutputTokens: TokenCount.make(2000) }) as unknown).toEqual({
     fields: {},
     headers: {},
     enforced: [
-      { enforced: { _tag: "Thinking", asked: "off" }, reason: "the Chat Completions adapter sends no settings" },
-      { enforced: { _tag: "Effort", asked: "low" }, reason: "the Chat Completions adapter sends no settings" },
+      { enforced: { _tag: "Observe", asked: "all" }, reason: "the Chat Completions adapter does not send this setting" },
+      { enforced: { _tag: "MaxOutputTokens", asked: 2000 }, reason: "the Chat Completions adapter does not send this setting" },
     ],
   });
 });

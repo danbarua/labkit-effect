@@ -88,15 +88,15 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 
 ### Providers
 
-- [ ] The Chat Completions adapter against the local Qwen model (`http://localhost:8000/v1`,
-      `mlx-community/Qwen3.5-9B-8bit`, as in the ACP log): streaming, `reasoning_content` sent back,
-      tool calls.
-### Telemetry
-
-Built: spans and log lines written to `<name>.spans.jsonl` and `<name>.logs.jsonl` beside a probe's
-transcript; the session and each turn are spans, and each request's span sits under its turn
-(`src/instrumentation/README.md`).
-
+- [ ] The Chat Completions adapter against the local server (Rapid-MLX, vLLM-compatible, at
+      `http://localhost:8000/v1`; OpenAPI docs at `/docs`). Built: the reasoning effort is sent as
+      `reasoning_effort` (Qwen3.5-9B takes `none` to `xhigh` and refuses `max`). To do: streaming;
+      `reasoning_content` sent back; tool calls; the other settings.
+- [ ] Configuration for local and unknown models, which `frontier.json` does not list: their
+      efforts, context window and input kinds. The local server says some of it itself:
+      `GET /v1/models` gives `context_window`, `capabilities`, and under `models`
+      `supported_reasoning_levels` and `default_reasoning_level`. Until then such a model is sent
+      the effort asked, and a server that does not take it refuses the request.
 - [ ] OTLP, for a collector: OpenTelemetry's `@opentelemetry/exporter-trace-otlp-http` (a new
       dependency, one more span processor beside the file), or Effect's `OtlpTracer` (no new
       package, but it replaces the NodeSdk tracer, so not beside the file exporter).
