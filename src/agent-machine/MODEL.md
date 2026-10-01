@@ -76,11 +76,13 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
 - I3. Input that arrives while a turn runs waits in the turn's mailbox and is taken between steps:
   when every call of a tool batch has settled, or when the model gives a response with no tool
   calls. The model is then asked again.
-- I4. After a response with no tool calls (a final answer, or one cut short) the turn asks the
-  layers around the core for anything more first (request `BeforeTurnEnded`; a Stop hook's
-  feedback, say, arrives as input), and they answer with `TurnEndReviewed`. The turn ends
-  (Decision `TurnEnded`: `Answered`, or `CutShort`) when no input was taken by then; otherwise it
-  goes on. A response cut short is not followed by another request with nothing new for the model
+- I4. After a response with no tool calls the turn asks the layers around the core for anything
+  more first (request `BeforeTurnEnded`; a Stop hook's feedback, say, arrives as input), and they
+  answer with `TurnEndReviewed`. A whole response with answer text is recorded as
+  `TurnCompleted`, one with none (only thinking or commentary) as `TurnIncomplete`, before the
+  request. The turn ends (Decision `TurnEnded`: `Completed`, `Incomplete`, or `CutShort`) when no
+  input was taken by then; otherwise it goes on. Whether an incomplete turn is held open is a
+  host's turn-end hook's to decide. A response cut short is not followed by another request with nothing new for the model
   to answer. How often hooks may hold a turn open is the layers' business.
 - I5. The sender can cancel input still waiting in a mailbox (Observation `InputCancelled`); it is
   withdrawn. Cancelling input already taken changes nothing.

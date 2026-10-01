@@ -68,9 +68,9 @@ test("the file holds the session's span, each turn's under it, each request's un
 
   const turns = named("agent.turn");
   expect(turns.map((span) => span.attributes)).toEqual([
-    { session: "dave", turn: "turn-1", ending: "Answered" },
-    { session: "dave", turn: "turn-2", ending: "Answered" },
-    { session: "dave", turn: "turn-3", ending: "Answered" },
+    { session: "dave", turn: "turn-1", ending: "Completed" },
+    { session: "dave", turn: "turn-2", ending: "Completed" },
+    { session: "dave", turn: "turn-3", ending: "Completed" },
   ]);
   expect(turns.filter((span) => span.parentSpanId !== session.spanId)).toEqual([]);
   const turnOf = new Map(turns.map((span) => [span.attributes["turn"], span.spanId]));

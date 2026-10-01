@@ -75,10 +75,12 @@ test("observe returns once the observation is recorded; input given while the mo
   expect(tags(before)).toEqual(["SessionOpened", "InputArrived", "TurnStarted", "InputDelivered", "AskModel", "InputArrived"]);
   expect(tags(after).slice(6)).toEqual([
     "ModelResponded",
+    "TurnCompleted",
     "InputDelivered",
     "TurnEndReviewed",
     "TellModel",
     "ModelResponded",
+    "TurnCompleted",
     "TurnEndReviewed",
     "TurnEnded",
   ]);

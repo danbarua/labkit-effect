@@ -79,7 +79,7 @@ test("a tool turn sends the catalog, then the call and a tool message with its r
       tools,
     },
   ]);
-  expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Answered" } } });
+  expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Completed" } } });
 });
 
 test("the choice's message becomes parts: content, calls to any tool name, and other fields kept whole", async () => {

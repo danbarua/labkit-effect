@@ -336,6 +336,7 @@ test("TC2 TC3: a tool call is run as soon as it is complete in the stream, befor
     "TellModel",
     "ModelRequestDispatched",
     "ModelResponded",
+    "TurnCompleted",
     "TurnEndReviewed",
     "TurnEnded",
   ]);

@@ -117,7 +117,7 @@ test("Anthropic is overloaded (HTTP 529), so OpenAI answers; the failed attempt 
   expect(attempt?._tag === "ModelAttemptFailed" ? reasonIn(attempt.error) : undefined).toBe("InternalProviderError");
   expect(change).toMatchObject({ provider: "openai", model: "gpt-5.6" });
   expect(response).toMatchObject({ provider: "openai", model: "gpt-5.6" });
-  expect(ended).toEqual(["Answered"]);
+  expect(ended).toEqual(["Completed"]);
   expect(fellBack).toBe(1);
 });
 
@@ -130,7 +130,7 @@ test("Anthropic's rate limit (HTTP 429) falls back too", async () => {
     "ModelChangeArrived",
     "ModelResponded",
   ]);
-  expect(ended).toEqual(["Answered"]);
+  expect(ended).toEqual(["Completed"]);
 });
 
 test("after falling back, the session stays on OpenAI: the next turn asks it first, and Anthropic is not tried again", async () => {
@@ -146,7 +146,7 @@ test("after falling back, the session stays on OpenAI: the next turn asks it fir
   ]);
   expect(model.at(-2)).toMatchObject({ provider: "openai", model: "gpt-5.6" });
   expect(model.at(-1)).toMatchObject({ provider: "openai", model: "gpt-5.6" });
-  expect(ended).toEqual(["Answered", "Answered"]);
+  expect(ended).toEqual(["Completed", "Completed"]);
   expect(fellBack).toBe(1);
 });
 

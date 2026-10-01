@@ -46,7 +46,7 @@ export type ConversationTurnState =
   | { readonly _tag: "Ended"; readonly turn: TurnId };
 
 /** How a turn ends when its last response had no tool calls and no input follows it. */
-type LastResponse = Extract<Ending, { _tag: "Answered" | "CutShort" }>;
+type LastResponse = Extract<Ending, { _tag: "Completed" | "Incomplete" | "CutShort" }>;
 
 export type ConversationTurnMessage = ToConversationTurn | ModelObservation | TurnObservation;
 
@@ -141,6 +141,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     Proceed: "ignored",
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
+    StepUnanswered: "ignored",
     StepCutShort: "ignored",
     StepUnfinished: "ignored",
     StepStopped: "ignored",
@@ -164,6 +165,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     Proceed: (state) => nextStep(state.turn, 0),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
+    StepUnanswered: "ignored",
     StepCutShort: "ignored",
     StepUnfinished: "ignored",
     StepStopped: "ignored",
@@ -188,7 +190,14 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     StepToolsSettled: continuing,
     StepCutShort: afterAnswer({ _tag: "CutShort" }),
     StepUnfinished: continuing,
-    StepAnswered: afterAnswer({ _tag: "Answered" }),
+    StepAnswered: (state) => {
+      const next = afterAnswer({ _tag: "Completed" })(state);
+      return { ...next, decisions: [{ _tag: "TurnCompleted", turn: state.turn }] };
+    },
+    StepUnanswered: (state) => {
+      const next = afterAnswer({ _tag: "Incomplete" })(state);
+      return { ...next, decisions: [{ _tag: "TurnIncomplete", turn: state.turn }] };
+    },
     StepStopped: (state, message) => ended(state.turn, message.ending),
     ModelResponded: passOn,
     ModelFailed: passOn,
@@ -210,6 +219,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     Proceed: (state) => nextStep(state.turn, state.step),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
+    StepUnanswered: "ignored",
     StepCutShort: "ignored",
     StepUnfinished: "ignored",
     StepStopped: "ignored",
@@ -237,6 +247,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     TurnHoldsExhausted: (state) => becomes(state),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
+    StepUnanswered: "ignored",
     StepCutShort: "ignored",
     StepUnfinished: "ignored",
     StepStopped: "ignored",
@@ -260,6 +271,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     TurnHoldsExhausted: (state) => becomes(state),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
+    StepUnanswered: "ignored",
     StepCutShort: "ignored",
     StepUnfinished: "ignored",
     StepStopped: "ignored",
@@ -283,6 +295,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     /** The step has heard from every request it made: the turn ends. */
     StepToolsSettled: endInterrupted,
     StepAnswered: endInterrupted,
+    StepUnanswered: endInterrupted,
     StepCutShort: endInterrupted,
     StepUnfinished: endInterrupted,
     StepStopped: endInterrupted,
@@ -311,6 +324,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     Proceed: "ignored",
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
+    StepUnanswered: "ignored",
     StepCutShort: "ignored",
     StepUnfinished: "ignored",
     StepStopped: "ignored",

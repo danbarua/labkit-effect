@@ -96,7 +96,9 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
           toConversationTurn(state.step.turn, {
             _tag:
               message.ending._tag === "Complete"
-                ? "StepAnswered"
+                ? message.parts.some((part) => part._tag === "Text")
+                  ? "StepAnswered"
+                  : "StepUnanswered"
                 : message.ending._tag === "Unfinished"
                   ? "StepUnfinished"
                   : "StepCutShort",

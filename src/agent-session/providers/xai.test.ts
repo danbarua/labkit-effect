@@ -102,7 +102,7 @@ test("Grok's stream as it sends it: the reasoning item is Thinking and the call 
     { type: "function_call", call_id: call?.["call_id"], name: "add", arguments: '{"a":1873,"b":4127}' },
     { type: "function_call_output", call_id: call?.["call_id"], output: "6000" },
   ]);
-  expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Answered" } } });
+  expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Completed" } } });
 });
 
 test("settings go in as xAI takes them, and what it cannot take is recorded as enforced before the request", async () => {

@@ -77,7 +77,7 @@ test("a tool turn sends the catalog, then the reasoning and call as received and
       ],
     },
   ]);
-  expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Answered" } } });
+  expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Completed" } } });
 });
 
 test("a commentary message is Commentary, and goes back as a message with that phase", async () => {

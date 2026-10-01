@@ -50,6 +50,7 @@ test("R5: the turn runs to an answer through one tool call", () => {
     "ToolEnded",
     "TellModel",
     "ModelResponded",
+    "TurnCompleted",
     "TurnEndReviewed",
     "TurnEnded",
   ]);
@@ -117,10 +118,11 @@ test("I3 I4: a response cut short is followed by another request when input arri
     "TurnEndReviewed",
     "TellModel",
     "ModelResponded",
+    "TurnCompleted",
     "TurnEndReviewed",
     "TurnEnded",
   ]);
-  expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Answered" } } });
+  expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Completed" } } });
 });
 
 test("S3: a failed attempt at a model request is recorded and changes nothing; the request's outcome ends the step", () => {
@@ -147,7 +149,7 @@ test("S3: a failed attempt at a model request is recorded and changes nothing; t
     ending: { _tag: "Complete" },
     metadata: json({}),
   });
-  expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Answered" } } });
+  expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Completed" } } });
   const late = observe(session, attempt);
   expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "ObservationNotExpected", observation: late } });
 });
@@ -207,8 +209,8 @@ test("I7: a whole response that is not yet an answer is followed by another requ
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "write the report" });
   observe(session, { ...cutShort("Writing it.", "pause_turn", "Unfinished"), parts: [{ _tag: "Commentary", text: "Writing it." }] });
   observe(session, cutShort("The report.", "end_turn", "Complete"));
-  expect(tags(session).slice(4)).toEqual(["AskModel", "ModelResponded", "TellModel", "ModelResponded", "TurnEndReviewed", "TurnEnded"]);
-  expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { ending: { _tag: "Answered" } } });
+  expect(tags(session).slice(4)).toEqual(["AskModel", "ModelResponded", "TellModel", "ModelResponded", "TurnCompleted", "TurnEndReviewed", "TurnEnded"]);
+  expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { ending: { _tag: "Completed" } } });
 });
 
 test("S6: a request that was made is recorded; the step waits for what comes of it", () => {
@@ -225,6 +227,25 @@ test("S6: a request that was made is recorded; the step waits for what comes of 
   expect(tags(session).slice(-2)).toEqual(["AskModel", "ModelRequestDispatched"]);
   expect(session.world.agent.state._tag).toBe("Running");
   observe(session, cutShort("Hello.", "end_turn", "Complete"));
-  expect(tags(session).slice(-3)).toEqual(["ModelResponded", "TurnEndReviewed", "TurnEnded"]);
+  expect(tags(session).slice(-4)).toEqual(["ModelResponded", "TurnCompleted", "TurnEndReviewed", "TurnEnded"]);
   expect(tags(session)).not.toContain("ObservationNotExpected");
+});
+
+test("I4: a whole response with no tool calls is TurnCompleted when it has answer text, TurnIncomplete when it has only thinking or commentary", () => {
+  const ended = (parts: ReadonlyArray<unknown>) => {
+    const session = open();
+    observe(session, opened);
+    observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
+    observe(session, { ...cutShort("", "end_turn", "Complete"), parts });
+    return { tags: tags(session).slice(-4), last: session.journal.at(-1) as unknown };
+  };
+  expect(ended([{ _tag: "Text", text: "Hello." }])).toMatchObject({
+    tags: ["ModelResponded", "TurnCompleted", "TurnEndReviewed", "TurnEnded"],
+    last: { decision: { ending: { _tag: "Completed" } } },
+  });
+  const thinking = { _tag: "Thinking", text: "They said hello.", received: json({ type: "thinking" }) };
+  expect(ended([thinking, { _tag: "Commentary", text: "Replying." }])).toMatchObject({
+    tags: ["ModelResponded", "TurnIncomplete", "TurnEndReviewed", "TurnEnded"],
+    last: { decision: { ending: { _tag: "Incomplete" } } },
+  });
 });

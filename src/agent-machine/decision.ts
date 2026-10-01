@@ -8,8 +8,13 @@ import { Received } from "./received.ts";
 
 /** How a turn ended. */
 export const Ending = Schema.Union([
-  /** The model gave a final answer and no input was queued. */
-  Schema.TaggedStruct("Answered", {}),
+  /** The model's last response was its answer (`TurnCompleted`), and nothing more was given to the turn. */
+  Schema.TaggedStruct("Completed", {}),
+  /**
+   * The model's last response was whole, with no tool calls, but held no answer, only thinking or
+   * commentary (`TurnIncomplete`), and nothing more was given to the turn.
+   */
+  Schema.TaggedStruct("Incomplete", {}),
   /** The model's response was cut short (a length limit, a pause) and no input was queued to go on with. */
   Schema.TaggedStruct("CutShort", {}),
   /** A request for a model response failed. */
@@ -22,6 +27,16 @@ export const Ending = Schema.Union([
 export type Ending = typeof Ending.Type;
 
 export const Decision = Schema.Union([
+  /**
+   * The model answered `turn`: its response had answer text and no tool calls. The turn ends
+   * (`TurnEnded`) unless the layers around the core give it more first (`BeforeTurnEnded`).
+   */
+  Schema.TaggedStruct("TurnCompleted", { turn: TurnId }),
+  /**
+   * The model's response to `turn` was whole, with no tool calls and no answer text. The turn ends
+   * as `TurnCompleted`'s does; a host's turn-end hook can give it more instead.
+   */
+  Schema.TaggedStruct("TurnIncomplete", { turn: TurnId }),
   /**
    * Inputs were given to `turn`: when it opened, or at a point between steps (after a tool batch
    * settled, or after a final answer).

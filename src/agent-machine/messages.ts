@@ -64,14 +64,16 @@ export type ToConversationTurn =
   | { readonly _tag: "Proceed" }
   /** Every call of the step's tool batch settled. */
   | { readonly _tag: "StepToolsSettled" }
-  /** The model gave a final answer in the step. */
+  /** The model gave a final answer in the step: a whole response with answer text and no tool calls. */
   | { readonly _tag: "StepAnswered" }
+  /** The model's response was whole, with no tool calls and no answer text. */
+  | { readonly _tag: "StepUnanswered" }
   /** The model's response was cut short, or stopped, with no tool calls. */
   | { readonly _tag: "StepCutShort" }
   /** The model's response was whole, with no tool calls, and not its answer; the turn asks again. */
   | { readonly _tag: "StepUnfinished" }
   /** The step stopped without an answer. */
-  | { readonly _tag: "StepStopped"; readonly ending: Exclude<Ending, { _tag: "Answered" }> };
+  | { readonly _tag: "StepStopped"; readonly ending: Exclude<Ending, { _tag: "Completed" | "Incomplete" }> };
 
 /** What a conversation turn, or a call, tells a step. */
 export type ToTurnStep =

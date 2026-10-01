@@ -50,9 +50,10 @@ test("M1: a change of model that arrives while the last step runs is taken once 
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
   observe(session, toOpenAi);
   observe(session, response([{ _tag: "Text", text: "Hello." }]));
-  expect(tags(session).slice(-5)).toEqual([
+  expect(tags(session).slice(-6)).toEqual([
     "ModelChangeArrived",
     "ModelResponded",
+    "TurnCompleted",
     "ModelChangeTaken",
     "TurnEndReviewed",
     "TurnEnded",

@@ -75,7 +75,7 @@ test("the user counts to 15; the model classifies each multiple of 3 or 5 and re
   const ended = facts.flatMap((fact) =>
     fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? [fact.decision.ending._tag] : [],
   );
-  expect(ended).toEqual(Array.from({ length: 8 }, () => "Answered"));
+  expect(ended).toEqual(Array.from({ length: 8 }, () => "Completed"));
 });
 
 const at = <A>(time: string, effect: Effect.Effect<A>) =>

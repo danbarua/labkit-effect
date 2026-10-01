@@ -68,7 +68,7 @@ test("while a request is carried out, CurrentWork and every log line name its se
   expect(logged).toContainEqual({ message: ["stub.responding"], annotations: { ...expected, origin } });
   // Every decision recorded is also logged, for whoever is debugging the loop.
   expect(logged.filter((line) => Array.isArray(line.message) && line.message[0] === logKeys.loop.decisionRecorded)).toEqual(
-    ["InputDelivered", "AskModel", "TurnEnded"].map((decision) => ({
+    ["InputDelivered", "AskModel", "TurnCompleted", "TurnEnded"].map((decision) => ({
       message: [logKeys.loop.decisionRecorded, expect.objectContaining({ decision })],
       annotations: { session: SessionId.make("s1"), origin },
     })),
@@ -131,16 +131,18 @@ test("I4: a turn-end hook's feedback holds the turn open; the turn ends when the
     "AskModel",
     "ModelRequestDispatched",
     "ModelResponded",
+    "TurnCompleted",
     "InputArrived",
     "InputDelivered",
     "TurnEndReviewed",
     "TellModel",
     "ModelRequestDispatched",
     "ModelResponded",
+    "TurnCompleted",
     "TurnEndReviewed",
     "TurnEnded",
   ]);
-  expect(facts[7] as unknown).toMatchObject({
+  expect(facts[8] as unknown).toMatchObject({
     observation: { from: { _tag: "System" }, text: "Write the session up before stopping." },
   });
   expect(logged).toContainEqual([logKeys.loop.turnHeld, { hold: 1, maxHolds: 5, feedback: 1 }]);

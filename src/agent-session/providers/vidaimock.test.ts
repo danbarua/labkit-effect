@@ -143,6 +143,7 @@ describe.each([...adapters])("$name at VidaiMock", (adapter) => {
       "TellModel",
       "ModelRequestDispatched",
       "ModelResponded",
+      "TurnCompleted",
       "TurnEndReviewed",
       "TurnEnded",
     ]);
