@@ -5,7 +5,6 @@
 
 import { afterAll, beforeAll, expect } from "bun:test";
 import { test } from "../../tests/support/test.ts";
-import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { Effect, Exit, Layer, Logger, Schema } from "effect";
 import * as AiError from "effect/ai/AiError";
 import type { Fact } from "../agent-machine/fact.ts";
@@ -25,7 +24,7 @@ import type { Retries } from "./provider-call.ts";
 import { anthropicRequests } from "./providers/anthropic-client.ts";
 import { Report } from "./report.ts";
 import { openAiRequests } from "./providers/openai-client.ts";
-import { AgentTelemetry } from "../instrumentation/telemetry.ts";
+import { type SpanLine, SpansTo } from "../instrumentation/telemetry.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { anthropicAtMock, openAiAtMock, startVidaiMock, type VidaiMock } from "../../tests/support/vidaimock.ts";
 
@@ -182,17 +181,16 @@ test("a fallback to a provider with no request configured is a defect when the l
 });
 
 test("each attempt runs in its own span, with its provider and model", async () => {
-  const spans = new InMemorySpanExporter();
+  const spans: Array<SpanLine> = [];
   const reported: Array<Observation> = [];
   const attempts = await runTest(
     Effect.gen(function* () {
       const client = yield* ModelClient;
       const context = { system: undefined, tools: [], messages: [{ role: "user" as const, parts: [{ _tag: "Text" as const, text: "hi" }] }] };
       yield* client.respond(anthropic, context, TurnId.make("turn-1"));
-      // Read before the telemetry layer is released: shutting it down clears the in-memory exporter.
-      return spans.getFinishedSpans().map((span) => ({ name: span.name, attributes: span.attributes }));
+      return spans.map((span) => ({ name: span.name, attributes: span.attributes }));
     }).pipe(
-      Effect.provide(Layer.mergeAll(chain({ anthropic: 529 }), AgentTelemetry({ spans: new SimpleSpanProcessor(spans) }))),
+      Effect.provide(Layer.mergeAll(chain({ anthropic: 529 }), SpansTo((line) => spans.push(line)))),
       // Outside the loop, so the test records what is reported itself.
       Effect.provideService(Report, (observation) => Effect.sync(() => reported.push(observation))),
     ),

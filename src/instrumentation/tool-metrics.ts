@@ -3,8 +3,8 @@
  * session, the tool, and how the run ended as attributes. The session is read from `CurrentWork`,
  * which the loop sets around each request; the tool runner is not given it.
  *
- * `CountedToolRunner` wraps any tool runner. Metrics are read with `Metric.snapshot`, or exported
- * through Effect's OpenTelemetry package.
+ * `CountedToolRunner` wraps any tool runner. Metrics are read with `Metric.snapshot`, or sent as
+ * OTLP by `OtlpFromEnv` in `telemetry.ts`.
  */
 
 import { Effect, Layer, Metric } from "effect";
