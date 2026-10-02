@@ -128,6 +128,22 @@ export function localCapabilities(listed: unknown): ReadonlyMap<string, Capabili
 }
 
 /**
+ * The models the local server serves, by the names it takes (`GET /v1/models`, `data[].id`), or
+ * `undefined` when it does not answer within a second.
+ */
+export const localModels: Effect.Effect<ReadonlyArray<string> | undefined> = Effect.tryPromise(() =>
+  fetch(`${localUrl}/models`, { signal: AbortSignal.timeout(1000) }).then((response) => response.json() as Promise<unknown>),
+).pipe(
+  Effect.map((listed) =>
+    isRecord(listed) ? list(listed["data"]).flatMap((model) => (isRecord(model) && typeof model["id"] === "string" ? [model["id"]] : [])) : [],
+  ),
+  Effect.orElseSucceed(() => undefined),
+);
+
+/** Where the local server is, as `bun cli models` says it. */
+export const localServer = localUrl;
+
+/**
  * What is known of each model: for `localhost`, what the local server lists, asked once when first
  * needed; for the others, the well-known models. A server that does not answer leaves its models unknown,
  * and that is logged.

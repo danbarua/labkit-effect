@@ -5,6 +5,7 @@
 
 import { expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
+import { withResumeValue } from "./index.ts";
 import { localCapabilities } from "./models.ts";
 
 const invoke = async (args: ReadonlyArray<string>, env: Record<string, string> = {}) => {
@@ -23,7 +24,9 @@ test("models lists each provider's well-known models, and whether its key is set
   const { stdout, code } = await invoke(["models"], { OPENAI_API_KEY: "set" });
   const lines = stdout.trim().split("\n");
   expect(code).toBe(0);
-  expect(lines.map((line) => line.split(":")[0])).toEqual(["anthropic (no ANTHROPIC_API_KEY)", "openai (key set)", "xai (no XAI_API_KEY)"]);
+  expect(lines.slice(0, 3).map((line) => line.split(":")[0])).toEqual(["anthropic (no ANTHROPIC_API_KEY)", "openai (key set)", "xai (no XAI_API_KEY)"]);
+  // Then the local server's models, or that it does not answer.
+  expect(lines[3]).toStartWith("localhost (http://localhost:8000/v1): ");
   expect(lines[0]).toContain("claude-sonnet-5-5");
   expect(lines[2]).toContain("grok-4.7");
 });
@@ -71,4 +74,10 @@ test("what the local server lists of a model is what is known of it: its context
     ["bare", { input: ["text"], price: { input: 0, output: 0 } }],
   ]);
   expect(localCapabilities("not a list").size).toBe(0);
+});
+
+test("--resume with no id is given an empty one, which asks for a session to be picked", () => {
+  expect(withResumeValue(["--resume"])).toEqual(["--resume", ""]);
+  expect(withResumeValue(["-r", "--model", "gpt-5.5"])).toEqual(["-r", "", "--model", "gpt-5.5"]);
+  expect(withResumeValue(["--resume", "abc", "-p", "hi"])).toEqual(["--resume", "abc", "-p", "hi"]);
 });

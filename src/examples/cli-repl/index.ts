@@ -15,7 +15,7 @@
  * fact is printed as it is recorded, then the result.
  *
  * Each session's facts are kept in `logs/sessions/` (`store.ts`); `--continue` goes on from the
- * one written to last, so `bun run cli:watch --continue` restarts on a change to the code and
+ * one written to last, `--resume <session>` from the one named (with no id, one picked from a list), so `bun run cli:watch --continue` restarts on a change to the code and
  * keeps the conversation.
  *
  * Calling it from an agent's shell tool, use `-p` with the prompt as an argument: without `-p` the
@@ -25,15 +25,15 @@
 
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Console, Effect, Option, Stdio, Stream } from "effect";
-import { Argument, Command, Flag } from "effect/cli";
+import { Argument, Command, Flag, Prompt } from "effect/cli";
 import { Effort, type ModelSettings, ThinkingMode } from "../../agent-machine/settings.ts";
 import { modelOf } from "../../agent-session/configuration/session-setup.ts";
 import { invalid } from "./invalid.ts";
-import { keyOf, keyVariables, known, targetOf } from "./models.ts";
+import { keyOf, keyVariables, known, localModels, localServer, targetOf } from "./models.ts";
 import { printOnce } from "./print.ts";
 import { repl } from "./repl.ts";
 import { type Config, LogsToFile, LogsToStderr, withSession } from "./session.ts";
-import { latestSession } from "./store.ts";
+import { latestSession, readSession, storedSessions, storeFolder, summaryOf } from "./store.ts";
 
 const optional = <A>(flag: Flag.Flag<A>) => flag.pipe(Flag.optional, Flag.map(Option.getOrUndefined));
 const text = (name: string, description: string, ...aliases: Array<string>) =>
@@ -56,6 +56,7 @@ const flags = {
   outputFormat: choice("output-format", ["text", "json", "stream-json"], "How the answer is printed (print mode)"),
   verbose: toggle("verbose", "Print the session's facts as they are recorded"),
   continue: toggle("continue", "Continue the latest conversation", "c"),
+  resume: text("resume", "Resume a session by its id; with none, pick one from a list", "r"),
   // `plan` and `auto` are not built.
   permissionMode: choice(
     "permission-mode",
@@ -63,7 +64,6 @@ const flags = {
     "When a tool call that changes things runs: default asks (manual is the same), acceptEdits runs file edits, dontAsk refuses, bypassPermissions runs all",
   ),
   // Not built yet:
-  // resume: text("resume", "Resume a session", "r"),
   // sessionId: text("session-id", "The session's id"),
   // name: text("name", "Session display name", "n"),
   // forkSession: toggle("fork-session", "Fork the continued or resumed session"),
@@ -102,10 +102,35 @@ const systemOf = (options: Options) =>
     return parts.length === 0 ? undefined : parts.join("\n\n");
   });
 
+/** When it was, as a short local date and time. */
+const shortly = (at: Date | undefined): string => (at === undefined ? "?" : at.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }));
+
+/**
+ * The session `--resume` names, or with none, the one picked from the store's, the one written to
+ * last first, each with its turns and the model it asks. A session whose file does not read is
+ * listed as such.
+ */
+const resumed = (named: string, interactive: boolean) =>
+  Effect.gen(function* () {
+    if (named !== "") return yield* readSession(named);
+    if (!interactive) return yield* invalid("--resume needs a session id when there is no terminal to pick one at.");
+    const stored = yield* storedSessions;
+    if (stored.length === 0) return yield* invalid(`No session to resume: ${storeFolder} holds none.`);
+    const choices = yield* Effect.forEach(stored, ({ sessionId, at }) =>
+      readSession(sessionId).pipe(
+        Effect.flatMap(({ facts }) => summaryOf(facts)),
+        Effect.map(({ turns, model }) => `${shortly(at)}  ${turns} turn${turns === 1 ? "" : "s"}  ${model}  ${sessionId}`),
+        Effect.orElseSucceed(() => `${shortly(at)}  (does not read)  ${sessionId}`),
+        Effect.map((title) => ({ title, value: sessionId })),
+      ),
+    );
+    return yield* readSession(yield* Prompt.Select({ message: "Resume which session?", choices }));
+  });
+
 /**
  * The session's configuration, as the flags give it. With `--continue`, the session written to
- * last, asking the model the flags name or the one it asked; the settings are the ones the flags
- * name, which change those it had.
+ * last, or with `--resume`, the one it names or the one picked, asking the model the flags name or
+ * the one it asked; the settings are the ones the flags name, which change those it had.
  */
 const configOf = (options: Options, interactive: boolean) =>
   Effect.gen(function* () {
@@ -116,12 +141,13 @@ const configOf = (options: Options, interactive: boolean) =>
       ...(options.thinking === undefined ? {} : { thinking: options.thinking }),
     };
     const system = yield* systemOf(options);
-    if (!options.continue) {
+    if (options.continue && options.resume !== undefined) return yield* invalid("Pass --continue or --resume, not both.");
+    if (!options.continue && options.resume === undefined) {
       const config: Config = { sessionId: crypto.randomUUID(), target: yield* targetOf(options.model), settings, system, ...permissions };
       return config;
     }
     if (system !== undefined) return yield* invalid("A continued session keeps the system prompt it opened with: all sessions have ImmutableSystemPrompt until further notice.");
-    const latest = yield* latestSession;
+    const latest = options.resume === undefined ? yield* latestSession : yield* resumed(options.resume, interactive);
     const now = yield* modelOf(latest.facts);
     const config: Config = { sessionId: latest.sessionId, target: yield* targetOf(options.model ?? `${now.provider}/${now.model}`), settings, system, continues: latest.facts, ...permissions };
     return config;
@@ -146,20 +172,34 @@ export const cli = Command.make(
     { command: 'cli -p "Hello" --model claude-sonnet-5-5', description: "Ask once and print the answer" },
     { command: 'cli -p "Hello" --model gpt-5.5 --output-format json', description: "The answer with the session's figures" },
     { command: "cli --model localhost/mlx-community/Qwen3.5-9B-8bit", description: "A REPL with a local model" },
-    { command: "cli models", description: "The known models, and which providers have a key set" },
+    { command: "cli models", description: "The known models, which providers have a key set, and the local server's models" },
   ]),
   Command.withSubcommands([
     Command.make("models", {}, () =>
-      Effect.forEach(
-        Object.entries(known),
-        ([provider, listed]) => Console.log(`${provider} (${keyOf(provider) === undefined ? `no ${keyVariables[provider] ?? "key"}` : "key set"}): ${Object.keys(listed).join(", ")}`),
-        { discard: true },
-      ),
-    ).pipe(Command.withDescription("The known models, and which providers have a key set")),
+      Effect.gen(function* () {
+        yield* Effect.forEach(
+          Object.entries(known),
+          ([provider, listed]) => Console.log(`${provider} (${keyOf(provider) === undefined ? `no ${keyVariables[provider] ?? "key"}` : "key set"}): ${Object.keys(listed).join(", ")}`),
+          { discard: true },
+        );
+        const local = yield* localModels;
+        yield* Console.log(`localhost (${localServer}): ${local === undefined ? "not answering" : local.length === 0 ? "no models" : local.join(", ")}`);
+      }),
+    ).pipe(Command.withDescription("The known models, which providers have a key set, and the local server's models")),
   ]),
 );
 
-export const run = (args: ReadonlyArray<string>) => Command.runWith(cli, { version: "0.1.0" })(args);
+/**
+ * `args` with an empty value after `--resume` (`-r`) where none was given, so that the flag alone
+ * asks for a session to be picked: a flag's value cannot be left out otherwise.
+ */
+export const withResumeValue = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
+  args.flatMap((arg, at) => {
+    const next = args[at + 1];
+    return (arg === "--resume" || arg === "-r") && (next === undefined || next.startsWith("-")) ? [arg, ""] : [arg];
+  });
+
+export const run = (args: ReadonlyArray<string>) => Command.runWith(cli, { version: "0.1.0" })(withResumeValue(args));
 export const main = () => run(process.argv.slice(2)).pipe(Effect.provide(BunServices.layer), BunRuntime.runMain);
 
 if (import.meta.main) main();

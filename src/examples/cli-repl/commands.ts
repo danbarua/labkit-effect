@@ -26,7 +26,7 @@ import { KnownModels } from "../../agent-session/configuration/well-known-models
 import { immutableToolCatalogOf, modelOf } from "../../agent-session/configuration/session-setup.ts";
 import { optionsOf, type SettingOption } from "../../agent-session/configuration/options.ts";
 import { invalid } from "./invalid.ts";
-import { keyOf, known, targetOf } from "./models.ts";
+import { keyOf, known, localModels, targetOf } from "./models.ts";
 
 /** Each command and what it says of itself in `/help`. */
 export const commands: ReadonlyArray<readonly [string, string]> = [
@@ -85,11 +85,13 @@ export const settingsFrom = (words: ReadonlyArray<string>) =>
     );
   });
 
-/** The known models whose provider has a key set, for picking. */
-const pickable = () =>
-  Object.entries(known).flatMap(([provider, models]) =>
-    keyOf(provider) === undefined ? [] : Object.keys(models).map((model) => ({ title: `${provider}/${model}`, value: `${provider}/${model}` })),
-  );
+/** The known models whose provider has a key set, and the local server's, for picking. */
+const pickable = Effect.map(localModels, (local) =>
+  [
+    ...Object.entries(known).flatMap(([provider, models]) => (keyOf(provider) === undefined ? [] : Object.keys(models).map((model) => `${provider}/${model}`))),
+    ...(local ?? []).map((model) => `localhost/${model}`),
+  ].map((name) => ({ title: name, value: name })),
+);
 
 /** What a line can be completed from: the models that can be asked, and the settings to offer for the model being asked, as it is set now. */
 export interface Offered {
@@ -99,7 +101,7 @@ export interface Offered {
 
 export const offered = (session: Session) =>
   Effect.gen(function* () {
-    const result: Offered = { models: pickable().map((each) => each.value), settings: (yield* optionsOf(yield* session.facts)).offered };
+    const result: Offered = { models: (yield* pickable).map((each) => each.value), settings: (yield* optionsOf(yield* session.facts)).offered };
     return result;
   });
 
@@ -167,7 +169,7 @@ export const command = (session: Session, line: string) =>
       }
       case "/model": {
         const now = yield* modelOf(yield* session.facts);
-        const chosen = words[0] ?? (yield* Prompt.Select({ message: `Asking ${now.provider}/${now.model}. Ask which model?`, choices: pickable() }));
+        const chosen = words[0] ?? (yield* Prompt.Select({ message: `Asking ${now.provider}/${now.model}. Ask which model?`, choices: yield* pickable }));
         const target = yield* targetOf(chosen);
         yield* session.observe({ _tag: "ModelChangeArrived", provider: target.provider, model: target.model });
         yield* session.idle;
