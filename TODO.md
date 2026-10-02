@@ -47,8 +47,10 @@ model.
       kind; what is asked and answered recorded (`PermissionAsked`, `PermissionAnswered`); allow
       for the session read from the facts; the CLI's `--permission-mode` and its REPL question;
       for ACP, the `session/request_permission` request and its answer, where the client's
-      cancelled outcome is a refusal (`src/agent-acp/permission.ts`), asked by the host's feed. To
-      do: `plan` and `auto`; allow and deny rules by tool and argument; resetting permissions.
+      cancelled outcome is a refusal (`src/agent-acp/permission.ts`), asked by the host's feed; the
+      mode as an ACP option the user changes (`permission_mode`), from the next call. To do: `plan`
+      and `auto`; allow and deny rules by tool and argument; resetting permissions; a change of
+      mode recorded in the session's facts (the ACP host keeps it only while the session is open).
 - [ ] Accounting for ACP. Built: a provider-neutral `usage` on each response; `contextGauge` (used,
       size, cost) and `requestsIn` (a turn's model requests) read from the facts (`accounting.ts`);
       prices with the well-known models; `maxTurnRequests` as an example host policy; for ACP,

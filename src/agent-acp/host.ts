@@ -25,7 +25,7 @@
  */
 
 import { isAbsolute, join } from "node:path";
-import { Clock, type Context, Effect, Exit, Fiber, FileSystem, Layer, Scope, Semaphore } from "effect";
+import { Clock, type Context, Effect, Exit, Fiber, FileSystem, Layer, Schema, Scope, Semaphore } from "effect";
 import * as Agent from "../acp/agent.ts";
 import { ErrorCode, type JsonRpcError } from "../acp/json-rpc.ts";
 import * as Protocol from "../acp/protocol.ts";
@@ -48,7 +48,8 @@ import { reportedBy } from "../agent-session/origin.ts";
 import { modelOf } from "../agent-session/configuration/session-setup.ts";
 import { optionsFor, type Options } from "../agent-session/configuration/options.ts";
 import { KnownModels } from "../agent-session/configuration/well-known-models.ts";
-import { changeOf, configOptions, InvalidChange } from "./config-options.ts";
+import { changeOf, configOptions, InvalidChange, permissionId, permissionModeOf, permissionOption } from "./config-options.ts";
+import { PermissionMode } from "../agent-policy/permissions.ts";
 import { acpUser, type Feed, startFeed } from "./feed.ts";
 import { logKeys } from "./log-keys.ts";
 import { stopOf } from "./stop-reason.ts";
@@ -66,6 +67,8 @@ export interface HostOptions<R = never> {
   readonly world?: "editor" | "local" | World<R> | undefined;
   /** The model sessions start with, as `provider/model` (`LABKIT_ACP_MODEL`); left out, the first the catalog lists. */
   readonly model?: string | undefined;
+  /** The permission mode sessions start in (`LABKIT_ACP_PERMISSION_MODE`); left out, `default`. The user can change it. */
+  readonly permissionMode?: PermissionMode | undefined;
   /** What a session runs with, given its world's tool runner, over the session's store; `HostSessionServices` when left out. */
   readonly services?: ((runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>) | undefined;
 }
@@ -76,11 +79,18 @@ export interface HostOptions<R = never> {
  */
 export const HostSessionServices = (runner: Layer.Layer<ToolRunner>) => SessionServices(runner, RetryIncomplete(1));
 
-/** The options a launcher takes from the environment: `LABKIT_ACP_MODEL` and `LABKIT_ACP_LOCAL_TOOLS`. */
-export const hostOptionsFrom = (env: Readonly<Record<string, string | undefined>>): Pick<HostOptions, "model" | "world"> => ({
-  model: env["LABKIT_ACP_MODEL"] === "" ? undefined : env["LABKIT_ACP_MODEL"],
-  world: env["LABKIT_ACP_LOCAL_TOOLS"] === "1" ? "local" : "editor",
-});
+/**
+ * The options a launcher takes from the environment: `LABKIT_ACP_MODEL`, `LABKIT_ACP_LOCAL_TOOLS` and
+ * `LABKIT_ACP_PERMISSION_MODE` (a value that is not a mode is left out; `launch` says so).
+ */
+export const hostOptionsFrom = (env: Readonly<Record<string, string | undefined>>): Pick<HostOptions, "model" | "world" | "permissionMode"> => {
+  const mode = env["LABKIT_ACP_PERMISSION_MODE"];
+  return {
+    model: env["LABKIT_ACP_MODEL"] === "" ? undefined : env["LABKIT_ACP_MODEL"],
+    world: env["LABKIT_ACP_LOCAL_TOOLS"] === "1" ? "local" : "editor",
+    permissionMode: Schema.is(PermissionMode)(mode) ? mode : undefined,
+  };
+};
 
 /** The command the host runs itself, without the model. */
 const exportCommand = { name: "export", description: "Write this session's transcript as Markdown to .labkit/exports/<session>.md in the working folder." };
@@ -105,6 +115,8 @@ interface Entry {
   state: { readonly _tag: "Draft"; readonly draft: Draft } | { readonly _tag: "Open"; readonly opened: Opened };
   /** The prompt running, if one is. */
   prompt: Fiber.Fiber<unknown, unknown> | undefined;
+  /** How tool calls are allowed: the host's to keep, read at each call, changed by the user. */
+  permissionMode: PermissionMode;
 }
 
 /**
@@ -182,7 +194,12 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 : yield* Effect.flatMap(Effect.flatMap(entry.state.opened.session.facts, configuredOf), optionsFor);
             const models = yield* askable;
             const limit = (yield* capabilitiesOf(configured))?.output;
-            return { configured, models, limit, options: configOptions(configured, models, limit) as ReadonlyArray<SessionConfigOption> };
+            return {
+              configured,
+              models,
+              limit,
+              options: [...configOptions(configured, models, limit), permissionOption(entry.permissionMode)] as ReadonlyArray<SessionConfigOption>,
+            };
           }).pipe(Effect.provideContext(known));
 
         /** The model `session/new` starts with, or why there is none. */
@@ -211,7 +228,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             const scope = yield* Scope.fork(connectionScope);
             return yield* Effect.gen(function* () {
               const file = storeFileOf(options.directory, entry.id);
-              const layer = Layer.mergeAll(services(entry.world.runner), PermissionsFor("default", true)).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
+              const layer = Layer.mergeAll(services(entry.world.runner), PermissionsFor(() => entry.permissionMode, true)).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
               const context = yield* Layer.buildWithScope(layer, scope);
               const session = yield* openSession.pipe(Effect.provideContext(context), Scope.provide(scope));
               const feed = yield* startFeed({
@@ -334,7 +351,15 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   draftOf({ model, tools: opened.tools, ...(opened.system === undefined ? {} : { system: opened.system }) }),
                   capabilities,
                 );
-                const entry: Entry = { id, cwd, world: opened, lock: yield* Semaphore.make(1), state: { _tag: "Draft", draft }, prompt: undefined };
+                const entry: Entry = {
+                  id,
+                  cwd,
+                  world: opened,
+                  lock: yield* Semaphore.make(1),
+                  state: { _tag: "Draft", draft },
+                  prompt: undefined,
+                  permissionMode: options.permissionMode ?? "default",
+                };
                 entries.set(id, entry);
                 const { options: configured } = yield* configurationOf(entry);
                 yield* Effect.logInfo(logKeys.session.created, {
@@ -363,6 +388,16 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 const { configId } = params;
                 return yield* entry.lock.withPermit(
                   Effect.gen(function* () {
+                    if (configId === permissionId) {
+                      const mode = typeof params.value === "string" ? permissionModeOf(params.value) : new InvalidChange({ reason: `Option ${configId} takes a value of a select.` });
+                      if (mode instanceof InvalidChange) {
+                        yield* Effect.logWarning(logKeys.config.refused, { configId, value: params.value, cause: mode.reason });
+                        return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, mode.reason, { configId }));
+                      }
+                      entry.permissionMode = mode;
+                      yield* Effect.logInfo(logKeys.config.changed, { configId, value: mode, applies: "from the next tool call" });
+                      return { configOptions: (yield* configurationOf(entry)).options };
+                    }
                     const now = yield* configurationOf(entry);
                     const change =
                       typeof params.value === "string"

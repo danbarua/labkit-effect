@@ -142,7 +142,8 @@ text and resource links; no load, resume, list, fork or auth methods.
   response's end comes first it is not sent, live or on replay, so a client shows no blank message.
   It counts as sent.
 - AA1. The config options are `model`, then one select for each setting the options offer but
-  `observe` and `cache`, with the ids and categories of the table; a setting not offered has none. Every option's current value
+  `observe` and `cache`, with the ids and categories of the table; a setting not offered has none.
+  The host adds `permission_mode` after them (AG18). Every option's current value
   is among its values: the model asked now is offered even when the catalog does not list it.
 - AA2. A setting's current value is what the model will get (the option's `now`): an effort beyond
   the model's highest shows the nearest it takes, which is offered; the effort said is not. Where
@@ -226,6 +227,9 @@ text and resource links; no load, resume, list, fork or auth methods.
   and the prompt ends `end_turn`, with no warning logged; with none again the turn ends
   `Incomplete` after that one retry, `end_turn` with no answer message. The feedback is not sent to
   the client (PJ1).
+- AG18. Each session has a permission mode, which the host keeps: it starts as the launcher says
+  (`LABKIT_ACP_PERMISSION_MODE`, else `default`) and is the option `permission_mode` (category
+  `mode`); a change applies from the next tool call. A value that is not a mode is -32602.
 - AG17. `editorWorld` offers `edit_file` to a client that advertised both `fs` methods, and
   `run_command` to one that advertised `terminal`. `edit_file` reads the file through the editor
   and writes it back with one occurrence of `old_text` replaced; `old_text` that occurs never or

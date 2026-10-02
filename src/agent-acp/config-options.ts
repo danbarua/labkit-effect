@@ -12,6 +12,7 @@
  * | `effort` | `thought_level` | the efforts the model takes |
  * | `thinking` | `model_config` | the values the model takes |
  * | `max_output_tokens` | `model_config` | the presets up to the model's limit, the limit, and the value in force |
+ * | `permission_mode` | `mode` | the permission modes (`permissionOption`), which the host keeps, not the model |
  *
  * A setting the options do not offer gives no option, and nor do `observe` (how much of its thinking
  * the provider returns) and `cache` (how long the provider keeps a request): the editor shows each
@@ -22,7 +23,7 @@
  * settings it does not name; choosing `not_sent` while it is the value now changes nothing.
  */
 
-import { Data } from "effect";
+import { Data, Schema } from "effect";
 import type { SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption } from "../acp/schema/v1.gen.ts";
 import { SessionConfigId, SessionConfigValueId } from "../acp/schema/v1.gen.ts";
 import { TokenCount } from "../agent-machine/names.ts";
@@ -30,6 +31,7 @@ import type { Observation } from "../agent-machine/observation.ts";
 import type { ModelSettings } from "../agent-machine/settings.ts";
 import type { Options, SettingOption } from "../agent-session/configuration/options.ts";
 import type { Asked } from "../agent-host/catalog.ts";
+import { PermissionMode } from "../agent-policy/permissions.ts";
 
 /** What `ModelChangeArrived` carries: the model to ask, and the settings it names. A draft takes the same. */
 export type Change = Omit<Extract<Observation, { _tag: "ModelChangeArrived" }>, "_tag">;
@@ -150,3 +152,29 @@ export function changeOf(configId: string, value: string, options: Options, mode
   const said: ModelSettings = setting._tag === "Number" ? { maxOutputTokens: TokenCount.make(Number(value)) } : { [setting.name]: value };
   return { ...unchanged, settings: said };
 }
+
+/** The permission modes, in the order offered, with what each does. */
+const modes: ReadonlyArray<{ readonly mode: PermissionMode; readonly name: string; readonly description: string }> = [
+  { mode: "default", name: "Ask", description: "Ask before a tool that changes something runs; tools that only read run." },
+  { mode: "acceptEdits", name: "Accept edits", description: "Edit files without asking; ask before other changes, such as commands." },
+  { mode: "bypassPermissions", name: "Run everything", description: "Run every tool without asking." },
+  { mode: "dontAsk", name: "Read only", description: "Run only tools that read; refuse the rest without asking." },
+];
+
+/** The id of the permission option. */
+export const permissionId = "permission_mode";
+
+/** The permission option, its current value `mode`: how tool calls are allowed from the next one. */
+export const permissionOption = (mode: PermissionMode): SessionConfigOption => ({
+  id: SessionConfigId.make(permissionId),
+  name: "Permissions",
+  description: "Which tool calls run without asking, from the next call.",
+  category: "mode",
+  type: "select",
+  currentValue: SessionConfigValueId.make(mode),
+  options: modes.map((each) => value(each.mode, each.name, each.description)),
+});
+
+/** The permission mode `value` names, or why it names none. */
+export const permissionModeOf = (value: string): PermissionMode | InvalidChange =>
+  Schema.is(PermissionMode)(value) ? value : new InvalidChange({ reason: `${value} is not a permission mode: ${modes.map((each) => each.mode).join(", ")}.` });

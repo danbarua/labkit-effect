@@ -36,8 +36,13 @@ export const SessionServices = <E, R, HE = never, HR = never>(
 /**
  * The permission policy for `mode`, over the tools the session opened with: each call is judged by
  * its tool's kind. `canAsk` says whether anyone is there to answer a question before a call runs.
+ * `mode` is read at each call, so a host that lets the user change it applies the change from the
+ * next call.
  */
-export const PermissionsFor = (mode: PermissionMode, canAsk: boolean) =>
+export const PermissionsFor = (mode: PermissionMode | (() => PermissionMode), canAsk: boolean) =>
   Layer.succeed(ToolCallPolicy, (facts) =>
-    Effect.map(immutableToolCatalogOf(facts), (tools) => permissions(mode, canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts) as Policy<unknown>),
+    Effect.map(
+      immutableToolCatalogOf(facts),
+      (tools) => permissions(typeof mode === "function" ? mode() : mode, canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts) as Policy<unknown>,
+    ),
   );

@@ -25,6 +25,8 @@ export const logKeys = {
     changed: "acp_host.config.changed",
     /** `session/set_config_option` was refused: why. */
     refused: "acp_host.config.refused",
+    /** `LABKIT_ACP_PERMISSION_MODE` names no permission mode: its value, and the mode used instead. */
+    permissionModeUnknown: "acp_host.config.permission_mode_unknown",
   },
   prompt: {
     /** `session/prompt` arrived: the blocks it carries. */

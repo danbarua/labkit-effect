@@ -397,6 +397,30 @@ test("AG4: session/cancel during a turn ends its prompt cancelled, and the sessi
   ]);
 });
 
+test("AG18: the permission mode is an option of category mode; changed, it applies from the next call: a write runs without asking, then is asked about again", async () => {
+  const write = (call: string) => answer({ _tag: "ToolCall", call, tool: "write_file", input: { path: "a.txt", content: call } });
+  const host = startHost({ script: [write("w-1"), answer({ _tag: "Text", text: "One." }), write("w-2"), answer({ _tag: "Text", text: "Two." })] });
+  const { app, log } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    const sessionId = created.sessionId;
+    const changed = await ctx.request("session/set_config_option", { sessionId, configId: "permission_mode", value: "bypassPermissions" });
+    await ctx.request("session/prompt", say(sessionId, "Write one"));
+    await ctx.request("session/set_config_option", { sessionId, configId: "permission_mode", value: "default" });
+    await ctx.request("session/prompt", say(sessionId, "Write two"));
+    const refused = await failure(ctx.request("session/set_config_option", { sessionId, configId: "permission_mode", value: "plan" }));
+    return { created, changed, refused };
+  });
+  await host.stop();
+  const option = (options: ReadonlyArray<acp.SessionConfigOption> | null | undefined) => options?.find((each) => each.id === "permission_mode");
+  expect(option(result.created.configOptions)).toMatchObject({ category: "mode", currentValue: "default" });
+  expect(option(result.changed.configOptions)).toMatchObject({ currentValue: "bypassPermissions" });
+  expect(log.asked.map((asked) => asked.toolCall.toolCallId)).toEqual(["w-2"]);
+  expect(log.files.filter((each) => each.method === "fs/write_text_file").map((each) => each.content)).toEqual(["w-1", "w-2"]);
+  expect(result.refused).toMatchObject({ code: -32602 });
+});
+
 test("AG5: set_config_option changes the draft; once the session is open it is ModelChangeArrived from the user through ACP, taken at the next step; a value not offered is -32602", async () => {
   const started = Deferred.makeUnsafe<void>();
   const release = Deferred.makeUnsafe<void>();

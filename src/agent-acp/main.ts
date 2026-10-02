@@ -4,7 +4,8 @@
  * on stderr; it exits 0 when stdin closes.
  *
  * Taken from the environment: `LABKIT_ACP_MODEL` (the model sessions start with, `provider/model`),
- * `LABKIT_ACP_LOCAL_TOOLS=1` (the stopgap tools on the local disk), `LABKIT_ACP_SESSIONS_DIR` (where
+ * `LABKIT_ACP_LOCAL_TOOLS=1` (the stopgap tools on the local disk), `LABKIT_ACP_PERMISSION_MODE` (the
+ * permission mode sessions start in: `default`, `acceptEdits`, `bypassPermissions`, `dontAsk`), `LABKIT_ACP_SESSIONS_DIR` (where
  * sessions are kept, default `~/.labkit/sessions`), the `LABKIT_ACP_LOG_*` variables, and the
  * providers' keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`).
  */
@@ -16,17 +17,31 @@ import { Effect, Layer } from "effect";
 import * as Agent from "../acp/agent.ts";
 import { KeyedAndLocalCatalog } from "../agent-host/catalog.ts";
 import { LauncherLogs, launcherLogOptionsFrom } from "../agent-host/launcher-logs.ts";
+import { PermissionMode } from "../agent-policy/permissions.ts";
 import { hostOptionsFrom, makeHost } from "./host.ts";
+import { logKeys } from "./log-keys.ts";
 
 /** Where sessions are kept: `LABKIT_ACP_SESSIONS_DIR`, else `~/.labkit/sessions`. */
 export const sessionsDirectoryFrom = (env: Readonly<Record<string, string | undefined>>): string =>
   env["LABKIT_ACP_SESSIONS_DIR"] ? resolve(env["LABKIT_ACP_SESSIONS_DIR"]) : join(homedir(), ".labkit", "sessions");
 
 /** The agent on this process's stdin and stdout, configured from `env`. It returns when stdin closes. */
-export const launch = (env: Readonly<Record<string, string | undefined>>) =>
-  Agent.runStdio({
-    info: { name: "labkit-effect", version: "0.1.0" },
-    implementations: [makeHost({ directory: sessionsDirectoryFrom(env), ...hostOptionsFrom(env) })],
-  }).pipe(Effect.provide(Layer.mergeAll(KeyedAndLocalCatalog, LauncherLogs(launcherLogOptionsFrom(env)).pipe(Layer.provideMerge(BunServices.layer)), BunStdio.layer)));
+export const launch = (env: Readonly<Record<string, string | undefined>>) => {
+  const options = hostOptionsFrom(env);
+  const mode = env["LABKIT_ACP_PERMISSION_MODE"];
+  const unknownMode =
+    mode !== undefined && mode !== "" && options.permissionMode === undefined
+      ? Effect.logWarning(logKeys.config.permissionModeUnknown, { value: mode, used: "default", modes: PermissionMode.literals })
+      : Effect.void;
+  return unknownMode.pipe(
+    Effect.andThen(
+      Agent.runStdio({
+        info: { name: "labkit-effect", version: "0.1.0" },
+        implementations: [makeHost({ directory: sessionsDirectoryFrom(env), ...options })],
+      }),
+    ),
+    Effect.provide(Layer.mergeAll(KeyedAndLocalCatalog, LauncherLogs(launcherLogOptionsFrom(env)).pipe(Layer.provideMerge(BunServices.layer)), BunStdio.layer)),
+  );
+};
 
 if (import.meta.main) launch(process.env).pipe(BunRuntime.runMain);
