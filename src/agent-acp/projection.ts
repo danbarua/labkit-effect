@@ -110,13 +110,21 @@ const none: Sent = { Text: 0, Commentary: 0, Thinking: 0 };
 interface TurnText {
   /** What the deltas of the request streaming now sent; none while `ahead`, whose deltas are dropped. */
   readonly streaming: Sent;
+  /**
+   * Of each kind, the deltas of only whitespace since its last text sent: sent with the next text of
+   * that kind, and dropped when a call or the response's end comes first, so that a client shows no
+   * blank message. They count as sent.
+   */
+  readonly held: { readonly [Kind in TextKind]?: string };
   /** Of each request ended but not answered yet, in order: what its deltas sent. */
   readonly awaiting: ReadonlyArray<Sent>;
   /** How many requests were answered (`ModelResponded`) before their end item: their deltas are dropped. */
   readonly ahead: number;
 }
 
-const fresh: TurnText = { streaming: none, awaiting: [], ahead: 0 };
+const fresh: TurnText = { streaming: none, held: {}, awaiting: [], ahead: 0 };
+
+const blank = (value: string): boolean => value.trim() === "";
 
 export interface ProjectionState {
   /** The text of each turn under way, by the turn: made by the first input that names it. */
@@ -181,7 +189,8 @@ const answered = (state: ProjectionState, parts: ReadonlyArray<ModelPart>, sent:
       const kind = part._tag;
       if (covered[kind] >= part.text.length) covered[kind] -= part.text.length;
       else {
-        updates.push(chunkOf(kind, part.text.slice(covered[kind])));
+        const rest = part.text.slice(covered[kind]);
+        if (!blank(rest)) updates.push(chunkOf(kind, rest));
         covered[kind] = 0;
       }
     }
@@ -208,10 +217,16 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
       // Its request was answered already, and `ModelResponded` sent its text.
       if (now.ahead > 0 || input.text === "") return nothing(state);
       const streaming = { ...now.streaming, [input.kind]: now.streaming[input.kind] + input.text.length };
-      return { state: withText(state, input.turn, { ...now, streaming }), updates: [chunkOf(input.kind, input.text)] };
+      const held = (now.held[input.kind] ?? "") + input.text;
+      if (blank(held)) return nothing(withText(state, input.turn, { ...now, streaming, held: { ...now.held, [input.kind]: held } }));
+      return { state: withText(state, input.turn, { ...now, streaming, held: { ...now.held, [input.kind]: "" } }), updates: [chunkOf(input.kind, held)] };
     }
-    case "ModelPartArrived":
-      return input.part._tag === "ToolCall" ? announce(state, callOf(input.part), context) : nothing(state);
+    case "ModelPartArrived": {
+      if (input.part._tag !== "ToolCall") return nothing(state);
+      const now = state.texts.get(input.turn);
+      const dropped = now === undefined ? state : withText(state, input.turn, { ...now, held: {} });
+      return announce(dropped, callOf(input.part), context);
+    }
     case "ModelResponseEnded": {
       if (state.ended.has(input.turn)) return nothing(state);
       const now = textOf(state, input.turn);
@@ -219,7 +234,7 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
         withText(
           state,
           input.turn,
-          now.ahead > 0 ? { ...now, ahead: now.ahead - 1 } : { ...now, awaiting: [...now.awaiting, now.streaming], streaming: none },
+          now.ahead > 0 ? { ...now, ahead: now.ahead - 1 } : { ...now, awaiting: [...now.awaiting, now.streaming], streaming: none, held: {} },
         ),
       );
     }

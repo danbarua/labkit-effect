@@ -138,6 +138,9 @@ text and resource links; no load, resume, list, fork or auth methods.
   feed keeps a turn's requests in order, and the projection pairs a request's `ModelResponseEnded`
   with its `ModelResponded` by position in the turn, whichever comes first, with either feed any
   number of requests or turns ahead. Every merge of the two sends each response's text once.
+- PJ10. Text of only whitespace is sent with the next text of its kind; when a call or the
+  response's end comes first it is not sent, live or on replay, so a client shows no blank message.
+  It counts as sent.
 - AA1. The config options are `model`, then one select for each setting the options offer but
   `observe` and `cache`, with the ids and categories of the table; a setting not offered has none. Every option's current value
   is among its values: the model asked now is offered even when the catalog does not list it.

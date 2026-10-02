@@ -79,8 +79,7 @@ model.
       (`ModelDelta`, `ModelPartArrived`, `ModelResponseEnded`), merged in any order, to the client's
       updates, one function for the live view and for `session/load` (`src/agent-acp/projection.ts`),
       which the ACP host's feed sends: text and thinking as they arrive, tool calls and how they
-      end. To do: the plan; text of only whitespace (`"\n\n"` before a tool call) shows as a
-      blank message.
+      end. To do: the plan.
 - [ ] `session/load`, `resume`, `list` and `fork` for ACP. Built: `session/close`; the host keeps
       each session's facts in a file (`FileBackedSessionStore`, `~/.labkit/sessions`). To do: the
       host's own record of a session next to its facts (its working folder, to list by; its

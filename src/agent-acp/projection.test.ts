@@ -208,6 +208,21 @@ test("PJ2: live with no deltas, from a scripted client or a whole answer: each p
   expect(project(whole.inputs, live).updates).toEqual(project(whole.session.journal, replay).updates.slice(1));
 });
 
+test("PJ10: text of only whitespace is sent with the next text of its kind, and not at all when a call or the response's end comes first: no blank message", () => {
+  const call = { _tag: "ToolCall", ...ls };
+  const live1 = recording();
+  live1.fact(asked("hi"));
+  live1.stream(delta("Text", "\n\n"), arrived(answer("\n\n")), arrived(call), delta("Text", "\n"), delta("Text", "Done."), arrived(answer("\nDone.")), ended());
+  live1.fact(responded([answer("\n\n"), call, answer("\nDone.")], "Complete"));
+  const updates = project(live1.inputs, live).updates;
+  expect(joined(updates, "agent_message_chunk")).toEqual("\nDone.");
+  expect(updates.filter((update) => update.sessionUpdate === "agent_message_chunk").map((update) => ("content" in update ? update.content : undefined))).toEqual([
+    { type: "text", text: "\nDone." },
+  ]);
+  // On replay, a part of only whitespace is not sent either.
+  expect(joined(project(live1.session.journal, replay).updates, "agent_message_chunk")).toEqual("\nDone.");
+});
+
 test("PJ3: several Text parts in one response, each with its deltas: the deltas cover the parts in order, and ModelResponded sends only what none sent", () => {
   const parts = [answer("Hello. "), answer("Bye.")];
   const streamed = [delta("Text", "Hel"), delta("Text", "lo. "), arrived(answer("Hello. ")), delta("Text", "By"), delta("Text", "e."), arrived(answer("Bye.")), ended()];
