@@ -85,8 +85,36 @@ written is the host's business.
   (`requestsIn`), the tokens the responses reported, the cost (`costIn`), and the context gauge of
   the model asked now when it is a well-known one (`contextGauge`).
 
+## Launcher logs
+
+`LauncherLogs(options)` (`launcher-logs.ts`) is the log a launched ACP agent keeps: its stdout is
+for the protocol, so its log lines go to a file of its own. `launcherLogOptionsFrom(env)` gives the
+options from the environment; `bun run acp:logs` prints the newest launch's file, `--errors` its
+warning, error and fatal records alone.
+
+- H12. Each record at the level or above is a line of JSON appended to
+  `<dir>/acp-<pid>-<launch id>.jsonl`, the folder made when missing: its time (ISO), its level
+  (trace, debug, info, warning, error, fatal), its log annotations (where the connection, request,
+  session, turn and call ids ride), its message and, when there is one, its cause as text with its
+  stack and nested causes. The layer also makes the level the lowest logged. The file's path is said
+  on stderr once, at start. The environment gives the folder (`LABKIT_ACP_LOG_DIR`,
+  `~/.labkit/logs`), the level (`LABKIT_ACP_LOG_LEVEL`, debug), the size a file is rotated at
+  (`LABKIT_ACP_LOG_MAX_BYTES`, 10 MiB) and the backups kept (`LABKIT_ACP_LOG_BACKUPS`, 4); a value
+  that does not read is the default. Each launch has an id of its own, and the 20 newest stopped
+  launches are kept.
+- H13. A record that would take the file past `maxBytes` first rotates it: `.jsonl` becomes
+  `.jsonl.1`, each backup moves one on, and none past `backups` is kept. A record whose line is past
+  256 KiB is written cut to fit: its time, its level, the start of its line as text (`record`) and
+  the bytes left out (`omittedBytes`). At start, the files of the stopped launches past the newest
+  `keep`, by the time their files were last written, are removed with their backups; a launch whose
+  pid runs keeps its files and does not count.
+- H14. The non-empty values of the environment variables whose names hold API_KEY, TOKEN, SECRET,
+  PASSWORD or CREDENTIAL are `[redacted]` wherever they occur in a record, its cause included, and so
+  is the value of a credential field (`authorization`, `apiKey`, `password`, an access token, a
+  cookie); the rest of an error's text stays. A folder or file that cannot be written is said once
+  on stderr, and that record and every one after go to stderr: the launcher does not die for its log.
+
 ## What is not built
 
 - A source of the catalog read from a hand-written `models.yml`.
 - A host's own record of a session in its folder (its title, its working folder).
-- The ACP launcher's log file: JSONL, rotated, secrets redacted (`DESIGN.next.md`, Logs).
