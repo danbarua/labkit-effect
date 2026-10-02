@@ -7,7 +7,7 @@ import { BlobRef } from "../agent-machine/blob.ts";
 import { Context, Effect, Schema } from "effect";
 import type { Policy } from "../agent-policy/policy.ts";
 import type { Fact } from "../agent-machine/fact.ts";
-import { CallId, type ModelName, ProviderName, ThinkingText, ToolKind, ToolName, type TurnId } from "../agent-machine/names.ts";
+import { CallId, ModelName, ProviderName, ThinkingText, ToolKind, ToolName, TurnId, WindowId } from "../agent-machine/names.ts";
 import { type Observation, ToolOutcome } from "../agent-machine/observation.ts";
 import { Received } from "../agent-machine/received.ts";
 import type { ModelSettings } from "../agent-machine/settings.ts";
@@ -39,18 +39,28 @@ export const ToolSpec = Schema.Struct({ name: ToolName, description: Schema.Stri
 export type ToolSpec = typeof ToolSpec.Type;
 
 /**
+ * Where a provider's own part in a context came from: a model's response, in a turn; or the
+ * provider's compaction of a window of the conversation.
+ */
+export const PartSource = Schema.Union([
+  Schema.TaggedStruct("Response", { model: ModelName, turn: TurnId }),
+  Schema.TaggedStruct("Compaction", { window: WindowId }),
+]);
+export type PartSource = typeof PartSource.Type;
+
+/**
  * One part of a message the model is sent. `Commentary` is what a model wrote for whoever is
  * watching, which is not its answer. `Thinking` and `Unrecognised` are parts of a response that
  * only the provider that produced it reads: its adapter sends them back unchanged, in their place;
- * any other provider's adapter leaves them out.
+ * any other provider's adapter leaves them out. Each says where it came from (`PartSource`).
  */
 export const ContextPart = Schema.Union([
   Schema.TaggedStruct("Text", { text: Schema.String }),
   Schema.TaggedStruct("Commentary", { text: Schema.String }),
-  Schema.TaggedStruct("Thinking", { provider: ProviderName, text: ThinkingText, received: Received }),
+  Schema.TaggedStruct("Thinking", { provider: ProviderName, from: PartSource, text: ThinkingText, received: Received }),
   Schema.TaggedStruct("ToolCall", { call: CallId, tool: ToolName, input: Received }),
   Schema.TaggedStruct("ToolResult", { call: CallId, outcome: ToolOutcome }),
-  Schema.TaggedStruct("Unrecognised", { provider: ProviderName, received: Received }),
+  Schema.TaggedStruct("Unrecognised", { provider: ProviderName, from: PartSource, received: Received }),
   /** A file, by reference: the adapter reads its bytes from the blob store when it makes the request. */
   Schema.TaggedStruct("File", { blob: BlobRef }),
 ]);

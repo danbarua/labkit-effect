@@ -5,7 +5,7 @@ import { test } from "../../../tests/support/test.ts";
 import { anthropicAt } from "../../../tests/support/providers.ts";
 import { Effect, Layer, Logger } from "effect";
 import { ModelName, ProviderName, ThinkingText, TurnId } from "../../agent-machine/names.ts";
-import { ModelClient } from "../contracts.ts";
+import { ModelClient, type ModelContext } from "../contracts.ts";
 import { logKeys } from "../log-keys.ts";
 import { json } from "../../../tests/support/received.ts";
 import { receivedJson } from "../received.ts";
@@ -366,34 +366,36 @@ test("thinking, an empty one included, and blocks nobody knows go back to the pr
   });
 });
 
-test("another provider's thinking and blocks are left out and logged; a message left empty is not sent", async () => {
+test("another provider's thinking and blocks are left out, and logged the first time for each model; a message left empty is not sent", async () => {
   const logged: Array<unknown> = [];
   const capture = Logger.make((options) => {
     logged.push(options.message);
   });
-  const provider = recording([{ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" }]);
+  const ok = { content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" };
+  const provider = recording([ok, ok, ok]);
   const other = ProviderName.make("other");
   await runTest(
     Effect.gen(function* () {
-      yield* (yield* ModelClient).respond(
-        target,
-        {
-          system: undefined,
-          tools: [],
-          messages: [
+      const client = yield* ModelClient;
+      const context: ModelContext = {
+        system: undefined,
+        tools: [],
+        messages: [
             { role: "user", parts: [{ _tag: "Text", text: "Hello" }] },
             {
               role: "assistant",
               parts: [
-                { _tag: "Thinking", provider: other, text: ThinkingText.make(""), received: receivedJson({ type: "reasoning", summary: [] }) },
-                { _tag: "Unrecognised", provider: other, received: receivedJson({ type: "reasoning" }) },
+                { _tag: "Thinking", provider: other, from: { _tag: "Response", model: ModelName.make("other-1"), turn: TurnId.make("turn-1") }, text: ThinkingText.make(""), received: receivedJson({ type: "reasoning", summary: [] }) },
+                { _tag: "Unrecognised", provider: other, from: { _tag: "Response", model: ModelName.make("other-1"), turn: TurnId.make("turn-1") }, received: receivedJson({ type: "reasoning" }) },
               ],
             },
             { role: "user", parts: [{ _tag: "Text", text: "Again" }] },
           ],
-        },
-        TurnId.make("turn-1"),
-      );
+        };
+      yield* client.respond(target, context, TurnId.make("turn-2"));
+      // The same parts left out of the next request to the same model are not logged again; to another model, they are.
+      yield* client.respond(target, context, TurnId.make("turn-3"));
+      yield* client.respond({ ...target, model: ModelName.make("boring-2") }, context, TurnId.make("turn-4"));
     }).pipe(
       Effect.provide(Layer.mergeAll(AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))), Logger.layer([capture]))),
     ),
@@ -403,18 +405,15 @@ test("another provider's thinking and blocks are left out and logged; a message 
     { role: "user", content: [{ type: "text", text: "Again" }] },
   ]);
   const reason = "produced by other, not boring";
-  // One line for the request, describing each part left out.
-  expect(logged.filter((line) => Array.isArray(line) && line[0] === logKeys.provider.partLeftOut)).toEqual([
-    [
-      logKeys.provider.partLeftOut,
-      {
-        count: 2,
-        parts: [
-          { part: "Thinking", from: "other", chars: 33, start: '{"type":"reasoning","summary":[]}', reason },
-          { part: "Unrecognised", from: "other", fields: ["type"], chars: 20, start: '{"type":"reasoning"}', reason },
-        ],
-      },
-    ],
+  // One line for a request, describing each part left out and where it came from; once for each model.
+  const lines = logged.filter((line) => Array.isArray(line) && line[0] === logKeys.provider.partLeftOut) as Array<[string, Record<string, unknown>]>;
+  expect(lines.map(([, details]) => [details["turn"], details["to"], details["count"]])).toEqual([
+    ["turn-2", "boring/boring-1", 2],
+    ["turn-4", "boring/boring-2", 2],
+  ]);
+  expect(lines[0]?.[1]["parts"]).toMatchObject([
+    { part: "Thinking", from: "other/other-1", turn: "turn-1", chars: 33, start: '{"type":"reasoning","summary":[]}', reason },
+    { part: "Unrecognised", from: "other/other-1", turn: "turn-1", fields: ["type"], chars: 20, start: '{"type":"reasoning"}', reason },
   ]);
 });
 

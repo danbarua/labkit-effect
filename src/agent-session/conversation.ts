@@ -84,9 +84,9 @@ function messages(fact: Fact, texts: ReturnType<typeof inputTexts>, calls: Calls
               case "ToolCall":
                 return [{ _tag: "ToolCall", call: part.call, tool: part.tool, input: part.input }];
               case "Thinking":
-                return [{ _tag: "Thinking", provider: observation.provider, text: part.text, received: part.received }];
+                return [{ _tag: "Thinking", provider: observation.provider, from: { _tag: "Response", model: observation.model, turn: observation.turn }, text: part.text, received: part.received }];
               case "Unrecognised":
-                return [{ _tag: "Unrecognised", provider: observation.provider, received: part.received }];
+                return [{ _tag: "Unrecognised", provider: observation.provider, from: { _tag: "Response", model: observation.model, turn: observation.turn }, received: part.received }];
               default:
                 return part satisfies never;
             }

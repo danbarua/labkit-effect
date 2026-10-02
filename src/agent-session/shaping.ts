@@ -5,9 +5,9 @@
  * records it as `Supplied`, and logs it.
  */
 
-import { Effect, type Schema } from "effect";
+import { Effect, Ref, type Schema } from "effect";
 import type { BlobId, BlobRef } from "../agent-machine/blob.ts";
-import { type CallId, TokenCount, type ToolName } from "../agent-machine/names.ts";
+import { type CallId, TokenCount, type ToolName, type TurnId } from "../agent-machine/names.ts";
 import type { ResponseEnding, ToolOutcome, Usage } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
 import type { ContextPart, ModelContext, Target, ToolSpec } from "./contracts.ts";
@@ -68,11 +68,36 @@ function describedPart(part: ContextPart): Record<string, unknown> {
   const fields = parsed !== undefined && "value" in parsed && isObject(parsed.value) ? Object.keys(parsed.value) : undefined;
   return {
     part: part._tag,
-    ...("provider" in part ? { from: part.provider } : {}),
+    ...("provider" in part
+      ? part.from._tag === "Response"
+        ? { from: `${part.provider}/${part.from.model}`, turn: part.from.turn }
+        : { from: `${part.provider} compaction`, window: part.from.window }
+      : {}),
     ...(fields === undefined ? {} : { fields }),
     chars: text.length,
     start: text.slice(0, 120),
+    digest: Bun.hash(JSON.stringify(part)).toString(16),
   };
+}
+
+/**
+ * The parts left out that have been logged: for each, the part (its digest), the model it was left
+ * out of a request to, and why. A part is logged the first time it is left out of a request to a
+ * model for a reason; it is left out of every later request to that model, until compaction takes
+ * it out of the conversation, and is not logged again. Asking another model, or a reason that
+ * changed, logs it again.
+ */
+export type LeftOutLogged = ReadonlySet<string>;
+
+/** Which of the parts left out of a request to `target` are logged for the first time, and the parts logged after it. */
+export function firstLeftOut(
+  logged: LeftOutLogged,
+  target: Target,
+  left: ReadonlyArray<Supplied>,
+): { readonly logged: LeftOutLogged; readonly first: ReadonlyArray<Supplied> } {
+  const keyOf = (entry: Supplied) => JSON.stringify([target.provider, target.model, entry.details["digest"], entry.details["reason"]]);
+  const first = left.filter((entry, at) => !logged.has(keyOf(entry)) && left.findIndex((other) => keyOf(other) === keyOf(entry)) === at);
+  return { logged: new Set([...logged, ...first.map(keyOf)]), first };
 }
 
 /** A part of an earlier response that is not sent, and why. */
@@ -205,17 +230,41 @@ export function renderToolResult(
   }
 }
 
-export const logSupplied = (supplied: ReadonlyArray<Supplied>): Effect.Effect<void> => {
-  // The parts left out of one request are logged in one line, each described.
-  const left = supplied.filter((entry) => entry.event === logKeys.provider.partLeftOut);
-  const rest = supplied.filter((entry) => entry.event !== logKeys.provider.partLeftOut);
-  return Effect.forEach(
-    [...rest, ...(left.length === 0 ? [] : [{ level: "info" as const, event: logKeys.provider.partLeftOut, details: { count: left.length, parts: left.map((entry) => entry.details) } }])],
-    (entry) =>
-      entry.level === "warning" ? Effect.logWarning(entry.event, entry.details) : Effect.logInfo(entry.event, entry.details),
-    { discard: true },
-  );
-};
+/**
+ * Logs what an adapter supplied to make a request to `target`, in `turn`. The parts left out are
+ * logged in one line, each described with the model and turn it came from, and only those left out
+ * for the first time (`firstLeftOut`, with what `logged` holds of the requests before).
+ */
+export const logSupplied = (supplied: ReadonlyArray<Supplied>, target: Target, turn: TurnId | undefined, logged: Ref.Ref<LeftOutLogged>): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const left = supplied.filter((entry) => entry.event === logKeys.provider.partLeftOut);
+    const rest = supplied.filter((entry) => entry.event !== logKeys.provider.partLeftOut);
+    const first = yield* Ref.modify(logged, (before) => {
+      const step = firstLeftOut(before, target, left);
+      return [step.first, step.logged];
+    });
+    const leftOutLine: ReadonlyArray<Supplied> =
+      first.length === 0
+        ? []
+        : [
+            {
+              level: "info",
+              event: logKeys.provider.partLeftOut,
+              details: {
+                ...(turn === undefined ? {} : { turn }),
+                to: `${target.provider}/${target.model}`,
+                count: first.length,
+                parts: first.map((entry) => entry.details),
+                until: "left out of every request to this model until compaction takes them out; not logged again",
+              },
+            },
+          ];
+    yield* Effect.forEach(
+      [...rest, ...leftOutLine],
+      (entry) => (entry.level === "warning" ? Effect.logWarning(entry.event, entry.details) : Effect.logInfo(entry.event, entry.details)),
+      { discard: true },
+    );
+  });
 
 /** The number at `path` in `json`, when there is one. */
 export function numberAt(json: Json | undefined, ...path: ReadonlyArray<string>): number | undefined {

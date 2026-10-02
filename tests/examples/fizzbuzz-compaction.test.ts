@@ -116,7 +116,7 @@ test("A7: a provider's own compaction is sent as its items, to that provider onl
       compaction: whenCountReaches(new Map([[30, PlainTextFizzBuzzSummarizer], [60, byProvider], [90, byProvider]])),
     }),
   );
-  const item = (n: number) => ({ _tag: "Unrecognised", provider: "scripted", received: json({ type: "compaction", id: `cmp_${n}`, encrypted_content: "opaque" }) });
+  const item = (n: number) => ({ _tag: "Unrecognised", provider: "scripted", from: { _tag: "Compaction", window: `window-${n + 1}` }, received: json({ type: "compaction", id: `cmp_${n}`, encrypted_content: "opaque" }) });
   const plain = asText(summaries[0]?.summary ?? receivedJson(null));
   expect(summaries.map((each) => [each.writtenBy, each.summary.mediaType]) as unknown).toEqual([
     ["PlainTextFizzBuzzSummarizer", "text/plain"],

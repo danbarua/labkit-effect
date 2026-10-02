@@ -5,7 +5,7 @@
 
 import { afterAll, expect } from "bun:test";
 import { Effect, Layer } from "effect";
-import { ModelName, ProviderName } from "../../agent-machine/names.ts";
+import { ModelName, ProviderName, WindowId } from "../../agent-machine/names.ts";
 import type { Observation } from "../../agent-machine/observation.ts";
 import { ContextAssembler, type ModelContext, ModelProvider } from "../contracts.ts";
 import { openSession } from "../loop.ts";
@@ -126,7 +126,7 @@ test("a compaction item Grok returned heads the input, sent back unchanged; the 
     system: "Be brief.",
     tools: [],
     messages: [
-      { role: "instruction", parts: [{ _tag: "Unrecognised", provider: from, received: receivedJson(compaction) }] },
+      { role: "instruction", parts: [{ _tag: "Unrecognised", provider: from, from: { _tag: "Compaction", window: WindowId.make("w1") }, received: receivedJson(compaction) }] },
       { role: "user", parts: [{ _tag: "Text", text: "And now?" }] },
     ],
   });

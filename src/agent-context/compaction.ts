@@ -177,7 +177,7 @@ const summaryParts = (summary: WindowSummary): ReadonlyArray<ContextPart> => {
   if (summary.summary.mediaType !== "application/json") return [{ _tag: "Text", text: asText(summary.summary) }];
   const parsed = parseJson(summary.summary);
   const items = "value" in parsed && Array.isArray(parsed.value) ? parsed.value : [];
-  return items.map((item) => ({ _tag: "Unrecognised", provider: summary.kind, received: receivedJson(item) }));
+  return items.map((item) => ({ _tag: "Unrecognised", provider: summary.kind, from: { _tag: "Compaction", window: summary.window }, received: receivedJson(item) }));
 };
 
 /**

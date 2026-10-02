@@ -20,7 +20,7 @@
 import type { BlobId } from "../../agent-machine/blob.ts";
 import { knownOf, takesFile } from "../configuration/well-known-models.ts";
 import { OpenAiClient } from "@effect/ai-openai-compat";
-import { Effect, Layer, type Schema } from "effect";
+import { Effect, Layer, Ref, type Schema } from "effect";
 import type * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
 import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agent-machine/names.ts";
@@ -37,6 +37,7 @@ import {
   isObject,
   type Json,
   leftOut,
+  type LeftOutLogged,
   logSupplied,
   renderToolResult,
   type Shaped,
@@ -230,6 +231,7 @@ export const openAiCompatRequests = (
 ): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
+    const leftOutLogged = yield* Ref.make<LeftOutLogged>(new Set());
     return (target, context, turn) => {
       const settled = openAiCompatSettle(target);
       return filesIn(context).pipe(
@@ -241,7 +243,7 @@ export const openAiCompatRequests = (
           body: { ...(sent.json as Record<string, Json>), ...settled.fields },
         };
         return reportAdjusted(turn, target, settled).pipe(
-          Effect.andThen(logSupplied(sent.supplied)),
+          Effect.andThen(logSupplied(sent.supplied, target, turn, leftOutLogged)),
           Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
         );
         }),
