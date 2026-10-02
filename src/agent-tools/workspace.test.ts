@@ -1,7 +1,7 @@
 /** The workspace tools, run on a folder made for the test. */
 
 import { expect } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
@@ -31,8 +31,31 @@ const call = (tool: string, input: unknown) =>
     }).pipe(Effect.provide(runner.pipe(Layer.provide(BunServices.layer)))),
   );
 
-test("the catalog is read_file, list_dir and write_file, each with its kind", () => {
-  expect(catalog.map((tool) => [tool.name as string, tool.kind])).toEqual([["read_file", "read"], ["list_dir", "search"], ["write_file", "edit"]]);
+test("the catalog is read_file, list_dir, write_file, edit_file and run_command, each with its kind", () => {
+  expect(catalog.map((tool) => [tool.name as string, tool.kind, tool.replay])).toEqual([
+    ["read_file", "read", "safe"],
+    ["list_dir", "search", "safe"],
+    ["write_file", "edit", "idempotent"],
+    ["edit_file", "edit", "unsafe"],
+    ["run_command", "execute", "unsafe"],
+  ]);
+});
+
+test("edit_file replaces the one occurrence of a text; one that occurs never or more than once is refused, and nothing is written", async () => {
+  writeFileSync(join(root, "src", "e.txt"), "alpha and a");
+  expect(await call("edit_file", { path: "src/e.txt", old_text: "alpha", new_text: "beta" })).toBe("Edited src/e.txt.");
+  expect(await call("read_file", { path: "src/e.txt" })).toBe("beta and a");
+  expect(await call("edit_file", { path: "src/e.txt", old_text: "a", new_text: "b" })).toBe("rejected: old_text occurs 3 times in src/e.txt; include more of the lines around it so that it occurs once.");
+  expect(await call("edit_file", { path: "src/e.txt", old_text: "gamma", new_text: "b" })).toBe("rejected: old_text does not occur in src/e.txt.");
+  expect(await call("read_file", { path: "src/e.txt" })).toBe("beta and a");
+  // The other tests list src: the file goes.
+  rmSync(join(root, "src", "e.txt"));
+});
+
+test("run_command runs sh -c in the workspace: exit 0 succeeds with the output; any other exit fails with it; past its time it is stopped", async () => {
+  expect(await call("run_command", { command: "ls src | head -1" })).toBe("a.txt\n[Exit code 0.]");
+  expect(await call("run_command", { command: "echo out; echo err >&2; exit 3" })).toBe("reported: out\nerr\n[Exit code 3.]");
+  expect(await call("run_command", { command: "sleep 5", timeout_seconds: 1 })).toBe("reported: [Still running after 1 seconds: stopped.]");
 });
 
 test("list_dir lists one folder, a folder's name ending with /", async () => {

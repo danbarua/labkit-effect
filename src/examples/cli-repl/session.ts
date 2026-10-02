@@ -4,8 +4,9 @@
  *
  * The opening holds the model, its settings and the system prompt; each input is the user's,
  * through the CLI; the conversation is every turn of it. The tools work on the folder the CLI runs
- * in: `read_file` and `list_dir` read it, and `write_file` changes it, with permission as
- * `--permission-mode` gives it.
+ * in (`agent-tools/workspace.ts`): `read_file` and `list_dir` read it, `write_file` and `edit_file`
+ * change it, and `run_command` runs a shell command in it, with permission as `--permission-mode`
+ * gives it.
  */
 
 import { Effect, Layer, type Scope } from "effect";

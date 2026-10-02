@@ -1,6 +1,6 @@
 /**
- * Tools for a workspace, a folder on disk: `read_file` and `list_dir`, which read, and `write_file`,
- * which changes it. Each tool is its catalog entry (what the model is offered, with its kind, which
+ * Tools for a workspace, a folder on disk: `read_file` and `list_dir`, which read; `write_file` and
+ * `edit_file`, which change it; and `run_command`, which runs a shell command in it. Each tool is its catalog entry (what the model is offered, with its kind, which
  * a permission policy reads) and the function that runs it, defined together, so a tool offered is
  * a tool that runs. `workspaceTools(root)` gives the catalog, for a session's opening, and the
  * `ToolRunner` that runs a call.
@@ -12,14 +12,19 @@
  * folder it is in must exist. A call left with no outcome when its process ended runs when the
  * session goes on only for `read_file` and `list_dir`, which change nothing (`replay: "safe"`).
  * `write_file` does not: it writes the same text whenever it runs, but the file may have changed
- * since (`"idempotent"`).
+ * since (`"idempotent"`). `edit_file` replaces the one occurrence of a text in a file; text that
+ * occurs never or more than once is refused. `run_command` runs `sh -c <command>` in the root, and
+ * gives its output (stdout, then stderr; the last 256 KiB) and how it ended: exit code 0 succeeds,
+ * any other end fails with the output. It is stopped after its time (`commandSeconds` unless the
+ * call says, at most 600 seconds), or when the call is interrupted. Neither runs again when a
+ * session goes on (`"unsafe"`).
  *
  * A call that cannot run fails with the reason: no tool has the name (`NotFound`), the input does
  * not fit (`InputRejected`), or the file system reported an error (`Reported`, with its message).
  */
 
 import { isAbsolute, relative, resolve } from "node:path";
-import { Data, Effect, FileSystem, Layer, Schema } from "effect";
+import { Data, Duration, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { FailureText, ToolName } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import { ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
@@ -35,6 +40,24 @@ const ReadFile = Schema.Struct({
 });
 const ListDir = Schema.Struct({ path: Schema.NonEmptyString });
 const WriteFile = Schema.Struct({ path: Schema.NonEmptyString, text: Schema.String });
+const EditFile = Schema.Struct({ path: Schema.NonEmptyString, old_text: Schema.NonEmptyString, new_text: Schema.String });
+const RunCommand = Schema.Struct({
+  command: Schema.NonEmptyString,
+  timeout_seconds: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(Schema.isLessThanOrEqualTo(600))),
+});
+
+/** How long a command runs before it is stopped, unless the call says otherwise. */
+export const commandSeconds = 120;
+
+/** The last `max` bytes of `text`, never inside a character, and whether any were left out. */
+const lastBytes = (text: string, max: number): { readonly kept: string; readonly cut: boolean } => {
+  const bytes = Buffer.from(text, "utf8");
+  if (bytes.length <= max) return { kept: text, cut: false };
+  let start = bytes.length - max;
+  // A continuation byte (10xxxxxx) is inside a character: step on to the next character's first byte.
+  while (start < bytes.length && ((bytes[start] ?? 0) & 0xc0) === 0x80) start++;
+  return { kept: bytes.subarray(start).toString("utf8"), cut: true };
+};
 
 interface WorkspaceTool<I> extends ToolSpec {
   readonly decode: (input: unknown) => Effect.Effect<I, Schema.SchemaError>;
@@ -121,6 +144,70 @@ export function workspaceTools(root: string) {
           return `Wrote ${bytes} bytes to ${path}.`;
         }),
     } satisfies WorkspaceTool<typeof WriteFile.Type>),
+    tool({
+      name: ToolName.make("edit_file"),
+      kind: "edit",
+      replay: "unsafe",
+      description: `Replace one occurrence of old_text in a UTF-8 file in the workspace with new_text. old_text must occur exactly once: include enough of the lines around it to make it so.${scope}`,
+      input: {
+        type: "object",
+        properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } },
+        required: ["path", "old_text", "new_text"],
+      },
+      decode: Schema.decodeUnknownEffect(EditFile),
+      run: ({ path, old_text, new_text }) =>
+        Effect.gen(function* () {
+          const full = yield* inside(path);
+          const fs = yield* FileSystem.FileSystem;
+          const text = yield* fs.readFileString(full).pipe(Effect.mapError(reported(path)));
+          const count = text.split(old_text).length - 1;
+          if (count !== 1)
+            return yield* new Rejected({
+              problem: count === 0 ? `old_text does not occur in ${path}.` : `old_text occurs ${count} times in ${path}; include more of the lines around it so that it occurs once.`,
+            });
+          const changed = text.replace(old_text, () => new_text);
+          const bytes = Buffer.byteLength(changed);
+          if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The file would be over 256 KiB (${bytes} bytes).` });
+          yield* fs.writeFileString(full, changed).pipe(Effect.mapError(reported(path)));
+          return `Edited ${path}.`;
+        }),
+    } satisfies WorkspaceTool<typeof EditFile.Type>),
+    tool({
+      name: ToolName.make("run_command"),
+      kind: "execute",
+      replay: "unsafe",
+      description: `Run a shell command (sh -c) in the workspace, and get its output (stdout, then stderr; the last 256 KiB) and how it exited. It is stopped after timeout_seconds (${commandSeconds} unless given; at most 600). Use it to search files (grep, find), run tests and use git.${scope}`,
+      input: {
+        type: "object",
+        properties: { command: { type: "string" }, timeout_seconds: { type: "integer", minimum: 1, maximum: 600 } },
+        required: ["command"],
+      },
+      decode: Schema.decodeUnknownEffect(RunCommand),
+      run: ({ command, timeout_seconds }) => {
+        const seconds = timeout_seconds ?? commandSeconds;
+        // The process is stopped however the call ends: at its time, or when the call is interrupted.
+        return Effect.acquireUseRelease(
+          Effect.sync(() => Bun.spawn(["/bin/sh", "-c", command], { cwd: root, stdin: "ignore", stdout: "pipe", stderr: "pipe" })),
+          (child) =>
+            Effect.promise(() => Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])).pipe(
+              Effect.timeoutOption(Duration.seconds(seconds)),
+            ),
+          (child) =>
+            Effect.sync(() => {
+              if (child.exitCode === null && child.signalCode === null) child.kill();
+            }),
+        ).pipe(
+          Effect.flatMap((ended) => {
+            if (Option.isNone(ended)) return Effect.fail(new Reported({ message: `[Still running after ${seconds} seconds: stopped.]` }));
+            const [stdout, stderr, code] = ended.value;
+            const output = `${stdout}${stdout !== "" && stderr !== "" && !stdout.endsWith("\n") ? "\n" : ""}${stderr}`;
+            const { kept, cut } = lastBytes(output, maxReadBytes);
+            const text = `${cut ? "[The output's beginning was cut: its last 256 KiB follow.]\n" : ""}${kept}${kept === "" || kept.endsWith("\n") ? "" : "\n"}[Exit code ${code}.]`;
+            return code === 0 ? Effect.succeed(text) : Effect.fail(new Reported({ message: text }));
+          }),
+        );
+      },
+    } satisfies WorkspaceTool<typeof RunCommand.Type>),
   ];
 
   const catalog: ReadonlyArray<ToolSpec> = tools.map(({ name, description, input, kind, replay }) => ({ name, description, input, kind, replay }));

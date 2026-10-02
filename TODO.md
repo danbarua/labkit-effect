@@ -103,8 +103,6 @@ model.
 
 ### The coding agent
 
-- [ ] Tools for coding, in the CLI's own: an edit that changes part of a file, a shell (tests,
-      git), search (grep, glob). The CLI has `read_file`, `list_dir` and `write_file`.
 - [ ] The CLI does what the ACP host does. Built: `/export` (`markdownOf`); `RetryIncomplete`; the
       REPL shows text and thinking as they arrive (`session.streamed`). To do: open its session from
       a draft at the first input (`src/agent-host/draft.ts`, turn zero), so a CLI quit before any
