@@ -224,7 +224,8 @@ function sdkClient(
       return {};
     })
     .onRequest("terminal/create", (ctx) => {
-      const terminalId = `terminal-${ran.size + 1}`;
+      // Named by its command: calls run at once, so the order terminals are made in is not fixed.
+      const terminalId = `terminal ${ctx.params.args?.at(-1) ?? ctx.params.command}`;
       log.terminals.push({ method: "terminal/create", command: ctx.params.command, args: ctx.params.args ?? [], cwd: ctx.params.cwd ?? null });
       ran.set(terminalId, run(ctx.params.args?.at(-1) ?? ctx.params.command));
       return { terminalId };
@@ -570,8 +571,11 @@ test("AG17: edit_file replaces one occurrence through fs/*, shown as a diff; run
   expect(log.files.filter((each) => each.method === "fs/write_text_file")).toEqual([
     { method: "fs/write_text_file", path: join(host.cwd, "a.txt"), sessionId, content: "beta and a" },
   ]);
-  expect(log.terminals.filter((each) => each.method === "terminal/create")).toEqual(
-    ["ls", "false", "sleep 100"].map((command) => ({ method: "terminal/create", command: "/bin/sh", args: ["-c", command], cwd: host.cwd })),
+  // The calls run at once, each when its permission is answered: their terminals in any order.
+  const created = log.terminals.filter((each) => each.method === "terminal/create");
+  expect(created).toHaveLength(3);
+  expect(created).toEqual(
+    expect.arrayContaining(["ls", "false", "sleep 100"].map((command) => ({ method: "terminal/create", command: "/bin/sh", args: ["-c", command], cwd: host.cwd }))),
   );
   expect(log.terminals.filter((each) => each.method === "terminal/release")).toHaveLength(3);
   const ended = new Map(observed(facts).flatMap((fact) => (fact.observation._tag === "ToolEnded" ? [[fact.observation.call as string, fact.observation.outcome] as const] : [])));
@@ -591,8 +595,8 @@ test("AG17: edit_file replaces one occurrence through fs/*, shown as a diff; run
   ]);
   const runUpdates = log.updates.filter((update) => update.sessionUpdate === "tool_call_update" && update.toolCallId === "run-1");
   expect(runUpdates.filter((update) => "content" in update && update.content !== undefined).map((update) => ("content" in update ? update.content : undefined))).toEqual([
-    [{ type: "terminal", terminalId: "terminal-1" }],
-    [{ type: "terminal", terminalId: "terminal-1" }],
+    [{ type: "terminal", terminalId: "terminal ls" }],
+    [{ type: "terminal", terminalId: "terminal ls" }],
   ]);
 });
 
