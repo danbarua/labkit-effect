@@ -36,6 +36,15 @@ from Effect, what we write ourselves instead, and why. Paths under `effect/` are
   gates on the negotiated profile. We copy the pattern, not the code (`protocol.ts`, `agent.ts`).
 - **Process entry: `BunRuntime.runMain` running an Effect that completes.** `agent.runStdio`
   returns when stdin closes, and `runMain` turns that into exit code 0.
+- **Work after a response: `Effect.fiber` and `Fiber.await`.** A handler's response is written from
+  its own fiber before the fiber ends (AP15), so a handler that forks `Fiber.await(self)` and then
+  a notification has the notification written after its response: the ACP host announces
+  `/export` (`available_commands_update`) only once the client has the session's id. No callback
+  or hook in the library is needed.
+- **What a connection keeps: the `Scope` that `Effect.scoped` gives `run`.** The handlers are built
+  and run in it (AN15), so an implementation keeps per-connection resources (the ACP host's
+  sessions, each a child scope from `Scope.fork`) there, and they close when the connection ends,
+  before `run` returns. `run`'s requirements exclude `Scope.Scope`.
 
 ## Do not use Effect for
 

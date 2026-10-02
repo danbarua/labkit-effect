@@ -119,6 +119,12 @@ reads and writes every JSON-RPC message itself. `stdio.ts` makes wires of newlin
   at once with the `JsonRpcError` `{ code: -32600, message: "The response to this request is
   malformed", data: { response } }`, `response` being the message as received, and a later
   response for that id is ignored (AP9).
+- AP15. A request that is not in a batch is answered from the fiber its handler ran in, before that
+  fiber ends: work forked to wait for that fiber (`Effect.fiber`, then `Fiber.await`) is written
+  after the response, as a notification about something the response announces must be. Every log
+  line the handler writes, and every one of what it forks, carries the annotation `request` with the
+  request's id. `Peer.open` is `false` from when the wire's `read` ends, before pending calls fail
+  and running handlers are interrupted (AP10).
 
 ## Streamable HTTP
 
@@ -331,3 +337,8 @@ advertises it.
   0, before the peer starts, and the peer numbers the client's later requests from 1
   (`Peer.make`'s `firstId`), so a late or repeated answer to `initialize` cannot settle another
   call. The agent sends no request before its peer starts, and its peer numbers from 0.
+- AN15. An agent's handlers are built and run in the connection's `Scope`: a `Scope.Scope` the
+  implementation needs is the connection's, closed after the connection has ended and its handlers
+  were interrupted, and `run` requires none of its caller. `connection.open` is `true` while the
+  connection is open: a handler interrupted by the client's `$/cancel_request` sees `true`, one
+  interrupted by the end of the connection `false`.

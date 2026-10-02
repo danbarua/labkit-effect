@@ -25,8 +25,9 @@ import type { Session } from "../../agent-session/loop.ts";
 import { KnownModels } from "../../agent-session/configuration/well-known-models.ts";
 import { immutableToolCatalogOf, modelOf } from "../../agent-session/configuration/session-setup.ts";
 import { optionsOf, type SettingOption } from "../../agent-session/configuration/options.ts";
+import { askable } from "../../agent-host/catalog.ts";
 import { invalid } from "./invalid.ts";
-import { keyOf, known, localModels, targetOf } from "./models.ts";
+import { targetOf } from "./models.ts";
 
 /** Each command and what it says of itself in `/help`. */
 export const commands: ReadonlyArray<readonly [string, string]> = [
@@ -85,13 +86,8 @@ export const settingsFrom = (words: ReadonlyArray<string>) =>
     );
   });
 
-/** The known models whose provider has a key set, and the local server's, for picking. */
-const pickable = Effect.map(localModels, (local) =>
-  [
-    ...Object.entries(known).flatMap(([provider, models]) => (keyOf(provider) === undefined ? [] : Object.keys(models).map((model) => `${provider}/${model}`))),
-    ...(local ?? []).map((model) => `localhost/${model}`),
-  ].map((name) => ({ title: name, value: name })),
-);
+/** The models the catalog lists (the known models whose provider has a key set, and the local server's), for picking. */
+const pickable = Effect.map(askable, (models) => models.map(({ provider, model }) => ({ title: `${provider}/${model}`, value: `${provider}/${model}` })));
 
 /** What a line can be completed from: the models that can be asked, and the settings to offer for the model being asked, as it is set now. */
 export interface Offered {

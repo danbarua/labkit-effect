@@ -8,28 +8,23 @@
  * `--permission-mode` gives it.
  */
 
-import { Effect, FileSystem, Layer, Logger, type Scope } from "effect";
-import { AgentContextAssembler, WholeConversation } from "../../agent-context/assembler.ts";
-import { Notices } from "../../agent-context/assemble.ts";
+import { Effect, Layer, type Scope } from "effect";
+import type { Asked } from "../../agent-host/catalog.ts";
+import { sessionFolderOf, storeFileOf } from "../../agent-host/directory.ts";
+import { PermissionsFor, SessionServices } from "../../agent-host/services.ts";
 import type { Ending } from "../../agent-machine/decision.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
 import { InputText, SessionId, type TurnId, Via } from "../../agent-machine/names.ts";
 import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { workspaceTools } from "../../agent-tools/workspace.ts";
-import { type PermissionMode, permissions } from "../../agent-policy/permissions.ts";
-import type { Policy } from "../../agent-policy/policy.ts";
-import { ToolCallPolicy } from "../../agent-session/contracts.ts";
+import type { PermissionMode } from "../../agent-policy/permissions.ts";
 import { leftRunning, type LeftRunning } from "../../agent-machine/left-running.ts";
 import { endTurnLeftRunning, openSession, type Session } from "../../agent-session/loop.ts";
 import { FileBackedSessionStore } from "../../agent-session/file-session-store.ts";
 import { ephemeralSessionStore, SessionStoreFailed } from "../../agent-session/session-store.ts";
-import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
 import { reportedBy } from "../../agent-session/origin.ts";
-import { immutableToolCatalogOf, modelOf, openedWith } from "../../agent-session/configuration/session-setup.ts";
-import { CountingTurnsInStore, NoTurnEndHooks } from "../../agent-session/turns.ts";
-import { type Asked, Clients, KnownToCli, SettlingForCli } from "./models.ts";
+import { modelOf, openedWith } from "../../agent-session/configuration/session-setup.ts";
 import { invalid } from "./invalid.ts";
-import { sessionFolderOf, storeFileOf } from "./store.ts";
 
 export interface Config {
   readonly sessionId: string;
@@ -53,43 +48,20 @@ export interface Config {
   readonly canAsk: boolean;
 }
 
-/** Log lines to stderr: for print mode, where stdout holds the answer alone, as a caller parsing it expects. */
-export const LogsToStderr = Logger.layer([Logger.withConsoleError(Logger.formatLogFmt)]);
+/**
+ * Where the CLI keeps sessions (`agent-host/directory.ts`): `--continue` goes on from the session
+ * written to last, `--resume <session>` from the one named.
+ */
+export const storeFolder = "logs/cli";
 
 /** Where a session's log lines go when they go to a file: beside its facts. */
-export const logFileOf = (sessionId: string): string => `${sessionFolderOf(sessionId)}/cli.log`;
-
-/** Log lines to the session's file: for the REPL, where the terminal holds the conversation alone. */
-export const LogsToFile = (sessionId: string) =>
-  Layer.unwrap(
-    Effect.gen(function* () {
-      yield* (yield* FileSystem.FileSystem).makeDirectory(sessionFolderOf(sessionId), { recursive: true });
-      return Logger.layer([Logger.toFile(Logger.formatLogFmt, logFileOf(sessionId), { batchWindow: "100 millis" })]);
-    }),
-  ).pipe(Layer.orDie);
+export const logFileOf = (sessionId: string): string => `${sessionFolderOf(storeFolder, sessionId)}/cli.log`;
 
 /** The tools a session is offered: the ones that read the workspace, the folder the CLI runs in. */
 const workspace = workspaceTools(process.cwd());
 
-/** The permission policy for `config`'s mode, over the tools the session opened with. */
-const PermissionsFor = (config: Config) =>
-  Layer.succeed(ToolCallPolicy, (facts) =>
-    Effect.map(immutableToolCatalogOf(facts), (tools) =>
-      permissions(config.permissionMode, config.canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts) as Policy<unknown>,
-    ),
-  );
-
-/** What the loop needs, for a CLI session; its turns count on from those its store holds. */
-const Services = Layer.mergeAll(
-    ModelFromFacts.pipe(Layer.provide(KnownToCli)),
-  KnownToCli,
-  SettlingForCli,
-    AgentContextAssembler.pipe(Layer.provide(Layer.mergeAll(WholeConversation, Layer.succeed(Notices, [])))),
-    Clients,
-    CountingTurnsInStore,
-    NoTurnEndHooks,
-  workspace.runner,
-);
+/** What the loop needs, for a CLI session: the workspace's tools; its turns count on from those its store holds. */
+const Services = SessionServices(workspace.runner);
 
 /**
  * What a way of running the CLI does with a session as it opens: follows its facts from the start
@@ -134,7 +106,7 @@ export const withSession = <A, E, R, L, H>(
   host: Host<H>,
   use: (session: Session) => Effect.Effect<A, E, R>,
 ) => {
-  const store = config.persist ? FileBackedSessionStore(storeFileOf(config.sessionId)) : ephemeralSessionStore(config.continues ?? []);
+  const store = config.persist ? FileBackedSessionStore(storeFileOf(storeFolder, config.sessionId)) : ephemeralSessionStore(config.continues ?? []);
   return Effect.gen(function* () {
     const session = yield* openSession;
     yield* host.follow(session);
@@ -159,7 +131,7 @@ export const withSession = <A, E, R, L, H>(
     reportedBy({ _tag: "User", via: Via.make("cli") }),
     Effect.scoped,
     // The store logs as it opens (a lock taken over, a line cut off): to the session's log, as the rest does.
-    Effect.provide(Layer.mergeAll(Services, PermissionsFor(config), logs).pipe(Layer.provideMerge(store.pipe(Layer.provide(logs))))),
+    Effect.provide(Layer.mergeAll(Services, PermissionsFor(config.permissionMode, config.canAsk), logs).pipe(Layer.provideMerge(store.pipe(Layer.provide(logs))))),
     Effect.mapError((error) => (error instanceof SessionStoreFailed ? invalid(error.message) : error)),
   );
 };

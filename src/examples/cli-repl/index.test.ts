@@ -6,7 +6,6 @@
 import { expect } from "bun:test";
 import { test, testFolder } from "../../../tests/support/test.ts";
 import { withResumeValue } from "./index.ts";
-import { localCapabilities } from "./models.ts";
 
 const invoke = async (args: ReadonlyArray<string>, env: Record<string, string> = {}) => {
   // Run in the test's folder, where what the CLI writes (its logs, its sessions) is kept.
@@ -55,27 +54,6 @@ test("a model whose provider has no key set is not asked: it names the variable"
   const result = await invoke(["-p", "Hello", "--model", "gpt-5.5"]);
   expect(result.code).not.toBe(0);
   expect(result.stdout + result.stderr).toContain("Set OPENAI_API_KEY before calling openai/* models, or try a different model with --model provider/model.");
-});
-
-test("what the local server lists of a model is what is known of it: its context window, input and reasoning efforts", () => {
-  const listed = {
-    data: [{ id: "qwen3.5-9b-8bit", context_window: null, capabilities: ["text", "tools"] }],
-    models: [
-      {
-        slug: "qwen3.5-9b-8bit",
-        context_window: 262144,
-        input_modalities: ["text"],
-        default_reasoning_level: "none",
-        supported_reasoning_levels: [{ effort: "none" }, { effort: "low" }, { effort: "medium" }, { effort: "high" }],
-      },
-      { slug: "bare" },
-    ],
-  };
-  expect([...localCapabilities(listed)]).toEqual([
-    ["qwen3.5-9b-8bit", { context: 262144, input: ["text"], efforts: ["none", "low", "medium", "high"], price: { input: 0, output: 0 } }],
-    ["bare", { input: ["text"], price: { input: 0, output: 0 } }],
-  ]);
-  expect(localCapabilities("not a list").size).toBe(0);
 });
 
 test("--resume with no id is given an empty one, which asks for a session to be picked", () => {

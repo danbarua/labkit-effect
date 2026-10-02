@@ -34,11 +34,16 @@
  * session's log follows everything that happens to it. Each fact is published as it is recorded;
  * `subscribe` receives every fact recorded after it.
  * What a model request streams is passed on to `streamed` and not recorded.
+ *
+ * A host drives turns through `prompt`, `cancel` and `turn`, or gives observations through
+ * `observe` and waits with `idle`. `prompt` records the user's input and waits for the end of the
+ * turn that took it, by the facts recorded, not by `idle`: `idle` also waits for a tool call's
+ * permission question, which a host answers from another fiber while `prompt` waits.
  */
 
 import { keptOutcome } from "./blobs.ts";
 import { Clock, DateTime, Deferred, Effect, Exit, FiberSet, PubSub, Ref, type Scope, Semaphore, type Tracer } from "effect";
-import type { Decision } from "../agent-machine/decision.ts";
+import type { Decision, Ending } from "../agent-machine/decision.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { notObserved } from "../agent-machine/not-observed.ts";
 import { deliver, type World } from "../agent-machine/router.ts";
@@ -96,6 +101,14 @@ const sessionOf = (facts: ReadonlyArray<Fact>): SessionId | undefined =>
     fact._tag === "Observed" && fact.observation._tag === "SessionOpened" ? [fact.observation.session] : [],
   )[0];
 
+/** The turn under way: the latest one started, while no `TurnEnded` is recorded for it. */
+const turnUnderWay = (facts: ReadonlyArray<Fact>): TurnId | undefined =>
+  facts.reduce<TurnId | undefined>((turn, fact) => {
+    if (fact._tag === "Observed" && fact.observation._tag === "TurnStarted") return fact.observation.turn;
+    if (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" && fact.decision.turn === turn) return undefined;
+    return turn;
+  }, undefined);
+
 /** The span each kind of request is carried out in. */
 const spanNames: Record<EffectRequest["_tag"], string> = {
   RequestModelResponse: "agent.model.request",
@@ -135,12 +148,37 @@ const holdsOf = (facts: ReadonlyArray<Fact>, turn: TurnId): number =>
 /** What the loop needs to carry out requests. */
 export type Services = ModelProvider | ContextAssembler | ModelClient | Turns | ToolRunner | TurnEndHooks;
 
+/** What the user gives a turn: the text, and the files that came with it. */
+export type Prompt = Pick<Extract<Observation, { _tag: "InputArrived" }>, "text" | "attachments">;
+
 export interface Session {
   /**
    * Records an observation, with the origin `CurrentOrigin` gives, and starts what follows from it.
    * It returns once the observation is recorded; the requests that follow are carried out after.
    */
   readonly observe: (observation: Observation) => Effect.Effect<void, SessionStoreFailed, Services>;
+  /**
+   * The turn under way, if one is: the latest `TurnStarted` with no `TurnEnded` recorded for it. A
+   * turn the facts left running (`leftRunning`) is under way until the host goes on with it or
+   * ends it.
+   */
+  readonly turn: Effect.Effect<TurnId | undefined>;
+  /**
+   * Records `input` as the user's (`InputArrived`, with the origin `CurrentOrigin` gives) and
+   * returns how the turn that took it ended. With no turn under way the loop starts one for it.
+   * With one under way the input goes to that turn, which takes it between steps (agent-machine I3);
+   * if that turn ends other than by an answer the input is dropped (I6), and `prompt` returns that
+   * ending all the same. Two at once are recorded one after the other, and both go to the same turn
+   * unless it ends between them. It fails if writing the session's facts fails, then or while it
+   * waits.
+   */
+  readonly prompt: (input: Prompt) => Effect.Effect<Ending, SessionStoreFailed, Services>;
+  /**
+   * Records `TurnInterrupted` for the turn under way, with the origin `CurrentOrigin` gives, and
+   * returns once it is recorded; the turn ends `Interrupted` once its requests have reported how
+   * far they got (agent-machine X1–X3). With no turn under way it records nothing.
+   */
+  readonly cancel: Effect.Effect<void, SessionStoreFailed, Services>;
   /** Waits until no request is being carried out; fails if writing the session's facts failed. */
   readonly idle: Effect.Effect<void, SessionStoreFailed>;
   /** The session's facts, as its store keeps them. */
@@ -597,21 +635,83 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
       Effect.catchTag("SessionStoreFailed", () => Effect.void),
     );
 
-  /** Records the observation, then starts each request that follows in a fiber of its own. */
-  const record = (origin: Origin, observation: Observation): Effect.Effect<void, SessionStoreFailed, Services> =>
-    write(origin, observation).pipe(
+  /**
+   * Runs `step`, which records observations, holding `lock`; then starts each request it returns in
+   * a fiber of its own, and gives what else it returns.
+   */
+  const recording = <A>(
+    step: Effect.Effect<readonly [ReadonlyArray<Started>, A], SessionStoreFailed, Services>,
+  ): Effect.Effect<A, SessionStoreFailed, Services> =>
+    step.pipe(
       Semaphore.withPermit(lock),
-      Effect.flatMap((started) => Effect.forEach(started, (each) => FiberSet.run(running, carry(each)), { discard: true })),
+      Effect.flatMap(([started, result]) =>
+        Effect.forEach(started, (each) => FiberSet.run(running, carry(each)), { discard: true }).pipe(Effect.as(result)),
+      ),
       Effect.uninterruptible,
     );
 
-  const observe = (observation: Observation): Effect.Effect<void, SessionStoreFailed, Services> =>
+  /** Records the observation, then starts each request that follows in a fiber of its own. */
+  const record = (origin: Origin, observation: Observation): Effect.Effect<void, SessionStoreFailed, Services> =>
+    recording(write(origin, observation).pipe(Effect.map((started) => [started, undefined] as const)));
+
+  /** The origin `CurrentOrigin` gives what is observed now. A session given an observation with none set is a defect. */
+  const originFor = (what: Observation["_tag"]): Effect.Effect<Origin> =>
     Effect.gen(function* () {
       const origin = yield* CurrentOrigin;
-      if (origin === undefined)
-        return yield* Effect.die(new Error(`${observation._tag} was given to a session with no origin set`));
-      yield* record(origin, observation);
+      if (origin === undefined) return yield* Effect.die(new Error(`${what} was given to a session with no origin set`));
+      return origin;
     });
+
+  const observe = (observation: Observation): Effect.Effect<void, SessionStoreFailed, Services> =>
+    originFor(observation._tag).pipe(Effect.flatMap((origin) => record(origin, observation)));
+
+  const prompt = (input: Prompt): Effect.Effect<Ending, SessionStoreFailed, Services> =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const origin = yield* originFor("InputArrived");
+        // Subscribed before the input is recorded, so the end of its turn cannot be missed.
+        const fromNow = yield* PubSub.subscribe(recorded);
+        // The input is built from `input`'s fields alone: whatever else the caller's value carries is not recorded.
+        const arrived: Observation = {
+          _tag: "InputArrived",
+          from: { _tag: "User" },
+          text: input.text,
+          ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
+        };
+        // The turn the input went to, read while the lock is held: the one under way, or the one
+        // started for it. Input in a turn's mailbox is taken by that turn or dropped when it ends.
+        const turn = yield* recording(
+          Effect.gen(function* () {
+            const started = yield* write(origin, arrived);
+            const agent = (yield* Ref.get(machines)).agent.state;
+            return [started, agent._tag === "Running" ? agent.turn : undefined] as const;
+          }),
+        );
+        if (turn === undefined) return yield* Effect.die(new Error("No turn was under way or started for the input given to prompt"));
+        const ended = Effect.gen(function* () {
+          let ending: Ending | undefined;
+          while (ending === undefined) {
+            const fact = yield* PubSub.take(fromNow);
+            if (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" && fact.decision.turn === turn) ending = fact.decision.ending;
+          }
+          return ending;
+        });
+        // A write that fails stops the session, and the turn's end is never recorded.
+        return yield* ended.pipe(Effect.raceFirst(Deferred.await(broken)));
+      }),
+    );
+
+  const cancel: Effect.Effect<void, SessionStoreFailed, Services> = Effect.gen(function* () {
+    const origin = yield* originFor("TurnInterrupted");
+    // The turn is read while the lock is held, so it cannot end between being read and being interrupted.
+    yield* recording(
+      Effect.gen(function* () {
+        const turn = turnUnderWay(yield* store.facts);
+        const started: ReadonlyArray<Started> = turn === undefined ? [] : yield* write(origin, { _tag: "TurnInterrupted", turn });
+        return [started, undefined] as const;
+      }),
+    );
+  });
 
   const goOn: Effect.Effect<void, SessionStoreFailed, Services> = Effect.gen(function* () {
     const facts = yield* store.facts;
@@ -646,6 +746,9 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
 
   return {
     observe,
+    turn: Effect.map(store.facts, turnUnderWay),
+    prompt,
+    cancel,
     idle: FiberSet.awaitEmpty(running).pipe(
       Effect.andThen(Deferred.isDone(broken)),
       Effect.flatMap((done) => (done ? Deferred.await(broken) : Effect.void)),

@@ -22,6 +22,8 @@ The domain core of a coding harness, and the layers around it.
 | `src/agent-context/` | Context assembly: what the model is sent, from system prompts, tool catalogs and a view of the conversation. See its `MODEL.md`. | anything |
 | `src/instrumentation/` | Tool usage counted from facts, as Effect metrics, and OpenTelemetry. See its `README.md`. | anything |
 | `src/acp/` | The Agent Client Protocol in Effect: schemas generated from the official SDK's JSON Schemas, a two-way JSON-RPC peer, the stdio and Streamable HTTP wires, and version and capability negotiation. Its tests drive it with the official SDK. See its `MODEL.md`. | anything but `@agentclientprotocol/sdk`, which only its tests import |
+| `src/agent-host/` | What both hosts share, lifted from the CLI: the model catalog, the provider clients, the services a session runs with, the permission policy for a mode, the folder sessions are kept in, log files (and the ACP launcher's, JSONL, rotated), the draft a session is before turn zero, and a session's transcript as Markdown. See its `MODEL.md`, and `DESIGN.next.md` for where the hosts are going. | the core; never `src/acp` or a host |
+| `src/agent-acp/` | The ACP host, protocol v1 over stdio: `makeHost` joins `src/acp` to sessions of the core (a draft at `session/new`, turn zero at the first prompt), with tools through the editor's `fs/*`, permission, cancel, `usage_update` and `/export`; the projection of a session's facts and the core's stream items to `session/update`; and the launcher, `bun src/agent-acp/main.ts`. See its `MODEL.md`, and `src/agent-host/DESIGN.next.md` for the layers. | anything |
 | `src/examples/` | Examples, not part of the harness: the FizzBuzz session (a scripted model, its tools, a toy compaction) and example policies. | anything |
 | `scripts/probes/` | Live checks against the providers' APIs. Each reads its key from the environment and writes what it saw to a folder per run, `logs/probes/<probe>/<run>/` (not committed). | anything |
 | `scripts/trajectories/` | Importers that project Claude Code and Codex sessions' records through the core's decisions into `trajectories/` (not committed). | anything |
@@ -48,6 +50,7 @@ to a type with no unbranded string, however it is built.
 bun install
 bun run vidaimock:install   # the mock provider server the adapter tests run against
 bun run check               # installs it if missing, then typecheck, lint, check:brands, check:rules, tests
+bun run acp:logs [--errors]  # the newest ACP launch log (~/.labkit/logs; LABKIT_ACP_LOG_DIR, _LEVEL, _MAX_BYTES, _BACKUPS)
 bun scripts/trajectories/sweep.ts codex         # run both sweeps after changing a core machine, and
 bun scripts/trajectories/sweep.ts claude-code   # read the counts of observations not expected
 ```
@@ -55,3 +58,34 @@ bun scripts/trajectories/sweep.ts claude-code   # read the counts of observation
 The adapter tests start [VidaiMock](https://github.com/vidaiUK/VidaiMock), a server that answers as
 the providers' APIs do. `scripts/vidaimock.ts` downloads the pinned release for this platform into
 `.tools/`, refusing an archive whose SHA-256 differs from the one it holds.
+
+## The ACP agent
+
+`bun src/agent-acp/main.ts` is the command an editor launches: protocol v1 on stdin and stdout, a log
+file whose path it says once on stderr, exit 0 when stdin closes. It has been driven with the
+official SDK's client against the local Qwen; it has not yet been seen in an editor. For VS Code's
+ACP Client extension, the setting is the one the labkit monorepo's host uses
+(`docs/agent/vscode-acp.md` there), with this command:
+
+```json
+{
+  "acp.agents": {
+    "labkit-effect": {
+      "command": "/opt/homebrew/bin/bun",
+      "args": ["/ABS/labkit-effect/src/agent-acp/main.ts"],
+      "env": { "LABKIT_ACP_MODEL": "localhost/<a model the local server lists>" }
+    }
+  }
+}
+```
+
+`/ABS/labkit-effect` is the main checkout, not a worktree: a worktree is removed after its branch
+merges, and an editor setting that names one stops working without saying why. The command exists
+there once the branch that adds `src/agent-acp/` is merged, and it needs `bun install` run in that
+checkout first (a checkout without `node_modules` fails at the first import).
+
+The environment: `LABKIT_ACP_MODEL` (the model new sessions start on, `provider/model`; else the
+first the catalog lists), a provider's key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`) or
+the local server at `http://localhost:8000/v1`, `LABKIT_ACP_SESSIONS_DIR` (default
+`~/.labkit/sessions`), `LABKIT_ACP_LOCAL_TOOLS=1` (tools on the local disk instead of through the
+editor: a stopgap), and `LABKIT_ACP_LOG_DIR`, `_LEVEL`, `_MAX_BYTES`, `_BACKUPS`.

@@ -14,7 +14,7 @@
  * With `--output-format json` the answer comes with the session's figures; with `stream-json` each
  * fact is printed as it is recorded, then the result.
  *
- * Each session's facts and log are kept in `logs/cli/<session>/` (`store.ts`); `--continue` goes on from the
+ * Each session's facts and log are kept in `logs/cli/<session>/` (`agent-host/directory.ts`); `--continue` goes on from the
  * one written to last, `--resume <session>` from the one named (with no id, one picked from a list), so `bun run cli:watch --continue` restarts on a change to the code and
  * keeps the conversation.
  *
@@ -28,12 +28,14 @@ import { Console, Effect, Option, Stdio, Stream } from "effect";
 import { Argument, Command, Flag, Prompt } from "effect/cli";
 import { Effort, type ModelSettings, ThinkingMode } from "../../agent-machine/settings.ts";
 import { modelOf } from "../../agent-session/configuration/session-setup.ts";
+import { KeyedAndLocalCatalog, keyOf, keyVariables, known, ModelCatalog } from "../../agent-host/catalog.ts";
+import { latestSession, readSession, storedSessions, summaryOf } from "../../agent-host/directory.ts";
+import { LogsToFile, LogsToStderr } from "../../agent-host/logs.ts";
 import { invalid } from "./invalid.ts";
-import { keyOf, keyVariables, known, localModels, localServer, targetOf } from "./models.ts";
+import { targetOf } from "./models.ts";
 import { printOnce } from "./print.ts";
 import { repl, Terminal } from "./repl.ts";
-import { type Config, Headless, LogsToFile, LogsToStderr, withSession } from "./session.ts";
-import { latestSession, readSession, storedSessions, storeFolder, summaryOf } from "./store.ts";
+import { type Config, Headless, logFileOf, storeFolder, withSession } from "./session.ts";
 
 const optional = <A>(flag: Flag.Flag<A>) => flag.pipe(Flag.optional, Flag.map(Option.getOrUndefined));
 const text = (name: string, description: string, ...aliases: Array<string>) =>
@@ -112,19 +114,19 @@ const shortly = (at: Date | undefined): string => (at === undefined ? "?" : at.t
  */
 const resumed = (named: string, interactive: boolean) =>
   Effect.gen(function* () {
-    if (named !== "") return yield* readSession(named);
+    if (named !== "") return yield* readSession(storeFolder, named);
     if (!interactive) return yield* invalid("--resume needs a session id when there is no terminal to pick one at.");
-    const stored = yield* storedSessions();
+    const stored = yield* storedSessions(storeFolder);
     if (stored.length === 0) return yield* invalid(`No session to resume: ${storeFolder} holds none.`);
     const choices = yield* Effect.forEach(stored, ({ sessionId, at }) =>
-      readSession(sessionId).pipe(
+      readSession(storeFolder, sessionId).pipe(
         Effect.flatMap(({ facts }) => summaryOf(facts)),
         Effect.map(({ turns, model }) => `${shortly(at)}  ${turns} turn${turns === 1 ? "" : "s"}  ${model}  ${sessionId}`),
         Effect.orElseSucceed(() => `${shortly(at)}  (does not read)  ${sessionId}`),
         Effect.map((title) => ({ title, value: sessionId })),
       ),
     );
-    return yield* readSession(yield* Prompt.Select({ message: "Resume which session?", choices }));
+    return yield* readSession(storeFolder, yield* Prompt.Select({ message: "Resume which session?", choices }));
   });
 
 /**
@@ -147,11 +149,18 @@ const configOf = (options: Options, interactive: boolean) =>
       return config;
     }
     if (system !== undefined) return yield* invalid("A continued session keeps the system prompt it opened with: all sessions have ImmutableSystemPrompt until further notice.");
-    const latest = options.resume === undefined ? yield* latestSession() : yield* resumed(options.resume, interactive);
+    const latest = options.resume === undefined ? yield* latestSession(storeFolder) : yield* resumed(options.resume, interactive);
     const now = yield* modelOf(latest.facts);
     const config: Config = { sessionId: latest.sessionId, target: yield* targetOf(options.model ?? `${now.provider}/${now.model}`), settings, system, continues: latest.facts, ...permissions };
     return config;
-  });
+  }).pipe(
+    Effect.catchTags({
+      DirectoryUnreadable: (error) => Effect.fail(invalid(`The session store could not be read: ${error.message}`)),
+      SessionNotFound: (error) => Effect.fail(invalid(`No session ${error.sessionId} in ${error.root}.`)),
+      NoSessionStored: (error) => Effect.fail(invalid(`No session to continue: ${error.root} holds none.`)),
+      SessionStoreFailed: (error) => Effect.fail(invalid(error.message)),
+    }),
+  );
 
 export const cli = Command.make(
   "cli",
@@ -161,7 +170,7 @@ export const cli = Command.make(
     const interactive = yield* stdio.stdinIsTerminal;
     const config = yield* configOf(options, interactive);
     if (!options.print)
-      return yield* withSession(config, LogsToFile(config.sessionId), interactive ? Terminal : Headless, (session) => repl(session, config, options.prompt, interactive));
+      return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), interactive ? Terminal : Headless, (session) => repl(session, config, options.prompt, interactive));
     // Piped input is read only when no prompt was given: a shell that leaves stdin open would
     // otherwise keep a prompted run waiting for an end of input that never comes.
     const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));
@@ -185,8 +194,13 @@ export const cli = Command.make(
           ([provider, listed]) => Console.log(`${provider} (${keyOf(provider) === undefined ? `no ${keyVariables[provider] ?? "key"}` : "key set"}): ${Object.keys(listed).join(", ")}`),
           { discard: true },
         );
-        const local = yield* localModels;
-        yield* Console.log(`localhost (${localServer}): ${local === undefined ? "not answering" : local.length === 0 ? "no models" : local.join(", ")}`);
+        const sources = yield* (yield* ModelCatalog).sources;
+        yield* Effect.forEach(
+          sources.filter(({ provider }) => !(provider in known)),
+          ({ provider, models, at }) =>
+            Console.log(`${provider}${at === undefined ? "" : ` (${at})`}: ${models === undefined ? "not answering" : models.length === 0 ? "no models" : models.join(", ")}`),
+          { discard: true },
+        );
         yield* Console.log("Name a model with --model or /model as it is listed here, or as provider/model: openai/gpt-5.5, localhost/<a local model>.");
       }),
     ).pipe(Command.withDescription("The known models, which providers have a key set, and the local server's models")),
@@ -203,7 +217,8 @@ export const withResumeValue = (args: ReadonlyArray<string>): ReadonlyArray<stri
     return (arg === "--resume" || arg === "-r") && (next === undefined || next.startsWith("-")) ? [arg, ""] : [arg];
   });
 
-export const run = (args: ReadonlyArray<string>) => Command.runWith(cli, { version: "0.1.0" })(withResumeValue(args));
+/** Runs the CLI with `args`; the model catalog is the well-known models whose provider has a key set, and the local server's. */
+export const run = (args: ReadonlyArray<string>) => Command.runWith(cli, { version: "0.1.0" })(withResumeValue(args)).pipe(Effect.provide(KeyedAndLocalCatalog));
 export const main = () => run(process.argv.slice(2)).pipe(Effect.provide(BunServices.layer), BunRuntime.runMain);
 
 if (import.meta.main) main();

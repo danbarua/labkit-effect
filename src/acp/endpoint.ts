@@ -128,6 +128,8 @@ export interface Endpoint {
   readonly notify: GatedNotify<any>;
   // oxlint-disable-next-line typescript/no-explicit-any -- erased here, typed by the agent and the client
   readonly extensions: ExtensionClient<any, any>;
+  /** Whether the connection is open (`Peer.open`): `false` once it is ending, before its handlers are interrupted. */
+  readonly open: Effect.Effect<boolean>;
   /** Completes when the connection ends. */
   readonly closed: Effect.Effect<void>;
 }
@@ -201,6 +203,7 @@ export const start = <V extends Version, R>(options: StartOptions<V, R>): Effect
         notify: ((method: string, payload: unknown) =>
           gated(method, payload, () => peer.notify(method, payload as never))) as never,
         extensions: { call: extensionCall as never, notify: peer.notify as never },
+        open: peer.open,
       };
       return endpoint;
     };
