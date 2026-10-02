@@ -18,6 +18,8 @@ session, is not. VS Code comes first, then the JetBrains AI extension (PyCharm, 
 protocol versions and features are those of the labkit monorepo's ACP host, for parity; what
 `session/load` sends back is the ACP side's to decide. In ACP, tools go through the editor.
 
+The layers, Dan's rulings and the order of work are in `src/agent-host/DESIGN.next.md`.
+
 A real ACP session's log
 (`~/.labkit/logs/acp-44517-ec9d22b3-8c0d-465a-83c7-9c227e0aec77.jsonl`, labkit-agent, local Qwen)
 is the set of capabilities a first working host needs: choose a model and a thinking level, send
@@ -61,6 +63,16 @@ model.
       prompt content as typed parts; the client half (sending, drawing, resolving `blob://`),
       labkit-web's.
 - [ ] Slash commands the host handles itself (`/export`), which are not input to the model.
+- [ ] The host's services, shared by the CLI and the ACP host and lifted out of the CLI
+      (`src/examples/cli-repl/{models,session,store}.ts`): the model catalog and how a model is
+      named, the provider clients, the services a session runs with, the permission policy for a
+      mode, the session directory, the logs.
+- [ ] Turn zero. A draft holds the model, its settings, the system prompt and the tools until the
+      first input; the session, and its facts, begin when the host opens it with them and gives it
+      the input. The options a draft offers come from the model and its settings alone
+      (`optionsFor`), not from a session's facts (`optionsOf`).
+- [ ] `Session` knows what a host asks of it: `prompt` (the input, and how the turn that took it
+      ended), `cancel` (`TurnInterrupted` for the turn under way) and `turn` (the one under way).
 - [ ] `session/new`: a session opened with its store and its opening.
 - [ ] `session/update`: what the session's facts and what its requests stream (`streamed`) become
       for the client: text and thinking as they arrive, tool calls and how they end, the plan.
@@ -149,6 +161,24 @@ with no model, its attachments as pointers and one line for each tool call (`dig
         schema refuses fields it does not define (read from the schema; not seen).
       - OpenAI, when a host sends its Chat Completions there: the output limit as
         `max_completion_tokens` (it refuses `max_tokens` for its o-series models).
+- [ ] The text and thinking of a response as it arrives, the same for every adapter. `streamed`
+      passes a provider's own events (`ModelStreamed`) and each part once it is whole
+      (`ModelPartArrived`); a host cannot draw text and thinking as they arrive without reading each
+      provider's events. What the ACP host needs of Anthropic, OpenAI, xAI and Chat Completions
+      alike, none of it recorded:
+      - the text of an answer and the text of thinking as separate items, in the order they arrive,
+        each saying its turn, the response (step) it belongs to and which part of it;
+      - the items of a part, joined, are that part's text as `ModelPartArrived` gives it, and the
+        last of them comes before `ModelPartArrived` of that part (`ModelStreamInterval` batching
+        may stay);
+      - an adapter that does not stream gives none, only the whole parts;
+      - thinking only when the `observe` setting and the provider allow it to be seen;
+      - Chat Completions: `delta.content` is text; thinking is in whichever field the local server
+        streams it in; `finish_reason: "length"` ends the response `CutShort` (the host sends
+        `max_tokens`); tool call deltas add up to a call, and `ToolCallArrived` is recorded when it
+        is whole.
+      A stopped response (X1) records only the parts that were whole, so text drawn from the items
+      of a part that was not whole is not in the facts; the host takes that as it is.
 - [ ] Models. Built: the well-known models as generated `const` data (`bun run models:refresh`:
       models.dev's catalog merged with `well-known-models.measured.json`); a settings type per
       well-known model (`SettingsFor`); the values to offer for each setting of a model as it is
