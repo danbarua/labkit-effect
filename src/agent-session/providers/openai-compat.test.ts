@@ -64,8 +64,9 @@ test("a tool turn sends the catalog, then the call and a tool message with its r
   const question = { role: "user", content: [{ type: "text", text: "What is 2 + 3?" }] };
   expect(provider.paths).toEqual(["/chat/completions", "/chat/completions"]);
   expect(provider.headers[0]).toMatchObject({ authorization: "Bearer test-key" });
+  const streaming = { stream: true, stream_options: { include_usage: true } };
   expect(provider.bodies).toEqual([
-    { model: "boring-1", messages: [question], tools },
+    { model: "boring-1", messages: [question], tools, ...streaming },
     {
       model: "boring-1",
       messages: [
@@ -78,6 +79,7 @@ test("a tool turn sends the catalog, then the call and a tool message with its r
         { role: "tool", tool_call_id: "call_1", content: "5" },
       ],
       tools,
+      ...streaming,
     },
   ]);
   expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Completed" } } });
@@ -110,4 +112,44 @@ test("the choice's message becomes parts: content, calls to any tool name, and o
   });
   const ended = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ToolEnded");
   expect(ended as unknown).toMatchObject({ observation: { call: "call_9", outcome: { _tag: "Failed", reason: { _tag: "NotFound" } } } });
+});
+
+test("the response streams: its usage comes in the last chunk, and a tool call is run once its response has it", async () => {
+  const { facts } = await turn([{ ...callsAdd, usage: { prompt_tokens: 40, completion_tokens: 12, completion_tokens_details: { reasoning_tokens: 5 } } }, answers]);
+  const observed = facts.flatMap((fact) => (fact._tag === "Observed" ? [fact.observation] : []));
+  expect(observed.find((each) => each._tag === "ModelResponded") as unknown).toMatchObject({ usage: { input: 40, output: 12, thinking: 5 } });
+  // The call is passed on as it is complete, and recorded as arrived, before the response is recorded whole.
+  const tags = observed.map((each) => each._tag);
+  expect(tags.indexOf("ToolCallArrived")).toBeGreaterThan(-1);
+  expect(tags.indexOf("ToolCallArrived")).toBeLessThan(tags.indexOf("ModelResponded"));
+});
+
+test("a stream that ends with no finish_reason was cut short: the request fails, and is not made again", async () => {
+  const chunk = (delta: unknown) => `data: ${JSON.stringify({ id: "c", choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`;
+  let requests = 0;
+  const server = Bun.serve({
+    port: 0,
+    fetch: () => {
+      requests += 1;
+      return new Response([chunk({ role: "assistant" }), chunk({ content: "Hal" })].join(""), { headers: { "content-type": "text/event-stream" } });
+    },
+  });
+  stops.push(() => server.stop(true));
+  const facts = await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
+      yield* session.observe(boringOpening());
+      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
+      yield* session.idle;
+      return yield* session.facts;
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(BoringModelProvider, TurnContextAssembler, OpenAiCompatModelClient.pipe(Layer.provide(openAiCompatAt(server.url))), CountingTurns, NoTurnEndHooks, SmolToolRunner),
+      ),
+    ),
+  );
+  expect(requests).toBe(1);
+  expect(facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelFailed") as unknown).toMatchObject({
+    observation: { failure: expect.stringContaining("The stream ended with no finish_reason") },
+  });
 });

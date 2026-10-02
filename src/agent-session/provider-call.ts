@@ -174,15 +174,9 @@ export const postJson = (http: HttpClient.HttpClient, caller: Caller, post: Post
     Effect.flatMap((text) => parsed(caller, text)),
   );
 
-/**
- * The response to `post`, as the server-sent events it streams: each event's data, parsed as JSON,
- * as it arrives. A stream is sent chunked, with no `Content-Length`; one closed before its last
- * chunk fails as a transport error. The response had begun, so it is not retried.
- */
-export const postEvents = (http: HttpClient.HttpClient, caller: Caller, post: Post): Stream.Stream<Json, AiError.AiError> =>
-  send(http, caller, post).pipe(
-    Effect.map((response) => response.stream),
-    Stream.unwrap,
+/** A response's server-sent events: each event's data, parsed as JSON, as it arrives. */
+const eventsOf = (caller: Caller, response: HttpClientResponse.HttpClientResponse): Stream.Stream<Json, AiError.AiError> =>
+  response.stream.pipe(
     Stream.decodeText,
     Stream.pipeThroughChannel(Sse.decode()),
     Stream.mapError((error) => {
@@ -196,7 +190,34 @@ export const postEvents = (http: HttpClient.HttpClient, caller: Caller, post: Po
           return fromHttp(caller)(error);
       }
     }),
+    // Chat Completions ends its stream with a `[DONE]` that is not JSON.
+    Stream.takeWhile((event) => event.data !== "[DONE]"),
     Stream.mapEffect((event) => parsed(caller, event.data)),
+  );
+
+/**
+ * The response to `post`, as the server-sent events it streams: each event's data, parsed as JSON,
+ * as it arrives. A stream is sent chunked, with no `Content-Length`; one closed before its last
+ * chunk fails as a transport error. The response had begun, so it is not retried.
+ */
+export const postEvents = (http: HttpClient.HttpClient, caller: Caller, post: Post): Stream.Stream<Json, AiError.AiError> =>
+  send(http, caller, post).pipe(
+    Effect.map((response) => eventsOf(caller, response)),
+    Stream.unwrap,
+  );
+
+/**
+ * As `postEvents`, from a server that may answer a request to stream with the whole response
+ * instead: a response that is not `text/event-stream` is read whole, as JSON, and is the one event.
+ */
+export const postEventsOrWhole = (http: HttpClient.HttpClient, caller: Caller, post: Post): Stream.Stream<Json, AiError.AiError> =>
+  send(http, caller, post).pipe(
+    Effect.map((response) =>
+      (response.headers["content-type"] ?? "").includes("text/event-stream")
+        ? eventsOf(caller, response)
+        : Stream.fromEffect(bodyText(caller, response).pipe(Effect.flatMap((text) => parsed(caller, text)))),
+    ),
+    Stream.unwrap,
   );
 
 /** Fails with the response's text, when a provider's response does not have the shape expected. */

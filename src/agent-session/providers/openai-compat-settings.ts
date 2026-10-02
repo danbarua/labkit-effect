@@ -10,8 +10,9 @@
  * `minimal`, `low`, `medium`, `high` and `xhigh` and refuses `max` with a 400; its default is
  * `none`; with any effort but `none` the response carries `reasoning_content`.
  *
- * The other settings are not sent, because what each compatible provider takes for them differs;
- * each one asked for is returned as adjusted.
+ * The output limit is sent as `max_tokens`; the server ends a response that reaches it with
+ * `finish_reason: length`. The other settings are not sent, because what each compatible provider
+ * takes for them differs; each one asked for is returned as adjusted.
  */
 
 import type { ModelSettings } from "../../agent-machine/settings.ts";
@@ -29,12 +30,16 @@ export function openAiCompatSettings(settings: ModelSettings = {}, efforts?: Rea
       : []),
     ...effortAdjusted,
     ...(settings.observe === undefined ? [] : [{ adjusted: { _tag: "Observe" as const, asked: settings.observe }, reason }]),
-    ...(settings.maxOutputTokens === undefined
-      ? []
-      : [{ adjusted: { _tag: "MaxOutputTokens" as const, asked: settings.maxOutputTokens }, reason }]),
     ...(settings.cache === undefined ? [] : [{ adjusted: { _tag: "Cache" as const, asked: settings.cache }, reason }]),
   ];
-  return { fields: sent === undefined ? {} : { reasoning_effort: sent }, headers: {}, adjusted };
+  return {
+    fields: {
+      ...(sent === undefined ? {} : { reasoning_effort: sent }),
+      ...(settings.maxOutputTokens === undefined ? {} : { max_tokens: settings.maxOutputTokens }),
+    },
+    headers: {},
+    adjusted,
+  };
 }
 
 /** The same for a request's target: its settings, and the efforts known of its model. */

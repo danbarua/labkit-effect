@@ -232,7 +232,7 @@ test("OpenAI: an effort a model does not accept is sent as the nearest it does, 
   expect(openAiSettings({ effort: "max" }).fields).toEqual({ reasoning: { effort: "max" } });
 });
 
-test("Chat Completions: the effort is sent as reasoning_effort, none for thinking off; the other settings are adjusted as not sent", () => {
+test("Chat Completions: the effort is sent as reasoning_effort, none for thinking off, and the output limit as max_tokens; the other settings are adjusted as not sent", () => {
   expect(openAiCompatSettings({})).toEqual({ fields: {}, headers: {}, adjusted: [] });
   expect(openAiCompatSettings({ effort: "high", thinking: "auto" })).toEqual({ fields: { reasoning_effort: "high" }, headers: {}, adjusted: [] });
   expect(openAiCompatSettings({ thinking: "off", effort: "low" })).toEqual({
@@ -243,13 +243,11 @@ test("Chat Completions: the effort is sent as reasoning_effort, none for thinkin
   // A model with no list of efforts is sent what was asked; one with a list, the nearest it takes.
   expect(openAiCompatSettings({ effort: "max" }).fields).toEqual({ reasoning_effort: "max" });
   expect(openAiCompatSettings({ effort: "max" }, ["none", "low", "medium", "high", "xhigh"]).fields).toEqual({ reasoning_effort: "xhigh" });
+  // The output limit is sent as max_tokens.
   expect(openAiCompatSettings({ observe: "all", maxOutputTokens: TokenCount.make(2000) }) as unknown).toEqual({
-    fields: {},
+    fields: { max_tokens: 2000 },
     headers: {},
-    adjusted: [
-      { adjusted: { _tag: "Observe", asked: "all" }, reason: "the Chat Completions adapter does not send this setting" },
-      { adjusted: { _tag: "MaxOutputTokens", asked: 2000 }, reason: "the Chat Completions adapter does not send this setting" },
-    ],
+    adjusted: [{ adjusted: { _tag: "Observe", asked: "all" }, reason: "the Chat Completions adapter does not send this setting" }],
   });
 });
 
@@ -424,13 +422,13 @@ test("the values offered for a setting are the ones the provider's adapter appli
     maxOutputTokens: true,
   });
   expect(choicesFor(target("anthropic", "claude-sonnet-5-5"), anthropicSettle)).toMatchObject({ thinking: ["auto", "between_tools"], cache: ["off", "5m", "1h"] });
-  // The Chat Completions adapter sends the effort alone; a model nothing is known of is offered every effort.
+  // The Chat Completions adapter sends the effort and the output limit; a model nothing is known of is offered every effort.
   expect(choicesFor(target("localhost", "some-model"), openAiCompatSettle)).toEqual({
     effort: ["low", "medium", "high", "xhigh", "max"],
     thinking: ["auto", "off"],
     observe: [],
     cache: [],
-    maxOutputTokens: false,
+    maxOutputTokens: true,
   });
 });
 

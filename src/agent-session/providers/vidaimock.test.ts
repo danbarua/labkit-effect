@@ -62,7 +62,7 @@ const adapters: ReadonlyArray<AtMock> = [
   },
   {
     name: "OpenAI-compatible Chat Completions",
-    streams: false,
+    streams: true,
     requests: (status) => openAiCompatRequests(noRetries).pipe(Effect.provide(openAiCompatAtMock(mock(), status))),
     client: (retries, status) => openAiCompatModelClient(retries).pipe(Layer.provide(openAiCompatAtMock(mock(), status))),
   },

@@ -62,3 +62,34 @@ export function openAiStream(whole: unknown): Response {
     { type: response["status"] === "incomplete" ? "response.incomplete" : "response.completed", response },
   ]);
 }
+
+/**
+ * A Chat Completions response as its stream: a chunk with the role, its content and each other text
+ * field in two pieces, each tool call by its index with its arguments in two pieces, a chunk with
+ * the `finish_reason`, a chunk with the usage and no choices, and `[DONE]`.
+ */
+export function chatStream(whole: unknown): Response {
+  const response = whole as Json;
+  const choice = ((response["choices"] ?? []) as ReadonlyArray<Json>)[0] ?? {};
+  const message = (choice["message"] ?? {}) as Json;
+  const { role: _role, tool_calls, ...fields } = message;
+  const { choices: _choices, usage, ...rest } = response;
+  const chunk = (delta: Json, finish: unknown = null) => ({ ...rest, object: "chat.completion.chunk", choices: [{ index: 0, delta, finish_reason: finish }] });
+  const halves = (text: string) => [text.slice(0, Math.ceil(text.length / 2)), text.slice(Math.ceil(text.length / 2))];
+  const chunks: Array<Json> = [chunk({ role: "assistant" })];
+  for (const [field, value] of Object.entries(fields)) {
+    if (typeof value === "string") for (const piece of halves(value)) chunks.push(chunk({ [field]: piece }));
+    else if (value !== null && value !== undefined) chunks.push(chunk({ [field]: value }));
+  }
+  ((tool_calls ?? []) as ReadonlyArray<Json>).forEach((call, index) => {
+    const fn = (call["function"] ?? {}) as Json;
+    const [first = "", second = ""] = halves(typeof fn["arguments"] === "string" ? fn["arguments"] : "");
+    chunks.push(chunk({ tool_calls: [{ index, id: call["id"], type: "function", function: { name: fn["name"], arguments: first } }] }));
+    chunks.push(chunk({ tool_calls: [{ index, function: { arguments: second } }] }));
+  });
+  chunks.push(chunk({}, choice["finish_reason"] ?? "stop"));
+  if (usage !== undefined) chunks.push({ ...rest, object: "chat.completion.chunk", choices: [], usage });
+  return new Response([...chunks.map((each) => `data: ${JSON.stringify(each)}\n\n`), ": keepalive\n\n", "data: [DONE]\n\n"].join(""), {
+    headers: { "content-type": "text/event-stream" },
+  });
+}

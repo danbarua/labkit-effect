@@ -3,7 +3,7 @@ import { OpenAiClient } from "@effect/ai-openai";
 import { OpenAiClient as OpenAiCompatClient } from "@effect/ai-openai-compat";
 import { Layer, Redacted } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
-import { openAiStream } from "./streams.ts";
+import { chatStream, openAiStream } from "./streams.ts";
 
 /** Effect's Anthropic client, sending requests to a local test server at `server`. */
 export function anthropicAt(server: URL) {
@@ -38,8 +38,9 @@ export function recordingServer(responses: ReadonlyArray<unknown>) {
       headers.push(Object.fromEntries(request.headers));
       bodies.push(await request.json());
       const response = responses[Math.min(bodies.length - 1, responses.length - 1)];
-      // The Responses adapter streams; the Chat Completions adapter does not.
-      return paths.at(-1) === "/responses" ? openAiStream(response) : Response.json(response);
+      // The Responses and Chat Completions adapters stream; counting, compaction and Anthropic's tests answer whole.
+      const body = bodies.at(-1) as { readonly stream?: unknown } | undefined;
+      return paths.at(-1) === "/responses" ? openAiStream(response) : paths.at(-1) === "/chat/completions" && body?.stream === true ? chatStream(response) : Response.json(response);
     },
   });
   return { url: server.url, bodies, headers, paths, stop: () => server.stop(true) };

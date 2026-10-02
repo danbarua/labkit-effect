@@ -10,23 +10,26 @@
  * yet; each one left out is logged. Of the session's settings the reasoning effort is sent, as
  * `reasoning_effort` (`openai-compat-settings.ts`); each other one asked for is recorded as adjusted.
  *
- * In: the first choice's message becomes the observation's parts in order: its `content` is
- * `Text`, each of its `tool_calls` is `ToolCall` (whatever the tool's name), its arguments kept as
- * the text received; any other field of the message (`reasoning_content`, `refusal`, ...) is
- * `Unrecognised`, holding that field. The stop is the choice's `finish_reason`; everything else in
- * the response is `metadata`. A request that fails, after retries, is observed as `ModelFailed`.
+ * In: the response streams, and its chunks build the first choice's message (`respondOnce`). The
+ * message becomes the observation's parts in order: its `content` is `Text`, each of its
+ * `tool_calls` is `ToolCall` (whatever the tool's name), its arguments kept as the text received;
+ * any other field of the message (`reasoning_content`, `refusal`, ...) is `Unrecognised`, holding
+ * that field. The stop is the choice's `finish_reason`; the usage is the last chunk's; everything
+ * else the chunks held is `metadata`. A request that fails, after retries, is observed as
+ * `ModelFailed`.
  */
 
 import type { BlobId } from "../../agent-machine/blob.ts";
 import { knownOf, takesFile } from "../configuration/well-known-models.ts";
 import { OpenAiClient } from "@effect/ai-openai-compat";
-import { Effect, Layer, Ref, type Schema } from "effect";
+import { Effect, Layer, Ref, type Schema, Stream } from "effect";
 import type * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
 import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agent-machine/names.ts";
 import type { ModelPart, Observation } from "../../agent-machine/observation.ts";
 import { type ContextMessage, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
-import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postJson, type Retries, withRetries } from "../provider-call.ts";
+import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEventsOrWhole, type Retries, withRetries } from "../provider-call.ts";
+import { ModelStream } from "../model-stream.ts";
 import { reportAdjusted } from "../configuration/settings.ts";
 import { openAiCompatSettle } from "./openai-compat-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
@@ -197,6 +200,68 @@ const chatUsageIn = (reported: Json | undefined) => {
   return usage === undefined ? {} : { usage };
 };
 
+/**
+ * A message as its stream's deltas build it. A text field (`content`, `reasoning_content`, ...) is
+ * its deltas joined in order; an array field, its deltas appended; any other field, as its last delta
+ * gave it. Tool calls are kept by their `index`, their `arguments` joined and their `id` and name
+ * as first given; a call with no index is the one its `id` names, or a new one.
+ */
+interface Building {
+  readonly fields: Map<string, Json>;
+  readonly calls: Map<number, { id?: string; name?: string; arguments: string; rest: Record<string, Json> }>;
+}
+
+const joined = (before: Json | undefined, delta: Json): Json =>
+  typeof before === "string" && typeof delta === "string"
+    ? before + delta
+    : Array.isArray(before) && Array.isArray(delta)
+      ? [...before, ...delta]
+      : delta;
+
+function added(building: Building, delta: Schema.JsonObject): ReadonlyArray<number> {
+  const { role: _role, tool_calls, ...rest } = delta;
+  for (const [field, value] of Object.entries(rest)) if (value !== null && value !== undefined) building.fields.set(field, joined(building.fields.get(field), value));
+  if (!Array.isArray(tool_calls)) return [];
+  return (tool_calls as ReadonlyArray<Json>).flatMap((each) => {
+    if (!isObject(each)) return [];
+    const { index, id, function: fn, type: _type, ...extra } = each;
+    const byId = typeof id === "string" ? [...building.calls].find(([, call]) => call.id === id)?.[0] : undefined;
+    const at = typeof index === "number" ? index : (byId ?? building.calls.size);
+    const call = building.calls.get(at) ?? { arguments: "", rest: {} };
+    const named = isObject(fn ?? null) ? (fn as { readonly name?: Json; readonly arguments?: Json }) : {};
+    building.calls.set(at, {
+      ...(call.id === undefined && typeof id === "string" ? { id } : call.id === undefined ? {} : { id: call.id }),
+      ...(call.name === undefined && typeof named.name === "string" ? { name: named.name } : call.name === undefined ? {} : { name: call.name }),
+      arguments: call.arguments + (typeof named.arguments === "string" ? named.arguments : ""),
+      rest: { ...call.rest, ...(extra as Record<string, Json>) },
+    });
+    return [at];
+  });
+}
+
+/** A tool call as the message holds it, from what its deltas built. */
+const callOf = (call: { id?: string; name?: string; arguments: string; rest: Record<string, Json> }): Json => ({
+  ...call.rest,
+  id: call.id ?? null,
+  type: "function",
+  function: { name: call.name ?? null, arguments: call.arguments },
+});
+
+/** The message the deltas built. */
+const messageOf = (building: Building): Schema.JsonObject => ({
+  role: "assistant",
+  ...Object.fromEntries(building.fields),
+  ...(building.calls.size === 0 ? {} : { tool_calls: [...building.calls].sort(([a], [b]) => a - b).map(([, call]) => callOf(call)) }),
+});
+
+/**
+ * One request. The response streams (`stream: true`, with its usage in the last chunk): each chunk
+ * is passed on as it arrives, and a tool call once the next one begins (`ModelStream`); the
+ * observation is made from the message the chunks built, as a whole response's message is. A
+ * stream that ends with no `finish_reason` was cut short, and fails; a chunk that holds an `error`
+ * fails the request with it. A server that answers with the whole response instead is read as one
+ * chunk holding the whole message.
+ */
 const respondOnce = (
   http: HttpClient.HttpClient,
   post: Post,
@@ -204,24 +269,52 @@ const respondOnce = (
   turn: TurnId,
 ): Effect.Effect<Responded, AiError.AiError> =>
   Effect.gen(function* () {
-    const response = yield* postJson(http, caller, post);
-    const choices = isObject(response) ? response["choices"] : undefined;
-    const choice = Array.isArray(choices) ? (choices as ReadonlyArray<Json>)[0] : undefined;
-    const message = choice !== undefined && isObject(choice) ? choice["message"] : undefined;
-    if (!isObject(response) || choice === undefined || !isObject(choice) || message === undefined || !isObject(message))
-      return yield* invalidOutput(caller, `The response has no choice with a message: ${JSON.stringify(response)}`);
-    const { choices: _choices, ...metadata } = response;
-    const { message: _message, finish_reason, ...choiceRest } = choice;
+    const passOn = yield* ModelStream;
+    const building: Building = { fields: new Map(), calls: new Map() };
+    const passed = new Set<number>();
+    const end = yield* postEventsOrWhole(http, caller, post).pipe(
+      Stream.runFoldEffect(
+        (): { readonly finish: Json | undefined; readonly usage: Json | undefined; readonly metadata: Record<string, Json> } => ({ finish: undefined, usage: undefined, metadata: {} }),
+        (so, chunk) =>
+          Effect.gen(function* () {
+            yield* passOn({ _tag: "Chunk", chunk: receivedJson(chunk) });
+            if (!isObject(chunk)) return so;
+            if (chunk["error"] !== undefined && chunk["error"] !== null)
+              return yield* invalidOutput(caller, `The stream reported an error: ${JSON.stringify(chunk["error"])}`);
+            const { choices, usage, ...metadata } = chunk;
+            const choice = Array.isArray(choices) ? (choices as ReadonlyArray<Json>)[0] : undefined;
+            // A server that answers whole sends the message where a chunk sends its delta.
+            const delta = choice !== undefined && isObject(choice) ? (choice["delta"] ?? choice["message"]) : undefined;
+            const touched = delta !== undefined && isObject(delta) ? added(building, delta) : [];
+            // A call is whole once a later one begins.
+            const later = Math.max(-1, ...touched);
+            for (const [at, call] of building.calls)
+              if (at < later && !passed.has(at)) {
+                passed.add(at);
+                yield* passOn({ _tag: "Part", part: toolCall(callOf(call)) });
+              }
+            const finish = choice !== undefined && isObject(choice) && choice["finish_reason"] !== null && choice["finish_reason"] !== undefined ? choice["finish_reason"] : so.finish;
+            return { finish, usage: usage !== null && usage !== undefined ? usage : so.usage, metadata: { ...so.metadata, ...(metadata as Record<string, Json>) } };
+          }),
+      ),
+    );
+    if (end.finish === undefined) return yield* invalidOutput(caller, `The stream ended with no finish_reason: ${JSON.stringify(messageOf(building))}`);
+    const responded = parts(messageOf(building));
+    yield* Effect.forEach(
+      responded.filter((part) => part._tag !== "ToolCall" || ![...building.calls].some(([at, call]) => passed.has(at) && call.id === part.call)),
+      (part) => passOn({ _tag: "Part", part }),
+      { discard: true },
+    );
     return {
       _tag: "ModelResponded" as const,
       turn,
       provider: target.provider,
       model: target.model,
-      parts: parts(message),
-      stop: StopReason.make(typeof finish_reason === "string" ? finish_reason : JSON.stringify(finish_reason ?? null)),
-      ending: endingOf(endings, finish_reason),
-      ...chatUsageIn(metadata["usage"]),
-      metadata: receivedJson({ ...metadata, choice: choiceRest }),
+      parts: responded,
+      stop: StopReason.make(typeof end.finish === "string" ? end.finish : JSON.stringify(end.finish)),
+      ending: endingOf(endings, end.finish),
+      ...chatUsageIn(end.usage),
+      metadata: receivedJson({ ...end.metadata, ...(end.usage === undefined ? {} : { usage: end.usage }) }),
     };
   });
 
@@ -240,7 +333,7 @@ export const openAiCompatRequests = (
         const post: Post = {
           path: "/chat/completions",
           headers: settled.headers,
-          body: { ...(sent.json as Record<string, Json>), ...settled.fields },
+          body: { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true, stream_options: { include_usage: true } },
         };
         return reportAdjusted(turn, target, settled).pipe(
           Effect.andThen(logSupplied(sent.supplied, target, turn, leftOutLogged)),

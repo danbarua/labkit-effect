@@ -24,13 +24,15 @@ import { bracketedPaste, Multiline } from "./multiline.ts";
 import { answerTo, ask, type Config, endingOf, type Host, lastTurn, logFileOf } from "./session.ts";
 import type { LeftRunning } from "../../agent-machine/left-running.ts";
 
-/** What is printed after a turn: the answer, or how the turn ended when it gave none. */
+/** What is printed after a turn: the answer, saying so when it was cut short, or how the turn ended when it gave none. */
 const replyTo = (facts: ReadonlyArray<Fact>): string => {
   const turn = lastTurn(facts);
   const ending = endingOf(facts, turn);
   const answer = answerTo(facts, turn);
   if (ending?._tag === "Failed") return `(the turn failed: ${ending.failure})`;
-  return answer !== "" ? answer : `(the turn ended ${ending?._tag ?? "with nothing recorded"}, with no answer)`;
+  if (answer === "") return `(the turn ended ${ending?._tag ?? "with nothing recorded"}, with no answer)`;
+  // An answer cut short by a length limit (the output limit, or the context window) says so.
+  return ending?._tag === "CutShort" ? `${answer}\n(cut short: the response reached its length limit)` : answer;
 };
 
 const turn = (session: Session, input: string) =>

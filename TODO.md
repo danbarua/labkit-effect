@@ -128,10 +128,12 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 - [ ] The Chat Completions adapter against the local server (Rapid-MLX, vLLM-compatible, at
       `http://localhost:8000/v1`; OpenAPI docs at `/docs`). Built: the reasoning effort is sent as
       `reasoning_effort` (Qwen3.5-9B takes `none` to `xhigh` and refuses `max`); tool calls, both
-      ways (Qwen called `read_file` and `write_file` through the CLI). To do, for parity with
-      core-agent and for small tasks on the local model: streaming; `reasoning_content` sent back
-      (it is left out of every request now, and logged once for each model); an output limit; the
-      other settings.
+      ways (Qwen called `read_file` and `write_file` through the CLI); streaming, with the usage in
+      the last chunk and a tool call passed on once the next begins (a server that answers whole
+      is read as one chunk); the output limit, as `max_tokens`. To do: what the genre of Chat
+      Completions-compatible back-ends requires of a client, beyond this server: reasoning sent
+      back (this server ignores `reasoning_content` and `reasoning`, and counts only `<think>` in
+      `content`), the output limit's name, per-provider differences.
 - [ ] Models. Built: the well-known models as generated `const` data (`bun run models:refresh`:
       models.dev's catalog merged with `well-known-models.measured.json`); a settings type per
       well-known model (`SettingsFor`); the values to offer for each setting of a model as it is
