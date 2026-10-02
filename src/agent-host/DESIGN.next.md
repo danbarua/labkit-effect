@@ -75,10 +75,20 @@ if lower (`vscode-workspace.ts` in labkit-agent).
   two lifetimes. A draft that never gets input leaves nothing on disk, so `session/list` lists
   sessions that had a turn.
 - A session is a folder in the session directory. `facts.jsonl` is the core's journal
-  (`FileBackedSessionStore`). `host.json` is the host's own record of it (the working folder, its
-  name, whatever else the host keeps): `agent-host` stores and returns it as JSON and does not read
-  it. Listing reads the folders and orders them by when the facts were last written; the ACP host
-  filters on its record.
+  (`FileBackedSessionStore`). `host.json` is the host's own record of it (the working folder and a
+  title from the first prompt, whatever else the host keeps): `agent-host` stores and returns it as
+  JSON and does not read it. Listing reads the folders and orders them by when the facts were last
+  written; the ACP host filters on its record, so a session the CLI made, with no record, is not
+  listed and loads by its id.
+- Reopening (`session/load`, `resume`). The world is opened for the request's `cwd`; the model,
+  system prompt and tool catalog come from the facts. A turn the facts left running is ended, not
+  gone on with: the editor that closed mid-turn is not watching, and what the turn had begun (a
+  model request, tools that change things) should not run unseen. The order matters because the
+  feed subscribes to facts when it starts: end the turn left running, replay the facts through the
+  projection (load only), start the feed from the state the replay leaves, and only then `goOn`.
+- A fork copied as it is would keep `SessionOpened { session }` naming its source, which the loop's
+  log annotations, the `/export` header and compaction's summaries read. The core has no identity
+  for a fork yet (`TODO.md`, Sessions), so the ACP host does not advertise `fork`.
 
 ## Projection
 
@@ -86,8 +96,9 @@ One pure projection from the core's output to `session/update`, for the live vie
 `session/load`. It takes the facts (`session.subscribe`, or the stored ones) and the core's captured
 items (`session.streamed`: `ModelDelta`, `ModelPartArrived`, `ModelResponseEnded`), merged in any
 order, and says the updates each gives. The two feeds have no order between them, and each
-response's text is sent once whichever merge a host makes (`agent-acp` PJ9). A host subscribes to
-`streamed` before it reads the facts for a load, so no delta of a request under way is missed.
+response's text is sent once whichever merge a host makes (`agent-acp` PJ9). A load has no request
+under way (a turn left running is ended before the facts are read), so there are no deltas to miss
+between the replay and the feed that goes on from it.
 
 | Core | ACP update |
 |---|---|
@@ -159,13 +170,14 @@ the projection; the draft; ACP's config options, permission request, stop reason
 `max_tokens`. The ACP host over stdio for protocol v1 (`makeHost` and the launcher: `session/new`,
 `session/set_config_option`, `session/prompt`, `session/cancel`, `session/close`,
 `session/request_permission`, `usage_update`, `/export`, tools through the editor's `fs/*`), run
-against the local Qwen with the SDK's client.
+against the local Qwen with the SDK's client. The session directory with the host's record, and
+`session/load`, `resume` and `list` over it.
 
 1. The ACP host in VS Code, then JetBrains.
 2. The CLI opens its session at its first input, from a draft, and has `/export`: the place to try
-   turn zero. The session directory with the host's record.
-3. `session/load`, `resume`, `list`, `fork`; `terminal/*`; MCP; attachments; Streamable HTTP with a
-   token and one holder for a session; elicitation.
+   turn zero.
+3. `terminal/*`; MCP; attachments; Streamable HTTP with a token and one holder for a session;
+   elicitation; `session/delete`; `session/fork` once the core has an identity for a fork.
 4. labkit's `app-acp` as a consumer.
 
 ## Open

@@ -22,8 +22,8 @@ The domain core of a coding harness, and the layers around it.
 | `src/agent-context/` | Context assembly: what the model is sent, from system prompts, tool catalogs and a view of the conversation. See its `MODEL.md`. | anything |
 | `src/instrumentation/` | Tool usage counted from facts, as Effect metrics, and OpenTelemetry. See its `README.md`. | anything |
 | `src/acp/` | The Agent Client Protocol in Effect: schemas generated from the official SDK's JSON Schemas, a two-way JSON-RPC peer, the stdio and Streamable HTTP wires, and version and capability negotiation. Its tests drive it with the official SDK. See its `MODEL.md`. | anything but `@agentclientprotocol/sdk`, which only its tests import |
-| `src/agent-host/` | What both hosts share, lifted from the CLI: the model catalog, the provider clients, the services a session runs with, the permission policy for a mode, the folder sessions are kept in, log files (and the ACP launcher's, JSONL, rotated), the draft a session is before turn zero, and a session's transcript as Markdown. See its `MODEL.md`, and `DESIGN.next.md` for where the hosts are going. | the core; never `src/acp` or a host |
-| `src/agent-acp/` | The ACP host, protocol v1 over stdio: `makeHost` joins `src/acp` to sessions of the core (a draft at `session/new`, turn zero at the first prompt), with tools through the editor's `fs/*`, permission, cancel, `usage_update` and `/export`; the projection of a session's facts and the core's stream items to `session/update`; and the launcher, `bun src/agent-acp/main.ts`. See its `MODEL.md`, and `src/agent-host/DESIGN.next.md` for the layers. | anything |
+| `src/agent-host/` | What both hosts share, lifted from the CLI: the model catalog, the provider clients, the services a session runs with, the permission policy for a mode, the folder sessions are kept in and a host's record of a session beside its facts, log files (and the ACP launcher's, JSONL, rotated), the draft a session is before turn zero, and a session's transcript as Markdown. See its `MODEL.md`, and `DESIGN.next.md` for where the hosts are going. | the core; never `src/acp` or a host |
+| `src/agent-acp/` | The ACP host, protocol v1 over stdio: `makeHost` joins `src/acp` to sessions of the core (a draft at `session/new`, turn zero at the first prompt), with tools through the editor's `fs/*`, permission, cancel, `usage_update`, `/export`, and `session/load`, `resume` and `list` over the sessions the directory keeps; the projection of a session's facts and the core's stream items to `session/update`; and the launcher, `bun src/agent-acp/main.ts`. See its `MODEL.md`, and `src/agent-host/DESIGN.next.md` for the layers. | anything |
 | `src/examples/` | Examples, not part of the harness: the FizzBuzz session (a scripted model, its tools, a toy compaction) and example policies. | anything |
 | `scripts/probes/` | Live checks against the providers' APIs. Each reads its key from the environment and writes what it saw to a folder per run, `logs/probes/<probe>/<run>/` (not committed). | anything |
 | `scripts/trajectories/` | Importers that project Claude Code and Codex sessions' records through the core's decisions into `trajectories/` (not committed). | anything |
@@ -69,6 +69,14 @@ labkit's ACP client and this agent in it, as `labkit-effect`. It builds the clie
 `LABKIT_VSCODE_CLIENT` (labkit-web's `packages/app-vscode`; set it in `.env`) and runs VS Code with
 user data of its own (`~/.labkit/vscode-dev`), whose `settings.json` it gives the agent's entry in
 `acp.agents`; the user's own settings are not changed. Run `bun install` in this checkout first.
+
+Each session that had a turn is a folder in the session directory: its facts (`facts.jsonl`) and
+the host's record of it (`host.json`: the working folder, and a title from the first prompt). The
+editor lists them (`session/list`, by working folder, the latest first) and reopens one with
+`session/load`, which replays its history, or `session/resume`, which does not. A turn the process
+left running (the editor closed mid-turn) is ended as interrupted when its session is reopened,
+and nothing it had begun is run again. A session is open in one process at a time. `session/fork`
+waits for the core (`TODO.md`, Sessions).
 
 The environment: `LABKIT_ACP_MODEL` (the model new sessions start on, `provider/model`; else the
 first the catalog lists), a provider's key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`) or

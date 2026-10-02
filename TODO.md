@@ -56,8 +56,8 @@ model.
       prices with the well-known models; `maxTurnRequests` as an example host policy; for ACP,
       `usage_update` and a turn's stop reason, where a vetoed request is `max_turn_requests` and a
       cut-short response `max_tokens` (`src/agent-acp/usage.ts`, `stop-reason.ts`), sent and
-      answered by the host after a prompt. To do in the host: `usage_update` after `session/load`
-      and when the numbers change; refuse the next prompt with an error at a session-level turn
+      answered by the host after a prompt, `session/load` and `resume`. To do in the host: sending
+      it when the numbers change; refuse the next prompt with an error at a session-level turn
       limit (ACP has no stop reason for it). Open: after a compaction `used` is the last response's
       until the next one reports (an estimate would come from the next-request size estimate); a
       summarizer's own requests are not counted in `cost`. `PromptResponse.usage` is a draft; not
@@ -75,18 +75,22 @@ model.
 - [ ] The host's services, shared by the CLI and the ACP host (`src/agent-host`). Built: the model
       catalog, the provider clients, the services a session runs with, the permission policy for a
       mode, the folder sessions are kept in, log lines to a file or to stderr, the ACP launcher's
-      log file (JSONL, rotated, secrets redacted; `bun run acp:logs`) (its `MODEL.md`). To do: a
+      log file (JSONL, rotated, secrets redacted; `bun run acp:logs`), and the host's own record of a
+      session in its folder (`host.json`, stored and returned as JSON) (its `MODEL.md`). To do: a
       hand-written `models.yml` as one more source of the catalog.
 - [ ] `session/update`. Built: the projection of a session's facts and of the core's captured items
       (`ModelDelta`, `ModelPartArrived`, `ModelResponseEnded`), merged in any order, to the client's
       updates, one function for the live view and for `session/load` (`src/agent-acp/projection.ts`),
       which the ACP host's feed sends: text and thinking as they arrive, tool calls and how they
-      end. To do: the plan.
-- [ ] `session/load`, `resume`, `list` and `fork` for ACP. Built: `session/close`; the host keeps
-      each session's facts in a file (`FileBackedSessionStore`, `~/.labkit/sessions`). To do: the
-      host's own record of a session next to its facts (its working folder, to list by; its
-      title); `session/load` sends the projection of the stored facts (`streamed` subscribed before
-      the facts are read).
+      end; `session/load` sends the projection of the stored facts before its answer, and the feed
+      goes on from the state they leave. To do: the plan.
+- [ ] The ACP host's sessions across processes. Built: each session's facts in a file
+      (`FileBackedSessionStore`, `~/.labkit/sessions`); the host's record of a session (`host.json`:
+      the working folder, a title from the first prompt), written at turn zero; `session/load` (the
+      stored facts replayed before the answer), `session/resume` (no replay) and `session/list`
+      (by working folder, newest first, paged), with `session_info_update`; a turn the facts left
+      running is ended, not gone on with; `session/close`. To do: `session/fork` (it waits for the
+      core: Forks, under Sessions); `session/delete`; additional directories.
 - [ ] The ACP host in an editor: the launch command, and VS Code's behaviour with what it sends and
       draws (config options as selects, thinking, permission, tool call content). Then JetBrains.
 - [ ] Incomplete responses. Built: `RetryIncomplete(retries)` (`src/agent-host/incomplete.ts`), a
@@ -145,11 +149,20 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       `FileBackedSessionStore`); each fact written before anything is done on it; a failed write
       stops the session; a turn left running goes on (`goOn`: a model request made again, only
       `safe` tool calls run) or ends, as the host chooses (the REPL asks; `-p` goes on); Ctrl+C records
-      the turn as interrupted; the ACP host keeps its sessions in files too.
+      the turn as interrupted; the ACP host keeps its sessions in files too, and ends that turn
+      when it reopens one (`session/load`, `resume`).
 - [ ] Forks as sessions, and the turn pointer (`session/turn`; turn zero of a root points at
       itself). A fact is addressed by its session and its position. In the CLI,
       `--fork-session` (commented out): go on from an earlier turn of a session, as a new one, to
-      walk back past a turn a refusal followed.
+      walk back past a turn a refusal followed. The ACP host's `session/fork` waits for it and does
+      not advertise `fork`: copying a session's facts as they are keeps fact 1, `SessionOpened {
+      session }`, naming the source, and the loop reads its session from there (its log
+      annotations, the session's span, each request's `Work`), as do the `/export` header and
+      compaction's summaries (`agent-context/compaction.ts`), so a fork would act as its source.
+      What the host needs of the core: given a session's facts, a new `SessionId` and optionally a
+      position (whole turns up to it), the facts a new session begins with, its opening naming the
+      new session; the host appends them to a new store. Whether window summaries and blobs follow
+      a fork is the core's to say.
 
 ### Providers
 
