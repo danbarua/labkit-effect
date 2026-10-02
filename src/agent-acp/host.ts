@@ -33,14 +33,17 @@
  */
 
 import { isAbsolute, join } from "node:path";
-import { Clock, type Context, Effect, Exit, Fiber, FileSystem, Layer, Option, Schema, Scope, Semaphore } from "effect";
+import { Clock, type Context, Effect, Exit, Fiber, FileSystem, Layer, Option, type Path, Schema, Scope, Semaphore } from "effect";
 import * as Agent from "../acp/agent.ts";
 import { ErrorCode, type JsonRpcError } from "../acp/json-rpc.ts";
 import * as Protocol from "../acp/protocol.ts";
 import type { ContentBlock, McpServer, SessionConfigOption, SessionUpdate } from "../acp/schema/v1.gen.ts";
 import { SessionId as AcpSessionId } from "../acp/schema/v1.gen.ts";
 import { type Asked, askable, keyVariables, ModelCatalog, targetOf } from "../agent-host/catalog.ts";
-import { storeFileOf } from "../agent-host/directory.ts";
+import { sessionFolderOf, storeFileOf } from "../agent-host/directory.ts";
+import type { BlobRef } from "../agent-machine/blob.ts";
+import { MediaType } from "../agent-machine/received.ts";
+import { Blobs, BlobsInFolder } from "../agent-session/blobs.ts";
 import { chooseModel, defaultModel, type Draft, draftOf, opening, optionsOfDraft, saySettings, withDefaults } from "../agent-host/draft.ts";
 import { markdownOf } from "../agent-host/export.ts";
 import { KnownWithLocalServer, localServer, SettlingWithLocalServer } from "../agent-host/local-server.ts";
@@ -154,6 +157,32 @@ const promptText = (prompt: ReadonlyArray<ContentBlock>): string =>
     .flatMap((block) => (block.type === "text" ? [block.text] : block.type === "resource_link" ? [`[${block.name}](${block.uri})`] : []))
     .join("\n");
 
+/** The last part of `uri`'s path, as a file's name. */
+const nameIn = (uri: string | null | undefined): string | undefined => {
+  const last = uri?.split(/[/\\]/).filter((part) => part !== "").at(-1);
+  return last === undefined || last === "" ? undefined : decodeURIComponent(last);
+};
+
+/**
+ * The input a prompt's blocks give: its text (`promptText`), and each image and embedded resource
+ * (an editor's file, as text or bytes) put in the session's blob store and attached by reference.
+ */
+const promptInput = (prompt: ReadonlyArray<ContentBlock>) =>
+  Effect.gen(function* () {
+    const blobs = yield* Blobs;
+    const attachments: Array<BlobRef> = [];
+    for (const block of prompt) {
+      if (block.type === "image") attachments.push(yield* blobs.store(Buffer.from(block.data, "base64"), MediaType.make(block.mimeType), nameIn(block.uri)));
+      if (block.type === "resource") {
+        const resource = block.resource;
+        const bytes = "text" in resource ? new TextEncoder().encode(resource.text) : Buffer.from(resource.blob, "base64");
+        const mediaType = resource.mimeType ?? ("text" in resource ? "text/plain" : "application/octet-stream");
+        attachments.push(yield* blobs.store(bytes, MediaType.make(mediaType), nameIn(resource.uri)));
+      }
+    }
+    return { text: InputText.make(promptText(prompt)), ...(attachments.length === 0 ? {} : { attachments }) };
+  });
+
 /** What `session/new` says when no model can be asked. */
 const noModel = `No model to ask: set ${Object.values(keyVariables).join(", ")} for a provider's models, or start the local server at ${localServer}, or name one with LABKIT_ACP_MODEL as provider/model.`;
 
@@ -165,9 +194,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
   const world: World<R> | World<FileSystem.FileSystem> =
     options.world === undefined || options.world === "editor" ? editorWorld : options.world === "local" ? workspaceWorld : options.world;
   const services = options.services ?? HostSessionServices;
-  return Agent.implement<Protocol.V1Version, ModelCatalog | FileSystem.FileSystem | Scope.Scope | R>(Protocol.v1, {
+  return Agent.implement<Protocol.V1Version, ModelCatalog | FileSystem.FileSystem | Path.Path | Scope.Scope | R>(Protocol.v1, {
     capabilities: {
-      promptCapabilities: { image: false, audio: false, embeddedContext: false },
+      promptCapabilities: { image: true, audio: false, embeddedContext: true },
       loadSession: true,
       sessionCapabilities: { close: {}, list: {}, resume: {} },
     },
@@ -254,7 +283,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             const scope = yield* Scope.fork(connectionScope);
             return yield* Effect.gen(function* () {
               const file = storeFileOf(options.directory, id);
-              const layer = Layer.mergeAll(services(world.runner), PermissionsFor(permissionMode, true)).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
+              // The session's blobs (its inputs' images and files) are kept in its folder, so a session gone on from its facts has them.
+              const blobs = BlobsInFolder(join(sessionFolderOf(options.directory, id), "blobs"));
+              const layer = Layer.mergeAll(services(world.runner), PermissionsFor(permissionMode, true), blobs).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
               const context = yield* Layer.buildWithScope(layer, scope);
               const session = yield* openSession.pipe(Effect.provideContext(context), Scope.provide(scope));
 
@@ -335,7 +366,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           );
 
         /** Opens the draft if it is one, runs the turn, waits for the feed to take its end, sends the usage and gives the stop. */
-        const turnOf = (entry: Entry, text: string) =>
+        const turnOf = (entry: Entry, text: string, blocks: ReadonlyArray<ContentBlock>) =>
           Effect.gen(function* () {
             const began = yield* Clock.currentTimeMillis;
             const opened = yield* entry.lock.withPermit(
@@ -348,7 +379,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             );
             const { session, context, feed } = opened;
             yield* Effect.logInfo(logKeys.prompt.admitted, { characters: text.length });
-            yield* session.prompt({ text: InputText.make(text) }).pipe(
+            const input = yield* promptInput(blocks).pipe(Effect.provideContext(context));
+            yield* session.prompt(input).pipe(
               Effect.provideContext(context),
               reportedBy(acpUser),
               Effect.catchTag("SessionStoreFailed", (error) =>
@@ -502,7 +534,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             );
           });
 
-        const handlers: Agent.AgentHandlers<Protocol.V1Version, ModelCatalog | FileSystem.FileSystem | Scope.Scope | R> = {
+        const handlers: Agent.AgentHandlers<Protocol.V1Version, ModelCatalog | FileSystem.FileSystem | Path.Path | Scope.Scope | R> = {
           "session/new": ({ cwd, mcpServers }) =>
             traced(
               Effect.gen(function* () {
@@ -646,7 +678,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 const run =
                   prompt.length === 1 && text.trim() === "/export"
                     ? exportOf(entry)
-                    : turnOf(entry, text).pipe(
+                    : turnOf(entry, text, prompt).pipe(
                         Effect.onInterrupt(() =>
                           Effect.flatMap(connection.open, (open) =>
                             open

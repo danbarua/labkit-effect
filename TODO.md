@@ -69,9 +69,9 @@ model.
       a text file as its text, and anything a model is not known to take as a pointer, logged;
       counting a request's input before it is sent (`anthropic-count.ts`, `openai-count.ts`; xAI has
       no endpoint). Live: all three read an attached image and PDF, and an image a tool returned;
-      the counts before sending matched what the responses reported. Left: the host's intake of ACP
-      prompt content as typed parts; the client half (sending, drawing, resolving `blob://`),
-      labkit-web's.
+      the counts before sending matched what the responses reported; the ACP host takes a prompt's
+      images and embedded files into the session's blob store, kept in its folder. Left: the
+      client half (sending, drawing, resolving `blob://`), labkit-web's.
 - [ ] The host's services, shared by the CLI and the ACP host (`src/agent-host`). Built: the model
       catalog, the provider clients, the services a session runs with, the permission policy for a
       mode, the folder sessions are kept in, log lines to a file or to stderr, the ACP launcher's

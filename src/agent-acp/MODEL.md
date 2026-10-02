@@ -254,6 +254,10 @@ twice.
 - AG18. Each session has a permission mode, which the host keeps: it starts as the launcher says
   (`LABKIT_ACP_PERMISSION_MODE`, else `default`) and is the option `permission_mode` (category
   `mode`); a change applies from the next tool call. A value that is not a mode is -32602.
+- AG19. The host takes images and embedded resources in a prompt (`promptCapabilities.image`,
+  `embeddedContext`): each is put in the session's blob store, kept in its folder (`blobs/`), and
+  attached to the input by reference, with its media type and the name its URI ends in; a
+  resource link is a Markdown link in the text.
 - AG17. `editorWorld` offers `edit_file` to a client that advertised both `fs` methods, and
   `run_command` to one that advertised `terminal`. `edit_file` reads the file through the editor
   and writes it back with one occurrence of `old_text` replaced; `old_text` that occurs never or

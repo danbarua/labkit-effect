@@ -437,6 +437,37 @@ test("AG4: session/cancel during a turn ends its prompt cancelled, and the sessi
   ]);
 });
 
+test("AG19: a prompt's image and embedded file are attached to the input, their bytes in the session's folder", async () => {
+  const host = startHost({ script: [answer({ _tag: "Text", text: "Seen." })] });
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const sessionId = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", {
+      sessionId: created.sessionId,
+      prompt: [
+        { type: "text", text: "What are these?" },
+        { type: "image", data: png.toString("base64"), mimeType: "image/png", uri: "file:///tmp/shot.png" },
+        { type: "resource", resource: { uri: "file:///work/notes.md", text: "# Notes", mimeType: "text/markdown" } },
+        { type: "resource_link", uri: "file:///work/a.ts", name: "a.ts" },
+      ],
+    });
+    return created.sessionId;
+  });
+  await host.stop();
+  const facts = await factsOn(storeFileOf(host.directory, sessionId));
+  const input = observed(facts).find((fact) => fact.observation._tag === "InputArrived")?.observation;
+  expect(input).toMatchObject({
+    text: "What are these?\n[a.ts](file:///work/a.ts)",
+    attachments: [
+      { mediaType: "image/png", size: png.byteLength, name: "shot.png" },
+      { mediaType: "text/markdown", size: 7, name: "notes.md" },
+    ],
+  });
+  const attached = input !== undefined && input._tag === "InputArrived" ? (input.attachments ?? []) : [];
+  for (const blob of attached) expect(await Bun.file(join(host.directory, sessionId, "blobs", blob.id)).exists()).toBe(true);
+});
+
 test("AG18: the permission mode is an option of category mode; changed, it applies from the next call: a write runs without asking, then is asked about again", async () => {
   const write = (call: string) => answer({ _tag: "ToolCall", call, tool: "write_file", input: { path: "a.txt", content: call } });
   const host = startHost({ script: [write("w-1"), answer({ _tag: "Text", text: "One." }), write("w-2"), answer({ _tag: "Text", text: "Two." })] });
