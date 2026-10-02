@@ -10,6 +10,7 @@
     "lint": "oxlint --type-aware --format default src tests scripts",
     "check:brands": "bun scripts/check-brands.ts",
     "check:rules": "bun scripts/check-rules.ts",
+    "acp:schema": "bun scripts/acp-schema.ts",
     "cli": "bun run src/examples/cli-repl/index.ts",
     "models:refresh": "bun scripts/models/refresh.ts",
     "cli:watch": "bun --watch src/examples/cli-repl/index.ts"

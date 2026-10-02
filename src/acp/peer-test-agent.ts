@@ -1,11 +1,13 @@
 /**
- * SPIKE: a few methods of an ACP agent on the two-way peer, enough to be driven by the official ACP
- * SDK. The prompt's text says what the turn does:
- * - `permission`: asks the client for permission, then reports the answer. The turn ends
- *   `cancelled` when the answer is `cancelled` or the request was cancelled (-32800), as ACP has a
- *   client answer after `session/cancel`; and when `session/cancel` arrives while the agent still
- *   waits, the question is cancelled (`$/cancel_request`).
- * - `hang`: waits until the client cancels the prompt request itself.
+ * A few methods of an ACP agent on the peer, for `peer.test.ts` and the stdio entry beside it; enough
+ * for the official ACP SDK's client to drive. The prompt's text says what the turn does:
+ * - `permission`: asks the client for permission, then reports the answer. The turn ends `cancelled`
+ *   when the answer is `cancelled` or the question was cancelled (-32800), as an ACP client answers
+ *   after `session/cancel`; and when `session/cancel` arrives while the agent still waits, the
+ *   question is cancelled (`$/cancel_request`).
+ * - `acknowledge`: asks the client for `_test/acknowledge`, whose success is an object with only
+ *   optional fields, then reports the answer.
+ * - `hang`: waits until it is interrupted.
  * - `fail`: fails with a JSON-RPC error of its own.
  * - `die`: dies.
  * - anything else: ends the turn.
@@ -13,9 +15,10 @@
  * Every turn first sends one `session/update`.
  */
 
-import { Deferred, Effect, Option, Schema } from "effect";
+import { Deferred, Effect, Option, Schema, type Scope } from "effect";
 import { Rpc, RpcGroup } from "effect/rpc";
-import { JsonRpcError, makePeer, type Wire } from "./peer.ts";
+import { JsonRpcError, type Wire } from "./json-rpc.ts";
+import * as Peer from "./peer.ts";
 
 const SessionId = Schema.String;
 
@@ -70,6 +73,11 @@ export const ClientRpcs = RpcGroup.make(
     success: Schema.Struct({ outcome: PermissionOutcome }),
     error: JsonRpcError,
   }),
+  Rpc.make("_test/acknowledge", {
+    payload: { sessionId: SessionId },
+    success: Schema.Struct({ note: Schema.optionalKey(Schema.String) }),
+    error: JsonRpcError,
+  }),
 );
 
 /** What the agent tells the client. */
@@ -77,10 +85,15 @@ export const ClientNotifications = RpcGroup.make(
   Rpc.make("session/update", { payload: { sessionId: SessionId, update: Schema.Unknown } }),
 );
 
+/** The agent's end of the connection. */
+export type AgentPeer = Peer.Peer<RpcGroup.Rpcs<typeof ClientRpcs>, RpcGroup.Rpcs<typeof ClientNotifications>>;
+
 /** What a test can watch of the agent from outside. */
 export interface Probe {
   /** Completed when a `hang` turn's handler is interrupted. */
   readonly hangInterrupted: Deferred.Deferred<void>;
+  /** Completed when a `hang` turn's handler starts. */
+  readonly hanging: Deferred.Deferred<void>;
 }
 
 const text = (sessionId: string, words: string) => ({
@@ -88,11 +101,20 @@ const text = (sessionId: string, words: string) => ({
   update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: words } },
 });
 
-/** Runs the agent on `wire` until the scope closes. */
-export const runAgent = (wire: Wire, probe: Probe) => {
+export const permissionRequest = (sessionId: string) => ({
+  sessionId,
+  toolCall: { toolCallId: "call-1", title: "write_file" },
+  options: [
+    { optionId: "allow-once", name: "Allow once", kind: "allow_once" as const },
+    { optionId: "reject-once", name: "Reject", kind: "reject_once" as const },
+  ],
+});
+
+/** Runs the agent on `wire` until the wire's read ends or the scope closes. */
+export const runAgent = (wire: Wire, probe: Probe): Effect.Effect<AgentPeer, never, Scope.Scope> => {
   const cancels = new Map<string, Deferred.Deferred<void>>();
   let sessions = 0;
-  return makePeer({
+  return Peer.make({
     wire,
     serve: AgentRpcs,
     call: ClientRpcs,
@@ -114,18 +136,11 @@ export const runAgent = (wire: Wire, probe: Probe) => {
             switch (prompt.map((block) => block.text ?? "").join("")) {
               case "permission": {
                 const answer = yield* Effect.raceFirst(
-                  peer.client["session/request_permission"]({
-                    sessionId,
-                    toolCall: { toolCallId: "call-1", title: "write_file" },
-                    options: [
-                      { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
-                      { optionId: "reject-once", name: "Reject", kind: "reject_once" },
-                    ],
-                  }).pipe(
+                  peer.client["session/request_permission"](permissionRequest(sessionId)).pipe(
                     Effect.map(({ outcome }) => (outcome.outcome === "cancelled" ? Option.none() : Option.some(outcome))),
                     Effect.catchIf(
                       (error) => "code" in error && error.code === -32800,
-                      () => Effect.succeed(Option.none()),
+                      () => Effect.succeedNone,
                     ),
                   ),
                   Deferred.await(cancelled).pipe(Effect.as(Option.none())),
@@ -134,12 +149,20 @@ export const runAgent = (wire: Wire, probe: Probe) => {
                 yield* peer.notify("session/update", text(sessionId, `Answered: ${JSON.stringify(answer.value)}`));
                 return { stopReason: "end_turn" as const };
               }
+              case "acknowledge": {
+                const answer = yield* peer.client["_test/acknowledge"]({ sessionId });
+                yield* peer.notify("session/update", text(sessionId, `Acknowledged: ${JSON.stringify(answer)}`));
+                return { stopReason: "end_turn" as const };
+              }
               case "hang":
-                return yield* Effect.never.pipe(Effect.onInterrupt(() => Deferred.succeed(probe.hangInterrupted, undefined)));
+                return yield* Deferred.succeed(probe.hanging, undefined).pipe(
+                  Effect.andThen(Effect.never),
+                  Effect.onInterrupt(() => Deferred.succeed(probe.hangInterrupted, undefined)),
+                );
               case "fail":
-                return yield* Effect.fail({ code: -32042, message: "Refused by the spike", data: { asked: "fail" } });
+                return yield* Effect.fail({ code: -32042, message: "Refused by the test agent", data: { asked: "fail" } });
               case "die":
-                return yield* Effect.die(new Error("the spike's handler died"));
+                return yield* Effect.die(new Error("the test agent's handler died"));
               default:
                 return { stopReason: "end_turn" as const };
             }
