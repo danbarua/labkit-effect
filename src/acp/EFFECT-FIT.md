@@ -96,6 +96,12 @@ from Effect, what we write ourselves instead, and why. Paths under `effect/` are
 - **Keep-alives, as `Bun.serve` sets them.** `Bun.serve` closes a connection after 10 s with no
   data, which kills a quiet SSE stream. `http.ts` writes a comment every 5 s (`keepAliveInterval`).
   This is a gap in Bun, not in Effect.
+- **Shaping what goes on the wire with `Schema.is`.** `Schema.is` on a `Struct` accepts extra
+  properties, and so does TypeScript's structural typing. A handler that fails with a
+  `Data.TaggedError` shaped like a `JsonRpcError` passes both, and written as received it would put
+  `_tag` and its other fields on the wire. `peer.ts` writes every error as a new object holding only
+  `code`, `message` and `data` (AP1, AP4). Use `Schema.is` to check a value, never to decide that
+  the value can be sent as it is.
 
 ## TypeScript limits
 
