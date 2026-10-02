@@ -7,9 +7,12 @@
  * peer can answer it with a parse error.
  */
 
-import { Data, type Effect, Schema, type Stream } from "effect";
+import { Data, type Effect, Predicate, Schema, type Stream } from "effect";
 
-/** A request's id: a string or a number. `null` appears only in an error response to a message whose id could not be read. */
+/**
+ * A request's id: a string or a number. A response carries `null` instead when the request's id was
+ * `null` or could not be read.
+ */
 export type JsonRpcId = string | number;
 
 /** The error codes ACP names (JSON-RPC's own, and ACP's in the reserved range). */
@@ -47,7 +50,7 @@ export interface JsonRpcNotification {
 
 export interface JsonRpcSuccess {
   readonly jsonrpc: "2.0";
-  readonly id: JsonRpcId;
+  readonly id: JsonRpcId | null;
   readonly result: unknown;
 }
 
@@ -60,6 +63,29 @@ export interface JsonRpcFailure {
 export type JsonRpcResponse = JsonRpcSuccess | JsonRpcFailure;
 
 export type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification | JsonRpcResponse;
+
+/** An id as a message may carry it: a string, a finite number, or `null`. */
+export const isJsonRpcId = (value: unknown): value is JsonRpcId | null =>
+  value === null || typeof value === "string" || (typeof value === "number" && Number.isFinite(value));
+
+/** A request: an object with a `method` and an `id`, neither of them checked further. */
+export const isRequest = (value: unknown): value is { readonly [key: string]: unknown; readonly id: unknown } =>
+  Predicate.isObject(value) && "id" in value && "method" in value;
+
+/**
+ * A response as the ACP SDK decides it: an object with `jsonrpc: "2.0"`, no `method`, an id
+ * `isJsonRpcId` accepts, and exactly one own `result` or `error`, an error having an integer `code`
+ * and a string `message`.
+ */
+export const isResponse = (value: unknown): value is { readonly [key: string]: unknown; readonly id: JsonRpcId | null } => {
+  if (!Predicate.isObject(value) || value["jsonrpc"] !== "2.0" || "method" in value) return false;
+  if (!("id" in value) || !isJsonRpcId(value["id"])) return false;
+  const hasResult = Object.hasOwn(value, "result");
+  const hasError = Object.hasOwn(value, "error");
+  if (hasResult === hasError) return false;
+  const error = value["error"];
+  return !hasError || (Predicate.isObject(error) && Number.isInteger(error["code"]) && typeof error["message"] === "string");
+};
 
 /** What a wire delivers: one parsed JSON value (a message, or a batch of them), or text it could not parse. */
 export type WireInput = Data.TaggedEnum<{

@@ -11,7 +11,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import { createHttpStream } from "@agentclientprotocol/sdk/experimental/http-client";
 import { createNodeHttpHandler } from "@agentclientprotocol/sdk/experimental/node";
 import { AcpServer, type HandleRequestOptions } from "@agentclientprotocol/sdk/experimental/server";
-import { Deferred, Effect, Fiber, Queue, type Scope, Stream } from "effect";
+import { Deferred, type Duration, Effect, Fiber, Queue, type Scope, Stream } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import type * as HttpClient from "effect/http/HttpClient";
 import * as HttpRouter from "effect/http/HttpRouter";
@@ -146,10 +146,40 @@ const wireAgent =
 const settled = (deferred: Deferred.Deferred<void>): Promise<void> =>
   Effect.runPromise(Deferred.await(deferred).pipe(Effect.timeout("3 seconds")));
 
-/** `serve` on `Bun.serve`, port 0. */
-const hostServe = (onConnection: (wire: Wire, connection: { readonly id: string }) => Effect.Effect<void, never, Scope.Scope>) => {
-  const web = HttpRouter.toWebHandler(serve({ onConnection }), { disableLogger: true });
-  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (request) => web.handler(request) });
+/**
+ * Answers `initialize`, then sends the notification `late`, which names no session, once `trigger`
+ * completes. It returns only when the connection ends.
+ */
+const quietAgent =
+  (trigger: Deferred.Deferred<void>) =>
+  (wire: Wire): Effect.Effect<void, never, Scope.Scope> =>
+    Effect.gen(function* () {
+      yield* wire.read.pipe(
+        Stream.runForEach((input) =>
+          input._tag === "Json" && (input.value as Message).method === "initialize"
+            ? wire.write({ jsonrpc: "2.0", id: 0, result: { protocolVersion: 1, agentCapabilities: {}, authMethods: [] } })
+            : Effect.void,
+        ),
+        Effect.ignore,
+        Effect.forkScoped,
+      );
+      yield* Deferred.await(trigger);
+      yield* Effect.ignore(wire.write({ jsonrpc: "2.0", method: "late" }));
+      return yield* Effect.never;
+    });
+
+/** `serve` on `Bun.serve`, port 0. `idleTimeout` is `Bun.serve`'s, in seconds. */
+const hostServe = (
+  onConnection: (wire: Wire, connection: { readonly id: string }) => Effect.Effect<void, never, Scope.Scope>,
+  options: { readonly keepAliveInterval?: Duration.Input; readonly idleTimeout?: number } = {},
+) => {
+  const web = HttpRouter.toWebHandler(serve({ onConnection, keepAliveInterval: options.keepAliveInterval }), { disableLogger: true });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    ...(options.idleTimeout === undefined ? {} : { idleTimeout: options.idleTimeout }),
+    fetch: (request) => web.handler(request),
+  });
   return {
     url: `http://127.0.0.1:${server.port}/acp`,
     stop: async () => {
@@ -771,13 +801,13 @@ describe("connect", () => {
     }
   });
 
-  test("AH13: closing the scope DELETEs the connection and ends read; read also ends when the connection ends at the agent", async () => {
+  test("AH13: closing the scope DELETEs the connection; read fails when the connection's stream ends without that, for example after something else DELETEs the connection", async () => {
     const sdk = await hostSdk();
     try {
       await runClient(Effect.flatMap(connect(sdk.url), exchange));
       const last = sdk.requests.at(-1);
       expect([last?.method, last?.connectionId, last?.status]).toEqual(["DELETE", sdk.connectionIds[0] ?? "", 202]);
-      const ended = await runClient(
+      const failed = await runClient(
         Effect.gen(function* () {
           const wire = yield* connect(sdk.url);
           const client = yield* wireClient(wire);
@@ -785,14 +815,61 @@ describe("connect", () => {
           yield* client.until(0);
           const connectionId = sdk.connectionIds[1] ?? "";
           yield* Effect.promise(() => fetch(sdk.url, { method: "DELETE", headers: { "acp-connection-id": connectionId } }));
-          return yield* Fiber.await(client.readEnded).pipe(Effect.timeout("3 seconds"));
+          return yield* Fiber.join(client.readEnded).pipe(Effect.flip, Effect.timeout("3 seconds"));
         }),
       );
-      expect(ended._tag).toBe("Success");
+      expect(failed.reason).toBe("ACP connection SSE stream closed");
     } finally {
       await sdk.stop();
     }
   });
+
+  test("AH13: read fails when a server that closes idle connections drops the connection's stream", async () => {
+    const host = hostServe(quietAgent(Deferred.makeUnsafe()), { idleTimeout: 1, keepAliveInterval: "1 minute" });
+    try {
+      const failed = await runClient(
+        Effect.gen(function* () {
+          const wire = yield* connect(host.url);
+          const client = yield* wireClient(wire);
+          yield* wire.write(initialize);
+          yield* client.until(0);
+          return yield* Fiber.join(client.readEnded).pipe(Effect.flip, Effect.timeout("5 seconds"));
+        }),
+      );
+      // `Bun.serve` cuts the connection mid-body, which `fetch` reads as an error rather than an end.
+      expect(failed._tag).toBe("WireError");
+      expect(failed.reason).toMatch(/^ACP (connection SSE stream closed|SSE stream failed: )/);
+    } finally {
+      await host.stop();
+    }
+  }, 15_000);
+
+  test("AH15: an event stream stays open past the server's idle timeout, and delivers what the agent sends after it", async () => {
+    const trigger = Deferred.makeUnsafe<void>();
+    const host = hostServe(quietAgent(trigger), { idleTimeout: 1, keepAliveInterval: "200 millis" });
+    try {
+      const outcome = await runClient(
+        Effect.gen(function* () {
+          const wire = yield* connect(host.url);
+          const inbox = yield* Queue.unbounded<unknown>();
+          const read = yield* wire.read.pipe(
+            Stream.runForEach((input) => Queue.offer(inbox, input._tag === "Json" ? input.value : input)),
+            Effect.forkScoped,
+          );
+          yield* wire.write(initialize);
+          yield* Queue.take(inbox).pipe(Effect.timeout("3 seconds"));
+          yield* Effect.sleep("2500 millis");
+          yield* Deferred.succeed(trigger, undefined);
+          const late = yield* Queue.take(inbox).pipe(Effect.timeout("3 seconds"));
+          return { late, read: read.pollUnsafe() };
+        }),
+      );
+      expect(outcome.late).toEqual({ jsonrpc: "2.0", method: "late" });
+      expect(outcome.read).toBeUndefined();
+    } finally {
+      await host.stop();
+    }
+  }, 15_000);
 
   test("AH14: a refused request fails the write with its status and body, and fails read; a batch is refused", async () => {
     const host = hostServe(wireAgent(makeProbe()));

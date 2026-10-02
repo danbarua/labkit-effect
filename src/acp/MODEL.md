@@ -1,9 +1,10 @@
 # acp
 
-The Agent Client Protocol (ACP) in Effect: the protocol's schemas, a two-way JSON-RPC peer, and the
-wires a connection runs over (stdio, Streamable HTTP). It is shaped like Effect's
-`effect/ai/McpServer`, and its tests drive it with the official ACP SDK
-(`@agentclientprotocol/sdk` 1.5.0), which the library itself never imports.
+The Agent Client Protocol (ACP) in Effect: the protocol's schemas, a two-way JSON-RPC peer, the
+wires a connection runs over (stdio, Streamable HTTP), and an agent and a client that negotiate the
+protocol version and each other's capabilities. It is shaped like Effect's `effect/ai/McpServer`,
+and its tests drive it with the official ACP SDK (`@agentclientprotocol/sdk` 1.5.0), which the
+library itself never imports.
 
 `json-rpc.ts` holds what every part shares: JSON-RPC's messages and error codes, and the `Wire`, one
 connection's parsed messages. A wire carries whole messages; framing is the wire's business, and
@@ -154,9 +155,127 @@ WebSocket is not built: a GET with `Upgrade: websocket` gets 426, as the SDK ans
   response's `Set-Cookie` and sends them on every later request; a caller `Cookie` with the same
   name wins.
 - AH13. Closing `connect`'s scope interrupts its streams and any POST in flight, DELETEs the
-  connection, and ends `read`. `read` also ends when the connection's stream ends, for example after
-  something else DELETEs the connection.
+  connection, and ends `read`. If the connection's stream ends while the scope is open (because
+  something else DELETEd the connection, the agent ended it, or a server or proxy dropped the
+  stream), `read` fails with `ACP connection SSE stream closed`, and the connection is torn down
+  and DELETEd. A session's stream that ends while a request about that session waits for its
+  response fails `read` with `ACP session SSE stream closed: <sessionId>`. Otherwise the session
+  is forgotten, and its stream is opened again when a message names it.
 - AH14. A POST or GET that does not get a 2xx fails the write with `<what>: <status>: <body>`, and
   `read` fails with the same error. After that, writes fail with `ACP HTTP stream is closed`. A
   batch written to either end's wire fails with `ACP Streamable HTTP does not carry JSON-RPC
   batches`.
+- AH15. `serve` sends a keep-alive comment (`:`) on each event stream as soon as it opens, then
+  every `keepAliveInterval` (default 5 seconds), so a stream with nothing to send outlives a
+  server's idle timeout. Under `Bun.serve` with `idleTimeout: 1` and a 200 ms interval, the
+  connection's stream stays open for 2.5 s with nothing to send, and then delivers a message the
+  agent sends.
+
+## Negotiation
+
+`protocol.ts` holds one `ProtocolAdapter` per protocol version (`v1`, `v2`), modelled on Effect's
+`McpProtocol`: the version's method groups, how it writes and reads `initialize`, and its capability
+gates. `agent.ts` and `client.ts` are the two ends. Each takes one implementation per version it
+speaks, answers or sends `initialize` itself, and then serves the chosen implementation's handlers
+behind the gates (`endpoint.ts`). A capability counts as advertised when it is present and neither
+`null` nor `false`. A refusal names the capability by its path in the `initialize` message that
+advertises it.
+
+- AN1. `select(supported, offered)` is `offered` when `supported` holds it. Otherwise it is the
+  highest version in `supported`, even when `offered` is lower than every supported version.
+- AN2. `agent.run` answers `initialize` itself. It reads `protocolVersion` from the params as an
+  integer from 0 to 65535, the same way in every version, and chooses the implementation with
+  `select`. It decodes the params with that version's `InitializeRequest` schema and answers in that
+  version's field names. Version 1 answers with `agentCapabilities`, `agentInfo` and `authMethods`.
+  Version 2 answers with `capabilities` and `info`, and with `authMethods` only when the list is not
+  empty. Params with no such `protocolVersion`, or params that schema refuses, are answered -32602,
+  and the connection stays uninitialized. The SDK's v1 client gets 1 from an agent that implements
+  1 and 2. The SDK's v2 client gets 2. A raw `initialize` offering 3 is answered 2. An agent that
+  implements only version 1 answers a version 2 client with 1, and the SDK's v2 client then fails
+  its request with a schema error on `info`.
+- AN3. Until `initialize` is answered, the agent answers a request with -32600 and
+  `data: { reason: "not_initialized" }`. In a batch, each request is answered and the answers go out
+  as one array; an `initialize` inside a batch is answered the same way. A line that is not JSON is
+  answered -32700 under id null, and anything else is dropped. Once initialized, a second
+  `initialize` is answered -32600 with `data: { reason: "already_initialized" }`. Until the client's
+  `initialize` is answered, the client answers a request from the agent with -32600 not_initialized
+  and drops anything else.
+- AN4. An incoming request that a gate refuses is answered before its handler runs. The answer is
+  -32601 when the method itself needs the capability, and -32602 when only its params do. It
+  carries the gate's message and `data: { capability }`. An incoming notification that a gate
+  refuses is dropped. A method the implementation has no handler for is answered -32601
+  `Method not found: <method>`, with no `data`. Params that the method's schema refuses are answered
+  -32602 before that, as for every method (AP6).
+- AN5. An end's calls to the other end (`client` and `notify` on the agent, `agent` and `notify` on
+  the client) go through the gates under the negotiated profile. A refused call fails with
+  `CapabilityNotAdvertised { method, capability, message }`, and nothing is written. The agent's
+  `fs/read_text_file` is refused when the SDK client did not advertise `fs`, and the SDK client
+  answers it when it did. The agent's `elicitation/create` is refused when the client advertised
+  `elicitation: {}`. The agent's `session/update` of kind `notice` is refused without
+  `session.notices`. The client's `session/load` is refused when the agent did not advertise
+  `loadSession`.
+- AN6. `client.connect` sends `initialize` with id 0, offering the highest version it implements in
+  that version's field names. It reads the answer's `protocolVersion` the same way in every version
+  and continues with the implementation for that version. The profile's client side is that
+  implementation's capabilities and info. If no implementation matches, `connect` fails with
+  `UnsupportedProtocolVersion { offered, answered }` and stops reading the wire. It fails with
+  `InitializeFailed` when the agent answers with an error, when the answer has no
+  `protocolVersion`, when the answered version's schema refuses the answer, when the wire closes
+  first, or when the request cannot be written. A client implementing 1 and 2 gets 1 from the SDK's
+  v1 agent, 2 from the SDK's v2 agent, and 2 or 1 from `agent.run` implementing both or only 1. A
+  client implementing only 2 fails against an agent implementing only 1.
+- AN7. A request from the agent that the client's gates refuse is answered as in AN4. An
+  `elicitation/create` in mode `form` or `url` that the client did not advertise gets -32602.
+  `fs/read_text_file` without `fs.readTextFile` gets -32601.
+- AN8. `agent.layerStdio` runs `run` on `fromStdio` for as long as the layer lives, with
+  `References.LogToStderr` set, so stdout carries only protocol messages. In a subprocess, the SDK's
+  client runs a turn with a permission request over pipes; every stdout line is JSON-RPC, and the
+  negotiation log line is on stderr. `agent.layerHttp` runs one `run` per connection on
+  `http.serve` (`path`, `keepAliveInterval`), and the SDK's `createHttpStream` client runs the same
+  turn against it. `client.connect` over `http.connect` runs the same turn against the SDK's
+  `AcpServer`.
+- AN9. Answering `initialize` is logged at Info as `acp.initialize.negotiated`:
+  `{ side: "agent", offered, chosen, supported }` on the agent, and `{ side: "client", offered,
+  chosen }` on the client. An incoming refusal is logged at Info as
+  `acp.gate.refused_incoming { side, method, capability, code }`. A local refusal is logged at
+  Debug as `acp.gate.refused_locally { side, method, capability }`. A routine exchange logs no
+  Warning or Error.
+- AN10. Version 1's gates. From client to agent: `session/load` needs
+  `agentCapabilities.loadSession`. `session/resume`, `close`, `list`, `delete` and `fork` need
+  `agentCapabilities.sessionCapabilities.<name>`. `logout` needs `agentCapabilities.auth.logout`.
+  `mcp/message` needs `agentCapabilities.mcpCapabilities.acp`. `providers/*` needs
+  `agentCapabilities.providers`, `nes/*` needs `agentCapabilities.nes`, and `document/<event>` needs
+  `agentCapabilities.nes.events.document.<event>`; all of these are method gates. Params gates:
+  `authenticate` needs a `methodId` that is in `authMethods` and is not of type `terminal`. In
+  `session/prompt`, an `image`, `audio` or `resource` block needs
+  `agentCapabilities.promptCapabilities.image`, `audio` or `embeddedContext`. In `session/new`,
+  `load`, `resume` and `fork`, a non-empty `additionalDirectories` needs
+  `agentCapabilities.sessionCapabilities.additionalDirectories`, and an MCP server of type `http`,
+  `sse` or `acp` needs `agentCapabilities.mcpCapabilities.<type>`. From agent to client:
+  `fs/read_text_file` and `fs/write_text_file` need `clientCapabilities.fs.readTextFile` and
+  `writeTextFile`. `terminal/*` needs `clientCapabilities.terminal`. `elicitation/complete` needs
+  `clientCapabilities.elicitation.url`. `mcp/*` needs the agent's own
+  `agentCapabilities.mcpCapabilities.acp`; all of these are method gates. Params gates:
+  `elicitation/create` in mode `form` or `url` needs `clientCapabilities.elicitation.<mode>`; other
+  modes are custom and pass. A `session/update` of kind `plan_update` or `plan_removed` needs
+  `clientCapabilities.plan`. Kind `notice` needs `clientCapabilities.session.notices`. Kinds
+  `compaction_update` and `compaction_summary_chunk` need `clientCapabilities.session.compaction`.
+  A `config_option_update` with a `boolean` option needs
+  `clientCapabilities.session.configOptions.boolean`.
+- AN11. Version 2's gates, from the v2 defs' descriptions (the v2 SDK enforces none). From client to
+  agent: every `session/*` method, `session/cancel` included, needs `capabilities.session`.
+  `session/delete` and `session/fork` also need `capabilities.session.delete` and
+  `capabilities.session.fork`. `auth/login` and `auth/logout` need a non-empty `authMethods`.
+  `mcp/message` needs `capabilities.session.mcp.acp`. `providers/*` needs `capabilities.providers`,
+  `nes/*` needs `capabilities.nes`, and `document/<event>` needs
+  `capabilities.nes.events.document.<event>`; all of these are method gates. Params gates:
+  `auth/login` needs a `methodId` that is advertised and is not of type `terminal`. In
+  `session/prompt`, an `image`, `audio` or `resource` block needs
+  `capabilities.session.prompt.image`, `audio` or `embeddedContext`. In `session/new`, `resume` and
+  `fork`, a non-empty `additionalDirectories` needs `capabilities.session.additionalDirectories`, and
+  an MCP server of type `stdio`, `http` or `acp` needs `capabilities.session.mcp.<type>`. From agent
+  to client: `elicitation/complete` needs the client's `capabilities.elicitation.url`, and `mcp/*`
+  needs the agent's `capabilities.session.mcp.acp` (method gates). `elicitation/create` in mode
+  `form` or `url` needs the client's `capabilities.elicitation.<mode>` (params gate). Version 2 has
+  no client capability for any `session/update` kind, `notice` included, and none for
+  `session/request_permission`.

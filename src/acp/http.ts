@@ -10,7 +10,7 @@
  * `createHttpStream`. WebSocket upgrade is not implemented: such a GET is answered 426.
  */
 
-import { Cause, Deferred, Effect, Exit, Fiber, type Layer, Queue, Scope, Semaphore, Stream } from "effect";
+import { Cause, Deferred, type Duration, Effect, Exit, Fiber, type Layer, Predicate, Queue, Scope, Semaphore, Stream } from "effect";
 import * as Sse from "effect/encoding/Sse";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
@@ -18,7 +18,7 @@ import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as HttpRouter from "effect/http/HttpRouter";
 import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
-import { type JsonRpcMessage, type Wire, WireError, WireInput } from "./json-rpc.ts";
+import { isRequest, isResponse, type JsonRpcMessage, type Wire, WireError, WireInput } from "./json-rpc.ts";
 
 /** The header naming the connection, set by the agent on its answer to `initialize`. */
 export const ConnectionIdHeader = "Acp-Connection-Id";
@@ -56,28 +56,8 @@ const sessionScopedMethods: ReadonlySet<string> = new Set([
 
 type Json = Readonly<Record<string, unknown>>;
 
-const isRecord = (value: unknown): value is Json => typeof value === "object" && value !== null;
-
-/** A response, as the SDK decides it: an id, and exactly one of `result` and a well-formed `error`. */
-const isResponse = (value: unknown): value is Json & { readonly id: unknown } => {
-  if (!isRecord(value) || value["jsonrpc"] !== "2.0" || "method" in value) return false;
-  const id = value["id"];
-  if (!("id" in value) || !(id === null || typeof id === "string" || (typeof id === "number" && Number.isFinite(id)))) {
-    return false;
-  }
-  const hasResult = Object.hasOwn(value, "result");
-  const hasError = Object.hasOwn(value, "error");
-  if (hasResult === hasError) return false;
-  const error = value["error"];
-  return !hasError || (isRecord(error) && Number.isInteger(error["code"]) && typeof error["message"] === "string");
-};
-
 const isInitializeRequest = (value: Json): boolean =>
   value["jsonrpc"] === "2.0" && "id" in value && value["method"] === "initialize";
-
-/** A request: a method and an id. */
-const isRequest = (value: unknown): value is Json & { readonly id: unknown } =>
-  isRecord(value) && "id" in value && "method" in value;
 
 /** The key a message id is tracked under: `1` and `"1"` are different ids. */
 const idKey = (id: unknown): string | undefined => {
@@ -88,14 +68,14 @@ const idKey = (id: unknown): string | undefined => {
 };
 
 const sessionIdOf = (params: unknown): string | undefined => {
-  if (!isRecord(params)) return undefined;
+  if (!Predicate.isObject(params)) return undefined;
   const sessionId = params["sessionId"];
   return typeof sessionId === "string" ? sessionId : undefined;
 };
 
 /** The session a request or notification is about: `params.sessionId`. */
 const paramsSessionId = (message: unknown): string | undefined =>
-  isRecord(message) && "method" in message ? sessionIdOf(message["params"]) : undefined;
+  Predicate.isObject(message) && "method" in message ? sessionIdOf(message["params"]) : undefined;
 
 /** The session a response names: `result.sessionId`, as `session/new` answers. */
 const resultSessionId = (message: unknown): string | undefined =>
@@ -166,15 +146,15 @@ const ensureSession = (connection: ServerConnection, sessionId: string): Effect.
   });
 
 /**
- * A comment at once, then every 15 seconds, as the SDK's server sends every 15 seconds. The first
- * makes a server that holds the headers until the body's first bytes (`Bun.serve` does) send them.
+ * The outbox's messages as `data:` events, with a keep-alive comment at once and then one every
+ * `keepAliveInterval`. The first comment makes a server that holds the headers until the body's
+ * first bytes (`Bun.serve` does) send them; the rest keep a server or proxy that closes idle
+ * connections from closing a stream with nothing to send.
  */
-const keepAlive: Stream.Stream<string> = Stream.tick("15 seconds").pipe(Stream.as(":\n\n"));
-
-const sseBody = (outbox: Outbox): Stream.Stream<Uint8Array> =>
+const sseBody = (outbox: Outbox, keepAliveInterval: Duration.Input): Stream.Stream<Uint8Array> =>
   Stream.fromQueue(outbox.queue).pipe(
     Stream.map((message) => `data: ${JSON.stringify(message)}\n\n`),
-    Stream.merge(keepAlive, { haltStrategy: "left" }),
+    Stream.merge(Stream.tick(keepAliveInterval).pipe(Stream.as(":\n\n")), { haltStrategy: "left" }),
     Stream.encodeText,
     Stream.ensuring(
       Effect.sync(() => {
@@ -237,6 +217,11 @@ export interface ServeOptions<R> {
   /** The endpoint. Default `/acp`. */
   readonly path?: HttpRouter.PathInput | undefined;
   /**
+   * How often each event stream gets a keep-alive comment, whatever else it sends. Default 5 seconds,
+   * half of `Bun.serve`'s default `idleTimeout` (10 seconds), after which Bun closes an idle connection.
+   */
+  readonly keepAliveInterval?: Duration.Input | undefined;
+  /**
    * Runs once per ACP connection, from its `initialize` until the client's DELETE or the server's
    * stop, which close its scope. The first message it writes must answer `initialize`. When it
    * returns, the connection ends: its streams deliver what is queued and close.
@@ -256,6 +241,7 @@ export const serve = <R = never>(
       const context = yield* Effect.context<Exclude<R, Scope.Scope>>();
       const connections = new Map<string, ServerConnection>();
       const path = options.path ?? "/acp";
+      const keepAliveInterval = options.keepAliveInterval ?? "5 seconds";
 
       const forget = (connection: ServerConnection): void => {
         connection.open = false;
@@ -393,7 +379,7 @@ export const serve = <R = never>(
           if (body === undefined) return textResponse("Invalid JSON", 400);
           const message = body.value;
           if (Array.isArray(message)) return textResponse("Batch JSON-RPC requests are not implemented", 501);
-          if (!isRecord(message)) return textResponse("Invalid JSON-RPC message", 400);
+          if (!Predicate.isObject(message)) return textResponse("Invalid JSON-RPC message", 400);
           const connectionId = header(request, connectionIdKey);
           if (isInitializeRequest(message)) {
             if (connectionId === undefined) return yield* initialize(message);
@@ -423,7 +409,7 @@ export const serve = <R = never>(
           const outbox = sessionId === undefined ? connection.connectionStream : yield* ensureSession(connection, sessionId);
           if (outbox.leased) return textResponse("Outbound stream already has an active receiver", 409);
           outbox.leased = true;
-          return HttpServerResponse.stream(sseBody(outbox), {
+          return HttpServerResponse.stream(sseBody(outbox, keepAliveInterval), {
             contentType: eventStream,
             headers: { "cache-control": "no-cache", connection: "keep-alive" },
           });
@@ -475,8 +461,9 @@ const cookiePairs = (header: string | undefined): ReadonlyArray<readonly [string
  * names the session (`result.sessionId` of a response, `params.sessionId` of a message written),
  * and a message about a session is not POSTed until its stream is open. Cookies the server sets
  * are sent back on every later request. Closing the scope aborts the streams and requests in
- * flight and DELETEs the connection; `read` ends when the scope closes or the connection's stream
- * ends, and fails when a request or a stream fails.
+ * flight, DELETEs the connection and ends `read`. Until then, `read` fails when a request or a
+ * stream fails, when the connection's stream ends (`ACP connection SSE stream closed`), and when a
+ * session's stream ends while a request about that session waits for its response.
  */
 export const connect = (
   url: string,
@@ -579,11 +566,15 @@ export const connect = (
     /** `read` fails with `error`, and the connection is torn down. */
     const failRead = (error: WireError): Effect.Effect<void> => stop(Queue.fail(inbound, error));
 
+    /**
+     * A stream ended, and not because this end closed: the agent ended the connection, or a server
+     * or proxy dropped the stream. As in the SDK's client, a session's stream that ends with no
+     * request about the session waiting is forgotten, and opened again when a message names it.
+     */
     const streamEnded = (sessionId: string | undefined): Effect.Effect<void, WireError> =>
       Effect.suspend(() => {
         if (state.ended) return Effect.void;
-        // The connection's stream ends when the connection does.
-        if (sessionId === undefined) return stop(Queue.end(inbound));
+        if (sessionId === undefined) return Effect.fail(new WireError({ reason: "ACP connection SSE stream closed" }));
         knownSessions.delete(sessionId);
         sessionReady.delete(sessionId);
         return [...pendingSessionRequests.values()].includes(sessionId)
@@ -681,7 +672,7 @@ export const connect = (
 
     const postInitialize = (message: JsonRpcMessage): Effect.Effect<void, WireError> =>
       Effect.gen(function* () {
-        if (!isRecord(message) || !isInitializeRequest(message)) {
+        if (!Predicate.isObject(message) || !isInitializeRequest(message)) {
           return yield* new WireError({ reason: "ACP HTTP stream first message must be initialize" });
         }
         const response = yield* postBody(message, {}, "ACP initialize failed");

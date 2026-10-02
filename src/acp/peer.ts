@@ -25,16 +25,16 @@
  * responses can be gathered into one array.
  */
 
-import { Deferred, Effect, Exit, Fiber, type Layer, Queue, Schema, Scope, Semaphore, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, type Layer, Predicate, Queue, Schema, Scope, Semaphore, Stream } from "effect";
 import { type Rpc, RpcClient, RpcClientError, type RpcGroup, RpcSerialization, RpcServer } from "effect/rpc";
 import type * as RpcMessage from "effect/rpc/RpcMessage";
 import {
   ErrorCode,
+  isJsonRpcId,
   JsonRpcError,
   type JsonRpcId,
   type JsonRpcMessage,
   type JsonRpcResponse,
-  type JsonRpcSuccess,
   type Wire,
   type WireInput,
 } from "./json-rpc.ts";
@@ -89,7 +89,7 @@ const codecOf = (rpc: Rpc.Any, schema: "payloadSchema" | "successSchema") =>
 
 const isJsonRpcError = Schema.is(JsonRpcError);
 
-const Id = Schema.Union([Schema.String, Schema.Finite, Schema.Null]);
+const Id = Schema.declare(isJsonRpcId);
 
 /** A JSON-RPC 2.0 message's fields, each checked when present. Which are present says what it is. */
 const Envelope = Schema.Struct({
@@ -103,8 +103,6 @@ const Envelope = Schema.Struct({
 
 const isEnvelope = Schema.is(Envelope);
 
-const hasId = Schema.is(Schema.Struct({ id: Id }));
-
 const isCancelParams = Schema.is(Schema.Struct({ requestId: Id }));
 
 /**
@@ -114,8 +112,11 @@ const isCancelParams = Schema.is(Schema.Struct({ requestId: Id }));
 const classify = (value: unknown): Classified => {
   // A malformed response is answered under id null: its id is one of this end's own requests, which
   // the other end would read as the id of a request of its own.
-  const response = typeof value === "object" && value !== null && !("method" in value) && ("result" in value || "error" in value);
-  if (!isEnvelope(value)) return { _tag: "Invalid", id: hasId(value) && !response ? value.id : null };
+  const response = Predicate.isObject(value) && !("method" in value) && ("result" in value || "error" in value);
+  if (!isEnvelope(value)) {
+    const id = Predicate.isObject(value) && !response ? value["id"] : null;
+    return { _tag: "Invalid", id: isJsonRpcId(id) ? id : null };
+  }
   const id = value.id ?? null;
   if (value.method !== undefined)
     return "id" in value
@@ -136,10 +137,7 @@ const errorOf = (cause: EncodedCause): JsonRpcError => {
   return { code: ErrorCode.InternalError, message: "Internal error" };
 };
 
-// JSON-RPC allows a request's id to be null, and the answer then carries null; `JsonRpcSuccess`
-// leaves null out because it is so rare.
-const success = (id: JsonRpcId | null, result: unknown): JsonRpcResponse =>
-  ({ jsonrpc: "2.0", id, result }) as JsonRpcSuccess;
+const success = (id: JsonRpcId | null, result: unknown): JsonRpcResponse => ({ jsonrpc: "2.0", id, result });
 
 const failure = (id: JsonRpcId | null, error: JsonRpcError): JsonRpcResponse => ({ jsonrpc: "2.0", id, error });
 
