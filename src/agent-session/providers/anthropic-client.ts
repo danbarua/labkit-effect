@@ -43,7 +43,7 @@ import {
   type Target,
 } from "../contracts.ts";
 import { logKeys } from "../log-keys.ts";
-import { ModelStream } from "../model-stream.ts";
+import { ModelStream, type Streamed } from "../model-stream.ts";
 import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEvents, type Retries, withRetries } from "../provider-call.ts";
 import { reportAdjusted } from "../configuration/settings.ts";
 import { anthropicSettle } from "./anthropic-settings.ts";
@@ -203,6 +203,17 @@ export function body(target: Target, context: ModelContext, files: ReadonlyMap<B
   };
 }
 
+/** The text an event adds to a text or thinking block, as it arrives. */
+function deltaIn(event: Json): Streamed | undefined {
+  if (!isObject(event) || event["type"] !== "content_block_delta") return undefined;
+  const delta = event["delta"];
+  if (!isObject(delta ?? null)) return undefined;
+  const { type, text, thinking } = delta as { readonly type?: Json; readonly text?: Json; readonly thinking?: Json };
+  if (type === "text_delta" && typeof text === "string") return { _tag: "Delta", kind: "Text", text };
+  if (type === "thinking_delta" && typeof thinking === "string") return { _tag: "Delta", kind: "Thinking", text: thinking };
+  return undefined;
+}
+
 function part(received: Json): ModelPart {
   if (isObject(received)) {
     const { type, text, id, name, input } = received;
@@ -297,6 +308,8 @@ const respondOnce = (
         (state, event) =>
           Effect.gen(function* () {
             yield* passOn({ _tag: "Chunk", chunk: receivedJson(event) });
+            const added = deltaIn(event);
+            if (added !== undefined) yield* passOn(added);
             const next = assemble(state, event);
             if (next.failed !== undefined) return yield* failedInStream(next.failed);
             if (next.notApplied !== undefined)

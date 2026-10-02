@@ -11,10 +11,11 @@
  * `reasoning_effort` (`openai-compat-settings.ts`); each other one asked for is recorded as adjusted.
  *
  * In: the response streams, and its chunks build the first choice's message (`respondOnce`). The
- * message becomes the observation's parts in order: its `content` is `Text`, each of its
- * `tool_calls` is `ToolCall` (whatever the tool's name), its arguments kept as the text received;
- * any other field of the message (`reasoning_content`, `refusal`, ...) is `Unrecognised`, holding
- * that field. The stop is the choice's `finish_reason`; the usage is the last chunk's; everything
+ * message becomes the observation's parts in order: its thinking (`reasoning_content`, `reasoning`)
+ * is `Thinking`, its `content` is `Text`, each of its `tool_calls` is `ToolCall` (whatever the
+ * tool's name), its arguments kept as the text received; any other field of the message
+ * (`refusal`, ...) is `Unrecognised`, holding that field. As the chunks arrive, the text each adds
+ * to the thinking and to the answer is passed on. The stop is the choice's `finish_reason`; the usage is the last chunk's; everything
  * else the chunks held is `metadata`. A request that fails, after retries, is observed as
  * `ModelFailed`.
  */
@@ -25,11 +26,11 @@ import { OpenAiClient } from "@effect/ai-openai-compat";
 import { Effect, Layer, Ref, type Schema, Stream } from "effect";
 import type * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
-import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agent-machine/names.ts";
+import { CallId, ModelText, StopReason, ThinkingText, ToolName, type TurnId } from "../../agent-machine/names.ts";
 import type { ModelPart, Observation } from "../../agent-machine/observation.ts";
 import { type ContextMessage, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
 import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEventsOrWhole, type Retries, withRetries } from "../provider-call.ts";
-import { ModelStream } from "../model-stream.ts";
+import { ModelStream, type Streamed } from "../model-stream.ts";
 import { reportAdjusted } from "../configuration/settings.ts";
 import { openAiCompatSettle } from "./openai-compat-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
@@ -164,21 +165,39 @@ function toolCall(call: Json): ModelPart {
   return { _tag: "Unrecognised", received: receivedJson(call) };
 }
 
+/** The message fields in which Chat Completions servers return readable thinking. */
+const thinkingFields: ReadonlyArray<string> = ["reasoning_content", "reasoning"];
+
 /**
- * The parts the choice's message becomes. Any other field of the message is kept as `Unrecognised`,
- * unless it holds nothing: `null`, or an empty array (OpenAI sends `refusal: null` and
- * `annotations: []` with every message).
+ * The parts the choice's message becomes: its thinking (a text field in `thinkingFields`) as
+ * `Thinking`, holding the field as received; its `content` as `Text`; any other field as
+ * `Unrecognised`, unless it holds nothing (`null`, or an empty array: OpenAI sends `refusal: null`
+ * and `annotations: []` with every message); its tool calls.
  */
 function parts(message: Schema.JsonObject): ReadonlyArray<ModelPart> {
   const { role: _role, content, tool_calls, ...rest } = message;
+  const filled = Object.entries(rest).filter(([, value]) => value !== null && value !== undefined && !(Array.isArray(value) && value.length === 0));
+  const thinks = ([field, value]: readonly [string, Json | undefined]) => thinkingFields.includes(field) && typeof value === "string";
   return [
+    ...filled.flatMap(([field, value]): ReadonlyArray<ModelPart> =>
+      thinkingFields.includes(field) && typeof value === "string" ? [{ _tag: "Thinking", text: ThinkingText.make(value), received: receivedJson({ [field]: value }) }] : [],
+    ),
     ...(typeof content === "string" && content.length > 0 ? [{ _tag: "Text" as const, text: ModelText.make(content) }] : []),
-    ...Object.entries(rest)
-      .filter(([, value]) => value !== null && value !== undefined && !(Array.isArray(value) && value.length === 0))
+    ...filled
+      .filter((entry) => !thinks(entry))
       .map(([field, value]): ModelPart => ({ _tag: "Unrecognised", received: receivedJson({ [field]: value as Json }) })),
     ...(Array.isArray(tool_calls) ? (tool_calls as ReadonlyArray<Json>).map(toolCall) : []),
   ];
 }
+
+/** The text a chunk's delta adds to the answer and to the thinking, as it arrives. */
+const deltasIn = (delta: Schema.JsonObject): ReadonlyArray<Streamed> => [
+  ...thinkingFields.flatMap((field): ReadonlyArray<Streamed> => {
+    const text = delta[field];
+    return typeof text === "string" ? [{ _tag: "Delta", kind: "Thinking", text }] : [];
+  }),
+  ...(typeof delta["content"] === "string" ? [{ _tag: "Delta" as const, kind: "Text" as const, text: delta["content"] }] : []),
+];
 
 /** A choice's `finish_reason` values. */
 const endings = new Map([
@@ -283,8 +302,11 @@ const respondOnce = (
               return yield* invalidOutput(caller, `The stream reported an error: ${JSON.stringify(chunk["error"])}`);
             const { choices, usage, ...metadata } = chunk;
             const choice = Array.isArray(choices) ? (choices as ReadonlyArray<Json>)[0] : undefined;
-            // A server that answers whole sends the message where a chunk sends its delta.
-            const delta = choice !== undefined && isObject(choice) ? (choice["delta"] ?? choice["message"]) : undefined;
+            // A server that answers whole sends the message where a chunk sends its delta; what arrives
+            // whole adds no text as it arrives.
+            const streamedDelta = choice !== undefined && isObject(choice) ? choice["delta"] : undefined;
+            const delta = choice !== undefined && isObject(choice) ? (streamedDelta ?? choice["message"]) : undefined;
+            if (streamedDelta !== undefined && isObject(streamedDelta)) yield* Effect.forEach(deltasIn(streamedDelta), passOn, { discard: true });
             const touched = delta !== undefined && isObject(delta) ? added(building, delta) : [];
             // A call is whole once a later one begins.
             const later = Math.max(-1, ...touched);

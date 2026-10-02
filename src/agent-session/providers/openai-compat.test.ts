@@ -85,13 +85,14 @@ test("a tool turn sends the catalog, then the call and a tool message with its r
   expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Completed" } } });
 });
 
-test("the choice's message becomes parts: content, calls to any tool name, and other fields kept whole", async () => {
+test("the choice's message becomes parts: thinking, content, calls to any tool name, and other fields kept whole", async () => {
   const { facts } = await turn([
     choice(
       {
         role: "assistant",
         content: "Reading.",
         reasoning_content: "The user wants a file.",
+        refusal: "none of it",
         tool_calls: [{ id: "call_9", type: "function", function: { name: "___read_", arguments: '{"path":"a.ts"}' } }],
       },
       "tool_calls",
@@ -104,8 +105,9 @@ test("the choice's message becomes parts: content, calls to any tool name, and o
       stop: "tool_calls",
       ending: { _tag: "Complete" },
       parts: [
+        { _tag: "Thinking", text: "The user wants a file.", received: json({ reasoning_content: "The user wants a file." }) },
         { _tag: "Text", text: "Reading." },
-        { _tag: "Unrecognised", received: json({ reasoning_content: "The user wants a file." }) },
+        { _tag: "Unrecognised", received: json({ refusal: "none of it" }) },
         { _tag: "ToolCall", call: "call_9", tool: "___read_" },
       ],
     },

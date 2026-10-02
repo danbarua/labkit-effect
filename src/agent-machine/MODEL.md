@@ -200,3 +200,9 @@ then continues").
   not part of it.
 - V2. `throttle.ts` is a machine that holds what is passed on and releases it in batches, at most
   once per interval; time is an input, so it reads no clock.
+- V3. The text each stream event adds to an answer, to commentary, or to the readable text of
+  thinking is passed on as it arrives (`ModelDelta`, with the kind of part it is added to). A
+  part's deltas, joined, are its text, and are passed on before its `ModelPartArrived`. A response
+  that arrives whole, and a part with no readable text, have none; a tool call has none.
+- V4. The end of a model request is passed on last, after everything it streamed
+  (`ModelResponseEnded`), however it ended: answered, failed, or stopped.

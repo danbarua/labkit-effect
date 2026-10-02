@@ -43,7 +43,7 @@ import type { Fact } from "../agent-machine/fact.ts";
 import { notObserved } from "../agent-machine/not-observed.ts";
 import { deliver, type World } from "../agent-machine/router.ts";
 import { leftRunning, worldAndRequestsOf } from "../agent-machine/left-running.ts";
-import { FailureText, InputText, Millis, type ModelName, type ProviderName, Seq, type SessionId, type TurnId } from "../agent-machine/names.ts";
+import { FailureText, InputText, Millis, type ModelName, ModelText, type ProviderName, Seq, type SessionId, ThinkingText, type TurnId } from "../agent-machine/names.ts";
 import type { CapturedObservation, ModelPart, Observation, ToolOutcome } from "../agent-machine/observation.ts";
 import type { Origin } from "../agent-machine/origin.ts";
 import type { EffectRequest } from "../agent-machine/request.ts";
@@ -85,6 +85,10 @@ const inBrief = (observation: Observation): Record<string, unknown> =>
       return [];
     }),
   );
+
+/** A delta as `streamed` gives it: its text branded for the kind of part it is added to. */
+const deltaOf = (turn: TurnId, kind: "Text" | "Commentary" | "Thinking", text: string): CapturedObservation =>
+  kind === "Thinking" ? { _tag: "ModelDelta", turn, kind, text: ThinkingText.make(text) } : { _tag: "ModelDelta", turn, kind, text: ModelText.make(text) };
 
 /** The session the facts opened, if they have. */
 const sessionOf = (facts: ReadonlyArray<Fact>): SessionId | undefined =>
@@ -272,9 +276,10 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
     });
 
   /**
-   * Carries out `request` with what it streams passed on to `streamed`: events held and released in
-   * batches at most once per `ModelStreamInterval`; a completed part, and the end of the request,
-   * release what is held.
+   * Carries out `request` with what it streams passed on to `streamed`: events and the text they add
+   * to parts held and released in batches at most once per `ModelStreamInterval`; a completed part,
+   * and the end of the request, release what is held. The end of the request is passed on last
+   * (`ModelResponseEnded`), however it ended.
    */
   const passingOn = <A, R>(turn: TurnId, request: Effect.Effect<A, never, R>): Effect.Effect<A, never, R> =>
     Effect.gen(function* () {
@@ -294,16 +299,28 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
           );
           yield* PubSub.publishAll(captured, batch);
         });
-      const sink = (streamed: Streamed) =>
-        streamed._tag === "Chunk"
-          ? step((at) => [{ _tag: "Captured", item: { _tag: "ModelStreamed", turn, chunk: streamed.chunk }, at }])
-          : step((at) => [
+      const sink = (streamed: Streamed) => {
+        switch (streamed._tag) {
+          case "Chunk":
+            return step((at) => [{ _tag: "Captured", item: { _tag: "ModelStreamed", turn, chunk: streamed.chunk }, at }]);
+          case "Delta":
+            // A delta with no text adds nothing to its part.
+            return streamed.text === ""
+              ? Effect.void
+              : step((at) => [{ _tag: "Captured", item: deltaOf(turn, streamed.kind, streamed.text), at }]);
+          case "Part":
+            return step((at) => [
               { _tag: "Captured", item: { _tag: "ModelPartArrived", turn, part: streamed.part }, at },
               { _tag: "Ended", at },
             ]);
+          default:
+            return streamed satisfies never;
+        }
+      };
       return yield* request.pipe(
         Effect.provideService(ModelStream, sink),
-        Effect.ensuring(step((at) => [{ _tag: "Ended", at }])),
+        // However the request ends (answered, failed, stopped), its end is the last of what it streamed.
+        Effect.ensuring(step((at) => [{ _tag: "Captured", item: { _tag: "ModelResponseEnded", turn }, at }, { _tag: "Ended", at }])),
       );
     });
 

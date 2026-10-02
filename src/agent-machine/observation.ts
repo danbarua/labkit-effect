@@ -274,11 +274,23 @@ export const Observation = Schema.Union([
 ]);
 export type Observation = typeof Observation.Type;
 
-/** Observations captured for display and not recorded. */
+/**
+ * Observations captured for display and not recorded. For one model request they come in the order
+ * they arrived, and end with `ModelResponseEnded`, however the request ended.
+ */
 export const CapturedObservation = Schema.Union([
   /** Part of a model response while it is still arriving, as received. */
   Schema.TaggedStruct("ModelStreamed", { turn: TurnId, chunk: Received }),
+  /**
+   * Text added to a part of the response while it arrives: an answer's (`Text`), commentary's, or
+   * the readable text of thinking. A part's deltas, joined, are its text, and come before the part's
+   * `ModelPartArrived`. A response that does not stream, and a part with no readable text, have none.
+   */
+  Schema.TaggedStruct("ModelDelta", { turn: TurnId, kind: Schema.Literals(["Text", "Commentary"]), text: ModelText }),
+  Schema.TaggedStruct("ModelDelta", { turn: TurnId, kind: Schema.Literal("Thinking"), text: ThinkingText }),
   /** A part of a model response is complete, while the rest is still arriving. */
   Schema.TaggedStruct("ModelPartArrived", { turn: TurnId, part: ModelPart }),
+  /** The model request ended: answered, failed, or stopped. Nothing more of it follows. */
+  Schema.TaggedStruct("ModelResponseEnded", { turn: TurnId }),
 ]);
 export type CapturedObservation = typeof CapturedObservation.Type;

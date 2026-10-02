@@ -56,9 +56,23 @@ export function openAiStream(whole: unknown): Response {
   const response = whole as Json;
   const output = (response["output"] ?? []) as ReadonlyArray<Json>;
   return events([
-    ...output.flatMap((item, output_index) =>
-      item["status"] === "incomplete" ? [] : [{ type: "response.output_item.done", output_index, item }],
-    ),
+    ...output.flatMap((item, output_index) => {
+      if (item["status"] === "incomplete") return [];
+      const content = (Array.isArray(item["content"]) ? item["content"] : []) as ReadonlyArray<Json>;
+      const summary = (Array.isArray(item["summary"]) ? item["summary"] : []) as ReadonlyArray<Json>;
+      // The text the item's content and summary parts hold, as the deltas that add it, in two pieces each.
+      const halves = (text: unknown) => (typeof text === "string" ? [text.slice(0, Math.ceil(text.length / 2)), text.slice(Math.ceil(text.length / 2))] : []);
+      return [
+        { type: "response.output_item.added", output_index, item: { ...item, ...(item["type"] === "message" ? { content: [] } : {}), ...(item["type"] === "reasoning" ? { summary: [] } : {}) } },
+        ...(item["type"] === "message"
+          ? content.flatMap((part, content_index) => halves(part["text"]).map((delta) => ({ type: "response.output_text.delta", output_index, content_index, delta })))
+          : []),
+        ...(item["type"] === "reasoning"
+          ? summary.flatMap((part, summary_index) => halves(part["text"]).map((delta) => ({ type: "response.reasoning_summary_text.delta", output_index, summary_index, delta })))
+          : []),
+        { type: "response.output_item.done", output_index, item },
+      ];
+    }),
     { type: response["status"] === "incomplete" ? "response.incomplete" : "response.completed", response },
   ]);
 }

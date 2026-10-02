@@ -9,7 +9,8 @@
  * out, and that is logged. The session's settings go in as `reasoning`
  * (`openai-settings.ts`); what that adjusted is recorded before the request.
  *
- * In: the response streams; each event and each completed item is passed on as it arrives, and
+ * In: the response streams; each event, the text it adds to an answer, commentary or a reasoning
+ * summary, and each completed item are passed on as they arrive, and
  * the stream's last event carries the whole response. Its `output` items that were completed
  * become the observation's parts in order: a `message` whose
  * content is all `output_text` is a `Text` for each, or a `Commentary` for each when its `phase` is
@@ -258,6 +259,9 @@ const respondOnce = (
 ): Effect.Effect<Responded, AiError.AiError> =>
   Effect.gen(function* () {
     const passOn = yield* ModelStream;
+    // What each output item's text deltas are added to, and the last summary part each reasoning item's deltas were in.
+    const kinds = new Map<number, "Text" | "Commentary">();
+    const summaries = new Map<number, number>();
     const ended = yield* postEvents(http, caller, post).pipe(
       Stream.runFoldEffect(
         (): Json | undefined => undefined,
@@ -265,7 +269,27 @@ const respondOnce = (
           Effect.gen(function* () {
             yield* passOn({ _tag: "Chunk", chunk: receivedJson(event) });
             if (!isObject(event)) return response;
+            const at = typeof event["output_index"] === "number" ? event["output_index"] : -1;
             switch (event["type"]) {
+              case "response.output_item.added": {
+                const item = event["item"];
+                if (isObject(item ?? null) && (item as Schema.JsonObject)["type"] === "message")
+                  kinds.set(at, (item as Schema.JsonObject)["phase"] === "commentary" ? "Commentary" : "Text");
+                return response;
+              }
+              case "response.output_text.delta":
+                if (typeof event["delta"] === "string") yield* passOn({ _tag: "Delta", kind: kinds.get(at) ?? "Text", text: event["delta"] });
+                return response;
+              case "response.reasoning_summary_text.delta": {
+                if (typeof event["delta"] !== "string") return response;
+                // The summary's parts are joined by a blank line in the thinking's text, and so in its deltas.
+                const index = typeof event["summary_index"] === "number" ? event["summary_index"] : 0;
+                const last = summaries.get(at);
+                if (last !== undefined && index > last) yield* passOn({ _tag: "Delta", kind: "Thinking", text: "\n\n" });
+                summaries.set(at, index);
+                yield* passOn({ _tag: "Delta", kind: "Thinking", text: event["delta"] });
+                return response;
+              }
               case "response.output_item.done": {
                 const item = event["item"] ?? null;
                 if (!stillArriving(item))
