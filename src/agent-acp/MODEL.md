@@ -56,11 +56,41 @@ sends nothing for what was said).
 - `usage.ts`: `usageUpdate(facts)`, the `usage_update` of the session (`contextGauge`), with what
   `KnownModels` knows of the model it asks now.
 
+## The host
+
+`host.ts`: `makeHost(options)` is an agent of protocol v1 (`Agent.implement`) whose sessions run on
+the core; a launcher runs it with `Agent.run` or `Agent.runStdio`, giving it the model catalog
+(`ModelCatalog`) and the file system. `HostOptions`: `directory`, the session directory's root;
+`world`, `"editor"` (the default), `"local"` or a world of the host's own; `model`, `provider/model`
+to start sessions with (else the catalog's first, `defaultModel`); `services`, what a session runs
+with given its world's runner (`SessionServices`). `hostOptionsFrom(env)` reads `LABKIT_ACP_MODEL`
+and `LABKIT_ACP_LOCAL_TOOLS=1`. It advertises `sessionCapabilities.close` and no prompt content but
+text and resource links; no load, resume, list, fork or auth methods.
+
+- `world.ts`: the `World` is what the host does not know of a session. `open({ sessionId, cwd,
+  mcpServers, connection })` gives its system prompt, its tools (`ToolSpec`), the `ToolRunner` that
+  runs them and their presentation (`Present`). `editorWorld` (the default) goes through the
+  editor: `read_file { path, line?, limit? }` (kind `read`) with `fs/read_text_file`, offered only
+  when the client advertised `fs.readTextFile`, and `write_file { path, content }` (kind `edit`) with
+  `fs/write_text_file`, offered only with `fs.writeTextFile`; 256 KiB at most each way. The editor
+  has no method to list a folder, so there is no `list_dir`. `workspaceWorld` is a stopgap: the
+  workspace tools (`agent-tools/workspace.ts`) on the local disk, bypassing the editor's unsaved
+  buffers.
+- `feed.ts`: an open session's live view. It subscribes to the facts and `streamed` before
+  anything is given to the session, merges them into the projection (`live`), sends each update in
+  order, asks each `PermissionAsked` of the client, and says when it has taken a turn's end
+  (`turnEnded`): the barrier a prompt waits on before it sends `usage_update` and answers.
+- `log-keys.ts`: the events the host logs. Each carries the `connection` (minted per connection),
+  `request` (set by the peer), `session`, `turn` and `call` it is about as log annotations, the
+  names the loop uses.
+
 ## What is not built
 
-- The handlers, the launcher and the stdio and HTTP hosts.
-- The host's own updates but for `usage_update` and the config options: `session_info_update`,
-  `available_commands_update`, `current_mode_update`, `plan`.
+- The launcher and the HTTP host.
+- The host's own updates but for `usage_update`, the config options and
+  `available_commands_update`: `session_info_update`, `current_mode_update`, `plan`.
+- `session/load`, `resume`, `list`, `fork`; MCP servers (a world is given them and ignores them);
+  attachments (image, audio, embedded context).
 - An input's attachments on load, and `messageId` on chunks.
 - What a reopened session shows as a tool call's content (the default shows its output as text).
 
@@ -127,3 +157,50 @@ sends nothing for what was said).
 - AA9. `usage_update` is the gauge of the model the session asks now: the visible tokens of the
   last exchange, the model's window as `KnownModels` knows it, and the cost so far; none for a model
   whose window is not known.
+- AG1. `session/new` with an absolute `cwd` mints the session's id (ACP's `sessionId` and the core's
+  `SessionId`), opens its world and answers a draft: the model to start with, its output limit
+  defaulted (`withDefaults`), and its config options (`configOptions`). Nothing is written. Once the
+  response is written, `available_commands_update` offers `/export`.
+- AG2. The first `session/prompt` opens the draft (turn zero): the session's folder in the session
+  directory with its `facts.jsonl`, opened with the draft's model, settings, system prompt and tools
+  (`SessionOpened`) by the user through ACP, and the prompt is the turn's input from the same
+  origin. Its updates are sent in the order the projection gives them, the facts and the streamed
+  items merged; each `PermissionAsked` is a `session/request_permission`, and the option the client
+  selects is recorded as the answer. Once the turn has ended and the feed has sent its updates, the
+  host sends `usage_update` and answers the prompt with the turn's stop (`stopOf`).
+- AG3. A permission request the client answers `cancelled`, fails, or answers with an option the
+  question does not offer refuses the call once: it does not run, and the turn goes on. Each but
+  the first is logged as a warning with its cause.
+- AG4. `session/cancel` is `Session.cancel`: the turn under way ends `Interrupted` and its prompt
+  `cancelled`. A prompt request the client cancels (`$/cancel_request`) cancels its turn the same
+  way. The session takes the next prompt.
+- AG5. `session/set_config_option` changes a draft (`chooseModel`, `saySettings`). On an open session
+  it is `ModelChangeArrived` from the user through ACP, taken at once between turns and otherwise
+  at the turn's next step (agent-machine M1); the answer is every option as the configuration will
+  be, the changes not yet taken included. A value the option does not offer, or an option no
+  session has, is -32602.
+- AG6. `/export`, alone in a prompt, writes the session's transcript (`markdownOf`) to
+  `<cwd>/.labkit/exports/<sessionId>.md`, says where in an `agent_message_chunk` and answers
+  `end_turn` without asking the model; on a draft it says there is nothing to export.
+- AG7. A prompt to a session with a prompt running is -32000 "already has an active prompt"; a
+  request naming a session the connection does not hold is -32002; a `cwd` that is not absolute is
+  -32602; with no model to ask, `session/new` fails saying which variables to set or which server
+  to start.
+- AG8. A turn that fails (a model request failed) answers its prompt with a JSON-RPC error carrying
+  the failure, and the session takes the next prompt.
+- AG9. When the connection ends, each session's scope closes: a turn under way is left running in
+  the facts (no `TurnInterrupted`, no `TurnEnded`), and `Agent.run` returns.
+- AG10. `editorWorld` offers `read_file` only to a client that advertised `fs.readTextFile` and
+  `write_file` only to one that advertised `fs.writeTextFile`; a client that advertised neither
+  gets no tools. They read and write through `fs/read_text_file` and `fs/write_text_file` with the
+  session's id and the path resolved against the working folder; a path outside it is refused with
+  a failure the model reads, and the editor is not asked.
+- AG11. Session created, config changed, session opened, prompt received, admitted and settled
+  (its stop reason or error, and its duration), cancel requested, permission asked, answered and
+  failed, export written and usage sent are logged under `log-keys.ts`, annotated with the
+  connection, request, session, turn and call they are about. A routine turn logs no warning or
+  error; a failure is logged with what failed, what the host was doing and the cause.
+- AG12. A world of the host's own gives the session its system prompt, its tools, the runner that
+  runs them and how their calls are shown.
+- AG13. `session/close` cancels the turn under way, waits for its prompt (which ends
+  `cancelled`), and closes the session's scope; a later request naming it is -32002.
