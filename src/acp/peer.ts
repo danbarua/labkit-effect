@@ -19,6 +19,8 @@
  * - a notification is run by its handler and nothing is sent back;
  * - a `null` result for a request whose success schema refuses `null` and accepts `{}` reaches the
  *   caller as `{}`, as the ACP SDK reads it: the SDK answers `null` when a handler returns nothing;
+ * - a result is decoded with its method's success schema before `RpcClient` sees it, so the
+ *   schema's default-on-error and skip-invalid-items fallbacks apply to it;
  * - a malformed response is answered -32600 under id null, and the pending call whose id it
  *   carries fails with the `JsonRpcError` -32600 "The response to this request is malformed".
  *
@@ -247,16 +249,34 @@ export const make: <Serve extends Rpc.Any, Call extends Rpc.Any, Notify extends 
   // The client half: what it sends is a request to the other end, or the cancellation of one.
   // `calling` holds the method of each request still waiting for its response, by id.
   const calling = new Map<string | number, string>();
+  // The success codec of each method this end calls.
+  const successCodecs = new Map([...options.call.requests.values()].map((rpc) => [rpc._tag, codecOf(rpc, "successSchema")]));
   // The methods whose success refuses `null` and accepts `{}`. The ACP SDK answers `null` when a
   // handler returns nothing, and reads `null` as `{}` itself; a `null` for one of these becomes `{}`.
   const nullAsEmpty = new Set(
-    [...options.call.requests.values()]
-      .filter((rpc) => {
-        const decode = Schema.decodeUnknownExit(codecOf(rpc, "successSchema"));
+    [...successCodecs]
+      .filter(([, codec]) => {
+        const decode = Schema.decodeUnknownExit(codec);
         return Exit.isFailure(decode(null)) && Exit.isSuccess(decode({}));
       })
-      .map((rpc) => rpc._tag),
+      .map(([method]) => method),
   );
+
+  /**
+   * A result as `method`'s success codec decodes it and encodes it back, or unchanged when it does
+   * not decode. `RpcClient` decodes a response inside `Schema.Exit`, which first checks the value
+   * against the success schema's encoded side, where a default-on-error or skip-invalid-items
+   * fallback cannot catch it: `availableModes: "none"` would fail there instead of becoming `[]`.
+   */
+  const normalized = (method: string | undefined, result: unknown): unknown => {
+    const codec = method === undefined ? undefined : successCodecs.get(method);
+    if (codec === undefined) return result;
+    const decoded = Schema.decodeUnknownExit(codec)(result);
+    if (Exit.isFailure(decoded)) return result;
+    const encoded = Schema.encodeUnknownExit(codec)(decoded.value);
+    return Exit.isSuccess(encoded) ? encoded.value : result;
+  };
+
   let toClient!: (message: RpcMessage.FromServerEncoded) => Effect.Effect<void>;
   const clientProtocol = yield* RpcClient.Protocol.make((writeResponse, clientIds) => {
     toClient = (message) => Effect.forEach([...clientIds], (id) => writeResponse(id, message), { discard: true });
@@ -357,7 +377,7 @@ export const make: <Serve extends Rpc.Any, Call extends Rpc.Any, Notify extends 
             exit: { _tag: "Failure", cause: [{ _tag: "Fail", error: message.error }] },
           });
         const value = message.result === null && method !== undefined && nullAsEmpty.has(method) ? {} : message.result;
-        return toClient({ _tag: "Exit", requestId: message.id, exit: { _tag: "Success", value } });
+        return toClient({ _tag: "Exit", requestId: message.id, exit: { _tag: "Success", value: normalized(method, value) } });
       }
       case "Notification":
       case "Request": {

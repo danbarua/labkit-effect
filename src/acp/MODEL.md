@@ -38,9 +38,15 @@ fails when a rule has none.
   its JSON Schema `default`. With no default it is left out, or becomes `[]` if it is required (in
   both versions such a property is always a skip-invalid array, which is the SDK's fallback). A
   required key that is missing still fails. A field without the marker is refused, as the SDK
-  refuses it. Encoding is unchanged.
+  refuses it. Encoding is unchanged. Over the wire the same holds for what an end receives: the
+  SDK's v1 client sends `agent.run` `clientCapabilities.fs.readTextFile: "yes"`, which the profile
+  holds as `false`, and the SDK's v1 agent answers `client.connect`'s `session/new` with
+  `modes.availableModes: "none"`, which the call returns as `[]` (AP13).
 - AS6. An array marked `x-deserialize-skip-invalid-items` decodes by dropping the items that fail to
-  decode. Encoding refuses an invalid item.
+  decode. Encoding refuses an invalid item. Over the wire, an `annotations.audience` of
+  `["user", 5, "assistant"]` in a prompt block from the SDK's v1 client reaches the agent's
+  `session/prompt` handler as `["user", "assistant"]`, and the same in a `session/update` from the
+  SDK's v1 agent reaches the client's handler as `["user", "assistant"]`; neither is refused.
 - AS7. Every def that is a plain JSON string is a string branded `acp/<Name>`, with the same brand
   in v1 and v2. A plain string, or a different kind of id, is not one.
 - AS8. The catch-all variant of an extensible union refuses an object whose tag belongs to a known
@@ -95,9 +101,12 @@ than by Effect's JSON-RPC encoder. `stdio.ts` makes wires of newline-delimited J
 - AP13. The peer keeps the method of each request it sends until that request's response arrives.
   A success response with `result: null` reaches the caller as `{}` when the method's success
   schema, decoded with the JSON codec `RpcClient` uses, refuses `null` and accepts `{}`. The ACP
-  SDK answers `null` when a handler returns nothing, and reads `null` as `{}` itself. Every other
-  result reaches the caller unchanged; a `null` that the success schema refuses makes the call die
-  on decoding.
+  SDK answers `null` when a handler returns nothing, and reads `null` as `{}` itself. Every result
+  is then decoded with the method's success schema and encoded back before `RpcClient` decodes it,
+  so the schema's default-on-error and skip-invalid-items fallbacks apply (`RpcClient` decodes
+  inside `Schema.Exit`, which checks the value against the encoded side first, where those
+  fallbacks cannot catch it). A result the success schema refuses, `null` included, reaches
+  `RpcClient` unchanged and makes the call die on decoding.
 - AP14. A malformed response is an object with no `method` and a `result` or an `error` that is not
   a well-formed response: `jsonrpc` other than `"2.0"`, an `id` that is not a string, number or
   null, an `error` without an integer `code` and a string `message`, or both `result` and `error`.
@@ -221,33 +230,37 @@ advertises it.
   `elicitation: {}`. The agent's `session/update` of kind `notice` is refused without
   `session.notices`. The client's `session/load` is refused when the agent did not advertise
   `loadSession`.
-- AN6. `client.connect` sends `initialize` with id 0, offering `offer` (one of the versions it
-  implements; the highest when left out) in that version's field names. An `offer` it does not
-  implement is a defect. It reads the answer's `protocolVersion` the same way in every version and
-  continues with the implementation for that version. The profile's client side is what the agent
-  received: the params sent, decoded with the answered version's `InitializeRequest` schema, and the
-  client's own gates use that profile. A client that offers 2 sends `capabilities` and `info`, which
+- AN6. Each `ProtocolAdapter` has a `stability`: `v1` is `stable`, and `v2`, the SDK's draft, is
+  `experimental`. `client.connect` sends `initialize` with id 0, offering `offer` in that version's
+  field names. Left out, `offer` is the highest stable version the client implements, or the
+  highest experimental one when it implements no stable version. An `offer` it does not implement
+  is a defect. It reads the answer's `protocolVersion` the same way in every version and continues
+  with the implementation for that version. The profile's client side is what the agent received:
+  the params sent, decoded with the answered version's `InitializeRequest` schema, and the client's
+  own gates use that profile. A client implementing 1 (with `fs` and `terminal`) and 2 offers 1 by
+  default, the SDK's v1 agent receives its `clientCapabilities` and `clientInfo`, and the agent's
+  `fs/read_text_file` reaches its handler. Offering 2, it sends `capabilities` and `info`, which
   version 1 does not name: when the SDK's v1 agent answers 1, the profile has no client
-  capabilities and no client info, and the client answers the agent's `fs/read_text_file` -32601
-  even when its version 1 implementation advertises `fs`. Offering 1, it sends `clientCapabilities`
-  and `clientInfo`, which the SDK's v1 agent receives. If no implementation matches, `connect` fails
-  with `UnsupportedProtocolVersion { offered, answered }` and stops reading the wire. It fails with
-  `InitializeFailed` when the agent answers with an error or with a malformed response (AP14), when
-  the answer has no `protocolVersion`, when the answered version's schema refuses the answer or the
-  params sent, when the wire closes first, or when the request cannot be written. A client
-  implementing 1 and 2 gets 1 from the SDK's v1 agent, 2 from the SDK's v2 agent, and 2 or 1 from
-  `agent.run` implementing both or only 1. A client implementing only 2 fails against an agent
-  implementing only 1.
+  capabilities and no client info, and the client answers the agent's `fs/read_text_file` -32601.
+  If no implementation matches, `connect` fails with `UnsupportedProtocolVersion { offered,
+  answered }` and stops reading the wire. It fails with `InitializeFailed` when the agent answers
+  with an error or with a malformed response (AP14), when the answer has no `protocolVersion`, when
+  the answered version's schema refuses the answer or the params sent, when the wire closes first,
+  or when the request cannot be written. A client implementing 1 and 2 gets 1 from the SDK's v1
+  agent and from `agent.run` implementing both; offering 2, it gets 2 from the SDK's v2 agent, and
+  2 or 1 from `agent.run` implementing both or only 1. A client implementing only 2 offers 2, and
+  fails against an agent implementing only 1.
 - AN7. A request from the agent that the client's gates refuse is answered as in AN4. An
   `elicitation/create` in mode `form` or `url` that the client did not advertise gets -32602.
   `fs/read_text_file` without `fs.readTextFile` gets -32601.
-- AN8. `agent.layerStdio` runs `run` on `fromStdio` for as long as the layer lives, with
-  `References.LogToStderr` set, so stdout carries only protocol messages. In a subprocess, the SDK's
-  client runs a turn with a permission request over pipes; every stdout line is JSON-RPC, and the
-  negotiation log line is on stderr. `agent.layerHttp` runs one `run` per connection on
-  `http.serve` (`path`, `keepAliveInterval`), and the SDK's `createHttpStream` client runs the same
-  turn against it. `client.connect` over `http.connect` runs the same turn against the SDK's
-  `AcpServer`.
+- AN8. `agent.runStdio` runs `run` on `fromStdio` with `References.LogToStderr` set, so stdout
+  carries only protocol messages, and returns when stdin closes. In a subprocess whose program is
+  `runStdio` under `BunRuntime.runMain`, the SDK's client runs a turn with a permission request over
+  pipes; every stdout line is JSON-RPC, the negotiation log line is on stderr, and once the client
+  closes the process's stdin the process exits 0 on its own. `agent.layerHttp` runs one `run` per
+  connection on `http.serve` (`path`, `keepAliveInterval`), and the SDK's `createHttpStream` client
+  runs the same turn against it. `client.connect` over `http.connect` runs the same turn against the
+  SDK's `AcpServer`.
 - AN9. Answering `initialize` is logged at Info as `acp.initialize.negotiated`:
   `{ side: "agent", offered, chosen, supported }` on the agent, and `{ side: "client", offered,
   chosen }` on the client. An incoming refusal is logged at Info as

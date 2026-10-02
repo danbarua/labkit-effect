@@ -1,9 +1,10 @@
 /**
  * An ACP client: one implementation per protocol version it speaks, and `connect` on a wire.
  *
- * `connect` sends `initialize` offering one version it implements (the highest, unless `offer`
- * names another), in that version's field names, reads the answer's `protocolVersion` the same way
- * in every version, and continues with the implementation for the answered version. The profile's
+ * `connect` sends `initialize` offering one version it implements (by default the highest stable
+ * one, or the highest experimental one when it implements no stable version; `offer` names
+ * another), in that version's field names, reads the answer's `protocolVersion` the same way in
+ * every version, and continues with the implementation for the answered version. The profile's
  * client side is what the agent received: the params sent, read with the answered version's schema.
  * From then on that implementation's handlers serve the agent's requests, behind the capability
  * gates of `protocol.ts`.
@@ -154,9 +155,10 @@ export interface ConnectOptions<Impls extends ReadonlyArray<AnyClientImplementat
   /** One per protocol version the client speaks. */
   readonly implementations: Impls;
   /**
-   * The version `initialize` offers, in that version's field names; the highest implemented when
-   * left out. An agent that answers a lower version reads the params with its own schema: a client
-   * that knows its agent speaks only version 1 offers 1, or the agent receives no capabilities.
+   * The version `initialize` offers, in that version's field names. Left out, it is the highest
+   * stable version implemented, or the highest experimental one when no stable version is. An agent
+   * that answers a lower version reads the params with its own schema: a client that offers the
+   * version 2 draft to an agent that speaks only version 1 sends it no capabilities.
    */
   readonly offer?: Impls[number]["adapter"]["protocolVersion"] | undefined;
 }
@@ -186,7 +188,10 @@ export const connect = <const Impls extends Implementations>(
     const byVersion = new Map(
       implementations.map((implementation) => [implementation.adapter.protocolVersion as number, implementation]),
     );
-    const offered: number = options.offer ?? Math.max(...byVersion.keys());
+    const stable = implementations.filter((implementation) => implementation.adapter.stability === "stable");
+    const offered: number =
+      options.offer ??
+      Math.max(...(stable.length > 0 ? stable : implementations).map((implementation) => implementation.adapter.protocolVersion));
     const offering = byVersion.get(offered);
     if (offering === undefined)
       return yield* Effect.die(new Error(`acp client: offer ${offered} is not a version in [${[...byVersion.keys()].join(", ")}]`));

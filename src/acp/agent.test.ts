@@ -9,13 +9,13 @@ import { describe, expect, test } from "bun:test";
 import * as acp from "@agentclientprotocol/sdk";
 import { createHttpStream } from "@agentclientprotocol/sdk/experimental/http-client";
 import * as acpv2 from "@agentclientprotocol/sdk/experimental/v2";
-import { Effect, Fiber, Layer, Logger, References } from "effect";
+import { Effect, Fiber, Layer, Logger, References, Stream } from "effect";
 import * as HttpRouter from "effect/http/HttpRouter";
 import * as Agent from "./agent.ts";
 import type { JsonRpcMessage, Wire } from "./json-rpc.ts";
 import { logKeys } from "./log-keys.ts";
 import { type AgentWithExtensions, decode, info, textOf, v1, v1WithExtensions, v2 } from "./negotiation-test-agent.ts";
-import type * as Protocol from "./protocol.ts";
+import * as Protocol from "./protocol.ts";
 import * as V1 from "./schema/v1.gen.ts";
 import * as V2 from "./schema/v2.gen.ts";
 import { fromWebStreams } from "./stdio.ts";
@@ -43,6 +43,8 @@ interface Started {
   readonly output: ReadableStream<Uint8Array>;
   /** Every message the agent wrote. */
   readonly sent: ReadonlyArray<JsonRpcMessage | ReadonlyArray<JsonRpcMessage>>;
+  /** Every JSON value the agent read, as it arrived. */
+  readonly received: ReadonlyArray<unknown>;
   /** Every log line, Debug included. */
   readonly logged: ReadonlyArray<Logged>;
   readonly stop: () => Promise<unknown>;
@@ -54,9 +56,10 @@ function start(implementations: Implementations): Started {
   const toClient = new TransformStream<Uint8Array, Uint8Array>();
   const wire = fromWebStreams(toAgent.readable, toClient.writable);
   const sent: Array<JsonRpcMessage | ReadonlyArray<JsonRpcMessage>> = [];
+  const received: Array<unknown> = [];
   const logged: Array<Logged> = [];
   const recorded: Wire = {
-    read: wire.read,
+    read: wire.read.pipe(Stream.tap((input) => Effect.sync(() => input._tag === "Json" && received.push(input.value)))),
     write: (message) => Effect.suspend(() => (sent.push(message), wire.write(message))),
   };
   const fiber = Effect.runFork(
@@ -69,6 +72,7 @@ function start(implementations: Implementations): Started {
     input: toAgent.writable,
     output: toClient.readable,
     sent,
+    received,
     logged,
     stop: () => Effect.runPromise(Fiber.interrupt(fiber)),
   };
@@ -267,6 +271,51 @@ describe("the agent's auth methods", () => {
   });
 });
 
+describe("lenient decoding over the wire", () => {
+  test("AS5 AS6: the SDK's v1 client sends the agent a default-on-error field that fails to decode and a skip-invalid-items array with an invalid item; the profile and the handler get the default and the array without the item, and the prompt is answered", async () => {
+    const handled: Array<unknown> = [];
+    const agent = start([
+      Agent.implement(Protocol.v1, {
+        capabilities: {},
+        handlers: (connection) =>
+          Effect.succeed({
+            "session/new": () => Effect.succeed({ sessionId: V1.SessionId.make("session-1") }),
+            "session/prompt": ({ prompt }) =>
+              Effect.sync(() => {
+                handled.push({ fs: connection.profile.client.capabilities.fs, prompt });
+                return { stopReason: "end_turn" as const };
+              }),
+          }),
+      }),
+    ]);
+    const annotations = { audience: ["user", 5, "assistant"], priority: "high" };
+    const prompted = await sdkClient([]).connectWith(acp.ndJsonStream(agent.input, agent.output), async (ctx) => {
+      // `fs.readTextFile` defaults to false on error; `audience` skips invalid items; `priority`
+      // has no default and is left out.
+      const clientCapabilities = { fs: { readTextFile: "yes", writeTextFile: true } } as unknown as acp.ClientCapabilities;
+      await ctx.request("initialize", { protocolVersion: 1, clientCapabilities, clientInfo });
+      const { sessionId } = await ctx.request("session/new", { cwd: "/tmp", mcpServers: [] });
+      const prompt = [{ type: "text", text: "hello", annotations }] as unknown as acp.PromptRequest["prompt"];
+      return ctx.request("session/prompt", { sessionId, prompt });
+    });
+    await agent.stop();
+    // The SDK sent the values as given.
+    expect(agent.received).toContainEqual(
+      expect.objectContaining({ method: "initialize", params: expect.objectContaining({ clientCapabilities: { fs: { readTextFile: "yes", writeTextFile: true } } }) }),
+    );
+    expect(agent.received).toContainEqual(
+      expect.objectContaining({ method: "session/prompt", params: expect.objectContaining({ prompt: [{ type: "text", text: "hello", annotations }] }) }),
+    );
+    expect(prompted).toEqual({ stopReason: "end_turn" });
+    expect(handled).toEqual([
+      {
+        fs: { readTextFile: false, writeTextFile: true },
+        prompt: [{ type: "text", text: "hello", annotations: { audience: ["user", "assistant"] } }],
+      },
+    ]);
+  });
+});
+
 describe("the agent's gates on what the client sends", () => {
   const connected = async <A>(capabilities: Parameters<typeof v1>[0], run: (ctx: acp.ClientContext, sessionId: string) => Promise<A>) => {
     const agent = start([v1(capabilities)]);
@@ -357,7 +406,7 @@ describe("the agent's gates on what it sends", () => {
 });
 
 describe("transports", () => {
-  test("AN8: layerStdio in a subprocess, driven by the SDK's client over pipes: stdout carries only protocol messages, and the logs go to stderr", async () => {
+  test("AN8: runStdio in a subprocess run by BunRuntime.runMain, driven by the SDK's client over pipes: stdout carries only protocol messages, the logs go to stderr, and the process exits 0 when its stdin closes", async () => {
     const child = Bun.spawn([process.execPath, `${import.meta.dir}/negotiation-test-agent-stdio.ts`], {
       stdin: "pipe",
       stdout: "pipe",
@@ -378,8 +427,8 @@ describe("transports", () => {
       return { initialized, prompted };
     });
     await child.stdin.end();
-    child.kill();
-    await child.exited;
+    // Bounded by the test's timeout: the agent must end the process on its own.
+    expect(await child.exited).toBe(0);
     const stdout = await new Response(forTest).text();
     const stderr = await new Response(child.stderr).text();
     expect(result.initialized.protocolVersion).toBe(1);

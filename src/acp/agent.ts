@@ -1,6 +1,6 @@
 /**
  * An ACP agent, shaped like Effect's `McpServer`: one implementation per protocol version it
- * speaks, `run` on a wire, or `layerStdio` and `layerHttp` to serve one.
+ * speaks, `run` on a wire, `runStdio` as an editor launches one, or `layerHttp` to serve one.
  *
  * The library answers `initialize` itself. It reads the offered `protocolVersion` the same way in
  * every version, chooses a version with `select`, decodes the request with that version's schema,
@@ -8,7 +8,7 @@
  * serve the connection, behind the capability gates of `protocol.ts`.
  */
 
-import { Deferred, Effect, Layer, References, Schema, type Stdio } from "effect";
+import { Deferred, Effect, type Layer, References, Schema, type Stdio } from "effect";
 import type { HttpRouter } from "effect/http";
 import type { Rpc } from "effect/rpc";
 import {
@@ -253,18 +253,16 @@ export const run = <const Impls extends Implementations>(
   );
 
 /**
- * The agent on this process's stdin and stdout, as an editor launches it, for as long as the layer
- * lives. It runs until stdin closes. Its logs, the negotiation's included, go to stderr: stdout
- * carries only protocol messages.
+ * The agent on this process's stdin and stdout, as an editor launches it: `run` on `fromStdio`,
+ * returning when stdin closes, so a program that ends with it (`BunRuntime.runMain`) exits 0. Its
+ * logs, the negotiation's included, go to stderr: stdout carries only protocol messages.
  */
-export const layerStdio = <const Impls extends Implementations>(
+export const runStdio = <const Impls extends Implementations>(
   options: Omit<RunOptions<Impls>, "wire">,
-): Layer.Layer<never, never, Stdio.Stdio | Requirements<Impls[number]>> =>
-  Layer.effectDiscard(
-    Effect.gen(function* () {
-      const wire = yield* fromStdio;
-      return yield* run({ ...options, wire });
-    }).pipe(Effect.provideService(References.LogToStderr, true), Effect.forkScoped),
+): Effect.Effect<void, never, Stdio.Stdio | Requirements<Impls[number]>> =>
+  fromStdio.pipe(
+    Effect.flatMap((wire) => run({ ...options, wire })),
+    Effect.provideService(References.LogToStderr, true),
   );
 
 /**

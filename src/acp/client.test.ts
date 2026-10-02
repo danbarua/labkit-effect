@@ -10,7 +10,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import { createNodeHttpHandler } from "@agentclientprotocol/sdk/experimental/node";
 import { AcpServer } from "@agentclientprotocol/sdk/experimental/server";
 import * as acpv2 from "@agentclientprotocol/sdk/experimental/v2";
-import { Cause, Effect, Exit, Fiber, Layer, Logger, References, Schema, type Scope } from "effect";
+import { Cause, Effect, Exit, Fiber, Layer, Logger, References, Schema, type Scope, Stream } from "effect";
 import { Rpc, RpcGroup } from "effect/rpc";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import type * as HttpClient from "effect/http/HttpClient";
@@ -197,7 +197,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope | HttpClient.HttpClie
   Effect.runPromise(effect.pipe(Effect.scoped, Effect.provide(Layer.merge(FetchHttpClient.layer, Logger.layer([])))));
 
 describe("the client negotiates the version", () => {
-  test("AN6: a client implementing versions 1 and 2 offers 2, gets 1 from the SDK's v1 agent, and runs a turn with a permission request", async () => {
+  test("AN6: a client implementing versions 1 and 2 offers 1, the highest stable version, gets 1 from the SDK's v1 agent, and runs a turn with a permission request", async () => {
     const ends = pipes();
     const received: Array<string> = [];
     sdkAgentV1(received).connect(acp.ndJsonStream(ends.agentWritable, ends.agentReadable));
@@ -211,18 +211,18 @@ describe("the client negotiates the version", () => {
         return { version: connection.protocolVersion, agentInfo: connection.profile.agent.info, stopReason: prompted.stopReason };
       }),
     );
-    expect(received).toEqual(["initialize 2", "session/new", "session/prompt"]);
+    expect(received).toEqual(["initialize 1", "session/new", "session/prompt"]);
     expect(result).toEqual({ version: 1, agentInfo: { name: "an-sdk-agent", version: "1.0.0" }, stopReason: "end_turn" });
     expect(seen).toEqual(["update: Working.", "permission", 'update: Answered: {"outcome":"selected","optionId":"allow-once"}']);
   });
 
-  test("AN6: a client implementing versions 1 and 2 gets 2 from the SDK's v2 agent, and runs a version 2 turn with a permission request", async () => {
+  test("AN6: a client implementing versions 1 and 2 that offers the version 2 draft gets 2 from the SDK's v2 agent, and runs a version 2 turn with a permission request", async () => {
     const ends = pipes();
     sdkAgentV2().connect(acpv2.ndJsonStream(ends.agentWritable, ends.agentReadable));
     const seen: Seen = [];
     const result = await run(
       Effect.gen(function* () {
-        const connection = yield* Client.connect({ wire: ends.client, info, implementations: [clientV1(seen), clientV2(seen)] });
+        const connection = yield* Client.connect({ wire: ends.client, info, implementations: [clientV1(seen), clientV2(seen)], offer: 2 });
         if (connection.protocolVersion !== 2) return { version: connection.protocolVersion };
         const { sessionId } = yield* connection.agent["session/new"]({ cwd: V2.AbsolutePath.make("/tmp") });
         const prompted = yield* connection.agent["session/prompt"]({ sessionId, prompt: [{ type: "text", text: "permission" }] });
@@ -234,12 +234,12 @@ describe("the client negotiates the version", () => {
     expect(seen).toEqual(["update: Working.", "permission", 'update: Answered: {"optionId":"allow-once","outcome":"selected"}']);
   });
 
-  test("AN6: against our agent, a client implementing versions 1 and 2 gets 2 when the agent implements both, and 1 when it implements only 1", async () => {
-    const turn = async (agent: OurAgent) => {
+  test("AN6: against our agent, a client implementing versions 1 and 2 gets 1 by default; offering 2, it gets 2 when the agent implements both, and 1 when it implements only 1", async () => {
+    const turn = async (agent: OurAgent, offer: 1 | 2 | undefined) => {
       const seen: Seen = [];
       const version = await run(
         Effect.gen(function* () {
-          const connection = yield* Client.connect({ wire: agent.wire, info, implementations: [clientV1(seen), clientV2(seen)] });
+          const connection = yield* Client.connect({ wire: agent.wire, info, implementations: [clientV1(seen), clientV2(seen)], offer });
           if (connection.protocolVersion === 1) {
             const { sessionId } = yield* connection.agent["session/new"]({ cwd: "/tmp", mcpServers: [] });
             yield* connection.agent["session/prompt"]({ sessionId, prompt: [{ type: "text", text: "permission" }] });
@@ -253,15 +253,16 @@ describe("the client negotiates the version", () => {
       await agent.stop();
       return { version, seen };
     };
-    const both = await turn(ourAgent([agentV1(), agentV2()]));
-    expect(both.version).toBe(2);
-    expect(both.seen).toEqual(["update: Working.", "permission", 'update: Answered: {"outcome":"selected","optionId":"allow-once"}']);
-    const onlyV1 = await turn(ourAgent([agentV1()]));
-    expect(onlyV1.version).toBe(1);
-    expect(onlyV1.seen).toEqual(["update: Working.", "permission", 'update: Answered: {"outcome":"selected","optionId":"allow-once"}']);
+    const turned = ["update: Working.", "permission", 'update: Answered: {"outcome":"selected","optionId":"allow-once"}'];
+    const byDefault = await turn(ourAgent([agentV1(), agentV2()]), undefined);
+    expect(byDefault).toEqual({ version: 1, seen: turned });
+    const both = await turn(ourAgent([agentV1(), agentV2()]), 2);
+    expect(both).toEqual({ version: 2, seen: turned });
+    const onlyV1 = await turn(ourAgent([agentV1()]), 2);
+    expect(onlyV1).toEqual({ version: 1, seen: turned });
   });
 
-  test("AN6: a client implementing only version 2 fails with UnsupportedProtocolVersion against an agent implementing only version 1", async () => {
+  test("AN6: a client implementing only the version 2 draft offers 2, and fails with UnsupportedProtocolVersion against an agent implementing only version 1", async () => {
     const agent = ourAgent([agentV1()]);
     const exit = await Effect.runPromiseExit(
       Effect.scoped(Client.connect({ wire: agent.wire, info, implementations: [clientV2([])] })),
@@ -270,7 +271,7 @@ describe("the client negotiates the version", () => {
     expect(exit).toEqual(Exit.fail(new Client.UnsupportedProtocolVersion({ offered: 2, answered: 1 })));
   });
 
-  test("AN6: when the SDK's v1 agent answers 1 to a client offering 2, the profile's client side is what the agent received, and the client's gates use it; offering 1, the agent receives the client's capabilities", async () => {
+  test("AN6: a client implementing versions 1 (with fs and terminal) and 2 offers 1, the highest stable version, by default, and the SDK's v1 agent receives its capabilities; offering 2, the profile's client side is what the v1 agent received, and the client's gates use it", async () => {
     const capabilities: V1.ClientCapabilities = { fs: { readTextFile: true, writeTextFile: true }, terminal: true };
     const connectTo = async (offer: 1 | 2 | undefined) => {
       const ends = pipes();
@@ -291,17 +292,19 @@ describe("the client negotiates the version", () => {
           return { version: connection.protocolVersion, profile: connection.profile.client };
         }),
       );
-      return { client, received: initialized[0]?.clientCapabilities, seen };
+      return { client, initialized, seen };
     };
-    const downgraded = await connectTo(undefined);
-    expect(downgraded.client).toEqual({ version: 1, profile: { capabilities: {}, info: undefined } });
-    expect(downgraded.received?.fs?.readTextFile).not.toBe(true);
-    expect(downgraded.received?.terminal).not.toBe(true);
-    expect(downgraded.seen).toEqual(["update: Working.", 'update: Read: -32601 {"capability":"clientCapabilities.fs.readTextFile"}']);
-    const offered = await connectTo(1);
-    expect(offered.client).toEqual({ version: 1, profile: { capabilities, info } });
-    expect(offered.received).toMatchObject(capabilities);
-    expect(offered.seen).toEqual(["update: Working.", "update: Read: file contents"]);
+    const byDefault = await connectTo(undefined);
+    expect(byDefault.initialized).toEqual([{ protocolVersion: 1, clientCapabilities: expect.objectContaining(capabilities), clientInfo: info }]);
+    expect(byDefault.client).toEqual({ version: 1, profile: { capabilities, info } });
+    expect(byDefault.seen).toEqual(["update: Working.", "update: Read: file contents"]);
+    const draft = await connectTo(2);
+    expect(draft.initialized).toHaveLength(1);
+    expect(draft.initialized[0]?.protocolVersion).toBe(2);
+    expect(draft.initialized[0]?.clientCapabilities?.fs?.readTextFile).not.toBe(true);
+    expect(draft.initialized[0]?.clientCapabilities?.terminal).not.toBe(true);
+    expect(draft.client).toEqual({ version: 1, profile: { capabilities: {}, info: undefined } });
+    expect(draft.seen).toEqual(["update: Working.", 'update: Read: -32601 {"capability":"clientCapabilities.fs.readTextFile"}']);
   });
 
   test("AN6: a malformed answer to initialize fails connect with InitializeFailed", async () => {
@@ -318,6 +321,52 @@ describe("the client negotiates the version", () => {
       _tag: "InitializeFailed",
       reason: expect.stringContaining("malformed"),
     });
+  });
+});
+
+describe("lenient decoding over the wire", () => {
+  test("AS5 AS6 AP13: the SDK's v1 agent sends the client a default-on-error field that fails to decode and a skip-invalid-items array with an invalid item; the client's call and handler get the default and the array without the item", async () => {
+    const annotations = { audience: ["user", 5, "assistant"], priority: "high" };
+    const ends = pipes();
+    acp
+      .agent({ name: "an-sdk-agent" })
+      .onRequest("initialize", () => ({ protocolVersion: 1, agentCapabilities: {}, authMethods: [] }))
+      // `availableModes` defaults to [] on error; `audience` skips invalid items; `priority` has no
+      // default and is left out.
+      .onRequest("session/new", () => ({ sessionId: "sdk-session", modes: { currentModeId: "ask", availableModes: "none" } }) as never)
+      .onRequest("session/prompt", async (c) => {
+        const content = { type: "text", text: "hello", annotations } as unknown as acp.ContentBlock;
+        await c.client.notify("session/update", { sessionId: c.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content } });
+        return { stopReason: "end_turn" as const };
+      })
+      .connect(acp.ndJsonStream(ends.agentWritable, ends.agentReadable));
+    const received: Array<unknown> = [];
+    const wire: Wire = {
+      read: ends.client.read.pipe(Stream.tap((input) => Effect.sync(() => input._tag === "Json" && received.push(input.value)))),
+      write: ends.client.write,
+    };
+    const updates: Array<unknown> = [];
+    const client = Client.implement(Protocol.v1, {
+      capabilities: {},
+      handlers: () => Effect.succeed({ "session/update": ({ update }) => Effect.sync(() => updates.push(update)) }),
+    });
+    const result = await run(
+      Effect.gen(function* () {
+        const connection = yield* Client.connect({ wire, info, implementations: [client] });
+        const created = yield* connection.agent["session/new"]({ cwd: "/tmp", mcpServers: [] });
+        const prompted = yield* connection.agent["session/prompt"]({ sessionId: created.sessionId, prompt: [{ type: "text", text: "go" }] });
+        return { modes: created.modes, stopReason: prompted.stopReason };
+      }),
+    );
+    // The SDK sent the values as given.
+    expect(received).toContainEqual(expect.objectContaining({ result: { sessionId: "sdk-session", modes: { currentModeId: "ask", availableModes: "none" } } }));
+    expect(received).toContainEqual(
+      expect.objectContaining({ method: "session/update", params: expect.objectContaining({ update: expect.objectContaining({ content: { type: "text", text: "hello", annotations } }) }) }),
+    );
+    expect(result).toEqual({ modes: { currentModeId: V1.SessionModeId.make("ask"), availableModes: [] }, stopReason: "end_turn" });
+    expect(updates).toEqual([
+      { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hello", annotations: { audience: ["user", "assistant"] } } },
+    ]);
   });
 });
 
@@ -402,7 +451,7 @@ describe("the client over Streamable HTTP", () => {
         }),
       );
       expect(result).toEqual({ version: 1, stopReason: "end_turn" });
-      expect(received).toEqual(["initialize 2", "session/new", "session/prompt"]);
+      expect(received).toEqual(["initialize 1", "session/new", "session/prompt"]);
       expect(seen).toEqual(["update: Working.", "permission", 'update: Answered: {"outcome":"selected","optionId":"allow-once"}']);
     } finally {
       await acpServer.close();
@@ -419,7 +468,7 @@ describe("the client's logs", () => {
     const agent = ourAgent([agentV1()]);
     const logged: Array<{ readonly level: string; readonly message: unknown }> = [];
     await Effect.runPromise(
-      Effect.scoped(Client.connect({ wire: agent.wire, info, implementations: [clientV1([]), clientV2([])] })).pipe(
+      Effect.scoped(Client.connect({ wire: agent.wire, info, implementations: [clientV1([]), clientV2([])], offer: 2 })).pipe(
         Effect.provide(Logger.layer([Logger.make((options) => logged.push({ level: options.logLevel, message: options.message }))])),
         Effect.provideService(References.MinimumLogLevel, "Debug"),
       ),

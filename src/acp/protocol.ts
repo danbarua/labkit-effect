@@ -100,6 +100,11 @@ export type Refused = Extract<Gate, { readonly _tag: "Refused" }>;
 
 export interface ProtocolAdapter<V extends Version> {
   readonly protocolVersion: V["protocolVersion"];
+  /**
+   * `stable` for a released protocol version, `experimental` for a draft. The SDK's main entry is
+   * version 1 only, and its draft of version 2 is under `experimental/v2`.
+   */
+  readonly stability: "stable" | "experimental";
   /** The requests the agent serves, `initialize` included. */
   readonly agentRequests: RpcGroup.RpcGroup<V["agentRequests"]>;
   readonly agentNotifications: RpcGroup.RpcGroup<V["agentNotifications"]>;
@@ -421,6 +426,7 @@ const gateWith =
  */
 export const v1: ProtocolAdapter<V1Version> = {
   protocolVersion: 1,
+  stability: "stable",
   agentRequests: V1Rpcs.AgentRequests,
   agentNotifications: V1Rpcs.AgentNotifications,
   clientRequests: V1Rpcs.ClientRequests,
@@ -458,6 +464,7 @@ export const v1: ProtocolAdapter<V1Version> = {
  */
 export const v2: ProtocolAdapter<V2Version> = {
   protocolVersion: 2,
+  stability: "experimental",
   agentRequests: V2Rpcs.AgentRequests,
   agentNotifications: V2Rpcs.AgentNotifications,
   clientRequests: V2Rpcs.ClientRequests,
