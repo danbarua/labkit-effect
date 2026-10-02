@@ -1,7 +1,7 @@
 # The hosts: direction
 
-Not built, but for the host services lifted out of the CLI (`MODEL.md` here). `TODO.md` lists what
-is to be built; a module's `MODEL.md` says what is.
+The layers of the two hosts, Dan's rulings and the order of work. `TODO.md` lists what is to be
+built; the `MODEL.md` of `agent-host` and `agent-acp` says what is.
 
 ## Rulings
 
@@ -41,9 +41,9 @@ Dan, 2026-10-02, where they decide something. In quotation marks, verbatim.
 | Layer | Where | Is |
 |---|---|---|
 | Core | `agent-machine`, `agent-policy`, `agent-session`, `agent-context` | Machines, facts, the loop, the journal. Knows no workspace, working folder, tool catalog, configuration UI or session name. |
-| Host services | `agent-host` (new) | What both hosts share, lifted from the CLI: the model catalog, the provider clients, the services a session runs with, the permission policy for a mode, the session directory, the logs, and the draft a session is before turn zero. Imports the core. Imports no protocol. |
+| Host services | `agent-host` | What both hosts share, lifted from the CLI: the model catalog, the provider clients, the services a session runs with, the permission policy for a mode, the session directory, the logs, and the draft a session is before turn zero. Imports the core. Imports no protocol. |
 | ACP | `acp` | The protocol and nothing else. Imports nothing of the core, so it can be offered to Effect. |
-| ACP host | `agent-acp` (new) | Joins `acp` to a session: the projection of facts to `session/update`, the handlers, the launcher. Imports `acp`, `agent-host` and the core. |
+| ACP host | `agent-acp` | Joins `acp` to a session: the handlers (`makeHost`), the projection of facts to `session/update`, the launcher. Imports `acp`, `agent-host` and the core. |
 | CLI | `examples/cli-repl` | The first host, and the place to try ideas. Imports `agent-host`, never `agent-acp`. |
 | labkit | `packages/app-acp` in labkit-agent | The world side of the ACP host: workspace files, the editor's files and terminal as tools, MCP, elicitation, plans, commands. Plugs into `agent-acp`. |
 
@@ -155,16 +155,17 @@ and call ids that apply. The file logger is in `agent-host`, and the ACP launche
 
 Built: `optionsFor`; `Session.prompt`, `cancel` and `turn`; the host services lifted out of the CLI;
 the projection; the draft; ACP's config options, permission request, stop reason and
-`usage_update`; the Markdown export. Chat Completions streams and sends `max_tokens`.
+`usage_update`; the Markdown export; the launcher's log file. Chat Completions streams and sends
+`max_tokens`. The ACP host over stdio for protocol v1 (`makeHost` and the launcher: `session/new`,
+`session/set_config_option`, `session/prompt`, `session/cancel`, `session/close`,
+`session/request_permission`, `usage_update`, `/export`, tools through the editor's `fs/*`), run
+against the local Qwen with the SDK's client.
 
-1. The CLI opens its session at its first input, from a draft, and has `/export`: the place to try
+1. The ACP host in VS Code, then JetBrains.
+2. The CLI opens its session at its first input, from a draft, and has `/export`: the place to try
    turn zero. The session directory with the host's record.
-2. The ACP host over stdio, against v1: `initialize`, `session/new`, `session/set_config_option`,
-   `session/prompt`, `session/cancel`, `session/request_permission`, `usage_update`, `/export`, the
-   launcher's logs. Acceptance: the SDK's client in tests with VidaiMock and the scenario of
-   `TODO.md`; then VS Code.
-3. `session/load`, `resume`, `list`, `close`, `fork`; the editor's files and terminal; MCP;
-   attachments; Streamable HTTP with a token and one holder for a session; elicitation; JetBrains.
+3. `session/load`, `resume`, `list`, `fork`; `terminal/*`; MCP; attachments; Streamable HTTP with a
+   token and one holder for a session; elicitation.
 4. labkit's `app-acp` as a consumer.
 
 ## Open
