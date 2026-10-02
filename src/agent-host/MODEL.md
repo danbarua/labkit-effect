@@ -2,7 +2,8 @@
 
 What both hosts share (the CLI, and the ACP host to come): the model catalog, the provider
 clients, the services a session runs with, the permission policy for a mode, the folder sessions
-are kept in, and where log lines go. It imports the core and no protocol, and nothing of a host.
+are kept in, where log lines go, and the draft a session is before turn zero. It imports the core
+and no protocol, and nothing of a host.
 What is described here is built; where the hosts are going is in `DESIGN.next.md`.
 
 ## What is built
@@ -39,6 +40,20 @@ What is described here is built; where the hosts are going is in `DESIGN.next.md
   `DirectoryUnreadable`.
 - H6. `LogsToFile(path)` writes log lines to `path`, making its folder when missing; `LogsToStderr`
   writes them to stderr, for a host whose stdout is for something else.
+- H7. A draft (`draft.ts`) is a session before turn zero: no session exists and nothing is
+  recorded. It holds the model to ask, the settings as said, the system prompt and the tools.
+  `chooseModel` gives it another model and keeps the settings as said, even one the new model
+  does not take; `saySettings` says the settings it names anew and leaves the others as said.
+  `optionsOfDraft` is what a host shows of it (`optionsFor`): each setting with the value the
+  model will get, so an effort the model does not take is shown as the nearest it does.
+- H8. `opening(draft, session)` is the `SessionOpened` that opens `session` with the draft: a
+  session opened with it asks the draft's model with its settings, has its system prompt and its
+  tools, and its options (`optionsOf`) are the draft's. A host opens it at the first input and
+  then drops the draft.
+- H9. `withDefaults(draft, capabilities)` gives a draft that says no output limit 32768 tokens, or
+  the model's own (`Capabilities.output`) when that is known and lower; a limit said stays. A host
+  applies it or leaves the limit to the provider. `defaultModel` is the first model the catalog
+  lists (`askable`), or none when it lists none, and a host has nothing to ask.
 
 `Clients` is one model client reaching each provider whose key is set, and the local server, the
 keys read when the layer is built. `SessionServices(runner)` is what the loop needs for a session
@@ -51,4 +66,3 @@ from those its store holds, no turn-end hooks, and `runner` for the host's tools
 - A source of the catalog read from a hand-written `models.yml`.
 - A host's own record of a session in its folder (its title, its working folder).
 - The ACP launcher's log file: JSONL, rotated, secrets redacted (`DESIGN.next.md`, Logs).
-- The draft a session is before turn zero.
