@@ -73,8 +73,10 @@ text and resource links; no load, resume, list, fork or auth methods.
   runs them and their presentation (`Present`). `editorWorld` (the default) goes through the
   editor: `read_file { path, line?, limit? }` (kind `read`) with `fs/read_text_file`, offered only
   when the client advertised `fs.readTextFile`, and `write_file { path, content }` (kind `edit`) with
-  `fs/write_text_file`, offered only with `fs.writeTextFile`; 256 KiB at most each way. The editor
-  has no method to list a folder, so there is no `list_dir`. `workspaceWorld` is a stopgap: the
+  `fs/write_text_file`, offered only with `fs.writeTextFile`; 256 KiB at most each way;
+  `edit_file { path, old_text, new_text }` (kind `edit`) with both, and `run_command { command,
+  timeout_seconds? }` (kind `execute`) in the editor's terminal, offered only with `terminal`. The
+  editor has no method to list or search a folder: `run_command` does both. `workspaceWorld` is a stopgap: the
   workspace tools (`agent-tools/workspace.ts`) on the local disk, bypassing the editor's unsaved
   buffers.
 - `feed.ts`: an open session's live view. It subscribes to the facts and `streamed` before
@@ -221,3 +223,11 @@ text and resource links; no load, resume, list, fork or auth methods.
   and the prompt ends `end_turn`, with no warning logged; with none again the turn ends
   `Incomplete` after that one retry, `end_turn` with no answer message. The feedback is not sent to
   the client (PJ1).
+- AG17. `editorWorld` offers `edit_file` to a client that advertised both `fs` methods, and
+  `run_command` to one that advertised `terminal`. `edit_file` reads the file through the editor
+  and writes it back with one occurrence of `old_text` replaced; `old_text` that occurs never or
+  more than once is refused, and nothing is written. `run_command` runs `sh -c <command>` in a
+  terminal of the editor's, in the working folder, waits for its exit until its time runs out,
+  reads its output, and releases the terminal however the call ends, which stops a command still
+  running. Exit code 0 succeeds; any other end fails, its output and how it ended for the model to
+  read. Both ask permission in the default mode.

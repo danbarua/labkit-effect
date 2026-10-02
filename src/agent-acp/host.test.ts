@@ -50,7 +50,7 @@ type Reply = (turn: TurnId, target: Target) => Effect.Effect<Responded>;
 type Piece =
   | { readonly _tag: "Thinking"; readonly text: string }
   | { readonly _tag: "Text"; readonly text: string }
-  | { readonly _tag: "ToolCall"; readonly call: string; readonly tool: string; readonly input: { readonly [key: string]: string } };
+  | { readonly _tag: "ToolCall"; readonly call: string; readonly tool: string; readonly input: { readonly [key: string]: string | number } };
 
 const toPart = (piece: Piece): ModelPart => {
   switch (piece._tag) {
@@ -192,7 +192,12 @@ interface ClientLog {
   /** Each `fs/*` request the client served, as `method path`, with the session it named. */
   readonly files: Array<{ readonly method: string; readonly path: string; readonly sessionId: string; readonly content?: string }>;
   readonly asked: Array<acp.RequestPermissionRequest>;
+  /** Each `terminal/*` request the client served, as its method and the command or terminal it named. */
+  readonly terminals: Array<{ readonly method: string; readonly command?: string; readonly args?: ReadonlyArray<string>; readonly cwd?: string | null; readonly terminalId?: string }>;
 }
+
+/** How the editor's terminal runs a command: its output and exit code, or never ending. */
+type Ran = { readonly output: string; readonly exitCode: number } | "runs on";
 
 /** The SDK's client: serves `fs/*` from `contents`, answers permission with `permission`, records each update. */
 function sdkClient(
@@ -200,8 +205,10 @@ function sdkClient(
     outcome: { outcome: "selected", optionId: "allow-once" },
   }),
   contents: Readonly<Record<string, string>> = {},
+  run: (command: string) => Ran = () => ({ output: "", exitCode: 0 }),
 ) {
-  const log: ClientLog = { updates: [], files: [], asked: [] };
+  const log: ClientLog = { updates: [], files: [], asked: [], terminals: [] };
+  const ran = new Map<string, Ran>();
   const app = acp
     .client({ name: "an-sdk-client" })
     .onRequest("session/request_permission", (ctx) => {
@@ -214,6 +221,24 @@ function sdkClient(
     })
     .onRequest("fs/write_text_file", (ctx) => {
       log.files.push({ method: "fs/write_text_file", path: ctx.params.path, sessionId: ctx.params.sessionId, content: ctx.params.content });
+      return {};
+    })
+    .onRequest("terminal/create", (ctx) => {
+      const terminalId = `terminal-${ran.size + 1}`;
+      log.terminals.push({ method: "terminal/create", command: ctx.params.command, args: ctx.params.args ?? [], cwd: ctx.params.cwd ?? null });
+      ran.set(terminalId, run(ctx.params.args?.at(-1) ?? ctx.params.command));
+      return { terminalId };
+    })
+    .onRequest("terminal/wait_for_exit", (ctx) => {
+      const result = ran.get(ctx.params.terminalId);
+      return result === undefined || result === "runs on" ? new Promise<never>(() => {}) : { exitCode: result.exitCode };
+    })
+    .onRequest("terminal/output", (ctx) => {
+      const result = ran.get(ctx.params.terminalId);
+      return result === undefined || result === "runs on" ? { output: "started\n", truncated: false } : { output: result.output, truncated: false, exitStatus: { exitCode: result.exitCode } };
+    })
+    .onRequest("terminal/release", (ctx) => {
+      log.terminals.push({ method: "terminal/release", terminalId: ctx.params.terminalId });
       return {};
     })
     .onNotification("session/update", ({ params }) => {
@@ -492,6 +517,51 @@ test("AG9: a client that closes the connection mid-turn leaves the turn running 
   expect(host.logged.find((each) => each.key === logKeys.prompt.interrupted)).toMatchObject({ details: { by: "the end of the connection" } });
 });
 
+test("AG17: edit_file replaces one occurrence through fs/*; run_command runs in the editor's terminal, released however it ends; both ask first", async () => {
+  const host = startHost({
+    script: [
+      answer(
+        { _tag: "ToolCall", call: "edit-1", tool: "edit_file", input: { path: "a.txt", old_text: "alpha", new_text: "beta" } },
+        { _tag: "ToolCall", call: "edit-2", tool: "edit_file", input: { path: "a.txt", old_text: "a", new_text: "b" } },
+        { _tag: "ToolCall", call: "run-1", tool: "run_command", input: { command: "ls" } },
+        { _tag: "ToolCall", call: "run-2", tool: "run_command", input: { command: "false" } },
+        { _tag: "ToolCall", call: "run-3", tool: "run_command", input: { command: "sleep 100", timeout_seconds: 1 } },
+      ),
+      answer({ _tag: "Text", text: "Done." }),
+    ],
+  });
+  const commands: Readonly<Record<string, Ran>> = { ls: { output: "a.txt\n", exitCode: 0 }, false: { output: "", exitCode: 1 }, "sleep 100": "runs on" };
+  const { app, log } = sdkClient(undefined, { [join(testFolder(), "work", "a.txt")]: "alpha and a" }, (command) => commands[command] ?? { output: "", exitCode: 127 });
+  const sessionId = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, { fs: { readTextFile: true, writeTextFile: true }, terminal: true });
+    const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "Edit and run"));
+    return created.sessionId;
+  });
+  await host.stop();
+  const facts = await factsOn(storeFileOf(host.directory, sessionId));
+  expect((await Effect.runPromise(immutableToolCatalogOf(facts))).map((tool): string => tool.name)).toEqual(["read_file", "write_file", "edit_file", "run_command"]);
+  // The default permission mode asks before an edit and before a command.
+  expect(log.asked).toHaveLength(5);
+  expect(log.files.filter((each) => each.method === "fs/write_text_file")).toEqual([
+    { method: "fs/write_text_file", path: join(host.cwd, "a.txt"), sessionId, content: "beta and a" },
+  ]);
+  expect(log.terminals.filter((each) => each.method === "terminal/create")).toEqual(
+    ["ls", "false", "sleep 100"].map((command) => ({ method: "terminal/create", command: "/bin/sh", args: ["-c", command], cwd: host.cwd })),
+  );
+  expect(log.terminals.filter((each) => each.method === "terminal/release")).toHaveLength(3);
+  const ended = new Map(observed(facts).flatMap((fact) => (fact.observation._tag === "ToolEnded" ? [[fact.observation.call as string, fact.observation.outcome] as const] : [])));
+  const text = (call: string) => JSON.stringify(ended.get(call));
+  expect(ended.get("edit-1")).toMatchObject({ _tag: "Succeeded" });
+  // The edit read the file as the editor had it before the first edit's write: "a" occurs more than once.
+  expect(ended.get("edit-2")).toMatchObject({ _tag: "Failed", reason: { _tag: "InputRejected" } });
+  expect(ended.get("run-1")).toMatchObject({ _tag: "Succeeded" });
+  expect(text("run-1")).toContain("a.txt\\n[Exit code 0.]");
+  expect(ended.get("run-2")).toMatchObject({ _tag: "Failed", reason: { _tag: "Reported" } });
+  expect(text("run-2")).toContain("[Exit code 1.]");
+  expect(text("run-3")).toContain("started\\n[Still running after 1 seconds: stopped.]");
+});
+
 test("AG10: the editor world offers read_file and write_file as the client advertised fs; read_file reads through fs/read_text_file, a path outside the working folder is refused, and a client with no fs has no tools", async () => {
   const host = startHost({
     script: [
@@ -545,7 +615,7 @@ test("AG3 AG11: each lifecycle point logs its event with the connection, request
   expect(of(logKeys.session.created)).toMatchObject({
     level: "Info",
     annotations: { session: sessionId, connection: expect.any(String) },
-    details: { model: "openai/gpt-6-sol", tools: ["read_file", "write_file"] },
+    details: { model: "openai/gpt-6-sol", tools: ["read_file", "write_file", "edit_file"] },
   });
   expect(of(logKeys.config.changed)).toMatchObject({ annotations: { session: sessionId }, details: { configId: "effort", value: "low", applies: "to the draft" } });
   expect(of(logKeys.session.opened)).toMatchObject({ annotations: { session: sessionId, request: expect.anything() } });

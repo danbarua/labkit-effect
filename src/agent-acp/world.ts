@@ -7,10 +7,12 @@
  *
  * - `editorWorld`, the default: the tools go through the editor. `read_file` reads with the client's
  *   `fs/read_text_file`, so the model sees the editor's unsaved buffers; `write_file` writes with
- *   `fs/write_text_file`. Each is offered only when the client advertised its method
- *   (`clientCapabilities.fs.readTextFile`, `.writeTextFile`), so no call meets a capability the
- *   client does not have; a client that advertised neither gets no tools. The editor has no method
- *   to list a folder, so there is no `list_dir`.
+ *   `fs/write_text_file`; `edit_file` replaces one occurrence of a text with both; `run_command`
+ *   runs a shell command in the editor's terminal (`terminal/create`), which is how a folder is
+ *   listed or searched, since the editor has no method for either. Each is offered only when the
+ *   client advertised the methods it uses (`clientCapabilities.fs.readTextFile`, `.writeTextFile`,
+ *   `.terminal`), so no call meets a capability the client does not have; a client that advertised
+ *   none gets no tools.
  * - `workspaceWorld`: a stopgap. The tools of `agent-tools/workspace.ts` (`read_file`, `list_dir`,
  *   `write_file`) on the local disk under the working folder, bypassing the editor and its unsaved
  *   buffers. A launcher chooses it explicitly.
@@ -20,7 +22,7 @@
  */
 
 import { isAbsolute, relative, resolve } from "node:path";
-import { Effect, FileSystem, Layer, Schema } from "effect";
+import { Duration, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import type { AgentConnection } from "../acp/agent.ts";
 import type { V1Version } from "../acp/protocol.ts";
 import type { McpServer, SessionId } from "../acp/schema/v1.gen.ts";
@@ -61,6 +63,14 @@ const ReadFile = Schema.Struct({
   limit: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
 });
 const WriteFile = Schema.Struct({ path: Schema.NonEmptyString, content: Schema.String });
+const EditFile = Schema.Struct({ path: Schema.NonEmptyString, old_text: Schema.NonEmptyString, new_text: Schema.String });
+const RunCommand = Schema.Struct({
+  command: Schema.NonEmptyString,
+  timeout_seconds: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(Schema.isLessThanOrEqualTo(600))),
+});
+
+/** How long a command runs before it is stopped, unless the call says otherwise. */
+export const commandSeconds = 120;
 
 const rejected = (problem: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "InputRejected", problem: FailureText.make(problem) } });
 const reported = (message: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(message) } });
@@ -81,6 +91,25 @@ const cut = (text: string, max: number): { readonly kept: string; readonly omitt
   // A continuation byte (10xxxxxx) is inside a character: step back to the character's first byte.
   while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) end--;
   return { kept: bytes.subarray(0, end).toString("utf8"), omitted: bytes.length - end };
+};
+
+/**
+ * A command's outcome, for the model to read: its output, then how it ended. One that exited 0
+ * succeeded; one that exited otherwise, was stopped by a signal, or ran past its time failed with
+ * its output.
+ */
+const commandOutcome = (
+  output: string,
+  truncated: boolean,
+  exited: Option.Option<{ readonly exitCode?: number | null; readonly signal?: string | null }>,
+  seconds: number,
+): ToolOutcome => {
+  const ending = Option.match(exited, {
+    onNone: () => `[Still running after ${seconds} seconds: stopped.]`,
+    onSome: ({ exitCode, signal }) => (typeof exitCode === "number" ? `[Exit code ${exitCode}.]` : `[Stopped by signal ${signal ?? "unknown"}.]`),
+  });
+  const text = `${truncated ? "[The output's beginning was cut: its last 256 KiB follow.]\n" : ""}${output}${output.endsWith("\n") || output === "" ? "" : "\n"}${ending}`;
+  return Option.isSome(exited) && exited.value.exitCode === 0 ? succeeded(text) : reported(text);
 };
 
 /** What a failed call to the editor is, for the model to read. */
@@ -117,6 +146,30 @@ export const editorWorld: World = {
           description: `Create a UTF-8 file, or replace one, with the content given, at most 256 KiB, through the editor.${scope}`,
           input: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
         });
+      if (fs?.readTextFile === true && fs.writeTextFile === true)
+        tools.push({
+          name: ToolName.make("edit_file"),
+          kind: "edit",
+          replay: "unsafe",
+          description: `Replace one occurrence of old_text in a UTF-8 file with new_text, through the editor, its unsaved changes included. old_text must occur exactly once: include enough of the lines around it to make it so.${scope}`,
+          input: {
+            type: "object",
+            properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } },
+            required: ["path", "old_text", "new_text"],
+          },
+        });
+      if (connection.profile.client.capabilities.terminal === true)
+        tools.push({
+          name: ToolName.make("run_command"),
+          kind: "execute",
+          replay: "unsafe",
+          description: `Run a shell command (sh -c) in the editor's terminal, in the working folder, and get its output (the last 256 KiB) and how it exited. It is stopped after timeout_seconds (${commandSeconds} unless given; at most 600). Use it to list and search files (ls, find, grep), run tests and use git.${scope}`,
+          input: {
+            type: "object",
+            properties: { command: { type: "string" }, timeout_seconds: { type: "integer", minimum: 1, maximum: 600 } },
+            required: ["command"],
+          },
+        });
 
       const read = (input: typeof ReadFile.Type) => {
         const at = inside(cwd, input.path);
@@ -148,6 +201,41 @@ export const editorWorld: World = {
         );
       };
 
+      const editText = (input: typeof EditFile.Type) => {
+        const at = inside(cwd, input.path);
+        if ("problem" in at) return Effect.succeed(rejected(at.problem));
+        return connection.client["fs/read_text_file"]({ sessionId, path: at.full }).pipe(
+          Effect.flatMap(({ content }): Effect.Effect<ToolOutcome, unknown> => {
+            const count = content.split(input.old_text).length - 1;
+            if (count !== 1)
+              return Effect.succeed(
+                rejected(count === 0 ? `old_text does not occur in ${input.path}.` : `old_text occurs ${count} times in ${input.path}; include more of the lines around it so that it occurs once.`),
+              );
+            const changed = content.replace(input.old_text, () => input.new_text);
+            const bytes = Buffer.byteLength(changed);
+            if (bytes > maxFileBytes) return Effect.succeed(rejected(`The file would be over 256 KiB (${bytes} bytes).`));
+            return connection.client["fs/write_text_file"]({ sessionId, path: at.full, content: changed }).pipe(Effect.as(succeeded(`Edited ${input.path}.`)));
+          }),
+          Effect.catch((error) => Effect.succeed(reported(editorFailure("edit_file", input.path, error as never)))),
+        );
+      };
+
+      // The terminal is released however the call ends, which stops a command still running.
+      const runCommand = (input: typeof RunCommand.Type) => {
+        const seconds = input.timeout_seconds ?? commandSeconds;
+        return Effect.acquireUseRelease(
+          connection.client["terminal/create"]({ sessionId, command: "/bin/sh", args: ["-c", input.command], cwd, outputByteLimit: maxFileBytes }),
+          ({ terminalId }) =>
+            connection.client["terminal/wait_for_exit"]({ sessionId, terminalId }).pipe(
+              Effect.timeoutOption(Duration.seconds(seconds)),
+              Effect.flatMap((exited) =>
+                connection.client["terminal/output"]({ sessionId, terminalId }).pipe(Effect.map(({ output, truncated }) => commandOutcome(output, truncated, exited, seconds))),
+              ),
+            ),
+          ({ terminalId }) => connection.client["terminal/release"]({ sessionId, terminalId }).pipe(Effect.ignore),
+        ).pipe(Effect.catch((error) => Effect.succeed(reported(editorFailure("run_command", input.command, error as never)))));
+      };
+
       const decoded = <S extends Schema.Top & { readonly DecodingServices: never }>(schema: S, tool: string, input: unknown, run: (value: S["Type"]) => Effect.Effect<ToolOutcome>) =>
         Schema.decodeUnknownEffect(schema)(input).pipe(
           Effect.matchEffect({ onFailure: (error) => Effect.succeed(rejected(`${tool} does not take this input: ${error.message}`)), onSuccess: run }),
@@ -158,7 +246,16 @@ export const editorWorld: World = {
           if (!tools.some((tool) => tool.name === name)) return Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "NotFound" } });
           const parsed = parseJson(input);
           if ("reason" in parsed) return Effect.succeed(rejected(`The input could not be read: ${parsed.reason}.`));
-          return name === "read_file" ? decoded(ReadFile, name, parsed.value, read) : decoded(WriteFile, name, parsed.value, write);
+          switch (name) {
+            case "read_file":
+              return decoded(ReadFile, name, parsed.value, read);
+            case "write_file":
+              return decoded(WriteFile, name, parsed.value, write);
+            case "edit_file":
+              return decoded(EditFile, name, parsed.value, editText);
+            default:
+              return decoded(RunCommand, name, parsed.value, runCommand);
+          }
         },
       });
 
