@@ -17,10 +17,10 @@
  * A setting the options do not offer gives no option, and nor do `observe` (how much of its thinking
  * the provider returns) and `cache` (how long the provider keeps a request): the editor shows each
  * option as a select above the prompt, and a session keeps what it was said to have of those two.
- * An option's current value is what the model
- * will get (a `SettingOption`'s `now`); where nothing is sent for a setting, it is `not_sent`, which
- * is offered only then. A change of a setting names that setting alone, since a change keeps the
- * settings it does not name; choosing `not_sent` while it is the value now changes nothing.
+ * An option's current value is what the model will get (a `SettingOption`'s `now`); where nothing
+ * is sent for a setting, it is `not_sent`, which is offered only then. A change of a setting names
+ * that setting alone, since a change keeps the settings it does not name; choosing `not_sent` while
+ * it is the value now changes nothing.
  */
 
 import { Data, Schema } from "effect";

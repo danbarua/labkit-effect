@@ -7,7 +7,7 @@
  */
 
 import { expect } from "bun:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import { BunServices } from "@effect/platform-bun";
@@ -20,8 +20,8 @@ import { answerNow } from "../agent-host/incomplete.ts";
 import { SessionServices } from "../agent-host/services.ts";
 import { CallId, FailureText, Millis, ModelName, ModelText, ProviderName, ThinkingText, TokenCount, ToolName, type TurnId } from "../agent-machine/names.ts";
 import type { Fact } from "../agent-machine/fact.ts";
-import type { ModelPart, Observation } from "../agent-machine/observation.ts";
-import { ModelClient, type Target, ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
+import type { ModelPart, Observation, ToolOutcome } from "../agent-machine/observation.ts";
+import { ModelClient, type ModelContext, type Target, ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
 import { immutableToolCatalogOf } from "../agent-session/configuration/session-setup.ts";
 import { readFacts } from "../agent-session/file-session-store.ts";
 import type { Services } from "../agent-session/loop.ts";
@@ -31,7 +31,7 @@ import type { SessionStore } from "../agent-session/session-store.ts";
 import { test, testFolder } from "../../tests/support/test.ts";
 import { HostSessionServices, makeHost } from "./host.ts";
 import { logKeys } from "./log-keys.ts";
-import { presentFrom } from "./projection.ts";
+import { presentFrom, project } from "./projection.ts";
 import type { World } from "./world.ts";
 
 const info = { name: "labkit-effect-test", version: "0.0.0" };
@@ -117,11 +117,15 @@ const echoWorld: World = {
 interface HostRun {
   readonly script: Array<Reply>;
   readonly targets: Array<string>;
+  /** What each model request was sent, in order. */
+  readonly contexts: Array<ModelContext>;
   readonly logged: Array<Logged>;
   readonly directory: string;
   readonly cwd: string;
   /** What the client writes to the agent, and what it reads. */
   readonly stream: acp.Stream;
+  /** Every message the agent wrote, as JSON, in the order it wrote them: what the client's own handlers may see a tick later. */
+  readonly wire: Array<Record<string, unknown>>;
   /** Ends the connection: the agent reads the end of its input. */
   readonly hangUp: () => Promise<void>;
   /** Completes when `Agent.run` returns. */
@@ -139,20 +143,35 @@ function startHost(
     readonly world?: World;
     readonly sources?: ReadonlyArray<CatalogSource>;
     readonly services?: (runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>;
+    readonly pageSize?: number;
   } = {},
 ): HostRun {
   const script = [...(options.script ?? [])];
   const targets: Array<string> = [];
+  const contexts: Array<ModelContext> = [];
   const logged: Array<Logged> = [];
   const directory = join(testFolder(), "sessions");
   const cwd = join(testFolder(), "work");
   const toAgent = new TransformStream<Uint8Array, Uint8Array>();
   const toClient = new TransformStream<Uint8Array, Uint8Array>();
+  const [toSdk, tapped] = toClient.readable.tee();
+  const wire: Array<Record<string, unknown>> = [];
+  void (async () => {
+    const decoder = new TextDecoder();
+    let rest = "";
+    for await (const chunk of tapped) {
+      rest += decoder.decode(chunk, { stream: true });
+      const lines = rest.split("\n");
+      rest = lines.pop() ?? "";
+      for (const line of lines) if (line.trim() !== "") wire.push(JSON.parse(line) as Record<string, unknown>);
+    }
+  })();
   const writer = toAgent.writable.getWriter();
   const scripted = Layer.succeed(ModelClient, {
-    respond: (target, _context, turn) =>
+    respond: (target, context, turn) =>
       Effect.suspend(() => {
         targets.push(`${target.provider}/${target.model}`);
+        contexts.push(context);
         const reply = script.shift();
         return reply === undefined ? Effect.die(new Error("the script has no more replies")) : reply(turn, target);
       }),
@@ -160,6 +179,7 @@ function startHost(
   const host = makeHost({
     directory,
     ...(options.world === undefined ? {} : { world: options.world }),
+    ...(options.pageSize === undefined ? {} : { pageSize: options.pageSize }),
     services: (runner) => Layer.mergeAll((options.services ?? SessionServices)(runner), scripted, Layer.succeed(ModelStreamInterval, Millis.make(0))),
   });
   const capture = Logger.make((log) => {
@@ -175,10 +195,12 @@ function startHost(
   return {
     script,
     targets,
+    contexts,
     logged,
     directory,
     cwd,
-    stream: acp.ndJsonStream(new WritableStream({ write: (chunk) => writer.write(chunk) }), toClient.readable),
+    stream: acp.ndJsonStream(new WritableStream({ write: (chunk) => writer.write(chunk) }), toSdk),
+    wire,
     hangUp: () => writer.close(),
     ended: Effect.runPromise(Fiber.await(fiber)).then(() => undefined),
     stop: () => Effect.runPromise(Fiber.interrupt(fiber)),
@@ -199,7 +221,10 @@ interface ClientLog {
 /** How the editor's terminal runs a command: its output and exit code, or never ending. */
 type Ran = { readonly output: string; readonly exitCode: number } | "runs on";
 
-/** The SDK's client: serves `fs/*` from `contents`, answers permission with `permission`, records each update. */
+/**
+ * The SDK's client: serves `fs/*` from `contents`, answers permission with `permission`, records each update. `until(check)`
+ * resolves once `check` holds of the updates recorded: the host's updates after an answer come once it is written.
+ */
 function sdkClient(
   permission: (request: acp.RequestPermissionRequest) => acp.RequestPermissionResponse | Promise<acp.RequestPermissionResponse> = () => ({
     outcome: { outcome: "selected", optionId: "allow-once" },
@@ -209,6 +234,7 @@ function sdkClient(
 ) {
   const log: ClientLog = { updates: [], files: [], asked: [], terminals: [] };
   const ran = new Map<string, Ran>();
+  const waiting: Array<{ readonly check: (updates: ReadonlyArray<Update>) => boolean; readonly resolve: () => void }> = [];
   const app = acp
     .client({ name: "an-sdk-client" })
     .onRequest("session/request_permission", (ctx) => {
@@ -244,8 +270,20 @@ function sdkClient(
     })
     .onNotification("session/update", ({ params }) => {
       log.updates.push(params.update);
+      for (const waiter of waiting.filter((each) => each.check(log.updates))) {
+        waiting.splice(waiting.indexOf(waiter), 1);
+        waiter.resolve();
+      }
     });
-  return { app, log };
+
+  const until = (check: (updates: ReadonlyArray<Update>) => boolean): Promise<void> => {
+    if (check(log.updates)) return Promise.resolve();
+    const { promise, resolve } = Promise.withResolvers<void>();
+    waiting.push({ check, resolve });
+    return promise;
+  };
+
+  return { app, log, until };
 }
 
 const editorCapabilities: acp.ClientCapabilities = { fs: { readTextFile: true, writeTextFile: true } };
@@ -327,6 +365,7 @@ test("AG2: the first prompt opens the draft; thinking and text stream, write_fil
   expect(result.changed.configOptions.find((option) => option.id === "effort")).toMatchObject({ currentValue: "high" });
   expect(kinds(log.updates)).toEqual([
     "available_commands_update",
+    "session_info_update",
     "agent_thought_chunk",
     "agent_message_chunk",
     "tool_call:pending",
@@ -743,6 +782,7 @@ test("AG16: by default a response after a tool call with thinking but no answer 
   expect(result.prompted.stopReason).toBe("end_turn");
   expect(kinds(log.updates)).toEqual([
     "available_commands_update",
+    "session_info_update",
     "tool_call:pending",
     "tool_call_update:in_progress",
     "tool_call_update:completed",
@@ -782,4 +822,354 @@ test("AG16: a turn whose retry has no answer either ends end_turn after one retr
   expect(kinds(log.updates).filter((kind) => kind === "agent_message_chunk")).toEqual([]);
   expect(kinds(log.updates).filter((kind) => kind === "agent_thought_chunk")).toHaveLength(2);
   expect(endings(await factsOn(storeFileOf(host.directory, result.sessionId)))).toEqual(["Incomplete"]);
+});
+
+/** A world like `echoWorld` whose runs are recorded in `runs`; given `hold`, a run says so on it and never ends. */
+const runsWorld = (runs: Array<string>, hold?: Deferred.Deferred<void>): World => ({
+  open: () =>
+    Effect.succeed({
+      system: "Test.",
+      tools: [echoTool],
+      runner: Layer.succeed(ToolRunner, {
+        run: (name, input): Effect.Effect<ToolOutcome> =>
+          Effect.suspend(() => {
+            runs.push(name);
+            return hold === undefined ? Effect.succeed({ _tag: "Succeeded", output: input }) : Deferred.succeed(hold, undefined).pipe(Effect.andThen(Effect.never));
+          }),
+      }),
+      present: presentFrom([echoTool]),
+    }),
+});
+
+/** What `session/load` replays of `facts` with `echoWorld`'s presentation, as JSON carries it. */
+const replayOf = (facts: ReadonlyArray<Fact>): Array<Update> =>
+  JSON.parse(JSON.stringify(project(facts, { mode: "replay", present: presentFrom([echoTool]) }).updates)) as Array<Update>;
+
+/** The updates the host sends of a session it started from its facts, after its answer. */
+const announced = ["available_commands_update", "session_info_update", "usage_update"];
+
+/** A session made and prompted once with `echoWorld`, in a host that then stops: what a later process finds stored. */
+const storedSession = async (text: string, pieces: ReadonlyArray<ReadonlyArray<Piece>>) => {
+  const host = startHost({ world: echoWorld, script: pieces.map((each) => answer(...each)) });
+  const sessionId = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, text));
+    return created.sessionId;
+  });
+  await host.stop();
+  return { sessionId, cwd: host.cwd, file: storeFileOf(host.directory, sessionId) };
+};
+
+const echoTurn: ReadonlyArray<ReadonlyArray<Piece>> = [
+  [
+    { _tag: "Thinking", text: "Echo it first." },
+    { _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "ping" } },
+  ],
+  [{ _tag: "Text", text: "Echoed." }],
+];
+
+test("AL1: initialize advertises session/load and the session methods close, list and resume, and not fork", async () => {
+  const host = startHost();
+  const { initialized } = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    const answered = await ctx.request("initialize", { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: "an-sdk-client", version: "1.0.0" } });
+    return { initialized: answered };
+  });
+  await host.stop();
+  expect(initialized.agentCapabilities?.loadSession).toBe(true);
+  expect(initialized.agentCapabilities?.sessionCapabilities).toMatchObject({ close: {}, list: {}, resume: {} });
+  expect(initialized.agentCapabilities?.sessionCapabilities?.fork ?? undefined).toBeUndefined();
+});
+
+test("AL2: the first prompt writes the session's record, its working folder and the prompt's text as its title, and sends session_info_update; /export on a draft writes nothing", async () => {
+  const host = startHost({ world: echoWorld, script: [answer({ _tag: "Text", text: "Hi." })] });
+  const { app, log } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(sessionId, "/export"));
+    const afterExport = existsSync(host.directory);
+    await ctx.request("session/prompt", say(sessionId, "  Plan\tthe   week:\n  three  goals  "));
+    return { sessionId, afterExport };
+  });
+  await host.stop();
+  expect(result.afterExport).toBe(false);
+  expect(JSON.parse(readFileSync(join(host.directory, result.sessionId, "host.json"), "utf8"))).toEqual({ cwd: host.cwd, title: "Plan the week: three goals" });
+  expect(kinds(log.updates)).toEqual(["available_commands_update", "agent_message_chunk", "session_info_update", "agent_message_chunk", "usage_update"]);
+  expect(log.updates.find((update) => update.sessionUpdate === "session_info_update")).toMatchObject({
+    title: "Plan the week: three goals",
+    updatedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/),
+  });
+  expect(host.logged.find((each) => each.key === logKeys.record.written)).toMatchObject({
+    level: "Info",
+    annotations: { session: result.sessionId, connection: expect.any(String) },
+    details: { cwd: host.cwd, titled: true },
+  });
+});
+
+test("AL3 AL8: session/load in a new process replays the stored turn in order before its answer, answers with the config options, then sends the commands, title and usage; a later prompt is live, repeats nothing and reaches the model with the earlier turn", async () => {
+  const stored = await storedSession("Echo ping", echoTurn);
+  const replay = replayOf(await factsOn(stored.file));
+  const host = startHost({ world: echoWorld, script: [answer({ _tag: "Text", text: "Second." })] });
+  const { app, log, until } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const loaded = await ctx.request("session/load", { sessionId: stored.sessionId, cwd: host.cwd, mcpServers: [] });
+    await until((updates) => updates.length >= replay.length + announced.length);
+    const beforePrompt = log.updates.length;
+    const prompted = await ctx.request("session/prompt", say(stored.sessionId, "Again"));
+    return { loaded, beforePrompt, prompted };
+  });
+  await host.stop();
+  expect(kinds(replay)[0]).toBe("user_message_chunk");
+  expect(kinds(replay)).toEqual(expect.arrayContaining(["agent_thought_chunk", "tool_call:pending", "tool_call_update:completed", "agent_message_chunk"]));
+  // On the wire, the agent wrote each stored update once, in the projection's order, and all of them before the answer (the load's
+  // answer is the first with config options); the client's handlers may run a tick after its request resolves, so they are not the witness.
+  const answered = host.wire.findIndex((message) => typeof message["result"] === "object" && message["result"] !== null && "configOptions" in message["result"]);
+  expect(answered).toBeGreaterThan(0);
+  const written = host.wire.slice(0, answered).flatMap((message) => (message["method"] === "session/update" ? [(message["params"] as { update: Update }).update] : []));
+  expect(written).toHaveLength(replay.length);
+  expect(written).toMatchObject(replay);
+  expect(log.updates.slice(0, replay.length)).toMatchObject(replay);
+  expect(kinds(log.updates.slice(replay.length, result.beforePrompt))).toEqual(announced);
+  expect(log.updates[replay.length + 1]).toMatchObject({ title: "Echo ping", updatedAt: expect.any(String) });
+  expect(result.loaded.configOptions?.find((option) => option.id === "model")).toMatchObject({ currentValue: "openai/gpt-6-sol" });
+  expect(result.prompted.stopReason).toBe("end_turn");
+  expect(kinds(log.updates.slice(result.beforePrompt))).toEqual(["agent_message_chunk", "usage_update"]);
+  expect(host.targets).toHaveLength(1);
+  const sent = JSON.stringify(host.contexts[0]?.messages);
+  expect(sent).toContain("Echo ping");
+  expect(sent).toContain("Echoed.");
+  expect(endings(await factsOn(stored.file))).toEqual(["Completed", "Completed"]);
+  expect(host.logged.filter((each) => each.level === "Warn" || each.level === "Error" || each.level === "Fatal")).toEqual([]);
+  expect(host.logged.find((each) => each.key === logKeys.session.loaded)).toMatchObject({
+    level: "Info",
+    annotations: { session: stored.sessionId, connection: expect.any(String), request: expect.anything() },
+    details: { cwd: host.cwd, file: stored.file, replayed: replay.length, turnsLeftRunning: [], tools: ["echo"] },
+  });
+});
+
+test("AL3: a loaded session offers permission_mode, starting at the launcher's mode, and a mode set after the load decides its next tool call", async () => {
+  const write = (call: string) => answer({ _tag: "ToolCall", call, tool: "write_file", input: { path: "a.txt", content: call } });
+  const first = startHost({ script: [write("w-1"), answer({ _tag: "Text", text: "One." })] });
+  const stored = await sdkClient().app.connectWith(first.stream, async (ctx) => {
+    await initialize(ctx);
+    const created = await ctx.request("session/new", { cwd: first.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "Write one"));
+    return created.sessionId;
+  });
+  await first.stop();
+  const host = startHost({ script: [write("w-2"), answer({ _tag: "Text", text: "Two." }), write("w-3"), answer({ _tag: "Text", text: "Three." })] });
+  const { app, log } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const loaded = await ctx.request("session/load", { sessionId: stored, cwd: host.cwd, mcpServers: [] });
+    const changed = await ctx.request("session/set_config_option", { sessionId: stored, configId: "permission_mode", value: "bypassPermissions" });
+    await ctx.request("session/prompt", say(stored, "Write two"));
+    await ctx.request("session/set_config_option", { sessionId: stored, configId: "permission_mode", value: "default" });
+    await ctx.request("session/prompt", say(stored, "Write three"));
+    return { loaded, changed };
+  });
+  await host.stop();
+  const option = (options: ReadonlyArray<acp.SessionConfigOption> | null | undefined) => options?.find((each) => each.id === "permission_mode");
+  expect(option(result.loaded.configOptions)).toMatchObject({ category: "mode", currentValue: "default" });
+  expect(option(result.changed.configOptions)).toMatchObject({ currentValue: "bypassPermissions" });
+  // In bypass mode the write ran without a question; back in the default mode the next one was asked about.
+  expect(log.asked.map((asked) => asked.toolCall.toolCallId)).toEqual(["w-3"]);
+  expect(log.files.filter((each) => each.method === "fs/write_text_file").map((each) => each.content)).toEqual(["w-2", "w-3"]);
+});
+
+test("AL4 AL8: loading a session whose process ended mid-turn ends that turn, with no tool run and no model request; its interruption is replayed once, and the next prompt works", async () => {
+  const held = Deferred.makeUnsafe<void>();
+  const first = startHost({ world: runsWorld([], held), script: [answer({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "ping" } })] });
+  const sessionId = await sdkClient().app.connectWith(first.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const created = await ctx.request("session/new", { cwd: first.cwd, mcpServers: [] });
+    void failure(ctx.request("session/prompt", say(created.sessionId, "Echo ping")));
+    await Effect.runPromise(Deferred.await(held));
+    await first.hangUp();
+    return created.sessionId;
+  });
+  await first.ended;
+  const file = storeFileOf(first.directory, sessionId);
+  expect(endings(await factsOn(file))).toEqual([]);
+
+  const runs: Array<string> = [];
+  const host = startHost({ world: runsWorld(runs), script: [answer({ _tag: "Text", text: "Fresh." })] });
+  const { app, log, until } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    await ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] });
+    const atLoad = { targets: host.targets.length, runs: runs.length, facts: await factsOn(file) };
+    await until((updates) => updates.some((update) => update.sessionUpdate === "usage_update"));
+    const prompted = await ctx.request("session/prompt", say(sessionId, "Again"));
+    return { atLoad, prompted };
+  });
+  await host.stop();
+  const { atLoad } = result;
+  expect(atLoad.targets).toBe(0);
+  expect(atLoad.runs).toBe(0);
+  expect(observed(atLoad.facts).map((fact) => fact.observation._tag)).toContain("TurnInterrupted");
+  expect(endings(atLoad.facts)).toEqual(["Interrupted"]);
+  const replay = replayOf(atLoad.facts);
+  expect(log.updates.slice(0, replay.length)).toMatchObject(replay);
+  expect(kinds(replay)).toContain("tool_call_update:failed");
+  expect(kinds(log.updates).filter((kind) => kind === "tool_call_update:failed")).toHaveLength(1);
+  expect(kinds(log.updates).filter((kind) => kind === "tool_call:pending")).toHaveLength(1);
+  expect(result.prompted.stopReason).toBe("end_turn");
+  expect(host.targets).toHaveLength(1);
+  expect(runs).toEqual([]);
+  expect(endings(await factsOn(file))).toEqual(["Interrupted", "Completed"]);
+  const ended = host.logged.find((each) => each.key === logKeys.session.turnLeftRunningEnded);
+  expect(ended).toMatchObject({ level: "Info", annotations: { session: sessionId, turn: expect.any(String) } });
+  expect(host.logged.find((each) => each.key === logKeys.session.loaded)).toMatchObject({
+    details: { replayed: replay.length, turnsLeftRunning: [ended?.annotations["turn"]] },
+  });
+});
+
+test("AL5 AL8: session/resume starts the stored session and replays nothing, then sends the commands, title and usage; the next prompt reaches the model with the earlier turn, and the record keeps its working folder", async () => {
+  const stored = await storedSession("Echo ping", echoTurn);
+  const elsewhere = join(testFolder(), "elsewhere");
+  const host = startHost({ world: echoWorld, script: [answer({ _tag: "Text", text: "Second." })] });
+  const { app, log, until } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const resumed = await ctx.request("session/resume", { sessionId: stored.sessionId, cwd: elsewhere });
+    await until((updates) => updates.length >= announced.length);
+    const beforePrompt = log.updates.length;
+    const prompted = await ctx.request("session/prompt", say(stored.sessionId, "Again"));
+    return { resumed, beforePrompt, prompted };
+  });
+  await host.stop();
+  expect(kinds(log.updates.slice(0, result.beforePrompt))).toEqual(announced);
+  expect(log.updates[1]).toMatchObject({ title: "Echo ping" });
+  expect(result.resumed.configOptions?.find((option) => option.id === "model")).toMatchObject({ currentValue: "openai/gpt-6-sol" });
+  expect(kinds(log.updates.slice(result.beforePrompt))).toEqual(["agent_message_chunk", "usage_update"]);
+  expect(JSON.stringify(host.contexts[0]?.messages)).toContain("Echoed.");
+  expect(JSON.parse(readFileSync(join(host.directory, stored.sessionId, "host.json"), "utf8"))).toEqual({ cwd: stored.cwd, title: "Echo ping" });
+  expect(host.logged.find((each) => each.key === logKeys.session.resumed)).toMatchObject({
+    level: "Info",
+    annotations: { session: stored.sessionId },
+    details: { cwd: elsewhere, replayed: 0, turnsLeftRunning: [] },
+  });
+});
+
+test("AL6 AL8: session/list gives the sessions with a record, latest first, by working folder and a page at a time; a session with no record is not listed but loads; a cursor it did not give is -32602", async () => {
+  const host = startHost({ world: echoWorld, pageSize: 2, script: ["One.", "Two.", "Three.", "Four."].map((text) => answer({ _tag: "Text", text })) });
+  const elsewhere = join(testFolder(), "elsewhere");
+  const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const made: Array<string> = [];
+    for (const [cwd, text] of [
+      [host.cwd, "First"],
+      [elsewhere, "Second"],
+      [host.cwd, "Third"],
+      [host.cwd, "Made by the CLI"],
+    ] as const) {
+      const { sessionId } = await ctx.request("session/new", { cwd, mcpServers: [] });
+      await ctx.request("session/prompt", say(sessionId, text));
+      made.push(sessionId);
+    }
+    // Each session's facts last written a minute after the one before's: the list's order is by that time.
+    made.forEach((sessionId, index) => {
+      const at = new Date(Date.UTC(2026, 0, 1, 12, index));
+      utimesSync(storeFileOf(host.directory, sessionId), at, at);
+    });
+    rmSync(join(host.directory, made[3] ?? "", "host.json"));
+    const firstPage = await ctx.request("session/list", {});
+    const secondPage = await ctx.request("session/list", { cursor: firstPage.nextCursor ?? null });
+    const here = await ctx.request("session/list", { cwd: host.cwd });
+    const bad = await failure(ctx.request("session/list", { cursor: "not-a-cursor" }));
+    return { made, firstPage, secondPage, here, bad };
+  });
+  await host.stop();
+
+  // Each listed session by the order it was made in: 0 is First, 3 the one with no record.
+  const made = (sessions: ReadonlyArray<{ readonly sessionId: string }>) => sessions.map((each) => result.made.indexOf(each.sessionId));
+
+  expect(made(result.firstPage.sessions)).toEqual([2, 1]);
+  expect(result.firstPage.sessions[0]).toMatchObject({ cwd: host.cwd, title: "Third", updatedAt: expect.any(String) });
+  expect(result.firstPage.sessions[1]).toMatchObject({ cwd: elsewhere, title: "Second" });
+  expect(result.firstPage.nextCursor).toEqual(expect.any(String));
+  expect(made(result.secondPage.sessions)).toEqual([0]);
+  expect(result.secondPage.nextCursor ?? undefined).toBeUndefined();
+  expect(made(result.here.sessions)).toEqual([2, 0]);
+  expect(result.bad).toMatchObject({ code: -32602, message: expect.stringContaining("not-a-cursor") });
+  const listed = host.logged.filter((each) => each.key === logKeys.session.listed);
+  expect(listed.map((each) => each.details)).toEqual([
+    { cwd: null, returned: 2, more: true },
+    { cwd: null, returned: 1, more: false },
+    { cwd: host.cwd, returned: 2, more: false },
+  ]);
+  expect(listed[0]).toMatchObject({ level: "Info", annotations: { connection: expect.any(String) } });
+  expect(host.logged.find((each) => each.key === logKeys.session.notListed)).toMatchObject({ level: "Warn", details: { cursor: "not-a-cursor" } });
+
+  const later = startHost({ world: echoWorld });
+  const { app, log, until } = sdkClient();
+  const loaded = await app.connectWith(later.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const answered = await ctx.request("session/load", { sessionId: result.made[3] ?? "", cwd: host.cwd, mcpServers: [] });
+    await until((updates) => updates.some((update) => update.sessionUpdate === "session_info_update"));
+    return answered;
+  });
+  await later.stop();
+  expect(loaded.configOptions).toBeDefined();
+  expect(log.updates.find((update) => update.sessionUpdate === "session_info_update")).toMatchObject({ title: null });
+  expect(later.logged.filter((each) => each.level === "Warn" || each.level === "Error" || each.level === "Fatal")).toEqual([]);
+});
+
+test("AL6 AL8: a session directory that cannot be read answers session/list -32603 with the cause, and logs it as an error", async () => {
+  writeFileSync(join(testFolder(), "sessions"), "not a folder");
+  const host = startHost();
+  const refused = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    return failure(ctx.request("session/list", {}));
+  });
+  await host.stop();
+  expect(refused).toMatchObject({ code: -32603, message: expect.stringContaining(host.directory) });
+  expect(host.logged.find((each) => each.key === logKeys.session.notListed)).toMatchObject({
+    level: "Error",
+    details: { directory: host.directory, doing: "reading the session directory", cause: expect.stringMatching(/\S/) },
+  });
+});
+
+test("AL7 AL8: session/load of an unknown session is -32002, a relative cwd -32602, a session already loaded -32602, and one whose facts another process holds -32000, which leaves nothing open", async () => {
+  const stored = await storedSession("One", [[{ _tag: "Text", text: "One." }]]);
+  writeFileSync(`${stored.file}.lock`, String(process.pid));
+  const host = startHost({ world: echoWorld });
+  const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const load = (sessionId: string, cwd = host.cwd) => ctx.request("session/load", { sessionId, cwd, mcpServers: [] });
+    const unknown = await failure(load("no-such-session"));
+    const relative = await failure(load(stored.sessionId, "work"));
+    const locked = await failure(load(stored.sessionId));
+    rmSync(`${stored.file}.lock`);
+    const loaded = await load(stored.sessionId);
+    const again = await failure(load(stored.sessionId));
+    const resumed = await failure(ctx.request("session/resume", { sessionId: stored.sessionId, cwd: host.cwd }));
+    return { unknown, relative, locked, loaded, again, resumed };
+  });
+  await host.stop();
+  expect(result.unknown).toMatchObject({ code: -32002, data: { sessionId: "no-such-session" } });
+  expect(result.relative).toMatchObject({ code: -32602, message: "cwd must be an absolute path: work" });
+  expect(result.locked).toMatchObject({ code: -32000, message: expect.stringContaining(`is open in another process (pid ${process.pid})`) });
+  expect(result.loaded.configOptions).toBeDefined();
+  expect(result.again).toMatchObject({ code: -32602, message: expect.stringContaining("already loaded") });
+  expect(result.resumed).toMatchObject({ code: -32602, message: expect.stringContaining("already loaded") });
+  expect(host.logged.find((each) => each.key === logKeys.session.notStored)).toMatchObject({
+    level: "Warn",
+    annotations: { session: "no-such-session", connection: expect.any(String) },
+    details: { doing: "session/load", file: storeFileOf(host.directory, "no-such-session") },
+  });
+  expect(host.logged.find((each) => each.key === logKeys.session.notLoaded)).toMatchObject({
+    level: "Error",
+    annotations: { session: stored.sessionId, connection: expect.any(String) },
+    details: { file: stored.file, cause: expect.stringContaining("another process") },
+  });
+  expect(host.logged.filter((each) => each.key === logKeys.session.refused).map((each) => each.details)).toMatchObject([
+    { doing: "session/load", cwd: "work" },
+    { doing: "session/load", cause: expect.stringContaining("already loaded") },
+    { doing: "session/resume", cause: expect.stringContaining("already loaded") },
+  ]);
+  expect(host.logged.filter((each) => each.key === logKeys.session.loaded)).toHaveLength(1);
 });

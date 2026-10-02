@@ -126,11 +126,31 @@ their reasoning.
   times since it started, the hook gives the model `answerNow`: "Your last response had thinking
   but no answer. Give your answer now.", which holds the turn open for one more request. A turn
   answered (`TurnCompleted`) or a response cut short gets nothing. With no answer after its
-  retries the turn ends `Incomplete` and no further request is made. The hook counts its retries
-  itself and the loop's own bound is one above them, so the loop's `holds_exhausted` warning, made
-  whenever a turn has used all its holds, is not what ends a retried turn.
+  retries the turn ends `Incomplete` and no further request is made. The hook counts the inputs
+  the turn-end hooks have given the turn, whichever hook gave them (the facts do not say which);
+  it is the only hook a session runs with, so they are its retries, and the loop's bound on holds
+  is the same number: at the bound the loop asks the hooks again, the hook gives nothing, and the
+  turn ends with no `TurnHoldsExhausted` and no `holds_exhausted` warning, which the loop makes
+  only when a hook would hold the turn again.
+
+## The host's record
+
+`host.json` (`record.ts`) is a host's own record of a session, in the session's folder beside its
+facts: whatever the host keeps of it that is not a fact (its working folder, its title). This
+module stores it as JSON and returns it as JSON and does not read it.
+
+- H16. `writeRecord` makes the session's folder when it is not there and writes the record whole:
+  under another name, flushed to the disk, then renamed over the record, so a reader finds the old
+  record or the new. `readRecord` gives the JSON written, `undefined` for a session with no record,
+  and fails with `RecordFailed` naming the file when it is not JSON or cannot be read; a write that
+  fails leaves the record already there as it was.
+- H17. `recordedSessions` is `storedSessions` (H5: the sessions with a facts file, the one written to
+  last first), each with its record, or `undefined` when it has none or its record does not read.
+  A record that does not read is logged as `host_record.unreadable` (session, file, cause), a
+  warning, and its session is listed without it. A folder with a record and no facts file is no
+  session.
 
 ## What is not built
 
 - A source of the catalog read from a hand-written `models.yml`.
-- A host's own record of a session in its folder (its title, its working folder).
+- Forks: the facts a new session begins with, which the core has not got (`TODO.md`, Sessions).
