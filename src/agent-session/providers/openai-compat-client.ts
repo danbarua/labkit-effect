@@ -286,7 +286,11 @@ const endings = new Map([
   ["stop", "Complete"],
   ["tool_calls", "Complete"],
   ["function_call", "Complete"],
+  // xAI's
+  ["end_turn", "Complete"],
   ["length", "CutShort"],
+  // Mistral's: the model's context was full.
+  ["model_length", "CutShort"],
   ["content_filter", "Refused"],
 ] as const);
 
@@ -393,8 +397,9 @@ const messageOf = (building: Building): Schema.JsonObject => ({
  * is passed on as it arrives, and a tool call once the next one begins (`ModelStream`); the
  * observation is made from the message the chunks built, as a whole response's message is. A
  * stream that ends with no `finish_reason` was cut short, and fails; a chunk that holds an `error`
- * fails the request with it. A server that answers with the whole response instead is read as one
- * chunk holding the whole message.
+ * (Groq's in `x_groq`) fails the request with it, and so does a `finish_reason` of `error`. A
+ * server that answers with the whole response instead is read as one chunk holding the whole
+ * message.
  */
 const respondOnce = (
   http: HttpClient.HttpClient,
@@ -413,8 +418,9 @@ const respondOnce = (
           Effect.gen(function* () {
             yield* passOn({ _tag: "Chunk", chunk: receivedJson(chunk) });
             if (!isObject(chunk)) return so;
-            if (chunk["error"] !== undefined && chunk["error"] !== null)
-              return yield* invalidOutput(caller, `The stream reported an error: ${JSON.stringify(chunk["error"])}`);
+            // Groq says why it stopped a stream early in `x_groq.error`.
+            const reported = chunk["error"] ?? (isObject(chunk["x_groq"] ?? null) ? (chunk["x_groq"] as Schema.JsonObject)["error"] : undefined);
+            if (reported !== undefined && reported !== null) return yield* invalidOutput(caller, `The stream reported an error: ${JSON.stringify(reported)}`);
             const { choices, usage, ...metadata } = chunk;
             const choice = Array.isArray(choices) ? (choices as ReadonlyArray<Json>)[0] : undefined;
             // A server that answers whole sends the message where a chunk sends its delta; what arrives
@@ -436,6 +442,8 @@ const respondOnce = (
       ),
     );
     if (end.finish === undefined) return yield* invalidOutput(caller, `The stream ended with no finish_reason: ${JSON.stringify(messageOf(building))}`);
+    // Mistral and OpenRouter end a response that failed with `finish_reason: "error"`.
+    if (end.finish === "error") return yield* invalidOutput(caller, `The response ended with finish_reason "error": ${JSON.stringify(messageOf(building))}`);
     const message = messageOf(building);
     const responded = parts(message);
     const unpassed = [...building.calls].filter(([at]) => !passed.has(at)).sort(([a], [b]) => a - b);

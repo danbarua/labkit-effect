@@ -135,11 +135,11 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       message's other fields (`reasoning_content`, `reasoning`, ...), a call's (Gemini's
       `extra_content`), and the chunks of a `content` that is a list (Mistral's thinking, which
       changes shape during a stream); a call's `arguments` sent as a JSON object are read as its
-      text; a call's name sent whole again as it grows (llama.cpp) is the whole name. To do, from the back-ends' documentation and source:
+      text; a call's name sent whole again as it grows (llama.cpp) is the whole name;
+      `finish_reason` `end_turn` (xAI) and `model_length` (Mistral) are classified, and `error`
+      (Mistral, OpenRouter) and Groq's `x_groq.error` fail the request. To do, from the back-ends' documentation and source:
       - Mistral: no `stream_options` (its schema refuses fields it does not define).
-      - `finish_reason` values not classified: `model_length` and `error` (Mistral), `end_turn`
-        (xAI), `error` (OpenRouter).
-      - Groq: a stream's error in `x_groq.error`, its usage in `x_groq.usage`. SGLang: reasoning
+      - Groq: a stream's usage in `x_groq.usage`. SGLang: reasoning
         tokens at the top of `usage`. DeepSeek: `prompt_cache_hit_tokens`.
       - The output limit's name: OpenAI takes `max_completion_tokens` (it refuses `max_tokens`
         for its o-series models); Mistral takes only `max_tokens`.

@@ -209,6 +209,31 @@ test("a call's name sent whole again as it grows (llama.cpp) is the whole name",
   expect(responded as unknown).toMatchObject({ observation: { parts: [{ _tag: "ToolCall", call: "call_1", tool: "add", input: json({ a: 2, b: 3 }) }] } });
 });
 
+test.each([
+  ["end_turn", "Complete"],
+  ["model_length", "CutShort"],
+])("finish_reason %s ends the response %s", async (finish, ending) => {
+  const { facts } = await turn([choice({ role: "assistant", content: "5." }, finish)]);
+  const responded = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded");
+  expect(responded as unknown).toMatchObject({ observation: { stop: finish, ending: { _tag: ending } } });
+});
+
+test.each([
+  ["Groq's error in x_groq", { x_groq: { error: "over capacity" } }, null, 'The stream reported an error: "over capacity"'],
+  ["finish_reason error", {}, "error", 'The response ended with finish_reason "error"'],
+])("a response that fails: %s", async (_name, more, finish, failure) => {
+  const failing = () =>
+    chatChunks([
+      { id: "e1", choices: [{ index: 0, delta: { role: "assistant", content: "Fi" }, finish_reason: null }] },
+      { id: "e1", choices: [{ index: 0, delta: {}, finish_reason: finish }], ...more },
+    ]);
+  const { provider, facts } = await turn([failing]);
+  expect(provider.bodies).toHaveLength(1);
+  expect(facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelFailed") as unknown).toMatchObject({
+    observation: { failure: expect.stringContaining(failure) },
+  });
+});
+
 test("the response streams: its usage comes in the last chunk, and a tool call is run once its response has it", async () => {
   const { facts } = await turn([{ ...callsAdd, usage: { prompt_tokens: 40, completion_tokens: 12, completion_tokens_details: { reasoning_tokens: 5 } } }, answers]);
   const observed = facts.flatMap((fact) => (fact._tag === "Observed" ? [fact.observation] : []));
