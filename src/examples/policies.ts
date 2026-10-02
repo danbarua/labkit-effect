@@ -1,5 +1,5 @@
 /**
- * Example policies for the gate in `src/agent-policy`: a deny list of tool names, asking a person
+ * Example policies (`src/agent-policy`): a deny list of tool names, asking a person
  * before a tool runs, holding model requests until a time, a spent budget, and a limit on a turn's
  * model requests. They show the shape
  * a policy takes; none is part of the policy layer, and none is wired into the loop.

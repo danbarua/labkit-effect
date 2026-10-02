@@ -1,8 +1,9 @@
 # agent-policy
 
 The place between the core's effect requests and the adapters that carry them out where a request
-can be allowed, refused or held. Permissions, budgets and rate limits are built here. It reads the
-core's effect requests and produces the core's observations; the core does not know it exists.
+can be allowed, refused or held. Permissions, budgets and rate limits are built here. A policy reads
+one of the core's effect requests and gives a verdict; the loop records a veto as the core's
+observation for it. The core does not know policies exist.
 
 Dan: "something might execute a decision to continue, veto or delay an Effect." How a policy decides
 (permissions, parsing a command, a model's judgement, asking a person) is the policy's business.
@@ -13,10 +14,6 @@ Dan: "something might execute a decision to continue, veto or delay an Effect." 
 - `permissions.ts`: permission to run a tool call, by Claude Code's permission modes (`default`,
   `acceptEdits`, `dontAsk`, `bypassPermissions`), from each tool's kind. What it asks offers ACP's
   options: allow once, allow the tool for the rest of the session, reject.
-- `gate.ts`: a machine that applies a policy to each request and gives what follows: the request
-  forwarded, the core's observation for a veto, or what a waiting policy asks. It is tested with the
-  example policies in `src/examples/policies.ts` (`tests/examples/policies.test.ts`); the loop does
-  not use it.
 - In the loop (`agent-session/loop.ts`): each tool call goes through the session's tool call policy
   (`ToolCallPolicy`) before it runs. Model requests are not reviewed.
 
@@ -46,11 +43,6 @@ Dan: "something might execute a decision to continue, veto or delay an Effect." 
   interprets it.
 - P3. `every([...])` applies policies in order. The first veto is the verdict; the request continues
   when every policy lets it continue.
-- P4. The gate applies a policy between the core's requests and the adapters that carry them out.
-  `Continue` forwards the request. `Veto` becomes the core's observation for a veto: `ToolEnded`
-  with `Vetoed`, or `ModelVetoed`, with the reason as the policy gave it. A waiting request is
-  held, and what the policy asks is passed on. `BeforeTurnEnded` and `StopTurnWork` are forwarded
-  without review.
 - P5. A call to a tool that only reads (`read`, `search`, `think`, `fetch`) runs in every mode. A
   call to a tool that changes things, or whose kind is not known: `default` asks; `acceptEdits` runs
   one that edits, deletes or moves files and asks for others; `dontAsk` vetoes; `bypassPermissions`

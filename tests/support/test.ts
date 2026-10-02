@@ -63,11 +63,12 @@ export const test = Object.assign(
     bunTest(name, named(callerFile(), name, run));
   },
   {
-    // Typed as `bun:test` types it, so a test's arguments are inferred from its rows as before.
-    each: ((rows: ReadonlyArray<ReadonlyArray<unknown>>) =>
+    // Typed as `bun:test` types it, so a test's arguments are inferred from its rows as before. A row
+    // that is not an array is the test's one argument: spread, a string would be its characters.
+    each: ((rows: ReadonlyArray<unknown>) =>
       (name: string, run: (...args: ReadonlyArray<unknown>) => unknown): void => {
         const file = callerFile();
-        bunTest.each(rows.map((row) => [...row]))(name, named(file, name, run));
+        bunTest.each(rows.map((row) => (Array.isArray(row) ? [...(row as ReadonlyArray<unknown>)] : [row])))(name, named(file, name, run));
       }) as unknown as typeof bunTest.each,
   },
 );

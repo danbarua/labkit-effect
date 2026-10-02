@@ -2,13 +2,7 @@
 
 What is to be built, by capability. What is built is in each module's `MODEL.md`; direction that is
 not yet work is in its `DESIGN.next.md`. Delete an item when it is done or dropped. As of
-2026-10-01.
-
-## Decisions for Dan
-
-- [ ] `ModelAnswered`: whether a response that ends the turn is an observation of its own, beside
-      `ModelResponded`, or stays the turn's ending (`TurnEnded { Answered }`), as it is now.
-      (`AskModel` and `TellModel { step }` are built; `AskModel` follows `TurnStarted`.)
+2026-10-02.
 
 ## Build
 
@@ -81,27 +75,33 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       - files and other context attached to it;
       - the tools, and the tool calls and results the next turn may bring;
       - room for writing a compaction summary.
-      Open: how much room to keep for the next turn's tool results, and for the summary (a
-      share, or the summarizer model's most output tokens).
-- [ ] Refuse a request to compact that would not fit the summarizer's context window.
 - [ ] Anthropic's own compaction (the compaction block, beta `compact-2026-09-04`).
 - [ ] A summarizer that asks a model to write a text summary with our own prompt.
 
-### Providers
+### Sessions
 
 - [ ] The session store. Built: `SessionStore`, which the loop requires (`EphemeralSessionStore`,
       `FileBackedSessionStore`); each fact written before anything is done on it; a failed write
-      stops the session; a turn left running goes on (`goOn`: requests made again, tools run again
-      by their `replay`) or ends, as the host chooses (the REPL asks; `-p` goes on); Ctrl+C records
+      stops the session; a turn left running goes on (`goOn`: a model request made again, only
+      `safe` tool calls run) or ends, as the host chooses (the REPL asks; `-p` goes on); Ctrl+C records
       the turn as interrupted. To do: a store for ACP hosts (`session/load`).
+- [ ] Forks as sessions, and the turn pointer (`session/turn`; turn zero of a root points at
+      itself). A fact is addressed by its session and its position. In the CLI,
+      `--fork-session` (commented out): go on from an earlier turn of a session, as a new one, to
+      walk back past a turn a refusal followed.
+
+### Providers
+
 - [ ] Effect's `Response.Usage` shape for a response's token counts, in place of our own.
 - [ ] Each provider's image and file formats, from what was measured, in place of models.dev's
       "takes images: yes or no".
 - [ ] The Chat Completions adapter against the local server (Rapid-MLX, vLLM-compatible, at
       `http://localhost:8000/v1`; OpenAPI docs at `/docs`). Built: the reasoning effort is sent as
-      `reasoning_effort` (Qwen3.5-9B takes `none` to `xhigh` and refuses `max`). To do, for parity
-      with core-agent and for small tasks on the local model: streaming; `reasoning_content` sent
-      back; an output limit; tool calls; the other settings.
+      `reasoning_effort` (Qwen3.5-9B takes `none` to `xhigh` and refuses `max`); tool calls, both
+      ways (Qwen called `read_file` and `write_file` through the CLI). To do, for parity with
+      core-agent and for small tasks on the local model: streaming; `reasoning_content` sent back
+      (it is left out of every request now, and logged once for each model); an output limit; the
+      other settings.
 - [ ] Models. Built: the well-known models as generated `const` data (`bun run models:refresh`:
       models.dev's catalog merged with `well-known-models.measured.json`); a settings type per
       well-known model (`SettingsFor`); the values to offer for each setting of a model as it is
@@ -122,12 +122,12 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       and compaction that knows the provider's cache: from the time since the
       provider's last summary (`writtenAt`) and its cache's lifetime, whether the next request can
       still read the cache, and so whether keeping its beginning unchanged saves anything.
-- [ ] Forks as sessions, and the turn pointer (`session/turn`; turn zero of a root points at
-      itself). A fact is addressed by its session and its position.
 - [ ] `prompt_cache_key` (OpenAI, xAI) for cache-aware work.
-- [ ] Changes to the system prompt or tools after the session opens, as facts of their own
-      (Anthropic takes tool changes mid-conversation as `tool_addition` and `tool_removal` blocks;
-      Codex records settings changes as `thread_settings_applied`).
+- [ ] Changes to the system prompt or tools after the session opens, as facts of their own: the
+      counterparts of `ImmutableSystemPrompt` and `ImmutableToolCatalog` (the readers
+      `immutableSystemPromptOf`, `immutableToolCatalogOf`), which read only the opening now.
+      Anthropic takes tool changes mid-conversation as `tool_addition` and `tool_removal` blocks;
+      Codex records settings changes as `thread_settings_applied`.
 - [ ] Returning to the first provider after a fallback by itself; today it is the user's to switch.
 - [ ] OpenAI `async: true` on a tool: the model goes on past a call before its output is returned.
 - [ ] OpenAI mid-turn steering (GPT-6, over a WebSocket to the Responses API): new input during a
@@ -144,11 +144,13 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 
 ## Trajectories
 
-Run both sweeps after a change to a core machine, and read the counts of observations not expected.
-On 2026-09-30: Codex none in 168 files; Claude Code 4 in 787.
+Run both sweeps after a change to a core machine, and read the counts of sessions with
+observations not expected or undelivered. On 2026-10-02: Codex 0 of 171 files; Claude Code 3 of
+783.
 
-- [ ] Claude Code: the 4 are each an error Claude Code reported after a response the core had
-      already taken as the step's outcome: three after a refusal, one after an answer.
+- [ ] Claude Code: the 3 sessions. On 2026-09-30 such observations were errors Claude Code reported
+      after a response the core had already taken as the step's outcome (after a refusal, or an
+      answer); read the 3 again to say what each is.
 - [ ] Codex: three responses in files from 2026-08 are split in two by a `token_count` that arrived
       mid-response, and the first half is recorded as `Unfinished`.
 - [ ] Codex: 8 turns still running when Codex completes them; 10 completions while another turn
@@ -165,6 +167,8 @@ On 2026-09-30: Codex none in 168 files; Claude Code 4 in 787.
 
 ## Parked by Dan
 
+- Saying before sending that a request to compact will not fit the summarizer's context window: it
+  needs the estimate of the next request's size, whose room to reserve is parked below.
 - How much room to reserve in the estimate of the next request's size: not until the usage
   figures are shown to be reliable, which needs the agent in daily use for coding.
 - Running `models:refresh` on a schedule: it is run by hand when a provider releases models.
