@@ -18,7 +18,7 @@ imports nothing of the core.
 
 | Input | ACP update |
 |---|---|
-| `InputArrived` | `user_message_chunk`, in `replay` only: live, the client has what it sent |
+| `InputArrived` from the user | `user_message_chunk`, in `replay` only: live, the client has what it sent. An input from the system (a turn-end hook's feedback) or another agent gives nothing |
 | `ModelDelta` of `Text` or `Commentary`, live | `agent_message_chunk` with the delta's text |
 | `ModelDelta` of `Thinking`, live | `agent_thought_chunk` with the delta's text |
 | `ModelResponded`: a `Text` or `Commentary` part | `agent_message_chunk` with what of the part no delta of its request sent |
@@ -102,8 +102,9 @@ text and resource links; no load, resume, list, fork or auth methods.
 
 ## Rules
 
-- PJ1. Live and replay are one projection with a mode. On replay each input is a
-  `user_message_chunk`; live, inputs give nothing.
+- PJ1. Live and replay are one projection with a mode. On replay each input from the user is a
+  `user_message_chunk`; an input from the system (a turn-end hook's feedback) or from another agent
+  gives nothing. Live, inputs give nothing.
 - PJ2. A response's answer text (`Text`, `Commentary`) is sent as `agent_message_chunk`, its
   thinking as `agent_thought_chunk`. Live, each `ModelDelta` is sent as it comes, and
   `ModelResponded` sends what of each of its parts the deltas of its request did not; with no

@@ -234,7 +234,8 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
       const observation = input.observation;
       switch (observation._tag) {
         case "InputArrived":
-          return { state, updates: context.mode === "replay" ? [{ sessionUpdate: "user_message_chunk", content: text(observation.text) }] : [] };
+          // Only what the user said is echoed: the feedback of a turn-end hook is the system's, another agent's is its own.
+          return { state, updates: context.mode === "replay" && observation.from._tag === "User" ? [{ sessionUpdate: "user_message_chunk", content: text(observation.text) }] : [] };
         case "ModelResponded": {
           const now = textOf(state, observation.turn);
           // The deltas of this request: those of the first request ended and not answered; else, live,

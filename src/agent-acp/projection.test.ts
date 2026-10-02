@@ -135,6 +135,20 @@ test("PJ1 PJ2 PJ4 PJ5 PJ6: replay of a recorded turn: the input, the call as it 
   ] as never);
 });
 
+test("PJ1: on replay only the user's inputs are echoed: what a turn-end hook gave, from the system, is not", () => {
+  const { session, fact } = recording();
+  fact(asked("list the files"));
+  fact(dispatched());
+  fact(responded([thinking("The files are a.ts.")]));
+  fact({ _tag: "InputArrived", from: { _tag: "System" }, text: "Your last response had no answer. Give it now." });
+  fact(dispatched());
+  fact(responded([answer("One file: a.ts.")]));
+  const updates = project(session.journal, replay).updates;
+  expect(updates.filter((update) => update.sessionUpdate === "user_message_chunk")).toEqual([user("list the files")] as never);
+  expect(joined(updates, "agent_thought_chunk")).toBe("The files are a.ts.");
+  expect(joined(updates, "agent_message_chunk")).toBe("One file: a.ts.");
+});
+
 test("PJ1 PJ2 PJ3 PJ4: live with deltas, each request's end item before its ModelResponded: no echo of the input, each delta once as it comes, and nothing at ModelResponded", () => {
   const { inputs } = listing(deltas);
   expect(project(inputs, live).updates).toEqual([
