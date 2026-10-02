@@ -3,7 +3,8 @@
  * say of a turn. Both ways of running the CLI (`print.ts`, `repl.ts`) are given the open session.
  *
  * The opening holds the model, its settings and the system prompt; each input is the user's,
- * through the CLI; the conversation is every turn of it; there are no tools yet.
+ * through the CLI; the conversation is every turn of it. The tools read the folder the CLI runs in
+ * (`read_file`, `list_dir`); none changes anything.
  */
 
 import { Effect, FileSystem, Layer, Logger } from "effect";
@@ -13,7 +14,7 @@ import type { Ending } from "../../agent-machine/decision.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
 import { InputText, SessionId, type TurnId, Via } from "../../agent-machine/names.ts";
 import type { ModelSettings } from "../../agent-machine/settings.ts";
-import { ToolRunner } from "../../agent-session/contracts.ts";
+import { workspaceTools } from "../../agent-tools/workspace.ts";
 import { openSession, resumeSession, type Session } from "../../agent-session/loop.ts";
 import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
 import { reportedBy } from "../../agent-session/origin.ts";
@@ -49,8 +50,8 @@ export const LogsToFile = (sessionId: string) =>
     }),
   ).pipe(Layer.orDie);
 
-/** The session has no tools yet: a call names none that exists. */
-const NoTools = Layer.succeed(ToolRunner, { run: () => Effect.succeed({ _tag: "Failed" as const, reason: { _tag: "NotFound" as const } }) });
+/** The tools a session is offered: the ones that read the workspace, the folder the CLI runs in. */
+const workspace = workspaceTools(process.cwd());
 
 /** What the loop needs, for a CLI session whose facts so far started `turns` turns. */
 const Services = (turns: number) => Layer.mergeAll(
@@ -61,7 +62,7 @@ const Services = (turns: number) => Layer.mergeAll(
     Clients,
     countingTurnsAfter(turns),
     NoTurnEndHooks,
-  NoTools,
+  workspace.runner,
 );
 
 /**
@@ -76,7 +77,7 @@ export const withSession = <A, E, R, L>(config: Config, logs: Layer.Layer<never,
     const session = before.length === 0 ? yield* openSession : yield* resumeSession(before);
     const store = yield* storing(session, storeFileOf(config.sessionId));
     if (before.length === 0)
-      yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: config.settings }, system: config.system, tools: [] }));
+      yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: config.settings }, system: config.system, tools: workspace.catalog }));
     else {
       const now = yield* modelOf(before);
       const changed = now.provider !== config.target.provider || now.model !== config.target.model || Object.keys(config.settings).length > 0;
