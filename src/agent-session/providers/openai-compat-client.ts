@@ -306,8 +306,8 @@ const chatUsageIn = (reported: Json | undefined) => {
  * its deltas joined in order; a list of chunks (Mistral's `content`), its deltas' chunks joined
  * (`chunksJoined`), text that follows a list being a text chunk; any other field, as its last delta
  * gave it. Tool calls are kept by their `index`, their `arguments` joined (an object as its JSON
- * text) and their `id` and name as first given; a call with no index is the one its `id` names, or
- * a new one.
+ * text), their `id` as first given and their name as `nameOf` says; a call with no index is the one
+ * its `id` names, or a new one.
  */
 interface Building {
   readonly fields: Map<string, Json>;
@@ -354,13 +354,24 @@ function added(building: Building, delta: Schema.JsonObject): ReadonlyArray<numb
     const named = isObject(fn ?? null) ? (fn as { readonly name?: Json; readonly arguments?: Json }) : {};
     building.calls.set(at, {
       ...(call.id === undefined && typeof id === "string" ? { id } : call.id === undefined ? {} : { id: call.id }),
-      ...(call.name === undefined && typeof named.name === "string" ? { name: named.name } : call.name === undefined ? {} : { name: call.name }),
+      ...nameOf(call.name, named.name),
       arguments: call.arguments + (typeof named.arguments === "string" ? named.arguments : named.arguments === undefined || named.arguments === null ? "" : JSON.stringify(named.arguments)),
       rest: { ...call.rest, ...(extra as Record<string, Json>) },
     });
     return [at];
   });
 }
+
+/**
+ * A call's name as its deltas give it: the first one given, or a later one that starts with it,
+ * as llama.cpp sends the name whole again each time it grows.
+ */
+const nameOf = (before: string | undefined, given: Json | undefined): { readonly name?: string } =>
+  typeof given === "string" && given.length > 0 && (before === undefined || given.startsWith(before))
+    ? { name: given }
+    : before === undefined
+      ? {}
+      : { name: before };
 
 /** A tool call as the message holds it, from what its deltas built. */
 const callOf = (call: { id?: string; name?: string; arguments: string; rest: Record<string, Json> }): Json => ({

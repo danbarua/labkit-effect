@@ -193,6 +193,22 @@ test("Mistral's content, a list of chunks that changes shape as it streams, is i
   });
 });
 
+test("a call's name sent whole again as it grows (llama.cpp) is the whole name", async () => {
+  const chunk = (delta: unknown, finish_reason: string | null = null) => ({ id: "l1", choices: [{ index: 0, delta, finish_reason }] });
+  const call = (fn: unknown, id?: string) => ({ tool_calls: [{ index: 0, ...(id === undefined ? {} : { id, type: "function" }), function: fn }] });
+  const llama = () =>
+    chatChunks([
+      chunk({ role: "assistant", ...call({ name: "a", arguments: "" }, "call_1") }),
+      chunk(call({ name: "ad" })),
+      chunk(call({ name: "add", arguments: '{"a":2,' })),
+      chunk(call({ arguments: '"b":3}' })),
+      chunk({}, "tool_calls"),
+    ]);
+  const { facts } = await turn([llama, answers]);
+  const responded = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded");
+  expect(responded as unknown).toMatchObject({ observation: { parts: [{ _tag: "ToolCall", call: "call_1", tool: "add", input: json({ a: 2, b: 3 }) }] } });
+});
+
 test("the response streams: its usage comes in the last chunk, and a tool call is run once its response has it", async () => {
   const { facts } = await turn([{ ...callsAdd, usage: { prompt_tokens: 40, completion_tokens: 12, completion_tokens_details: { reasoning_tokens: 5 } } }, answers]);
   const observed = facts.flatMap((fact) => (fact._tag === "Observed" ? [fact.observation] : []));
