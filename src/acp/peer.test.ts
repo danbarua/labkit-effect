@@ -467,7 +467,7 @@ describe("a two-way JSON-RPC peer, as an ACP agent, against the official SDK", (
     expect(log).toEqual(["update: Working.", "update: Acknowledged: {}"]);
   });
 
-  test("AP13: a null result becomes {} for a call whose success accepts {}, and is passed on unchanged for one whose success refuses {}, whose call then dies", async () => {
+  test("AP13: a null result becomes {} for a call whose success accepts {}, and fails with -32603 naming the method a call whose success refuses both", async () => {
     const agent = await start();
     const raw = rawClient(agent);
     const answerNull = async (method: string) => {
@@ -483,7 +483,16 @@ describe("a two-way JSON-RPC peer, as an ACP agent, against the official SDK", (
     await raw.send(request(2, "session/prompt", prompt("session-1", "permission")));
     expect(await raw.next()).toMatchObject({ method: "session/update" });
     await answerNull("session/request_permission");
-    expect(await raw.next()).toEqual({ jsonrpc: "2.0", id: 2, error: expect.objectContaining({ code: -32603 }) });
+    // The test agent answers its prompt with the error its call failed with.
+    expect(await raw.next()).toEqual({
+      jsonrpc: "2.0",
+      id: 2,
+      error: {
+        code: -32603,
+        message: "The result does not match session/request_permission's schema",
+        data: { result: null, issue: expect.any(String) },
+      },
+    });
     await agent.close();
   });
 

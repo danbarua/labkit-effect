@@ -105,8 +105,12 @@ than by Effect's JSON-RPC encoder. `stdio.ts` makes wires of newline-delimited J
   is then decoded with the method's success schema and encoded back before `RpcClient` decodes it,
   so the schema's default-on-error and skip-invalid-items fallbacks apply (`RpcClient` decodes
   inside `Schema.Exit`, which checks the value against the encoded side first, where those
-  fallbacks cannot catch it). A result the success schema refuses, `null` included, reaches
-  `RpcClient` unchanged and makes the call die on decoding.
+  fallbacks cannot catch it). A result the success schema refuses, `null` included, fails its call
+  with the `JsonRpcError` `{ code: -32603, message: "The result does not match <method>'s schema",
+  data: { result, issue } }`, `result` being the result as received and `issue` the schema's issue
+  as text. That is a failure the caller can handle, not a defect, and a later response for that id
+  is ignored (AP9). When the SDK's v1 agent answers `session/new` with a numeric `sessionId`, the
+  client's call fails so, and its next `session/new` succeeds.
 - AP14. A malformed response is an object with no `method` and a `result` or an `error` that is not
   a well-formed response: `jsonrpc` other than `"2.0"`, an `id` that is not a string, number or
   null, an `error` without an integer `code` and a string `message`, or both `result` and `error`.

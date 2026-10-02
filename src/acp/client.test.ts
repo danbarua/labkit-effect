@@ -324,7 +324,7 @@ describe("the client negotiates the version", () => {
   });
 });
 
-describe("lenient decoding over the wire", () => {
+describe("decoding over the wire", () => {
   test("AS5 AS6 AP13: the SDK's v1 agent sends the client a default-on-error field that fails to decode and a skip-invalid-items array with an invalid item; the client's call and handler get the default and the array without the item", async () => {
     const annotations = { audience: ["user", 5, "assistant"], priority: "high" };
     const ends = pipes();
@@ -367,6 +367,32 @@ describe("lenient decoding over the wire", () => {
     expect(updates).toEqual([
       { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hello", annotations: { audience: ["user", "assistant"] } } },
     ]);
+  });
+
+  test("AP13: a result its method's success schema refuses fails that call with -32603 naming the method, as a failure and not a defect, and the connection goes on", async () => {
+    const ends = pipes();
+    let sessions = 0;
+    acp
+      .agent({ name: "an-sdk-agent" })
+      .onRequest("initialize", () => ({ protocolVersion: 1, agentCapabilities: {}, authMethods: [] }))
+      // The first answer's sessionId is a number, which session/new's success schema refuses.
+      .onRequest("session/new", () => (++sessions === 1 ? { sessionId: 42 } : { sessionId: "sdk-session" }) as never)
+      .connect(acp.ndJsonStream(ends.agentWritable, ends.agentReadable));
+    const { refused, after } = await run(
+      Effect.gen(function* () {
+        const connection = yield* Client.connect({ wire: ends.client, info, implementations: [clientV1([])] });
+        const refused = yield* Effect.exit(connection.agent["session/new"]({ cwd: "/tmp", mcpServers: [] }));
+        const after = yield* connection.agent["session/new"]({ cwd: "/tmp", mcpServers: [] });
+        return { refused, after };
+      }),
+    );
+    expect(Exit.isFailure(refused) && refused.cause.reasons.map((reason) => reason._tag)).toEqual(["Fail"]);
+    expect(Exit.isFailure(refused) && Cause.squash(refused.cause)).toEqual({
+      code: -32603,
+      message: "The result does not match session/new's schema",
+      data: { result: { sessionId: 42 }, issue: expect.any(String) },
+    });
+    expect(after).toEqual({ sessionId: V1.SessionId.make("sdk-session") });
   });
 });
 

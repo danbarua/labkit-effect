@@ -20,7 +20,8 @@
  * - a `null` result for a request whose success schema refuses `null` and accepts `{}` reaches the
  *   caller as `{}`, as the ACP SDK reads it: the SDK answers `null` when a handler returns nothing;
  * - a result is decoded with its method's success schema before `RpcClient` sees it, so the
- *   schema's default-on-error and skip-invalid-items fallbacks apply to it;
+ *   schema's default-on-error and skip-invalid-items fallbacks apply to it, and a result the schema
+ *   refuses fails its call with -32603 rather than making `RpcClient` die decoding it;
  * - a malformed response is answered -32600 under id null, and the pending call whose id it
  *   carries fails with the `JsonRpcError` -32600 "The response to this request is malformed".
  *
@@ -29,7 +30,7 @@
  * responses can be gathered into one array.
  */
 
-import { Deferred, Effect, Exit, Fiber, type Layer, Predicate, Queue, Schema, Scope, Semaphore, Stream } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, type Layer, Predicate, Queue, Schema, Scope, Semaphore, Stream } from "effect";
 import { type Rpc, RpcClient, RpcClientError, type RpcGroup, RpcSerialization, RpcServer } from "effect/rpc";
 import type * as RpcMessage from "effect/rpc/RpcMessage";
 import {
@@ -46,6 +47,9 @@ import {
 
 /** The method of the notification that cancels a request, in either direction. */
 export const cancelMethod = "$/cancel_request";
+
+/** A response's outcome, as `RpcClient` reads it from its protocol. */
+type ExitEncoded = Extract<RpcMessage.FromServerEncoded, { readonly _tag: "Exit" }>["exit"];
 
 export interface Peer<Call extends Rpc.Any, Notify extends Rpc.Any> {
   /**
@@ -263,18 +267,25 @@ export const make: <Serve extends Rpc.Any, Call extends Rpc.Any, Notify extends 
   );
 
   /**
-   * A result as `method`'s success codec decodes it and encodes it back, or unchanged when it does
-   * not decode. `RpcClient` decodes a response inside `Schema.Exit`, which first checks the value
-   * against the success schema's encoded side, where a default-on-error or skip-invalid-items
-   * fallback cannot catch it: `availableModes: "none"` would fail there instead of becoming `[]`.
+   * What `RpcClient` gets for a result of `method`: the result as the method's success codec
+   * decodes it and encodes it back, or, when the codec refuses it, a failure with the `JsonRpcError`
+   * -32603 naming the method. `RpcClient` decodes a response inside `Schema.Exit`, which first
+   * checks the value against the success schema's encoded side, where a default-on-error or
+   * skip-invalid-items fallback cannot catch it (`availableModes: "none"` would fail there instead of
+   * becoming `[]`), and it dies on a value it cannot decode.
    */
-  const normalized = (method: string | undefined, result: unknown): unknown => {
+  const exitOf = (method: string | undefined, result: unknown): ExitEncoded => {
     const codec = method === undefined ? undefined : successCodecs.get(method);
-    if (codec === undefined) return result;
+    if (codec === undefined) return { _tag: "Success", value: result };
     const decoded = Schema.decodeUnknownExit(codec)(result);
-    if (Exit.isFailure(decoded)) return result;
-    const encoded = Schema.encodeUnknownExit(codec)(decoded.value);
-    return Exit.isSuccess(encoded) ? encoded.value : result;
+    const encoded = Exit.isSuccess(decoded) ? Schema.encodeUnknownExit(codec)(decoded.value) : decoded;
+    if (Exit.isSuccess(encoded)) return { _tag: "Success", value: encoded.value };
+    const error: JsonRpcError = {
+      code: ErrorCode.InternalError,
+      message: `The result does not match ${method}'s schema`,
+      data: { result, issue: String(Cause.squash(encoded.cause)) },
+    };
+    return { _tag: "Failure", cause: [{ _tag: "Fail", error }] };
   };
 
   let toClient!: (message: RpcMessage.FromServerEncoded) => Effect.Effect<void>;
@@ -377,7 +388,7 @@ export const make: <Serve extends Rpc.Any, Call extends Rpc.Any, Notify extends 
             exit: { _tag: "Failure", cause: [{ _tag: "Fail", error: message.error }] },
           });
         const value = message.result === null && method !== undefined && nullAsEmpty.has(method) ? {} : message.result;
-        return toClient({ _tag: "Exit", requestId: message.id, exit: { _tag: "Success", value: normalized(method, value) } });
+        return toClient({ _tag: "Exit", requestId: message.id, exit: exitOf(method, value) });
       }
       case "Notification":
       case "Request": {
