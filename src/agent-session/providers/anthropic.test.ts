@@ -121,7 +121,7 @@ test("the max_tokens the Messages API requires is supplied when none was said, a
       );
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.server.url))), Logger.layer([capture])),
+        Layer.mergeAll(AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.server.url))), Logger.layer([capture], { mergeWithExisting: true })),
       ),
     ),
   );
@@ -398,7 +398,7 @@ test("another provider's thinking and blocks are left out, and logged the first 
       yield* client.respond(target, context, TurnId.make("turn-3"));
       yield* client.respond({ ...target, model: ModelName.make("boring-2") }, context, TurnId.make("turn-4"));
     }).pipe(
-      Effect.provide(Layer.mergeAll(AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))), Logger.layer([capture]))),
+      Effect.provide(Layer.mergeAll(AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))), Logger.layer([capture], { mergeWithExisting: true }))),
     ),
   );
   expect((provider.bodies[0] as { messages: unknown }).messages).toEqual([

@@ -88,7 +88,7 @@ const oneTurn = (client: Layer.Layer<ModelClient>) => {
     CountingTurns,
     NoTurnEndHooks,
     SmolToolRunner,
-    Logger.layer([Logger.make((options) => logged.push(options.message))]),
+    Logger.layer([Logger.make((options) => logged.push(options.message))], { mergeWithExisting: true }),
   );
   return runTest(
     Effect.gen(function* () {

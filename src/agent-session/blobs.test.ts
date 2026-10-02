@@ -101,7 +101,7 @@ test("in a folder, a file whose bytes no longer match its id is found to be noth
       const stored = yield* blobs.store(bytes, MediaType.make("text/plain"));
       writeFileSync(join(folder, stored.id), "changed");
       return yield* blobs.read(stored.id);
-    }).pipe(Effect.provide(Layer.mergeAll(inFolder(folder), Logger.layer([Logger.make((options) => logged.push(options.message))])))),
+    }).pipe(Effect.provide(Layer.mergeAll(inFolder(folder), Logger.layer([Logger.make((options) => logged.push(options.message))], { mergeWithExisting: true })))),
   );
   expect(read).toBeUndefined();
   expect(logged).toContainEqual([logKeys.blobs.notAsStored, expect.objectContaining({ blob: helloId, size: 7 })]);

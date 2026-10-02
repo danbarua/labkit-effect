@@ -43,7 +43,7 @@ test("a provider that cannot be reached fails as a network error, retried first"
       Effect.provide(
         Layer.mergeAll(
           anthropicModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(anthropicAt(url))),
-          Logger.layer([Logger.make((options) => logged.push(options.message))]),
+          Logger.layer([Logger.make((options) => logged.push(options.message))], { mergeWithExisting: true }),
         ),
       ),
     ),
@@ -87,7 +87,7 @@ const asked = (client: Layer.Layer<ModelClient>, provider = "boring") => {
         { system: undefined, tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "hi" }] }] },
         TurnId.make("turn-1"),
       );
-    }).pipe(Effect.provide(Layer.mergeAll(client, Logger.layer([Logger.make((options) => logged.push(options.message))])))),
+    }).pipe(Effect.provide(Layer.mergeAll(client, Logger.layer([Logger.make((options) => logged.push(options.message))], { mergeWithExisting: true })))),
   ).then((observed) => ({
     observed,
     events: (key: string) => logged.filter((message) => Array.isArray(message) && message[0] === key),

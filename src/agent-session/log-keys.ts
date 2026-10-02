@@ -25,6 +25,11 @@ export const logKeys = {
     fileAsPointer: "provider.request.file_as_pointer",
   },
   loop: {
+    /**
+     * An observation was recorded; the details are its kind, its position, its origin, and its
+     * fields in brief (its text, numbers and the kind of its outcome or ending).
+     */
+    observationRecorded: "loop.observation.recorded",
     /** The core made a decision, and it was recorded; the details are the decision and where. */
     decisionRecorded: "loop.decision.recorded",
     /** Writing the session's facts down failed; the details say why, and which facts. The session stops. */

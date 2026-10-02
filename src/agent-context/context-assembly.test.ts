@@ -74,7 +74,7 @@ const run = (setup: Setup, messages: ReadonlyArray<ContextMessage>) => {
     Layer.succeed(Notices, setup.notices),
     Layer.succeed(ModelSelectors, setup.modelSelectors),
     TestClock.layer(),
-    Logger.layer([capture]),
+    Logger.layer([capture], { mergeWithExisting: true }),
   );
   return runTest(
     Effect.gen(function* () {

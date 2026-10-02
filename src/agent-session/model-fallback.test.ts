@@ -87,7 +87,7 @@ const oneTurn = async (
           CountingTurns,
           NoTurnEndHooks,
           SmolToolRunner,
-          Logger.layer([Logger.make((options) => logged.push(options.message))]),
+          Logger.layer([Logger.make((options) => logged.push(options.message))], { mergeWithExisting: true }),
         ),
       ),
     ),

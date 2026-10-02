@@ -30,7 +30,9 @@
  * What happens during a request besides its outcome (a failed attempt at it, say) is recorded at
  * once through `Report`.
  *
- * Each fact is published as it is recorded; `subscribe` receives every fact recorded after it.
+ * Each fact is logged as it is recorded (`loop.observation.recorded`, `loop.decision.recorded`), so a
+ * session's log follows everything that happens to it. Each fact is published as it is recorded;
+ * `subscribe` receives every fact recorded after it.
  * What a model request streams is passed on to `streamed` and not recorded.
  */
 
@@ -67,6 +69,22 @@ import { CurrentWork, type Work } from "./work.ts";
  */
 /** The machines as `facts` leave them. */
 const worldOf = (facts: ReadonlyArray<Fact>): World => worldAndRequestsOf(facts).world;
+
+/**
+ * An observation in brief, for the log: each of its fields that is text (its first 200 characters),
+ * a number or a flag, and the kind of each that has one (an outcome, an ending). What it carries
+ * besides (a response's parts, what a request sent) is in the facts.
+ */
+const inBrief = (observation: Observation): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(observation).flatMap(([field, value]): ReadonlyArray<readonly [string, unknown]> => {
+      if (field === "_tag") return [];
+      if (typeof value === "string") return [[field, value.length > 200 ? `${value.slice(0, 200)}…` : value]];
+      if (typeof value === "number" || typeof value === "boolean") return [[field, value]];
+      if (typeof value === "object" && value !== null && "_tag" in value) return [[field, value._tag]];
+      return [];
+    }),
+  );
 
 /** The session the facts opened, if they have. */
 const sessionOf = (facts: ReadonlyArray<Fact>): SessionId | undefined =>
@@ -491,6 +509,9 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
       yield* PubSub.publishAll(recorded, facts);
       const session = sessionOf(now);
       yield* traceTurns(observation, outcome.decisions, session);
+      yield* Effect.logInfo(logKeys.loop.observationRecorded, { observation: observation._tag, seq, origin, details: inBrief(observation) }).pipe(
+        Effect.annotateLogs(session === undefined ? {} : { session }),
+      );
       yield* Effect.forEach(decided, (fact) =>
         fact._tag === "Decided"
           ? Effect.logInfo(logKeys.loop.decisionRecorded, {

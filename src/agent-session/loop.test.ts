@@ -57,7 +57,7 @@ test("while a request is carried out, CurrentWork and every log line name its se
       yield* session.idle;
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(provider, client, BoringContextAssembler, CountingTurns, NoTurnEndHooks, SmolToolRunner, Logger.layer([capture])),
+        Layer.mergeAll(provider, client, BoringContextAssembler, CountingTurns, NoTurnEndHooks, SmolToolRunner, Logger.layer([capture], { mergeWithExisting: true })),
       ),
     ),
   );
@@ -113,7 +113,7 @@ async function answeringTurn(hooks: ReadonlyArray<() => ReadonlyArray<string>>, 
       return yield* session.facts;
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(provider, client, BoringContextAssembler, CountingTurns, turnEndHooks, SmolToolRunner, Logger.layer([capture])),
+        Layer.mergeAll(provider, client, BoringContextAssembler, CountingTurns, turnEndHooks, SmolToolRunner, Logger.layer([capture], { mergeWithExisting: true })),
       ),
     ),
   );
@@ -208,7 +208,7 @@ test("a request that dies of a defect is logged with what it died of, and record
           CountingTurns,
           NoTurnEndHooks,
           SmolToolRunner,
-          Logger.layer([Logger.make((options) => logged.push(options.message))]),
+          Logger.layer([Logger.make((options) => logged.push(options.message))], { mergeWithExisting: true }),
         ),
       ),
     ),
