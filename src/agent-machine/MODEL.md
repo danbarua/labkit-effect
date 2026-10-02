@@ -131,8 +131,9 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
 - X5. A turn going on from facts that stopped while it ran carries out each request they left with
   no outcome. A model request is made (again). A tool call that had not begun runs, asked about
   again if it was waiting for an answer. A call that began, and whose end was not observed, runs
-  again when its tool's `replay` is `safe` or `idempotent`; otherwise it ends `Indeterminate`, and
-  is not run again. A turn that was being interrupted is given what is known of each request, as
+  again only when its tool's `replay` is `safe`: it changes nothing. Otherwise it ends
+  `Indeterminate` and is not run again, `idempotent` included: what it changes may have changed
+  since, and the model looks before it runs it again. A turn that was being interrupted is given what is known of each request, as
   X4 says, and ends. The turn then goes on as any other.
 
 ## What the model has seen

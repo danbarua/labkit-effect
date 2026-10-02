@@ -9,9 +9,9 @@
  * `read_file` reads UTF-8 text, at most 256 KiB in one result; `line` (1-based) and `limit` (a
  * count of lines) read part of a file. `list_dir` lists one folder, without recursion, a folder's
  * name followed by `/`. `write_file` creates or replaces a file with at most 256 KiB of text; the
- * folder it is in must exist. Run again for a call whose end was not observed, `read_file` and
- * `list_dir` change nothing (`replay: "safe"`), and `write_file` writes the same text to the same
- * file (`"idempotent"`).
+ * folder it is in must exist. For a call whose end was not observed, `read_file` and `list_dir`
+ * run again: they change nothing (`replay: "safe"`). `write_file` does not: running it again writes
+ * the same text, but the file may have changed since (`"idempotent"`).
  *
  * A call that cannot run fails with the reason: no tool has the name (`NotFound`), the input does
  * not fit (`InputRejected`), or the file system reported an error (`Reported`, with its message).

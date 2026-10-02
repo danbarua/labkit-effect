@@ -22,9 +22,10 @@ import { receivedJson, receivedText } from "./received.ts";
 import { ephemeralSessionStore } from "./session-store.ts";
 import { CountingTurnsInStore, NoTurnEndHooks } from "./turns.ts";
 
-/** `look` changes nothing; `launch` cannot be run twice. */
+/** `look` changes nothing; `write` leaves things as writing once does; `launch` cannot be run twice. */
 const catalog: ReadonlyArray<ToolSpec> = [
   { name: ToolName.make("look"), description: "Looks.", input: { type: "object" }, kind: "read", replay: "safe" },
+  { name: ToolName.make("write"), description: "Writes.", input: { type: "object" }, kind: "edit", replay: "idempotent" },
   { name: ToolName.make("launch"), description: "Launches.", input: { type: "object" }, kind: "execute", replay: "unsafe" },
 ];
 
@@ -134,9 +135,9 @@ test("X5: a call that began, to a tool safe to run again, runs again; the model 
   expect(ending(after)).toEqual(["Completed"]);
 });
 
-test("X5: a call that began, to a tool not safe to run again, is not run: how it ended was not observed", async () => {
+test.each([["launch"], ["write"]])("X5: a call that began, to a tool that changes things (%s), is not run again: how it ended was not observed", async (tool: string) => {
   const session = asked();
-  calls(session, "launch");
+  calls(session, tool);
   observe(session, { _tag: "ToolCallDispatched", call: "c1" });
   const { after, ran, asked: times } = await wentOn(session.journal);
   expect(ran).toEqual([]);

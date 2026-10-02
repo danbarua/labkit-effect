@@ -30,9 +30,11 @@ export const ToolKind = Schema.Literals(["read", "edit", "delete", "move", "sear
 export type ToolKind = typeof ToolKind.Type;
 
 /**
- * Whether a tool can be run again for a call whose end was not observed (its process ended while
- * it ran): `safe`, it changes nothing; `idempotent`, running it again leaves things as running it
- * once does; `unsafe`, neither, and it is not run again. Whoever defines a tool says which.
+ * What running a tool again does, for a call whose end was not observed (its process ended while
+ * it ran): `safe`, it changes nothing, so it is run again; `idempotent`, running it again leaves
+ * things as running it once does, but what it changes may have changed since, so it is not run
+ * again without looking first; `unsafe`, neither, and it is not run again. Whoever defines a tool
+ * says which.
  */
 export const ToolReplay = Schema.Literals(["safe", "idempotent", "unsafe"]);
 export type ToolReplay = typeof ToolReplay.Type;
