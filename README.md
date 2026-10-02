@@ -61,28 +61,14 @@ the providers' APIs do. `scripts/vidaimock.ts` downloads the pinned release for 
 
 ## The ACP agent
 
-`bun src/agent-acp/main.ts` is the command an editor launches: protocol v1 on stdin and stdout, a log
-file whose path it says once on stderr, exit 0 when stdin closes. It has been driven with the
-official SDK's client against the local Qwen; it has not yet been seen in an editor. For VS Code's
-ACP Client extension, the setting is the one the labkit monorepo's host uses
-(`docs/agent/vscode-acp.md` there), with this command:
+`bun src/agent-acp/main.ts` (`bun run acp:dev`) is the command an editor launches: protocol v1 on
+stdin and stdout, a log file whose path it says once on stderr, exit 0 when stdin closes.
 
-```json
-{
-  "acp.agents": {
-    "labkit-effect": {
-      "command": "/opt/homebrew/bin/bun",
-      "args": ["/ABS/labkit-effect/src/agent-acp/main.ts"],
-      "env": { "LABKIT_ACP_MODEL": "localhost/<a model the local server lists>" }
-    }
-  }
-}
-```
-
-`/ABS/labkit-effect` is the main checkout, not a worktree: a worktree is removed after its branch
-merges, and an editor setting that names one stops working without saying why. The command exists
-there once the branch that adds `src/agent-acp/` is merged, and it needs `bun install` run in that
-checkout first (a checkout without `node_modules` fails at the first import).
+`bun run vscode:dev [folder]` opens VS Code on a folder (this checkout when none is given) with
+labkit's ACP client and this agent in it, as `labkit-effect`. It builds the client from
+`LABKIT_VSCODE_CLIENT` (labkit-web's `packages/app-vscode`; set it in `.env`) and runs VS Code with
+user data of its own (`~/.labkit/vscode-dev`), whose `settings.json` it gives the agent's entry in
+`acp.agents`; the user's own settings are not changed. Run `bun install` in this checkout first.
 
 The environment: `LABKIT_ACP_MODEL` (the model new sessions start on, `provider/model`; else the
 first the catalog lists), a provider's key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`) or
