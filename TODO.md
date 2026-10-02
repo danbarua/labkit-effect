@@ -132,11 +132,11 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       the last chunk and a tool call passed on once the next begins (a server that answers whole
       is read as one chunk); the output limit, as `max_tokens`, when one is set; what a response
       held besides its text and calls goes back to the provider that produced it as it came: the
-      message's other fields (`reasoning_content`, `reasoning`, ...) and a call's (Gemini's
-      `extra_content`). To do, from the back-ends' documentation and source:
-      - Mistral: `content` as a list of chunks (thinking, with a `signature`, and text), which
-        changes shape during a stream; a tool call's `arguments` as a JSON object; no
-        `stream_options` (its schema refuses fields it does not define).
+      message's other fields (`reasoning_content`, `reasoning`, ...), a call's (Gemini's
+      `extra_content`), and the chunks of a `content` that is a list (Mistral's thinking, which
+      changes shape during a stream); a call's `arguments` sent as a JSON object are read as its
+      text. To do, from the back-ends' documentation and source:
+      - Mistral: no `stream_options` (its schema refuses fields it does not define).
       - llama.cpp: a streamed tool call's name, sent whole again each time it grows.
       - `finish_reason` values not classified: `model_length` and `error` (Mistral), `end_turn`
         (xAI), `error` (OpenRouter).

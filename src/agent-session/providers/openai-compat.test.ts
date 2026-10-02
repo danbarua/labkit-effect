@@ -13,6 +13,7 @@ import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.t
 import { TurnContextAssembler } from "../turn-context.ts";
 import { openAiCompatAt, recordingServer } from "../../../tests/support/providers.ts";
 import { json } from "../../../tests/support/received.ts";
+import { chatChunks } from "../../../tests/support/streams.ts";
 import { runTest } from "../../../tests/support/run.ts";
 import { boringOpening } from "../../../tests/support/boring.ts";
 
@@ -152,6 +153,43 @@ test("what a response held besides its text and calls goes back to its provider 
     reasoning_content: "Add them.",
     refusal: "none of it",
     tool_calls: [{ id: "call_1", type: "function", function: { name: "add", arguments: '{"a":2,"b":3}' }, extra_content: signed }],
+  });
+});
+
+/** Mistral's stream: its `content` a list holding a thinking chunk, then the thinking's end and the text's start, then text. */
+const mistralStream = () => {
+  const chunk = (delta: unknown, finish_reason: string | null = null, more = {}) => ({ id: "m1", object: "chat.completion.chunk", choices: [{ index: 0, delta, finish_reason }], ...more });
+  const think = (text: string, more = {}) => ({ type: "thinking", thinking: [{ type: "text", text }], ...more });
+  return chatChunks([
+    chunk({ role: "assistant", content: [think("Two and ")] }),
+    chunk({ content: [think("three.")] }),
+    chunk({ content: [think("", { closed: true }), { type: "text", text: "Add" }] }),
+    chunk({ content: "ing." }),
+    chunk({ tool_calls: [{ id: "call_1", index: 0, function: { name: "add", arguments: { a: 2, b: 3 } } }] }),
+    chunk({ content: "" }, "tool_calls", { usage: { prompt_tokens: 40, completion_tokens: 12, total_tokens: 52 } }),
+  ]);
+};
+
+test("Mistral's content, a list of chunks that changes shape as it streams, is its thinking and its text, and goes back as it came", async () => {
+  const { provider, facts } = await turn([mistralStream, answers]);
+  const thought = { type: "thinking", thinking: [{ type: "text", text: "Two and three." }], closed: true };
+  const responded = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded");
+  expect(responded as unknown).toMatchObject({
+    observation: {
+      parts: [
+        { _tag: "Thinking", text: "Two and three.", received: json({ content: [thought] }) },
+        { _tag: "Text", text: "Adding." },
+        // Arguments sent as an object are its JSON.
+        { _tag: "ToolCall", call: "call_1", tool: "add", input: json({ a: 2, b: 3 }) },
+      ],
+      usage: { input: 40, output: 12 },
+    },
+  });
+  const second = provider.bodies[1] as { readonly messages: ReadonlyArray<unknown> };
+  expect(second.messages[1]).toEqual({
+    role: "assistant",
+    content: [thought, { type: "text", text: "Adding." }],
+    tool_calls: [{ id: "call_1", type: "function", function: { name: "add", arguments: '{"a":2,"b":3}' } }],
   });
 });
 

@@ -109,3 +109,10 @@ export function chatStream(whole: unknown): Response {
     headers: { "content-type": "text/event-stream" },
   });
 }
+
+/** Chat Completions chunks as a server streams them, as given, then `[DONE]`: for a stream no whole response gives. */
+export function chatChunks(chunks: ReadonlyArray<unknown>): Response {
+  return new Response([...chunks.map((each) => `data: ${JSON.stringify(each)}\n\n`), "data: [DONE]\n\n"].join(""), {
+    headers: { "content-type": "text/event-stream" },
+  });
+}

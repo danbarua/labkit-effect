@@ -12,7 +12,7 @@ import { BoringModelProvider, boringOpening } from "../../../tests/support/borin
 import { anthropicAt, openAiAt, openAiCompatAt } from "../../../tests/support/providers.ts";
 import { runTest } from "../../../tests/support/run.ts";
 import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
-import { anthropicStream, chatStream, openAiStream } from "../../../tests/support/streams.ts";
+import { anthropicStream, chatChunks, chatStream, openAiStream } from "../../../tests/support/streams.ts";
 import { test } from "../../../tests/support/test.ts";
 import type { ModelClient } from "../contracts.ts";
 import { openSession } from "../loop.ts";
@@ -137,6 +137,24 @@ test("V3: Chat Completions: the thinking field and the content, each its deltas 
   const fromWhole = await streamedIn(openAiCompatModelClient({ times: 0, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(answeringWhole))));
   expect(tags(fromWhole)).not.toContain("ModelDelta");
   expect(tags(fromWhole).at(-1)).toBe("ModelResponseEnded");
+});
+
+test("V3: Chat Completions: Mistral's content, a list of chunks, then text: the thinking and the text, each its deltas joined", async () => {
+  const chunk = (delta: unknown, finish_reason: string | null = null) => ({ id: "m1", choices: [{ index: 0, delta, finish_reason }] });
+  const think = (text: string) => ({ type: "thinking", thinking: [{ type: "text", text }] });
+  const url = serving(() =>
+    chatChunks([
+      chunk({ role: "assistant", content: [think("Two and ")] }),
+      chunk({ content: [think("three."), { type: "text", text: "Fi" }] }),
+      chunk({ content: "ve." }),
+      chunk({}, "stop"),
+    ]),
+  );
+  const passed = await streamedIn(openAiCompatModelClient({ times: 0, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(url))));
+  expect(paired(passed)).toEqual([
+    { kind: "Thinking", text: "Two and three.", shown: "Two and three." },
+    { kind: "Text", text: "Five.", shown: "Five." },
+  ]);
 });
 
 test("V4: a request that fails ends with ModelResponseEnded too", async () => {

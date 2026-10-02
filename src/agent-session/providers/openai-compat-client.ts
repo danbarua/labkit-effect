@@ -14,7 +14,8 @@
  *
  * In: the response streams, and its chunks build the first choice's message (`respondOnce`). The
  * message becomes the observation's parts in order: its thinking (`reasoning_content`, `reasoning`)
- * is `Thinking`, its `content` is `Text`, each of its `tool_calls` is `ToolCall` (whatever the
+ * is `Thinking`, its `content` is `Text` (a list of chunks, Mistral's, is a part per chunk, its
+ * thinking `Thinking`), each of its `tool_calls` is `ToolCall` (whatever the
  * tool's name), its arguments kept as the text received, and a call's other fields (Gemini's
  * `extra_content`) are `Unrecognised` holding the call; any other field of the message
  * (`refusal`, ...) is `Unrecognised`, holding that field. As the chunks arrive, the text each adds
@@ -85,13 +86,19 @@ function chatMessages(
   const filed = message.parts.flatMap((part) =>
     part._tag === "File" ? [fileAs(part.blob, files, (mediaType) => mediaType.startsWith("image/") && takesFile(knownOf(target), mediaType))] : [],
   );
-  const text = [
-    ...message.parts.flatMap((part) => (part._tag === "Text" || part._tag === "Commentary" ? [{ type: "text", text: part.text }] : [])),
-    ...filed.map((file) => (file._tag === "Text" ? { type: "text", text: file.text } : { type: "image_url", image_url: { url: file.dataUrl } })),
-  ];
   const toolCalls = message.parts.flatMap((part) =>
     part._tag === "ToolCall" ? [{ call: part.call, tool: part.tool, input: toolInputObject(part.call, part.input) }] : [],
   );
+  const kept = keptFields(
+    message,
+    target,
+    toolCalls.map((call) => ({ id: call.call, type: "function", function: { name: call.tool, arguments: JSON.stringify(call.input.json) } })),
+  );
+  // The content in the order of the parts: text, and the chunks kept from the response (Mistral's thinking).
+  const text = [
+    ...message.parts.flatMap((part, at) => (part._tag === "Text" || part._tag === "Commentary" ? [{ type: "text", text: part.text }] : (kept.content.get(at) ?? []))),
+    ...filed.map((file) => (file._tag === "Text" ? { type: "text", text: file.text } : { type: "image_url", image_url: { url: file.dataUrl } })),
+  ];
   const results = message.parts.flatMap((part) =>
     part._tag === "ToolResult"
       ? [
@@ -102,11 +109,6 @@ function chatMessages(
           },
         ]
       : [],
-  );
-  const kept = keptFields(
-    message,
-    target,
-    toolCalls.map((call) => ({ id: call.call, type: "function", function: { name: call.tool, arguments: JSON.stringify(call.input.json) } })),
   );
   const own =
     text.length === 0 && kept.calls.length === 0 && Object.keys(kept.fields).length === 0
@@ -127,23 +129,34 @@ function chatMessages(
 
 /**
  * What an earlier response held besides its text and its calls, put back as it came
- * (`sentBack`): each of the message's other fields (`reasoning_content`, ...), and each call's
+ * (`sentBack`): each of the message's other fields (`reasoning_content`, ...); the chunks of its
+ * content that are not text (Mistral's thinking), by the part that holds them; and each call's
  * other fields (Gemini's `extra_content`) on the call with its id.
  */
 function keptFields(
   message: ContextMessage,
   target: Target,
   calls: ReadonlyArray<Readonly<Record<string, Json>>>,
-): { readonly fields: Readonly<Record<string, Json>>; readonly calls: ReadonlyArray<Readonly<Record<string, Json>>>; readonly supplied: Shaped["supplied"] } {
+): {
+  readonly fields: Readonly<Record<string, Json>>;
+  readonly content: ReadonlyMap<number, ReadonlyArray<Json>>;
+  readonly calls: ReadonlyArray<Readonly<Record<string, Json>>>;
+  readonly supplied: Shaped["supplied"];
+} {
   const fields: Record<string, Json> = {};
+  const content = new Map<number, ReadonlyArray<Json>>();
   const extras = new Map<string, Readonly<Record<string, Json>>>();
-  const supplied = message.parts.flatMap((part) => {
+  const supplied = message.parts.flatMap((part, at) => {
     if (part._tag !== "Thinking" && part._tag !== "Unrecognised") return [];
     const back = sentBack(part, target);
     const [piece] = back.json as ReadonlyArray<Json>;
     if (piece === undefined) return back.supplied;
     if (!isObject(piece)) return leftOut(part, "it is not a message's fields").supplied;
     return Object.entries(piece).flatMap(([field, value]) => {
+      if (field === "content" && Array.isArray(value)) {
+        content.set(at, value);
+        return [];
+      }
       if (field !== "tool_calls" || !Array.isArray(value)) {
         fields[field] = value as Json;
         return [];
@@ -156,7 +169,7 @@ function keptFields(
       });
     });
   });
-  return { fields, calls: calls.map((own) => ({ ...extras.get(own["id"] as string), ...own })), supplied };
+  return { fields, content, calls: calls.map((own) => ({ ...extras.get(own["id"] as string), ...own })), supplied };
 }
 
 function body(target: Target, context: ModelContext, files: ReadonlyMap<BlobId, Uint8Array> = new Map()): Shaped {
@@ -224,12 +237,36 @@ function fieldParts(message: Schema.JsonObject): ReadonlyArray<ModelPart> {
     ...filled.flatMap(([field, value]): ReadonlyArray<ModelPart> =>
       thinkingFields.includes(field) && typeof value === "string" ? [{ _tag: "Thinking", text: ThinkingText.make(value), received: receivedJson({ [field]: value }) }] : [],
     ),
-    ...(typeof content === "string" && content.length > 0 ? [{ _tag: "Text" as const, text: ModelText.make(content) }] : []),
+    ...contentParts(content),
     ...filled
       .filter((entry) => !thinks(entry))
       .map(([field, value]): ModelPart => ({ _tag: "Unrecognised", received: receivedJson({ [field]: value as Json }) })),
   ];
 }
+
+/**
+ * The parts the message's `content` becomes: text as `Text`. A list of chunks (Mistral's) becomes a
+ * part per chunk, in order: a text chunk as `Text`; a thinking chunk as `Thinking`, its text the
+ * text of its own chunks, holding the chunk; any other chunk as `Unrecognised`, holding it.
+ */
+function contentParts(content: Json | undefined): ReadonlyArray<ModelPart> {
+  if (content === undefined || content === null) return [];
+  if (typeof content === "string") return content.length === 0 ? [] : [{ _tag: "Text", text: ModelText.make(content) }];
+  return asChunks(content).flatMap((chunk): ReadonlyArray<ModelPart> => {
+    const kept = receivedJson({ content: [chunk] });
+    if (!isObject(chunk)) return [{ _tag: "Unrecognised", received: kept }];
+    if (chunk["type"] === "text" && typeof chunk["text"] === "string") return chunk["text"].length === 0 ? [] : [{ _tag: "Text", text: ModelText.make(chunk["text"]) }];
+    if (chunk["type"] === "thinking") return [{ _tag: "Thinking", text: ThinkingText.make(thinkingOf(chunk)), received: kept }];
+    return [{ _tag: "Unrecognised", received: kept }];
+  });
+}
+
+/** The text of a thinking chunk: its own text chunks' text, joined. */
+const thinkingOf = (chunk: Schema.JsonObject): string => {
+  const thinking = chunk["thinking"];
+  if (typeof thinking === "string") return thinking;
+  return Array.isArray(thinking) ? thinking.flatMap((each) => (isObject(each) && typeof each["text"] === "string" ? [each["text"]] : [])).join("") : "";
+};
 
 /** The text a chunk's delta adds to the answer and to the thinking, as it arrives. */
 const deltasIn = (delta: Schema.JsonObject): ReadonlyArray<Streamed> => [
@@ -237,7 +274,11 @@ const deltasIn = (delta: Schema.JsonObject): ReadonlyArray<Streamed> => [
     const text = delta[field];
     return typeof text === "string" ? [{ _tag: "Delta", kind: "Thinking", text }] : [];
   }),
-  ...(typeof delta["content"] === "string" ? [{ _tag: "Delta" as const, kind: "Text" as const, text: delta["content"] }] : []),
+  ...(delta["content"] === undefined || delta["content"] === null ? [] : asChunks(delta["content"])).flatMap((chunk): ReadonlyArray<Streamed> => {
+    if (!isObject(chunk)) return [];
+    if (chunk["type"] === "text" && typeof chunk["text"] === "string") return [{ _tag: "Delta", kind: "Text", text: chunk["text"] }];
+    return chunk["type"] === "thinking" ? [{ _tag: "Delta", kind: "Thinking", text: thinkingOf(chunk) }] : [];
+  }),
 ];
 
 /** A choice's `finish_reason` values. */
@@ -262,21 +303,43 @@ const chatUsageIn = (reported: Json | undefined) => {
 
 /**
  * A message as its stream's deltas build it. A text field (`content`, `reasoning_content`, ...) is
- * its deltas joined in order; an array field, its deltas appended; any other field, as its last delta
- * gave it. Tool calls are kept by their `index`, their `arguments` joined and their `id` and name
- * as first given; a call with no index is the one its `id` names, or a new one.
+ * its deltas joined in order; a list of chunks (Mistral's `content`), its deltas' chunks joined
+ * (`chunksJoined`), text that follows a list being a text chunk; any other field, as its last delta
+ * gave it. Tool calls are kept by their `index`, their `arguments` joined (an object as its JSON
+ * text) and their `id` and name as first given; a call with no index is the one its `id` names, or
+ * a new one.
  */
 interface Building {
   readonly fields: Map<string, Json>;
   readonly calls: Map<number, { id?: string; name?: string; arguments: string; rest: Record<string, Json> }>;
 }
 
+const asChunks = (value: Json): ReadonlyArray<Json> => (typeof value === "string" ? [{ type: "text", text: value }] : Array.isArray(value) ? value : [value]);
+
 const joined = (before: Json | undefined, delta: Json): Json =>
   typeof before === "string" && typeof delta === "string"
     ? before + delta
-    : Array.isArray(before) && Array.isArray(delta)
-      ? [...before, ...delta]
+    : before !== undefined && (Array.isArray(before) || Array.isArray(delta)) && (typeof before === "string" || Array.isArray(before))
+      ? chunksJoined(asChunks(before), asChunks(delta))
       : delta;
+
+/**
+ * `before`'s chunks with `more` after them: a text chunk after a text chunk adds its text to it, and
+ * a thinking chunk after a thinking chunk adds its own chunks to it (its other fields, `closed` or a
+ * `signature`, the later ones), as a stream sends one chunk in pieces.
+ */
+function chunksJoined(before: ReadonlyArray<Json>, more: ReadonlyArray<Json>): ReadonlyArray<Json> {
+  return more.reduce<ReadonlyArray<Json>>((all, chunk) => {
+    const last = all.at(-1);
+    if (last === undefined || !isObject(last) || !isObject(chunk) || last["type"] !== chunk["type"]) return [...all, chunk];
+    const [earlier, later] = [last as Record<string, Json>, chunk as Record<string, Json>];
+    if (later["type"] === "text" && typeof earlier["text"] === "string" && typeof later["text"] === "string")
+      return [...all.slice(0, -1), { ...earlier, ...later, text: earlier["text"] + later["text"] }];
+    if (later["type"] === "thinking" && Array.isArray(earlier["thinking"]) && Array.isArray(later["thinking"]))
+      return [...all.slice(0, -1), { ...earlier, ...later, thinking: chunksJoined(earlier["thinking"], later["thinking"]) }];
+    return [...all, chunk];
+  }, before);
+}
 
 function added(building: Building, delta: Schema.JsonObject): ReadonlyArray<number> {
   const { role: _role, tool_calls, ...rest } = delta;
@@ -292,7 +355,7 @@ function added(building: Building, delta: Schema.JsonObject): ReadonlyArray<numb
     building.calls.set(at, {
       ...(call.id === undefined && typeof id === "string" ? { id } : call.id === undefined ? {} : { id: call.id }),
       ...(call.name === undefined && typeof named.name === "string" ? { name: named.name } : call.name === undefined ? {} : { name: call.name }),
-      arguments: call.arguments + (typeof named.arguments === "string" ? named.arguments : ""),
+      arguments: call.arguments + (typeof named.arguments === "string" ? named.arguments : named.arguments === undefined || named.arguments === null ? "" : JSON.stringify(named.arguments)),
       rest: { ...call.rest, ...(extra as Record<string, Json>) },
     });
     return [at];

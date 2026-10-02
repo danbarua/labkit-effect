@@ -26,7 +26,7 @@ export function openAiCompatAt(server: URL) {
   );
 }
 
-/** A local server that answers each request with the next scripted body, keeping each request. */
+/** A local server that answers each request with the next scripted body (or a function making its `Response`), keeping each request. */
 export function recordingServer(responses: ReadonlyArray<unknown>) {
   const bodies: Array<unknown> = [];
   const headers: Array<Record<string, string>> = [];
@@ -38,6 +38,8 @@ export function recordingServer(responses: ReadonlyArray<unknown>) {
       headers.push(Object.fromEntries(request.headers));
       bodies.push(await request.json());
       const response = responses[Math.min(bodies.length - 1, responses.length - 1)];
+      // A response given as a function that makes it is served as it makes it.
+      if (typeof response === "function") return (response as () => Response)();
       // The Responses and Chat Completions adapters stream; counting, compaction and Anthropic's tests answer whole.
       const body = bodies.at(-1) as { readonly stream?: unknown } | undefined;
       return paths.at(-1) === "/responses" ? openAiStream(response) : paths.at(-1) === "/chat/completions" && body?.stream === true ? chatStream(response) : Response.json(response);
