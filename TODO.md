@@ -6,9 +6,19 @@ not yet work is in its `DESIGN.next.md`. Delete an item when it is done or dropp
 
 ## Build
 
-### The host (ACP)
+### The hosts: ACP and the CLI
 
-The session's interface with the user. A real ACP session's log
+Both hosts are built here, and labkit imports the libraries from here. The core is the mediator
+between a host and the models (machines, messages, streams of events): the workspace, the working
+folder, the tool catalog, the configuration UI and what a session is called are the host's.
+
+ACP: the protocol is built (`src/acp`: schemas, the peer, stdio and Streamable HTTP, negotiation;
+its `MODEL.md`, and `EFFECT-FIT.md` for where Effect fits). The host, which joins it to the
+session, is not. VS Code comes first, then the JetBrains AI extension (PyCharm, WebStorm). The
+protocol versions and features are those of the labkit monorepo's ACP host, for parity; what
+`session/load` sends back is the ACP side's to decide. In ACP, tools go through the editor.
+
+A real ACP session's log
 (`~/.labkit/logs/acp-44517-ec9d22b3-8c0d-465a-83c7-9c227e0aec77.jsonl`, labkit-agent, local Qwen)
 is the set of capabilities a first working host needs: choose a model and a thinking level, send
 the first input, stream thinking, the model calls a tool, the user is asked for permission, the
@@ -48,9 +58,29 @@ model.
       counting a request's input before it is sent (`anthropic-count.ts`, `openai-count.ts`; xAI has
       no endpoint). Live: all three read an attached image and PDF, and an image a tool returned;
       the counts before sending matched what the responses reported. Left: the host's intake of ACP
-      prompt content as typed parts (labkit-agent's `app-acp`); the client half (sending, drawing,
-      resolving `blob://`), labkit-web's.
+      prompt content as typed parts; the client half (sending, drawing, resolving `blob://`),
+      labkit-web's.
 - [ ] Slash commands the host handles itself (`/export`), which are not input to the model.
+- [ ] `session/new`: a session opened with its store and its opening.
+- [ ] `session/update`: what the session's facts and what its requests stream (`streamed`) become
+      for the client: text and thinking as they arrive, tool calls and how they end, the plan.
+- [ ] `session/cancel`: the turn interrupted (`TurnInterrupted`; agent-machine X1 ends it).
+- [ ] The editor's files and terminal as tools (`fs/*`, `terminal/*`, when the client offers
+      them). A terminal is a tool whose call carries the terminal's id (`effect/ai/IdGenerator`
+      gives ids).
+- [ ] The MCP servers a client names in `session/new`, their tools offered to the model. Effect has
+      MCP's schemas, protocol and a server (`effect/ai/McpSchema`, `McpProtocol`, `McpServer`) and
+      no client: a client built from them, as `src/acp` was built.
+
+### The coding agent
+
+- [ ] Tools for coding, in the CLI's own: an edit that changes part of a file, a shell (tests,
+      git), search (grep, glob). The CLI has `read_file`, `list_dir` and `write_file`.
+- [ ] The REPL shows text and thinking as they arrive (`session.streamed`), not the answer when
+      the turn ends.
+- [ ] The system prompt belongs in context assembly, as configuration; it is to be designed and
+      tried. A hard-coded one ("You are a helpful assistant") will do until the host's question
+      of where a user's things live has an answer.
 
 ### Compaction
 
