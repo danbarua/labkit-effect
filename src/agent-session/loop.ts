@@ -281,8 +281,9 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
   const cancels = yield* Ref.make<ReadonlyMap<TurnId, Deferred.Deferred<void>>>(new Map());
 
   /**
-   * The turn-end hooks' feedback as input, then the review. After `maxHolds` holds the hooks are not
-   * run; that is recorded (`TurnHoldsExhausted`), then the review.
+   * The turn-end hooks' feedback as input, then the review. Once they have held the turn `maxHolds`
+   * times, feedback they still give is not given to it: that is recorded (`TurnHoldsExhausted`)
+   * and logged with the feedback, then the review. Hooks with nothing more let it end either way.
    */
   const reviewTurnEnd = (turn: TurnId): Effect.Effect<ReadonlyArray<Observed>, never, Services> =>
     Effect.gen(function* () {
@@ -290,12 +291,12 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
       const holds = holdsOf(yield* store.facts, turn);
       const origin = harnessParts.turnEndHooks;
       const reviewed: Observed = { origin, observation: { _tag: "TurnEndReviewed", turn } };
-      if (hooks.length > 0 && holds >= maxHolds) {
-        yield* Effect.logWarning(logKeys.loop.holdsExhausted, { holds, maxHolds });
-        return [{ origin, observation: { _tag: "TurnHoldsExhausted", turn, holds } }, reviewed];
-      }
       const feedback = (yield* Effect.forEach(hooks, (hook) => hook(turn))).flat();
       if (feedback.length === 0) return [reviewed];
+      if (holds >= maxHolds) {
+        yield* Effect.logWarning(logKeys.loop.holdsExhausted, { holds, maxHolds, feedback });
+        return [{ origin, observation: { _tag: "TurnHoldsExhausted", turn, holds } }, reviewed];
+      }
       yield* Effect.logInfo(logKeys.loop.turnHeld, { hold: holds + 1, maxHolds, feedback: feedback.length });
       const inputs = feedback.map(
         (text): Observed => ({

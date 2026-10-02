@@ -153,7 +153,16 @@ test("a hook that never lets go holds the turn at most maxHolds times, then the 
   const { tags, logged } = await answeringTurn([() => ["Not yet."]], 2);
   expect(tags.filter((tag) => tag === "ModelResponded")).toHaveLength(3);
   expect(tags.slice(-3)).toEqual(["TurnHoldsExhausted", "TurnEndReviewed", "TurnEnded"]);
-  expect(logged).toContainEqual([logKeys.loop.holdsExhausted, { holds: 2, maxHolds: 2 }]);
+  expect(logged).toContainEqual([logKeys.loop.holdsExhausted, { holds: 2, maxHolds: 2, feedback: ["Not yet."] }]);
+});
+
+test("a hook that holds the turn its maxHolds times and then lets go ends it with no holds run out", async () => {
+  const feedback = ["Write the session up before stopping."];
+  const { tags, logged } = await answeringTurn([() => feedback.splice(0)], 1);
+  expect(tags.filter((tag) => tag === "ModelResponded")).toHaveLength(2);
+  expect(tags).not.toContain("TurnHoldsExhausted");
+  expect(tags.slice(-2)).toEqual(["TurnEndReviewed", "TurnEnded"]);
+  expect(logged.some((line) => Array.isArray(line) && line[0] === logKeys.loop.holdsExhausted)).toBe(false);
 });
 
 test("a subscriber receives every fact recorded after it subscribed, in order", async () => {

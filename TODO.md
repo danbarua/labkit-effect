@@ -100,13 +100,9 @@ model.
 - [ ] Incomplete responses. Built: `RetryIncomplete(retries)` (`src/agent-host/incomplete.ts`), a
       turn-end hook that asks again, once, for the answer of a response that had thinking and no
       answer (some local models put the whole answer in their reasoning: Qwen3.5-9B with an effort
-      set did, after a tool result); the ACP host runs with it. To do: the CLI too; `retries` as a
-      host setting. For the loop: it logs `holds_exhausted` as a warning whenever a turn has used
-      all its holds, without asking the hooks, so a hook that held once at `maxHolds: 1` and then
-      got its answer warns though nothing was left unanswered (the hook counts its retries itself
-      and sets `maxHolds` one above, to avoid it). The hooks could be asked first and the warning
-      kept for a hook that would hold again; that runs hooks past their bound, which
-      `TurnEndHooks` says they are not.
+      set did, after a tool result); the ACP host runs with it. The loop asks the hooks at its
+      bound too, and records `TurnHoldsExhausted` and warns only when they would hold the turn
+      again. To do: the CLI too; `retries` as a host setting.
 - [ ] The editor's files and terminal as tools. Built: `read_file` and `write_file` through
       `fs/read_text_file` and `fs/write_text_file`, each offered only when the client advertises it
       (`editorWorld`, `src/agent-acp/world.ts`); the local disk (`LABKIT_ACP_LOCAL_TOOLS=1`) is a

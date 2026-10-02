@@ -40,7 +40,7 @@ export const logKeys = {
     requestDied: "loop.request.died",
     /** A turn-end hook's feedback held a turn open. */
     turnHeld: "loop.turn_end.held",
-    /** A turn reached `maxHolds`; its turn-end hooks were not run again. */
+    /** A turn's hooks gave feedback after it had been held `maxHolds` times; the feedback was not given to it. */
     holdsExhausted: "loop.turn_end.holds_exhausted",
   },
   anthropic: {

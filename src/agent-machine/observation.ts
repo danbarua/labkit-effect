@@ -266,7 +266,8 @@ export const Observation = Schema.Union([
   Schema.TaggedStruct("TurnEndReviewed", { turn: TurnId }),
   /**
    * The layers around the core held `turn` open before it ends as many times as they allow
-   * (`holds`), and do not run what holds it open again for this turn; the review goes on without it.
+   * (`holds`), and would hold it again; what they would give it is not given, and the review goes
+   * on without it.
    */
   Schema.TaggedStruct("TurnHoldsExhausted", { turn: TurnId, holds: Schema.Int }),
   /** The turn was interrupted (by the user, or whoever else may stop it). It ends at once. */

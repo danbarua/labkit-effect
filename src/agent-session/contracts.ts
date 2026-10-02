@@ -129,8 +129,8 @@ export class Turns extends Context.Service<Turns, { readonly start: Effect.Effec
 
 /**
  * What runs before a turn may end. Each hook returns feedback for the model, which the turn is given
- * as input, holding it open; no feedback lets it end. After `maxHolds` holds in one turn the hooks
- * are not run again for it.
+ * as input, holding it open; no feedback lets it end. After `maxHolds` holds in one turn, feedback
+ * the hooks still give is not given to it, and the turn ends.
  */
 export class TurnEndHooks extends Context.Service<
   TurnEndHooks,

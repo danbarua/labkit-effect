@@ -35,10 +35,8 @@ const holdsIn = (facts: ReadonlyArray<Fact>, turn: TurnId): number =>
  * session's facts from the `SessionStore` the layer is built with: a hook's own type requires
  * nothing.
  *
- * The loop's own bound on holds is one above `retries`. The loop warns (`holds_exhausted`) when a
- * turn has used all its holds, without asking the hooks, and a retry that answered would then
- * warn though nothing was left unanswered; the hook counts its retries itself so that the bound is
- * never what stops it.
+ * The hook counts its own retries, so that another hook's holds do not use them up; the loop's
+ * bound on holds is the same number.
  */
 export const RetryIncomplete = (retries = 1): Layer.Layer<TurnEndHooks, never, SessionStore> =>
   Layer.effect(
@@ -47,6 +45,6 @@ export const RetryIncomplete = (retries = 1): Layer.Layer<TurnEndHooks, never, S
       const store = yield* SessionStore;
       const hook = (turn: TurnId) =>
         Effect.map(store.facts, (facts) => (latestDecision(facts, turn) === "TurnIncomplete" && holdsIn(facts, turn) < retries ? [answerNow] : []));
-      return { hooks: [hook], maxHolds: retries + 1 };
+      return { hooks: [hook], maxHolds: retries };
     }),
   );
