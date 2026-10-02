@@ -55,6 +55,10 @@ sends nothing for what was said).
   `stopReason`, or a JSON-RPC error; none before the turn ends.
 - `usage.ts`: `usageUpdate(facts)`, the `usage_update` of the session (`contextGauge`), with what
   `KnownModels` knows of the model it asks now.
+- `session-record.ts`: what the host keeps of a session in its record (`agent-host/record.ts`,
+  `host.json`): `recordFor(cwd, firstPrompt)` is the working folder and the title (`titleOf`) the
+  first prompt's text gives; `readSessionRecord` reads one back, or nothing when it is not one.
+  `pageOf(stored, request, size)` is one page of `session/list`, or an `InvalidCursor`.
 
 ## The host
 
@@ -64,9 +68,17 @@ the core; a launcher runs it with `Agent.run` or `Agent.runStdio`, giving it the
 `world`, `"editor"` (the default), `"local"` or a world of the host's own; `model`, `provider/model`
 to start sessions with (else the catalog's first, `defaultModel`); `services`, what a session runs
 with given its world's runner (`HostSessionServices`: `SessionServices` with `RetryIncomplete(1)`,
-agent-host H15). `hostOptionsFrom(env)` reads `LABKIT_ACP_MODEL`
-and `LABKIT_ACP_LOCAL_TOOLS=1`. It advertises `sessionCapabilities.close` and no prompt content but
-text and resource links; no load, resume, list, fork or auth methods.
+agent-host H15); `pageSize`, the most sessions a page of `session/list` gives (50).
+`hostOptionsFrom(env)` reads `LABKIT_ACP_MODEL` and `LABKIT_ACP_LOCAL_TOOLS=1`. It advertises
+`loadSession`, the session methods `close`, `list` and `resume`, and no prompt content but text and
+resource links; no fork and no auth methods.
+
+A session is started, at turn zero or from its facts file by `session/load` or `session/resume`,
+the same way: in a scope of its own forked from the connection's, over `FileBackedSessionStore` of
+its facts file, with the services its world's runner gives and `PermissionsFor("default", true)`,
+and with a feed. Turn zero starts the feed before the opening is observed. Load and resume start
+it from the state the stored facts leave in the projection, after the replay, so nothing is sent
+twice.
 
 - `world.ts`: the `World` is what the host does not know of a session. `open({ sessionId, cwd,
   mcpServers, connection })` gives its system prompt, its tools (`ToolSpec`), the `ToolRunner` that
@@ -80,9 +92,10 @@ text and resource links; no load, resume, list, fork or auth methods.
   workspace tools (`agent-tools/workspace.ts`) on the local disk, bypassing the editor's unsaved
   buffers.
 - `feed.ts`: an open session's live view. It subscribes to the facts and `streamed` before
-  anything is given to the session, merges them into the projection (`live`), sends each update in
-  order, asks each `PermissionAsked` of the client, and says when it has taken a turn's end
-  (`turnEnded`): the barrier a prompt waits on before it sends `usage_update` and answers.
+  anything is given to the session, merges them into the projection (`live`), from `start` or the
+  state given (`initial`: a loaded session's), sends each update in order, asks each
+  `PermissionAsked` of the client, and says when it has taken a turn's end (`turnEnded`): the
+  barrier a prompt waits on before it sends `usage_update` and answers.
 - `log-keys.ts`: the events the host logs. Each carries the `connection` (minted per connection),
   `request` (set by the peer), `session`, `turn` and `call` it is about as log annotations, the
   names the loop uses.
@@ -96,10 +109,11 @@ text and resource links; no load, resume, list, fork or auth methods.
 ## What is not built
 
 - The HTTP host.
-- The host's own updates but for `usage_update`, the config options and
-  `available_commands_update`: `session_info_update`, `current_mode_update`, `plan`.
-- `session/load`, `resume`, `list`, `fork`; MCP servers (a world is given them and ignores them);
-  attachments (image, audio, embedded context).
+- The host's own updates but for `usage_update`, the config options, `available_commands_update`
+  and `session_info_update`: `current_mode_update`, `plan`.
+- `session/fork`: the core has no identity for a fork yet. `session/delete`; additional
+  directories; MCP servers (a world is given them and ignores them); attachments (image, audio,
+  embedded context).
 - An input's attachments on load, and `messageId` on chunks.
 - What a reopened session shows as a tool call's content (the default shows its output as text).
 
@@ -171,6 +185,16 @@ text and resource links; no load, resume, list, fork or auth methods.
 - AA9. `usage_update` is the gauge of the model the session asks now: the visible tokens of the
   last exchange, the model's window as `KnownModels` knows it, and the cost so far; none for a model
   whose window is not known.
+- AR1. A title is the first prompt's text trimmed, each run of whitespace one space, cut after 120
+  characters (never inside one); none when no text is left.
+- AR2. A record is the working folder and, when the first prompt gives one, the title; it reads
+  back from JSON. What is not a record, or has no working folder, reads as none.
+- AR3. A page of `session/list` lists the stored sessions whose record reads, the one written to
+  last first and by id among those written at the same time, only those made for `cwd` when it is
+  given, each as its `SessionInfo`: its id, working folder, title and when it was last written.
+- AR4. A page has at most `size` sessions (one at least), and `nextCursor` when more follow; a
+  cursor goes on after the session its page ended with, so each session comes once and one written
+  to meanwhile is not repeated. A cursor `pageOf` did not give is an `InvalidCursor` naming it.
 - AG1. `session/new` with an absolute `cwd` mints the session's id (ACP's `sessionId` and the core's
   `SessionId`), opens its world and answers a draft: the model to start with, its output limit
   defaulted (`withDefaults`), and its config options (`configOptions`). Nothing is written. Once the
@@ -240,3 +264,41 @@ text and resource links; no load, resume, list, fork or auth methods.
   read. Both ask permission in the default mode. An edit's call shows its change as a `diff`, from
   when permission is asked; a command's call shows its `terminal` from when it has one, and when
   it has ended.
+- AL1. `initialize` advertises `loadSession` and the session methods `close`, `list` and
+  `resume`; not `fork`, which waits for the core to have an identity for a fork.
+- AL2. Turn zero writes the session's record (`host.json`, `recordFor`) before its facts: the
+  working folder and the first prompt's text as its title (AR1). Once the opening is recorded the
+  host sends `session_info_update` with the title (`null` when there is none) and the time as
+  `updatedAt`. `/export` on a draft opens nothing and writes nothing. A record that cannot be
+  written fails the prompt as a session that could not be opened (-32603).
+- AL3. `session/load` with an absolute `cwd` starts the stored session on the connection: its
+  facts, with the model, system prompt and tool catalog they hold, and the world opened for `cwd`
+  and the MCP servers asked, which gives the runner and the presentation; the record keeps the
+  working folder it had. Before its answer the host sends the stored facts as the projection
+  replays them (`replay`), each update once and in order; the answer is the session's config
+  options. After the answer it sends `available_commands_update` (`/export`),
+  `session_info_update` (the record's title, `null` when it has none or it does not read, and when
+  the facts file was last written) and `usage_update`. The feed goes on from the state the replay
+  leaves (PJ8): a later prompt's updates are sent live and repeat nothing replayed, and its model
+  request carries the earlier turns.
+- AL4. A turn the stored facts left running (their process ended mid-turn) is ended at load or
+  resume (`endTurnLeftRunning`): it ends `Interrupted`, each call it left running fails, no tool
+  runs and no model request is made. The replay shows its interruption once. With no turn left
+  running, the session goes on (`goOn`) once its feed has started, so input left waiting starts its
+  turn live. The next prompt runs a new turn.
+- AL5. `session/resume` is `session/load` with nothing replayed: the client has the history.
+- AL6. `session/list` is a page (`pageOf`, of `pageSize`) of the sessions in the session directory
+  with a record, the one written to last first, filtered by `cwd` when it is given. A session with
+  no record (the CLI made it) is not listed, and loads by its id. A cursor `session/list` did not
+  give is -32602 naming it; a session directory that cannot be read is -32603 with the cause.
+- AL7. For `session/load` and `session/resume`, a `cwd` that is not absolute is -32602; a session
+  the connection holds already is -32602 saying it is already loaded; one the session directory
+  does not hold is -32002 with its `sessionId`; one whose store cannot be opened (its facts file
+  open in another process, a file that does not read) is -32000 carrying the store's message, and
+  leaves nothing open: once the cause is gone, it loads.
+- AL8. Record written, session loaded and resumed (the updates replayed, the turns left running),
+  turn left running ended (with its turn), session not stored, not loaded, listed (the `cwd`
+  filter, the sessions given, whether more follow) and not listed are logged under `log-keys.ts`,
+  annotated with the connection and the session. A routine load logs no warning or error; a
+  session not stored, a load refused and a bad cursor are warnings, a store that cannot be opened
+  and a directory that cannot be read are errors, each with its cause.

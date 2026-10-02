@@ -42,6 +42,11 @@ export interface FeedOptions {
   readonly connection: AgentConnection<V1Version>;
   /** The log annotations of everything the feed logs (the connection and the session). */
   readonly annotations: Readonly<Record<string, unknown>>;
+  /**
+   * The projection's state to go on from: that of the facts the session had before the feed (a loaded
+   * session's, projected), so nothing they showed is shown again (PJ8). Left out, `start`.
+   */
+  readonly initial?: ProjectionState | undefined;
 }
 
 export interface Feed {
@@ -69,7 +74,7 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
       return made;
     };
     const asking = new Map<CallId, Fiber.Fiber<void>>();
-    let state: ProjectionState = start;
+    let state: ProjectionState = options.initial ?? start;
     let turn: TurnId | undefined;
 
     const send = (update: SessionUpdate) =>

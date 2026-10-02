@@ -11,11 +11,19 @@
  * - `session/set_config_option` changes the draft, or, once open, is `ModelChangeArrived` from the
  *   user through ACP, taken at the next turn (agent-machine M1). The answer is every option as the
  *   configuration will be.
- * - `session/prompt` opens a draft (turn zero: its folder in the session directory, its services,
- *   `SessionOpened`) and runs the turn with `Session.prompt`. The session's feed (`feed.ts`) sends
- *   the turn's updates and asks permission; once it has taken the turn's end the host sends
- *   `usage_update` and answers with the turn's stop (`stopOf`). `/export` alone writes the
- *   transcript to `<cwd>/.labkit/exports/<sessionId>.md` without asking the model.
+ * - `session/prompt` opens a draft (turn zero: the session's record, `host.json`, with its working
+ *   folder and the first prompt's text as its title; its folder in the session directory, its
+ *   services, `SessionOpened`; then `session_info_update` with the title) and runs the turn with
+ *   `Session.prompt`. The session's feed (`feed.ts`) sends the turn's updates and asks permission;
+ *   once it has taken the turn's end the host sends `usage_update` and answers with the turn's stop
+ *   (`stopOf`). `/export` alone writes the transcript to `<cwd>/.labkit/exports/<sessionId>.md`
+ *   without asking the model, and opens no draft.
+ * - `session/load` starts a stored session on this connection: its facts file, with the world
+ *   opened for the `cwd` and MCP servers asked. A turn its facts left running is ended, not gone
+ *   on with. Its facts are replayed through the projection (`replay`) before the answer, and the
+ *   feed goes on from the state they leave. `session/resume` does the same and replays nothing.
+ *   After either answer: `available_commands_update`, `session_info_update` and `usage_update`.
+ * - `session/list` lists the stored sessions that have the host's record (`session-record.ts`).
  * - `session/cancel` is `Session.cancel`; so is a prompt request the client cancels
  *   (`$/cancel_request`). A prompt interrupted by the end of the connection leaves its turn running
  *   in the facts, as the core allows: the host does not end it.
@@ -25,11 +33,11 @@
  */
 
 import { isAbsolute, join } from "node:path";
-import { Clock, type Context, Effect, Exit, Fiber, FileSystem, Layer, Schema, Scope, Semaphore } from "effect";
+import { Clock, type Context, Effect, Exit, Fiber, FileSystem, Layer, Option, Schema, Scope, Semaphore } from "effect";
 import * as Agent from "../acp/agent.ts";
 import { ErrorCode, type JsonRpcError } from "../acp/json-rpc.ts";
 import * as Protocol from "../acp/protocol.ts";
-import type { ContentBlock, SessionConfigOption, SessionUpdate } from "../acp/schema/v1.gen.ts";
+import type { ContentBlock, McpServer, SessionConfigOption, SessionUpdate } from "../acp/schema/v1.gen.ts";
 import { SessionId as AcpSessionId } from "../acp/schema/v1.gen.ts";
 import { type Asked, askable, keyVariables, ModelCatalog, targetOf } from "../agent-host/catalog.ts";
 import { storeFileOf } from "../agent-host/directory.ts";
@@ -37,12 +45,14 @@ import { chooseModel, defaultModel, type Draft, draftOf, opening, optionsOfDraft
 import { markdownOf } from "../agent-host/export.ts";
 import { KnownWithLocalServer, localServer, SettlingWithLocalServer } from "../agent-host/local-server.ts";
 import { RetryIncomplete } from "../agent-host/incomplete.ts";
+import { readRecord, RecordFailed, recordedSessions, recordFileOf, writeRecord } from "../agent-host/record.ts";
 import { PermissionsFor, SessionServices } from "../agent-host/services.ts";
 import type { Fact } from "../agent-machine/fact.ts";
+import { leftRunning } from "../agent-machine/left-running.ts";
 import { InputText, SessionId, type TurnId } from "../agent-machine/names.ts";
 import type { Target, ToolRunner } from "../agent-session/contracts.ts";
 import { FileBackedSessionStore } from "../agent-session/file-session-store.ts";
-import { openSession, type Services, type Session } from "../agent-session/loop.ts";
+import { endTurnLeftRunning, openSession, type Services, type Session } from "../agent-session/loop.ts";
 import type { SessionStore } from "../agent-session/session-store.ts";
 import { reportedBy } from "../agent-session/origin.ts";
 import { modelOf } from "../agent-session/configuration/session-setup.ts";
@@ -52,6 +62,8 @@ import { changeOf, configOptions, InvalidChange, permissionId, permissionModeOf,
 import { PermissionMode } from "../agent-policy/permissions.ts";
 import { acpUser, type Feed, startFeed } from "./feed.ts";
 import { logKeys } from "./log-keys.ts";
+import { type ProjectionState, project, start } from "./projection.ts";
+import { InvalidCursor, pageOf, readSessionRecord, recordFor } from "./session-record.ts";
 import { stopOf } from "./stop-reason.ts";
 import { usageUpdate } from "./usage.ts";
 import { editorWorld, type World, type WorldSession, workspaceWorld } from "./world.ts";
@@ -71,6 +83,8 @@ export interface HostOptions<R = never> {
   readonly permissionMode?: PermissionMode | undefined;
   /** What a session runs with, given its world's tool runner, over the session's store; `HostSessionServices` when left out. */
   readonly services?: ((runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>) | undefined;
+  /** The most sessions one page of `session/list` gives; 50 when left out. */
+  readonly pageSize?: number | undefined;
 }
 
 /**
@@ -105,7 +119,7 @@ interface Opened {
   readonly feed: Feed;
 }
 
-/** A session this connection made: a draft until its first prompt, then open. */
+/** A session this connection holds: one it made, a draft until its first prompt and then open, or one it started from its facts, open. */
 interface Entry {
   readonly id: AcpSessionId;
   readonly cwd: string;
@@ -154,7 +168,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
   return Agent.implement<Protocol.V1Version, ModelCatalog | FileSystem.FileSystem | Scope.Scope | R>(Protocol.v1, {
     capabilities: {
       promptCapabilities: { image: false, audio: false, embeddedContext: false },
-      sessionCapabilities: { close: {} },
+      loadSession: true,
+      sessionCapabilities: { close: {}, list: {}, resume: {} },
     },
     handlers: (connection) =>
       Effect.gen(function* () {
@@ -163,6 +178,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
         // What is known of each model, and how its settings apply: the local server asked once per connection.
         const known = yield* Layer.buildWithScope(Layer.mergeAll(KnownWithLocalServer, SettlingWithLocalServer), connectionScope);
         const entries = new Map<string, Entry>();
+        /** The sessions `session/load` or `session/resume` is starting: not yet among `entries`, and not to be started twice. */
+        const starting = new Set<string>();
 
         const traced = <A, E, X>(effect: Effect.Effect<A, E, X>, session?: string) =>
           effect.pipe(Effect.annotateLogs({ connection: connectionId, ...(session === undefined ? {} : { session }) }));
@@ -222,34 +239,62 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 }),
               );
 
-        /** Opens the entry's draft: its folder, its services in a scope of its own, its feed, then `SessionOpened`. Turn zero. */
-        const open = (entry: Entry, draft: Draft) =>
+        /**
+         * Starts the session `id` over its facts file in a scope of its own, forked from the connection's: its services, the core's
+         * session, then what `go` does with them. `go` starts the session's feed (`follow`, from the projection's state it gives) at the
+         * point from which the feed is to send what is recorded. Whatever fails closes the scope: nothing is left open.
+         */
+        const startSession = <A extends { readonly feed: Feed }, E, X>(
+          id: AcpSessionId,
+          world: WorldSession,
+          permissionMode: () => PermissionMode,
+          go: (session: Session, context: Context.Context<Services>, follow: (initial: ProjectionState) => Effect.Effect<Feed>) => Effect.Effect<A, E, X>,
+        ) =>
           Effect.gen(function* () {
             const scope = yield* Scope.fork(connectionScope);
             return yield* Effect.gen(function* () {
-              const file = storeFileOf(options.directory, entry.id);
-              const layer = Layer.mergeAll(services(entry.world.runner), PermissionsFor(() => entry.permissionMode, true)).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
+              const file = storeFileOf(options.directory, id);
+              const layer = Layer.mergeAll(services(world.runner), PermissionsFor(permissionMode, true)).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
               const context = yield* Layer.buildWithScope(layer, scope);
               const session = yield* openSession.pipe(Effect.provideContext(context), Scope.provide(scope));
-              const feed = yield* startFeed({
-                sessionId: entry.id,
-                session,
-                context,
-                present: entry.world.present,
-                connection,
-                annotations: { connection: connectionId, session: entry.id },
-              }).pipe(Scope.provide(scope));
-              yield* session.observe(opening(draft, SessionId.make(entry.id))).pipe(Effect.provideContext(context), reportedBy(acpUser));
-              yield* Effect.logInfo(logKeys.session.opened, { file, model: `${draft.model.provider}/${draft.model.model}` });
-              return { session, context, scope, feed } satisfies Opened;
+
+              const follow = (initial: ProjectionState) =>
+                startFeed({ sessionId: id, session, context, present: world.present, connection, annotations: { connection: connectionId, session: id }, initial }).pipe(
+                  Scope.provide(scope),
+                );
+
+              const made = yield* go(session, context, follow);
+              return { ...made, session, context, scope };
             }).pipe(Effect.onError(() => Scope.close(scope, Exit.void)));
-          }).pipe(
-            Effect.catch((error) =>
-              Effect.logError(logKeys.session.notOpened, { doing: "opening the draft at its first prompt", cause: error.message }).pipe(
+          });
+
+        /**
+         * Opens the entry's draft at its first prompt (turn zero): its record (`host.json`: the working folder, and the title `text`
+         * gives), its folder, its services in a scope of its own, its feed, then `SessionOpened`; then `session_info_update`.
+         */
+        const open = (entry: Entry, draft: Draft, text: string) =>
+          Effect.gen(function* () {
+            const failed = (doing: string) => (error: { readonly message: string }) =>
+              Effect.logError(logKeys.session.notOpened, { doing, cause: error.message }).pipe(
                 Effect.andThen(Effect.fail(rpcError(ErrorCode.InternalError, `The session could not be opened: ${error.message}`))),
-              ),
-            ),
-          );
+              );
+
+            const record = recordFor(entry.cwd, text);
+            yield* writeRecord(options.directory, entry.id, record).pipe(Effect.catch(failed("writing the session's record at its first prompt")));
+            yield* Effect.logInfo(logKeys.record.written, { file: recordFileOf(options.directory, entry.id), cwd: record.cwd, titled: record.title !== undefined });
+            const opened = yield* startSession(entry.id, entry.world, () => entry.permissionMode, (session, context, follow) =>
+              Effect.gen(function* () {
+                // The feed first: the session has no facts yet, and it sends everything from the opening on, live.
+                const feed = yield* follow(start);
+                yield* session.observe(opening(draft, SessionId.make(entry.id))).pipe(Effect.provideContext(context), reportedBy(acpUser));
+                return { feed };
+              }),
+            ).pipe(Effect.catch(failed("opening the draft at its first prompt")));
+            yield* Effect.logInfo(logKeys.session.opened, { file: storeFileOf(options.directory, entry.id), model: `${draft.model.provider}/${draft.model.model}` });
+            const now = new Date(yield* Clock.currentTimeMillis).toISOString();
+            yield* send(entry.id, { sessionUpdate: "session_info_update", title: record.title ?? null, updatedAt: now });
+            return opened satisfies Opened;
+          });
 
         /** `/export`: the transcript to `<cwd>/.labkit/exports/<id>.md`, said in a message. */
         const exportOf = (entry: Entry) =>
@@ -296,7 +341,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             const opened = yield* entry.lock.withPermit(
               Effect.gen(function* () {
                 if (entry.state._tag === "Open") return entry.state.opened;
-                const made = yield* open(entry, entry.state.draft);
+                const made = yield* open(entry, entry.state.draft, text);
                 entry.state = { _tag: "Open", opened: made };
                 return made;
               }),
@@ -331,6 +376,130 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             }
             yield* Effect.logInfo(logKeys.prompt.settled, { stopReason: stop.stopReason, ms: took }).pipe(Effect.annotateLogs({ turn }));
             return { stopReason: stop.stopReason };
+          });
+
+        /** The title in the session's record: none when it has no record (the CLI made it), or one that does not read, which is logged. */
+        const recordedTitle = (sessionId: AcpSessionId) => {
+          const file = recordFileOf(options.directory, sessionId);
+          return readRecord(options.directory, sessionId).pipe(
+            Effect.flatMap((record) => {
+              const read = record === undefined ? undefined : readSessionRecord(record);
+              return record !== undefined && read === undefined
+                ? Effect.fail(new RecordFailed({ file, message: `${file} is not a session record: it has no cwd` }))
+                : Effect.succeed(read?.title);
+            }),
+            Effect.catch((error) =>
+              Effect.logWarning(logKeys.record.unreadable, { file, cause: error.message, consequence: "the session's title is not sent" }).pipe(Effect.as(undefined)),
+            ),
+          );
+        };
+
+        /** What the host sends of a session started from its facts once the client knows it: the commands, its title and last write, and its usage. */
+        const announce = (entry: Entry, opened: Opened) =>
+          Effect.gen(function* () {
+            yield* send(entry.id, { sessionUpdate: "available_commands_update", availableCommands: [exportCommand] });
+            const title = yield* recordedTitle(entry.id);
+            const fs = yield* FileSystem.FileSystem;
+            const written = yield* fs.stat(storeFileOf(options.directory, entry.id)).pipe(
+              Effect.map((info) => Option.getOrUndefined(info.mtime)),
+              Effect.orElseSucceed(() => undefined),
+            );
+            const updatedAt = written ?? new Date(yield* Clock.currentTimeMillis);
+            yield* send(entry.id, { sessionUpdate: "session_info_update", title: title ?? null, updatedAt: updatedAt.toISOString() });
+            const usage = yield* Effect.flatMap(opened.session.facts, usageUpdate).pipe(Effect.provideContext(opened.context));
+            if (usage !== undefined) {
+              yield* send(entry.id, usage);
+              yield* Effect.logDebug(logKeys.usage.sent, { used: usage.used, size: usage.size });
+            }
+          });
+
+        /**
+         * `session/load` or `session/resume`: the stored session started on this connection, with the world opened for `cwd` and
+         * `mcpServers`. A turn its facts left running is ended, with nothing run again. On load the facts, as they are then, are sent as
+         * the projection replays them, before the answer. The feed goes on from the state they leave, so nothing is sent twice; only then
+         * does the session go on (input left waiting starts its turn, which the feed sends). The entry is held once it started; after the
+         * answer the host sends what it sends of a session (`announce`).
+         */
+        const reopen = (
+          method: "session/load" | "session/resume",
+          params: { readonly sessionId: AcpSessionId; readonly cwd: string; readonly mcpServers: ReadonlyArray<McpServer> },
+        ) =>
+          Effect.gen(function* () {
+            const { sessionId, cwd, mcpServers } = params;
+            if (!isAbsolute(cwd)) {
+              yield* Effect.logWarning(logKeys.session.refused, { doing: method, cwd, cause: "the working folder is not an absolute path" });
+              return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, `cwd must be an absolute path: ${cwd}`));
+            }
+            if (entries.has(sessionId) || starting.has(sessionId)) {
+              yield* Effect.logWarning(logKeys.session.refused, { doing: method, cause: "the session is already loaded on this connection" });
+              return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, `Session ${sessionId} is already loaded on this connection`, { sessionId }));
+            }
+            const file = storeFileOf(options.directory, sessionId);
+
+            const notStarted = (doing: string) => (error: { readonly message: string }) =>
+              Effect.logError(logKeys.session.notLoaded, { doing: `${method}: ${doing}`, file, cause: error.message }).pipe(
+                Effect.andThen(Effect.fail(rpcError(-32000, `Session ${sessionId} could not be started: ${error.message}`, { sessionId }))),
+              );
+
+            const stored = yield* (yield* FileSystem.FileSystem).exists(file).pipe(Effect.catch(notStarted("looking for the session's facts file")));
+            if (!stored) {
+              yield* Effect.logWarning(logKeys.session.notStored, { doing: method, file, cause: "the session directory has no facts file for the session" });
+              return yield* Effect.fail(rpcError(ErrorCode.ResourceNotFound, `Session ${sessionId} not found in ${options.directory}`, { sessionId }));
+            }
+            starting.add(sessionId);
+            return yield* Effect.gen(function* () {
+              const its = yield* (world as World<R | FileSystem.FileSystem>).open({ sessionId, cwd, mcpServers, connection });
+              // The policy reads the entry's mode at each call; the entry exists once the session started, and until then the mode is the launcher's.
+              const initialMode = options.permissionMode ?? "default";
+              let held: Entry | undefined;
+              const opened = yield* startSession(sessionId, its, () => held?.permissionMode ?? initialMode, (session, context, follow) =>
+                Effect.gen(function* () {
+                  const left = leftRunning(yield* session.facts);
+                  if (left !== undefined) {
+                    yield* endTurnLeftRunning(session).pipe(Effect.provideContext(context));
+                    yield* Effect.logInfo(logKeys.session.turnLeftRunningEnded, { stopping: left.stopping, requests: left.requests.length }).pipe(
+                      Effect.annotateLogs({ turn: left.turn }),
+                    );
+                  }
+                  const replayed = project(yield* session.facts, { mode: "replay", present: its.present });
+                  if (method === "session/load") yield* Effect.forEach(replayed.updates, (update) => send(sessionId, update), { discard: true });
+                  const feed = yield* follow(replayed.state);
+                  if (left === undefined) yield* session.goOn.pipe(Effect.provideContext(context));
+                  return { feed, replayed: method === "session/load" ? replayed.updates.length : 0, left: left?.turn };
+                }),
+              ).pipe(Effect.catch(notStarted("starting the stored session")));
+              const entry: Entry = {
+                id: sessionId,
+                cwd,
+                world: its,
+                lock: yield* Semaphore.make(1),
+                state: { _tag: "Open", opened },
+                prompt: undefined,
+                permissionMode: initialMode,
+              };
+              held = entry;
+              entries.set(sessionId, entry);
+              const { options: configured } = yield* configurationOf(entry);
+              yield* Effect.logInfo(method === "session/load" ? logKeys.session.loaded : logKeys.session.resumed, {
+                cwd,
+                file,
+                facts: (yield* opened.session.facts).length,
+                replayed: opened.replayed,
+                turnsLeftRunning: opened.left === undefined ? [] : [opened.left],
+                tools: its.tools.map((tool) => tool.name),
+                mcpServers: mcpServers.length,
+              });
+              // The updates follow the response: the response is written before this handler's fiber ends.
+              const self = yield* Effect.fiber;
+              yield* Effect.forkIn(Fiber.await(self).pipe(Effect.andThen(announce(entry, opened)), Effect.annotateLogs({ session: sessionId })), connectionScope);
+              return { configOptions: configured };
+            }).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  starting.delete(sessionId);
+                }),
+              ),
+            );
           });
 
         const handlers: Agent.AgentHandlers<Protocol.V1Version, ModelCatalog | FileSystem.FileSystem | Scope.Scope | R> = {
@@ -378,6 +547,30 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   connectionScope,
                 );
                 return { sessionId: id, configOptions: configured };
+              }),
+            ),
+
+          "session/load": ({ sessionId, cwd, mcpServers }) => traced(reopen("session/load", { sessionId, cwd, mcpServers }), sessionId),
+
+          "session/resume": ({ sessionId, cwd, mcpServers }) => traced(reopen("session/resume", { sessionId, cwd, mcpServers: mcpServers ?? [] }), sessionId),
+
+          "session/list": (params) =>
+            traced(
+              Effect.gen(function* () {
+                const stored = yield* recordedSessions(options.directory).pipe(
+                  Effect.catchTag("DirectoryUnreadable", (error) =>
+                    Effect.logError(logKeys.session.notListed, { directory: options.directory, doing: "reading the session directory", cause: error.message }).pipe(
+                      Effect.andThen(Effect.fail(rpcError(ErrorCode.InternalError, `The session directory ${options.directory} could not be read: ${error.message}`))),
+                    ),
+                  ),
+                );
+                const page = pageOf(stored, params, options.pageSize ?? 50);
+                if (page instanceof InvalidCursor) {
+                  yield* Effect.logWarning(logKeys.session.notListed, { cursor: page.cursor, cause: "the cursor is not one session/list gave" });
+                  return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, `Invalid cursor ${page.cursor}: it is not one session/list gave`, { cursor: page.cursor }));
+                }
+                yield* Effect.logInfo(logKeys.session.listed, { cwd: params.cwd ?? null, returned: page.sessions.length, more: typeof page.nextCursor === "string" });
+                return page;
               }),
             ),
 
