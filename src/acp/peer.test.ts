@@ -142,25 +142,53 @@ describe("a two-way JSON-RPC peer, as an ACP agent, against the official SDK", (
     expect(agent.sent.join("\n")).not.toMatch(/@effect\/rpc|traceId|spanId|"_tag"|"headers"/);
   });
 
-  test("AP2: session/cancel during a permission question ends the turn cancelled when the client answers cancelled", async () => {
+  test("AP2: when session/cancel interrupts a permission question, exactly one $/cancel_request with the question's id is written, and the client's later cancelled answer is dropped", async () => {
     const agent = await start();
-    const asked = Promise.withResolvers<acp.RequestPermissionResponse>();
     const questioned = Promise.withResolvers<void>();
-    const { app } = client([], () => {
+    const cancelReceived = Promise.withResolvers<void>();
+    const { app } = client([], (ctx) => {
       questioned.resolve();
-      return asked.promise;
+      ctx.signal.addEventListener("abort", () => cancelReceived.resolve());
+      // ACP: the client answers a pending question `cancelled` after session/cancel. This one
+      // answers only once the agent's $/cancel_request has arrived, so the answer comes late.
+      return cancelReceived.promise.then(() => ({ outcome: { outcome: "cancelled" as const } }));
     });
-    const response = await app.connectWith(sdkStream(agent), async (ctx) => {
+    // The client's input to the agent, resolving `answeredLate` once the late answer is written.
+    const answeredLate = Promise.withResolvers<void>();
+    const writer = agent.input.getWriter();
+    const decoder = new TextDecoder();
+    const input = new WritableStream<Uint8Array>({
+      write: async (chunk) => {
+        await writer.write(chunk);
+        if (decoder.decode(chunk).includes('"cancelled"')) answeredLate.resolve();
+      },
+    });
+    const messages = () => agent.sent.map((line) => JSON.parse(line));
+    const { response, after } = await app.connectWith(acp.ndJsonStream(input, agent.output), async (ctx) => {
       const sessionId = await open(ctx);
       const turn = ctx.request("session/prompt", prompt(sessionId, "permission"));
       await questioned.promise;
-      // ACP: the client sends session/cancel and answers every pending question `cancelled`.
       await ctx.notify("session/cancel", { sessionId });
-      asked.resolve({ outcome: { outcome: "cancelled" } });
-      return turn;
+      const response = await turn;
+      // The agent reads in order: anything it writes in reply to the late answer comes before its
+      // answer to the session/new written after it.
+      await answeredLate.promise;
+      const answered = messages().length;
+      await ctx.request("session/new", { cwd: "/tmp", mcpServers: [] });
+      return { response, after: messages().slice(answered) };
     });
     await agent.close();
     expect(response.stopReason).toBe("cancelled");
+    const asked = messages().find((message) => message.method === "session/request_permission");
+    const cancels = messages().filter((message) => message.method === "$/cancel_request");
+    expect(cancels).toEqual([{ jsonrpc: "2.0", method: "$/cancel_request", params: { requestId: asked.id } }]);
+    expect(agent.received.map((line) => JSON.parse(line))).toContainEqual({
+      jsonrpc: "2.0",
+      id: asked.id,
+      result: { outcome: { outcome: "cancelled" } },
+    });
+    // Nothing was written in reply to the late answer: no -32600 under null, only session/new's answer.
+    expect(after).toEqual([{ jsonrpc: "2.0", id: expect.anything(), result: { sessionId: "session-2" } }]);
   });
 
   test("AP2: an interrupted call to the other end is cancelled with $/cancel_request, and the turn ends cancelled", async () => {
@@ -283,6 +311,30 @@ describe("a two-way JSON-RPC peer, as an ACP agent, against the official SDK", (
     // A malformed response: its id is this end's own, so the answer goes under null.
     await raw.send(`${JSON.stringify({ jsonrpc: "2.0", id: 9, result: 1, error: { code: 1, message: "both" } })}\n`);
     expect(await raw.next()).toEqual(error(null, -32600));
+    await agent.close();
+  });
+
+  test("AP14: a malformed response to a pending call fails that call promptly with -32600, and is answered -32600 under null", async () => {
+    const agent = await start();
+    const raw = rawClient(agent);
+    await raw.send(request(1, "session/prompt", prompt("session-1", "permission")));
+    expect(await raw.next()).toMatchObject({ method: "session/update" });
+    const asked = (await raw.next()) as { readonly id: number; readonly method: string };
+    expect(asked.method).toBe("session/request_permission");
+    // An error with no message.
+    await raw.send(`${JSON.stringify({ jsonrpc: "2.0", id: asked.id, error: { code: -32000 } })}\n`);
+    const answers = [await raw.next(), await raw.next()];
+    expect(answers).toContainEqual({ jsonrpc: "2.0", id: null, error: expect.objectContaining({ code: -32600 }) });
+    // The test agent answers its prompt with the error its call failed with.
+    expect(answers).toContainEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      error: {
+        code: -32600,
+        message: "The response to this request is malformed",
+        data: { response: { jsonrpc: "2.0", id: asked.id, error: { code: -32000 } } },
+      },
+    });
     await agent.close();
   });
 

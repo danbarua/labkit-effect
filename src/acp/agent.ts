@@ -10,8 +10,14 @@
 
 import { Deferred, Effect, Layer, References, Schema, type Stdio } from "effect";
 import type { HttpRouter } from "effect/http";
+import type { Rpc } from "effect/rpc";
 import {
   type AnyHandler,
+  checkExtensions,
+  type ErasedExtensions,
+  type ExtensionClient,
+  type ExtensionHandlers,
+  type Extensions,
   type GatedClient,
   type GatedNotify,
   type Handlers,
@@ -31,57 +37,105 @@ import {
   type WireInput,
 } from "./json-rpc.ts";
 import { logKeys } from "./log-keys.ts";
-import { type Profile, type ProtocolAdapter, readProtocolVersion, select, type Version } from "./protocol.ts";
+import { type AnyAdapter, type Profile, type ProtocolAdapter, readProtocolVersion, select, type Version } from "./protocol.ts";
 import type { Implementation } from "./schema/v1.gen.ts";
 import { fromStdio } from "./stdio.ts";
 
-/** The connection a version's handlers are given: what was negotiated, and the client's methods. */
-export interface AgentConnection<V extends Version> {
+/**
+ * The connection a version's handlers are given: what was negotiated, the client's methods, and
+ * the client's extension methods this implementation declared it calls and sends.
+ */
+export interface AgentConnection<V extends Version, Call extends Rpc.Any = never, Notify extends Rpc.Any = never> {
   readonly profile: Profile<V>;
   /** The client's requests. One the client's capabilities do not allow fails with `CapabilityNotAdvertised`, and is not sent. */
   readonly client: GatedClient<V["clientRequests"]>;
   /** The client's notifications, gated the same way. */
   readonly notify: GatedNotify<V["clientNotifications"]>;
+  readonly extensions: ExtensionClient<Call, Notify>;
 }
 
-/** Handlers for any of a version's agent requests and notifications except `initialize`. */
-export type AgentHandlers<V extends Version, R> = Handlers<
+/** Handlers for any of a version's agent requests and notifications except `initialize`, and for the extension methods in `Serve`. */
+export type AgentHandlers<V extends Version, R, Serve extends Rpc.Any = never> = Handlers<
   Exclude<Served<V["agentRequests"], V["agentNotifications"]>, { readonly _tag: "initialize" }>,
   R
->;
+> &
+  ExtensionHandlers<Serve, R>;
 
 /** One protocol version, as this agent speaks it. */
-export interface AgentImplementation<V extends Version, R> {
+export interface AgentImplementation<
+  V extends Version,
+  R,
+  Serve extends Rpc.Any = never,
+  Call extends Rpc.Any = never,
+  Notify extends Rpc.Any = never,
+> {
   readonly adapter: ProtocolAdapter<V>;
   readonly capabilities: V["agentCapabilities"];
   readonly authMethods: ReadonlyArray<V["authMethod"]>;
-  readonly handlers: (connection: AgentConnection<V>) => Effect.Effect<AgentHandlers<V, R>, never, R>;
+  readonly extensions: ErasedExtensions;
+  readonly handlers: (connection: AgentConnection<V, Call, Notify>) => Effect.Effect<AgentHandlers<V, R, Serve>, never, R>;
 }
 
-// oxlint-disable-next-line typescript/no-explicit-any -- any version's implementation, as a list of them holds it
-export type AnyAgentImplementation = AgentImplementation<any, any>;
+// oxlint-disable-next-line typescript/no-explicit-any -- any version's implementation, as a list of them holds it; `Serve` is never, as `any` would erase every handler's type
+export type AnyAgentImplementation = AgentImplementation<any, any, never, any, any>;
 
 /** The services an implementation's handlers need. */
-export type Requirements<I> = I extends AgentImplementation<infer _V, infer R> ? R : never;
+export type Requirements<I> = I extends AgentImplementation<infer _V, infer R, infer _S, infer _C, infer _N> ? R : never;
+
+/** What an agent's implementation of one version advertises, and its handlers. */
+export interface AgentOptions<
+  V extends Version,
+  R,
+  Serve extends Rpc.Any = never,
+  Call extends Rpc.Any = never,
+  Notify extends Rpc.Any = never,
+> {
+  readonly capabilities: V["agentCapabilities"];
+  /** Those of type `terminal` are offered only to a client that advertises terminal auth. */
+  readonly authMethods?: ReadonlyArray<V["authMethod"]> | undefined;
+  readonly handlers: (connection: AgentConnection<V, Call, Notify>) => Effect.Effect<AgentHandlers<V, R, Serve>, never, R>;
+}
 
 /**
  * The agent's implementation of `adapter`'s version: the capabilities and auth methods it
  * advertises, and its handlers, built once per connection. A method with no handler is answered
  * -32601.
  */
-export const implement = <V extends Version, R = never>(
+export function implement<V extends Version, R = never>(
   adapter: ProtocolAdapter<V>,
-  options: {
-    readonly capabilities: V["agentCapabilities"];
-    readonly authMethods?: ReadonlyArray<V["authMethod"]> | undefined;
-    readonly handlers: (connection: AgentConnection<V>) => Effect.Effect<AgentHandlers<V, R>, never, R>;
-  },
-): AgentImplementation<V, R> => ({
-  adapter,
-  capabilities: options.capabilities,
-  authMethods: options.authMethods ?? [],
-  handlers: options.handlers,
-});
+  options: AgentOptions<V, R>,
+): AgentImplementation<V, R>;
+/**
+ * The same, with the extension methods the agent serves, calls and sends. They come before the
+ * options so that the handlers are typed from them; a group built inside this argument
+ * (`group.omit(…)`) leaves a handlers function with no parameter untyped, so build it beforehand.
+ * An extension method whose name does not start with `_` is a defect: `implement` throws.
+ */
+export function implement<
+  V extends Version,
+  R = never,
+  Serve extends Rpc.Any = never,
+  Call extends Rpc.Any = never,
+  Notify extends Rpc.Any = never,
+>(
+  adapter: ProtocolAdapter<V>,
+  extensions: Extensions<Serve, Call, Notify>,
+  options: AgentOptions<V, R, Serve, Call, Notify>,
+): AgentImplementation<V, R, Serve, Call, Notify>;
+export function implement(
+  adapter: AnyAdapter,
+  // oxlint-disable-next-line typescript/no-explicit-any -- erased here; the overloads above type it
+  ...rest: [options: AgentOptions<any, any>] | [extensions: Extensions<any, any, any>, options: AgentOptions<any, any, any, any, any>]
+): AnyAgentImplementation {
+  const [extensions, options] = rest.length === 1 ? [undefined, rest[0]] : rest;
+  return {
+    adapter,
+    capabilities: options.capabilities,
+    authMethods: options.authMethods ?? [],
+    extensions: checkExtensions(extensions),
+    handlers: options.handlers,
+  };
+}
 
 export interface RunOptions<Impls extends ReadonlyArray<AnyAgentImplementation>> {
   readonly wire: Wire;
@@ -121,7 +175,8 @@ export const run = <const Impls extends Implementations>(
   Effect.scoped(
     Effect.gen(function* () {
       type R = Requirements<Impls[number]>;
-      const implementations: ReadonlyArray<AgentImplementation<Version, R>> = options.implementations;
+      // Erased to no extension methods: `start` serves and calls them by name.
+      const implementations = options.implementations as unknown as ReadonlyArray<AgentImplementation<Version, R>>;
       const byVersion = new Map(implementations.map((implementation) => [implementation.adapter.protocolVersion as number, implementation]));
       const supported = [...byVersion.keys()] as unknown as readonly [number, ...Array<number>];
       const negotiated = yield* Deferred.make<Negotiated<R>>();
@@ -148,7 +203,7 @@ export const run = <const Impls extends Implementations>(
           const response = adapter.initializeResponse({
             capabilities: implementation.capabilities,
             info: options.info,
-            authMethods: implementation.authMethods,
+            authMethods: adapter.offeredAuthMethods(decoded.success, implementation.authMethods),
           });
           const result = yield* Schema.encodeEffect(adapter.initializeCodec.response)(response).pipe(Effect.orDie);
           yield* send({ jsonrpc: "2.0", id, result });
@@ -183,12 +238,14 @@ export const run = <const Impls extends Implementations>(
         side: "agent",
         adapter: implementation.adapter,
         profile,
-        // The endpoint's methods are erased; they are the chosen version's.
+        extensions: implementation.extensions,
+        // The endpoint's methods are erased; they are the chosen version's and the implementation's extensions.
         handlers: (endpoint) =>
           implementation.handlers({
             profile,
             client: endpoint.call as never,
             notify: endpoint.notify,
+            extensions: endpoint.extensions,
           }) as Effect.Effect<Readonly<Record<string, AnyHandler<R> | undefined>>, never, R>,
       });
       yield* endpoint.closed;

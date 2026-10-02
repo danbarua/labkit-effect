@@ -87,6 +87,13 @@ export const isResponse = (value: unknown): value is { readonly [key: string]: u
   return !hasError || (Predicate.isObject(error) && Number.isInteger(error["code"]) && typeof error["message"] === "string");
 };
 
+/**
+ * Shaped like a response, well formed or not: an object with no `method` and a `result` or an
+ * `error`. Its `id`, if it is one `isJsonRpcId` accepts, is the id of a request the reader sent.
+ */
+export const isResponseShaped = (value: unknown): value is { readonly [key: string]: unknown } =>
+  Predicate.isObject(value) && !("method" in value) && ("result" in value || "error" in value);
+
 /** What a wire delivers: one parsed JSON value (a message, or a batch of them), or text it could not parse. */
 export type WireInput = Data.TaggedEnum<{
   Json: { readonly value: unknown };

@@ -18,7 +18,9 @@
  *   params are refused, is dropped;
  * - a notification is run by its handler and nothing is sent back;
  * - a `null` result for a request whose success schema refuses `null` and accepts `{}` reaches the
- *   caller as `{}`, as the ACP SDK reads it: the SDK answers `null` when a handler returns nothing.
+ *   caller as `{}`, as the ACP SDK reads it: the SDK answers `null` when a handler returns nothing;
+ * - a malformed response is answered -32600 under id null, and the pending call whose id it
+ *   carries fails with the `JsonRpcError` -32600 "The response to this request is malformed".
  *
  * Incoming requests reach the server half under private ids, so any JSON-RPC id (`null` included)
  * can be answered, notifications can run as requests whose responses are dropped, and a batch's
@@ -31,6 +33,7 @@ import type * as RpcMessage from "effect/rpc/RpcMessage";
 import {
   ErrorCode,
   isJsonRpcId,
+  isResponseShaped,
   JsonRpcError,
   type JsonRpcId,
   type JsonRpcMessage,
@@ -77,7 +80,9 @@ type Classified =
   | { readonly _tag: "Notification"; readonly method: string; readonly params: unknown }
   | { readonly _tag: "Success"; readonly id: JsonRpcId | null; readonly result: unknown }
   | { readonly _tag: "Failure"; readonly id: JsonRpcId | null; readonly error: JsonRpcError }
-  | { readonly _tag: "Invalid"; readonly id: JsonRpcId | null };
+  | { readonly _tag: "Invalid"; readonly id: JsonRpcId | null }
+  /** A malformed response; `id` is the one it carries, when it carries one. */
+  | { readonly _tag: "MalformedResponse"; readonly id: JsonRpcId | null };
 
 type EncodedCause = ReadonlyArray<{ readonly _tag: string; readonly error?: unknown }>;
 
@@ -110,11 +115,12 @@ const isCancelParams = Schema.is(Schema.Struct({ requestId: Id }));
  * or a notification; one with exactly one of `result` and `error` is a response.
  */
 const classify = (value: unknown): Classified => {
-  // A malformed response is answered under id null: its id is one of this end's own requests, which
-  // the other end would read as the id of a request of its own.
-  const response = Predicate.isObject(value) && !("method" in value) && ("result" in value || "error" in value);
+  if (isResponseShaped(value) && (!isEnvelope(value) || ("result" in value) === ("error" in value))) {
+    const id = value["id"];
+    return { _tag: "MalformedResponse", id: isJsonRpcId(id) ? id : null };
+  }
   if (!isEnvelope(value)) {
-    const id = Predicate.isObject(value) && !response ? value["id"] : null;
+    const id = Predicate.isObject(value) ? value["id"] : null;
     return { _tag: "Invalid", id: isJsonRpcId(id) ? id : null };
   }
   const id = value.id ?? null;
@@ -122,10 +128,8 @@ const classify = (value: unknown): Classified => {
     return "id" in value
       ? { _tag: "Request", id, method: value.method, params: value.params }
       : { _tag: "Notification", method: value.method, params: value.params };
-  if (("result" in value) === ("error" in value)) return { _tag: "Invalid", id: response ? null : id };
-  return value.error === undefined
-    ? { _tag: "Success", id, result: value.result }
-    : { _tag: "Failure", id, error: value.error };
+  if (value.error !== undefined) return { _tag: "Failure", id, error: value.error };
+  return "result" in value ? { _tag: "Success", id, result: value.result } : { _tag: "Invalid", id };
 };
 
 /** The JSON-RPC error for a handler's encoded failure. */
@@ -322,6 +326,24 @@ export const make: <Serve extends Rpc.Any, Call extends Rpc.Any, Notify extends 
       case "Invalid":
         expect();
         return respond(batch, failure(message.id, invalidRequest));
+      case "MalformedResponse": {
+        // Answered under null: its id is one of this end's own requests, which the other end would
+        // read as the id of a request of its own. The call it answers, if one is pending, fails.
+        expect();
+        const answered = respond(batch, failure(null, invalidRequest));
+        if (message.id === null || !calling.has(message.id)) return answered;
+        calling.delete(message.id);
+        const error: JsonRpcError = {
+          code: ErrorCode.InvalidRequest,
+          message: "The response to this request is malformed",
+          data: { response: value },
+        };
+        return answered.pipe(
+          Effect.andThen(
+            toClient({ _tag: "Exit", requestId: message.id, exit: { _tag: "Failure", cause: [{ _tag: "Fail", error }] } }),
+          ),
+        );
+      }
       case "Success":
       case "Failure": {
         // A response to no request of this end's, or to one already answered, is dropped by the client half.

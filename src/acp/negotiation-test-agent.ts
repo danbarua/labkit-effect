@@ -8,11 +8,16 @@
  * - `notice`: sends a `session/update` of kind `notice`, then reports whether it was sent or refused.
  *
  * Each turn first sends the update `Working.`; each report is one more `agent_message_chunk`.
+ *
+ * `v1WithExtensions` speaks version 1 with extension methods only: it serves `_an/echo` (which
+ * tells the client `_an/progress`, asks it `_an/ask`, and answers with the text and the answer) and
+ * `_an/ping`.
  */
 
 import { Effect, Schema } from "effect";
+import { Rpc, RpcGroup } from "effect/rpc";
 import * as Agent from "./agent.ts";
-import type { JsonRpcError } from "./json-rpc.ts";
+import { JsonRpcError } from "./json-rpc.ts";
 import * as Protocol from "./protocol.ts";
 import * as V1 from "./schema/v1.gen.ts";
 import * as V2 from "./schema/v2.gen.ts";
@@ -38,9 +43,54 @@ const reported = (error: { readonly _tag?: string; readonly capability?: string;
 
 const internal = (error: unknown): JsonRpcError => ({ code: -32603, message: "Internal error", data: String(error) });
 
-export const v1 = (capabilities: V1.AgentCapabilities = {}) =>
+/** The extension methods the agent serves. */
+export const AgentExtensions = RpcGroup.make(
+  Rpc.make("_an/echo", { payload: { text: Schema.String }, success: Schema.Struct({ text: Schema.String }), error: JsonRpcError }),
+  Rpc.make("_an/ping", { payload: { note: Schema.String } }),
+);
+
+/** The extension methods the client serves. */
+export const ClientExtensions = RpcGroup.make(
+  Rpc.make("_an/ask", { payload: { question: Schema.String }, success: Schema.Struct({ answer: Schema.String }), error: JsonRpcError }),
+  Rpc.make("_an/progress", { payload: { note: Schema.String } }),
+);
+
+/** `v1WithExtensions`'s implementation: it serves `AgentExtensions`, calls `_an/ask` and sends `_an/progress`. */
+export type AgentWithExtensions = Agent.AgentImplementation<
+  Protocol.V1Version,
+  never,
+  RpcGroup.Rpcs<typeof AgentExtensions>,
+  Exclude<RpcGroup.Rpcs<typeof ClientExtensions>, { readonly _tag: "_an/progress" }>,
+  Exclude<RpcGroup.Rpcs<typeof ClientExtensions>, { readonly _tag: "_an/ask" }>
+>;
+
+/** Version 1 with extension methods; each `_an/ping`'s note is pushed to `pinged`. */
+export const v1WithExtensions = (pinged: Array<string>): AgentWithExtensions =>
+  Agent.implement(
+    Protocol.v1,
+    { serve: AgentExtensions, call: ClientExtensions.omit("_an/progress"), notify: ClientExtensions.omit("_an/ask") },
+    {
+      capabilities: {},
+      handlers: (connection) =>
+        Effect.succeed({
+          "_an/echo": ({ text }) =>
+            Effect.gen(function* () {
+              yield* connection.extensions.notify("_an/progress", { note: `echoing ${text}` });
+              const { answer } = yield* connection.extensions.call["_an/ask"]({ question: text });
+              return { text: `${text}: ${answer}` };
+            }).pipe(Effect.mapError((error) => ("code" in error ? error : internal(error)))),
+          "_an/ping": ({ note }) =>
+            Effect.sync(() => {
+              pinged.push(note);
+            }),
+        }),
+    },
+  );
+
+export const v1 = (capabilities: V1.AgentCapabilities = {}, authMethods: ReadonlyArray<V1.AuthMethod> = []) =>
   Agent.implement(Protocol.v1, {
     capabilities,
+    authMethods,
     handlers: (connection) =>
       Effect.sync(() => {
         let sessions = 0;
@@ -103,9 +153,10 @@ export const v1 = (capabilities: V1.AgentCapabilities = {}) =>
       }),
   });
 
-export const v2 = (capabilities: V2.AgentCapabilities = { session: {} }) =>
+export const v2 = (capabilities: V2.AgentCapabilities = { session: {} }, authMethods: ReadonlyArray<V2.AuthMethod> = []) =>
   Agent.implement(Protocol.v2, {
     capabilities,
+    authMethods,
     handlers: (connection) =>
       Effect.sync(() => {
         let sessions = 0;

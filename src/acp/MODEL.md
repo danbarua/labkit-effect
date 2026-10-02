@@ -77,7 +77,7 @@ than by Effect's JSON-RPC encoder. `stdio.ts` makes wires of newline-delimited J
 - AP7. A line that is not JSON is answered -32700 under id null. A JSON value that is not a
   JSON-RPC 2.0 message is answered -32600 under its id when the value has a string, number or null
   `id`, and otherwise under null. A malformed response is answered under null, because its id is
-  one of this end's own.
+  one of this end's own, and the call it names fails (AP14).
 - AP8. A batch (a JSON array) is answered with one array holding the response to each request in
   it, in any order. A batch of only notifications and responses gets nothing. An empty array is
   answered -32600 under id null.
@@ -98,6 +98,13 @@ than by Effect's JSON-RPC encoder. `stdio.ts` makes wires of newline-delimited J
   SDK answers `null` when a handler returns nothing, and reads `null` as `{}` itself. Every other
   result reaches the caller unchanged; a `null` that the success schema refuses makes the call die
   on decoding.
+- AP14. A malformed response is an object with no `method` and a `result` or an `error` that is not
+  a well-formed response: `jsonrpc` other than `"2.0"`, an `id` that is not a string, number or
+  null, an `error` without an integer `code` and a string `message`, or both `result` and `error`.
+  It is answered -32600 under id null (AP7). When its `id` is that of a pending call, that call fails
+  at once with the `JsonRpcError` `{ code: -32600, message: "The response to this request is
+  malformed", data: { response } }`, `response` being the message as received, and a later
+  response for that id is ignored (AP9).
 
 ## Streamable HTTP
 
@@ -186,13 +193,13 @@ advertises it.
 - AN2. `agent.run` answers `initialize` itself. It reads `protocolVersion` from the params as an
   integer from 0 to 65535, the same way in every version, and chooses the implementation with
   `select`. It decodes the params with that version's `InitializeRequest` schema and answers in that
-  version's field names. Version 1 answers with `agentCapabilities`, `agentInfo` and `authMethods`.
-  Version 2 answers with `capabilities` and `info`, and with `authMethods` only when the list is not
-  empty. Params with no such `protocolVersion`, or params that schema refuses, are answered -32602,
-  and the connection stays uninitialized. The SDK's v1 client gets 1 from an agent that implements
-  1 and 2. The SDK's v2 client gets 2. A raw `initialize` offering 3 is answered 2. An agent that
-  implements only version 1 answers a version 2 client with 1, and the SDK's v2 client then fails
-  its request with a schema error on `info`.
+  version's field names. Version 1 answers with `agentCapabilities`, `agentInfo` and `authMethods`
+  (AN12). Version 2 answers with `capabilities` and `info`, and with `authMethods` only when the list
+  is not empty. Params with no such `protocolVersion`, or params that schema refuses, are answered
+  -32602, and the connection stays uninitialized. The SDK's v1 client gets 1 from an agent that
+  implements 1 and 2. The SDK's v2 client gets 2. A raw `initialize` offering 3 is answered 2. An
+  agent that implements only version 1 answers a version 2 client with 1, and the SDK's v2 client
+  then fails its request with a schema error on `info`.
 - AN3. Until `initialize` is answered, the agent answers a request with -32600 and
   `data: { reason: "not_initialized" }`. In a batch, each request is answered and the answers go out
   as one array; an `initialize` inside a batch is answered the same way. A line that is not JSON is
@@ -214,16 +221,23 @@ advertises it.
   `elicitation: {}`. The agent's `session/update` of kind `notice` is refused without
   `session.notices`. The client's `session/load` is refused when the agent did not advertise
   `loadSession`.
-- AN6. `client.connect` sends `initialize` with id 0, offering the highest version it implements in
-  that version's field names. It reads the answer's `protocolVersion` the same way in every version
-  and continues with the implementation for that version. The profile's client side is that
-  implementation's capabilities and info. If no implementation matches, `connect` fails with
-  `UnsupportedProtocolVersion { offered, answered }` and stops reading the wire. It fails with
-  `InitializeFailed` when the agent answers with an error, when the answer has no
-  `protocolVersion`, when the answered version's schema refuses the answer, when the wire closes
-  first, or when the request cannot be written. A client implementing 1 and 2 gets 1 from the SDK's
-  v1 agent, 2 from the SDK's v2 agent, and 2 or 1 from `agent.run` implementing both or only 1. A
-  client implementing only 2 fails against an agent implementing only 1.
+- AN6. `client.connect` sends `initialize` with id 0, offering `offer` (one of the versions it
+  implements; the highest when left out) in that version's field names. An `offer` it does not
+  implement is a defect. It reads the answer's `protocolVersion` the same way in every version and
+  continues with the implementation for that version. The profile's client side is what the agent
+  received: the params sent, decoded with the answered version's `InitializeRequest` schema, and the
+  client's own gates use that profile. A client that offers 2 sends `capabilities` and `info`, which
+  version 1 does not name: when the SDK's v1 agent answers 1, the profile has no client
+  capabilities and no client info, and the client answers the agent's `fs/read_text_file` -32601
+  even when its version 1 implementation advertises `fs`. Offering 1, it sends `clientCapabilities`
+  and `clientInfo`, which the SDK's v1 agent receives. If no implementation matches, `connect` fails
+  with `UnsupportedProtocolVersion { offered, answered }` and stops reading the wire. It fails with
+  `InitializeFailed` when the agent answers with an error or with a malformed response (AP14), when
+  the answer has no `protocolVersion`, when the answered version's schema refuses the answer or the
+  params sent, when the wire closes first, or when the request cannot be written. A client
+  implementing 1 and 2 gets 1 from the SDK's v1 agent, 2 from the SDK's v2 agent, and 2 or 1 from
+  `agent.run` implementing both or only 1. A client implementing only 2 fails against an agent
+  implementing only 1.
 - AN7. A request from the agent that the client's gates refuse is answered as in AN4. An
   `elicitation/create` in mode `form` or `url` that the client did not advertise gets -32602.
   `fs/read_text_file` without `fs.readTextFile` gets -32601.
@@ -265,12 +279,12 @@ advertises it.
 - AN11. Version 2's gates, from the v2 defs' descriptions (the v2 SDK enforces none). From client to
   agent: every `session/*` method, `session/cancel` included, needs `capabilities.session`.
   `session/delete` and `session/fork` also need `capabilities.session.delete` and
-  `capabilities.session.fork`. `auth/login` and `auth/logout` need a non-empty `authMethods`.
-  `mcp/message` needs `capabilities.session.mcp.acp`. `providers/*` needs `capabilities.providers`,
-  `nes/*` needs `capabilities.nes`, and `document/<event>` needs
-  `capabilities.nes.events.document.<event>`; all of these are method gates. Params gates:
-  `auth/login` needs a `methodId` that is advertised and is not of type `terminal`. In
-  `session/prompt`, an `image`, `audio` or `resource` block needs
+  `capabilities.session.fork`. `auth/login` and `auth/logout` need the `authMethods` the agent
+  answered with (AN12) to be non-empty. `mcp/message` needs `capabilities.session.mcp.acp`.
+  `providers/*` needs `capabilities.providers`, `nes/*` needs `capabilities.nes`, and
+  `document/<event>` needs `capabilities.nes.events.document.<event>`; all of these are method
+  gates. Params gates: `auth/login` needs a `methodId` that is advertised and is not of type
+  `terminal`. In `session/prompt`, an `image`, `audio` or `resource` block needs
   `capabilities.session.prompt.image`, `audio` or `embeddedContext`. In `session/new`, `resume` and
   `fork`, a non-empty `additionalDirectories` needs `capabilities.session.additionalDirectories`, and
   an MCP server of type `stdio`, `http` or `acp` needs `capabilities.session.mcp.<type>`. From agent
@@ -279,3 +293,19 @@ advertises it.
   `form` or `url` needs the client's `capabilities.elicitation.<mode>` (params gate). Version 2 has
   no client capability for any `session/update` kind, `notice` included, and none for
   `session/request_permission`.
+- AN12. `agent.run` answers `initialize` without the `authMethods` of type `terminal` unless the
+  client advertised terminal auth: `clientCapabilities.auth.terminal` in version 1,
+  `capabilities.auth.terminal` in version 2. The profile holds the list answered. The SDK's v1
+  client gets a terminal method only with `auth: { terminal: true }`, and the SDK's v2 client only
+  with `auth: { terminal: {} }`. Without it, a version 2 agent whose only method is a terminal one
+  answers no `authMethods`, and the client's `auth/login` is answered -32601.
+- AN13. `agent.implement` and `client.implement` take, before their options, the extension
+  methods the implementation serves, calls and sends (`Extensions { serve, call, notify }`, each an
+  `RpcGroup`). Every method name in them starts with `_`; `implement` throws when one does not. The
+  served ones are handled in the same handler record as the version's methods, as requests or
+  notifications. The connection's `extensions.call` (an `RpcClient` of `call`) and
+  `extensions.notify` (of `notify`) send the outgoing ones. No gate refuses a method whose name
+  starts with `_`. An extension method with no handler, or one the implementation does not
+  declare, is answered -32601 (AN4, AP6). An agent of `agent.ts` and a client of `client.ts` call
+  and notify each other's extension methods, and the SDK client's `request` and `notify` of `_`
+  methods reach the agent's handlers.

@@ -10,15 +10,26 @@ import * as acp from "@agentclientprotocol/sdk";
 import { createNodeHttpHandler } from "@agentclientprotocol/sdk/experimental/node";
 import { AcpServer } from "@agentclientprotocol/sdk/experimental/server";
 import * as acpv2 from "@agentclientprotocol/sdk/experimental/v2";
-import { Effect, Exit, Fiber, Layer, Logger, References, type Scope } from "effect";
+import { Cause, Effect, Exit, Fiber, Layer, Logger, References, Schema, type Scope } from "effect";
+import { Rpc, RpcGroup } from "effect/rpc";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import type * as HttpClient from "effect/http/HttpClient";
 import * as Agent from "./agent.ts";
 import * as Client from "./client.ts";
 import * as Http from "./http.ts";
-import type { Wire } from "./json-rpc.ts";
+import { JsonRpcError, type Wire } from "./json-rpc.ts";
 import { logKeys } from "./log-keys.ts";
-import { decode, info as agentInfo, v1 as agentV1, v2 as agentV2, textOf } from "./negotiation-test-agent.ts";
+import {
+  AgentExtensions,
+  type AgentWithExtensions,
+  info as agentInfo,
+  v1 as agentV1,
+  v2 as agentV2,
+  ClientExtensions,
+  decode,
+  textOf,
+  v1WithExtensions,
+} from "./negotiation-test-agent.ts";
 import * as Protocol from "./protocol.ts";
 import * as V1 from "./schema/v1.gen.ts";
 import * as V2 from "./schema/v2.gen.ts";
@@ -41,6 +52,7 @@ const clientV1 = (seen: Seen, capabilities: V1.ClientCapabilities = {}) =>
           }),
         "session/update": ({ update }) => Effect.sync(() => seen.push(`update: ${textOf(update)}`)),
         "elicitation/create": () => Effect.succeed(decode(V1.CreateElicitationResponse, { action: "decline" })),
+        "fs/read_text_file": () => Effect.succeed({ content: "file contents" }),
       }),
   });
 
@@ -72,12 +84,13 @@ const say = (sessionId: string, text: string): acp.SessionNotification => ({
 const errorText = (error: unknown): string =>
   error instanceof acp.RequestError ? `${error.code} ${JSON.stringify(error.data)}` : String(error);
 
-/** The SDK's v1 agent, recording each method it receives. Its prompt does what its text says. */
-function sdkAgentV1(received: Array<string>, agentCapabilities: acp.AgentCapabilities = {}) {
+/** The SDK's v1 agent, recording each method it receives, and each `initialize`'s params in `initialized`. Its prompt does what its text says. */
+function sdkAgentV1(received: Array<string>, agentCapabilities: acp.AgentCapabilities = {}, initialized: Array<acp.InitializeRequest> = []) {
   return acp
     .agent({ name: "an-sdk-agent" })
     .onRequest("initialize", (c) => {
       received.push(`initialize ${c.params.protocolVersion}`);
+      initialized.push(c.params);
       return { protocolVersion: 1, agentCapabilities, agentInfo: { name: "an-sdk-agent", version: "1.0.0" }, authMethods: [] };
     })
     .onRequest("session/new", () => {
@@ -160,7 +173,8 @@ function pipes() {
 
 type AgentImplementation =
   | Agent.AgentImplementation<Protocol.V1Version, never>
-  | Agent.AgentImplementation<Protocol.V2Version, never>;
+  | Agent.AgentImplementation<Protocol.V2Version, never>
+  | AgentWithExtensions;
 
 /** The agent of `agent.ts` running in this process, on the other end of `wire`. */
 interface OurAgent {
@@ -254,6 +268,56 @@ describe("the client negotiates the version", () => {
     );
     await agent.stop();
     expect(exit).toEqual(Exit.fail(new Client.UnsupportedProtocolVersion({ offered: 2, answered: 1 })));
+  });
+
+  test("AN6: when the SDK's v1 agent answers 1 to a client offering 2, the profile's client side is what the agent received, and the client's gates use it; offering 1, the agent receives the client's capabilities", async () => {
+    const capabilities: V1.ClientCapabilities = { fs: { readTextFile: true, writeTextFile: true }, terminal: true };
+    const connectTo = async (offer: 1 | 2 | undefined) => {
+      const ends = pipes();
+      const initialized: Array<acp.InitializeRequest> = [];
+      sdkAgentV1([], {}, initialized).connect(acp.ndJsonStream(ends.agentWritable, ends.agentReadable));
+      const seen: Seen = [];
+      const client = await run(
+        Effect.gen(function* () {
+          const connection = yield* Client.connect({
+            wire: ends.client,
+            info,
+            implementations: [clientV1(seen, capabilities), clientV2(seen)],
+            offer,
+          });
+          if (connection.protocolVersion !== 1) return { version: connection.protocolVersion };
+          const { sessionId } = yield* connection.agent["session/new"]({ cwd: "/tmp", mcpServers: [] });
+          yield* connection.agent["session/prompt"]({ sessionId, prompt: [{ type: "text", text: "read" }] });
+          return { version: connection.protocolVersion, profile: connection.profile.client };
+        }),
+      );
+      return { client, received: initialized[0]?.clientCapabilities, seen };
+    };
+    const downgraded = await connectTo(undefined);
+    expect(downgraded.client).toEqual({ version: 1, profile: { capabilities: {}, info: undefined } });
+    expect(downgraded.received?.fs?.readTextFile).not.toBe(true);
+    expect(downgraded.received?.terminal).not.toBe(true);
+    expect(downgraded.seen).toEqual(["update: Working.", 'update: Read: -32601 {"capability":"clientCapabilities.fs.readTextFile"}']);
+    const offered = await connectTo(1);
+    expect(offered.client).toEqual({ version: 1, profile: { capabilities, info } });
+    expect(offered.received).toMatchObject(capabilities);
+    expect(offered.seen).toEqual(["update: Working.", "update: Read: file contents"]);
+  });
+
+  test("AN6: a malformed answer to initialize fails connect with InitializeFailed", async () => {
+    const ends = pipes();
+    const exit = Effect.runPromiseExit(Effect.scoped(Client.connect({ wire: ends.client, info, implementations: [clientV1([])] })));
+    const reader = ends.agentReadable.getReader();
+    const writer = ends.agentWritable.getWriter();
+    const asked = new TextDecoder().decode((await reader.read()).value);
+    expect(JSON.parse(asked)).toMatchObject({ id: 0, method: "initialize" });
+    // An error with no message.
+    await writer.write(new TextEncoder().encode(`${JSON.stringify({ jsonrpc: "2.0", id: 0, error: { code: -32000 } })}\n`));
+    const failed = await exit;
+    expect(Exit.isFailure(failed) && Cause.squash(failed.cause)).toMatchObject({
+      _tag: "InitializeFailed",
+      reason: expect.stringContaining("malformed"),
+    });
   });
 });
 
@@ -364,5 +428,64 @@ describe("the client's logs", () => {
     expect(logged).toEqual([
       { level: "Info", message: [logKeys.initialize.negotiated, { side: "client", offered: 2, chosen: 1 }] },
     ]);
+  });
+});
+
+describe("extension methods", () => {
+  // The client calls `_an/echo` and `_an/unknown`, which the agent does not serve, and sends `_an/ping`.
+  const clientCalls = AgentExtensions.omit("_an/ping").add(
+    Rpc.make("_an/unknown", { payload: {}, success: Schema.Struct({}), error: JsonRpcError }),
+  );
+  const clientNotifications = AgentExtensions.omit("_an/echo");
+
+  /** A version 1 client with extension methods only; what its handlers see goes to `seen`. */
+  const clientWithExtensions = (seen: Seen) =>
+    Client.implement(
+      Protocol.v1,
+      { serve: ClientExtensions, call: clientCalls, notify: clientNotifications },
+      {
+        capabilities: {},
+        handlers: () =>
+          Effect.succeed({
+            "_an/ask": ({ question }) =>
+              Effect.sync(() => {
+                seen.push(`ask: ${question}`);
+                return { answer: "yes" };
+              }),
+            "_an/progress": ({ note }) =>
+              Effect.sync(() => {
+                seen.push(`progress: ${note}`);
+              }),
+          }),
+      },
+    );
+
+  test("AN13: an Effect agent and an Effect client call and notify each other's extension methods, and an extension method the other end does not serve is -32601", async () => {
+    const pinged: Array<string> = [];
+    const agent = ourAgent([v1WithExtensions(pinged)]);
+    const seen: Seen = [];
+    const result = await run(
+      Effect.gen(function* () {
+        const connection = yield* Client.connect({ wire: agent.wire, info, implementations: [clientWithExtensions(seen)] });
+        yield* connection.extensions.notify("_an/ping", { note: "hello" });
+        const echoed = yield* connection.extensions.call["_an/echo"]({ text: "ready?" });
+        const unknown = yield* connection.extensions.call["_an/unknown"]({}).pipe(Effect.flip);
+        return { echoed, unknown };
+      }),
+    );
+    await agent.stop();
+    expect(result).toEqual({ echoed: { text: "ready?: yes" }, unknown: { code: -32601, message: "Method not found: _an/unknown" } });
+    expect(seen).toEqual(["progress: echoing ready?", "ask: ready?"]);
+    expect(pinged).toEqual(["hello"]);
+  });
+
+  test("AN13: implement throws when an extension method's name does not start with _", () => {
+    const named = RpcGroup.make(Rpc.make("an/echo", { payload: { text: Schema.String } }));
+    expect(() => Client.implement(Protocol.v1, { notify: named }, { capabilities: {}, handlers: () => Effect.succeed({}) })).toThrow(
+      '"an/echo" is declared as an extension method',
+    );
+    expect(() => Agent.implement(Protocol.v2, { serve: named }, { capabilities: {}, handlers: () => Effect.succeed({}) })).toThrow(
+      '"an/echo" is declared as an extension method',
+    );
   });
 });

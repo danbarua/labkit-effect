@@ -8,10 +8,12 @@
  *   the capability, and an incoming notification it refuses is dropped, both before any handler
  *   runs. An outgoing request or notification a gate refuses fails with `CapabilityNotAdvertised`
  *   and nothing is sent.
+ * - An implementation's extension methods (`_`-prefixed, `Extensions`) are served beside the
+ *   version's methods and called through `extensions`; no gate stands in front of them.
  */
 
 import { type Cause, Deferred, Effect, Layer, Queue, type Scope, Stream } from "effect";
-import type { Rpc, RpcClient, RpcClientError, RpcGroup } from "effect/rpc";
+import { type Rpc, type RpcClient, type RpcClientError, RpcGroup } from "effect/rpc";
 import { ErrorCode, type JsonRpcError, type Wire, type WireError, type WireInput } from "./json-rpc.ts";
 import { logKeys } from "./log-keys.ts";
 import * as Peer from "./peer.ts";
@@ -19,6 +21,7 @@ import {
   type AnyAdapter,
   CapabilityNotAdvertised,
   type Direction,
+  isExtensionMethod,
   type Profile,
   refusalError,
   type Version,
@@ -37,6 +40,16 @@ export type Handlers<Rpcs extends Rpc.Any, R> = {
   ) => Effect.Effect<Rpc.Success<Current>, JsonRpcError, R>;
 };
 
+/**
+ * Handlers for extension methods, by method name. Keyed by name rather than by method, so that
+ * `implement` infers the methods from the declared groups only, and types each handler from them.
+ */
+export type ExtensionHandlers<Rpcs extends Rpc.Any, R> = {
+  readonly [Method in Rpcs["_tag"]]?: (
+    payload: Rpc.Payload<Rpc.ExtractTag<Rpcs, Method>>,
+  ) => Effect.Effect<Rpc.Success<Rpc.ExtractTag<Rpcs, Method>>, JsonRpcError, R>;
+};
+
 /** The methods one end serves: its requests, and the notifications that are not also requests (`mcp/message` is both). */
 export type Served<Requests extends Rpc.Any, Notifications extends Rpc.Any> =
   | Requests
@@ -53,6 +66,48 @@ export type GatedNotify<Rpcs extends Rpc.Any> = <Tag extends Rpcs["_tag"]>(
   tag: Tag,
   payload: Rpc.Payload<Rpc.ExtractTag<Rpcs, Tag>>,
 ) => Effect.Effect<void, CapabilityNotAdvertised>;
+
+/**
+ * The extension methods an implementation declares: those it serves (requests and notifications
+ * alike, handled in the same record as the version's methods), those it calls, and the
+ * notifications it sends. Every method name starts with `_`. Declare a request's `error` as
+ * `JsonRpcError`: a handler's failure goes out as that error, and a call fails with it.
+ */
+export interface Extensions<Serve extends Rpc.Any = never, Call extends Rpc.Any = never, Notify extends Rpc.Any = never> {
+  readonly serve?: RpcGroup.RpcGroup<Serve> | undefined;
+  readonly call?: RpcGroup.RpcGroup<Call> | undefined;
+  readonly notify?: RpcGroup.RpcGroup<Notify> | undefined;
+}
+
+/** The other end's extension methods, as an implementation declared them; no gate stands in front of them. */
+export interface ExtensionClient<Call extends Rpc.Any, Notify extends Rpc.Any> {
+  readonly call: RpcClient.RpcClient<Call, RpcClientError.RpcClientError>;
+  readonly notify: <Tag extends Notify["_tag"]>(
+    tag: Tag,
+    payload: Rpc.Payload<Rpc.ExtractTag<Notify, Tag>>,
+  ) => Effect.Effect<void>;
+}
+
+/** Extension groups with their methods erased, as an implementation keeps them. */
+export interface ErasedExtensions {
+  readonly serve: RpcGroup.RpcGroup<Rpc.Any>;
+  readonly call: RpcGroup.RpcGroup<Rpc.Any>;
+  readonly notify: RpcGroup.RpcGroup<Rpc.Any>;
+}
+
+/** `extensions`, erased, once each of its method names is checked to start with `_`; a name that does not is a defect, thrown. */
+export const checkExtensions = <Serve extends Rpc.Any, Call extends Rpc.Any, Notify extends Rpc.Any>(
+  extensions: Extensions<Serve, Call, Notify> | undefined,
+): ErasedExtensions => {
+  // A group is invariant in its methods; erased, a group of none is a group of any.
+  const erase = (group: RpcGroup.Any | undefined) => (group ?? RpcGroup.make()) as unknown as RpcGroup.RpcGroup<Rpc.Any>;
+  const erased = { serve: erase(extensions?.serve), call: erase(extensions?.call), notify: erase(extensions?.notify) };
+  for (const group of [erased.serve, erased.call, erased.notify])
+    for (const method of group.requests.keys())
+      if (!isExtensionMethod(method))
+        throw new Error(`acp: ${JSON.stringify(method)} is declared as an extension method, and an extension method's name starts with "_"`);
+  return erased;
+};
 
 export interface Split {
   /** The messages `before` handed over, and every message after them, on the same `write`. */
@@ -94,6 +149,8 @@ export interface Endpoint {
   readonly call: GatedClient<any>;
   // oxlint-disable-next-line typescript/no-explicit-any -- erased here, typed by the agent and the client
   readonly notify: GatedNotify<any>;
+  // oxlint-disable-next-line typescript/no-explicit-any -- erased here, typed by the agent and the client
+  readonly extensions: ExtensionClient<any, any>;
   /** Completes when the connection ends. */
   readonly closed: Effect.Effect<void>;
 }
@@ -104,6 +161,7 @@ export interface StartOptions<V extends Version, R> {
   readonly side: Side;
   readonly adapter: AnyAdapter;
   readonly profile: Profile<V>;
+  readonly extensions: ErasedExtensions;
   readonly handlers: (
     endpoint: Omit<Endpoint, "closed">,
   ) => Effect.Effect<Readonly<Record<string, AnyHandler<R> | undefined>>, never, R>;
@@ -125,10 +183,14 @@ export const start = <V extends Version, R>(options: StartOptions<V, R>): Effect
     const requests: RpcGroup.RpcGroup<Rpc.Any> = side === "agent" ? adapter.agentRequests : adapter.clientRequests;
     const notifications: RpcGroup.RpcGroup<Rpc.Any> =
       side === "agent" ? adapter.agentNotifications : adapter.clientNotifications;
-    const served = requests.merge(notifications.omit(...requests.requests.keys()));
-    const call: RpcGroup.RpcGroup<Rpc.Any> =
+    const versionCall: RpcGroup.RpcGroup<Rpc.Any> =
       side === "agent" ? adapter.clientRequests : adapter.agentRequests.omit("initialize");
-    const notify: RpcGroup.RpcGroup<Rpc.Any> = side === "agent" ? adapter.clientNotifications : adapter.agentNotifications;
+    const versionNotify: RpcGroup.RpcGroup<Rpc.Any> =
+      side === "agent" ? adapter.clientNotifications : adapter.agentNotifications;
+    const { extensions } = options;
+    const served = requests.merge(notifications.omit(...requests.requests.keys()), extensions.serve);
+    const call = versionCall.merge(extensions.call);
+    const notify = versionNotify.merge(extensions.notify);
 
     /** Runs `send` when the gate lets `method` with `payload` through; otherwise fails, having sent nothing. */
     const gated = <A, E>(
@@ -150,16 +212,18 @@ export const start = <V extends Version, R>(options: StartOptions<V, R>): Effect
       if (endpoint !== undefined) return endpoint;
       const client = peer.client as unknown as ErasedClient;
       const gatedCall = Object.fromEntries(
-        [...call.requests.keys()].map((method) => [
+        [...versionCall.requests.keys()].map((method) => [
           method,
           (payload: unknown, callOptions?: unknown) =>
             gated(method, payload, () => client[method]?.(payload, callOptions) ?? Effect.die(`no client method ${method}`)),
         ]),
       );
+      const extensionCall = Object.fromEntries([...extensions.call.requests.keys()].map((method) => [method, client[method]]));
       endpoint = {
         call: gatedCall as never,
         notify: ((method: string, payload: unknown) =>
           gated(method, payload, () => peer.notify(method, payload as never))) as never,
+        extensions: { call: extensionCall as never, notify: peer.notify as never },
       };
       return endpoint;
     };

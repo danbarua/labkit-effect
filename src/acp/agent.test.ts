@@ -14,8 +14,10 @@ import * as HttpRouter from "effect/http/HttpRouter";
 import * as Agent from "./agent.ts";
 import type { JsonRpcMessage, Wire } from "./json-rpc.ts";
 import { logKeys } from "./log-keys.ts";
-import { info, textOf, v1, v2 } from "./negotiation-test-agent.ts";
+import { type AgentWithExtensions, decode, info, textOf, v1, v1WithExtensions, v2 } from "./negotiation-test-agent.ts";
 import type * as Protocol from "./protocol.ts";
+import * as V1 from "./schema/v1.gen.ts";
+import * as V2 from "./schema/v2.gen.ts";
 import { fromWebStreams } from "./stdio.ts";
 
 const encoder = new TextEncoder();
@@ -30,7 +32,8 @@ type Implementations = readonly [Implementation, ...Array<Implementation>];
 
 type Implementation =
   | Agent.AgentImplementation<Protocol.V1Version, never>
-  | Agent.AgentImplementation<Protocol.V2Version, never>;
+  | Agent.AgentImplementation<Protocol.V2Version, never>
+  | AgentWithExtensions;
 
 /** The agent running in this process, and what the tests see of it. */
 interface Started {
@@ -223,6 +226,47 @@ describe("the agent answers initialize itself", () => {
   });
 });
 
+describe("the agent's auth methods", () => {
+  test("AN12: a terminal auth method is offered only to a client that advertised terminal auth, in either version, and version 2's auth/login follows the list offered", async () => {
+    const v1Methods = [
+      decode(V1.AuthMethod, { id: "api-key", name: "API key" }),
+      decode(V1.AuthMethod, { type: "terminal", id: "tui", name: "Log in in a terminal" }),
+    ];
+    const offeredV1 = async (clientCapabilities: acp.ClientCapabilities) => {
+      const agent = start([v1({}, v1Methods)]);
+      const initialized = await sdkClient([]).connectWith(acp.ndJsonStream(agent.input, agent.output), (ctx) =>
+        ctx.request("initialize", { protocolVersion: 1, clientCapabilities, clientInfo }),
+      );
+      await agent.stop();
+      return initialized.authMethods?.map((method) => method.id);
+    };
+    expect(await offeredV1({})).toEqual(["api-key"]);
+    expect(await offeredV1({ auth: { terminal: false } })).toEqual(["api-key"]);
+    expect(await offeredV1({ auth: { terminal: true } })).toEqual(["api-key", "tui"]);
+
+    const v2Methods = [decode(V2.AuthMethod, { type: "terminal", methodId: "tui", name: "Log in in a terminal" })];
+    const offeredV2 = async (capabilities: acpv2.ClientCapabilities) => {
+      const agent = start([v2({ session: {} }, v2Methods)]);
+      const result = await acpv2
+        .client({ name: "an-sdk-client-v2" })
+        .connectWith(acpv2.ndJsonStream(agent.input, agent.output), async (ctx) => {
+          const initialized = await ctx.request("initialize", { protocolVersion: 2, info: clientInfo, capabilities });
+          const login = await failure(ctx.request("auth/login", { methodId: "tui" }));
+          return { offered: initialized.authMethods?.map((method) => method.methodId), login };
+        });
+      await agent.stop();
+      return result;
+    };
+    const without = await offeredV2({});
+    expect(without.offered).toBeUndefined();
+    expect(without.login).toMatchObject({ code: -32601, data: { capability: "authMethods" } });
+    const withTerminal = await offeredV2({ auth: { terminal: {} } });
+    expect(withTerminal.offered).toEqual(["tui"]);
+    // Offered, and still refused: a terminal method is one the client runs itself.
+    expect(withTerminal.login).toMatchObject({ code: -32602, data: { capability: "authMethods" } });
+  });
+});
+
 describe("the agent's gates on what the client sends", () => {
   const connected = async <A>(capabilities: Parameters<typeof v1>[0], run: (ctx: acp.ClientContext, sessionId: string) => Promise<A>) => {
     const agent = start([v1(capabilities)]);
@@ -405,5 +449,42 @@ describe("logs", () => {
       message: [logKeys.gate.refusedLocally, { side: "agent", method: "fs/read_text_file", capability: "clientCapabilities.fs.readTextFile" }],
     });
     expect(gated.logged.filter((line) => line.level === "Warn" || line.level === "Error")).toEqual([]);
+  });
+});
+
+describe("extension methods", () => {
+  test("AN13: the SDK client's request and notification of `_` methods reach the agent's extension handlers, the agent's own reach the SDK client, and an unknown `_` method is -32601", async () => {
+    const pinged: Array<string> = [];
+    const agent = start([v1WithExtensions(pinged)]);
+    const seen: Array<string> = [];
+    const result = await acp
+      .client({ name: "an-sdk-client" })
+      .onRequest(
+        "_an/ask",
+        (params: unknown) => params as { readonly question: string },
+        (ctx) => {
+          seen.push(`ask: ${ctx.params.question}`);
+          return { answer: "yes" };
+        },
+      )
+      .onNotification(
+        "_an/progress",
+        (params: unknown) => params as { readonly note: string },
+        ({ params }) => {
+          seen.push(`progress: ${params.note}`);
+        },
+      )
+      .connectWith(acp.ndJsonStream(agent.input, agent.output), async (ctx) => {
+        await ctx.request("initialize", { protocolVersion: 1, clientCapabilities: {}, clientInfo });
+        await ctx.notify("_an/ping", { note: "hello" });
+        const echoed = await ctx.request("_an/echo", { text: "ready?" });
+        const unknown = await failure(ctx.request("_an/unknown", {}));
+        return { echoed, unknown };
+      });
+    await agent.stop();
+    expect(result.echoed).toEqual({ text: "ready?: yes" });
+    expect(result.unknown).toMatchObject({ code: -32601 });
+    expect(seen).toEqual(["progress: echoing ready?", "ask: ready?"]);
+    expect(pinged).toEqual(["hello"]);
   });
 });

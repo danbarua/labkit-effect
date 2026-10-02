@@ -123,6 +123,14 @@ export interface ProtocolAdapter<V extends Version> {
     readonly info: V["implementation"];
     readonly authMethods: ReadonlyArray<V["authMethod"]>;
   }) => V["initializeResponse"];
+  /**
+   * The auth methods an agent answers the client that sent `request` with: `authMethods` without
+   * those of type `terminal`, unless the client advertised terminal auth.
+   */
+  readonly offeredAuthMethods: (
+    request: V["initializeRequest"],
+    authMethods: ReadonlyArray<V["authMethod"]>,
+  ) => ReadonlyArray<V["authMethod"]>;
   /** The profile an `initialize` request and its result negotiated. */
   readonly profile: (request: V["initializeRequest"], response: V["initializeResponse"]) => Profile<V>;
   /** The gate on the method alone, whatever its params. */
@@ -167,6 +175,9 @@ export const refusalError = (refused: Refused): JsonRpcError => ({
   data: { capability: refused.capability },
 });
 
+/** ACP reserves method names that start with `_` for extensions. No gate stands in front of them. */
+export const isExtensionMethod = (method: string): boolean => method.startsWith("_");
+
 const allowed: Gate = { _tag: "Allowed" };
 
 /** The value at `path` under `value`, or undefined where the path leaves objects. */
@@ -180,6 +191,9 @@ const listAt = (value: unknown, key: string): ReadonlyArray<unknown> => {
 
 const typeOf = (value: unknown, key = "type"): unknown => at(value, [key]);
 
+/** A capability is advertised when it is present and neither `null` nor `false`. */
+const isAdvertised = (value: unknown): boolean => value !== undefined && value !== null && value !== false;
+
 /** Refuses unless the capability at `path` under `root` (named `rootName`) is advertised. */
 const need = (
   root: unknown,
@@ -188,8 +202,7 @@ const need = (
   needs: "method" | "params",
   why: string,
 ): Gate => {
-  const value = at(root, path);
-  if (value !== undefined && value !== null && value !== false) return allowed;
+  if (isAdvertised(at(root, path))) return allowed;
   const capability = [rootName, ...path].join(".");
   return { _tag: "Refused", capability, needs, message: `${why} needs ${capability}, which was not advertised` };
 };
@@ -202,6 +215,12 @@ const first = (gates: Iterable<() => Gate>): Gate => {
   }
   return allowed;
 };
+
+/** `authMethods` without those of type `terminal`, unless the client advertised terminal auth at `path` under `request`. */
+const offeredAuthMethods = <A>(request: unknown, path: ReadonlyArray<string>, authMethods: ReadonlyArray<A>): ReadonlyArray<A> =>
+  isAdvertised(at(request, path))
+    ? authMethods
+    : authMethods.filter((authMethod) => typeOf(authMethod) !== "terminal");
 
 /** `methodId` must be an advertised method that is not of type `terminal`, which the client runs itself. */
 const authMethodGate = (method: string, params: unknown, authMethods: ReadonlyArray<unknown>, idKey: string): Gate => {
@@ -260,6 +279,7 @@ const isUpdate = (params: unknown, ...kinds: ReadonlyArray<string>): boolean => 
 };
 
 const v1MethodGate = (direction: Direction, method: string, profile: Profile<V1Version>): Gate => {
+  if (isExtensionMethod(method)) return allowed;
   const agent = (path: ReadonlyArray<string>) =>
     need(profile.agent.capabilities, "agentCapabilities", path, "method", method);
   const client = (path: ReadonlyArray<string>) =>
@@ -326,6 +346,7 @@ const v1ParamsGate = (direction: Direction, method: string, params: unknown, pro
 };
 
 const v2MethodGate = (direction: Direction, method: string, profile: Profile<V2Version>): Gate => {
+  if (isExtensionMethod(method)) return allowed;
   const agent = (path: ReadonlyArray<string>) => need(profile.agent.capabilities, "capabilities", path, "method", method);
   const client = (path: ReadonlyArray<string>) => need(profile.client.capabilities, "capabilities", path, "method", method);
   if (direction === "toAgent") {
@@ -416,6 +437,8 @@ export const v1: ProtocolAdapter<V1Version> = {
     agentInfo: info,
     authMethods,
   }),
+  offeredAuthMethods: (request, authMethods) =>
+    offeredAuthMethods(request, ["clientCapabilities", "auth", "terminal"], authMethods),
   profile: (request, response) => ({
     protocolVersion: 1,
     client: { capabilities: request.clientCapabilities ?? {}, info: request.clientInfo ?? undefined },
@@ -451,6 +474,7 @@ export const v2: ProtocolAdapter<V2Version> = {
     info,
     ...(authMethods.length > 0 ? { authMethods } : {}),
   }),
+  offeredAuthMethods: (request, authMethods) => offeredAuthMethods(request, ["capabilities", "auth", "terminal"], authMethods),
   profile: (request, response) => ({
     protocolVersion: 2,
     client: { capabilities: request.capabilities ?? {}, info: request.info },
