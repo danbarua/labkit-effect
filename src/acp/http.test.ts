@@ -439,6 +439,16 @@ const sdkClient = () => {
 
 const prompt = (sessionId: string, text: string): acp.PromptRequest => ({ sessionId, prompt: [{ type: "text", text }] });
 
+/**
+ * Closes the client's half of the wire once the SDK has finished writing to it. The SDK holds the
+ * writer while a message's POST waits for its 202, and a request resolves when its response
+ * arrives on the SSE stream, which can be first; `connectWith` returns without waiting for it.
+ */
+const closeWire = async (writable: WritableStream) => {
+  while (writable.locked) await Bun.sleep(1);
+  await writable.close();
+};
+
 describe("serve, driven by the SDK's HTTP client", () => {
   test("AH1: initialize, session/new and a prompt whose updates and permission request reach the client before its response; DELETE ends the wire", async () => {
     const probe = makeProbe();
@@ -458,7 +468,7 @@ describe("serve, driven by the SDK's HTTP client", () => {
       expect(result.updatesBeforeResponse).toEqual(
         ["permission-1", "permission-2", "permission-3", "permission-allow"].map((text) => `${result.sessionId}:${text}`),
       );
-      await stream.writable.close();
+      await closeWire(stream.writable);
       await settled(probe.wireEnded);
       await settled(probe.scopeClosed);
     } finally {
@@ -481,7 +491,7 @@ describe("serve, driven by the SDK's HTTP client", () => {
         ]);
         return { first, second };
       });
-      await stream.writable.close();
+      await closeWire(stream.writable);
       expect(client.updates.filter((update) => update.startsWith(`${sessions.first}:`))).toEqual(
         ["first-1", "first-2", "first-3"].map((text) => `${sessions.first}:${text}`),
       );
