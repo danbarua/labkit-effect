@@ -8,7 +8,7 @@
  * serve the connection, behind the capability gates of `protocol.ts`.
  */
 
-import { Deferred, Effect, type Layer, References, Schema, type Stdio } from "effect";
+import { Deferred, Effect, type Layer, References, Schema, type Scope, type Stdio } from "effect";
 import type { HttpRouter } from "effect/http";
 import {
   type AnyHandler,
@@ -43,6 +43,10 @@ import { fromStdio } from "./stdio.ts";
 /**
  * The connection a version's handlers are given: what was negotiated, the client's methods, and
  * the client's extension methods this implementation declared it calls and sends.
+ *
+ * The handlers are built, and run, in the connection's `Scope`: a `Scope.Scope` they need is the
+ * connection's, closed once it has ended, after its handlers are interrupted. What an
+ * implementation keeps for a connection (its sessions) lives there.
  */
 export interface AgentConnection<V extends Version, Call extends Methods.Any = never, Notify extends Methods.Any = never> {
   readonly profile: Profile<V>;
@@ -51,6 +55,12 @@ export interface AgentConnection<V extends Version, Call extends Methods.Any = n
   /** The client's notifications, gated the same way. */
   readonly notify: GatedNotify<V["clientNotifications"]>;
   readonly extensions: ExtensionClient<Call, Notify>;
+  /**
+   * Whether the connection is open: `false` from when it starts to end, before its handlers are
+   * interrupted. A handler interrupted while it is `true` was cancelled by the client
+   * (`$/cancel_request`); one interrupted once it is `false`, by the end of the connection.
+   */
+  readonly open: Effect.Effect<boolean>;
 }
 
 /** Handlers for any of a version's agent requests and notifications except `initialize`, and for the extension methods in `Serve`. */
@@ -78,8 +88,8 @@ export interface AgentImplementation<
 // oxlint-disable-next-line typescript/no-explicit-any -- any version's implementation, as a list of them holds it; `Serve` is never, as `any` would erase every handler's type
 export type AnyAgentImplementation = AgentImplementation<any, any, never, any, any>;
 
-/** The services an implementation's handlers need. */
-export type Requirements<I> = I extends AgentImplementation<infer _V, infer R, infer _S, infer _C, infer _N> ? R : never;
+/** The services an implementation's handlers need but the connection's `Scope`, which `run` gives them. */
+export type Requirements<I> = I extends AgentImplementation<infer _V, infer R, infer _S, infer _C, infer _N> ? Exclude<R, Scope.Scope> : never;
 
 /** What an agent's implementation of one version advertises, and its handlers. */
 export interface AgentOptions<
@@ -245,6 +255,7 @@ export const run = <const Impls extends Implementations>(
             client: endpoint.call as never,
             notify: endpoint.notify,
             extensions: endpoint.extensions,
+            open: endpoint.open,
           }) as Effect.Effect<Readonly<Record<string, AnyHandler<R> | undefined>>, never, R>,
       });
       yield* endpoint.closed;

@@ -9,7 +9,7 @@ import { describe, expect, test } from "bun:test";
 import * as acp from "@agentclientprotocol/sdk";
 import { createHttpStream } from "@agentclientprotocol/sdk/experimental/http-client";
 import * as acpv2 from "@agentclientprotocol/sdk/experimental/v2";
-import { Effect, Fiber, Layer, Logger, References, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Logger, References, Scope, Stream } from "effect";
 import * as HttpRouter from "effect/http/HttpRouter";
 import * as Agent from "./agent.ts";
 import type { JsonRpcMessage, Wire } from "./json-rpc.ts";
@@ -32,6 +32,7 @@ type Implementations = readonly [Implementation, ...Array<Implementation>];
 
 type Implementation =
   | Agent.AgentImplementation<Protocol.V1Version, never>
+  | Agent.AgentImplementation<Protocol.V1Version, Scope.Scope>
   | Agent.AgentImplementation<Protocol.V2Version, never>
   | AgentWithExtensions;
 
@@ -47,6 +48,8 @@ interface Started {
   readonly received: ReadonlyArray<unknown>;
   /** Every log line, Debug included. */
   readonly logged: ReadonlyArray<Logged>;
+  /** Completes when `Agent.run` returns. */
+  readonly ended: Promise<unknown>;
   readonly stop: () => Promise<unknown>;
 }
 
@@ -74,6 +77,7 @@ function start(implementations: Implementations): Started {
     sent,
     received,
     logged,
+    ended: Effect.runPromise(Fiber.await(fiber)),
     stop: () => Effect.runPromise(Fiber.interrupt(fiber)),
   };
 }
@@ -100,6 +104,7 @@ function raw(agent: Started) {
   return {
     send: (message: unknown) => writer.write(encoder.encode(`${JSON.stringify(message)}\n`)),
     next,
+    end: () => writer.close(),
   };
 }
 
@@ -535,5 +540,67 @@ describe("extension methods", () => {
     expect(result.unknown).toMatchObject({ code: -32601 });
     expect(seen).toEqual(["progress: echoing ready?", "ask: ready?"]);
     expect(pinged).toEqual(["hello"]);
+  });
+});
+
+describe("a connection's lifetime, as its handlers see it", () => {
+  test("AP15 AN15: a handler's response is written before its fiber ends; its log lines name its request; handlers run in the connection's scope; open says whether the client cancelled a request or the connection ended", async () => {
+    const events: Array<string> = [];
+    const prompting = [Deferred.makeUnsafe<void>(), Deferred.makeUnsafe<void>()];
+    let prompts = 0;
+    const agent = start([
+      Agent.implement(Protocol.v1, {
+        capabilities: {},
+        handlers: (connection) =>
+          Effect.gen(function* () {
+            const scope = yield* Scope.Scope;
+            return {
+              "session/new": () =>
+                Effect.gen(function* () {
+                  const annotations = yield* References.CurrentLogAnnotations;
+                  events.push(`request ${JSON.stringify(annotations["request"])}`);
+                  yield* Scope.addFinalizer(scope, Effect.sync(() => events.push("connection scope closed")));
+                  const self = yield* Effect.fiber;
+                  yield* Effect.forkIn(
+                    Fiber.await(self).pipe(
+                      Effect.andThen(
+                        connection.notify(
+                          "session/update",
+                          decode(V1.SessionNotification, { sessionId: "s1", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "after" } } }),
+                        ),
+                      ),
+                      Effect.ignore,
+                    ),
+                    scope,
+                  );
+                  return { sessionId: V1.SessionId.make("s1") };
+                }),
+              "session/prompt": () =>
+                Effect.suspend(() => Deferred.succeed(prompting[prompts++] ?? Deferred.makeUnsafe<void>(), undefined)).pipe(
+                  Effect.andThen(Effect.never),
+                  Effect.onInterrupt(() => Effect.flatMap(connection.open, (open) => Effect.sync(() => events.push(`interrupted, open: ${open}`)))),
+                ),
+            };
+          }),
+      }),
+    ]);
+    const client = raw(agent);
+    await client.send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+    await client.next();
+    await client.send({ jsonrpc: "2.0", id: "new", method: "session/new", params: { cwd: "/tmp", mcpServers: [] } });
+    const first = await client.next();
+    const second = await client.next();
+    await client.send({ jsonrpc: "2.0", id: 3, method: "session/prompt", params: { sessionId: "s1", prompt: [] } });
+    await Effect.runPromise(Deferred.await(prompting[0] ?? Deferred.makeUnsafe<void>()));
+    await client.send({ jsonrpc: "2.0", method: "$/cancel_request", params: { requestId: 3 } });
+    const cancelled = await client.next();
+    await client.send({ jsonrpc: "2.0", id: 4, method: "session/prompt", params: { sessionId: "s1", prompt: [] } });
+    await Effect.runPromise(Deferred.await(prompting[1] ?? Deferred.makeUnsafe<void>()));
+    await client.end();
+    await agent.ended;
+    expect(first).toMatchObject({ id: "new", result: { sessionId: "s1" } });
+    expect(second).toMatchObject({ method: "session/update", params: { update: { content: { text: "after" } } } });
+    expect(cancelled).toMatchObject({ id: 3, error: { code: -32800 } });
+    expect(events).toEqual(['request "new"', "interrupted, open: true", "interrupted, open: false", "connection scope closed"]);
   });
 });

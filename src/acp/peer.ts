@@ -29,7 +29,10 @@
  *   -32603;
  * - a malformed response is answered -32600 under id null, and the pending call whose id it
  *   carries fails with the `JsonRpcError` -32600 "The response to this request is malformed";
- * - a batch's responses are written as one array once every request in it is answered.
+ * - a batch's responses are written as one array once every request in it is answered;
+ * - a request not in a batch is answered from the fiber that ran its handler, before that fiber
+ *   ends: work that waits for that fiber (`Effect.fiber`, then `Fiber.await`) comes after the
+ *   response, as a notification the other end can only read once it has the response must.
  */
 
 import {
@@ -75,6 +78,13 @@ export interface Peer<Call extends Methods.Any, Notify extends Methods.Any> {
   readonly notify: Methods.Notify<Notify>;
   /** Completes when the wire's `read` ends or fails, or the peer's scope closes. */
   readonly closed: Effect.Effect<void>;
+  /**
+   * Whether the connection is open: `false` from when the wire's `read` ends, before pending calls
+   * fail and running handlers are interrupted. A handler interrupted while it is still `true` was
+   * cancelled by the other end (`$/cancel_request`); one interrupted once it is `false`, by the end
+   * of the connection.
+   */
+  readonly open: Effect.Effect<boolean>;
 }
 
 export interface Options<Serve extends Methods.Any, Call extends Methods.Any, Notify extends Methods.Any, R> {
@@ -322,7 +332,7 @@ export const make: <Serve extends Methods.Any, Call extends Methods.Any, Notify 
     );
   };
 
-  const peer: Peer<Call, Notify> = { client, notify, closed: Deferred.await(ended) };
+  const peer: Peer<Call, Notify> = { client, notify, closed: Deferred.await(ended), open: Effect.sync(() => open) };
 
   // Built in the background, as a handler may call the other end, whose answer the reader must read.
   const handlers = yield* options.handlers(peer).pipe(Effect.forkIn(scope));
@@ -397,7 +407,8 @@ export const make: <Serve extends Methods.Any, Call extends Methods.Any, Notify 
               if (!isRequest) return FiberSet.run(background, handle(method, payload)).pipe(Effect.as(none));
               const { id } = message;
               const start = (answer: Answer) => {
-                const handled = handle(method, payload, (exit) => answer(responseOf(id, method, exit)));
+                // Every log line of the handler, and of what it forks, names the request it serves.
+                const handled = handle(method, payload, (exit) => answer(responseOf(id, method, exit))).pipe(Effect.annotateLogs({ request: id }));
                 // A second request under an id still running is served, but cannot be cancelled by id.
                 return (
                   FiberMap.hasUnsafe(running, id) ? FiberSet.run(background, handled) : FiberMap.run(running, id, handled)
