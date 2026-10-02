@@ -6,15 +6,14 @@
  */
 
 import { expect } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, Exit, type FileSystem, Layer, Ref, Schema } from "effect";
 import { BoringModelProvider, boringOpening, WholeSessionAssembler } from "../../tests/support/boring.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { smolCatalog } from "../../tests/support/smol-tools.ts";
-import { test } from "../../tests/support/test.ts";
+import { test, testFolder } from "../../tests/support/test.ts";
 import { Fact } from "../agent-machine/fact.ts";
 import { CallId, InputText, ModelText, StopReason, ToolName } from "../agent-machine/names.ts";
 import { ModelClient, ToolRunner } from "./contracts.ts";
@@ -24,7 +23,8 @@ import { receivedJson, receivedText } from "./received.ts";
 import { ephemeralSessionStore, SessionStore, SessionStoreFailed } from "./session-store.ts";
 import { CountingTurnsInStore, NoTurnEndHooks } from "./turns.ts";
 
-const fileIn = () => join(mkdtempSync(join(tmpdir(), "store-")), "s1.jsonl");
+/** The session's file, in the test's folder. */
+const fileIn = () => join(testFolder(), "s1.jsonl");
 const line = Schema.encodeSync(Schema.fromJsonString(Fact));
 const tagsIn = (facts: ReadonlyArray<Fact>) => facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
 

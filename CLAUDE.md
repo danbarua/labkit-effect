@@ -14,7 +14,7 @@ What is built is in each module's `MODEL.md`; what is not, in `TODO.md`.
 ## Commands
 
 - `bun run check`: typecheck, lint and tests. Run it before committing.
-- Don't pipe `bun test`: redirect its output to a file under `logs/` and read the file.
+- Don't pipe `bun test`: redirect its output to a file under `logs/commands/` and read the file.
 - `bun cli` is a REPL and waits for input. From an agent's shell, use
   `bun --silent cli -p "<prompt>" --model <model>`.
 
@@ -38,6 +38,14 @@ To move to another version, install it, then:
 `git subtree pull --prefix=repos/effect https://github.com/Effect-TS/effect.git "effect@<version>" --squash`
 
 ## Output written to files
+
+`logs/` (not committed) holds what runs write, a folder for each thing that wrote it:
+
+- `logs/tests/<test file>/<test name>/`: a test's log lines (`log.jsonl`) and the files it makes
+  (`testFolder()`), emptied when the test starts.
+- `logs/probes/<probe>/<run>/`: a live probe's transcript, facts and telemetry.
+- `logs/cli/<session>/`: a CLI session's facts (its session store) and log.
+- `logs/commands/`: the output of commands run by hand, such as `bun run check`.
 
 Run commands whose output goes to a file with `FORCE_COLOR=0 NO_COLOR=1`. Claude Code's shell sets
 `FORCE_COLOR`, which overrides `NO_COLOR`, so without both the files under `logs/` fill with

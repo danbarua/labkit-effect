@@ -9,8 +9,9 @@
  *   ANTHROPIC_API_KEY=... OPENAI_API_KEY=... bun scripts/probes/fizzbuzz-switch.ts
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { runFolder } from "./run-folder.ts";
 import { AnthropicClient } from "@effect/ai-anthropic";
 import { OpenAiClient } from "@effect/ai-openai";
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
@@ -61,7 +62,8 @@ const client = Layer.unwrap(
 
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const name = `${stamp}-fizzbuzz-switch`;
-const folder = join("logs/live", `${name}.summaries`);
+const run = runFolder("fizzbuzz-switch", name);
+const folder = join(run, "summaries");
 
 const { facts } = await Effect.runPromise(
   play(countingUser(10), {
@@ -79,7 +81,7 @@ const { facts } = await Effect.runPromise(
       [16, claude],
     ]),
     summaries: SummariesInFolder(folder).pipe(Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))),
-  }).pipe(reportedBy({ _tag: "Test", name: TestName.make("fizzbuzz-switch") }), Effect.provide(TelemetryToFiles(join("logs/live", name)))),
+  }).pipe(reportedBy({ _tag: "Test", name: TestName.make("fizzbuzz-switch") }), Effect.provide(TelemetryToFiles(join(run, "telemetry")))),
 );
 
 const replies = facts.flatMap((fact) => {
@@ -89,9 +91,8 @@ const replies = facts.flatMap((fact) => {
 });
 const expected = countingUser(10).map((n) => String(Number(n) + 1));
 
-mkdirSync("logs/live", { recursive: true });
 writeFileSync(
-  join("logs/live", `${name}.md`),
+  join(run, "transcript.md"),
   transcript(
     "fizzbuzz-switch",
     `One FizzBuzz session switching from Claude Sonnet 5.5 to GPT-5.5 at 8 and back at 16, compacting for the provider being left each time, run by \`bun scripts/probes/fizzbuzz-switch.ts\`. It is a probe, not one of the tests. The facts are in \`${name}.facts.jsonl\` and the summaries in \`${name}.summaries/\`.`,
@@ -99,10 +100,10 @@ writeFileSync(
   ),
 );
 const encodeFact = Schema.encodeSync(Fact);
-writeFileSync(join("logs/live", `${name}.facts.jsonl`), `${facts.map((fact) => JSON.stringify(encodeFact(fact))).join("\n")}\n`);
+writeFileSync(join(run, "facts.jsonl"), `${facts.map((fact) => JSON.stringify(encodeFact(fact))).join("\n")}\n`);
 
 for (const [index, [provider, reply]] of replies.entries())
   if (reply !== expected[index]) console.log(`reply ${index + 1} from ${provider}: ${JSON.stringify(reply)} (expected ${expected[index]})`);
 console.log(`${replies.filter(([, reply], index) => reply === expected[index]).length} of ${expected.length} replies right`);
-console.log(`logs/live/${name}.md`);
-console.log(`logs/live/${name}.spans.jsonl`);
+console.log(join(run, "transcript.md"));
+console.log(join(run, "telemetry.spans.jsonl"));

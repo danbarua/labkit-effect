@@ -3,9 +3,10 @@
  * file; with an OTLP endpoint set, its spans, log lines and tool metrics reach that too.
  */
 
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect } from "bun:test";
-import { test } from "./support/test.ts";
+import { test, testFolder } from "./support/test.ts";
 import { ConfigProvider, Effect, Layer, Metric } from "effect";
 import { ModelName, ProviderName } from "../src/agent-machine/names.ts";
 import { ModelClient, type ProviderRequest } from "../src/agent-session/contracts.ts";
@@ -36,9 +37,7 @@ const readLines = <A>(path: string): ReadonlyArray<A> =>
     .map((line) => JSON.parse(line) as A);
 
 test("the file holds the session's span, each turn's under it, each request's under its turn, and each attempt under its request", async () => {
-  const base = "logs/telemetry-test/spans-tree";
-  rmSync(`${base}.spans.jsonl`, { force: true });
-  rmSync(`${base}.logs.jsonl`, { force: true });
+  const base = join(testFolder(), "telemetry");
   const target = { provider: ProviderName.make("scripted"), model: ModelName.make("fizzbuzz-1") };
   // The scripted model as a provider's request, behind the fallback chain, so each request makes an attempt.
   const client = Layer.unwrap(
@@ -99,9 +98,7 @@ test("with OTEL_EXPORTER_OTLP_ENDPOINT set, the spans go to it and to the file, 
     },
   });
   try {
-    const base = "logs/telemetry-test/otlp";
-    rmSync(`${base}.spans.jsonl`, { force: true });
-    rmSync(`${base}.logs.jsonl`, { force: true });
+    const base = join(testFolder(), "telemetry");
     await runTest(
       play(["1", "3", "7"], { ...advanced, session: "erin", tools: CountedToolRunner(FizzBuzzToolRunner) }).pipe(
         Effect.provide(TelemetryToFiles(base)),

@@ -1,9 +1,10 @@
 /**
  * Live probe: one tool-calling turn through the loop and a real provider's adapter, so a change to
  * what an adapter sends back can be checked against the provider itself. Writes the session's facts
- * to `logs/live/` as a transcript to read (`.md`) and as recorded (`.facts.jsonl`), with its spans
- * (`.spans.jsonl`) and log lines (`.logs.jsonl`) beside them, and prints how the turn ended and the
- * paths of the transcript and the spans.
+ * to the run's folder (`logs/probes/live-turn/<run>/`) as a transcript to read (`transcript.md`) and
+ * as recorded (`facts.jsonl`), with its spans (`telemetry.spans.jsonl`) and log lines
+ * (`telemetry.logs.jsonl`) beside them, and prints how the turn ended and the paths of the
+ * transcript and the spans.
  *
  * Settings follow the model as `name=value` (`thinking`, `observe`, `effort`, `maxOutputTokens`).
  *
@@ -12,8 +13,9 @@
  *   XAI_API_KEY=...       bun scripts/probes/live-turn.ts xai grok-4.7 observe=all
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { runFolder } from "./run-folder.ts";
 import { AnthropicClient } from "@effect/ai-anthropic";
 import { OpenAiClient } from "@effect/ai-openai";
 import { Effect, Layer, Redacted, Schema } from "effect";
@@ -65,6 +67,7 @@ const client =
 const encodeFact = Schema.encodeSync(Fact);
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const name = [stamp, provider, model, ...said].join("-");
+const run = runFolder("live-turn", name);
 
 const facts = await Effect.runPromise(
   Effect.gen(function* () {
@@ -99,24 +102,23 @@ const facts = await Effect.runPromise(
         CountingTurns,
         NoTurnEndHooks,
         SmolToolRunner,
-        TelemetryToFiles(join("logs/live", name)),
+        TelemetryToFiles(join(run, "telemetry")),
       ),
     ),
   ),
 );
 
-mkdirSync("logs/live", { recursive: true });
 writeFileSync(
-  join("logs/live", `${name}.md`),
+  join(run, "transcript.md"),
   transcript(
     ["live-turn", provider, model, ...said].join(" "),
     `One turn with a tool call, run through the loop against ${provider}'s API by \`bun scripts/probes/live-turn.ts ${[provider, model, ...said].join(" ")}\`. It is a probe, not one of the tests. The facts as recorded are beside this file, in \`${name}.facts.jsonl\`.`,
     facts,
   ),
 );
-writeFileSync(join("logs/live", `${name}.facts.jsonl`), `${facts.map((fact) => JSON.stringify(encodeFact(fact))).join("\n")}\n`);
+writeFileSync(join(run, "facts.jsonl"), `${facts.map((fact) => JSON.stringify(encodeFact(fact))).join("\n")}\n`);
 
 const ended = facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? [fact.decision.ending._tag] : []));
 console.log(`turn ended: ${ended.join(", ") || "not ended"}`);
-console.log(`logs/live/${name}.md`);
-console.log(`logs/live/${name}.spans.jsonl`);
+console.log(join(run, "transcript.md"));
+console.log(join(run, "telemetry.spans.jsonl"));

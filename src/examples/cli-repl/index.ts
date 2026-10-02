@@ -14,7 +14,7 @@
  * With `--output-format json` the answer comes with the session's figures; with `stream-json` each
  * fact is printed as it is recorded, then the result.
  *
- * Each session's facts are kept in `logs/sessions/` (`store.ts`); `--continue` goes on from the
+ * Each session's facts and log are kept in `logs/cli/<session>/` (`store.ts`); `--continue` goes on from the
  * one written to last, `--resume <session>` from the one named (with no id, one picked from a list), so `bun run cli:watch --continue` restarts on a change to the code and
  * keeps the conversation.
  *
@@ -165,6 +165,8 @@ export const cli = Command.make(
     // Piped input is read only when no prompt was given: a shell that leaves stdin open would
     // otherwise keep a prompted run waiting for an end of input that never comes.
     const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));
+    // Said before the session opens, so a run with nothing to ask leaves no session behind.
+    if (prompt === "") return yield* invalid("No prompt: pass one, or pipe it in.");
     yield* withSession(config, LogsToStderr, Headless, (session) => printOnce(session, config, prompt, options.outputFormat ?? "text", options.verbose));
   }),
 ).pipe(

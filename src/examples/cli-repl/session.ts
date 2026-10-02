@@ -29,7 +29,7 @@ import { immutableToolCatalogOf, modelOf, openedWith } from "../../agent-session
 import { CountingTurnsInStore, NoTurnEndHooks } from "../../agent-session/turns.ts";
 import { type Asked, Clients, KnownToCli, SettlingForCli } from "./models.ts";
 import { invalid } from "./invalid.ts";
-import { storeFileOf } from "./store.ts";
+import { sessionFolderOf, storeFileOf } from "./store.ts";
 
 export interface Config {
   readonly sessionId: string;
@@ -56,14 +56,14 @@ export interface Config {
 /** Log lines to stderr: for print mode, where stdout holds the answer alone, as a caller parsing it expects. */
 export const LogsToStderr = Logger.layer([Logger.withConsoleError(Logger.formatLogFmt)]);
 
-/** Where a session's log lines go when they go to a file. */
-export const logFileOf = (sessionId: string): string => `logs/cli/${sessionId}.log`;
+/** Where a session's log lines go when they go to a file: beside its facts. */
+export const logFileOf = (sessionId: string): string => `${sessionFolderOf(sessionId)}/cli.log`;
 
 /** Log lines to the session's file: for the REPL, where the terminal holds the conversation alone. */
 export const LogsToFile = (sessionId: string) =>
   Layer.unwrap(
     Effect.gen(function* () {
-      yield* (yield* FileSystem.FileSystem).makeDirectory("logs/cli", { recursive: true });
+      yield* (yield* FileSystem.FileSystem).makeDirectory(sessionFolderOf(sessionId), { recursive: true });
       return Logger.layer([Logger.toFile(Logger.formatLogFmt, logFileOf(sessionId), { batchWindow: "100 millis" })]);
     }),
   ).pipe(Layer.orDie);

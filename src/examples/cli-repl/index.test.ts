@@ -4,13 +4,14 @@
  */
 
 import { expect } from "bun:test";
-import { test } from "../../../tests/support/test.ts";
+import { test, testFolder } from "../../../tests/support/test.ts";
 import { withResumeValue } from "./index.ts";
 import { localCapabilities } from "./models.ts";
 
 const invoke = async (args: ReadonlyArray<string>, env: Record<string, string> = {}) => {
-  const child = Bun.spawn([process.execPath, "src/examples/cli-repl/index.ts", ...args], {
-    cwd: new URL("../../../", import.meta.url).pathname,
+  // Run in the test's folder, where what the CLI writes (its logs, its sessions) is kept.
+  const child = Bun.spawn([process.execPath, new URL("./index.ts", import.meta.url).pathname, ...args], {
+    cwd: testFolder(),
     stdin: new Blob([""]),
     stdout: "pipe",
     stderr: "pipe",

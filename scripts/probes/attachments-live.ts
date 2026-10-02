@@ -15,8 +15,9 @@
  * `localhost` is a local server's Chat Completions endpoint at http://localhost:8000/v1, with no key.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { runFolder } from "./run-folder.ts";
 import { deflateSync } from "node:zlib";
 import { AnthropicClient } from "@effect/ai-anthropic";
 import { OpenAiClient } from "@effect/ai-openai";
@@ -127,8 +128,9 @@ const question = "What colours does the image show, left and right? What is the 
 
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const name = [stamp, "attachments", provider, model.replaceAll("/", "_"), ...(viaTool ? ["tool"] : [])].join("-");
+const run = runFolder("attachments-live", name);
 // The blobs are kept as files beside the transcript.
-const blobFolder = join("logs/live", `${name}.blobs`);
+const blobFolder = join(run, "blobs");
 
 const facts = await Effect.runPromise(
   Effect.gen(function* () {
@@ -183,14 +185,13 @@ const answer = facts.flatMap((fact) =>
     ? fact.observation.parts.flatMap((part) => (part._tag === "Text" ? [part.text] : []))
     : [],
 );
-mkdirSync("logs/live", { recursive: true });
 writeFileSync(
-  join("logs/live", `${name}.md`),
+  join(run, "transcript.md"),
   transcript(`attachments-live ${provider} ${model}`, "One input with an image and a PDF attached, by `bun scripts/probes/attachments-live.ts`.", facts),
 );
 const encodeFact = Schema.encodeSync(Fact);
-writeFileSync(join("logs/live", `${name}.facts.jsonl`), `${facts.map((fact) => JSON.stringify(encodeFact(fact))).join("\n")}\n`);
+writeFileSync(join(run, "facts.jsonl"), `${facts.map((fact) => JSON.stringify(encodeFact(fact))).join("\n")}\n`);
 const reported = facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "ModelResponded" ? [fact.observation.usage?.input] : []));
 console.log(`reported by the response: ${reported[0] ?? "nothing"} input tokens`);
 console.log(`answer: ${answer.join(" ") || "(none)"}`);
-console.log(`logs/live/${name}.md`);
+console.log(join(run, "transcript.md"));

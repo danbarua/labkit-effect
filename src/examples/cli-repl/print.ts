@@ -55,7 +55,6 @@ const printingFacts = (session: Session) =>
 export const printOnce = (session: Session, config: Config, prompt: string, format: OutputFormat, facts: boolean) =>
   Effect.gen(function* () {
     const started = Date.now();
-    if (prompt === "") return yield* invalid("No prompt: pass one, or pipe it in.");
     const printer = facts || format === "stream-json" ? yield* printingFacts(session) : undefined;
     yield* ask(session, prompt);
     if (printer !== undefined) yield* printer.finish;

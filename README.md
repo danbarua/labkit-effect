@@ -22,7 +22,7 @@ The domain core of a coding harness, and the layers around it.
 | `src/agent-context/` | Context assembly: what the model is sent, from system prompts, tool catalogs and a view of the conversation. See its `MODEL.md`. | anything |
 | `src/instrumentation/` | Tool usage counted from facts, as Effect metrics, and OpenTelemetry. See its `README.md`. | anything |
 | `src/examples/` | Examples, not part of the harness: the FizzBuzz session (a scripted model, its tools, a toy compaction) and example policies for the gate. | anything |
-| `scripts/probes/` | Live checks against the providers' APIs. Each reads its key from the environment and writes what it saw to `logs/live/` (not committed). | anything |
+| `scripts/probes/` | Live checks against the providers' APIs. Each reads its key from the environment and writes what it saw to a folder per run, `logs/probes/<probe>/<run>/` (not committed). | anything |
 | `scripts/trajectories/` | Importers that project Claude Code and Codex sessions' records through the core's decisions into `trajectories/` (not committed). | anything |
 
 Each module's `MODEL.md` says what it builds, as rules with ids. A rule has at least one test whose

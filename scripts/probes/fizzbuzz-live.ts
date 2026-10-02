@@ -1,9 +1,9 @@
 /**
  * Live probe: the FizzBuzz scenario against a real model. The counting user sends 1, 3, 5, … up to
  * `count` messages; the model should classify each multiple of 3 or 5 with the `classify` tool and
- * reply with the number plus one. Writes the session's facts to `logs/live/` as a transcript
- * (`.md`) and as recorded (`.facts.jsonl`), with its spans (`.spans.jsonl`) and log lines
- * (`.logs.jsonl`) beside them, and prints each turn the model got wrong, how many it got right, and
+ * reply with the number plus one. Writes the session's facts to the run's folder
+ * (`logs/probes/fizzbuzz-live/<run>/`) as a transcript (`transcript.md`) and as recorded
+ * (`facts.jsonl`), with its spans and log lines (`telemetry.*.jsonl`) beside them, and prints each turn the model got wrong, how many it got right, and
  * the paths of the transcript and the spans.
  *
  * With `compact`, the session is compacted when the count reaches 30, 60 and 90; with `fizzbuzz`,
@@ -23,8 +23,9 @@
  * tokens the responses report as read from the cache, written to it, and neither.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { runFolder } from "./run-folder.ts";
 import { AnthropicClient } from "@effect/ai-anthropic";
 import { OpenAiClient } from "@effect/ai-openai";
 import { Effect, Layer, Redacted, Schema } from "effect";
@@ -85,6 +86,7 @@ const client =
 
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const name = [stamp, "fizzbuzz", provider, model, counted, ...rest].join("-");
+const run = runFolder("fizzbuzz-live", name);
 
 const { facts, summaries } = await Effect.runPromise(
   play(countingUser(count), {
@@ -103,7 +105,7 @@ const { facts, summaries } = await Effect.runPromise(
     model: { target: { provider: ProviderName.make(provider), model: ModelName.make(model), settings }, client },
   }).pipe(
     reportedBy({ _tag: "Test", name: TestName.make(`fizzbuzz-live ${provider} ${model}`) }),
-    Effect.provide(TelemetryToFiles(join("logs/live", name))),
+    Effect.provide(TelemetryToFiles(join(run, "telemetry"))),
   ),
 );
 
@@ -143,9 +145,8 @@ const wrong = [...turns.entries()].flatMap(([turn, { asked, labels, reply }]) =>
     : [`${turn}: asked ${asked}; classified ${labels.join(", ") || "nothing"} (expected ${label ?? "nothing"}); replied ${JSON.stringify(reply ?? null)} (expected ${n + 1})`];
 });
 
-mkdirSync("logs/live", { recursive: true });
 writeFileSync(
-  join("logs/live", `${name}.md`),
+  join(run, "transcript.md"),
   transcript(
     `fizzbuzz-live ${provider} ${model} ${counted}`,
     `The FizzBuzz scenario, ${count} user messages, run through the loop against ${provider}'s API by \`bun scripts/probes/fizzbuzz-live.ts ${provider} ${model} ${counted}\`. It is a probe, not one of the tests. The facts as recorded are beside this file, in \`${name}.facts.jsonl\`.`,
@@ -153,7 +154,7 @@ writeFileSync(
   ),
 );
 const encodeFact = Schema.encodeSync(Fact);
-writeFileSync(join("logs/live", `${name}.facts.jsonl`), `${facts.map((fact) => JSON.stringify(encodeFact(fact))).join("\n")}\n`);
+writeFileSync(join(run, "facts.jsonl"), `${facts.map((fact) => JSON.stringify(encodeFact(fact))).join("\n")}\n`);
 
 /** The input tokens each response reports, summed: read from the cache, written to it, and neither. */
 const usage = { cacheRead: 0, cacheWritten: 0, uncached: 0 };
@@ -184,5 +185,5 @@ for (const line of wrong) console.log(line);
 console.log(`input tokens: ${JSON.stringify(usage)}`);
 console.log(`context gauge: ${JSON.stringify(contextGauge(facts, provider, model) ?? null)}`);
 console.log(`${turns.size - wrong.length} of ${turns.size} turns right`);
-console.log(`logs/live/${name}.md`);
-console.log(`logs/live/${name}.spans.jsonl`);
+console.log(join(run, "transcript.md"));
+console.log(join(run, "telemetry.spans.jsonl"));
