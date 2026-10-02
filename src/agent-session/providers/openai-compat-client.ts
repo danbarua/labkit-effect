@@ -6,14 +6,17 @@
  * Out: the system text is a `system` message; the context's messages become chat messages: text
  * as `text` content parts, the model's tool calls as an assistant message's `tool_calls`, each tool
  * outcome as a `tool` message carrying the text the model is sent. The catalog is sent as
- * `function` tools. An earlier response's other fields (`reasoning_content`, ...) are not sent back
- * yet; each one left out is logged. Of the session's settings the reasoning effort is sent, as
+ * `function` tools. What an earlier response from this provider held besides its text and calls
+ * goes back as it came: its other fields (`reasoning_content`, ...) on its message, and a call's
+ * other fields on the call; another provider's are left out, and logged. Of the session's settings
+ * the reasoning effort is sent, as
  * `reasoning_effort` (`openai-compat-settings.ts`); each other one asked for is recorded as adjusted.
  *
  * In: the response streams, and its chunks build the first choice's message (`respondOnce`). The
  * message becomes the observation's parts in order: its thinking (`reasoning_content`, `reasoning`)
  * is `Thinking`, its `content` is `Text`, each of its `tool_calls` is `ToolCall` (whatever the
- * tool's name), its arguments kept as the text received; any other field of the message
+ * tool's name), its arguments kept as the text received, and a call's other fields (Gemini's
+ * `extra_content`) are `Unrecognised` holding the call; any other field of the message
  * (`refusal`, ...) is `Unrecognised`, holding that field. As the chunks arrive, the text each adds
  * to the thinking and to the answer is passed on. The stop is the choice's `finish_reason`; the usage is the last chunk's; everything
  * else the chunks held is `metadata`. A request that fails, after retries, is observed as
@@ -44,6 +47,7 @@ import {
   type LeftOutLogged,
   logSupplied,
   renderToolResult,
+  sentBack,
   type Shaped,
   numberAt,
   toolInputObject,
@@ -77,11 +81,6 @@ function chatMessages(
   context: ModelContext,
   files: ReadonlyMap<BlobId, Uint8Array>,
 ): Shaped {
-  const notSent = message.parts.flatMap((part) =>
-    part._tag === "Thinking" || part._tag === "Unrecognised"
-      ? leftOut(part, "this adapter does not send an earlier response's other fields back").supplied
-      : [],
-  );
   // A file goes in the message's content: an image as `image_url` with a data URL; anything else as its pointer.
   const filed = message.parts.flatMap((part) =>
     part._tag === "File" ? [fileAs(part.blob, files, (mediaType) => mediaType.startsWith("image/") && takesFile(knownOf(target), mediaType))] : [],
@@ -104,28 +103,60 @@ function chatMessages(
         ]
       : [],
   );
+  const kept = keptFields(
+    message,
+    target,
+    toolCalls.map((call) => ({ id: call.call, type: "function", function: { name: call.tool, arguments: JSON.stringify(call.input.json) } })),
+  );
   const own =
-    text.length === 0 && toolCalls.length === 0
+    text.length === 0 && kept.calls.length === 0 && Object.keys(kept.fields).length === 0
       ? []
       : [
           {
             role: role(message),
             content: text.length === 0 ? null : text,
-            ...(toolCalls.length === 0
-              ? {}
-              : {
-                  tool_calls: toolCalls.map((call) => ({
-                    id: call.call,
-                    type: "function",
-                    function: { name: call.tool, arguments: JSON.stringify(call.input.json) },
-                  })),
-                }),
+            ...kept.fields,
+            ...(kept.calls.length === 0 ? {} : { tool_calls: kept.calls }),
           },
         ];
   return {
     json: [...results, ...own],
-    supplied: [...toolCalls.flatMap((call) => call.input.supplied), ...notSent, ...filed.flatMap((file) => (file._tag === "Text" ? file.supplied : []))],
+    supplied: [...toolCalls.flatMap((call) => call.input.supplied), ...kept.supplied, ...filed.flatMap((file) => (file._tag === "Text" ? file.supplied : []))],
   };
+}
+
+/**
+ * What an earlier response held besides its text and its calls, put back as it came
+ * (`sentBack`): each of the message's other fields (`reasoning_content`, ...), and each call's
+ * other fields (Gemini's `extra_content`) on the call with its id.
+ */
+function keptFields(
+  message: ContextMessage,
+  target: Target,
+  calls: ReadonlyArray<Readonly<Record<string, Json>>>,
+): { readonly fields: Readonly<Record<string, Json>>; readonly calls: ReadonlyArray<Readonly<Record<string, Json>>>; readonly supplied: Shaped["supplied"] } {
+  const fields: Record<string, Json> = {};
+  const extras = new Map<string, Readonly<Record<string, Json>>>();
+  const supplied = message.parts.flatMap((part) => {
+    if (part._tag !== "Thinking" && part._tag !== "Unrecognised") return [];
+    const back = sentBack(part, target);
+    const [piece] = back.json as ReadonlyArray<Json>;
+    if (piece === undefined) return back.supplied;
+    if (!isObject(piece)) return leftOut(part, "it is not a message's fields").supplied;
+    return Object.entries(piece).flatMap(([field, value]) => {
+      if (field !== "tool_calls" || !Array.isArray(value)) {
+        fields[field] = value as Json;
+        return [];
+      }
+      return (value as ReadonlyArray<Json>).flatMap((call) => {
+        const id = isObject(call) ? call["id"] : undefined;
+        if (typeof id !== "string" || !calls.some((own) => own["id"] === id)) return leftOut(part, "its call is not in the message").supplied;
+        extras.set(id, call as Readonly<Record<string, Json>>);
+        return [];
+      });
+    });
+  });
+  return { fields, calls: calls.map((own) => ({ ...extras.get(own["id"] as string), ...own })), supplied };
 }
 
 function body(target: Target, context: ModelContext, files: ReadonlyMap<BlobId, Uint8Array> = new Map()): Shaped {
@@ -151,18 +182,23 @@ function body(target: Target, context: ModelContext, files: ReadonlyMap<BlobId, 
   };
 }
 
-function toolCall(call: Json): ModelPart {
+/**
+ * The parts one tool call becomes: `ToolCall`, and when the call holds other fields than its `id`,
+ * `type` and `function` (Gemini's `extra_content`), `Unrecognised` holding the call as received, so
+ * that they go back with it. A call with no id or name is `Unrecognised`.
+ */
+function callParts(call: Json): ReadonlyArray<ModelPart> {
+  const received: ModelPart = { _tag: "Unrecognised", received: receivedJson({ tool_calls: [call] }) };
   if (isObject(call) && typeof call["id"] === "string" && isObject(call["function"] ?? null)) {
-    const fn = call["function"] as { readonly name?: Json; readonly arguments?: Json };
-    if (typeof fn.name === "string" && typeof fn.arguments === "string")
-      return {
-        _tag: "ToolCall",
-        call: CallId.make(call["id"]),
-        tool: ToolName.make(fn.name),
-        input: receivedJsonText(fn.arguments),
-      };
+    const { id, type: _type, function: fn, ...other } = call;
+    const { name, arguments: args } = fn as { readonly name?: Json; readonly arguments?: Json };
+    if (typeof name === "string" && typeof args === "string")
+      return [
+        { _tag: "ToolCall", call: CallId.make(id as string), tool: ToolName.make(name), input: receivedJsonText(args) },
+        ...(Object.keys(other).length === 0 ? [] : [received]),
+      ];
   }
-  return { _tag: "Unrecognised", received: receivedJson(call) };
+  return [received];
 }
 
 /** The message fields in which Chat Completions servers return readable thinking. */
@@ -172,10 +208,16 @@ const thinkingFields: ReadonlyArray<string> = ["reasoning_content", "reasoning"]
  * The parts the choice's message becomes: its thinking (a text field in `thinkingFields`) as
  * `Thinking`, holding the field as received; its `content` as `Text`; any other field as
  * `Unrecognised`, unless it holds nothing (`null`, or an empty array: OpenAI sends `refusal: null`
- * and `annotations: []` with every message); its tool calls.
+ * and `annotations: []` with every message); its tool calls (`callParts`).
  */
 function parts(message: Schema.JsonObject): ReadonlyArray<ModelPart> {
-  const { role: _role, content, tool_calls, ...rest } = message;
+  const { tool_calls } = message;
+  return [...fieldParts(message), ...(Array.isArray(tool_calls) ? (tool_calls as ReadonlyArray<Json>).flatMap(callParts) : [])];
+}
+
+/** The parts the message's fields other than its tool calls become. */
+function fieldParts(message: Schema.JsonObject): ReadonlyArray<ModelPart> {
+  const { role: _role, content, tool_calls: _calls, ...rest } = message;
   const filled = Object.entries(rest).filter(([, value]) => value !== null && value !== undefined && !(Array.isArray(value) && value.length === 0));
   const thinks = ([field, value]: readonly [string, Json | undefined]) => thinkingFields.includes(field) && typeof value === "string";
   return [
@@ -186,7 +228,6 @@ function parts(message: Schema.JsonObject): ReadonlyArray<ModelPart> {
     ...filled
       .filter((entry) => !thinks(entry))
       .map(([field, value]): ModelPart => ({ _tag: "Unrecognised", received: receivedJson({ [field]: value as Json }) })),
-    ...(Array.isArray(tool_calls) ? (tool_calls as ReadonlyArray<Json>).map(toolCall) : []),
   ];
 }
 
@@ -260,10 +301,10 @@ function added(building: Building, delta: Schema.JsonObject): ReadonlyArray<numb
 
 /** A tool call as the message holds it, from what its deltas built. */
 const callOf = (call: { id?: string; name?: string; arguments: string; rest: Record<string, Json> }): Json => ({
-  ...call.rest,
   id: call.id ?? null,
   type: "function",
   function: { name: call.name ?? null, arguments: call.arguments },
+  ...call.rest,
 });
 
 /** The message the deltas built. */
@@ -313,7 +354,7 @@ const respondOnce = (
             for (const [at, call] of building.calls)
               if (at < later && !passed.has(at)) {
                 passed.add(at);
-                yield* passOn({ _tag: "Part", part: toolCall(callOf(call)) });
+                yield* Effect.forEach(callParts(callOf(call)), (part) => passOn({ _tag: "Part", part }), { discard: true });
               }
             const finish = choice !== undefined && isObject(choice) && choice["finish_reason"] !== null && choice["finish_reason"] !== undefined ? choice["finish_reason"] : so.finish;
             return { finish, usage: usage !== null && usage !== undefined ? usage : so.usage, metadata: { ...so.metadata, ...(metadata as Record<string, Json>) } };
@@ -321,9 +362,11 @@ const respondOnce = (
       ),
     );
     if (end.finish === undefined) return yield* invalidOutput(caller, `The stream ended with no finish_reason: ${JSON.stringify(messageOf(building))}`);
-    const responded = parts(messageOf(building));
+    const message = messageOf(building);
+    const responded = parts(message);
+    const unpassed = [...building.calls].filter(([at]) => !passed.has(at)).sort(([a], [b]) => a - b);
     yield* Effect.forEach(
-      responded.filter((part) => part._tag !== "ToolCall" || ![...building.calls].some(([at, call]) => passed.has(at) && call.id === part.call)),
+      [...fieldParts(message), ...unpassed.flatMap(([, call]) => callParts(callOf(call)))],
       (part) => passOn({ _tag: "Part", part }),
       { discard: true },
     );

@@ -116,6 +116,45 @@ test("the choice's message becomes parts: thinking, content, calls to any tool n
   expect(ended as unknown).toMatchObject({ observation: { call: "call_9", outcome: { _tag: "Failed", reason: { _tag: "NotFound" } } } });
 });
 
+test("what a response held besides its text and calls goes back to its provider as it came: the message's fields, and a call's", async () => {
+  const signed = { google: { thought_signature: "c2ln" } };
+  const { provider, facts } = await turn([
+    choice(
+      {
+        role: "assistant",
+        content: null,
+        reasoning_content: "Add them.",
+        refusal: "none of it",
+        tool_calls: [{ id: "call_1", type: "function", function: { name: "add", arguments: '{"a":2,"b":3}' }, extra_content: signed }],
+      },
+      "tool_calls",
+    ),
+    answers,
+  ]);
+  const responded = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded");
+  expect(responded as unknown).toMatchObject({
+    observation: {
+      parts: [
+        { _tag: "Thinking", text: "Add them." },
+        { _tag: "Unrecognised", received: json({ refusal: "none of it" }) },
+        { _tag: "ToolCall", call: "call_1", tool: "add" },
+        {
+          _tag: "Unrecognised",
+          received: json({ tool_calls: [{ id: "call_1", type: "function", function: { name: "add", arguments: '{"a":2,"b":3}' }, extra_content: signed }] }),
+        },
+      ],
+    },
+  });
+  const second = provider.bodies[1] as { readonly messages: ReadonlyArray<unknown> };
+  expect(second.messages[1]).toEqual({
+    role: "assistant",
+    content: null,
+    reasoning_content: "Add them.",
+    refusal: "none of it",
+    tool_calls: [{ id: "call_1", type: "function", function: { name: "add", arguments: '{"a":2,"b":3}' }, extra_content: signed }],
+  });
+});
+
 test("the response streams: its usage comes in the last chunk, and a tool call is run once its response has it", async () => {
   const { facts } = await turn([{ ...callsAdd, usage: { prompt_tokens: 40, completion_tokens: 12, completion_tokens_details: { reasoning_tokens: 5 } } }, answers]);
   const observed = facts.flatMap((fact) => (fact._tag === "Observed" ? [fact.observation] : []));

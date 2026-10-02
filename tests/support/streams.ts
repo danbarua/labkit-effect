@@ -96,9 +96,11 @@ export function chatStream(whole: unknown): Response {
     else if (value !== null && value !== undefined) chunks.push(chunk({ [field]: value }));
   }
   ((tool_calls ?? []) as ReadonlyArray<Json>).forEach((call, index) => {
-    const fn = (call["function"] ?? {}) as Json;
+    const { function: given, id, type: _type, ...other } = call;
+    const fn = (given ?? {}) as Json;
     const [first = "", second = ""] = halves(typeof fn["arguments"] === "string" ? fn["arguments"] : "");
-    chunks.push(chunk({ tool_calls: [{ index, id: call["id"], type: "function", function: { name: fn["name"], arguments: first } }] }));
+    // A call's other fields (Gemini's `extra_content`) come with its first delta.
+    chunks.push(chunk({ tool_calls: [{ index, id, type: "function", function: { name: fn["name"], arguments: first }, ...other }] }));
     chunks.push(chunk({ tool_calls: [{ index, function: { arguments: second } }] }));
   });
   chunks.push(chunk({}, choice["finish_reason"] ?? "stop"));

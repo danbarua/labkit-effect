@@ -130,10 +130,20 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       `reasoning_effort` (Qwen3.5-9B takes `none` to `xhigh` and refuses `max`); tool calls, both
       ways (Qwen called `read_file` and `write_file` through the CLI); streaming, with the usage in
       the last chunk and a tool call passed on once the next begins (a server that answers whole
-      is read as one chunk); the output limit, as `max_tokens`. To do: what the genre of Chat
-      Completions-compatible back-ends requires of a client, beyond this server: reasoning sent
-      back (this server ignores `reasoning_content` and `reasoning`, and counts only `<think>` in
-      `content`), the output limit's name, per-provider differences.
+      is read as one chunk); the output limit, as `max_tokens`, when one is set; what a response
+      held besides its text and calls goes back to the provider that produced it as it came: the
+      message's other fields (`reasoning_content`, `reasoning`, ...) and a call's (Gemini's
+      `extra_content`). To do, from the back-ends' documentation and source:
+      - Mistral: `content` as a list of chunks (thinking, with a `signature`, and text), which
+        changes shape during a stream; a tool call's `arguments` as a JSON object; no
+        `stream_options` (its schema refuses fields it does not define).
+      - llama.cpp: a streamed tool call's name, sent whole again each time it grows.
+      - `finish_reason` values not classified: `model_length` and `error` (Mistral), `end_turn`
+        (xAI), `error` (OpenRouter).
+      - Groq: a stream's error in `x_groq.error`, its usage in `x_groq.usage`. SGLang: reasoning
+        tokens at the top of `usage`. DeepSeek: `prompt_cache_hit_tokens`.
+      - The output limit's name: OpenAI takes `max_completion_tokens` (it refuses `max_tokens`
+        for its o-series models); Mistral takes only `max_tokens`.
 - [ ] Models. Built: the well-known models as generated `const` data (`bun run models:refresh`:
       models.dev's catalog merged with `well-known-models.measured.json`); a settings type per
       well-known model (`SettingsFor`); the values to offer for each setting of a model as it is
