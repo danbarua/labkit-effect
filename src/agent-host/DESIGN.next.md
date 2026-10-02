@@ -141,29 +141,28 @@ with its `LABKIT_ACP_LOG_DIR`, `_LEVEL`, `_MAX_BYTES` and `_BACKUPS`): bounded, 
 redacted by field and no error dropped. Each record carries the connection, request, session, turn
 and call ids that apply. The file logger is in `agent-host`, and the ACP launcher sets it up.
 
-## What the ACP host needs of the core
+## What the ACP host still needs of the core
 
 | Need | Built by | Where |
 |---|---|---|
-| `Session.prompt`, `cancel`, `turn` | labkit-agent | `agent-session/loop.ts` |
-| Pure `optionsFor` | labkit-agent | `agent-session/configuration/options.ts` |
 | Text and thinking as they arrive, the same for every adapter | labkit-effect | `TODO.md`, Providers |
-| Chat Completions: streaming, `max_tokens` as `length`, `reasoning_content` | labkit-effect | `TODO.md`, Providers |
 | The call, given to `ToolRunner.run` | open | when the editor's tools are built |
 
 ## Order
 
-1. In parallel, each in its own worktree: `optionsFor`; the host services lifted out of the CLI;
-   `Session.prompt`, `cancel` and `turn`; the projection.
-2. The draft, and the CLI opening its session at the first input; the session directory with the
-   host's record; the options as ACP's `configOptions`.
-3. The ACP host over stdio, against v1: `initialize`, `session/new`, `session/set_config_option`,
+Built: `optionsFor`; `Session.prompt`, `cancel` and `turn`; the host services lifted out of the CLI;
+the projection; the draft; ACP's config options, permission request, stop reason and
+`usage_update`; the Markdown export. Chat Completions streams and sends `max_tokens`.
+
+1. The CLI opens its session at its first input, from a draft, and has `/export`: the place to try
+   turn zero. The session directory with the host's record.
+2. The ACP host over stdio, against v1: `initialize`, `session/new`, `session/set_config_option`,
    `session/prompt`, `session/cancel`, `session/request_permission`, `usage_update`, `/export`, the
    launcher's logs. Acceptance: the SDK's client in tests with VidaiMock and the scenario of
    `TODO.md`; then VS Code.
-4. `session/load`, `resume`, `list`, `close`, `fork`; the editor's files and terminal; MCP;
+3. `session/load`, `resume`, `list`, `close`, `fork`; the editor's files and terminal; MCP;
    attachments; Streamable HTTP with a token and one holder for a session; elicitation; JetBrains.
-5. labkit's `app-acp` as a consumer.
+4. labkit's `app-acp` as a consumer.
 
 ## Open
 

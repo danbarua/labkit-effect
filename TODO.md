@@ -37,21 +37,26 @@ model.
       change is `ModelChangeArrived` from `User { via: acp }`, taken between turns (M1–M3); the
       log's configuration versions are our host's numbering (labkit-agent), ours to change, as
       `Seq` is the session's.
+      Built: ACP's config options, and `session/set_config_option` as the change it asks
+      (`src/agent-acp/config-options.ts`). To do: the handlers.
 - [ ] Tool permission. Built: each tool call goes through `ToolCallPolicy` in the loop; the
       permission modes (`default`, `acceptEdits`, `dontAsk`, `bypassPermissions`) by each tool's
       kind; what is asked and answered recorded (`PermissionAsked`, `PermissionAnswered`); allow
-      for the session read from the facts; the CLI's `--permission-mode` and its REPL question. To
-      do: the ACP host's `session/request_permission`; `plan` and `auto`; allow and deny rules by
-      tool and argument; resetting permissions.
+      for the session read from the facts; the CLI's `--permission-mode` and its REPL question;
+      for ACP, the `session/request_permission` request and its answer, where the client's
+      cancelled outcome is a refusal (`src/agent-acp/permission.ts`). To do: the handler that
+      asks; `plan` and `auto`; allow and deny rules by tool and argument; resetting permissions.
 - [ ] Accounting for ACP. Built: a provider-neutral `usage` on each response; `contextGauge` (used,
       size, cost) and `requestsIn` (a turn's model requests) read from the facts (`accounting.ts`);
-      prices with the well-known models; `maxTurnRequests` as an example host policy. To do in the host: send
-      `usage_update` after `session/new` or `session/load`, after a prompt, and when the numbers
-      change; answer a vetoed request with `max_turn_requests`, a cut-short response with
-      `max_tokens`; refuse the next prompt with an error at a session-level turn limit (ACP has no
-      stop reason for it). Open: after a compaction `used` is the last response's until the next one
-      reports (an estimate would come from the next-request size estimate); a summarizer's own
-      requests are not counted in `cost`. `PromptResponse.usage` is a draft; not built.
+      prices with the well-known models; `maxTurnRequests` as an example host policy; for ACP,
+      `usage_update` as a value (`src/agent-acp/usage.ts`) and a turn's stop reason, where a vetoed
+      request is `max_turn_requests` and a cut-short response `max_tokens`
+      (`src/agent-acp/stop-reason.ts`). To do in the host: send `usage_update` after `session/new`
+      or `session/load`, after a prompt, and when the numbers change; refuse the next prompt with
+      an error at a session-level turn limit (ACP has no stop reason for it). Open: after a
+      compaction `used` is the last response's until the next one reports (an estimate would come
+      from the next-request size estimate); a summarizer's own requests are not counted in `cost`.
+      `PromptResponse.usage` is a draft; not built.
 - [ ] Attachments. Built: input carries files by reference (`InputArrived.attachments`); a tool's
       output that arrives as bytes is kept in the blob store and recorded by reference (`Received`
       body `Stored`); bytes in the blob store (`Blobs`: in memory by default, or a folder); each
@@ -62,7 +67,9 @@ model.
       the counts before sending matched what the responses reported. Left: the host's intake of ACP
       prompt content as typed parts; the client half (sending, drawing, resolving `blob://`),
       labkit-web's.
-- [ ] Slash commands the host handles itself (`/export`), which are not input to the model.
+- [ ] Slash commands the host handles itself (`/export`), which are not input to the model. Built:
+      the transcript, `markdownOf(facts)` (`src/agent-host/export.ts`). To do: the command in each
+      host, and where it writes the file.
 - [ ] The host's services, shared by the CLI and the ACP host (`src/agent-host`). Built: the model
       catalog, the provider clients, the services a session runs with, the permission policy for a
       mode, the folder sessions are kept in, log lines to a file or to stderr (its `MODEL.md`). To
@@ -70,10 +77,11 @@ model.
       ACP launcher's log file (JSONL, rotated, secrets redacted); a hand-written `models.yml` as one
       more source of the catalog.
 - [ ] Turn zero. Built: `optionsFor`, the options of a model and its settings with no session behind
-      them, with the value the model will get where the adapter adjusts a setting. To do: a draft
-      holds the model, its settings, the system prompt and the tools until the first input; the
-      session, and its facts, begin when the host opens it with them and gives it the input. The CLI
-      opens its session at its first input, as the place to try it.
+      them, with the value the model will get where the adapter adjusts a setting; the draft a
+      session is until the first input (`src/agent-host/draft.ts`: the model, its settings as said,
+      the system prompt and the tools; its options; the opening). To do: the CLI opens its session
+      at its first input with it, as the place to try it; the ACP host's `session/new` and first
+      prompt.
 - [ ] `session/new`: a session opened with its store and its opening.
 - [ ] `session/update`. Built: the projection of a session's facts and deltas to the client's updates,
       one function for the live view and for `session/load` (`src/agent-acp/projection.ts`). To do:
