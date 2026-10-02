@@ -41,8 +41,7 @@ model.
       log's configuration versions are our host's numbering (labkit-agent), ours to change, as
       `Seq` is the session's.
       Built: ACP's config options, and `session/set_config_option` as the change it asks, served by
-      the ACP host for a draft and for an open session. To do: the CLI configures a draft before its
-      first input.
+      the ACP host for a draft and for an open session.
 - [ ] Tool permission. Built: each tool call goes through `ToolCallPolicy` in the loop; the
       permission modes (`default`, `acceptEdits`, `dontAsk`, `bypassPermissions`) by each tool's
       kind; what is asked and answered recorded (`PermissionAsked`, `PermissionAnswered`); allow
@@ -71,30 +70,22 @@ model.
       the counts before sending matched what the responses reported. Left: the host's intake of ACP
       prompt content as typed parts; the client half (sending, drawing, resolving `blob://`),
       labkit-web's.
-- [ ] Slash commands the host handles itself (`/export`), which are not input to the model. Built:
-      the transcript, `markdownOf(facts)` (`src/agent-host/export.ts`), and the ACP host's
-      `/export`, which writes it to `<working folder>/.labkit/exports/<session>.md`. To do: the
-      CLI's.
 - [ ] The host's services, shared by the CLI and the ACP host (`src/agent-host`). Built: the model
       catalog, the provider clients, the services a session runs with, the permission policy for a
       mode, the folder sessions are kept in, log lines to a file or to stderr, the ACP launcher's
-      log file (JSONL, rotated, secrets redacted; `bun run acp:logs`) (its `MODEL.md`). To do: the
-      host's own record of a session in its folder (its title, its working folder); a hand-written
-      `models.yml` as one more source of the catalog.
-- [ ] Turn zero. Built: `optionsFor`, the options of a model and its settings with no session behind
-      them, with the value the model will get where the adapter adjusts a setting; the draft a
-      session is until the first input (`src/agent-host/draft.ts`: the model, its settings as said,
-      the system prompt and the tools; its options; the opening), which the ACP host holds from
-      `session/new` and opens at the first prompt. To do: the CLI opens its session at its first
-      input with it, as the place to try it.
+      log file (JSONL, rotated, secrets redacted; `bun run acp:logs`) (its `MODEL.md`). To do: a
+      hand-written `models.yml` as one more source of the catalog.
 - [ ] `session/update`. Built: the projection of a session's facts and of the core's captured items
       (`ModelDelta`, `ModelPartArrived`, `ModelResponseEnded`), merged in any order, to the client's
       updates, one function for the live view and for `session/load` (`src/agent-acp/projection.ts`),
       which the ACP host's feed sends: text and thinking as they arrive, tool calls and how they
-      end. To do: the plan; `session/load` sends the projection of the stored facts (`streamed`
-      subscribed before the facts are read).
-- [ ] `session/load`, `resume`, `list` and `fork` for ACP, and the host's own record of a session
-      they need (a working folder to list by, a title). `session/close` is built.
+      end. To do: the plan; text of only whitespace (`"\n\n"` before a tool call) shows as a
+      blank message.
+- [ ] `session/load`, `resume`, `list` and `fork` for ACP. Built: `session/close`; the host keeps
+      each session's facts in a file (`FileBackedSessionStore`, `~/.labkit/sessions`). To do: the
+      host's own record of a session next to its facts (its working folder, to list by; its
+      title); `session/load` sends the projection of the stored facts (`streamed` subscribed before
+      the facts are read).
 - [ ] The ACP host in an editor: the launch command, and VS Code's behaviour with what it sends and
       draws (config options as selects, thinking, permission, tool call content). Then JetBrains.
 - [ ] Incomplete responses. Built: `RetryIncomplete(retries)` (`src/agent-host/incomplete.ts`), a
@@ -102,7 +93,7 @@ model.
       answer (some local models put the whole answer in their reasoning: Qwen3.5-9B with an effort
       set did, after a tool result); the ACP host runs with it. The loop asks the hooks at its
       bound too, and records `TurnHoldsExhausted` and warns only when they would hold the turn
-      again. To do: the CLI too; `retries` as a host setting.
+      again. To do: `retries` as a host setting.
 - [ ] The editor's files and terminal as tools. Built: `read_file` and `write_file` through
       `fs/read_text_file` and `fs/write_text_file`, each offered only when the client advertises it
       (`editorWorld`, `src/agent-acp/world.ts`); the local disk (`LABKIT_ACP_LOCAL_TOOLS=1`) is a
@@ -120,8 +111,9 @@ model.
 
 - [ ] Tools for coding, in the CLI's own: an edit that changes part of a file, a shell (tests,
       git), search (grep, glob). The CLI has `read_file`, `list_dir` and `write_file`.
-- [ ] The REPL shows text and thinking as they arrive (`session.streamed`), not the answer when
-      the turn ends.
+- [ ] The CLI does what the ACP host does: opens its session from a draft at the first input
+      (`src/agent-host/draft.ts`, turn zero); `/export` (`markdownOf`); `RetryIncomplete`; text and
+      thinking shown as they arrive (`session.streamed`), not the answer when the turn ends.
 - [ ] The system prompt belongs in context assembly, as configuration; it is to be designed and
       tried. A hard-coded one ("You are a helpful assistant") will do until the host's question
       of where a user's things live has an answer.
@@ -158,7 +150,7 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       `FileBackedSessionStore`); each fact written before anything is done on it; a failed write
       stops the session; a turn left running goes on (`goOn`: a model request made again, only
       `safe` tool calls run) or ends, as the host chooses (the REPL asks; `-p` goes on); Ctrl+C records
-      the turn as interrupted. To do: a store for ACP hosts (`session/load`).
+      the turn as interrupted; the ACP host keeps its sessions in files too.
 - [ ] Forks as sessions, and the turn pointer (`session/turn`; turn zero of a root points at
       itself). A fact is addressed by its session and its position. In the CLI,
       `--fork-session` (commented out): go on from an earlier turn of a session, as a new one, to
