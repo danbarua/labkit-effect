@@ -28,11 +28,38 @@ imports nothing of the core.
 | `ToolEnded` | `tool_call_update`, `completed` (`Succeeded`) or `failed`, with the presentation's content and locations, and its title and kind where they differ from the announcement |
 | anything else | nothing |
 
+- `config-options.ts`: a configuration (`optionsFor`, `optionsOf`) as ACP's config options, and a
+  `session/set_config_option` as the change it asks. `configOptions(options, models, limit)` gives
+  the selects; `models` are the catalog's (`askable`), `limit` the model's output limit (none known:
+  every preset). `changeOf(configId, value, options, models, limit)` gives a `Change` (what
+  `ModelChangeArrived` carries, which a draft takes too) or an `InvalidChange` saying why, which the
+  host answers with -32602.
+
+| id | category | values |
+|---|---|---|
+| `model` | `model` | `provider/model` of each model offered, and of the one asked now |
+| `effort` | `thought_level` | the efforts the model takes |
+| `thinking` | `model_config` | the thinking modes the model takes |
+| `observe` | `model_config` | how much thinking the model returns, of those it takes |
+| `cache` | `model_config` | the cache lifetimes the model takes |
+| `max_output_tokens` | `model_config` | 4096, 8192, 16384, 32768, 65536, 128000 up to the model's limit; the limit; the value in force |
+
+Each setting's option offers `not_sent` while nothing is sent for it (it is unsaid, or the adapter
+sends nothing for what was said).
+
+- `permission.ts`: `requestOf(sessionId, call, question, presented)` is the
+  `session/request_permission` for a `PermissionAsked`; `answerOf(response, question)` is the
+  answer `PermissionAnswered` records (`answerPicking`), or an `InvalidAnswer`.
+- `stop-reason.ts`: `stopOf(facts, turn)`, the answer to the `session/prompt` that began `turn`: a
+  `stopReason`, or a JSON-RPC error; none before the turn ends.
+- `usage.ts`: `usageUpdate(facts)`, the `usage_update` of the session (`contextGauge`), with what
+  `KnownModels` knows of the model it asks now.
+
 ## What is not built
 
 - The handlers, the launcher and the stdio and HTTP hosts.
-- The host's own updates: `usage_update`, `session_info_update`, `available_commands_update`,
-  `config_option_update`, `current_mode_update`, `plan`; and `session/request_permission`.
+- The host's own updates but for `usage_update` and the config options: `session_info_update`,
+  `available_commands_update`, `current_mode_update`, `plan`.
 - An input's attachments on load, and `messageId` on chunks.
 - What a reopened session shows as a tool call's content (the default shows its output as text).
 
@@ -61,3 +88,32 @@ imports nothing of the core.
   made whole, and the text of a part it does not hold, sent while it streamed, is not taken back.
 - PJ8. Projecting the stored facts gives the state to go on from live: what was shown on load is not
   shown again.
+- AA1. The config options are `model`, then one select for each setting the options offer, with
+  the ids and categories of the table; a setting not offered has none. Every option's current value
+  is among its values: the model asked now is offered even when the catalog does not list it.
+- AA2. A setting's current value is what the model will get (the option's `now`): an effort beyond
+  the model's highest shows the nearest it takes, which is offered; the effort said is not. Where
+  nothing is sent for a setting, its value is `not_sent`, offered only then.
+- AA3. The output limit offers the presets up to the model's limit, the limit, and the value in
+  force even beyond the limit, least first.
+- AA4. `changeOf` is the inverse of `configOptions`: each value offered, taken as a change, gives a
+  configuration whose option has that value now. A change names only what was chosen, the model or
+  the one setting (a change keeps the settings it does not name); `not_sent` while current changes
+  nothing. A model value is `provider/model` split at its first slash, so a model's name keeps its
+  own slashes.
+- AA5. A value the option does not offer, or an id no option has, is an `InvalidChange` saying why.
+- AA6. A permission request is the call as the host presents it, `pending`, with its input as
+  `rawInput` and, where the presentation has none, the question's kind; its options are exactly the
+  question's, by id, name and kind.
+- AA7. A selected option is the answer that picks it. A `cancelled` response is the question's
+  reject-once option: the call is refused, nothing is remembered for the session, and the turn goes
+  on. An option the question did not offer, or a cancel where no option rejects once, is an
+  `InvalidAnswer`.
+- AA8. A turn's stop: `Completed` and `Incomplete` are `end_turn`, `CutShort` `max_tokens`,
+  `Interrupted` `cancelled`; `Vetoed` is `max_turn_requests` when the reason's JSON has
+  `stop: "max_turn_requests"`, and otherwise an error (-32603) carrying the reason as text; `Failed`
+  is an error carrying the failure. Whatever the ending, a turn whose last response was `Refused` is
+  `refusal`. A turn not ended has no stop.
+- AA9. `usage_update` is the gauge of the model the session asks now: the visible tokens of the
+  last exchange, the model's window as `KnownModels` knows it, and the cost so far; none for a model
+  whose window is not known.
