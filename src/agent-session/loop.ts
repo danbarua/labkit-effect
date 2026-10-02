@@ -498,7 +498,7 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
           if (verdict._tag === "Veto") return vetoed(verdict.reason);
           yield* (yield* Report)({ _tag: "ToolCallDispatched", call: request.call }, harnessParts.toolRunner);
           const outcome = yield* (yield* ToolRunner)
-            .run(request.tool, request.input)
+            .run(request.tool, request.input, request.call)
             .pipe(Effect.raceFirst(stopped.pipe(Effect.as<ToolOutcome>({ _tag: "Failed", reason: { _tag: "Indeterminate" } }))));
           return ended(yield* keptOutcome(outcome));
         }).pipe(

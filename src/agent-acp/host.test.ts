@@ -517,7 +517,7 @@ test("AG9: a client that closes the connection mid-turn leaves the turn running 
   expect(host.logged.find((each) => each.key === logKeys.prompt.interrupted)).toMatchObject({ details: { by: "the end of the connection" } });
 });
 
-test("AG17: edit_file replaces one occurrence through fs/*; run_command runs in the editor's terminal, released however it ends; both ask first", async () => {
+test("AG17: edit_file replaces one occurrence through fs/*, shown as a diff; run_command runs in the editor's terminal, shown in its call, released however it ends; both ask first", async () => {
   const host = startHost({
     script: [
       answer(
@@ -560,6 +560,16 @@ test("AG17: edit_file replaces one occurrence through fs/*; run_command runs in 
   expect(ended.get("run-2")).toMatchObject({ _tag: "Failed", reason: { _tag: "Reported" } });
   expect(text("run-2")).toContain("[Exit code 1.]");
   expect(text("run-3")).toContain("started\\n[Still running after 1 seconds: stopped.]");
+  // The edit's change is shown as a diff when permission is asked; a command's terminal is shown in
+  // its call once it has one, and still when it has ended.
+  expect(log.asked.find((asked) => asked.toolCall.toolCallId === "edit-1")?.toolCall.content).toEqual([
+    { type: "diff", path: join(host.cwd, "a.txt"), oldText: "alpha", newText: "beta" },
+  ]);
+  const runUpdates = log.updates.filter((update) => update.sessionUpdate === "tool_call_update" && update.toolCallId === "run-1");
+  expect(runUpdates.filter((update) => "content" in update && update.content !== undefined).map((update) => ("content" in update ? update.content : undefined))).toEqual([
+    [{ type: "terminal", terminalId: "terminal-1" }],
+    [{ type: "terminal", terminalId: "terminal-1" }],
+  ]);
 });
 
 test("AG10: the editor world offers read_file and write_file as the client advertised fs; read_file reads through fs/read_text_file, a path outside the working folder is refused, and a client with no fs has no tools", async () => {

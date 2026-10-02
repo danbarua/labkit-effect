@@ -140,10 +140,10 @@ export class TurnEndHooks extends Context.Service<
   }
 >()("agent-session/TurnEndHooks") {}
 
-/** Runs one tool call and reports how it ended. */
+/** Runs one tool call (`call`, by which a host can show it as it runs) and reports how it ended. */
 export class ToolRunner extends Context.Service<
   ToolRunner,
-  { readonly run: (tool: ToolName, input: Received) => Effect.Effect<ToolOutcome> }
+  { readonly run: (tool: ToolName, input: Received, call: CallId) => Effect.Effect<ToolOutcome> }
 >()("agent-session/ToolRunner") {}
 
 /**

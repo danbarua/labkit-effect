@@ -25,8 +25,8 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { Duration, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import type { AgentConnection } from "../acp/agent.ts";
 import type { V1Version } from "../acp/protocol.ts";
-import type { McpServer, SessionId } from "../acp/schema/v1.gen.ts";
-import { FailureText, ToolName } from "../agent-machine/names.ts";
+import { type McpServer, type SessionId, type TerminalId, ToolCallId } from "../acp/schema/v1.gen.ts";
+import { type CallId, FailureText, ToolName } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import { ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
 import { parseJson, receivedText } from "../agent-session/received.ts";
@@ -220,13 +220,22 @@ export const editorWorld: World = {
         );
       };
 
+      // The terminal each command ran in, by call: shown in the call as it runs, and when it has ended.
+      const terminals = new Map<CallId, TerminalId>();
+
       // The terminal is released however the call ends, which stops a command still running.
-      const runCommand = (input: typeof RunCommand.Type) => {
+      const runCommand = (call: CallId) => (input: typeof RunCommand.Type) => {
         const seconds = input.timeout_seconds ?? commandSeconds;
         return Effect.acquireUseRelease(
           connection.client["terminal/create"]({ sessionId, command: "/bin/sh", args: ["-c", input.command], cwd, outputByteLimit: maxFileBytes }),
           ({ terminalId }) =>
-            connection.client["terminal/wait_for_exit"]({ sessionId, terminalId }).pipe(
+            Effect.sync(() => terminals.set(call, terminalId)).pipe(
+              Effect.andThen(
+                connection
+                  .notify("session/update", { sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: ToolCallId.make(call), content: [{ type: "terminal", terminalId }] } })
+                  .pipe(Effect.ignore),
+              ),
+              Effect.andThen(connection.client["terminal/wait_for_exit"]({ sessionId, terminalId })),
               Effect.timeoutOption(Duration.seconds(seconds)),
               Effect.flatMap((exited) =>
                 connection.client["terminal/output"]({ sessionId, terminalId }).pipe(Effect.map(({ output, truncated }) => commandOutcome(output, truncated, exited, seconds))),
@@ -242,7 +251,7 @@ export const editorWorld: World = {
         );
 
       const runner = Layer.succeed(ToolRunner, {
-        run: (name, input) => {
+        run: (name, input, call) => {
           if (!tools.some((tool) => tool.name === name)) return Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "NotFound" } });
           const parsed = parseJson(input);
           if ("reason" in parsed) return Effect.succeed(rejected(`The input could not be read: ${parsed.reason}.`));
@@ -254,18 +263,27 @@ export const editorWorld: World = {
             case "edit_file":
               return decoded(EditFile, name, parsed.value, editText);
             default:
-              return decoded(RunCommand, name, parsed.value, runCommand);
+              return decoded(RunCommand, name, parsed.value, runCommand(call));
           }
         },
       });
 
       const plain = presentFrom(tools);
+      // A file's path as its location; an edit's change as a diff, before it runs (when permission
+      // is asked) and once it succeeded; a command's terminal, once it has one.
       const present: Present = (call, outcome) => {
         const shown = plain(call, outcome);
-        const input = parseJson(call.input);
-        const path = "value" in input && typeof input.value === "object" && input.value !== null && "path" in input.value ? input.value["path"] : undefined;
-        const at = typeof path === "string" ? inside(cwd, path) : undefined;
-        return at === undefined || "problem" in at ? shown : { ...shown, locations: [{ path: at.full }] };
+        const parsed = parseJson(call.input);
+        const input = "value" in parsed && typeof parsed.value === "object" && parsed.value !== null ? (parsed.value as Record<string, unknown>) : {};
+        const terminalId = terminals.get(call.call);
+        if (call.tool === "run_command" && terminalId !== undefined) return { ...shown, content: [{ type: "terminal", terminalId }] };
+        const at = typeof input["path"] === "string" ? inside(cwd, input["path"]) : undefined;
+        if (at === undefined || "problem" in at) return shown;
+        const located = { ...shown, locations: [{ path: at.full }] };
+        const edited = call.tool === "edit_file" && typeof input["old_text"] === "string" && typeof input["new_text"] === "string";
+        return edited && (outcome === undefined || outcome._tag === "Succeeded")
+          ? { ...located, content: [{ type: "diff", path: at.full, oldText: input["old_text"] as string, newText: input["new_text"] as string }] }
+          : located;
       };
 
       return { system: `The working folder is ${cwd}.`, tools, runner, present };

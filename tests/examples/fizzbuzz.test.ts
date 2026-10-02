@@ -5,7 +5,7 @@ import { TestClock } from "effect/testing";
 import { Conversation } from "../../src/agent-context/assemble.ts";
 import { estimatedTokens } from "../../src/agent-context/example-providers.ts";
 import type { Fact } from "../../src/agent-machine/fact.ts";
-import { ToolName } from "../../src/agent-machine/names.ts";
+import { CallId, ToolName } from "../../src/agent-machine/names.ts";
 import { type ContextMessage, type ModelContext, ToolRunner } from "../../src/agent-session/contracts.ts";
 import { conversationOf } from "../../src/agent-session/conversation.ts";
 import { asText, receivedJson } from "../../src/agent-session/received.ts";
@@ -170,7 +170,7 @@ test("after compaction, the model finds the last number it returned in the summa
 test("a tool call whose input does not fit its schema is rejected with the decoder's reason", async () => {
   const outcome = await runTest(
     Effect.gen(function* () {
-      return yield* (yield* ToolRunner).run(ToolName.make("classify"), receivedJson({ label: "Fuzz" }));
+      return yield* (yield* ToolRunner).run(ToolName.make("classify"), receivedJson({ label: "Fuzz" }), CallId.make("call-1"));
     }).pipe(Effect.provide(FizzBuzzToolRunner)),
   );
   expect(outcome as unknown).toEqual({

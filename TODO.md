@@ -94,14 +94,6 @@ model.
       set did, after a tool result); the ACP host runs with it. The loop asks the hooks at its
       bound too, and records `TurnHoldsExhausted` and warns only when they would hold the turn
       again. To do: `retries` as a host setting.
-- [ ] The editor's files and terminal as tools. Built: `read_file`, `write_file` and `edit_file`
-      through `fs/read_text_file` and `fs/write_text_file`, and `run_command` (`sh -c`) in the
-      editor's terminal (`terminal/*`), each offered only when the client advertises what it uses
-      (`editorWorld`, `src/agent-acp/world.ts`); the local disk (`LABKIT_ACP_LOCAL_TOOLS=1`) is a
-      stopgap that bypasses the editor's unsaved buffers. To do: the terminal shown in the tool
-      call as it runs (ACP's `terminal` tool call content), which needs the call's id in the
-      runner (`effect/ai/IdGenerator` gives ids; `ToolRunner.run` is given no call yet); an edit's
-      diff shown in the tool call (ACP's `diff` content).
 - [ ] The MCP servers a client names in `session/new`, their tools offered to the model (the ACP
       host's world is given them and ignores them). Effect has MCP's schemas, protocol and a server
       (`effect/ai/McpSchema`, `McpProtocol`, `McpServer`) and no client: a client built from them,

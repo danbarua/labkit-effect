@@ -25,9 +25,9 @@ export const CountedToolRunner = <E, R>(inner: Layer.Layer<ToolRunner, E, R>): L
     Effect.gen(function* () {
       const runner = yield* ToolRunner;
       return {
-        run: (tool, input) =>
+        run: (tool, input, call) =>
           Effect.gen(function* () {
-            const [took, outcome] = yield* Effect.timed(runner.run(tool, input));
+            const [took, outcome] = yield* Effect.timed(runner.run(tool, input, call));
             const work = yield* CurrentWork;
             const attributes = {
               ...(work.session === undefined ? {} : { session: work.session }),

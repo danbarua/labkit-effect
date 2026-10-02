@@ -230,4 +230,6 @@ text and resource links; no load, resume, list, fork or auth methods.
   terminal of the editor's, in the working folder, waits for its exit until its time runs out,
   reads its output, and releases the terminal however the call ends, which stops a command still
   running. Exit code 0 succeeds; any other end fails, its output and how it ended for the model to
-  read. Both ask permission in the default mode.
+  read. Both ask permission in the default mode. An edit's call shows its change as a `diff`, from
+  when permission is asked; a command's call shows its `terminal` from when it has one, and when
+  it has ended.

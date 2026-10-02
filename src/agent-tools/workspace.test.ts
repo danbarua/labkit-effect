@@ -8,7 +8,7 @@ import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
-import { ToolName } from "../agent-machine/names.ts";
+import { CallId, ToolName } from "../agent-machine/names.ts";
 import { ToolRunner } from "../agent-session/contracts.ts";
 import { asText, receivedJson } from "../agent-session/received.ts";
 import { workspaceTools } from "./workspace.ts";
@@ -24,7 +24,7 @@ const { catalog, runner } = workspaceTools(root);
 const call = (tool: string, input: unknown) =>
   runTest(
     Effect.gen(function* () {
-      const outcome = yield* (yield* ToolRunner).run(ToolName.make(tool), receivedJson(input as never));
+      const outcome = yield* (yield* ToolRunner).run(ToolName.make(tool), receivedJson(input as never), CallId.make("call-1"));
       if (outcome._tag === "Succeeded") return asText(outcome.output);
       const reason = outcome.reason;
       return reason._tag === "InputRejected" ? `rejected: ${reason.problem}` : reason._tag === "Reported" ? `reported: ${asText(reason.error)}` : reason._tag;
