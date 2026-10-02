@@ -1,6 +1,7 @@
 # The hosts: direction
 
-Not built. `TODO.md` lists what is to be built; a module's `MODEL.md` says what is.
+Not built, but for the host services lifted out of the CLI (`MODEL.md` here). `TODO.md` lists what
+is to be built; a module's `MODEL.md` says what is.
 
 ## Rulings
 

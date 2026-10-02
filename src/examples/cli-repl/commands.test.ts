@@ -3,6 +3,7 @@
 import { expect } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
+import { KeyedAndLocalCatalog } from "../../agent-host/catalog.ts";
 import { BoringContextAssembler } from "../../../tests/support/boring.ts";
 import { runTest } from "../../../tests/support/run.ts";
 import { test } from "../../../tests/support/test.ts";
@@ -58,7 +59,16 @@ const session = (lines: ReadonlyArray<string>) => {
       // No command here prompts; the terminal is there because `/model` and `/settings` alone would.
       Effect.orDie,
       Effect.provide(
-        Layer.mergeAll(BunServices.layer, ModelFromFacts, BoringContextAssembler, recording, CountingTurns, NoTurnEndHooks, Layer.succeed(ToolRunner, { run: () => Effect.die("no tools") })),
+        Layer.mergeAll(
+          BunServices.layer,
+          KeyedAndLocalCatalog,
+          ModelFromFacts,
+          BoringContextAssembler,
+          recording,
+          CountingTurns,
+          NoTurnEndHooks,
+          Layer.succeed(ToolRunner, { run: () => Effect.die("no tools") }),
+        ),
       ),
     ),
   );

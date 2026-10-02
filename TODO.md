@@ -63,20 +63,24 @@ model.
       prompt content as typed parts; the client half (sending, drawing, resolving `blob://`),
       labkit-web's.
 - [ ] Slash commands the host handles itself (`/export`), which are not input to the model.
-- [ ] The host's services, shared by the CLI and the ACP host and lifted out of the CLI
-      (`src/examples/cli-repl/{models,session,store}.ts`): the model catalog and how a model is
-      named, the provider clients, the services a session runs with, the permission policy for a
-      mode, the session directory, the logs.
-- [ ] Turn zero. A draft holds the model, its settings, the system prompt and the tools until the
-      first input; the session, and its facts, begin when the host opens it with them and gives it
-      the input. The options a draft offers come from the model and its settings alone
-      (`optionsFor`), not from a session's facts (`optionsOf`).
-- [ ] `Session` knows what a host asks of it: `prompt` (the input, and how the turn that took it
-      ended), `cancel` (`TurnInterrupted` for the turn under way) and `turn` (the one under way).
+- [ ] The host's services, shared by the CLI and the ACP host (`src/agent-host`). Built: the model
+      catalog, the provider clients, the services a session runs with, the permission policy for a
+      mode, the folder sessions are kept in, log lines to a file or to stderr (its `MODEL.md`). To
+      do: the host's own record of a session in its folder (its title, its working folder); the
+      ACP launcher's log file (JSONL, rotated, secrets redacted); a hand-written `models.yml` as one
+      more source of the catalog.
+- [ ] Turn zero. Built: `optionsFor`, the options of a model and its settings with no session behind
+      them, with the value the model will get where the adapter adjusts a setting. To do: a draft
+      holds the model, its settings, the system prompt and the tools until the first input; the
+      session, and its facts, begin when the host opens it with them and gives it the input. The CLI
+      opens its session at its first input, as the place to try it.
 - [ ] `session/new`: a session opened with its store and its opening.
-- [ ] `session/update`: what the session's facts and what its requests stream (`streamed`) become
-      for the client: text and thinking as they arrive, tool calls and how they end, the plan.
-- [ ] `session/cancel`: the turn interrupted (`TurnInterrupted`; agent-machine X1 ends it).
+- [ ] `session/update`. Built: the projection of a session's facts and deltas to the client's updates,
+      one function for the live view and for `session/load` (`src/agent-acp/projection.ts`). To do:
+      feed it (`subscribe`, and the text and thinking of a response as they arrive) and send what it
+      gives; the plan.
+- [ ] `session/cancel`: the turn interrupted. Built: `Session.cancel` (`TurnInterrupted`;
+      agent-machine X1 ends it), with `Session.prompt` and `Session.turn`. To do: the handler.
 - [ ] The editor's files and terminal as tools (`fs/*`, `terminal/*`, when the client offers
       them). A terminal is a tool whose call carries the terminal's id (`effect/ai/IdGenerator`
       gives ids).
