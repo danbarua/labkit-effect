@@ -19,6 +19,7 @@ import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
 import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { logKeys } from "./log-keys.ts";
 import { openSession } from "./loop.ts";
+import { EphemeralSessionStore } from "./session-store.ts";
 import { FallbackModelClient } from "./model-fallback.ts";
 import type { Retries } from "./provider-call.ts";
 import { anthropicRequests } from "./providers/anthropic-client.ts";
@@ -65,7 +66,7 @@ const oneTurn = async (
   const logged: Array<unknown> = [];
   const facts: ReadonlyArray<Fact> = await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(openedWith({ session: SessionId.make("s1"), model: anthropic, system: undefined, tools: [] }));
       yield* session.idle;
       yield* Effect.forEach(

@@ -7,6 +7,7 @@ import type { Observation } from "../../agent-machine/observation.ts";
 import { BoringModelProvider } from "../../../tests/support/boring.ts";
 import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
 import { openSession } from "../loop.ts";
+import { EphemeralSessionStore } from "../session-store.ts";
 import { OpenAiModelClient } from "./openai-client.ts";
 import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
@@ -25,7 +26,7 @@ async function turn(responses: ReadonlyArray<unknown>) {
   stops.push(provider.stop);
   const facts = await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.idle;
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);

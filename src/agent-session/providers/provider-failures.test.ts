@@ -15,6 +15,7 @@ import type { Observation } from "../../agent-machine/observation.ts";
 import { ModelClient } from "../contracts.ts";
 import { conversationOf } from "../conversation.ts";
 import { openSession } from "../loop.ts";
+import { EphemeralSessionStore } from "../session-store.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
 import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
 import { BoringModelProvider, boringOpening } from "../../../tests/support/boring.ts";
@@ -172,7 +173,7 @@ test("TC4: a stream closed after a tool call of it was passed on is not made aga
   stops.push(() => server.stop(true));
   const facts = await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
       yield* session.idle;

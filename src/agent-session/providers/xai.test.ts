@@ -9,6 +9,7 @@ import { ModelName, ProviderName, WindowId } from "../../agent-machine/names.ts"
 import type { Observation } from "../../agent-machine/observation.ts";
 import { ContextAssembler, type ModelContext, ModelProvider } from "../contracts.ts";
 import { openSession } from "../loop.ts";
+import { EphemeralSessionStore } from "../session-store.ts";
 import { receivedJson } from "../received.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
 import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
@@ -55,7 +56,7 @@ const asEvents = (events: ReadonlyArray<{ readonly type: string }>) =>
 async function session(url: URL, settings: object, context?: ModelContext) {
   return runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.observe(input);
       yield* session.idle;

@@ -6,6 +6,7 @@ import { ModelText, StopReason, TurnId } from "../agent-machine/names.ts";
 import type { Observation } from "../agent-machine/observation.ts";
 import { ModelClient, type ModelContext } from "./contracts.ts";
 import { openSession } from "./loop.ts";
+import { EphemeralSessionStore } from "./session-store.ts";
 import { receivedJson } from "./received.ts";
 import { TurnContextAssembler } from "./turn-context.ts";
 import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
@@ -61,7 +62,7 @@ test("observe returns once the observation is recorded; input given while the mo
       const gate = yield* Deferred.make<void>();
       const model = gated([gate]);
       return yield* Effect.gen(function* () {
-        const session = yield* openSession;
+        const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
         yield* session.observe(boringOpening());
         yield* session.observe(input("first"));
         yield* session.observe(input("second"));
@@ -93,7 +94,7 @@ test("an interruption while the model is asked stops the request; the response a
       const never = yield* Deferred.make<void>();
       const model = gated([never]);
       return yield* Effect.gen(function* () {
-        const session = yield* openSession;
+        const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
         yield* session.observe(boringOpening());
         yield* session.observe(input("hello"));
         yield* session.observe({ _tag: "TurnInterrupted", turn: TurnId.make("turn-1") });

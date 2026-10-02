@@ -67,6 +67,7 @@ export const BoringToolCatalog: ToolCatalog = {
       description: 'Answers "PONG".',
       input: { type: "object", properties: {} },
       kind: "other",
+      replay: "safe",
     },
   ]),
 };

@@ -6,6 +6,7 @@ import { CallId, ModelText, StopReason, ToolName } from "../agent-machine/names.
 import type { Observation } from "../agent-machine/observation.ts";
 import { ModelClient } from "./contracts.ts";
 import { openSession } from "./loop.ts";
+import { EphemeralSessionStore } from "./session-store.ts";
 import { receivedJson } from "./received.ts";
 import { TurnContextAssembler } from "./turn-context.ts";
 import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
@@ -43,7 +44,7 @@ const input = { _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 +
 test("R6: what the test gives the session is from the test; what the loop observes is from the provider, the tool or the harness", async () => {
   const facts = await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.idle;
       yield* session.observe(input);
@@ -70,7 +71,7 @@ test("R6: what the test gives the session is from the test; what the loop observ
 test("R6: an observation given to a session with no origin set is a defect", async () => {
   const exit = await Effect.runPromiseExit(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening());
       yield* session.idle;
     }).pipe(Effect.provide(services()), Effect.scoped),

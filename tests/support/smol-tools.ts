@@ -24,6 +24,7 @@ const tools: ReadonlyArray<SmolTool> = [
     name: ToolName.make("add"),
     description: "Adds two numbers.",
     kind: "other",
+    replay: "safe",
     input: {
       type: "object",
       properties: { a: { type: "number" }, b: { type: "number" } },
@@ -38,13 +39,14 @@ const tools: ReadonlyArray<SmolTool> = [
     name: ToolName.make("echo"),
     description: "Returns the text it is given.",
     kind: "other",
+    replay: "safe",
     input: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
     run: (input) =>
       typeof input["text"] === "string" ? { output: input["text"] } : { misfit: "echo needs a text." },
   },
 ];
 
-export const smolCatalog: ReadonlyArray<ToolSpec> = tools.map(({ name, description, input, kind }) => ({ name, description, input, kind }));
+export const smolCatalog: ReadonlyArray<ToolSpec> = tools.map(({ name, description, input, kind, replay }) => ({ name, description, input, kind, replay }));
 
 const rejected = (problem: string): ToolOutcome => ({
   _tag: "Failed",

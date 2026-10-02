@@ -17,11 +17,12 @@ import type { Fact } from "../../agent-machine/fact.ts";
 import { answerPicking, OptionId, type PermissionQuestion, questionIn } from "../../agent-policy/permissions.ts";
 import type { CallId } from "../../agent-machine/names.ts";
 import type { ToolOutcome } from "../../agent-machine/observation.ts";
-import type { Session } from "../../agent-session/loop.ts";
+import type { Services, Session } from "../../agent-session/loop.ts";
 import { asText } from "../../agent-session/received.ts";
 import { command, completions, offered } from "./commands.ts";
 import { bracketedPaste, Multiline } from "./multiline.ts";
-import { answerTo, ask, type Config, endingOf, lastTurn, logFileOf } from "./session.ts";
+import { answerTo, ask, type Config, endingOf, type Host, lastTurn, logFileOf } from "./session.ts";
+import type { LeftRunning } from "../../agent-machine/left-running.ts";
 
 /** What is printed after a turn: the answer, or how the turn ended when it gave none. */
 const replyTo = (facts: ReadonlyArray<Fact>): string => {
@@ -122,10 +123,40 @@ const following = (session: Session) =>
     yield* Effect.forkScoped(Effect.forever(PubSub.take(recorded).pipe(Effect.flatMap(answer))));
   });
 
+/** A request a turn left running, in words: a model request, or a tool call, and whether it began. */
+const shownLeft = (request: LeftRunning["requests"][number], began: ReadonlySet<CallId>): string => {
+  switch (request._tag) {
+    case "RequestModelResponse":
+      return "a model request";
+    case "RunTool":
+      return `${request.tool} ${oneLine(asText(request.input), 80)} (${began.has(request.call) ? "began; it runs again if it is safe to" : "not begun"})`;
+    case "BeforeTurnEnded":
+      return "the review before the turn ends";
+    default:
+      return request satisfies never;
+  }
+};
+
+/**
+ * The REPL at a terminal: it follows the session from when it opens (`following`), and asks the
+ * user whether to go on with a turn the session's facts left running, or end it.
+ */
+export const Terminal: Host<Prompt.Environment | Services> = {
+  follow: following,
+  choose: (left) =>
+    Prompt.Select({
+      message: `The last session stopped while ${left.turn} ran${left.stopping ? ", being interrupted" : ""}, with ${left.requests.map((request) => shownLeft(request, left.began)).join("; ") || "nothing under way"}. Go on with it?`,
+      choices: [
+        { title: "Go on with it", value: "go on" as const },
+        { title: "End it, as interrupted", value: "end" as const },
+      ],
+    }).pipe(Effect.orElseSucceed(() => "end" as const)),
+  wentOn: (session) => Effect.flatMap(session.facts, (facts) => Console.log(replyTo(facts))),
+};
+
 export const repl = (session: Session, config: Config, first: string | undefined, interactive: boolean) =>
   Effect.scoped(Effect.gen(function* () {
     yield* Console.log(`${config.target.provider}/${config.target.model} · /help for commands, /exit to quit. Log: ${logFileOf(config.sessionId)}`);
-    if (interactive) yield* following(session);
     if (first !== undefined) yield* turn(session, first);
     if (!interactive) return;
     yield* bracketedPaste;

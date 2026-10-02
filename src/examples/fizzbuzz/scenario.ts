@@ -23,6 +23,7 @@ import { InputText, ModelName, ProviderName, SessionId } from "../../agent-machi
 import type { ModelClient, ModelContext, ToolRunner } from "../../agent-session/contracts.ts";
 import { sentIn } from "../../agent-session/sent.ts";
 import { openSession } from "../../agent-session/loop.ts";
+import { EphemeralSessionStore } from "../../agent-session/session-store.ts";
 import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
 import { CountingTurns, NoTurnEndHooks } from "../../agent-session/turns.ts";
 import { scriptedFizzBuzzModel } from "./model.ts";
@@ -91,7 +92,7 @@ const played = (inputs: ReadonlyArray<string>, setup: Setup, summaries: Summarie
     Layer.succeed(ToolCatalogs, [setup.catalog]),
   );
   return Effect.gen(function* () {
-    const session = yield* openSession;
+    const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
     const compaction = setup.compaction;
     const compactAfter = compaction === undefined ? Effect.void : compactIfDue(session, compaction).pipe(Effect.andThen(session.idle));
     const switchAfter = (text: string) => {
@@ -118,5 +119,6 @@ const played = (inputs: ReadonlyArray<string>, setup: Setup, summaries: Summarie
       fact._tag === "Observed" && fact.observation._tag === "ModelRequestDispatched" ? [sentIn(fact.observation.sent)] : [],
     );
     return { facts, seen, summaries: yield* summaries.recorded };
-  }).pipe(Effect.provide(services), Effect.scoped);
+    // The facts are kept in memory, where writing them down does not fail.
+  }).pipe(Effect.provide(services), Effect.scoped, Effect.orDie);
 };

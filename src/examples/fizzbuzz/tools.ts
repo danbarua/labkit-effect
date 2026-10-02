@@ -42,7 +42,7 @@ function tool<A>(
 ): FizzBuzzTool {
   const decode = Schema.decodeUnknownResult(input);
   return {
-    spec: { name: ToolName.make(name), description, input: Schema.toJsonSchemaDocument(input).schema as Schema.Json, kind: "other" },
+    spec: { name: ToolName.make(name), description, input: Schema.toJsonSchemaDocument(input).schema as Schema.Json, kind: "other", replay: "safe" },
     run: (received) => {
       const parsed = parseJson(received);
       if ("reason" in parsed) return rejected(`The input could not be read: ${parsed.reason}.`);

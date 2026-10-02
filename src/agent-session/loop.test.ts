@@ -11,6 +11,7 @@ import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
 import { ModelClient, ModelProvider, TurnEndHooks } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
 import { openSession } from "./loop.ts";
+import { EphemeralSessionStore } from "./session-store.ts";
 import { receivedJson } from "./received.ts";
 import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { runTest } from "../../tests/support/run.ts";
@@ -49,7 +50,7 @@ test("while a request is carried out, CurrentWork and every log line name its se
   });
   await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening());
       yield* session.idle;
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
@@ -104,7 +105,7 @@ async function answeringTurn(hooks: ReadonlyArray<() => ReadonlyArray<string>>, 
   });
   const facts = await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening());
       yield* session.idle;
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
@@ -175,7 +176,7 @@ test("a subscriber receives every fact recorded after it subscribed, in order", 
   const { received, facts } = await runTest(
     Effect.scoped(
       Effect.gen(function* () {
-        const session = yield* openSession;
+        const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
         yield* session.observe(boringOpening());
         yield* session.idle;
         const subscription = yield* session.subscribe;
@@ -193,7 +194,7 @@ test("a request that dies of a defect is logged with what it died of, and record
   const dying = Layer.succeed(ModelClient, { respond: () => Effect.die(new Error("No request is configured for provider boring")) });
   const facts = await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening());
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hello" } as unknown as Observation);
       yield* session.idle;

@@ -12,6 +12,7 @@ import { answerPicking, OptionId, permissions } from "../agent-policy/permission
 import type { Policy } from "../agent-policy/policy.ts";
 import { ModelClient, ToolCallPolicy } from "./contracts.ts";
 import { openSession } from "./loop.ts";
+import { EphemeralSessionStore } from "./session-store.ts";
 import { receivedJson } from "./received.ts";
 import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
 
@@ -44,7 +45,7 @@ const callsEchoOnce = () => {
 const answeredWith = (option: string) =>
   runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       const recorded = yield* session.subscribe;
       // The answerer: answers each question as it is recorded.
       yield* Effect.forkScoped(

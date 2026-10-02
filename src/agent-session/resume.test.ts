@@ -15,7 +15,8 @@ import { runTest } from "../../tests/support/run.ts";
 import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { test } from "../../tests/support/test.ts";
 import { ModelClient, type ModelContext } from "./contracts.ts";
-import { endTurnLeftRunning, resumeSession, sessionFrom } from "./loop.ts";
+import { endTurnLeftRunning, openSession } from "./loop.ts";
+import { ephemeralSessionStore } from "./session-store.ts";
 import { ModelFromFacts } from "./configuration/model-choice.ts";
 import { receivedJson } from "./received.ts";
 import { countingTurnsAfter, NoTurnEndHooks } from "./turns.ts";
@@ -61,7 +62,8 @@ const resumed = (facts: ReadonlyArray<Fact>, then?: string, turns = 1) => {
   });
   return runTest(
     Effect.gen(function* () {
-      const session = yield* resumeSession(facts);
+      const session = yield* openSession.pipe(Effect.provide(ephemeralSessionStore(facts)));
+      yield* endTurnLeftRunning(session);
       const settled = yield* session.facts;
       if (then !== undefined) {
         yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: then } as unknown as Observation);
@@ -193,9 +195,9 @@ test("X4: a session made from facts holds them as given; a turn they leave runni
   observe(driven, dispatched);
   const { made, ended } = await runTest(
     Effect.gen(function* () {
-      const session = yield* sessionFrom(driven.journal);
+      const session = yield* openSession.pipe(Effect.provide(ephemeralSessionStore(driven.journal)));
       const made = yield* session.facts;
-      yield* endTurnLeftRunning(session, driven.journal);
+      yield* endTurnLeftRunning(session);
       return { made, ended: (yield* session.facts).slice(made.length) };
     }).pipe(Effect.provide(Layer.mergeAll(ModelFromFacts, WholeSessionAssembler, NoModel, countingTurnsAfter(1), NoTurnEndHooks, SmolToolRunner))),
   );

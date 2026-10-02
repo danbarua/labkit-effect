@@ -5,6 +5,7 @@
 import { Effect, Layer } from "effect";
 import { TurnId } from "../agent-machine/names.ts";
 import { TurnEndHooks, Turns } from "./contracts.ts";
+import { SessionStore } from "./session-store.ts";
 
 /** No hooks: a turn ends as soon as it may. */
 export const NoTurnEndHooks = Layer.succeed(TurnEndHooks, { hooks: [], maxHolds: 0 });
@@ -26,3 +27,11 @@ export const countingTurnsAfter = (already: number) =>
 
 /** Turn identities `turn-1`, `turn-2`, … in the order turns start. */
 export const CountingTurns = countingTurnsAfter(0);
+
+/** Turn identities `turn-1`, `turn-2`, … counting on from the turns the session's store already holds. */
+export const CountingTurnsInStore = Layer.unwrap(
+  Effect.gen(function* () {
+    const facts = yield* (yield* SessionStore).facts;
+    return countingTurnsAfter(facts.filter((fact) => fact._tag === "Observed" && fact.observation._tag === "TurnStarted").length);
+  }),
+);

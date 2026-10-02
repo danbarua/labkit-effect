@@ -23,6 +23,7 @@ import { ModelName, ProviderName, SessionId, TestName } from "../../src/agent-ma
 import type { Observation } from "../../src/agent-machine/observation.ts";
 import { ModelSettings } from "../../src/agent-machine/settings.ts";
 import { openSession } from "../../src/agent-session/loop.ts";
+import { EphemeralSessionStore } from "../../src/agent-session/session-store.ts";
 import { ModelFromFacts } from "../../src/agent-session/configuration/model-choice.ts";
 import { reportedBy } from "../../src/agent-session/origin.ts";
 import { AnthropicModelClient } from "../../src/agent-session/providers/anthropic-client.ts";
@@ -67,7 +68,7 @@ const name = [stamp, provider, model, ...said].join("-");
 
 const facts = await Effect.runPromise(
   Effect.gen(function* () {
-    const session = yield* openSession;
+    const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
     yield* session.observe(
       openedWith({
         session: SessionId.make("live"),

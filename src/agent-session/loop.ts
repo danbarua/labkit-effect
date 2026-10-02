@@ -1,7 +1,12 @@
 /**
  * The loop around the core: it records each observation, asks the core what follows, records the
- * decisions, and carries out the requests, each of whose outcome is the next observation. The
- * session's facts are held in memory.
+ * decisions, and carries out the requests, each of whose outcome is the next observation.
+ *
+ * The session's facts are kept in its store (`SessionStore`), which the loop needs to run. Each fact
+ * is written down before anything is done on it: an observation before the core decides on it, the
+ * decisions before the requests that follow from them are carried out. A write that fails stops the
+ * session: nothing after it is written or done, the requests under way are stopped, and `observe`
+ * and `idle` fail with it.
  *
  * Observations are recorded one at a time, in the order they arrive. Each request is carried out
  * in a fiber of its own, so the session takes further observations meanwhile: input is queued in
@@ -34,7 +39,8 @@ import { Clock, DateTime, Deferred, Effect, Exit, FiberSet, PubSub, Ref, type Sc
 import type { Decision } from "../agent-machine/decision.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { notObserved } from "../agent-machine/not-observed.ts";
-import { deliver, emptyWorld, type World } from "../agent-machine/router.ts";
+import { deliver, type World } from "../agent-machine/router.ts";
+import { leftRunning, worldAndRequestsOf } from "../agent-machine/left-running.ts";
 import { FailureText, InputText, Millis, type ModelName, type ProviderName, Seq, type SessionId, type TurnId } from "../agent-machine/names.ts";
 import type { CapturedObservation, ModelPart, Observation, ToolOutcome } from "../agent-machine/observation.ts";
 import type { Origin } from "../agent-machine/origin.ts";
@@ -49,7 +55,8 @@ import { ModelStream, ModelStreamInterval, type Streamed } from "./model-stream.
 import { CurrentOrigin, harnessParts, reportedBy } from "./origin.ts";
 import { Report } from "./report.ts";
 import { sentAs } from "./sent.ts";
-import { modelOf } from "./configuration/session-setup.ts";
+import { immutableToolCatalogOf, modelOf } from "./configuration/session-setup.ts";
+import { SessionStore, type SessionStoreFailed } from "./session-store.ts";
 import { CurrentWork, type Work } from "./work.ts";
 
 /**
@@ -58,18 +65,8 @@ import { CurrentWork, type Work } from "./work.ts";
  * ended bears on them: input waiting for a turn, or a turn the facts leave running. Those
  * observations are delivered in order, and the machines' state is what is kept.
  */
-const worldOf = (facts: ReadonlyArray<Fact>): World => {
-  const ended = facts.reduce(
-    (last, fact, index) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? index : last),
-    -1,
-  );
-  return facts
-    .slice(ended + 1)
-    .reduce(
-      (world, fact) => (fact._tag === "Observed" ? deliver(world, fact.seq, fact.observation).world : world),
-      emptyWorld,
-    );
-};
+/** The machines as `facts` leave them. */
+const worldOf = (facts: ReadonlyArray<Fact>): World => worldAndRequestsOf(facts).world;
 
 /** The session the facts opened, if they have. */
 const sessionOf = (facts: ReadonlyArray<Fact>): SessionId | undefined =>
@@ -97,11 +94,6 @@ interface Started {
   readonly work: Work;
 }
 
-interface Held {
-  readonly world: World;
-  readonly facts: ReadonlyArray<Fact>;
-}
-
 /**
  * How many times the turn-end hooks have held `turn` open: the reviews of it in which they gave
  * feedback. Each is on record as the feedback, given as input by the hooks, and the review after it.
@@ -118,17 +110,29 @@ const holdsOf = (facts: ReadonlyArray<Fact>, turn: TurnId): number =>
     { holds: 0, feedback: false },
   ).holds;
 
-type Services = ModelProvider | ContextAssembler | ModelClient | Turns | ToolRunner | TurnEndHooks;
+/** What the loop needs to carry out requests. */
+export type Services = ModelProvider | ContextAssembler | ModelClient | Turns | ToolRunner | TurnEndHooks;
 
 export interface Session {
   /**
    * Records an observation, with the origin `CurrentOrigin` gives, and starts what follows from it.
    * It returns once the observation is recorded; the requests that follow are carried out after.
    */
-  readonly observe: (observation: Observation) => Effect.Effect<void, never, Services>;
-  /** Waits until no request is being carried out. */
-  readonly idle: Effect.Effect<void>;
+  readonly observe: (observation: Observation) => Effect.Effect<void, SessionStoreFailed, Services>;
+  /** Waits until no request is being carried out; fails if writing the session's facts failed. */
+  readonly idle: Effect.Effect<void, SessionStoreFailed>;
+  /** The session's facts, as its store keeps them. */
   readonly facts: Effect.Effect<ReadonlyArray<Fact>>;
+  /**
+   * Goes on with the turn the facts left running, when the session went on from facts that stop
+   * while a turn runs (`leftRunning`): each request they left with no outcome is carried out. A
+   * model request is made (again). A tool call that had not begun runs; one that began, and whose
+   * end was not observed, runs again when its tool's `replay` is `safe` or `idempotent`, and
+   * otherwise ends `Indeterminate`, not run again. A turn that was being stopped is given what is
+   * known of each request, and ends. Input that arrived with no turn started for it starts one.
+   * The other choice is `endTurnLeftRunning`; which to make is the host's.
+   */
+  readonly goOn: Effect.Effect<void, SessionStoreFailed, Services>;
   /** Every fact recorded from now on, in order, for as long as the scope lasts. */
   readonly subscribe: Effect.Effect<PubSub.Subscription<Fact>, never, Scope.Scope>;
   /**
@@ -140,16 +144,20 @@ export interface Session {
 }
 
 /**
- * A session that goes on from `facts`: another session's, or this one's before its process ended.
- * This is all there is to resuming, because going on from facts that stop between turns is no
- * different from starting the next turn. The facts are kept as given, and everything a turn's
- * requests carry (the conversation, the model and its settings, the system prompt, the tools) is
- * read from them when the request is made. The machines start as the facts leave them (`worldOf`),
- * which between turns is as they start in a new session.
+ * A session over the facts its store keeps: a new one, or one that goes on from them (another
+ * session's, or this one's before its process ended). Between turns that is all there is to going
+ * on, because going on from facts that stop between turns is no different from starting the next
+ * turn. Everything a turn's requests carry (the conversation, the model and its settings, the
+ * system prompt, the tools) is read from the facts when the request is made. The machines start as
+ * the facts leave them (`worldOf`). Facts that stop while a turn runs leave it running, with its
+ * requests under way and no one carrying them out: the host goes on with it (`goOn`) or ends it
+ * (`endTurnLeftRunning`).
  *
  * The turns that start from here need identities the facts have not used: that is `Turns`' business.
  */
-export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, never, Scope.Scope> => Effect.gen(function* () {
+export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionStore> = Effect.gen(function* () {
+  const store = yield* SessionStore;
+  const facts = yield* store.facts;
   // Made before `running`, so closing the scope ends the requests' spans, then the turns', then this.
   const sessionSpan = yield* Effect.makeSpanScoped("agent.session");
   // A turn's span stays here after it ends: requests that follow from its ending are still under it.
@@ -186,11 +194,29 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
         { discard: true },
       );
     });
-  const held = yield* Ref.make<Held>({ world: worldOf(facts), facts });
+  const machines = yield* Ref.make<World>(worldOf(facts));
   const recorded = yield* PubSub.unbounded<Fact>();
   const captured = yield* PubSub.unbounded<CapturedObservation>();
   const lock = yield* Semaphore.make(1);
   const running = yield* FiberSet.make<void, never>();
+  const broken = yield* Deferred.make<never, SessionStoreFailed>();
+
+  /**
+   * Writes `facts` down. After a write that failed nothing more is written: the session stops, and
+   * the requests under way are stopped.
+   */
+  const written = (more: ReadonlyArray<Fact>): Effect.Effect<void, SessionStoreFailed> =>
+    Effect.gen(function* () {
+      if (yield* Deferred.isDone(broken)) return yield* Deferred.await(broken);
+      yield* store.append(more).pipe(
+        Effect.tapError((error) =>
+          Deferred.fail(broken, error).pipe(
+            Effect.andThen(Effect.logError(logKeys.loop.storeFailed, { message: error.message, facts: more.map((fact) => fact.seq) })),
+            Effect.andThen(Effect.forkDetach(FiberSet.clear(running))),
+          ),
+        ),
+      );
+    });
   const cancels = yield* Ref.make<ReadonlyMap<TurnId, Deferred.Deferred<void>>>(new Map());
 
   /**
@@ -200,7 +226,7 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
   const reviewTurnEnd = (turn: TurnId): Effect.Effect<ReadonlyArray<Observed>, never, Services> =>
     Effect.gen(function* () {
       const { hooks, maxHolds } = yield* TurnEndHooks;
-      const holds = holdsOf((yield* Ref.get(held)).facts, turn);
+      const holds = holdsOf(yield* store.facts, turn);
       const origin = harnessParts.turnEndHooks;
       const reviewed: Observed = { origin, observation: { _tag: "TurnEndReviewed", turn } };
       if (hooks.length > 0 && holds >= maxHolds) {
@@ -295,7 +321,7 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
   const reviewed = (request: Extract<EffectRequest, { _tag: "RunTool" }>): Effect.Effect<Verdict, never, Services> =>
     Effect.scoped(
       Effect.gen(function* () {
-        const policy = yield* (yield* ToolCallPolicy)((yield* Ref.get(held)).facts);
+        const policy = yield* (yield* ToolCallPolicy)(yield* store.facts);
         const answers = yield* PubSub.subscribe(recorded);
         let step = policy.start(request);
         while (step._tag === "Waiting") {
@@ -327,7 +353,7 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
         return passingOn(
           request.turn,
           Effect.gen(function* () {
-            const facts = (yield* Ref.get(held)).facts;
+            const facts = yield* store.facts;
             const target = yield* (yield* ModelProvider).select(facts, request.turn);
             const context = yield* (yield* ContextAssembler).assemble(facts, request.turn);
             const asked: Origin = { _tag: "Provider", provider: target.provider };
@@ -444,30 +470,27 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
    * Records the observation and the decisions that follow from it, and returns the requests that
    * follow, each with what it is about. One observation is recorded at a time: callers hold `lock`.
    */
-  const write = (origin: Origin, observation: Observation): Effect.Effect<ReadonlyArray<Started>, never, Services> =>
+  const write = (origin: Origin, observation: Observation): Effect.Effect<ReadonlyArray<Started>, SessionStoreFailed, Services> =>
     Effect.gen(function* () {
-      const before = yield* Ref.get(held);
-      const seq = Seq.make(before.facts.length + 1);
-      const outcome = deliver(before.world, seq, observation);
+      const before = yield* store.facts;
+      const seq = Seq.make(before.length + 1);
       const time = yield* DateTime.now;
-      const facts: ReadonlyArray<Fact> = [
-        { _tag: "Observed", seq, time, origin, observation },
-        ...outcome.decisions.map((decision, index): Fact => ({
-          _tag: "Decided",
-          seq: Seq.make(seq + 1 + index),
-          time,
-          decision,
-        })),
-      ];
-      const now = yield* Ref.updateAndGet(held, (current) => ({
-        ...current,
-        world: outcome.world,
-        facts: [...before.facts, ...facts],
-      }));
+      const observed: Fact = { _tag: "Observed", seq, time, origin, observation };
+      // The observation is written down before the core decides on it, and the decisions before
+      // anything follows from them.
+      yield* written([observed]);
+      const outcome = deliver(yield* Ref.get(machines), seq, observation);
+      const decided = outcome.decisions.map(
+        (decision, index): Fact => ({ _tag: "Decided", seq: Seq.make(seq + 1 + index), time, decision }),
+      );
+      yield* written(decided);
+      yield* Ref.set(machines, outcome.world);
+      const facts = [observed, ...decided];
+      const now = [...before, ...facts];
       yield* PubSub.publishAll(recorded, facts);
-      const session = sessionOf(now.facts);
+      const session = sessionOf(now);
       yield* traceTurns(observation, outcome.decisions, session);
-      yield* Effect.forEach(facts, (fact) =>
+      yield* Effect.forEach(decided, (fact) =>
         fact._tag === "Decided"
           ? Effect.logInfo(logKeys.loop.decisionRecorded, {
               decision: fact.decision._tag,
@@ -477,8 +500,8 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
             }).pipe(Effect.annotateLogs(session === undefined ? {} : { session }))
           : Effect.void,
       );
-      const started = outcome.requests.map((request) => ({ request, work: about(request, now.world, now.facts) }));
-      if (observation._tag !== "InputArrived" || now.world.agent.state._tag !== "Idle") return started;
+      const started = outcome.requests.map((request) => ({ request, work: about(request, outcome.world, now) }));
+      if (observation._tag !== "InputArrived" || outcome.world.agent.state._tag !== "Idle") return started;
       const turn = yield* (yield* Turns).start;
       return [...started, ...(yield* write(harnessParts.loop, { _tag: "TurnStarted", turn }))];
     });
@@ -487,7 +510,9 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
   const carry = ({ request, work }: Started): Effect.Effect<void, never, Services> =>
     Effect.gen(function* () {
       const services = yield* Effect.context<Services>();
-      const report = (reported: Observation, by: Origin) => record(by, reported).pipe(Effect.provideContext(services));
+      // A report that cannot be written down stops the request: it does not go on to do what it reported.
+      const report = (reported: Observation, by: Origin) =>
+        record(by, reported).pipe(Effect.provideContext(services), Effect.catchTag("SessionStoreFailed", () => Effect.interrupt));
       const stop = work.turn === undefined ? undefined : yield* cancelOf(work.turn);
       // Given, not inherited: this fiber was started from whichever fiber recorded the observation.
       const parent = (work.turn === undefined ? undefined : (yield* Ref.get(turnSpans)).get(work.turn)) ?? sessionSpan;
@@ -529,17 +554,19 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
           Effect.andThen(outcome === undefined ? Effect.void : record(harnessParts.loop, outcome)),
         );
       }),
+      // A write that failed is logged where it failed, and the session has stopped.
+      Effect.catchTag("SessionStoreFailed", () => Effect.void),
     );
 
   /** Records the observation, then starts each request that follows in a fiber of its own. */
-  const record = (origin: Origin, observation: Observation): Effect.Effect<void, never, Services> =>
+  const record = (origin: Origin, observation: Observation): Effect.Effect<void, SessionStoreFailed, Services> =>
     write(origin, observation).pipe(
       Semaphore.withPermit(lock),
       Effect.flatMap((started) => Effect.forEach(started, (each) => FiberSet.run(running, carry(each)), { discard: true })),
       Effect.uninterruptible,
     );
 
-  const observe = (observation: Observation): Effect.Effect<void, never, Services> =>
+  const observe = (observation: Observation): Effect.Effect<void, SessionStoreFailed, Services> =>
     Effect.gen(function* () {
       const origin = yield* CurrentOrigin;
       if (origin === undefined)
@@ -547,17 +574,46 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
       yield* record(origin, observation);
     });
 
+  const goOn: Effect.Effect<void, SessionStoreFailed, Services> = Effect.gen(function* () {
+    const facts = yield* store.facts;
+    const world = yield* Ref.get(machines);
+    const left = leftRunning(facts);
+    if (left === undefined) {
+      const waiting = world.agent.state._tag === "Idle" && world.agent.mailbox.some((each) => each.message._tag === "InputArrived");
+      if (waiting) yield* record(harnessParts.resume, { _tag: "TurnStarted", turn: yield* (yield* Turns).start });
+      return;
+    }
+    if (left.stopping) {
+      const outcomes = notObserved(world, left.turn, yield* askedIn(facts, left.turn), arrivedIn(facts, left.turn));
+      yield* Effect.forEach(outcomes, (outcome) => record(harnessParts.resume, outcome), { discard: true });
+      return;
+    }
+    const tools = yield* immutableToolCatalogOf(facts);
+    yield* Effect.forEach(
+      left.requests,
+      (request) => {
+        const replay = request._tag === "RunTool" ? (tools.find((tool) => tool.name === request.tool)?.replay ?? "unsafe") : undefined;
+        if (request._tag === "RunTool" && left.began.has(request.call) && replay === "unsafe")
+          return record(harnessParts.resume, { _tag: "ToolEnded", call: request.call, outcome: { _tag: "Failed", reason: { _tag: "Indeterminate" } } });
+        return FiberSet.run(running, carry({ request, work: about(request, world, facts) })).pipe(Effect.asVoid);
+      },
+      { discard: true },
+    );
+  });
+
   return {
     observe,
-    idle: FiberSet.awaitEmpty(running),
-    facts: Ref.get(held).pipe(Effect.map((current) => current.facts)),
+    idle: FiberSet.awaitEmpty(running).pipe(
+      Effect.andThen(Deferred.isDone(broken)),
+      Effect.flatMap((done) => (done ? Deferred.await(broken) : Effect.void)),
+    ),
+    facts: store.facts,
+    goOn,
     subscribe: PubSub.subscribe(recorded),
     streamed: PubSub.subscribe(captured),
   };
 });
 
-/** A session with no facts yet. */
-export const openSession: Effect.Effect<Session, never, Scope.Scope> = sessionFrom([]);
 
 /** The parts of the response to `turn`'s latest request that are known to have arrived: its tool calls. */
 const arrivedIn = (facts: ReadonlyArray<Fact>, turn: TurnId): ReadonlyArray<ModelPart> => {
@@ -600,8 +656,9 @@ const askedIn = (
  * had arrived), and how each call still running ended was not observed. No request is made again.
  * When the facts leave no turn running, nothing is recorded.
  */
-export const endTurnLeftRunning = (session: Session, facts: ReadonlyArray<Fact>): Effect.Effect<void, never, Services> =>
+export const endTurnLeftRunning = (session: Session): Effect.Effect<void, SessionStoreFailed, Services> =>
   Effect.gen(function* () {
+    const facts = yield* session.facts;
     const world = worldOf(facts);
     const agent = world.agent.state;
     if (agent._tag !== "Running") return;
@@ -612,7 +669,3 @@ export const endTurnLeftRunning = (session: Session, facts: ReadonlyArray<Fact>)
     );
     yield* session.idle;
   });
-
-/** A session that goes on from `facts`, with the turn they leave running, if any, ended. */
-export const resumeSession = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, never, Scope.Scope | Services> =>
-  sessionFrom(facts).pipe(Effect.tap((session) => endTurnLeftRunning(session, facts)));

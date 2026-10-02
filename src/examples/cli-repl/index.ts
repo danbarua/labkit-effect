@@ -31,8 +31,8 @@ import { modelOf } from "../../agent-session/configuration/session-setup.ts";
 import { invalid } from "./invalid.ts";
 import { keyOf, keyVariables, known, localModels, localServer, targetOf } from "./models.ts";
 import { printOnce } from "./print.ts";
-import { repl } from "./repl.ts";
-import { type Config, LogsToFile, LogsToStderr, withSession } from "./session.ts";
+import { repl, Terminal } from "./repl.ts";
+import { type Config, Headless, LogsToFile, LogsToStderr, withSession } from "./session.ts";
 import { latestSession, readSession, storedSessions, storeFolder, summaryOf } from "./store.ts";
 
 const optional = <A>(flag: Flag.Flag<A>) => flag.pipe(Flag.optional, Flag.map(Option.getOrUndefined));
@@ -57,6 +57,7 @@ const flags = {
   verbose: toggle("verbose", "Print the session's facts as they are recorded"),
   continue: toggle("continue", "Continue the latest conversation", "c"),
   resume: text("resume", "Resume a session by its id; with none, pick one from a list", "r"),
+  noSessionPersistence: toggle("no-session-persistence", "Keep the session's facts in memory only, not in its file"),
   // `plan` and `auto` are not built.
   permissionMode: choice(
     "permission-mode",
@@ -85,7 +86,6 @@ const flags = {
   // inputFormat: choice("input-format", ["text", "stream-json"], "Input encoding (print mode)"),
   // jsonSchema: text("json-schema", "Structured output schema"),
   // includePartialMessages: toggle("include-partial-messages", "Print partial stream events"),
-  // noSessionPersistence: toggle("no-session-persistence", "Do not keep the session"),
   // debug: text("debug", "Enable diagnostics for categories"),
   // debugFile: text("debug-file", "Debug log destination"),
 };
@@ -135,7 +135,7 @@ const resumed = (named: string, interactive: boolean) =>
 const configOf = (options: Options, interactive: boolean) =>
   Effect.gen(function* () {
     const mode = options.permissionMode ?? "default";
-    const permissions = { permissionMode: mode === "manual" ? "default" : mode, canAsk: interactive && !options.print } as const;
+    const permissions = { permissionMode: mode === "manual" ? "default" : mode, canAsk: interactive && !options.print, persist: !options.noSessionPersistence } as const;
     const settings: ModelSettings = {
       ...(options.effort === undefined ? {} : { effort: options.effort }),
       ...(options.thinking === undefined ? {} : { thinking: options.thinking }),
@@ -160,11 +160,12 @@ export const cli = Command.make(
     const stdio = yield* Stdio.Stdio;
     const interactive = yield* stdio.stdinIsTerminal;
     const config = yield* configOf(options, interactive);
-    if (!options.print) return yield* withSession(config, LogsToFile(config.sessionId), (session) => repl(session, config, options.prompt, interactive));
+    if (!options.print)
+      return yield* withSession(config, LogsToFile(config.sessionId), interactive ? Terminal : Headless, (session) => repl(session, config, options.prompt, interactive));
     // Piped input is read only when no prompt was given: a shell that leaves stdin open would
     // otherwise keep a prompted run waiting for an end of input that never comes.
     const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));
-    yield* withSession(config, LogsToStderr, (session) => printOnce(session, config, prompt, options.outputFormat ?? "text", options.verbose));
+    yield* withSession(config, LogsToStderr, Headless, (session) => printOnce(session, config, prompt, options.outputFormat ?? "text", options.verbose));
   }),
 ).pipe(
   Command.withDescription("An agent at the command line: a REPL, or -p to ask once."),

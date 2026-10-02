@@ -9,6 +9,7 @@ import { test } from "../../../tests/support/test.ts";
 import { ModelName, ModelText, ProviderName, SessionId } from "../../agent-machine/names.ts";
 import { ModelClient, type Target, ToolRunner } from "../../agent-session/contracts.ts";
 import { openSession } from "../../agent-session/loop.ts";
+import { EphemeralSessionStore } from "../../agent-session/session-store.ts";
 import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
 import { receivedJson } from "../../agent-session/received.ts";
 import { openedWith } from "../../agent-session/configuration/session-setup.ts";
@@ -40,7 +41,7 @@ const session = (lines: ReadonlyArray<string>) => {
   delete process.env["XAI_API_KEY"];
   return runTest(
     Effect.gen(function* () {
-      const opened = yield* openSession;
+      const opened = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* opened.observe(
         openedWith({ session: SessionId.make("s1"), model: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5"), settings: { effort: "low" } }, system: undefined, tools: [] }),
       );

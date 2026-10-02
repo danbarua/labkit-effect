@@ -8,6 +8,7 @@ import { Effect, Layer, PubSub } from "effect";
 import { Millis, TurnId } from "../../agent-machine/names.ts";
 import type { Observation } from "../../agent-machine/observation.ts";
 import { openSession } from "../loop.ts";
+import { EphemeralSessionStore } from "../session-store.ts";
 import { ModelStreamInterval } from "../model-stream.ts";
 import { AnthropicModelClient } from "./anthropic-client.ts";
 import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
@@ -141,7 +142,7 @@ test("Anthropic: a response cut short records the parts that were completed, and
   );
   const facts = await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.observe(input);
       yield* session.idle;
@@ -167,7 +168,7 @@ test("Anthropic: a stream that ends without message_stop fails the request, and 
   const url = serving(() => anthropicStream({ content: [{ type: "text", text: "5" }], stop_reason: "end_turn" }, { unstopped: true }));
   const facts = await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.observe(input);
       yield* session.idle;
@@ -205,7 +206,7 @@ test("OpenAI: an item still arriving when the response ended is not recorded", a
   );
   const facts = await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.observe(input);
       yield* session.idle;
@@ -237,7 +238,7 @@ test("V1: while a response arrives, its events and each completed part are passe
   );
   const { passed, facts } = await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       const streamed = yield* session.streamed;
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.observe(input);
@@ -307,7 +308,7 @@ test("TC2 TC3: a tool call is run as soon as it is complete in the stream, befor
   });
   const facts = await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.observe(input);
       yield* session.idle;
@@ -380,7 +381,7 @@ test("X1: interrupted while a response streams and its tool runs: both are stopp
   });
   const facts = await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.observe(input);
       yield* Effect.promise(() => toolBegan.promise);

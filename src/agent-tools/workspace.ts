@@ -9,7 +9,9 @@
  * `read_file` reads UTF-8 text, at most 256 KiB in one result; `line` (1-based) and `limit` (a
  * count of lines) read part of a file. `list_dir` lists one folder, without recursion, a folder's
  * name followed by `/`. `write_file` creates or replaces a file with at most 256 KiB of text; the
- * folder it is in must exist.
+ * folder it is in must exist. Run again for a call whose end was not observed, `read_file` and
+ * `list_dir` change nothing (`replay: "safe"`), and `write_file` writes the same text to the same
+ * file (`"idempotent"`).
  *
  * A call that cannot run fails with the reason: no tool has the name (`NotFound`), the input does
  * not fit (`InputRejected`), or the file system reported an error (`Reported`, with its message).
@@ -60,6 +62,7 @@ export function workspaceTools(root: string) {
     tool({
       name: ToolName.make("read_file"),
       kind: "read",
+      replay: "safe",
       description: `Read a UTF-8 file in the workspace, at most 256 KiB per result. Use line (1-based) and limit (a count of lines) to read a large file in parts, for example {"path": "src/a.ts", "line": 1, "limit": 100}. If a path does not exist, list its folder with list_dir.${scope}`,
       input: {
         type: "object",
@@ -83,6 +86,7 @@ export function workspaceTools(root: string) {
     tool({
       name: ToolName.make("list_dir"),
       kind: "search",
+      replay: "safe",
       description: `List one folder in the workspace, without recursion; a folder's name ends with /. Use "." for the workspace itself.${scope}`,
       input: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
       decode: Schema.decodeUnknownEffect(ListDir),
@@ -103,6 +107,7 @@ export function workspaceTools(root: string) {
     tool({
       name: ToolName.make("write_file"),
       kind: "edit",
+      replay: "idempotent",
       description: `Create a UTF-8 file in the workspace, or replace one, with the text given, at most 256 KiB. The folder it is in must exist.${scope}`,
       input: { type: "object", properties: { path: { type: "string" }, text: { type: "string" } }, required: ["path", "text"] },
       decode: Schema.decodeUnknownEffect(WriteFile),
@@ -117,7 +122,7 @@ export function workspaceTools(root: string) {
     } satisfies WorkspaceTool<typeof WriteFile.Type>),
   ];
 
-  const catalog: ReadonlyArray<ToolSpec> = tools.map(({ name, description, input, kind }) => ({ name, description, input, kind }));
+  const catalog: ReadonlyArray<ToolSpec> = tools.map(({ name, description, input, kind, replay }) => ({ name, description, input, kind, replay }));
 
   const rejected = (problem: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "InputRejected", problem: FailureText.make(problem) } });
 

@@ -31,6 +31,7 @@ import { type ModelContext, ToolRunner, type ToolSpec } from "../../src/agent-se
 import { MediaType } from "../../src/agent-machine/received.ts";
 import { Blobs, BlobsInFolder } from "../../src/agent-session/blobs.ts";
 import { openSession } from "../../src/agent-session/loop.ts";
+import { EphemeralSessionStore } from "../../src/agent-session/session-store.ts";
 import { anthropicInputTokens } from "../../src/agent-session/providers/anthropic-count.ts";
 import { openAiInputTokens } from "../../src/agent-session/providers/openai-count.ts";
 import { ModelFromFacts } from "../../src/agent-session/configuration/model-choice.ts";
@@ -116,7 +117,7 @@ function papaya(): Uint8Array {
   return new TextEncoder().encode(out);
 }
 
-const look: ToolSpec = { name: ToolName.make("look"), description: "Returns the picture in front of you, as an image.", input: { type: "object", properties: {} }, kind: "read" };
+const look: ToolSpec = { name: ToolName.make("look"), description: "Returns the picture in front of you, as an image.", input: { type: "object", properties: {} }, kind: "read", replay: "safe" };
 /** Runs `look`: its output is the image, as bytes, which the loop puts in the blob store. */
 const Looking = Layer.succeed(ToolRunner, {
   run: () => Effect.succeed({ _tag: "Succeeded" as const, output: { mediaType: MediaType.make("image/png"), body: { _tag: "Bytes" as const, bytes: halves() } } }),
@@ -148,7 +149,7 @@ const facts = await Effect.runPromise(
           ? yield* Effect.flatMap(anthropicInputTokens(), (count) => count(target, context)).pipe(Effect.provide(AnthropicClient.layer({ apiKey }).pipe(Layer.provide(http))))
           : yield* Effect.flatMap(openAiInputTokens(), (count) => count(target, context)).pipe(Effect.provide(OpenAiClient.layer({ apiKey }).pipe(Layer.provide(http))));
     if (counted !== undefined) console.log(`counted before sending: ${counted} input tokens`);
-    const session = yield* openSession;
+    const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
     yield* session.observe(
       openedWith({
         session: SessionId.make("attachments"),

@@ -93,7 +93,7 @@ test("A1 A2 A3: one provider of each kind: the system prompt and tools recorded 
   const { assembled, logged } = await run(oneOfEach, messages);
   expect(assembled as unknown).toEqual({
     system: ["You are a helpful assistant."],
-    tools: [{ name: "echo", description: 'Answers "PONG".', input: { type: "object", properties: {} }, kind: "other" }],
+    tools: [{ name: "echo", description: 'Answers "PONG".', input: { type: "object", properties: {} }, kind: "other", replay: "safe" }],
     messages,
     notices: ["The current time is 2026-09-28T12:00:00.000Z."],
     model: small,

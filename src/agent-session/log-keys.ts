@@ -27,6 +27,8 @@ export const logKeys = {
   loop: {
     /** The core made a decision, and it was recorded; the details are the decision and where. */
     decisionRecorded: "loop.decision.recorded",
+    /** Writing the session's facts down failed; the details say why, and which facts. The session stops. */
+    storeFailed: "loop.store.failed",
     /** A tool call ended; the details are the call, the tool, its input, and how it ended. */
     toolEnded: "loop.tool.ended",
     /** Carrying out a request died of a defect; the details are what it died of. */

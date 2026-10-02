@@ -10,6 +10,7 @@ import { ModelName, ProviderName, SessionId, TokenCount } from "../../agent-mach
 import type { Observation } from "../../agent-machine/observation.ts";
 import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { openSession } from "../loop.ts";
+import { EphemeralSessionStore } from "../session-store.ts";
 import { ModelFromFacts } from "./model-choice.ts";
 import { AnthropicModelClient } from "../providers/anthropic-client.ts";
 import { anthropicSettings, anthropicSettle } from "../providers/anthropic-settings.ts";
@@ -327,7 +328,7 @@ test("M3: a request carries the settings the model allows; what was adjusted is 
   stops.push(() => server.stop(true));
   const facts = await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(
         openedWith({
           session: SessionId.make("s1"),

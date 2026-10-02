@@ -7,7 +7,7 @@ import { BlobRef } from "../agent-machine/blob.ts";
 import { Context, Effect, Schema } from "effect";
 import type { Policy } from "../agent-policy/policy.ts";
 import type { Fact } from "../agent-machine/fact.ts";
-import { CallId, ModelName, ProviderName, ThinkingText, ToolKind, ToolName, TurnId, WindowId } from "../agent-machine/names.ts";
+import { CallId, ModelName, ProviderName, ThinkingText, ToolKind, ToolName, ToolReplay, TurnId, WindowId } from "../agent-machine/names.ts";
 import { type Observation, ToolOutcome } from "../agent-machine/observation.ts";
 import { Received } from "../agent-machine/received.ts";
 import type { ModelSettings } from "../agent-machine/settings.ts";
@@ -32,10 +32,11 @@ export class ModelProvider extends Context.Service<
 >()("agent-session/ModelProvider") {}
 
 /**
- * A tool the model may call: its name, what it does, the JSON Schema of its input, and its kind
- * (`ToolKind`), which is not sent to models.
+ * A tool the model may call: its name, what it does, the JSON Schema of its input, its kind
+ * (`ToolKind`), and whether it can be run again (`ToolReplay`). Kind and replay are not sent to
+ * models.
  */
-export const ToolSpec = Schema.Struct({ name: ToolName, description: Schema.String, input: Schema.Json, kind: ToolKind });
+export const ToolSpec = Schema.Struct({ name: ToolName, description: Schema.String, input: Schema.Json, kind: ToolKind, replay: ToolReplay });
 export type ToolSpec = typeof ToolSpec.Type;
 
 /**

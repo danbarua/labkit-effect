@@ -15,6 +15,7 @@ import { TurnId } from "../agent-machine/names.ts";
 import type { Observation } from "../agent-machine/observation.ts";
 import { ContextAssembler } from "../agent-session/contracts.ts";
 import { openSession } from "../agent-session/loop.ts";
+import { EphemeralSessionStore } from "../agent-session/session-store.ts";
 import { AnthropicModelClient } from "../agent-session/providers/anthropic-client.ts";
 import { Report } from "../agent-session/report.ts";
 import { CountingTurns, NoTurnEndHooks } from "../agent-session/turns.ts";
@@ -81,7 +82,7 @@ test("S5 A4: a later request carries each earlier notice where it was sent, and 
   const counted: NoticeProvider = { notices: Effect.sync(() => [`Notice ${++sent}.`]) };
   const facts = await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.idle;
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);

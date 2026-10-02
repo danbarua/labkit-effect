@@ -8,6 +8,7 @@ import { test } from "../../../tests/support/test.ts";
 import { ModelName, ProviderName, SessionId, TokenCount } from "../../agent-machine/names.ts";
 import { ModelClient, ToolRunner } from "../contracts.ts";
 import { openSession } from "../loop.ts";
+import { EphemeralSessionStore } from "../session-store.ts";
 import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
 import { ModelFromFacts } from "./model-choice.ts";
 import { optionsOf } from "./options.ts";
@@ -16,7 +17,7 @@ import { openedWith } from "./session-setup.ts";
 test("the options are the model, the settings in force, and each setting to offer with its value now; they follow a change taken", async () => {
   const [opened, changed] = await runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       const model = { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5"), settings: { effort: "low" as const, maxOutputTokens: TokenCount.make(2000) } };
       yield* session.observe(openedWith({ session: SessionId.make("s1"), model, system: undefined, tools: [] }));
       yield* session.idle;

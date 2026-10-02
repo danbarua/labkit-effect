@@ -16,6 +16,7 @@ import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
 import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
 import { logKeys } from "../log-keys.ts";
 import { openSession } from "../loop.ts";
+import { EphemeralSessionStore } from "../session-store.ts";
 import type { Retries } from "../provider-call.ts";
 import { anthropicModelClient, anthropicRequests } from "./anthropic-client.ts";
 import { openAiModelClient, openAiRequests } from "./openai-client.ts";
@@ -91,7 +92,7 @@ const oneTurn = (client: Layer.Layer<ModelClient>) => {
   );
   return runTest(
     Effect.gen(function* () {
-      const session = yield* openSession;
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.idle;
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make("What is 2 + 3?") });

@@ -89,12 +89,11 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 
 ### Providers
 
-- [ ] A session store. Built, in the CLI (`store.ts`): a session's facts appended to
-      `logs/sessions/<session>.jsonl` as they are recorded, one process at a time (a lock holding
-      its pid; a dead process's lock is taken over); facts read back in order or the file is
-      refused; a line whose write did not finish is cut off; a failed write stops the session;
-      `--continue`, `--resume`; `bun run cli:watch`. To do: look at what was built, and decide
-      what the store is.
+- [ ] The session store. Built: `SessionStore`, which the loop requires (`EphemeralSessionStore`,
+      `FileBackedSessionStore`); each fact written before anything is done on it; a failed write
+      stops the session; a turn left running goes on (`goOn`: requests made again, tools run again
+      by their `replay`) or ends, as the host chooses (the REPL asks; `-p` goes on); Ctrl+C records
+      the turn as interrupted. To do: a store for ACP hosts (`session/load`).
 - [ ] Effect's `Response.Usage` shape for a response's token counts, in place of our own.
 - [ ] Each provider's image and file formats, from what was measured, in place of models.dev's
       "takes images: yes or no".

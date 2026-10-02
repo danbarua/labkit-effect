@@ -29,6 +29,14 @@ export type ToolName = typeof ToolName.Type;
 export const ToolKind = Schema.Literals(["read", "edit", "delete", "move", "search", "execute", "think", "fetch", "other"]);
 export type ToolKind = typeof ToolKind.Type;
 
+/**
+ * Whether a tool can be run again for a call whose end was not observed (its process ended while
+ * it ran): `safe`, it changes nothing; `idempotent`, running it again leaves things as running it
+ * once does; `unsafe`, neither, and it is not run again. Whoever defines a tool says which.
+ */
+export const ToolReplay = Schema.Literals(["safe", "idempotent", "unsafe"]);
+export type ToolReplay = typeof ToolReplay.Type;
+
 /** The name of a model provider. */
 export const ProviderName = Schema.String.pipe(Schema.brand("agent-machine/ProviderName"));
 export type ProviderName = typeof ProviderName.Type;
