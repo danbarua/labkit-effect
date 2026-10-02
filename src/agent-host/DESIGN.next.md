@@ -83,13 +83,16 @@ if lower (`vscode-workspace.ts` in labkit-agent).
 ## Projection
 
 One pure projection from the core's output to `session/update`, for the live view and for
-`session/load`. It takes facts and deltas in order and says the updates each gives. Live, it is fed
-`session.subscribe` and the deltas; on load, the stored facts.
+`session/load`. It takes the facts (`session.subscribe`, or the stored ones) and the core's captured
+items (`session.streamed`: `ModelDelta`, `ModelPartArrived`, `ModelResponseEnded`), merged in any
+order, and says the updates each gives. The two feeds have no order between them, and each
+response's text is sent once whichever merge a host makes (`agent-acp` PJ9). A host subscribes to
+`streamed` before it reads the facts for a load, so no delta of a request under way is missed.
 
 | Core | ACP update |
 |---|---|
 | `InputArrived` | `user_message_chunk`, on load only: the client has the prompt it sent |
-| answer text | `agent_message_chunk`: as deltas arrive; else the part when it is whole; on load, the part from `ModelResponded` |
+| answer text | `agent_message_chunk`: each delta as it arrives, then what no delta sent when `ModelResponded` is taken; on load, the parts of `ModelResponded` |
 | thinking | `agent_thought_chunk`, likewise |
 | `ToolCallArrived`, or a tool call part of `ModelResponded` | `tool_call`, `pending`; title, kind and locations from the host's presentation of the call |
 | `PermissionAsked` | `tool_call_update`, `pending` (the host also asks `session/request_permission`) |
@@ -145,7 +148,7 @@ and call ids that apply. The file logger is in `agent-host`, and the ACP launche
 
 | Need | Built by | Where |
 |---|---|---|
-| Text and thinking as they arrive, the same for every adapter | labkit-effect | `TODO.md`, Providers |
+| An end for each attempt of a model request on `streamed` (a fallback's failed attempt leaves text on screen) | labkit-effect | `TODO.md`, Providers |
 | The call, given to `ToolRunner.run` | open | when the editor's tools are built |
 
 ## Order

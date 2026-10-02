@@ -83,10 +83,11 @@ model.
       at its first input with it, as the place to try it; the ACP host's `session/new` and first
       prompt.
 - [ ] `session/new`: a session opened with its store and its opening.
-- [ ] `session/update`. Built: the projection of a session's facts and deltas to the client's updates,
-      one function for the live view and for `session/load` (`src/agent-acp/projection.ts`). To do:
-      feed it (`subscribe`, and the text and thinking of a response as they arrive) and send what it
-      gives; the plan.
+- [ ] `session/update`. Built: the projection of a session's facts and of the core's captured items
+      (`ModelDelta`, `ModelPartArrived`, `ModelResponseEnded`), merged in any order, to the client's
+      updates, one function for the live view and for `session/load` (`src/agent-acp/projection.ts`).
+      To do: feed it `subscribe` and `streamed` (subscribed before the facts for a load are read)
+      and send what it gives; the plan.
 - [ ] `session/cancel`: the turn interrupted. Built: `Session.cancel` (`TurnInterrupted`;
       agent-machine X1 ends it), with `Session.prompt` and `Session.turn`. To do: the handler.
 - [ ] The editor's files and terminal as tools (`fs/*`, `terminal/*`, when the client offers
@@ -173,35 +174,12 @@ with no model, its attachments as pointers and one line for each tool call (`dig
         schema refuses fields it does not define (read from the schema; not seen).
       - OpenAI, when a host sends its Chat Completions there: the output limit as
         `max_completion_tokens` (it refuses `max_tokens` for its o-series models).
-- [ ] The text and thinking of a response as it arrives, the same for every adapter. `streamed`
-      passes each provider's own events (`ModelStreamed`) and each part once it is whole
-      (`ModelPartArrived`); nothing can draw the text and thinking of a response as they arrive
-      without reading each provider's events. The ACP host needs this of Anthropic, OpenAI, xAI and
-      Chat Completions alike, and the REPL showing text and thinking as they arrive (The coding
-      agent, below) needs the same:
-      - one more item in `Streamed` (what an adapter passes on) and in `CapturedObservation` (what
-        `streamed` gives): the text of a response as it arrives, saying its turn and its `kind`
-        (`Text`, `Commentary` or `Thinking`: the kind of the part the text ends up in). Each
-        adapter passes it where it already adds a delta to the part it is building: Anthropic's
-        `text_delta` and `thinking_delta`, the Responses text and reasoning-summary deltas, Chat
-        Completions' `delta.content` and whichever field the server streams thinking in;
-      - the deltas of a part, joined, are that part's text, and they come in `streamed` before
-        `ModelPartArrived` of that part (the throttle's batching may stay). A host matches parts to
-        deltas by kind, so a part passed late is fine (Chat Completions passes its text at the end);
-      - a response boundary in `streamed`, there whether the response ends, is stopped or fails.
-        The facts and `streamed` are separate subscriptions with no order between them, so a
-        consumer cannot take the boundary from a fact; without one, text a stopped response left
-        reads as the start of the next;
-      - thinking is the readable text the provider returns (`Thinking.text`). `Observe` decides what
-        the provider is asked to return, for the record; showing it is the host's;
-      - no deltas from an adapter that does not stream, from a server that answers whole
-        (`postEventsOrWhole`), or for thinking with no readable text: the host sends the whole
-        parts;
-      - none for tool calls (`ToolCallArrived` is enough);
-      - none recorded.
-      A stopped response (X1) records only the parts that were whole, so text a host drew from the
-      deltas of a part that was not whole is not in the facts. Text from a fallback attempt that then
-      failed (`ModelAttemptFailed`) cannot be taken back from a client. The hosts take both.
+- [ ] An end for each attempt of a model request on `streamed`. A fallback (`model-fallback.ts`)
+      makes several attempts in one request, which has one `ModelResponseEnded`. An attempt that
+      fails after it streamed text leaves that text on a client's screen, which cannot take it
+      back, and the next attempt's text is sent after it; the host counts both as sent, so
+      `ModelResponded` sends nothing more. An end item for each attempt, which the host reads as
+      "what was streamed so far is not this response's", would let it say so.
 - [ ] Models. Built: the well-known models as generated `const` data (`bun run models:refresh`:
       models.dev's catalog merged with `well-known-models.measured.json`); a settings type per
       well-known model (`SettingsFor`); the values to offer for each setting of a model as it is
