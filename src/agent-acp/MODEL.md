@@ -8,25 +8,26 @@ imports nothing of the core.
 - `projection.ts`: the pure projection of a session to ACP's `session/update`, for the live view and
   for `session/load` (`src/agent-host/DESIGN.next.md`, "Projection"). `next(state, input, context)`
   takes one input and gives the updates it makes and the state to take the next from; `project`
-  folds it over many, from `start` or a state given. An input is a fact, a part a streaming response
-  completed (`ModelPartArrived`), or a `Delta`: the text of a part as it arrives, by turn, response
-  (the step, from 1) and part index (from 0, as `ModelResponded` holds the parts). The core does not
-  produce deltas yet; the host adapts what the provider's stream gives. The context is the mode
-  (`live` or `replay`) and the host's presentation of tool calls (`present(call, outcome?)`);
-  `presentFrom(catalog)` is the default, over the session's catalog (`immutableToolCatalogOf`).
+  folds it over many, from `start` or a state given. An input is a fact (`session.subscribe`) or what
+  a model request passes on while it runs (`session.streamed`, `CapturedObservation`): `ModelDelta`
+  (a part's text as it arrives, by kind), `ModelPartArrived`, and `ModelResponseEnded`, the last item
+  of every request. A host merges the two feeds as they come; there is no order between them. The
+  context is the mode (`live` or `replay`) and the host's presentation of tool calls
+  (`present(call, outcome?)`); `presentFrom(catalog)` is the default, over the session's catalog
+  (`immutableToolCatalogOf`).
 
 | Input | ACP update |
 |---|---|
 | `InputArrived` | `user_message_chunk`, in `replay` only: live, the client has what it sent |
-| `Delta` of `text` | `agent_message_chunk` with the delta's text |
-| `Delta` of `thinking` | `agent_thought_chunk` with the delta's text |
-| `ModelPartArrived`, `ModelResponded`: a `Text` or `Commentary` part | `agent_message_chunk` with what of the part no delta sent |
-| the same: a `Thinking` part | `agent_thought_chunk` with what of the part no delta sent |
+| `ModelDelta` of `Text` or `Commentary`, live | `agent_message_chunk` with the delta's text |
+| `ModelDelta` of `Thinking`, live | `agent_thought_chunk` with the delta's text |
+| `ModelResponded`: a `Text` or `Commentary` part | `agent_message_chunk` with what of the part no delta of its request sent |
+| the same: a `Thinking` part | `agent_thought_chunk` with what of the part no delta of its request sent |
 | `ToolCallArrived`; a `ToolCall` part of `ModelPartArrived` or `ModelResponded` | `tool_call`, `pending`, with the presentation's title, kind, locations and content; once a call |
 | `PermissionAsked` | `tool_call_update`, `pending` |
 | `ToolCallDispatched` | `tool_call_update`, `in_progress` |
 | `ToolEnded` | `tool_call_update`, `completed` (`Succeeded`) or `failed`, with the presentation's content and locations, and its title and kind where they differ from the announcement |
-| anything else | nothing |
+| anything else (`ModelStreamed`, `ModelPartArrived` of text, `ModelResponseEnded`) | nothing |
 
 - `config-options.ts`: a configuration (`optionsFor`, `optionsOf`) as ACP's config options, and a
   `session/set_config_option` as the change it asks. `configOptions(options, models, limit)` gives
@@ -68,12 +69,15 @@ sends nothing for what was said).
 - PJ1. Live and replay are one projection with a mode. On replay each input is a
   `user_message_chunk`; live, inputs give nothing.
 - PJ2. A response's answer text (`Text`, `Commentary`) is sent as `agent_message_chunk`, its
-  thinking as `agent_thought_chunk`: each delta as it comes, then, when the part is whole
-  (`ModelPartArrived`, or the response's `ModelResponded`), what of the part no delta sent. The text
-  sent for a part, joined, is the part's text; live with deltas, with parts and with neither sends
-  the text a replay of the facts does.
-- PJ3. A part's text is never sent twice. A part whose deltas stopped part way gets the rest when it
-  is whole; a delta for a part already whole, or for a response already recorded, gives nothing.
+  thinking as `agent_thought_chunk`. Live, each `ModelDelta` is sent as it comes, and
+  `ModelResponded` sends what of each of its parts the deltas of its request did not; with no
+  deltas (a client that does not stream, a whole answer), the whole parts. On replay there are no
+  deltas and `ModelResponded` sends its parts whole. The text sent for a response, joined, is the
+  text of its parts: live with deltas, live without, and replay send the same.
+- PJ3. A response's text is never sent twice. The deltas of a request cover its parts of their kind
+  in order, across several parts of one kind; `ModelResponded` sends of each part only what they
+  did not cover. A delta of a request whose `ModelResponded` was taken first, and anything captured
+  of a turn after its `TurnEnded`, gives nothing: the facts sent that text.
 - PJ4. A tool call is announced once, as `tool_call` `pending`, by the first of `ToolCallArrived`,
   its part in `ModelPartArrived` and its part in `ModelResponded`; a response recorded after the
   call ended does not announce it again.
@@ -84,10 +88,16 @@ sends nothing for what was said).
   content; ended, the presentation with the outcome gives the content and locations, and the title
   and kind where they changed. The default presentation is the tool's name, its kind from the
   session's catalog, and, once ended, its output as text, or why it failed in words.
-- PJ7. An interrupted response keeps what was sent of it: the parts its `ModelResponded` holds are
-  made whole, and the text of a part it does not hold, sent while it streamed, is not taken back.
-- PJ8. Projecting the stored facts gives the state to go on from live: what was shown on load is not
-  shown again.
+- PJ7. A response that stopped or failed keeps what was sent of it. A stopped response's
+  `ModelResponded` holds its whole parts only: what the deltas sent of a part the stream cut is not
+  taken back, and nothing is sent again. A failed request has no `ModelResponded`: its deltas stay,
+  and what they sent is forgotten when its turn ends.
+- PJ8. Projecting the stored facts gives the state to go on from live, with no reset: what was shown
+  on load is not shown again, and a later request's deltas are sent once.
+- PJ9. The relative order of the facts and the captured items does not change what is sent: each
+  feed keeps a turn's requests in order, and the projection pairs a request's `ModelResponseEnded`
+  with its `ModelResponded` by position in the turn, whichever comes first, with either feed any
+  number of requests or turns ahead. Every merge of the two sends each response's text once.
 - AA1. The config options are `model`, then one select for each setting the options offer, with
   the ids and categories of the table; a setting not offered has none. Every option's current value
   is among its values: the model asked now is offered even when the catalog does not list it.

@@ -1,15 +1,18 @@
 /**
  * The projection of a session to ACP's `session/update`: one pure, incremental function from the
- * core's facts, the parts a response completes while it streams (`ModelPartArrived`) and the text
- * of a part as it arrives (`Delta`), to the updates each gives. Live, a host feeds it what
- * `session.subscribe` and `session.streamed` pass on and the deltas; on `session/load`, the stored
- * facts (`project`). The two differ only in `mode`: live, an input is not echoed, since the client
- * has what it sent.
+ * core's facts (`session.subscribe`) and what it passes on while a model responds (`session.streamed`,
+ * `CapturedObservation`) to the updates each gives. Live, a host merges the two feeds; on
+ * `session/load`, it projects the stored facts (`project`). The two differ in `mode`: live, an input
+ * is not echoed, since the client has what it sent.
  *
- * Inputs are taken in the order they happened. A response's text is sent once: as deltas arrive,
- * then what of each part no delta carried when the part is whole (`ModelPartArrived`, or the
- * response's `ModelResponded`). A tool call is announced once, by whichever of `ToolCallArrived`,
- * its `ModelPartArrived` or its response comes first; its status follows the call's facts.
+ * The two feeds keep their own order, and none between them: a request's deltas can come before or
+ * after its `ModelResponded`, and the host may be a request or a turn ahead on either. Text is sent
+ * once whatever the merge. Each feed holds a turn's model requests in the same order, so the
+ * projection pairs them by position: a request's end item (`ModelResponseEnded`) on the captured
+ * feed with its outcome (`ModelResponded`) on the facts. Live, a delta is sent as it comes;
+ * `ModelResponded` sends what of each part its request's deltas did not. A tool call is announced
+ * once, by whichever of `ToolCallArrived`, its `ModelPartArrived` or its response comes first; its
+ * status follows the call's facts.
  *
  * Not here, the host's own: `usage_update`, `session_info_update`, `available_commands_update`,
  * `config_option_update`, `current_mode_update`, `plan`, and `session/request_permission`.
@@ -18,31 +21,14 @@
 import type { ContentBlock, SessionUpdate, ToolCallContent, ToolCallLocation, ToolKind } from "../acp/schema/v1.gen.ts";
 import { ToolCallId } from "../acp/schema/v1.gen.ts";
 import type { Fact } from "../agent-machine/fact.ts";
-import { type CallId, StepIndex, type ToolName, type TurnId } from "../agent-machine/names.ts";
+import type { CallId, ToolName, TurnId } from "../agent-machine/names.ts";
 import type { CapturedObservation, ModelPart, ToolFailure, ToolOutcome } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
 import { asText } from "../agent-session/received.ts";
 
-/**
- * Text of a response's part as it arrives: `response` is the request within `turn` that the
- * response answers (its step, from 1), `part` the part's index among the response's parts, from 0,
- * as `ModelResponded` holds them. The deltas of a part, joined, are the part's text: `Text` or
- * `Commentary` for `text`, `Thinking` for `thinking`.
- */
-export interface Delta {
-  readonly _tag: "Delta";
-  readonly turn: TurnId;
-  readonly response: StepIndex;
-  readonly part: number;
-  readonly kind: "text" | "thinking";
-  readonly text: string;
-}
-
-type PartArrived = Extract<CapturedObservation, { _tag: "ModelPartArrived" }>;
-
-/** What the projection takes: a fact, a part completed while its response streams, or a delta. */
-export type ProjectionInput = Fact | PartArrived | Delta;
+/** What the projection takes: a fact, or an item a model request passed on while it ran. */
+export type ProjectionInput = Fact | CapturedObservation;
 
 /** A tool call as the model made it. */
 export interface Call {
@@ -107,56 +93,53 @@ export const presentFrom =
     };
   };
 
-/** The response under way: its turn, its step when known, and how much of each part was sent. */
-interface Response {
-  readonly turn: TurnId;
-  readonly step: StepIndex | undefined;
-  /** How many of its parts `ModelPartArrived` completed: the index of the next. */
-  readonly arrived: number;
-  /** By part index: the characters of the part's text sent, and whether the part was whole when sent. */
-  readonly sent: ReadonlyMap<number, { readonly length: number; readonly whole: boolean }>;
-  /** Its `ModelResponded` was taken: what arrives for it after is not sent. */
-  readonly responded: boolean;
+
+/** The kinds of text a delta carries, as `ModelDelta` names them. */
+type TextKind = "Text" | "Commentary" | "Thinking";
+
+/** The length of the delta text sent, by kind. */
+type Sent = { readonly [Kind in TextKind]: number };
+
+const none: Sent = { Text: 0, Commentary: 0, Thinking: 0 };
+
+/**
+ * One turn's text, live: what its requests' deltas sent, until each request's `ModelResponded` is
+ * taken. Of a turn's requests, the captured feed has ended the first `c` (their end items) and the
+ * facts have answered the first `a`; at most one of `awaiting` and `ahead` is not empty.
+ */
+interface TurnText {
+  /** What the deltas of the request streaming now sent; none while `ahead`, whose deltas are dropped. */
+  readonly streaming: Sent;
+  /** Of each request ended but not answered yet, in order: what its deltas sent. */
+  readonly awaiting: ReadonlyArray<Sent>;
+  /** How many requests were answered (`ModelResponded`) before their end item: their deltas are dropped. */
+  readonly ahead: number;
 }
 
+const fresh: TurnText = { streaming: none, awaiting: [], ahead: 0 };
+
 export interface ProjectionState {
-  readonly response: Response | undefined;
+  /** The text of each turn under way, by the turn: made by the first input that names it. */
+  readonly texts: ReadonlyMap<TurnId, TurnText>;
+  /** The turns ended (`TurnEnded`): what is captured of them after is dropped, its text sent by their facts. */
+  readonly ended: ReadonlySet<TurnId>;
   /** The calls announced, as they were presented. */
   readonly calls: ReadonlyMap<CallId, { readonly call: Call; readonly shown: Presented }>;
 }
 
-export const start: ProjectionState = { response: undefined, calls: new Map() };
+export const start: ProjectionState = { texts: new Map(), ended: new Set(), calls: new Map() };
 
 export interface Projected {
   readonly state: ProjectionState;
   readonly updates: ReadonlyArray<SessionUpdate>;
 }
 
-const fresh = (turn: TurnId, step: StepIndex | undefined): Response => ({ turn, step, arrived: 0, sent: new Map(), responded: false });
+const textOf = (state: ProjectionState, turn: TurnId): TurnText => state.texts.get(turn) ?? fresh;
 
-/** The response that `turn` (and `step`, when given) names: the one under way, or a new one. */
-const responseFor = (state: ProjectionState, turn: TurnId, step?: StepIndex): Response => {
-  const now = state.response;
-  if (now !== undefined && now.turn === turn && (step === undefined || now.step === undefined || now.step === step))
-    return now.step === undefined && step !== undefined ? { ...now, step } : now;
-  return fresh(turn, step);
-};
+const withText = (state: ProjectionState, turn: TurnId, now: TurnText): ProjectionState => ({ ...state, texts: new Map(state.texts).set(turn, now) });
 
-const chunkOf = (kind: "text" | "thinking", value: string): SessionUpdate =>
-  kind === "text" ? { sessionUpdate: "agent_message_chunk", content: text(value) } : { sessionUpdate: "agent_thought_chunk", content: text(value) };
-
-/** A part's text and whether it is answer text or thinking; none for a part with no text to show. */
-const textOf = (part: ModelPart): { readonly kind: "text" | "thinking"; readonly text: string } | undefined => {
-  switch (part._tag) {
-    case "Text":
-    case "Commentary":
-      return { kind: "text", text: part.text };
-    case "Thinking":
-      return { kind: "thinking", text: part.text };
-    default:
-      return undefined;
-  }
-};
+const chunkOf = (kind: TextKind, value: string): SessionUpdate =>
+  kind === "Thinking" ? { sessionUpdate: "agent_thought_chunk", content: text(value) } : { sessionUpdate: "agent_message_chunk", content: text(value) };
 
 /** Announces `call` as `pending`, unless it was announced. */
 const announce = (state: ProjectionState, call: Call, context: ProjectionContext): Projected => {
@@ -178,14 +161,32 @@ const announce = (state: ProjectionState, call: Call, context: ProjectionContext
   };
 };
 
-/** The whole part at `index` of `response`: what of its text was not sent, and the call it makes. */
-const whole = (state: ProjectionState, response: Response, index: number, part: ModelPart, context: ProjectionContext): Projected => {
-  if (part._tag === "ToolCall") return announce({ ...state, response }, { call: part.call, tool: part.tool, input: part.input }, context);
-  const shown = textOf(part);
-  const sent = response.sent.get(index);
-  const rest = shown === undefined || sent?.whole === true ? "" : shown.text.slice(sent?.length ?? 0);
-  const next: Response = { ...response, sent: new Map(response.sent).set(index, { length: shown?.text.length ?? 0, whole: true }) };
-  return { state: { ...state, response: next }, updates: shown === undefined || rest === "" ? [] : [chunkOf(shown.kind, rest)] };
+const callOf = (part: Extract<ModelPart, { _tag: "ToolCall" }>): Call => ({ call: part.call, tool: part.tool, input: part.input });
+
+/**
+ * The parts of a response its deltas sent `sent` of: of each kind, the deltas cover that kind's
+ * parts in order, so a part they covered gives nothing and the first they did not gives what of it
+ * they did not send. A part the stream cut is not among `parts`: what was sent of it stays sent.
+ */
+const answered = (state: ProjectionState, parts: ReadonlyArray<ModelPart>, sent: Sent, context: ProjectionContext): Projected => {
+  const covered = { ...sent };
+  const updates: Array<SessionUpdate> = [];
+  let now = state;
+  for (const part of parts) {
+    if (part._tag === "ToolCall") {
+      const step = announce(now, callOf(part), context);
+      now = step.state;
+      updates.push(...step.updates);
+    } else if (part._tag === "Text" || part._tag === "Commentary" || part._tag === "Thinking") {
+      const kind = part._tag;
+      if (covered[kind] >= part.text.length) covered[kind] -= part.text.length;
+      else {
+        updates.push(chunkOf(kind, part.text.slice(covered[kind])));
+        covered[kind] = 0;
+      }
+    }
+  }
+  return { state: now, updates };
 };
 
 const nothing = (state: ProjectionState): Projected => ({ state, updates: [] });
@@ -199,27 +200,35 @@ const status = (call: CallId, value: "pending" | "in_progress"): SessionUpdate =
 /** The updates `input` gives, and the state to take the next input from. */
 export function next(state: ProjectionState, input: ProjectionInput, context: ProjectionContext): Projected {
   switch (input._tag) {
-    case "Delta": {
-      const response = responseFor(state, input.turn, input.response);
-      const sent = response.sent.get(input.part);
-      if (response.responded || sent?.whole === true || input.text === "") return { state: { ...state, response }, updates: [] };
-      const now: Response = { ...response, sent: new Map(response.sent).set(input.part, { length: (sent?.length ?? 0) + input.text.length, whole: false }) };
-      return { state: { ...state, response: now }, updates: [chunkOf(input.kind, input.text)] };
+    case "ModelStreamed":
+      return nothing(state);
+    case "ModelDelta": {
+      if (state.ended.has(input.turn)) return nothing(state);
+      const now = textOf(state, input.turn);
+      // Its request was answered already, and `ModelResponded` sent its text.
+      if (now.ahead > 0 || input.text === "") return nothing(state);
+      const streaming = { ...now.streaming, [input.kind]: now.streaming[input.kind] + input.text.length };
+      return { state: withText(state, input.turn, { ...now, streaming }), updates: [chunkOf(input.kind, input.text)] };
     }
-    case "ModelPartArrived": {
-      const response = responseFor(state, input.turn);
-      if (response.responded) return nothing(state);
-      return whole(state, { ...response, arrived: response.arrived + 1 }, response.arrived, input.part, context);
+    case "ModelPartArrived":
+      return input.part._tag === "ToolCall" ? announce(state, callOf(input.part), context) : nothing(state);
+    case "ModelResponseEnded": {
+      if (state.ended.has(input.turn)) return nothing(state);
+      const now = textOf(state, input.turn);
+      return nothing(
+        withText(
+          state,
+          input.turn,
+          now.ahead > 0 ? { ...now, ahead: now.ahead - 1 } : { ...now, awaiting: [...now.awaiting, now.streaming], streaming: none },
+        ),
+      );
     }
     case "Decided": {
       const decision = input.decision;
-      if (decision._tag === "AskModel" || decision._tag === "TellModel") {
-        const step = decision._tag === "AskModel" ? StepIndex.make(1) : decision.step;
-        const now = state.response;
-        const same = now !== undefined && now.turn === decision.turn && (now.step === undefined || now.step === step);
-        return nothing({ ...state, response: same ? { ...now, step } : fresh(decision.turn, step) });
-      }
-      return nothing(state);
+      if (decision._tag !== "TurnEnded") return nothing(state);
+      const texts = new Map(state.texts);
+      texts.delete(decision.turn);
+      return nothing({ ...state, texts, ended: new Set(state.ended).add(decision.turn) });
     }
     case "Observed": {
       const observation = input.observation;
@@ -227,17 +236,17 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
         case "InputArrived":
           return { state, updates: context.mode === "replay" ? [{ sessionUpdate: "user_message_chunk", content: text(observation.text) }] : [] };
         case "ModelResponded": {
-          const under = responseFor(state, observation.turn);
-          const response = under.responded ? fresh(observation.turn, under.step) : under;
-          const done = observation.parts.reduce<Projected>(
-            (so, part, index) => {
-              const step = whole(so.state, so.state.response ?? response, index, part, context);
-              return { state: step.state, updates: [...so.updates, ...step.updates] };
-            },
-            { state: { ...state, response }, updates: [] },
-          );
-          const after = done.state.response ?? response;
-          return { state: { ...done.state, response: { ...after, sent: new Map(), responded: true } }, updates: done.updates };
+          const now = textOf(state, observation.turn);
+          // The deltas of this request: those of the first request ended and not answered; else, live,
+          // those streaming now (none while `ahead`: this request's have not come yet), and its
+          // deltas still to come are dropped. On replay there are none.
+          const [sent, after]: readonly [Sent, TurnText] =
+            now.awaiting[0] !== undefined
+              ? [now.awaiting[0], { ...now, awaiting: now.awaiting.slice(1) }]
+              : context.mode === "replay"
+                ? [none, now]
+                : [now.streaming, { ...now, streaming: none, ahead: now.ahead + 1 }];
+          return answered(withText(state, observation.turn, after), observation.parts, sent, context);
         }
         case "ToolCallArrived":
           return announce(state, { call: observation.call, tool: observation.tool, input: observation.input }, context);
