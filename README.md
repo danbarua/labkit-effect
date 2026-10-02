@@ -79,6 +79,11 @@ ACP Client extension, the setting is the one the labkit monorepo's host uses
 }
 ```
 
+`/ABS/labkit-effect` is the main checkout, not a worktree: a worktree is removed after its branch
+merges, and an editor setting that names one stops working without saying why. The command exists
+there once the branch that adds `src/agent-acp/` is merged, and it needs `bun install` run in that
+checkout first (a checkout without `node_modules` fails at the first import).
+
 The environment: `LABKIT_ACP_MODEL` (the model new sessions start on, `provider/model`; else the
 first the catalog lists), a provider's key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`) or
 the local server at `http://localhost:8000/v1`, `LABKIT_ACP_SESSIONS_DIR` (default
