@@ -162,23 +162,34 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       - OpenAI, when a host sends its Chat Completions there: the output limit as
         `max_completion_tokens` (it refuses `max_tokens` for its o-series models).
 - [ ] The text and thinking of a response as it arrives, the same for every adapter. `streamed`
-      passes a provider's own events (`ModelStreamed`) and each part once it is whole
-      (`ModelPartArrived`); a host cannot draw text and thinking as they arrive without reading each
-      provider's events. What the ACP host needs of Anthropic, OpenAI, xAI and Chat Completions
-      alike, none of it recorded:
-      - the text of an answer and the text of thinking as separate items, in the order they arrive,
-        each saying its turn, the response (step) it belongs to and which part of it;
-      - the items of a part, joined, are that part's text as `ModelPartArrived` gives it, and the
-        last of them comes before `ModelPartArrived` of that part (`ModelStreamInterval` batching
-        may stay);
-      - an adapter that does not stream gives none, only the whole parts;
-      - thinking only when the `observe` setting and the provider allow it to be seen;
-      - Chat Completions: `delta.content` is text; thinking is in whichever field the local server
-        streams it in; `finish_reason: "length"` ends the response `CutShort` (the host sends
-        `max_tokens`); tool call deltas add up to a call, and `ToolCallArrived` is recorded when it
-        is whole.
-      A stopped response (X1) records only the parts that were whole, so text drawn from the items
-      of a part that was not whole is not in the facts; the host takes that as it is.
+      passes each provider's own events (`ModelStreamed`) and each part once it is whole
+      (`ModelPartArrived`); nothing can draw the text and thinking of a response as they arrive
+      without reading each provider's events. The ACP host needs this of Anthropic, OpenAI, xAI and
+      Chat Completions alike, and the REPL showing text and thinking as they arrive (The coding
+      agent, below) needs the same:
+      - one more item in `Streamed` (what an adapter passes on) and in `CapturedObservation` (what
+        `streamed` gives): the text of a response as it arrives, saying its turn and its `kind`
+        (`Text`, `Commentary` or `Thinking`: the kind of the part the text ends up in). Each
+        adapter passes it where it already adds a delta to the part it is building: Anthropic's
+        `text_delta` and `thinking_delta`, the Responses text and reasoning-summary deltas, Chat
+        Completions' `delta.content` and whichever field the server streams thinking in;
+      - the deltas of a part, joined, are that part's text, and they come in `streamed` before
+        `ModelPartArrived` of that part (the throttle's batching may stay). A host matches parts to
+        deltas by kind, so a part passed late is fine (Chat Completions passes its text at the end);
+      - a response boundary in `streamed`, there whether the response ends, is stopped or fails.
+        The facts and `streamed` are separate subscriptions with no order between them, so a
+        consumer cannot take the boundary from a fact; without one, text a stopped response left
+        reads as the start of the next;
+      - thinking is the readable text the provider returns (`Thinking.text`). `Observe` decides what
+        the provider is asked to return, for the record; showing it is the host's;
+      - no deltas from an adapter that does not stream, from a server that answers whole
+        (`postEventsOrWhole`), or for thinking with no readable text: the host sends the whole
+        parts;
+      - none for tool calls (`ToolCallArrived` is enough);
+      - none recorded.
+      A stopped response (X1) records only the parts that were whole, so text a host drew from the
+      deltas of a part that was not whole is not in the facts. Text from a fallback attempt that then
+      failed (`ModelAttemptFailed`) cannot be taken back from a client. The hosts take both.
 - [ ] Models. Built: the well-known models as generated `const` data (`bun run models:refresh`:
       models.dev's catalog merged with `well-known-models.measured.json`); a settings type per
       well-known model (`SettingsFor`); the values to offer for each setting of a model as it is
