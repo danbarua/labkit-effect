@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import * as acp from "@agentclientprotocol/sdk";
-import { Deferred, Effect, Exit, Scope, Sink, Stdio, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Scope, Sink, Stdio, Stream } from "effect";
 import type { Wire } from "./json-rpc.ts";
 import { type AgentPeer, permissionRequest, runAgent } from "./peer-test-agent.ts";
 import { fromStdio, fromWebStreams } from "./stdio.ts";
@@ -221,6 +221,35 @@ describe("a two-way JSON-RPC peer, as an ACP agent, against the official SDK", (
     expect(cancels[0].params).toEqual({ requestId: asked.id });
   });
 
+  test("AP2: a call interrupted before its request is written sends no $/cancel_request", async () => {
+    const written: Array<{ readonly method?: string }> = [];
+    const release = Deferred.makeUnsafe<void>();
+    // The first write blocks until released, holding the peer's write lock.
+    const wire: Wire = {
+      read: Stream.never,
+      write: (message) =>
+        Effect.suspend(() => {
+          written.push(message as { readonly method?: string });
+          return written.length === 1 ? Deferred.await(release) : Effect.void;
+        }),
+    };
+    const scope = Scope.makeUnsafe();
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const peer = yield* runAgent(wire, { hanging: yield* Deferred.make<void>(), hangInterrupted: yield* Deferred.make<void>() });
+        const update = yield* Effect.forkChild(peer.notify("session/update", { sessionId: "s", update: {} }));
+        const call = yield* Effect.forkChild(peer.client["session/request_permission"](permissionRequest("s")));
+        yield* Effect.yieldNow;
+        const interrupted = yield* Effect.forkChild(Fiber.interrupt(call));
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(update);
+        yield* Fiber.join(interrupted);
+      }).pipe(Scope.provide(scope)),
+    );
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(written.map((message) => message.method)).toEqual(["session/update"]);
+  });
+
   test("AP3: the client cancelling its own request interrupts the handler, and the request ends with -32800", async () => {
     const agent = await start();
     const { app, firstUpdate } = client([], allowOnce);
@@ -255,6 +284,15 @@ describe("a two-way JSON-RPC peer, as an ACP agent, against the official SDK", (
     );
     await agent.close();
     expect(error).toMatchObject({ code: -32042, message: "Refused by the test agent", data: { asked: "fail" } });
+  });
+
+  test("AP4: a handler that fails with a tagged error class shaped like a JSON-RPC error is answered with exactly its code and message, and no _tag or other field", async () => {
+    const agent = await start();
+    const raw = rawClient(agent);
+    await raw.send(request(1, "session/prompt", prompt("session-1", "refuse")));
+    expect(await raw.next()).toMatchObject({ method: "session/update" });
+    expect(await raw.next()).toStrictEqual({ jsonrpc: "2.0", id: 1, error: { code: -32042, message: "Refused by the test agent" } });
+    await agent.close();
   });
 
   test("AP5: a handler that dies answers its own request with -32603, and the connection goes on", async () => {

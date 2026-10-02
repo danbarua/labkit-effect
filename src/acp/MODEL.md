@@ -67,13 +67,16 @@ reads and writes every JSON-RPC message itself. `stdio.ts` makes wires of newlin
   notifications and its own requests to the other end reach the other end before its response.
   Nothing of Effect's RPC dialect is written: no `@effect/rpc/*` messages, `_tag`, `headers`,
   `traceId` or `spanId`.
-- AP2. When a call to the other end is interrupted, the peer sends `$/cancel_request { requestId }`
-  with that call's id, and drops a response that arrives for it later.
+- AP2. When a call to the other end is interrupted after its request was written, the peer sends
+  `$/cancel_request { requestId }` with that call's id, and drops a response that arrives for it
+  later. A call interrupted before its request was written sends nothing.
 - AP3. An incoming `$/cancel_request` interrupts the handler of the request it names, and that
   request is answered with -32800. A `$/cancel_request` for an id that is unknown or already
   answered is ignored.
 - AP4. A handler that fails with a `JsonRpcError` answers its request with that error: code,
-  message and data as given.
+  message and data as given, and nothing else. A failure value with more to it (a tagged error
+  class shaped like a `JsonRpcError`) goes out as its `code`, `message` and `data` only, with no
+  `_tag` or other field; an error response reaches the caller the same way.
 - AP5. A handler that dies answers its own request with -32603, and the connection goes on.
 - AP6. An unknown method is answered -32601, and params the method's payload schema refuses are
   answered -32602. Both are answered before any handler runs. A notification gets no response: one

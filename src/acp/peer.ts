@@ -7,8 +7,9 @@
  *
  * - each incoming request runs in its own fiber, in a `FiberMap` keyed by the request's id, and an
  *   incoming `$/cancel_request` interrupts that fiber, whose request is then answered -32800;
- * - each outgoing request waits on a `Deferred`, kept by id until its response arrives; a call that
- *   is interrupted while it waits sends `$/cancel_request`, and its late response is dropped;
+ * - each outgoing request waits on a `Deferred`, kept by id until its response arrives; a call
+ *   interrupted after its request was written sends `$/cancel_request`, and its late response is
+ *   dropped;
  * - a `Semaphore` writes one message at a time, in the order they are sent;
  * - the peer's `Scope` owns every fiber; when the wire's `read` ends, pending calls fail with
  *   `PeerClosed` and running handlers are interrupted.
@@ -16,7 +17,8 @@
  * Every message is read and written here, as JSON-RPC 2.0:
  *
  * - a handler's failure goes out as the `JsonRpcError` it failed with, an interruption as -32800, a
- *   defect as -32603, always answering the request that died;
+ *   defect as -32603, always answering the request that died; every error written, and every error
+ *   response handed to a caller, is a fresh object of its `code`, `message` and `data` only;
  * - an unknown method is -32601 and params its schema refuses are -32602, answered before any
  *   handler runs; an unknown notification, or one whose params are refused, is dropped;
  * - a notification is run by its handler and nothing is sent back;
@@ -168,7 +170,10 @@ const classify = (value: unknown): Classified => {
 
 const success = (id: JsonRpcId | null, result: unknown): JsonRpcResponse => ({ jsonrpc: "2.0", id, result });
 
-const failure = (id: JsonRpcId | null, error: JsonRpcError): JsonRpcResponse => ({ jsonrpc: "2.0", id, error });
+/** A JSON-RPC error as written or handed to a caller: its code, message and data, and nothing else of the value it came from. */
+const exactly = ({ code, message, data }: JsonRpcError): JsonRpcError => ({ code, message, ...(data !== undefined ? { data } : {}) });
+
+const failure = (id: JsonRpcId | null, error: JsonRpcError): JsonRpcResponse => ({ jsonrpc: "2.0", id, error: exactly(error) });
 
 const invalidRequest: JsonRpcError = { code: ErrorCode.InvalidRequest, message: "Invalid request" };
 
@@ -272,16 +277,29 @@ export const make: <Serve extends Methods.Any, Call extends Methods.Any, Notify 
               if (!open) return Effect.fail(new PeerClosed({ reason: "The connection closed" }));
               const id = nextId++;
               const answer = Deferred.makeUnsafe<unknown, JsonRpcError | PeerClosed>();
+              // Set before the write: the response may be read as soon as the write completes.
               pending.set(id, { method, answer });
+              let written = false;
               return restore(
-                lock.withPermit(options.wire.write({ jsonrpc: "2.0", id, method: method.name, params })).pipe(
-                  Effect.mapError((error) => new PeerClosed({ reason: `The request could not be written: ${error.reason}` })),
-                  Effect.andThen(Deferred.await(answer)),
-                ),
+                lock
+                  .withPermit(
+                    options.wire.write({ jsonrpc: "2.0", id, method: method.name, params }).pipe(
+                      Effect.onExit((exit) =>
+                        Effect.sync(() => {
+                          written = Exit.isSuccess(exit);
+                        }),
+                      ),
+                    ),
+                  )
+                  .pipe(
+                    Effect.mapError((error) => new PeerClosed({ reason: `The request could not be written: ${error.reason}` })),
+                    Effect.andThen(Deferred.await(answer)),
+                  ),
               ).pipe(
                 Effect.onExit((exit) =>
-                  // Still pending when interrupted: the other end is told to stop, and its answer will be dropped.
-                  pending.delete(id) && Exit.hasInterrupts(exit)
+                  // Written and still pending when interrupted: the other end is told to stop, and its
+                  // answer will be dropped. A request never written is not cancelled.
+                  pending.delete(id) && written && Exit.hasInterrupts(exit)
                     ? post({ jsonrpc: "2.0", method: cancelMethod, params: { requestId: id } })
                     : Effect.void,
                 ),
@@ -352,7 +370,7 @@ export const make: <Serve extends Methods.Any, Call extends Methods.Any, Notify 
         // A response to no request of this end's, or to one already answered or cancelled, is dropped.
         const call = take(message.id);
         if (call === undefined) return Effect.succeed(none);
-        const exit = message._tag === "Success" ? resultOf(call.method, message.result) : Exit.fail(message.error);
+        const exit = message._tag === "Success" ? resultOf(call.method, message.result) : Exit.fail(exactly(message.error));
         return Deferred.done(call.answer, exit).pipe(Effect.as(none));
       }
       case "Notification":

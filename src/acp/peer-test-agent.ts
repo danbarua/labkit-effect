@@ -9,16 +9,21 @@
  *   optional fields, then reports the answer.
  * - `hang`: waits until it is interrupted.
  * - `fail`: fails with a JSON-RPC error of its own.
+ * - `refuse`: fails with `Refused`, a tagged error class shaped like a JSON-RPC error, with a field
+ *   of its own.
  * - `die`: dies.
  * - anything else: ends the turn.
  *
  * Every turn first sends one `session/update`.
  */
 
-import { Deferred, Effect, Option, Schema, type Scope } from "effect";
+import { Data, Deferred, Effect, Option, Schema, type Scope } from "effect";
 import type { Wire } from "./json-rpc.ts";
 import * as Methods from "./methods.ts";
 import * as Peer from "./peer.ts";
+
+/** A domain error a handler fails with: a JSON-RPC error by shape, with a tag and a field of its own. */
+class Refused extends Data.TaggedError("Refused")<{ readonly code: number; readonly message: string; readonly reason: string }> {}
 
 const SessionId = Schema.String;
 
@@ -153,6 +158,8 @@ export const runAgent = (wire: Wire, probe: Probe): Effect.Effect<AgentPeer, nev
                 );
               case "fail":
                 return yield* Effect.fail({ code: -32042, message: "Refused by the test agent", data: { asked: "fail" } });
+              case "refuse":
+                return yield* new Refused({ code: -32042, message: "Refused by the test agent", reason: "tagged" });
               case "die":
                 return yield* Effect.die(new Error("the test agent's handler died"));
               default:
