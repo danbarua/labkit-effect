@@ -1,6 +1,6 @@
 /**
  * Generates the ACP schemas from the JSON Schemas the ACP SDK ships: every `$def` becomes an Effect
- * Schema in `src/acp/schema/v{1,2}.gen.ts`, and the methods become `RpcGroup`s in
+ * Schema in `src/acp/schema/v{1,2}.gen.ts`, and the methods become method sets (`src/acp/methods.ts`) in
  * `src/acp/schema/v{1,2}.rpcs.gen.ts`. `bun run acp:schema` writes them; `generate` returns them, so a
  * test can check the files on disk are what the installed SDK produces.
  *
@@ -592,22 +592,21 @@ function rpcsModule(version: (typeof versions)[number], sdkVersion: string, inpu
     serves(side).flatMap((entry) =>
       entry.request === undefined || entry.response === undefined
         ? []
-        : [`  Rpc.make(${JSON.stringify(entry.method)}, { payload: Schemas.${entry.request}, success: Schemas.${entry.response}, error: JsonRpcError }),`],
+        : [`  Methods.request(${JSON.stringify(entry.method)}, Schemas.${entry.request}, Schemas.${entry.response}),`],
     );
   const notifications = (side: "agent" | "client") =>
-    serves(side).flatMap((entry) => (entry.notification === undefined ? [] : [`  Rpc.make(${JSON.stringify(entry.method)}, { payload: Schemas.${entry.notification} }),`]));
-  const group = (comment: string, name: string, rpcs: ReadonlyArray<string>) => `/** ${comment} */\nexport const ${name} = RpcGroup.make(\n${rpcs.join("\n")}\n);\n`;
+    serves(side).flatMap((entry) => (entry.notification === undefined ? [] : [`  Methods.notification(${JSON.stringify(entry.method)}, Schemas.${entry.notification}),`]));
+  const set = (comment: string, name: string, methods: ReadonlyArray<string>) => `/** ${comment} */\nexport const ${name} = Methods.make(\n${methods.join("\n")}\n);\n`;
   const unstable = all.filter((entry) => entry.unstable).map((entry) => JSON.stringify(entry.method));
   return [
     header(version, sdkVersion),
-    `import { Rpc, RpcGroup } from "effect/rpc";`,
-    `import { JsonRpcError } from "../json-rpc.ts";`,
+    `import * as Methods from "../methods.ts";`,
     `import * as Schemas from "./${version.name}.gen.ts";`,
     "",
-    group("The requests the agent serves.", "AgentRequests", requests("agent")),
-    group("The notifications the agent receives.", "AgentNotifications", notifications("agent")),
-    group("The requests the client serves.", "ClientRequests", requests("client")),
-    group("The notifications the client receives.", "ClientNotifications", notifications("client")),
+    set("The requests the agent serves.", "AgentRequests", requests("agent")),
+    set("The notifications the agent receives.", "AgentNotifications", notifications("agent")),
+    set("The requests the client serves.", "ClientRequests", requests("client")),
+    set("The notifications the client receives.", "ClientNotifications", notifications("client")),
     `/** The methods whose definitions are marked **UNSTABLE**: not part of the spec yet, and may change or go. */`,
     `export const unstable: ReadonlySet<string> = new Set([${unstable.join(", ")}]);`,
     "",

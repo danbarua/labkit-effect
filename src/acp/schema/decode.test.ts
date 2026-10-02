@@ -113,21 +113,21 @@ type Codec = Schema.Codec<unknown, unknown>;
 /** The schema a logged message's params or result is checked against, by direction and method. */
 function schemaFor(logged: Logged, methodById: Map<string, string>): { readonly method: string; readonly schema: Codec; readonly value: unknown } {
   const { message, direction } = logged;
-  const requests = direction === "toAgent" ? v1Rpcs.AgentRequests.requests : v1Rpcs.ClientRequests.requests;
-  const notifications = direction === "toAgent" ? v1Rpcs.AgentNotifications.requests : v1Rpcs.ClientNotifications.requests;
+  const requests = direction === "toAgent" ? v1Rpcs.AgentRequests.byName : v1Rpcs.ClientRequests.byName;
+  const notifications = direction === "toAgent" ? v1Rpcs.AgentNotifications.byName : v1Rpcs.ClientNotifications.byName;
   if (typeof message["method"] === "string") {
     const method = message["method"];
     if ("id" in message) methodById.set(`${direction}:${String(message["id"])}`, method);
-    const rpc = "id" in message ? requests.get(method) : notifications.get(method);
-    if (rpc === undefined) throw new Error(`no rpc for ${method}`);
-    return { method, schema: rpc.payloadSchema as Codec, value: message["params"] };
+    const declared = "id" in message ? requests.get(method) : notifications.get(method);
+    if (declared === undefined) throw new Error(`no method ${method}`);
+    return { method, schema: declared.params as Codec, value: message["params"] };
   }
   // A response answers a request that went the other way.
   const asked = direction === "toAgent" ? "toClient" : "toAgent";
   const method = methodById.get(`${asked}:${String(message["id"])}`);
-  const rpc = method === undefined ? undefined : (asked === "toAgent" ? v1Rpcs.AgentRequests : v1Rpcs.ClientRequests).requests.get(method);
-  if (method === undefined || rpc === undefined) throw new Error(`a response to no known request: ${JSON.stringify(message)}`);
-  return { method: `${method} (response)`, schema: rpc.successSchema as Codec, value: message["result"] };
+  const declared = method === undefined ? undefined : (asked === "toAgent" ? v1Rpcs.AgentRequests : v1Rpcs.ClientRequests).byName.get(method);
+  if (method === undefined || declared === undefined) throw new Error(`a response to no known request: ${JSON.stringify(message)}`);
+  return { method: `${method} (response)`, schema: declared.result as Codec, value: message["result"] };
 }
 
 test("AS4: what an SDK client and agent send each other in a turn decodes, and encodes back to the same JSON", async () => {

@@ -23,11 +23,12 @@ fails when a rule has none.
   `@agentclientprotocol/sdk`'s `schema/schema.json` (protocol version 1) and
   `schema/v2/schema.unstable.json` (protocol version 2). Every `$def` is an exported Schema and a
   type of the same name, and the def's description is the doc comment of both.
-- AS2. Each version has four `RpcGroup`s whose tags are method names. `AgentRequests` and
-  `ClientRequests` pair each request def with its response def, with error `JsonRpcError`.
-  `AgentNotifications` and `ClientNotifications` have a payload only. A method is on the side its
-  `x-side` names, and `both` puts it on both sides. `mcp/message` is a request and also a
-  notification. `$/cancel_request` is in no group. `unstable` holds every method with a def whose
+- AS2. Each version has four method sets (`methods.ts`) keyed by method name. `AgentRequests` and
+  `ClientRequests` hold a request per request def, its params decoded by the request def and its
+  result by the response def; every request's error is `JsonRpcError`. `AgentNotifications` and
+  `ClientNotifications` hold a notification per notification def, with params only. A method is on
+  the side its `x-side` names, and `both` puts it on both sides. `mcp/message` is a request and also
+  a notification. `$/cancel_request` is in no set. `unstable` holds every method with a def whose
   description says `**UNSTABLE**`.
 - AS3. A value a method def accepts encodes to JSON that the SDK's zod schema for that def accepts,
   and what that zod schema outputs decodes back.
@@ -58,9 +59,9 @@ fails when a rule has none.
 
 ## The peer
 
-`peer.ts` is one end of a connection: it serves the requests and notifications of one `RpcGroup`
-and calls another. The groups only declare the methods and their schemas; the peer reads and
-writes every JSON-RPC message itself. `stdio.ts` makes wires of newline-delimited JSON.
+`peer.ts` is one end of a connection: it serves the requests and notifications of one method set
+and calls another (`methods.ts`). The sets only declare the methods and their schemas; the peer
+reads and writes every JSON-RPC message itself. `stdio.ts` makes wires of newline-delimited JSON.
 
 - AP1. The peer writes each message whole, one at a time, in the order it is sent. A handler's
   notifications and its own requests to the other end reach the other end before its response.
@@ -191,7 +192,7 @@ WebSocket is not built: a GET with `Upgrade: websocket` gets 426, as the SDK ans
 ## Negotiation
 
 `protocol.ts` holds one `ProtocolAdapter` per protocol version (`v1`, `v2`), modelled on Effect's
-`McpProtocol`: the version's method groups, how it writes and reads `initialize`, and its capability
+`McpProtocol`: the version's method sets, how it writes and reads `initialize`, and its capability
 gates. `agent.ts` and `client.ts` are the two ends. Each takes one implementation per version it
 speaks, answers or sends `initialize` itself, and then serves the chosen implementation's handlers
 behind the gates (`endpoint.ts`). A capability counts as advertised when it is present and neither
@@ -314,8 +315,8 @@ advertises it.
   with `auth: { terminal: {} }`. Without it, a version 2 agent whose only method is a terminal one
   answers no `authMethods`, and the client's `auth/login` is answered -32601.
 - AN13. `agent.implement` and `client.implement` take, before their options, the extension
-  methods the implementation serves, calls and sends (`Extensions { serve, call, notify }`, each an
-  `RpcGroup`). Every method name in them starts with `_`; `implement` throws when one does not. The
+  methods the implementation serves, calls and sends (`Extensions { serve, call, notify }`, each a
+  method set). Every method name in them starts with `_`; `implement` throws when one does not. The
   served ones are handled in the same handler record as the version's methods, as requests or
   notifications. The connection's `extensions.call` (a function per method of `call`, by name) and
   `extensions.notify` (of `notify`) send the outgoing ones. No gate refuses a method whose name
@@ -323,3 +324,7 @@ advertises it.
   declare, is answered -32601 (AN4, AP6). An agent of `agent.ts` and a client of `client.ts` call
   and notify each other's extension methods, and the SDK client's `request` and `notify` of `_`
   methods reach the agent's handlers.
+- AN14. A connection never reuses one of its own request ids. The client sends `initialize` as id
+  0, before the peer starts, and the peer numbers the client's later requests from 1
+  (`Peer.make`'s `firstId`), so a late or repeated answer to `initialize` cannot settle another
+  call. The agent sends no request before its peer starts, and its peer numbers from 0.

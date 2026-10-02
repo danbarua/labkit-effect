@@ -2,8 +2,8 @@
  * One JSON-RPC 2.0 connection on which this end both serves requests and makes them. ACP needs
  * this: an agent serves `session/prompt` and, during it, asks the client for permission.
  *
- * `Rpc` and `RpcGroup` only declare the methods: each one's name and the schemas of its params,
- * result and error. The connection is built here from Effect's primitives:
+ * `methods.ts` declares the methods: each one's name, the schema of its params and, for a request,
+ * the schema of its result. The connection is built here from Effect's primitives:
  *
  * - each incoming request runs in its own fiber, in a `FiberMap` keyed by the request's id, and an
  *   incoming `$/cancel_request` interrupts that fiber, whose request is then answered -32800;
@@ -32,7 +32,6 @@
 
 import {
   Cause,
-  Data,
   Deferred,
   Effect,
   Exit,
@@ -46,7 +45,6 @@ import {
   Semaphore,
   Stream,
 } from "effect";
-import type { Rpc, RpcGroup } from "effect/rpc";
 import {
   ErrorCode,
   isJsonRpcId,
@@ -58,55 +56,40 @@ import {
   type Wire,
   type WireInput,
 } from "./json-rpc.ts";
+import type * as Methods from "./methods.ts";
+import { PeerClosed } from "./methods.ts";
 
 /** The method of the notification that cancels a request, in either direction. */
 export const cancelMethod = "$/cancel_request";
 
-/** A call to the other end got no answer: the connection closed first, or the request could not be written. */
-export class PeerClosed extends Data.TaggedError("PeerClosed")<{
-  readonly reason: string;
-}> {}
-
-/** Requests to the other end, one function per method of `Rpcs`, by name; `E` is what else a call can fail with. */
-export type Client<Rpcs extends Rpc.Any, E = never> = {
-  readonly [Current in Rpcs as Current["_tag"]]: (
-    payload: Rpc.PayloadConstructor<Current>,
-  ) => Effect.Effect<Rpc.Success<Current>, Rpc.Error<Current> | E>;
-};
-
-/** One handler per method of `Rpcs`, by name. A notification's handler returns nothing. */
-export type Handlers<Rpcs extends Rpc.Any, R> = {
-  readonly [Current in Rpcs as Current["_tag"]]: (
-    payload: Rpc.Payload<Current>,
-  ) => Effect.Effect<Rpc.Success<Current>, Rpc.Error<Current>, R>;
-};
-
-export interface Peer<Call extends Rpc.Any, Notify extends Rpc.Any> {
+export interface Peer<Call extends Methods.Any, Notify extends Methods.Any> {
   /**
-   * Requests to the other end, typed by the `call` group. A call fails with the method's declared
-   * error when the other end answers with an error, and with `PeerClosed` when the connection
-   * closes before it is answered or the request cannot be written.
+   * Requests to the other end, typed by the `call` set. A call fails with the `JsonRpcError` the
+   * other end answers, and with `PeerClosed` when the connection closes before it is answered or
+   * the request cannot be written.
    */
-  readonly client: Client<Call, PeerClosed>;
-  /** Sends a notification of the `notify` group. Nothing is sent once the connection has closed. */
-  readonly notify: <Tag extends Notify["_tag"]>(
-    tag: Tag,
-    payload: Rpc.Payload<Rpc.ExtractTag<Notify, Tag>>,
-  ) => Effect.Effect<void>;
+  readonly client: Methods.Caller<Call>;
+  /** Sends a notification of the `notify` set. Nothing is sent once the connection has closed. */
+  readonly notify: Methods.Notify<Notify>;
   /** Completes when the wire's `read` ends or fails, or the peer's scope closes. */
   readonly closed: Effect.Effect<void>;
 }
 
-export interface Options<Serve extends Rpc.Any, Call extends Rpc.Any, Notify extends Rpc.Any, R> {
+export interface Options<Serve extends Methods.Any, Call extends Methods.Any, Notify extends Methods.Any, R> {
   readonly wire: Wire;
   /** The requests and notifications this end handles. */
-  readonly serve: RpcGroup.RpcGroup<Serve>;
+  readonly serve: Methods.MethodSet<Serve>;
   /** The requests this end makes. */
-  readonly call: RpcGroup.RpcGroup<Call>;
+  readonly call: Methods.MethodSet<Call>;
   /** The notifications this end sends. */
-  readonly notify: RpcGroup.RpcGroup<Notify>;
+  readonly notify: Methods.MethodSet<Notify>;
   /** Builds the handlers once, given the peer, so that a handler can call the other end. */
-  readonly handlers: (peer: Peer<Call, Notify>) => Effect.Effect<Handlers<Serve, R>, never, R>;
+  readonly handlers: (peer: Peer<Call, Notify>) => Effect.Effect<Methods.Handlers<Serve, R>, never, R>;
+  /**
+   * The id of this end's first request; each later one counts up from it. 0 when left out. An end
+   * that sent requests of its own before the peer started begins after their ids.
+   */
+  readonly firstId?: number | undefined;
 }
 
 /** One incoming JSON value, as far as JSON-RPC 2.0 is concerned. */
@@ -133,7 +116,7 @@ type Reply<R> =
 
 /** A call waiting for its response. */
 interface Pending {
-  readonly method: Rpc.AnyWithProps;
+  readonly method: Methods.Request;
   readonly answer: Deferred.Deferred<unknown, JsonRpcError | PeerClosed>;
 }
 
@@ -142,10 +125,6 @@ type ErasedHandlers<R> = Readonly<Record<string, ((payload: unknown) => Effect.E
 
 /** The JSON codec of one of a method's schemas. */
 const json = (schema: Schema.Top) => Schema.toCodecJson(schema) as unknown as Schema.Codec<unknown, unknown>;
-
-/** A method of a group, with its schemas. */
-const methodOf = (group: RpcGroup.Any, name: string) =>
-  (group as RpcGroup.RpcGroup<Rpc.Any>).requests.get(name) as Rpc.AnyWithProps | undefined;
 
 const isJsonRpcError = Schema.is(JsonRpcError);
 
@@ -200,20 +179,21 @@ const none: Reply<never> = { _tag: "None" };
 const now = (response: JsonRpcResponse): Reply<never> => ({ _tag: "Now", response });
 
 /** The JSON-RPC error a handler's failure goes out as: its typed error, else -32800 for an interruption, else -32603. */
-const errorOf = (method: Rpc.AnyWithProps, cause: Cause.Cause<unknown>): JsonRpcError => {
+const errorOf = (cause: Cause.Cause<unknown>): JsonRpcError => {
   const failed = Cause.findError(cause);
-  if (Result.isSuccess(failed)) {
-    const encoded = Schema.encodeUnknownExit(json(method.errorSchema))(failed.success);
-    if (Exit.isSuccess(encoded) && isJsonRpcError(encoded.value)) return encoded.value;
-  }
+  if (Result.isSuccess(failed) && isJsonRpcError(failed.success)) return failed.success;
   if (Cause.hasInterrupts(cause)) return { code: ErrorCode.RequestCancelled, message: "Request cancelled" };
   return internalError;
 };
 
-/** The response to request `id` once its handler has exited; a result its schema cannot encode is -32603. */
-const responseOf = (id: JsonRpcId | null, method: Rpc.AnyWithProps, exit: Exit.Exit<unknown, JsonRpcError>): JsonRpcResponse => {
-  if (Exit.isFailure(exit)) return failure(id, errorOf(method, exit.cause));
-  const encoded = Schema.encodeUnknownExit(json(method.successSchema))(exit.value);
+/**
+ * The response to request `id` once its handler has exited. A result its schema cannot encode is
+ * -32603; a notification's handler, run for a request, answers `null`.
+ */
+const responseOf = (id: JsonRpcId | null, method: Methods.Any, exit: Exit.Exit<unknown, JsonRpcError>): JsonRpcResponse => {
+  if (Exit.isFailure(exit)) return failure(id, errorOf(exit.cause));
+  if (method._tag === "Notification") return success(id, null);
+  const encoded = Schema.encodeUnknownExit(json(method.result))(exit.value);
   return Exit.isSuccess(encoded) ? success(id, encoded.value ?? null) : failure(id, internalError);
 };
 
@@ -222,8 +202,8 @@ const responseOf = (id: JsonRpcId | null, method: Rpc.AnyWithProps, exit: Exit.E
  * `{}` when the schema accepts `{}`. A result the schema refuses is the `JsonRpcError` -32603
  * naming the method.
  */
-const resultOf = (method: Rpc.AnyWithProps, result: unknown): Exit.Exit<unknown, JsonRpcError> => {
-  const decode = Schema.decodeUnknownExit(json(method.successSchema));
+const resultOf = (method: Methods.Request, result: unknown): Exit.Exit<unknown, JsonRpcError> => {
+  const decode = Schema.decodeUnknownExit(json(method.result));
   const decoded = decode(result);
   if (Exit.isSuccess(decoded)) return Exit.succeed(decoded.value);
   if (result === null) {
@@ -232,7 +212,7 @@ const resultOf = (method: Rpc.AnyWithProps, result: unknown): Exit.Exit<unknown,
   }
   return Exit.fail({
     code: ErrorCode.InternalError,
-    message: `The result does not match ${method._tag}'s schema`,
+    message: `The result does not match ${method.name}'s schema`,
     data: { result, issue: String(Cause.squash(decoded.cause)) },
   });
 };
@@ -242,12 +222,12 @@ const resultOf = (method: Rpc.AnyWithProps, result: unknown): Exit.Exit<unknown,
  * handlers `handlers` builds (given the peer, so a handler can call the other end), calls `call`, and
  * sends `notify`.
  */
-export const make: <Serve extends Rpc.Any, Call extends Rpc.Any, Notify extends Rpc.Any, R>(
+export const make: <Serve extends Methods.Any, Call extends Methods.Any, Notify extends Methods.Any, R>(
   options: Options<Serve, Call, Notify, R>,
 ) => Effect.Effect<Peer<Call, Notify>, never, Scope.Scope | R> = Effect.fnUntraced(function* <
-  Serve extends Rpc.Any,
-  Call extends Rpc.Any,
-  Notify extends Rpc.Any,
+  Serve extends Methods.Any,
+  Call extends Methods.Any,
+  Notify extends Methods.Any,
   R,
 >(options: Options<Serve, Call, Notify, R>) {
   const scope = yield* Scope.Scope;
@@ -259,7 +239,7 @@ export const make: <Serve extends Rpc.Any, Call extends Rpc.Any, Notify extends 
   const background = yield* FiberSet.make();
   // Each outgoing request still waiting for its response, by id.
   const pending = new Map<JsonRpcId, Pending>();
-  let nextId = 0;
+  let nextId = options.firstId ?? 0;
   let open = true;
 
   /** Writes a message nothing waits on, after every message written before it; once the connection has closed it is dropped. */
@@ -282,9 +262,9 @@ export const make: <Serve extends Rpc.Any, Call extends Rpc.Any, Notify extends 
 
   /** One method of `call`, as the client calls it. */
   const callOf =
-    (method: Rpc.AnyWithProps) =>
+    (method: Methods.Request) =>
     (payload: unknown): Effect.Effect<unknown, JsonRpcError | PeerClosed> =>
-      Effect.suspend(() => Schema.encodeUnknownEffect(json(method.payloadSchema))(method.payloadSchema.make(payload))).pipe(
+      Effect.suspend(() => Schema.encodeUnknownEffect(json(method.params))(method.params.make(payload))).pipe(
         Effect.orDie,
         Effect.flatMap((params) =>
           Effect.uninterruptibleMask((restore) =>
@@ -294,7 +274,7 @@ export const make: <Serve extends Rpc.Any, Call extends Rpc.Any, Notify extends 
               const answer = Deferred.makeUnsafe<unknown, JsonRpcError | PeerClosed>();
               pending.set(id, { method, answer });
               return restore(
-                lock.withPermit(options.wire.write({ jsonrpc: "2.0", id, method: method._tag, params })).pipe(
+                lock.withPermit(options.wire.write({ jsonrpc: "2.0", id, method: method.name, params })).pipe(
                   Effect.mapError((error) => new PeerClosed({ reason: `The request could not be written: ${error.reason}` })),
                   Effect.andThen(Deferred.await(answer)),
                 ),
@@ -312,15 +292,15 @@ export const make: <Serve extends Rpc.Any, Call extends Rpc.Any, Notify extends 
       );
 
   const client = Object.fromEntries(
-    [...options.call.requests.keys()].map((name) => [name, callOf(methodOf(options.call, name) as Rpc.AnyWithProps)]),
-  ) as unknown as Client<Call, PeerClosed>;
+    [...options.call.byName.values()].flatMap((method) => (method._tag === "Request" ? [[method.name, callOf(method)]] : [])),
+  ) as Methods.Caller<Call>;
 
-  const notify: Peer<Call, Notify>["notify"] = (tag, payload) => {
-    const method = methodOf(options.notify, tag);
-    if (method === undefined) return Effect.die(new Error(`${tag} is not in the peer's notify group`));
-    return Schema.encodeUnknownEffect(json(method.payloadSchema))(payload).pipe(
+  const notify: Peer<Call, Notify>["notify"] = (name, payload) => {
+    const method = options.notify.byName.get(name);
+    if (method === undefined) return Effect.die(new Error(`${name} is not in the peer's notify set`));
+    return Schema.encodeUnknownEffect(json(method.params))(payload).pipe(
       Effect.orDie,
-      Effect.flatMap((params) => post({ jsonrpc: "2.0", method: tag, params })),
+      Effect.flatMap((params) => post({ jsonrpc: "2.0", method: name, params })),
     );
   };
 
@@ -330,12 +310,12 @@ export const make: <Serve extends Rpc.Any, Call extends Rpc.Any, Notify extends 
   const handlers = yield* options.handlers(peer).pipe(Effect.forkIn(scope));
 
   /** Runs `method`'s handler on `payload`; its exit goes to `answer`, if one is given. */
-  const handle = (method: Rpc.AnyWithProps, payload: unknown, answer?: (exit: Exit.Exit<unknown, JsonRpcError>) => Effect.Effect<void>) =>
+  const handle = (method: Methods.Any, payload: unknown, answer?: (exit: Exit.Exit<unknown, JsonRpcError>) => Effect.Effect<void>) =>
     Fiber.join(handlers).pipe(
       Effect.flatMap((built) => {
-        const handler = (built as ErasedHandlers<R>)[method._tag];
+        const handler = (built as ErasedHandlers<R>)[method.name];
         if (handler === undefined)
-          return Effect.fail<JsonRpcError>({ code: ErrorCode.MethodNotFound, message: `Method not found: ${method._tag}` });
+          return Effect.fail<JsonRpcError>({ code: ErrorCode.MethodNotFound, message: `Method not found: ${method.name}` });
         return handler(payload);
       }),
       Effect.onExit((exit) => answer?.(exit) ?? Effect.void),
@@ -372,24 +352,22 @@ export const make: <Serve extends Rpc.Any, Call extends Rpc.Any, Notify extends 
         // A response to no request of this end's, or to one already answered or cancelled, is dropped.
         const call = take(message.id);
         if (call === undefined) return Effect.succeed(none);
-        if (message._tag === "Success") return Deferred.done(call.answer, resultOf(call.method, message.result)).pipe(Effect.as(none));
-        // The error as the method declares it; one the declaration refuses is passed on as it came.
-        const error = Schema.decodeExit(json(call.method.errorSchema))(message.error);
-        return Deferred.fail(call.answer, Exit.isSuccess(error) ? (error.value as JsonRpcError) : message.error).pipe(Effect.as(none));
+        const exit = message._tag === "Success" ? resultOf(call.method, message.result) : Exit.fail(message.error);
+        return Deferred.done(call.answer, exit).pipe(Effect.as(none));
       }
       case "Notification":
       case "Request": {
         const isRequest = message._tag === "Request";
         if (message.method === cancelMethod)
           return cancel(message.params).pipe(Effect.as(isRequest ? now(success(message.id, null)) : none));
-        const method = methodOf(options.serve, message.method);
+        const method: Methods.Any | undefined = options.serve.byName.get(message.method);
         if (method === undefined)
           return Effect.succeed(
             isRequest
               ? now(failure(message.id, { code: ErrorCode.MethodNotFound, message: `Method not found: ${message.method}` }))
               : none,
           );
-        return Schema.decodeUnknownEffect(json(method.payloadSchema))(message.params).pipe(
+        return Schema.decodeUnknownEffect(json(method.params))(message.params).pipe(
           Effect.matchEffect({
             onFailure: (error) =>
               Effect.succeed(

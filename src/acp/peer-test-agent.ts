@@ -16,8 +16,8 @@
  */
 
 import { Deferred, Effect, Option, Schema, type Scope } from "effect";
-import { Rpc, RpcGroup } from "effect/rpc";
-import { JsonRpcError, type Wire } from "./json-rpc.ts";
+import type { Wire } from "./json-rpc.ts";
+import * as Methods from "./methods.ts";
 import * as Peer from "./peer.ts";
 
 const SessionId = Schema.String;
@@ -36,57 +36,49 @@ const PermissionOutcome = Schema.Union([
 ]);
 
 /** What the agent serves. */
-export const AgentRpcs = RpcGroup.make(
-  Rpc.make("initialize", {
-    payload: { protocolVersion: Schema.Finite },
-    success: Schema.Struct({
+export const AgentMethods = Methods.make(
+  Methods.request(
+    "initialize",
+    Schema.Struct({ protocolVersion: Schema.Finite }),
+    Schema.Struct({
       protocolVersion: Schema.Finite,
       agentCapabilities: Schema.Struct({ loadSession: Schema.Boolean }),
       authMethods: Schema.Array(Schema.Unknown),
     }),
-    error: JsonRpcError,
-  }),
-  Rpc.make("session/new", {
-    payload: { cwd: Schema.String },
-    success: Schema.Struct({ sessionId: SessionId }),
-    error: JsonRpcError,
-  }),
-  Rpc.make("session/prompt", {
-    payload: {
+  ),
+  Methods.request("session/new", Schema.Struct({ cwd: Schema.String }), Schema.Struct({ sessionId: SessionId })),
+  Methods.request(
+    "session/prompt",
+    Schema.Struct({
       sessionId: SessionId,
       prompt: Schema.Array(Schema.Struct({ type: Schema.String, text: Schema.optionalKey(Schema.String) })),
-    },
-    success: Schema.Struct({ stopReason: StopReason }),
-    error: JsonRpcError,
-  }),
-  Rpc.make("session/cancel", { payload: { sessionId: SessionId } }),
+    }),
+    Schema.Struct({ stopReason: StopReason }),
+  ),
+  Methods.notification("session/cancel", Schema.Struct({ sessionId: SessionId })),
 );
 
 /** What the agent asks of the client. */
-export const ClientRpcs = RpcGroup.make(
-  Rpc.make("session/request_permission", {
-    payload: {
+export const ClientMethods = Methods.make(
+  Methods.request(
+    "session/request_permission",
+    Schema.Struct({
       sessionId: SessionId,
       toolCall: Schema.Struct({ toolCallId: Schema.String, title: Schema.String }),
       options: Schema.Array(PermissionOption),
-    },
-    success: Schema.Struct({ outcome: PermissionOutcome }),
-    error: JsonRpcError,
-  }),
-  Rpc.make("_test/acknowledge", {
-    payload: { sessionId: SessionId },
-    success: Schema.Struct({ note: Schema.optionalKey(Schema.String) }),
-    error: JsonRpcError,
-  }),
+    }),
+    Schema.Struct({ outcome: PermissionOutcome }),
+  ),
+  Methods.request("_test/acknowledge", Schema.Struct({ sessionId: SessionId }), Schema.Struct({ note: Schema.optionalKey(Schema.String) })),
 );
 
 /** What the agent tells the client. */
-export const ClientNotifications = RpcGroup.make(
-  Rpc.make("session/update", { payload: { sessionId: SessionId, update: Schema.Unknown } }),
+export const ClientNotifications = Methods.make(
+  Methods.notification("session/update", Schema.Struct({ sessionId: SessionId, update: Schema.Unknown })),
 );
 
 /** The agent's end of the connection. */
-export type AgentPeer = Peer.Peer<RpcGroup.Rpcs<typeof ClientRpcs>, RpcGroup.Rpcs<typeof ClientNotifications>>;
+export type AgentPeer = Peer.Peer<Methods.Of<typeof ClientMethods>, Methods.Of<typeof ClientNotifications>>;
 
 /** What a test can watch of the agent from outside. */
 export interface Probe {
@@ -116,8 +108,8 @@ export const runAgent = (wire: Wire, probe: Probe): Effect.Effect<AgentPeer, nev
   let sessions = 0;
   return Peer.make({
     wire,
-    serve: AgentRpcs,
-    call: ClientRpcs,
+    serve: AgentMethods,
+    call: ClientMethods,
     notify: ClientNotifications,
     handlers: (peer) =>
       Effect.succeed({

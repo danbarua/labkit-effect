@@ -15,9 +15,9 @@
  */
 
 import { Effect, Schema } from "effect";
-import { Rpc, RpcGroup } from "effect/rpc";
 import * as Agent from "./agent.ts";
-import { JsonRpcError } from "./json-rpc.ts";
+import type { JsonRpcError } from "./json-rpc.ts";
+import * as Methods from "./methods.ts";
 import * as Protocol from "./protocol.ts";
 import * as V1 from "./schema/v1.gen.ts";
 import * as V2 from "./schema/v2.gen.ts";
@@ -44,24 +44,24 @@ const reported = (error: { readonly _tag?: string; readonly capability?: string;
 const internal = (error: unknown): JsonRpcError => ({ code: -32603, message: "Internal error", data: String(error) });
 
 /** The extension methods the agent serves. */
-export const AgentExtensions = RpcGroup.make(
-  Rpc.make("_an/echo", { payload: { text: Schema.String }, success: Schema.Struct({ text: Schema.String }), error: JsonRpcError }),
-  Rpc.make("_an/ping", { payload: { note: Schema.String } }),
+export const AgentExtensions = Methods.make(
+  Methods.request("_an/echo", Schema.Struct({ text: Schema.String }), Schema.Struct({ text: Schema.String })),
+  Methods.notification("_an/ping", Schema.Struct({ note: Schema.String })),
 );
 
 /** The extension methods the client serves. */
-export const ClientExtensions = RpcGroup.make(
-  Rpc.make("_an/ask", { payload: { question: Schema.String }, success: Schema.Struct({ answer: Schema.String }), error: JsonRpcError }),
-  Rpc.make("_an/progress", { payload: { note: Schema.String } }),
+export const ClientExtensions = Methods.make(
+  Methods.request("_an/ask", Schema.Struct({ question: Schema.String }), Schema.Struct({ answer: Schema.String })),
+  Methods.notification("_an/progress", Schema.Struct({ note: Schema.String })),
 );
 
 /** `v1WithExtensions`'s implementation: it serves `AgentExtensions`, calls `_an/ask` and sends `_an/progress`. */
 export type AgentWithExtensions = Agent.AgentImplementation<
   Protocol.V1Version,
   never,
-  RpcGroup.Rpcs<typeof AgentExtensions>,
-  Exclude<RpcGroup.Rpcs<typeof ClientExtensions>, { readonly _tag: "_an/progress" }>,
-  Exclude<RpcGroup.Rpcs<typeof ClientExtensions>, { readonly _tag: "_an/ask" }>
+  Methods.Of<typeof AgentExtensions>,
+  Exclude<Methods.Of<typeof ClientExtensions>, { readonly name: "_an/progress" }>,
+  Exclude<Methods.Of<typeof ClientExtensions>, { readonly name: "_an/ask" }>
 >;
 
 /** Version 1 with extension methods; each `_an/ping`'s note is pushed to `pinged`. */

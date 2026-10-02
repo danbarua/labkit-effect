@@ -10,13 +10,11 @@
 
 import { Deferred, Effect, type Layer, References, Schema, type Stdio } from "effect";
 import type { HttpRouter } from "effect/http";
-import type { Rpc } from "effect/rpc";
 import {
   type AnyHandler,
   checkExtensions,
   type ErasedExtensions,
   type ExtensionClient,
-  type ExtensionHandlers,
   type Extensions,
   type GatedClient,
   type GatedNotify,
@@ -37,6 +35,7 @@ import {
   type WireInput,
 } from "./json-rpc.ts";
 import { logKeys } from "./log-keys.ts";
+import type * as Methods from "./methods.ts";
 import { type AnyAdapter, type Profile, type ProtocolAdapter, readProtocolVersion, select, type Version } from "./protocol.ts";
 import type { Implementation } from "./schema/v1.gen.ts";
 import { fromStdio } from "./stdio.ts";
@@ -45,7 +44,7 @@ import { fromStdio } from "./stdio.ts";
  * The connection a version's handlers are given: what was negotiated, the client's methods, and
  * the client's extension methods this implementation declared it calls and sends.
  */
-export interface AgentConnection<V extends Version, Call extends Rpc.Any = never, Notify extends Rpc.Any = never> {
+export interface AgentConnection<V extends Version, Call extends Methods.Any = never, Notify extends Methods.Any = never> {
   readonly profile: Profile<V>;
   /** The client's requests. One the client's capabilities do not allow fails with `CapabilityNotAdvertised`, and is not sent. */
   readonly client: GatedClient<V["clientRequests"]>;
@@ -55,19 +54,19 @@ export interface AgentConnection<V extends Version, Call extends Rpc.Any = never
 }
 
 /** Handlers for any of a version's agent requests and notifications except `initialize`, and for the extension methods in `Serve`. */
-export type AgentHandlers<V extends Version, R, Serve extends Rpc.Any = never> = Handlers<
-  Exclude<Served<V["agentRequests"], V["agentNotifications"]>, { readonly _tag: "initialize" }>,
+export type AgentHandlers<V extends Version, R, Serve extends Methods.Any = never> = Handlers<
+  Exclude<Served<V["agentRequests"], V["agentNotifications"]>, { readonly name: "initialize" }>,
   R
 > &
-  ExtensionHandlers<Serve, R>;
+  Handlers<Serve, R>;
 
 /** One protocol version, as this agent speaks it. */
 export interface AgentImplementation<
   V extends Version,
   R,
-  Serve extends Rpc.Any = never,
-  Call extends Rpc.Any = never,
-  Notify extends Rpc.Any = never,
+  Serve extends Methods.Any = never,
+  Call extends Methods.Any = never,
+  Notify extends Methods.Any = never,
 > {
   readonly adapter: ProtocolAdapter<V>;
   readonly capabilities: V["agentCapabilities"];
@@ -86,9 +85,9 @@ export type Requirements<I> = I extends AgentImplementation<infer _V, infer R, i
 export interface AgentOptions<
   V extends Version,
   R,
-  Serve extends Rpc.Any = never,
-  Call extends Rpc.Any = never,
-  Notify extends Rpc.Any = never,
+  Serve extends Methods.Any = never,
+  Call extends Methods.Any = never,
+  Notify extends Methods.Any = never,
 > {
   readonly capabilities: V["agentCapabilities"];
   /** Those of type `terminal` are offered only to a client that advertises terminal auth. */
@@ -107,16 +106,16 @@ export function implement<V extends Version, R = never>(
 ): AgentImplementation<V, R>;
 /**
  * The same, with the extension methods the agent serves, calls and sends. They come before the
- * options so that the handlers are typed from them; a group built inside this argument
- * (`group.omit(…)`) leaves a handlers function with no parameter untyped, so build it beforehand.
+ * options so that the handlers are typed from them; a set built inside this argument
+ * (`set.omit(…)`, `Methods.make(…)`) leaves a handlers function with no parameter untyped, so build it beforehand.
  * An extension method whose name does not start with `_` is a defect: `implement` throws.
  */
 export function implement<
   V extends Version,
   R = never,
-  Serve extends Rpc.Any = never,
-  Call extends Rpc.Any = never,
-  Notify extends Rpc.Any = never,
+  Serve extends Methods.Any = never,
+  Call extends Methods.Any = never,
+  Notify extends Methods.Any = never,
 >(
   adapter: ProtocolAdapter<V>,
   extensions: Extensions<Serve, Call, Notify>,

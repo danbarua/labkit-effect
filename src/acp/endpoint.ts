@@ -1,6 +1,6 @@
 /**
  * What the agent and the client share once `initialize` is answered: the peer on the negotiated
- * version's method groups, with each side's capability gates in front of it.
+ * version's method sets, with each side's capability gates in front of it.
  *
  * - `split` reads a wire through `before` until `before` hands it over (when `initialize` is
  *   answered); every later message is kept for the peer, so none is lost while it starts.
@@ -13,9 +13,9 @@
  */
 
 import { type Cause, Deferred, Effect, Queue, type Scope, Stream } from "effect";
-import { type Rpc, RpcGroup } from "effect/rpc";
 import { ErrorCode, type JsonRpcError, type Wire, type WireError, type WireInput } from "./json-rpc.ts";
 import { logKeys } from "./log-keys.ts";
+import * as Methods from "./methods.ts";
 import * as Peer from "./peer.ts";
 import {
   type AnyAdapter,
@@ -33,74 +33,54 @@ export type Side = "agent" | "client";
 /** A handler of a method this end serves, its payload erased; `R` is the services it needs. */
 export type AnyHandler<R> = (payload: never) => Effect.Effect<unknown, JsonRpcError, R>;
 
-/** Handlers by method name, typed by one version's group of methods; any subset of them. */
-export type Handlers<Rpcs extends Rpc.Any, R> = {
-  readonly [Current in Rpcs as Current["_tag"]]?: (
-    payload: Rpc.Payload<Current>,
-  ) => Effect.Effect<Rpc.Success<Current>, JsonRpcError, R>;
-};
-
-/**
- * Handlers for extension methods, by method name. Keyed by name rather than by method, so that
- * `implement` infers the methods from the declared groups only, and types each handler from them.
- */
-export type ExtensionHandlers<Rpcs extends Rpc.Any, R> = {
-  readonly [Method in Rpcs["_tag"]]?: (
-    payload: Rpc.Payload<Rpc.ExtractTag<Rpcs, Method>>,
-  ) => Effect.Effect<Rpc.Success<Rpc.ExtractTag<Rpcs, Method>>, JsonRpcError, R>;
-};
+/** Handlers by method name for any subset of the methods `M`. */
+export type Handlers<M extends Methods.Any, R> = Partial<Methods.Handlers<M, R>>;
 
 /** The methods one end serves: its requests, and the notifications that are not also requests (`mcp/message` is both). */
-export type Served<Requests extends Rpc.Any, Notifications extends Rpc.Any> =
+export type Served<Requests extends Methods.Any, Notifications extends Methods.Any> =
   | Requests
-  | Exclude<Notifications, { readonly _tag: Requests["_tag"] }>;
+  | Exclude<Notifications, { readonly name: Requests["name"] }>;
 
 /** The other end's requests, called through the gates. */
-export type GatedClient<Rpcs extends Rpc.Any> = Peer.Client<Rpcs, Peer.PeerClosed | CapabilityNotAdvertised>;
+export type GatedClient<M extends Methods.Any> = Methods.Caller<M, CapabilityNotAdvertised>;
 
 /** Sends one of the other end's notifications through the gates. */
-export type GatedNotify<Rpcs extends Rpc.Any> = <Tag extends Rpcs["_tag"]>(
-  tag: Tag,
-  payload: Rpc.Payload<Rpc.ExtractTag<Rpcs, Tag>>,
-) => Effect.Effect<void, CapabilityNotAdvertised>;
+export type GatedNotify<M extends Methods.Any> = Methods.Notify<M, CapabilityNotAdvertised>;
 
 /**
  * The extension methods an implementation declares: those it serves (requests and notifications
  * alike, handled in the same record as the version's methods), those it calls, and the
- * notifications it sends. Every method name starts with `_`. Declare a request's `error` as
- * `JsonRpcError`: a handler's failure goes out as that error, and a call fails with it.
+ * notifications it sends. Every method name starts with `_`.
  */
-export interface Extensions<Serve extends Rpc.Any = never, Call extends Rpc.Any = never, Notify extends Rpc.Any = never> {
-  readonly serve?: RpcGroup.RpcGroup<Serve> | undefined;
-  readonly call?: RpcGroup.RpcGroup<Call> | undefined;
-  readonly notify?: RpcGroup.RpcGroup<Notify> | undefined;
+export interface Extensions<Serve extends Methods.Any = never, Call extends Methods.Any = never, Notify extends Methods.Any = never> {
+  readonly serve?: Methods.MethodSet<Serve> | undefined;
+  readonly call?: Methods.MethodSet<Call> | undefined;
+  readonly notify?: Methods.MethodSet<Notify> | undefined;
 }
 
 /** The other end's extension methods, as an implementation declared them; no gate stands in front of them. */
-export interface ExtensionClient<Call extends Rpc.Any, Notify extends Rpc.Any> {
-  readonly call: Peer.Client<Call, Peer.PeerClosed>;
-  readonly notify: <Tag extends Notify["_tag"]>(
-    tag: Tag,
-    payload: Rpc.Payload<Rpc.ExtractTag<Notify, Tag>>,
-  ) => Effect.Effect<void>;
+export interface ExtensionClient<Call extends Methods.Any, Notify extends Methods.Any> {
+  readonly call: Methods.Caller<Call>;
+  readonly notify: Methods.Notify<Notify>;
 }
 
-/** Extension groups with their methods erased, as an implementation keeps them. */
+/** Extension sets with their methods erased, as an implementation keeps them. */
 export interface ErasedExtensions {
-  readonly serve: RpcGroup.RpcGroup<Rpc.Any>;
-  readonly call: RpcGroup.RpcGroup<Rpc.Any>;
-  readonly notify: RpcGroup.RpcGroup<Rpc.Any>;
+  readonly serve: Methods.MethodSet<Methods.Any>;
+  readonly call: Methods.MethodSet<Methods.Any>;
+  readonly notify: Methods.MethodSet<Methods.Any>;
 }
 
 /** `extensions`, erased, once each of its method names is checked to start with `_`; a name that does not is a defect, thrown. */
-export const checkExtensions = <Serve extends Rpc.Any, Call extends Rpc.Any, Notify extends Rpc.Any>(
+export const checkExtensions = <Serve extends Methods.Any, Call extends Methods.Any, Notify extends Methods.Any>(
   extensions: Extensions<Serve, Call, Notify> | undefined,
 ): ErasedExtensions => {
-  // A group is invariant in its methods; erased, a group of none is a group of any.
-  const erase = (group: RpcGroup.Any | undefined) => (group ?? RpcGroup.make()) as unknown as RpcGroup.RpcGroup<Rpc.Any>;
+  // A set is invariant in its methods; erased, a set of none is a set of any.
+  const erase = (set: Methods.MethodSet<Serve> | Methods.MethodSet<Call> | Methods.MethodSet<Notify> | undefined) =>
+    (set ?? Methods.make()) as unknown as Methods.MethodSet<Methods.Any>;
   const erased = { serve: erase(extensions?.serve), call: erase(extensions?.call), notify: erase(extensions?.notify) };
-  for (const group of [erased.serve, erased.call, erased.notify])
-    for (const method of group.requests.keys())
+  for (const set of [erased.serve, erased.call, erased.notify])
+    for (const method of set.byName.keys())
       if (!isExtensionMethod(method))
         throw new Error(`acp: ${JSON.stringify(method)} is declared as an extension method, and an extension method's name starts with "_"`);
   return erased;
@@ -159,12 +139,14 @@ export interface StartOptions<V extends Version, R> {
   readonly adapter: AnyAdapter;
   readonly profile: Profile<V>;
   readonly extensions: ErasedExtensions;
+  /** The id of this end's first request through the peer: past those it sent before the peer started. */
+  readonly firstId?: number | undefined;
   readonly handlers: (
     endpoint: Omit<Endpoint, "closed">,
   ) => Effect.Effect<Readonly<Record<string, AnyHandler<R> | undefined>>, never, R>;
 }
 
-type ErasedClient = Readonly<Record<string, (payload: unknown) => Effect.Effect<unknown, Peer.PeerClosed | JsonRpcError>>>;
+type ErasedClient = Readonly<Record<string, (payload: unknown) => Effect.Effect<unknown, Methods.PeerClosed | JsonRpcError>>>;
 
 /** Runs the peer for `side` on the negotiated version, until the wire ends or the scope closes. */
 export const start = <V extends Version, R>(options: StartOptions<V, R>): Effect.Effect<Endpoint, never, Scope.Scope | R> =>
@@ -172,17 +154,20 @@ export const start = <V extends Version, R>(options: StartOptions<V, R>): Effect
     const { adapter, profile, side } = options;
     const incoming: Direction = side === "agent" ? "toAgent" : "toClient";
     const outgoing: Direction = side === "agent" ? "toClient" : "toAgent";
-    const requests: RpcGroup.RpcGroup<Rpc.Any> = side === "agent" ? adapter.agentRequests : adapter.clientRequests;
-    const notifications: RpcGroup.RpcGroup<Rpc.Any> =
+    const requests: Methods.MethodSet<Methods.Any> = side === "agent" ? adapter.agentRequests : adapter.clientRequests;
+    const notifications: Methods.MethodSet<Methods.Any> =
       side === "agent" ? adapter.agentNotifications : adapter.clientNotifications;
-    const versionCall: RpcGroup.RpcGroup<Rpc.Any> =
+    const versionCall: Methods.MethodSet<Methods.Any> =
       side === "agent" ? adapter.clientRequests : adapter.agentRequests.omit("initialize");
-    const versionNotify: RpcGroup.RpcGroup<Rpc.Any> =
+    const versionNotify: Methods.MethodSet<Methods.Any> =
       side === "agent" ? adapter.clientNotifications : adapter.agentNotifications;
     const { extensions } = options;
-    const served = requests.merge(notifications.omit(...requests.requests.keys()), extensions.serve);
-    const call = versionCall.merge(extensions.call);
-    const notify = versionNotify.merge(extensions.notify);
+    const served = requests.add(
+      ...notifications.omit(...requests.byName.keys()).byName.values(),
+      ...extensions.serve.byName.values(),
+    );
+    const call = versionCall.add(...extensions.call.byName.values());
+    const notify = versionNotify.add(...extensions.notify.byName.values());
 
     /** Runs `send` when the gate lets `method` with `payload` through; otherwise fails, having sent nothing. */
     const gated = <A, E>(
@@ -200,17 +185,17 @@ export const start = <V extends Version, R>(options: StartOptions<V, R>): Effect
     };
 
     let endpoint: Omit<Endpoint, "closed"> | undefined;
-    const endpointOf = (peer: Peer.Peer<Rpc.Any, Rpc.Any>): Omit<Endpoint, "closed"> => {
+    const endpointOf = (peer: Peer.Peer<Methods.Any, Methods.Any>): Omit<Endpoint, "closed"> => {
       if (endpoint !== undefined) return endpoint;
       const client = peer.client as unknown as ErasedClient;
       const gatedCall = Object.fromEntries(
-        [...versionCall.requests.keys()].map((method) => [
+        [...versionCall.byName.keys()].map((method) => [
           method,
           (payload: unknown) =>
             gated(method, payload, () => client[method]?.(payload) ?? Effect.die(`no client method ${method}`)),
         ]),
       );
-      const extensionCall = Object.fromEntries([...extensions.call.requests.keys()].map((method) => [method, client[method]]));
+      const extensionCall = Object.fromEntries([...extensions.call.byName.keys()].map((method) => [method, client[method]]));
       endpoint = {
         call: gatedCall as never,
         notify: ((method: string, payload: unknown) =>
@@ -246,17 +231,18 @@ export const start = <V extends Version, R>(options: StartOptions<V, R>): Effect
         return handler(payload as never);
       };
 
-    // The groups are erased here; what the handlers need is `R`, the services the caller's handlers need.
+    // The sets are erased here; what the handlers need is `R`, the services the caller's handlers need.
     const running = Peer.make({
       wire: options.wire,
       serve: served,
       call,
       notify,
+      firstId: options.firstId,
       handlers: (peer) =>
         Effect.map(options.handlers(endpointOf(peer)), (handlers) =>
-          Object.fromEntries([...served.requests.keys()].map((method) => [method, handlerFor(method, handlers)])),
+          Object.fromEntries([...served.byName.keys()].map((method) => [method, handlerFor(method, handlers)])),
         ) as never,
-    }) as Effect.Effect<Peer.Peer<Rpc.Any, Rpc.Any>, never, Scope.Scope | R>;
+    }) as Effect.Effect<Peer.Peer<Methods.Any, Methods.Any>, never, Scope.Scope | R>;
     const peer = yield* running;
     return { ...endpointOf(peer), closed: peer.closed };
   });

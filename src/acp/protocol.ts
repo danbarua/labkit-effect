@@ -1,6 +1,6 @@
 /**
  * ACP's protocol versions, modelled on Effect's `McpProtocol`: one `ProtocolAdapter` per version,
- * holding that version's method groups, how it writes and reads `initialize`, and its capability
+ * holding that version's method sets, how it writes and reads `initialize`, and its capability
  * gates.
  *
  * A gate says, for a method and its params under the profile both ends negotiated, whether the
@@ -15,8 +15,8 @@
  */
 
 import { Data, Predicate, Schema } from "effect";
-import type { Rpc, RpcGroup } from "effect/rpc";
 import { ErrorCode, type JsonRpcError } from "./json-rpc.ts";
+import type * as Methods from "./methods.ts";
 import * as V1 from "./schema/v1.gen.ts";
 import * as V1Rpcs from "./schema/v1.rpcs.gen.ts";
 import * as V2 from "./schema/v2.gen.ts";
@@ -28,10 +28,10 @@ export type ProtocolVersion = 1 | 2;
 /** The types one protocol version names. */
 export interface Version {
   readonly protocolVersion: ProtocolVersion;
-  readonly agentRequests: Rpc.Any;
-  readonly agentNotifications: Rpc.Any;
-  readonly clientRequests: Rpc.Any;
-  readonly clientNotifications: Rpc.Any;
+  readonly agentRequests: Methods.Any;
+  readonly agentNotifications: Methods.Any;
+  readonly clientRequests: Methods.Any;
+  readonly clientNotifications: Methods.Any;
   readonly agentCapabilities: object;
   readonly clientCapabilities: object;
   readonly authMethod: unknown;
@@ -42,10 +42,10 @@ export interface Version {
 
 export interface V1Version {
   readonly protocolVersion: 1;
-  readonly agentRequests: RpcGroup.Rpcs<typeof V1Rpcs.AgentRequests>;
-  readonly agentNotifications: RpcGroup.Rpcs<typeof V1Rpcs.AgentNotifications>;
-  readonly clientRequests: RpcGroup.Rpcs<typeof V1Rpcs.ClientRequests>;
-  readonly clientNotifications: RpcGroup.Rpcs<typeof V1Rpcs.ClientNotifications>;
+  readonly agentRequests: Methods.Of<typeof V1Rpcs.AgentRequests>;
+  readonly agentNotifications: Methods.Of<typeof V1Rpcs.AgentNotifications>;
+  readonly clientRequests: Methods.Of<typeof V1Rpcs.ClientRequests>;
+  readonly clientNotifications: Methods.Of<typeof V1Rpcs.ClientNotifications>;
   readonly agentCapabilities: V1.AgentCapabilities;
   readonly clientCapabilities: V1.ClientCapabilities;
   readonly authMethod: V1.AuthMethod;
@@ -56,10 +56,10 @@ export interface V1Version {
 
 export interface V2Version {
   readonly protocolVersion: 2;
-  readonly agentRequests: RpcGroup.Rpcs<typeof V2Rpcs.AgentRequests>;
-  readonly agentNotifications: RpcGroup.Rpcs<typeof V2Rpcs.AgentNotifications>;
-  readonly clientRequests: RpcGroup.Rpcs<typeof V2Rpcs.ClientRequests>;
-  readonly clientNotifications: RpcGroup.Rpcs<typeof V2Rpcs.ClientNotifications>;
+  readonly agentRequests: Methods.Of<typeof V2Rpcs.AgentRequests>;
+  readonly agentNotifications: Methods.Of<typeof V2Rpcs.AgentNotifications>;
+  readonly clientRequests: Methods.Of<typeof V2Rpcs.ClientRequests>;
+  readonly clientNotifications: Methods.Of<typeof V2Rpcs.ClientNotifications>;
   readonly agentCapabilities: V2.AgentCapabilities;
   readonly clientCapabilities: V2.ClientCapabilities;
   readonly authMethod: V2.AuthMethod;
@@ -106,10 +106,10 @@ export interface ProtocolAdapter<V extends Version> {
    */
   readonly stability: "stable" | "experimental";
   /** The requests the agent serves, `initialize` included. */
-  readonly agentRequests: RpcGroup.RpcGroup<V["agentRequests"]>;
-  readonly agentNotifications: RpcGroup.RpcGroup<V["agentNotifications"]>;
-  readonly clientRequests: RpcGroup.RpcGroup<V["clientRequests"]>;
-  readonly clientNotifications: RpcGroup.RpcGroup<V["clientNotifications"]>;
+  readonly agentRequests: Methods.MethodSet<V["agentRequests"]>;
+  readonly agentNotifications: Methods.MethodSet<V["agentNotifications"]>;
+  readonly clientRequests: Methods.MethodSet<V["clientRequests"]>;
+  readonly clientNotifications: Methods.MethodSet<V["clientNotifications"]>;
   /** The methods whose definitions are marked **UNSTABLE**. */
   readonly unstable: ReadonlySet<string>;
   /** `initialize`'s params and result, between their JSON and this version's types. */

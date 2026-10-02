@@ -11,13 +11,11 @@
  */
 
 import { Data, Deferred, Effect, Exit, Schema, Scope } from "effect";
-import type { Rpc } from "effect/rpc";
 import {
   type AnyHandler,
   checkExtensions,
   type ErasedExtensions,
   type ExtensionClient,
-  type ExtensionHandlers,
   type Extensions,
   type GatedClient,
   type GatedNotify,
@@ -37,15 +35,16 @@ import {
   type WireInput,
 } from "./json-rpc.ts";
 import { logKeys } from "./log-keys.ts";
+import type * as Methods from "./methods.ts";
 import { type AnyAdapter, type Profile, type ProtocolAdapter, readProtocolVersion, type Version } from "./protocol.ts";
 import type { Implementation } from "./schema/v1.gen.ts";
 
 /** A connection to an agent, in the version the agent answered. */
-export interface ClientConnection<V extends Version, Call extends Rpc.Any = never, Notify extends Rpc.Any = never> {
+export interface ClientConnection<V extends Version, Call extends Methods.Any = never, Notify extends Methods.Any = never> {
   readonly protocolVersion: V["protocolVersion"];
   readonly profile: Profile<V>;
   /** The agent's requests. One the agent's capabilities do not allow fails with `CapabilityNotAdvertised`, and is not sent. */
-  readonly agent: GatedClient<Exclude<V["agentRequests"], { readonly _tag: "initialize" }>>;
+  readonly agent: GatedClient<Exclude<V["agentRequests"], { readonly name: "initialize" }>>;
   /** The agent's notifications, gated the same way. */
   readonly notify: GatedNotify<V["agentNotifications"]>;
   /** The agent's extension methods this implementation declared it calls and sends. */
@@ -55,19 +54,19 @@ export interface ClientConnection<V extends Version, Call extends Rpc.Any = neve
 }
 
 /** Handlers for any of a version's client requests and notifications, and for the extension methods in `Serve`. */
-export type ClientHandlers<V extends Version, R, Serve extends Rpc.Any = never> = Handlers<
+export type ClientHandlers<V extends Version, R, Serve extends Methods.Any = never> = Handlers<
   Served<V["clientRequests"], V["clientNotifications"]>,
   R
 > &
-  ExtensionHandlers<Serve, R>;
+  Handlers<Serve, R>;
 
 /** One protocol version, as this client speaks it. */
 export interface ClientImplementation<
   V extends Version,
   R,
-  Serve extends Rpc.Any = never,
-  Call extends Rpc.Any = never,
-  Notify extends Rpc.Any = never,
+  Serve extends Methods.Any = never,
+  Call extends Methods.Any = never,
+  Notify extends Methods.Any = never,
 > {
   readonly adapter: ProtocolAdapter<V>;
   readonly capabilities: V["clientCapabilities"];
@@ -91,9 +90,9 @@ export type ConnectionOf<I> =
 export interface ClientOptions<
   V extends Version,
   R,
-  Serve extends Rpc.Any = never,
-  Call extends Rpc.Any = never,
-  Notify extends Rpc.Any = never,
+  Serve extends Methods.Any = never,
+  Call extends Methods.Any = never,
+  Notify extends Methods.Any = never,
 > {
   readonly capabilities: V["clientCapabilities"];
   readonly handlers: (
@@ -111,16 +110,16 @@ export function implement<V extends Version, R = never>(
 ): ClientImplementation<V, R>;
 /**
  * The same, with the extension methods the client serves, calls and sends. They come before the
- * options so that the handlers are typed from them; a group built inside this argument
- * (`group.omit(…)`) leaves a handlers function with no parameter untyped, so build it beforehand.
+ * options so that the handlers are typed from them; a set built inside this argument
+ * (`set.omit(…)`, `Methods.make(…)`) leaves a handlers function with no parameter untyped, so build it beforehand.
  * An extension method whose name does not start with `_` is a defect: `implement` throws.
  */
 export function implement<
   V extends Version,
   R = never,
-  Serve extends Rpc.Any = never,
-  Call extends Rpc.Any = never,
-  Notify extends Rpc.Any = never,
+  Serve extends Methods.Any = never,
+  Call extends Methods.Any = never,
+  Notify extends Methods.Any = never,
 >(
   adapter: ProtocolAdapter<V>,
   extensions: Extensions<Serve, Call, Notify>,
@@ -165,7 +164,7 @@ export interface ConnectOptions<Impls extends ReadonlyArray<AnyClientImplementat
 
 type Implementations = readonly [AnyClientImplementation, ...Array<AnyClientImplementation>];
 
-/** The id of the `initialize` request, sent before any other request. */
+/** The id of the `initialize` request, sent before any other request; the peer's own begin after it. */
 const initializeId = 0;
 
 /**
@@ -265,6 +264,7 @@ export const connect = <const Impls extends Implementations>(
         adapter,
         profile,
         extensions: implementation.extensions,
+        firstId: initializeId + 1,
         // The endpoint's methods are erased; they are the answered version's and the implementation's extensions.
         handlers: (endpoint) =>
           implementation.handlers({

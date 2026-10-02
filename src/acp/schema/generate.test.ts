@@ -11,7 +11,7 @@ import * as v2 from "./v2.rpcs.gen.ts";
 
 const root = process.cwd();
 
-const tags = (group: { readonly requests: ReadonlyMap<string, unknown> }): Array<string> => [...group.requests.keys()].sort();
+const tags = (set: { readonly byName: ReadonlyMap<string, unknown> }): Array<string> => [...set.byName.keys()].sort();
 
 const sorted = (methods: object): Array<string> => Object.values(methods).map(String).sort();
 
@@ -49,7 +49,7 @@ test("AS1: the generated files are what scripts/acp-schema.ts makes from the ins
   for (const file of files) expect({ path: file.path, content: readFileSync(join(root, file.path), "utf8") }).toEqual(file);
 });
 
-test("AS2: v1's groups hold exactly the SDK's agent and client methods, each by its definitions' side and kind", () => {
+test("AS2: v1's method sets hold exactly the SDK's agent and client methods, each by its definitions' side and kind", () => {
   const { documents } = installed(root);
   const want = expected(documents.v1);
   expect(tags(v1.AgentRequests)).toEqual(want.agentRequests);
@@ -64,7 +64,7 @@ test("AS2: v1's groups hold exactly the SDK's agent and client methods, each by 
   expect(tags(v1.ClientRequests)).toContain("mcp/message");
 });
 
-test("AS2: v2's groups hold exactly the SDK's v2 agent and client methods, each by its definitions' side and kind", () => {
+test("AS2: v2's method sets hold exactly the SDK's v2 agent and client methods, each by its definitions' side and kind", () => {
   const { documents } = installed(root);
   const want = expected(documents.v2);
   expect(tags(v2.AgentRequests)).toEqual(want.agentRequests);
@@ -77,9 +77,9 @@ test("AS2: v2's groups hold exactly the SDK's v2 agent and client methods, each 
   expect(tags(v2.ClientRequests)).not.toContain("fs/read_text_file");
 });
 
-test("AS2: $/cancel_request is in no group of either version", () => {
-  for (const group of [v1.AgentRequests, v1.AgentNotifications, v1.ClientRequests, v1.ClientNotifications, v2.AgentRequests, v2.AgentNotifications, v2.ClientRequests, v2.ClientNotifications])
-    expect(tags(group)).not.toContain(PROTOCOL_METHODS.cancel_request);
+test("AS2: $/cancel_request is in no method set of either version", () => {
+  for (const set of [v1.AgentRequests, v1.AgentNotifications, v1.ClientRequests, v1.ClientNotifications, v2.AgentRequests, v2.AgentNotifications, v2.ClientRequests, v2.ClientNotifications])
+    expect(tags(set)).not.toContain(PROTOCOL_METHODS.cancel_request);
 });
 
 test("AS2: `unstable` holds the methods whose definitions are marked **UNSTABLE**, and only those", () => {

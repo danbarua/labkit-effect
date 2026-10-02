@@ -11,14 +11,14 @@ import { createNodeHttpHandler } from "@agentclientprotocol/sdk/experimental/nod
 import { AcpServer } from "@agentclientprotocol/sdk/experimental/server";
 import * as acpv2 from "@agentclientprotocol/sdk/experimental/v2";
 import { Cause, Effect, Exit, Fiber, Layer, Logger, References, Schema, type Scope, Stream } from "effect";
-import { Rpc, RpcGroup } from "effect/rpc";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import type * as HttpClient from "effect/http/HttpClient";
 import * as Agent from "./agent.ts";
 import * as Client from "./client.ts";
 import * as Http from "./http.ts";
-import { JsonRpcError, type Wire } from "./json-rpc.ts";
+import type { Wire } from "./json-rpc.ts";
 import { logKeys } from "./log-keys.ts";
+import * as Methods from "./methods.ts";
 import {
   AgentExtensions,
   type AgentWithExtensions,
@@ -322,6 +322,39 @@ describe("the client negotiates the version", () => {
       reason: expect.stringContaining("malformed"),
     });
   });
+
+  test("AN14: the client's requests after initialize, as the SDK's v1 agent receives them, never reuse initialize's id 0", async () => {
+    const ends = pipes();
+    const ids: Array<unknown> = [];
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const recorded = ends.agentReadable.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform: (chunk, controller) => {
+          buffer += decoder.decode(chunk, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            const message = JSON.parse(line) as { readonly id?: unknown; readonly method?: unknown };
+            if (message.method !== undefined && message.id !== undefined) ids.push(message.id);
+          }
+          controller.enqueue(chunk);
+        },
+      }),
+    );
+    sdkAgentV1([]).connect(acp.ndJsonStream(ends.agentWritable, recorded));
+    await run(
+      Effect.gen(function* () {
+        const connection = yield* Client.connect({ wire: ends.client, info, implementations: [clientV1([])] });
+        if (connection.protocolVersion !== 1) return;
+        yield* connection.agent["session/new"]({ cwd: "/tmp", mcpServers: [] });
+        yield* connection.agent["session/new"]({ cwd: "/tmp", mcpServers: [] });
+      }),
+    );
+    expect(ids).toHaveLength(3);
+    expect(ids[0]).toBe(0);
+    expect(new Set(ids).size).toBe(3);
+  });
 });
 
 describe("decoding over the wire", () => {
@@ -509,7 +542,7 @@ describe("the client's logs", () => {
 describe("extension methods", () => {
   // The client calls `_an/echo` and `_an/unknown`, which the agent does not serve, and sends `_an/ping`.
   const clientCalls = AgentExtensions.omit("_an/ping").add(
-    Rpc.make("_an/unknown", { payload: {}, success: Schema.Struct({}), error: JsonRpcError }),
+    Methods.request("_an/unknown", Schema.Struct({}), Schema.Struct({})),
   );
   const clientNotifications = AgentExtensions.omit("_an/echo");
 
@@ -555,7 +588,7 @@ describe("extension methods", () => {
   });
 
   test("AN13: implement throws when an extension method's name does not start with _", () => {
-    const named = RpcGroup.make(Rpc.make("an/echo", { payload: { text: Schema.String } }));
+    const named = Methods.make(Methods.notification("an/echo", Schema.Struct({ text: Schema.String })));
     expect(() => Client.implement(Protocol.v1, { notify: named }, { capabilities: {}, handlers: () => Effect.succeed({}) })).toThrow(
       '"an/echo" is declared as an extension method',
     );

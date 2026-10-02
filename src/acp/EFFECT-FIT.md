@@ -6,10 +6,6 @@ from Effect, what we write ourselves instead, and why. Paths under `effect/` are
 
 ## Use Effect for
 
-- **Method declarations: `RpcGroup` and `Rpc`, as declarations only.** Each ACP version's methods
-  are an `RpcGroup` per direction (`schema/*.rpcs.gen.ts`). `peer.ts` reads from each method only
-  its name and its payload, success and error schemas. Handlers, callers and errors are typed from
-  that one declaration (`Rpc.Payload`, `Rpc.PayloadConstructor`, `Rpc.Success`, `Rpc.Error`).
 - **Per-request fibers and cancellation: `FiberMap`.** Each incoming request's handler runs in a
   fiber of a `FiberMap` keyed by the request's id. An incoming `$/cancel_request` interrupts that
   fiber (`FiberMap.remove`), and the handler's `Effect.onExit` answers -32800.
@@ -54,9 +50,15 @@ from Effect, what we write ourselves instead, and why. Paths under `effect/` are
     trace fields.
 
   No ACP peer understands that dialect, so `peer.ts` writes every message itself.
-- **Serving and calling JSON-RPC: `RpcServer` and `RpcClient`.** Effect's RPC is an Effect-to-Effect
-  protocol (used by its cluster); a JSON-RPC peer fits the primitives. `src/acp` uses neither half.
-  Fitting JSON-RPC through them took a workaround for each of these:
+- **Declaring, serving and calling JSON-RPC methods: `Rpc`, `RpcGroup`, `RpcServer` and
+  `RpcClient`.** Effect's RPC is an Effect-to-Effect protocol (used by its cluster); a JSON-RPC peer
+  fits the primitives. `src/acp` imports nothing from `effect/rpc`.
+  - `Rpc` declares an error schema per method, besides middleware, streaming and services. ACP has
+    no per-method error: every request's error is `JsonRpcError`. `methods.ts` declares a method
+    as its name, its params schema and, for a request, its result schema, and types handlers and
+    callers from that (`Handlers`, `Caller`, `Notify`).
+
+  Fitting JSON-RPC through `RpcServer` and `RpcClient` took a workaround for each of these:
   - `RpcServer` turns an unknown tag or a payload that fails to decode into a `Die` defect, so
     -32601 and -32602 had to be answered before handing the request over.
   - By default `RpcServer` reports a handler's defect for the whole connection, under no request
@@ -95,9 +97,10 @@ from Effect, what we write ourselves instead, and why. Paths under `effect/` are
   data, which kills a quiet SSE stream. `http.ts` writes a comment every 5 s (`keepAliveInterval`).
   This is a gap in Bun, not in Effect.
 
-## TypeScript limits met through Effect's types
+## TypeScript limits
 
-- **Handler types for extension groups.** TypeScript cannot type handler parameters from an
-  `RpcGroup` declared in the same object literal as the handlers, or built inline with `.omit(…)`.
-  The parameters become implicit `any`. So `implement(adapter, extensions, options)` takes the
-  extension groups as their own argument, before the options.
+- **Handler types for inline extension sets.** TypeScript cannot type handler parameters from a
+  served method set built inline in the extensions argument (`Methods.make(…)` or `set.omit(…)`),
+  nor from one declared in the same object literal as the handlers (a single options object). The
+  parameters become implicit `any`. So `implement(adapter, extensions, options)` takes the
+  extension sets as their own argument, before the options, and a served set is built beforehand.
