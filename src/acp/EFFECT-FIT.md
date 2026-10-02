@@ -6,20 +6,29 @@ from Effect, what we write ourselves instead, and why. Paths under `effect/` are
 
 ## Use Effect for
 
-- **Typed method sets: `RpcGroup` and `Rpc`.** Each ACP version's methods are an `RpcGroup` per
-  direction (`schema/*.rpcs.gen.ts`). Handlers, callers and errors are typed from one declaration.
-- **Request dispatch and per-request fibers: `RpcServer`.** Each incoming request runs in its own
-  fiber, and interrupting that fiber is how `$/cancel_request` cancels a handler. `peer.ts` feeds
-  it through `RpcServer.Protocol.make`.
-- **Pending calls and cancellation: `RpcClient`.** It keeps the table of pending calls, and an
-  interrupted call (for example, the loser of a `raceFirst`) sends an `Interrupt`, which `peer.ts`
-  writes as `$/cancel_request`. Structured cancellation maps onto ACP's cancellation without extra
-  bookkeeping.
+- **Method declarations: `RpcGroup` and `Rpc`, as declarations only.** Each ACP version's methods
+  are an `RpcGroup` per direction (`schema/*.rpcs.gen.ts`). `peer.ts` reads from each method only
+  its name and its payload, success and error schemas. Handlers, callers and errors are typed from
+  that one declaration (`Rpc.Payload`, `Rpc.PayloadConstructor`, `Rpc.Success`, `Rpc.Error`).
+- **Per-request fibers and cancellation: `FiberMap`.** Each incoming request's handler runs in a
+  fiber of a `FiberMap` keyed by the request's id. An incoming `$/cancel_request` interrupts that
+  fiber (`FiberMap.remove`), and the handler's `Effect.onExit` answers -32800.
+- **Pending calls: `Deferred`, and interruption.** Each outgoing call waits on a `Deferred`, kept by
+  id until its response completes it. An interrupted call (for example, the loser of a
+  `raceFirst`) still pending sends `$/cancel_request` from its `Effect.onExit`. Structured
+  cancellation maps onto ACP's cancellation without extra bookkeeping.
+- **Write order: `Semaphore`.** One permit: each message is written whole, in the order it is sent.
+- **Lifetime: `Scope` and `FiberSet`.** The reader, the building of the handlers, and a `FiberSet`
+  of the other fibers (notification handlers, batches waiting for their answers, cancellations)
+  all live in the peer's scope. When the wire's read ends, the peer fails pending calls with
+  `PeerClosed` and clears the `FiberMap` and the `FiberSet`, which interrupts running handlers.
+- **Reading the wire: `Stream.runForEach`.** `peer.ts` handles one wire input at a time, in order.
 - **NDJSON framing: `Stream.decodeText` and `Stream.splitLines`.** `stdio.ts` splits the byte
   stream into lines with these and parses each line itself (see below).
-- **Payload and result codecs: `RpcSerialization.json.codecFor`.** `peer.ts` gets each rpc's JSON
-  codec from it, the same codec `RpcServer` and `RpcClient` use, so validation and the lenient
-  pass agree with what the RPC halves decode.
+- **Params and result codecs: `Schema.toCodecJson`.** `peer.ts` decodes each incoming request's
+  params once with its method's JSON codec, answering -32602 when the codec refuses them, and
+  hands the decoded value to the handler. It decodes each result once, so the `catchDecoding`
+  fallbacks apply to it (AP13).
 - **Schema codegen: `SchemaRepresentation.fromJsonSchemaMultiDocument` and `toCodeDocument`.**
   These turn the SDK's JSON Schemas into Effect Schema source (`scripts/acp-schema.ts`), so nobody
   hand-writes 130 method definitions.
@@ -45,28 +54,24 @@ from Effect, what we write ourselves instead, and why. Paths under `effect/` are
     trace fields.
 
   No ACP peer understands that dialect, so `peer.ts` writes every message itself.
-- **Answering unknown methods and bad params.** `RpcServer` turns an unknown tag or a payload that
-  fails to decode into a `Die` defect. `peer.ts` answers -32601 and -32602 itself before handing the
-  request over.
-- **Handler defects, under `RpcServer`'s defaults.** By default a handler's defect is reported for
-  the whole connection, under no request id. The other end's call then never settles, and an
-  incoming connection-level `Defect` fails every pending `RpcClient` call. Run `RpcServer.make` with
-  `disableFatalDefects: true` so each defect is answered -32603 on its own request.
-- **Notifications, as `RpcServer` runs them.** `RpcServer` treats an incoming notification as a
-  request. `peer.ts` gives each one a synthetic id and drops its `Exit`.
-- **Lenient decoding of results, as `RpcClient` does it.** `RpcClient` decodes a response inside
-  `Schema.Exit`, which first checks the value against the success schema's encoded side. The
-  `catchDecoding` fallbacks never run there, so `availableModes: "none"` fails instead of becoming
-  `[]`. `peer.ts` decodes each result with its method's success codec and encodes it back before
-  `RpcClient` sees it (AP13).
-- **Results the schema refuses, as `RpcClient` handles them.** `RpcClient` runs `decodeExit` and
-  then `orDie`, so a non-conforming answer from a third-party agent becomes a defect in the caller,
-  which `catchTag` cannot handle. `peer.ts` decodes the result first and fails just that call with
-  the `JsonRpcError` -32603 "The result does not match <method>'s schema", whose `data` carries the
-  result and the schema issue. The connection goes on (AP13).
-- **Failing one call with `RpcClientError`.** `RpcClient` decodes each `Exit` with the rpc's error
-  schema, and the only way to raise `RpcClientError` fails every pending call. So one bad response
-  fails its own call with a `JsonRpcError`, which every rpc's error schema includes (AP14).
+- **Serving and calling JSON-RPC: `RpcServer` and `RpcClient`.** Effect's RPC is an Effect-to-Effect
+  protocol (used by its cluster); a JSON-RPC peer fits the primitives. `src/acp` uses neither half.
+  Fitting JSON-RPC through them took a workaround for each of these:
+  - `RpcServer` turns an unknown tag or a payload that fails to decode into a `Die` defect, so
+    -32601 and -32602 had to be answered before handing the request over.
+  - By default `RpcServer` reports a handler's defect for the whole connection, under no request
+    id. The other end's call then never settles, and an incoming connection-level `Defect` fails
+    every pending `RpcClient` call. It needed `disableFatalDefects: true`.
+  - `RpcServer` runs an incoming notification as a request, so each one needed a synthetic id and
+    its `Exit` dropped.
+  - `RpcClient` decodes a response inside `Schema.Exit`, which first checks the value against the
+    success schema's encoded side, where the `catchDecoding` fallbacks never run
+    (`availableModes: "none"` fails instead of becoming `[]`). Each result had to be decoded and
+    encoded back before `RpcClient` saw it.
+  - `RpcClient` runs `decodeExit` and then `orDie`, so a result the schema refuses becomes a defect
+    in the caller, which `catchTag` cannot handle. The result had to be checked first.
+  - The only way to raise `RpcClientError` fails every pending call, so one malformed response
+    could not fail just its own call with it.
 - **JSON Schema forms and keywords the importer does not take.** It refuses an object with sibling
   `anyOf`/`oneOf`, an `allOf` naming a union, and `not`. It also ignores `x-*` keywords. The
   generator rewrites those forms first and carries the `x-deserialize-*` markers through a

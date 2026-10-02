@@ -59,8 +59,8 @@ fails when a rule has none.
 ## The peer
 
 `peer.ts` is one end of a connection: it serves the requests and notifications of one `RpcGroup`
-and calls another, on Effect's `RpcServer` and `RpcClient`, with messages written by hand rather
-than by Effect's JSON-RPC encoder. `stdio.ts` makes wires of newline-delimited JSON.
+and calls another. The groups only declare the methods and their schemas; the peer reads and
+writes every JSON-RPC message itself. `stdio.ts` makes wires of newline-delimited JSON.
 
 - AP1. The peer writes each message whole, one at a time, in the order it is sent. A handler's
   notifications and its own requests to the other end reach the other end before its response.
@@ -73,8 +73,7 @@ than by Effect's JSON-RPC encoder. `stdio.ts` makes wires of newline-delimited J
   answered is ignored.
 - AP4. A handler that fails with a `JsonRpcError` answers its request with that error: code,
   message and data as given.
-- AP5. A handler that dies answers its own request with -32603, and the connection goes on
-  (`disableFatalDefects`).
+- AP5. A handler that dies answers its own request with -32603, and the connection goes on.
 - AP6. An unknown method is answered -32601, and params the method's payload schema refuses are
   answered -32602. Both are answered before any handler runs. A notification gets no response: one
   with an unknown method, or with params its schema refuses, is dropped; a known one is run by its
@@ -89,8 +88,8 @@ than by Effect's JSON-RPC encoder. `stdio.ts` makes wires of newline-delimited J
   answered -32600 under id null.
 - AP9. A response whose id matches no pending call is ignored.
 - AP10. When the wire's `read` ends or fails, `closed` completes, every pending call fails with
-  `RpcClientError` ("RpcClientDefect: The connection closed"), calls made afterwards fail the same
-  way, running handlers are interrupted, and nothing more is written.
+  `PeerClosed` ("The connection closed"), calls made afterwards fail the same way, running handlers
+  are interrupted, and nothing more is written.
 - AP11. `fromWebStreams` and `fromStdio` carry newline-delimited JSON. A message split across
   chunks is joined, several messages in one chunk are split, blank lines are skipped, and a line
   that is not JSON arrives as `Unparsable`. Each write is one line of `JSON.stringify` output with
@@ -99,18 +98,16 @@ than by Effect's JSON-RPC encoder. `stdio.ts` makes wires of newline-delimited J
   client runs a turn that includes a permission request, and the agent exits 0 when its stdin
   closes.
 - AP13. The peer keeps the method of each request it sends until that request's response arrives.
-  A success response with `result: null` reaches the caller as `{}` when the method's success
-  schema, decoded with the JSON codec `RpcClient` uses, refuses `null` and accepts `{}`. The ACP
-  SDK answers `null` when a handler returns nothing, and reads `null` as `{}` itself. Every result
-  is then decoded with the method's success schema and encoded back before `RpcClient` decodes it,
-  so the schema's default-on-error and skip-invalid-items fallbacks apply (`RpcClient` decodes
-  inside `Schema.Exit`, which checks the value against the encoded side first, where those
-  fallbacks cannot catch it). A result the success schema refuses, `null` included, fails its call
-  with the `JsonRpcError` `{ code: -32603, message: "The result does not match <method>'s schema",
-  data: { result, issue } }`, `result` being the result as received and `issue` the schema's issue
-  as text. That is a failure the caller can handle, not a defect, and a later response for that id
-  is ignored (AP9). When the SDK's v1 agent answers `session/new` with a numeric `sessionId`, the
-  client's call fails so, and its next `session/new` succeeds.
+  Every result is decoded with the method's success schema, so the schema's default-on-error and
+  skip-invalid-items fallbacks apply. A success response with `result: null` reaches the caller as
+  `{}` when the method's success schema refuses `null` and accepts `{}`. The ACP SDK answers `null`
+  when a handler returns nothing, and reads `null` as `{}` itself. A result the success schema
+  refuses, `null` included, fails its call with the `JsonRpcError` `{ code: -32603, message: "The
+  result does not match <method>'s schema", data: { result, issue } }`, `result` being the result
+  as received and `issue` the schema's issue as text. That is a failure the caller can handle, not
+  a defect, and a later response for that id is ignored (AP9). When the SDK's v1 agent answers
+  `session/new` with a numeric `sessionId`, the client's call fails so, and its next `session/new`
+  succeeds.
 - AP14. A malformed response is an object with no `method` and a `result` or an `error` that is not
   a well-formed response: `jsonrpc` other than `"2.0"`, an `id` that is not a string, number or
   null, an `error` without an integer `code` and a string `message`, or both `result` and `error`.
@@ -320,7 +317,7 @@ advertises it.
   methods the implementation serves, calls and sends (`Extensions { serve, call, notify }`, each an
   `RpcGroup`). Every method name in them starts with `_`; `implement` throws when one does not. The
   served ones are handled in the same handler record as the version's methods, as requests or
-  notifications. The connection's `extensions.call` (an `RpcClient` of `call`) and
+  notifications. The connection's `extensions.call` (a function per method of `call`, by name) and
   `extensions.notify` (of `notify`) send the outgoing ones. No gate refuses a method whose name
   starts with `_`. An extension method with no handler, or one the implementation does not
   declare, is answered -32601 (AN4, AP6). An agent of `agent.ts` and a client of `client.ts` call

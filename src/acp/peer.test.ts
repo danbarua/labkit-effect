@@ -380,7 +380,7 @@ describe("a two-way JSON-RPC peer, as an ACP agent, against the official SDK", (
     await agent.close();
   });
 
-  test("AP10: when the wire's read ends, pending and later calls fail with RpcClientError, running handlers are interrupted, and closed completes", async () => {
+  test("AP10: when the wire's read ends, pending and later calls fail with PeerClosed, running handlers are interrupted, and closed completes", async () => {
     const agent = await start();
     const raw = rawClient(agent);
     await raw.send(request(1, "session/prompt", prompt("session-1", "hang")));
@@ -391,10 +391,10 @@ describe("a two-way JSON-RPC peer, as an ACP agent, against the official SDK", (
     const pending = Effect.runPromise(Effect.flip(call));
     expect(await raw.next()).toMatchObject({ method: "session/request_permission" });
     await raw.end();
-    expect(await pending).toMatchObject({ _tag: "RpcClientError", message: "RpcClientDefect: The connection closed" });
+    expect(await pending).toMatchObject({ _tag: "PeerClosed", reason: "The connection closed" });
     await agent.hangInterrupted;
     await Effect.runPromise(agent.peer.closed);
-    expect(await Effect.runPromise(Effect.flip(call))).toMatchObject({ _tag: "RpcClientError" });
+    expect(await Effect.runPromise(Effect.flip(call))).toMatchObject({ _tag: "PeerClosed", reason: "The connection closed" });
     // The interrupted handler's -32800 was not written to the closed connection.
     expect(agent.sent.filter((line) => JSON.parse(line).id === 1)).toEqual([]);
     await agent.close();

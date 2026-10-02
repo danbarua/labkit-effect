@@ -12,8 +12,8 @@
  *   version's methods and called through `extensions`; no gate stands in front of them.
  */
 
-import { type Cause, Deferred, Effect, Layer, Queue, type Scope, Stream } from "effect";
-import { type Rpc, type RpcClient, type RpcClientError, RpcGroup } from "effect/rpc";
+import { type Cause, Deferred, Effect, Queue, type Scope, Stream } from "effect";
+import { type Rpc, RpcGroup } from "effect/rpc";
 import { ErrorCode, type JsonRpcError, type Wire, type WireError, type WireInput } from "./json-rpc.ts";
 import { logKeys } from "./log-keys.ts";
 import * as Peer from "./peer.ts";
@@ -56,10 +56,7 @@ export type Served<Requests extends Rpc.Any, Notifications extends Rpc.Any> =
   | Exclude<Notifications, { readonly _tag: Requests["_tag"] }>;
 
 /** The other end's requests, called through the gates. */
-export type GatedClient<Rpcs extends Rpc.Any> = RpcClient.RpcClient<
-  Rpcs,
-  RpcClientError.RpcClientError | CapabilityNotAdvertised
->;
+export type GatedClient<Rpcs extends Rpc.Any> = Peer.Client<Rpcs, Peer.PeerClosed | CapabilityNotAdvertised>;
 
 /** Sends one of the other end's notifications through the gates. */
 export type GatedNotify<Rpcs extends Rpc.Any> = <Tag extends Rpcs["_tag"]>(
@@ -81,7 +78,7 @@ export interface Extensions<Serve extends Rpc.Any = never, Call extends Rpc.Any 
 
 /** The other end's extension methods, as an implementation declared them; no gate stands in front of them. */
 export interface ExtensionClient<Call extends Rpc.Any, Notify extends Rpc.Any> {
-  readonly call: RpcClient.RpcClient<Call, RpcClientError.RpcClientError>;
+  readonly call: Peer.Client<Call, Peer.PeerClosed>;
   readonly notify: <Tag extends Notify["_tag"]>(
     tag: Tag,
     payload: Rpc.Payload<Rpc.ExtractTag<Notify, Tag>>,
@@ -167,12 +164,7 @@ export interface StartOptions<V extends Version, R> {
   ) => Effect.Effect<Readonly<Record<string, AnyHandler<R> | undefined>>, never, R>;
 }
 
-type ErasedClient = Readonly<
-  Record<
-    string,
-    (payload: unknown, options?: unknown) => Effect.Effect<unknown, RpcClientError.RpcClientError | JsonRpcError>
-  >
->;
+type ErasedClient = Readonly<Record<string, (payload: unknown) => Effect.Effect<unknown, Peer.PeerClosed | JsonRpcError>>>;
 
 /** Runs the peer for `side` on the negotiated version, until the wire ends or the scope closes. */
 export const start = <V extends Version, R>(options: StartOptions<V, R>): Effect.Effect<Endpoint, never, Scope.Scope | R> =>
@@ -214,8 +206,8 @@ export const start = <V extends Version, R>(options: StartOptions<V, R>): Effect
       const gatedCall = Object.fromEntries(
         [...versionCall.requests.keys()].map((method) => [
           method,
-          (payload: unknown, callOptions?: unknown) =>
-            gated(method, payload, () => client[method]?.(payload, callOptions) ?? Effect.die(`no client method ${method}`)),
+          (payload: unknown) =>
+            gated(method, payload, () => client[method]?.(payload) ?? Effect.die(`no client method ${method}`)),
         ]),
       );
       const extensionCall = Object.fromEntries([...extensions.call.requests.keys()].map((method) => [method, client[method]]));
@@ -261,12 +253,8 @@ export const start = <V extends Version, R>(options: StartOptions<V, R>): Effect
       call,
       notify,
       handlers: (peer) =>
-        Layer.effectContext(
-          Effect.gen(function* () {
-            const handlers = yield* options.handlers(endpointOf(peer));
-            const wrapped = Object.fromEntries([...served.requests.keys()].map((method) => [method, handlerFor(method, handlers)]));
-            return yield* served.toHandlers(Effect.succeed(wrapped) as never);
-          }),
+        Effect.map(options.handlers(endpointOf(peer)), (handlers) =>
+          Object.fromEntries([...served.requests.keys()].map((method) => [method, handlerFor(method, handlers)])),
         ) as never,
     }) as Effect.Effect<Peer.Peer<Rpc.Any, Rpc.Any>, never, Scope.Scope | R>;
     const peer = yield* running;

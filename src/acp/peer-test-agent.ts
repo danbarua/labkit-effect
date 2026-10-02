@@ -120,7 +120,7 @@ export const runAgent = (wire: Wire, probe: Probe): Effect.Effect<AgentPeer, nev
     call: ClientRpcs,
     notify: ClientNotifications,
     handlers: (peer) =>
-      AgentRpcs.toLayer({
+      Effect.succeed({
         initialize: () =>
           Effect.succeed({ protocolVersion: 1, agentCapabilities: { loadSession: false }, authMethods: [] }),
         "session/new": () => Effect.succeed({ sessionId: `session-${++sessions}` }),
