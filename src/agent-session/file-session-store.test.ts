@@ -9,7 +9,7 @@ import { expect } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, Exit, type FileSystem, Layer, Ref, Schema } from "effect";
+import { Effect, Exit, FileSystem, Layer, Ref, Schema } from "effect";
 import { BoringModelProvider, boringOpening, WholeSessionAssembler } from "../../tests/support/boring.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { smolCatalog } from "../../tests/support/smol-tools.ts";
@@ -228,4 +228,53 @@ test("J1: an ephemeral store keeps the facts in memory only; a store opened on f
   expect(after.find((fact) => fact.seq > held.length && fact._tag === "Observed" && fact.observation._tag === "TurnStarted") as unknown).toMatchObject({
     observation: { turn: "turn-2" },
   });
+});
+
+test("J2: each append is flushed to the disk before it returns: a tool runs only after its dispatch is written and flushed", async () => {
+  const file = fileIn();
+  const events: Array<string> = [];
+  // The file system as Bun gives it, with each write to and each flush of an opened file noted.
+  const noting = Layer.effect(
+    FileSystem.FileSystem,
+    Effect.gen(function* () {
+      const base = yield* FileSystem.FileSystem;
+      const open: typeof base.open = (path, options) =>
+        base.open(path, options).pipe(
+          Effect.map(
+            (opened) =>
+              new Proxy(opened, {
+                get: (target, key) => {
+                  if (key === "writeAll")
+                    return (bytes: Uint8Array) =>
+                      target.writeAll(bytes).pipe(
+                        Effect.tap(() => Effect.sync(() => events.push(`write ${new TextDecoder().decode(bytes).includes("ToolCallDispatched") ? "dispatch" : "facts"}`))),
+                      );
+                  if (key === "sync") return target.sync.pipe(Effect.tap(() => Effect.sync(() => events.push("flush"))));
+                  return Reflect.get(target, key);
+                },
+              }),
+          ),
+        );
+      return { ...base, open };
+    }),
+  ).pipe(Layer.provide(BunServices.layer));
+  const tools = Layer.succeed(ToolRunner, {
+    run: () => Effect.sync(() => events.push("tool runs")).pipe(Effect.as({ _tag: "Succeeded" as const, output: receivedText("hi") })),
+  });
+  const store = FileBackedSessionStore(file).pipe(Layer.provide(noting));
+  await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession;
+      yield* session.observe(boringOpening(smolCatalog));
+      yield* ask(session, "echo hi");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(BunServices.layer, BoringModelProvider, WholeSessionAssembler, Scripted, tools, NoTurnEndHooks, CountingTurnsInStore).pipe(Layer.provideMerge(store)),
+      ),
+    ),
+  );
+  // Every write is followed by its flush, and the tool runs after the dispatch's.
+  const at = events.indexOf("tool runs");
+  expect(events.slice(at - 2, at + 1)).toEqual(["write dispatch", "flush", "tool runs"]);
+  expect(events.filter((event) => event.startsWith("write")).length).toBe(events.filter((event) => event === "flush").length - 1);
 });

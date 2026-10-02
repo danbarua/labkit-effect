@@ -9,6 +9,9 @@
  * - A file is read as facts in order: the first fact 1, each the one after the one before; a file
  *   that is not is refused. A last line without its line break is a write the process did not
  *   finish: it is not read, and is cut off before the file is written to again, which is logged.
+ * - Each `append` writes its facts and flushes them to the disk (`fsync`) before it returns, so
+ *   what the session does after writing a fact down (a tool it runs) follows the fact being on the
+ *   disk, a power cut included. A new file's folder is flushed too, so the file is found after one.
  * - A write that fails is said, with the file and the facts it did not write, and nothing is
  *   written after it.
  *
@@ -87,8 +90,22 @@ const locked = (file: string) =>
   }).pipe(Effect.catchTag("PlatformError", (error) => Effect.fail(failed(`${file}.lock could not be taken: ${error.message}`))));
 
 /**
+ * Flushes the folder `file` is in to the disk, so that a file just made there is found after a power
+ * cut. A file system that cannot flush a folder is logged, and the store goes on.
+ */
+const folderSynced = (file: string) =>
+  Effect.gen(function* () {
+    const folder = file.slice(0, file.lastIndexOf("/"));
+    const handle = yield* (yield* FileSystem.FileSystem).open(folder, { flag: "r" });
+    yield* handle.sync;
+  }).pipe(
+    Effect.scoped,
+    Effect.catchTag("PlatformError", (error) => Effect.logWarning("session_store.folder_not_flushed", { file, error: error.message })),
+  );
+
+/**
  * The session store kept in `file`, open for as long as the layer is: its lock taken, its facts
- * read, and a line whose write did not finish cut off.
+ * read, a line whose write did not finish cut off, and the file held open to append to.
  */
 export const FileBackedSessionStore = (file: string) =>
   Layer.effect(
@@ -104,17 +121,23 @@ export const FileBackedSessionStore = (file: string) =>
         yield* Effect.logWarning("session_store.torn_line_cut", { file, bytes: Buffer.byteLength(stored.torn), start: stored.torn.slice(0, 200) });
         yield* fs.truncate(file, stored.bytes).pipe(Effect.mapError((error) => failed(`${file} could not be cut to its last complete line: ${error.message}`)));
       }
+      const created = !(yield* fs.exists(file).pipe(Effect.orElseSucceed(() => false)));
+      // Open for appending for as long as the store is; a file made here is made now.
+      const opened = yield* fs.open(file, { flag: "a" }).pipe(Effect.mapError((error) => failed(`${file} could not be opened: ${error.message}`)));
+      if (created) yield* folderSynced(file);
       const kept = yield* Ref.make<ReadonlyArray<Fact>>(stored.facts);
       return {
         facts: Ref.get(kept),
-        // The write and what is kept go together: a write that landed is never left uncounted.
+        // The write, its flush to the disk, and what is kept go together: a write that landed is
+        // never left uncounted, and the facts count as written only once they are on the disk.
         append: (more) =>
           Effect.uninterruptible(
             Effect.gen(function* () {
               if (more.length === 0) return;
-              yield* fs.writeFileString(file, more.map((fact) => `${encodeLine(fact)}\n`).join(""), { flag: "a" }).pipe(
-                Effect.mapError((error) => failed(`Facts ${more[0]?.seq} to ${more.at(-1)?.seq} could not be written to ${file}: ${error.message}`)),
-              );
+              const notWritten = (error: { readonly message: string }) =>
+                failed(`Facts ${more[0]?.seq} to ${more.at(-1)?.seq} could not be written to ${file}: ${error.message}`);
+              yield* opened.writeAll(new TextEncoder().encode(more.map((fact) => `${encodeLine(fact)}\n`).join(""))).pipe(Effect.mapError(notWritten));
+              yield* opened.sync.pipe(Effect.mapError(notWritten));
               yield* Ref.update(kept, (before) => [...before, ...more]);
             }),
           ),
