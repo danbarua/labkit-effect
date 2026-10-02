@@ -150,9 +150,13 @@ test("I4: a turn-end hook's feedback holds the turn open; the turn ends when the
 });
 
 test("a hook that never lets go holds the turn at most maxHolds times, then the turn ends", async () => {
-  const { tags, logged } = await answeringTurn([() => ["Not yet."]], 2);
+  const { facts, tags, logged } = await answeringTurn([() => ["Not yet."]], 2);
   expect(tags.filter((tag) => tag === "ModelResponded")).toHaveLength(3);
   expect(tags.slice(-3)).toEqual(["TurnHoldsExhausted", "TurnEndReviewed", "TurnEnded"]);
+  // What the hooks would still have said is on record.
+  expect(facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "TurnHoldsExhausted") as unknown).toMatchObject({
+    observation: { holds: 2, feedback: ["Not yet."] },
+  });
   expect(logged).toContainEqual([logKeys.loop.holdsExhausted, { holds: 2, maxHolds: 2, feedback: ["Not yet."] }]);
 });
 
