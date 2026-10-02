@@ -10,10 +10,13 @@
  * |---|---|---|
  * | `model` | `model` | `provider/model` of each model offered, and the one asked now |
  * | `effort` | `thought_level` | the efforts the model takes |
- * | `thinking`, `observe`, `cache` | `model_config` | the values the model takes |
+ * | `thinking` | `model_config` | the values the model takes |
  * | `max_output_tokens` | `model_config` | the presets up to the model's limit, the limit, and the value in force |
  *
- * A setting the options do not offer gives no option. An option's current value is what the model
+ * A setting the options do not offer gives no option, and nor do `observe` (how much of its thinking
+ * the provider returns) and `cache` (how long the provider keeps a request): the editor shows each
+ * option as a select above the prompt, and a session keeps what it was said to have of those two.
+ * An option's current value is what the model
  * will get (a `SettingOption`'s `now`); where nothing is sent for a setting, it is `not_sent`, which
  * is offered only then. A change of a setting names that setting alone, since a change keeps the
  * settings it does not name; choosing `not_sent` while it is the value now changes nothing.
@@ -40,27 +43,23 @@ const outputPresets: ReadonlyArray<number> = [4096, 8192, 16384, 32768, 65536, 1
 /** The value of an option whose setting is sent nothing: the setting is unsaid, or the adapter sends nothing for it. */
 const notSent = "not_sent";
 
-type Listed = "effort" | "thinking" | "observe" | "cache";
+/** The settings shown as options. */
+type Shown = Exclude<keyof ModelSettings, "observe" | "cache">;
+const isShown = (setting: SettingOption): setting is SettingOption & { readonly name: Shown } => setting.name !== "observe" && setting.name !== "cache";
 
-const ids: Readonly<Record<keyof ModelSettings, string>> = {
+type Listed = "effort" | "thinking";
+
+const ids: Readonly<Record<Shown, string>> = {
   effort: "effort",
   thinking: "thinking",
-  observe: "observe",
-  cache: "cache",
   maxOutputTokens: "max_output_tokens",
 };
 
-const described: Readonly<Record<keyof ModelSettings, { readonly name: string; readonly description: string; readonly category: SessionConfigOptionCategory }>> = {
+const described: Readonly<Record<Shown, { readonly name: string; readonly description: string; readonly category: SessionConfigOptionCategory }>> = {
   effort: { name: "Reasoning effort", description: "How much effort the model puts into a response.", category: "thought_level" },
   thinking: {
     name: "Thinking",
     description: "When the model thinks: as it sees fit, before every answer, only between tool calls, or not at all.",
-    category: "model_config",
-  },
-  observe: { name: "Thinking returned", description: "How much of the model's thinking the provider returns to be recorded.", category: "model_config" },
-  cache: {
-    name: "Prompt cache",
-    description: "How long the provider keeps what a request carried, so that later requests beginning the same way read it back.",
     category: "model_config",
   },
   maxOutputTokens: { name: "Maximum output tokens", description: "The most tokens a response may take, thinking and answer together.", category: "model_config" },
@@ -69,8 +68,6 @@ const described: Readonly<Record<keyof ModelSettings, { readonly name: string; r
 const valueNames: Readonly<Record<Listed, Readonly<Record<string, string>>>> = {
   effort: { low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum" },
   thinking: { auto: "As the model sees fit", before_answer: "Before every answer", between_tools: "Between tool calls", off: "Off" },
-  observe: { all: "All of it", progress_only: "Notes on progress only", off: "None" },
-  cache: { off: "Off", "5m": "Five minutes", "1h": "An hour" },
 };
 
 const value = (id: string, name: string, description?: string): SessionConfigSelectOption => ({
@@ -120,7 +117,7 @@ export function configOptions(options: Options, models: ReadonlyArray<Asked>, li
     currentValue: SessionConfigValueId.make(`${options.provider}/${options.model}`),
     options: modelsOffered(options, models).map((each) => value(each.value, `${each.model} (${each.provider})`)),
   };
-  const settings = options.offered.map((setting): SessionConfigOption => {
+  const settings = options.offered.filter(isShown).map((setting): SessionConfigOption => {
     const { values, now } = valuesOf(setting, limit);
     return {
       id: SessionConfigId.make(ids[setting.name]),
@@ -145,7 +142,7 @@ export function changeOf(configId: string, value: string, options: Options, mode
     const found = modelsOffered(options, models).find((each) => each.value === value);
     return found === undefined ? new InvalidChange({ reason: `${value} is not a model offered.` }) : { provider: found.provider, model: found.model };
   }
-  const setting = options.offered.find((each) => ids[each.name] === configId);
+  const setting = options.offered.filter(isShown).find((each) => ids[each.name] === configId);
   if (setting === undefined) return new InvalidChange({ reason: `No option has the id ${configId}.` });
   const offered = valuesOf(setting, limit).values.some((each) => each.value === value);
   if (!offered) return new InvalidChange({ reason: `${value} is not a value offered for ${described[setting.name].name.toLowerCase()}.` });

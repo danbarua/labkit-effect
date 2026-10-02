@@ -24,15 +24,13 @@ const shown = (options: ReadonlyArray<SessionConfigOption>) =>
     now: String(option.currentValue),
   }));
 
-test("AA1 AA2: an openai/gpt-5.5 configuration: the model, then each setting offered, each with its current value among its values", async () => {
+test("AA1 AA2: an openai/gpt-5.5 configuration: the model, then each setting offered but observe and cache, each with its current value among its values", async () => {
   const options = await optionsOf("openai", "gpt-5.5", { effort: "medium", cache: "1h", maxOutputTokens: TokenCount.make(32768) });
   const shownOptions = shown(configOptions(options, models, 128000));
   expect(shownOptions).toEqual([
     { id: "model", category: "model", values: ["openai/gpt-5.5", "anthropic/claude-haiku-4-5"], now: "openai/gpt-5.5" },
     { id: "effort", category: "thought_level", values: ["low", "medium", "high", "xhigh"], now: "medium" },
     { id: "thinking", category: "model_config", values: ["not_sent", "auto", "off"], now: "not_sent" },
-    { id: "observe", category: "model_config", values: ["not_sent", "all", "progress_only", "off"], now: "not_sent" },
-    { id: "cache", category: "model_config", values: ["5m", "1h"], now: "1h" },
     { id: "max_output_tokens", category: "model_config", values: ["4096", "8192", "16384", "32768", "65536", "128000"], now: "32768" },
   ] as never);
   for (const { values, now } of shownOptions) expect(values).toContain(now);
@@ -76,10 +74,12 @@ test("AA4: every value offered, taken as a change, gives a configuration whose o
 
 test("AA4: a change names only what was chosen: a setting alone, or the model alone; choosing not_sent while it is current changes nothing", async () => {
   const options = await optionsOf("openai", "gpt-5.5", { effort: "medium" });
-  expect(changeOf("cache", "5m", options, models, 128000)).toEqual({ provider: "openai", model: "gpt-5.5", settings: { cache: "5m" } } as never);
+  expect(changeOf("thinking", "auto", options, models, 128000)).toEqual({ provider: "openai", model: "gpt-5.5", settings: { thinking: "auto" } } as never);
   expect(changeOf("max_output_tokens", "65536", options, models, 128000)).toEqual({ provider: "openai", model: "gpt-5.5", settings: { maxOutputTokens: 65536 } } as never);
   expect(changeOf("model", "anthropic/claude-haiku-4-5", options, models, 128000)).toEqual({ provider: "anthropic", model: "claude-haiku-4-5" } as never);
   expect(changeOf("thinking", "not_sent", options, models, 128000)).toEqual({ provider: "openai", model: "gpt-5.5" } as never);
+  // observe and cache are not options.
+  expect(changeOf("cache", "5m", options, models, 128000)).toBeInstanceOf(InvalidChange);
 });
 
 test("AA4: a model value is split at its first slash: a local model's name keeps its own slashes", async () => {
