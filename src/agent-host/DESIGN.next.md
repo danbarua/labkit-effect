@@ -143,9 +143,8 @@ In ACP, tools go through the editor. The catalog and the system prompt are known
 and do not change after. The host's world supplies, for each session: the catalog (`ToolSpec`), a
 `ToolRunner` that reaches the editor (`fs/*`, `terminal/*`) and the MCP servers the client named,
 and the presentation of each tool's calls. The core is told what happened. `ToolRunner.run` is
-given no call, so a tool that needs the call's id (a terminal shown on its `tool_call`) cannot have
-it. To decide when the editor's tools are built: a `CurrentCall` the loop provides around `run`, as
-it provides `CurrentOrigin`, or the id in the tool's output.
+given the call it runs (`call`), so a tool that needs the call's id, a terminal shown on its
+`tool_call`, has it.
 
 ## Logs
 
@@ -176,8 +175,8 @@ against the local Qwen with the SDK's client. The session directory with the hos
 1. The ACP host in VS Code, then JetBrains.
 2. The CLI opens its session at its first input, from a draft, and has `/export`: the place to try
    turn zero.
-3. `terminal/*`; MCP; attachments; Streamable HTTP with a token and one holder for a session;
-   elicitation; `session/delete`; `session/fork` once the core has an identity for a fork.
+3. MCP; attachments; Streamable HTTP with a token and one holder for a session; elicitation;
+   `session/delete`; `session/fork` once the core has an identity for a fork.
 4. labkit's `app-acp` as a consumer.
 
 ## Open
@@ -185,5 +184,4 @@ against the local Qwen with the SDK's client. The session directory with the hos
 - The shape of the seam between `agent-acp` and labkit's `app-acp`: drawn from the first slice.
 - A `models.yml` as one more source for the catalog. The catalog is a service, so a file can be
   added; not in the first slice.
-- The call, given to a tool.
 - What `session/load` sends for tool content (parked by Dan).
