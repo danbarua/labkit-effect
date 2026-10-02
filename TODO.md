@@ -83,7 +83,8 @@ model.
       updates, one function for the live view and for `session/load` (`src/agent-acp/projection.ts`),
       which the ACP host's feed sends: text and thinking as they arrive, tool calls and how they
       end; `session/load` sends the projection of the stored facts before its answer, and the feed
-      goes on from the state they leave. To do: the plan.
+      goes on from the state they leave; the model's plan (`update_plan`) as a `plan` update. To
+      do: the last plan sent again on `session/load`.
 - [ ] The ACP host's sessions across processes. Built: each session's facts in a file
       (`FileBackedSessionStore`, `~/.labkit/sessions`); the host's record of a session (`host.json`:
       the working folder, a title from the first prompt), written at turn zero; `session/load` (the

@@ -468,6 +468,35 @@ test("AG19: a prompt's image and embedded file are attached to the input, their 
   for (const blob of attached) expect(await Bun.file(join(host.directory, sessionId, "blobs", blob.id)).exists()).toBe(true);
 });
 
+test("AG20: update_plan sends the whole plan to the editor as a plan update, without asking", async () => {
+  const entries = [
+    { content: "Read the tests", status: "completed" },
+    { content: "Fix the bug", status: "in_progress", priority: "high" },
+  ];
+  const host = startHost({ script: [answer({ _tag: "ToolCall", call: "plan-1", tool: "update_plan", input: { entries } as never }), answer({ _tag: "Text", text: "Planned." })] });
+  const { app, log } = sdkClient();
+  const sessionId = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "Plan it"));
+    return created.sessionId;
+  });
+  await host.stop();
+  expect(log.asked).toEqual([]);
+  expect(log.updates).toContainEqual({
+    sessionUpdate: "plan",
+    entries: [
+      { content: "Read the tests", status: "completed", priority: "medium" },
+      { content: "Fix the bug", status: "in_progress", priority: "high" },
+    ],
+  });
+  const facts = await factsOn(storeFileOf(host.directory, sessionId));
+  expect(observed(facts).find((fact) => fact.observation._tag === "ToolEnded")?.observation).toMatchObject({
+    call: "plan-1",
+    outcome: { _tag: "Succeeded", output: { body: { text: "The plan has 2 steps: 1 completed, 1 in progress, 0 pending." } } },
+  });
+});
+
 test("AG18: the permission mode is an option of category mode; changed, it applies from the next call: a write runs without asking, then is asked about again", async () => {
   const write = (call: string) => answer({ _tag: "ToolCall", call, tool: "write_file", input: { path: "a.txt", content: call } });
   const host = startHost({ script: [write("w-1"), answer({ _tag: "Text", text: "One." }), write("w-2"), answer({ _tag: "Text", text: "Two." })] });
@@ -635,7 +664,7 @@ test("AG17: edit_file replaces one occurrence through fs/*, shown as a diff; run
   });
   await host.stop();
   const facts = await factsOn(storeFileOf(host.directory, sessionId));
-  expect((await Effect.runPromise(immutableToolCatalogOf(facts))).map((tool): string => tool.name)).toEqual(["read_file", "write_file", "edit_file", "run_command"]);
+  expect((await Effect.runPromise(immutableToolCatalogOf(facts))).map((tool): string => tool.name)).toEqual(["read_file", "write_file", "edit_file", "update_plan", "run_command"]);
   // The default permission mode asks before an edit and before a command.
   expect(log.asked).toHaveLength(5);
   expect(log.files.filter((each) => each.method === "fs/write_text_file")).toEqual([
@@ -670,7 +699,7 @@ test("AG17: edit_file replaces one occurrence through fs/*, shown as a diff; run
   ]);
 });
 
-test("AG10: the editor world offers read_file and write_file as the client advertised fs; read_file reads through fs/read_text_file, a path outside the working folder is refused, and a client with no fs has no tools", async () => {
+test("AG10: the editor world offers read_file and write_file as the client advertised fs; read_file reads through fs/read_text_file, a path outside the working folder is refused, and a client with no fs has no file tools", async () => {
   const host = startHost({
     script: [
       answer({ _tag: "ToolCall", call: "read-1", tool: "read_file", input: { path: "a.txt" } }, { _tag: "ToolCall", call: "read-2", tool: "read_file", input: { path: "../outside.txt" } }),
@@ -688,7 +717,7 @@ test("AG10: the editor world offers read_file and write_file as the client adver
   expect(log.asked).toEqual([]);
   expect(log.files).toEqual([{ method: "fs/read_text_file", path: join(host.cwd, "a.txt"), sessionId }]);
   const facts = await factsOn(storeFileOf(host.directory, sessionId));
-  expect((await Effect.runPromise(immutableToolCatalogOf(facts))).map((tool): string => tool.name)).toEqual(["read_file"]);
+  expect((await Effect.runPromise(immutableToolCatalogOf(facts))).map((tool): string => tool.name)).toEqual(["read_file", "update_plan"]);
   const ended = observed(facts).flatMap((fact) => (fact.observation._tag === "ToolEnded" ? [fact.observation] : []));
   expect(ended).toEqual(
     expect.arrayContaining([
@@ -705,7 +734,8 @@ test("AG10: the editor world offers read_file and write_file as the client adver
     return created.sessionId;
   });
   await bare.stop();
-  expect(await Effect.runPromise(immutableToolCatalogOf(await factsOn(storeFileOf(bare.directory, bareSession))))).toEqual([]);
+  // A client with no fs and no terminal has only the plan.
+  expect((await Effect.runPromise(immutableToolCatalogOf(await factsOn(storeFileOf(bare.directory, bareSession))))).map((tool): string => tool.name)).toEqual(["update_plan"]);
 });
 
 test("AG3 AG11: each lifecycle point logs its event with the connection, request, session, turn and call it is about; a routine turn logs no warning, and a failure says what failed and why", async () => {
@@ -723,7 +753,7 @@ test("AG3 AG11: each lifecycle point logs its event with the connection, request
   expect(of(logKeys.session.created)).toMatchObject({
     level: "Info",
     annotations: { session: sessionId, connection: expect.any(String) },
-    details: { model: "openai/gpt-6-sol", tools: ["read_file", "write_file", "edit_file"] },
+    details: { model: "openai/gpt-6-sol", tools: ["read_file", "write_file", "edit_file", "update_plan"] },
   });
   expect(of(logKeys.config.changed)).toMatchObject({ annotations: { session: sessionId }, details: { configId: "effort", value: "low", applies: "to the draft" } });
   expect(of(logKeys.session.opened)).toMatchObject({ annotations: { session: sessionId, request: expect.anything() } });

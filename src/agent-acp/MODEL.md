@@ -230,7 +230,7 @@ twice.
   the facts (no `TurnInterrupted`, no `TurnEnded`), and `Agent.run` returns.
 - AG10. `editorWorld` offers `read_file` only to a client that advertised `fs.readTextFile` and
   `write_file` only to one that advertised `fs.writeTextFile`; a client that advertised neither
-  gets no tools. They read and write through `fs/read_text_file` and `fs/write_text_file` with the
+  gets no file tools. They read and write through `fs/read_text_file` and `fs/write_text_file` with the
   session's id and the path resolved against the working folder; a path outside it is refused with
   a failure the model reads, and the editor is not asked.
 - AG11. Session created, config changed, session opened, prompt received, admitted and settled
@@ -258,6 +258,9 @@ twice.
   `embeddedContext`): each is put in the session's blob store, kept in its folder (`blobs/`), and
   attached to the input by reference, with its media type and the name its URI ends in; a
   resource link is a Markdown link in the text.
+- AG20. `editorWorld` offers `update_plan { entries }` to every client: each call sends the whole
+  plan as a `plan` update (an entry's priority `medium` unless given), and succeeds with the count
+  of steps by status. It is of kind `think`: it runs in every permission mode without asking.
 - AG17. `editorWorld` offers `edit_file` to a client that advertised both `fs` methods, and
   `run_command` to one that advertised `terminal`. `edit_file` reads the file through the editor
   and writes it back with one occurrence of `old_text` replaced; `old_text` that occurs never or

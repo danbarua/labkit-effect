@@ -11,8 +11,8 @@
  *   runs a shell command in the editor's terminal (`terminal/create`), which is how a folder is
  *   listed or searched, since the editor has no method for either. Each is offered only when the
  *   client advertised the methods it uses (`clientCapabilities.fs.readTextFile`, `.writeTextFile`,
- *   `.terminal`), so no call meets a capability the client does not have; a client that advertised
- *   none gets no tools.
+ *   `.terminal`), so no call meets a capability the client does not have. `update_plan` sends the
+ *   model's plan to the editor (a `plan` update), which shows it; every client gets it.
  * - `workspaceWorld`: a stopgap. The tools of `agent-tools/workspace.ts` (`read_file`, `list_dir`,
  *   `write_file`) on the local disk under the working folder, bypassing the editor and its unsaved
  *   buffers. A launcher chooses it explicitly.
@@ -68,6 +68,13 @@ const RunCommand = Schema.Struct({
   command: Schema.NonEmptyString,
   timeout_seconds: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(Schema.isLessThanOrEqualTo(600))),
 });
+
+const PlanEntryInput = Schema.Struct({
+  content: Schema.NonEmptyString,
+  status: Schema.Literals(["pending", "in_progress", "completed"]),
+  priority: Schema.optionalKey(Schema.Literals(["high", "medium", "low"])),
+});
+const UpdatePlan = Schema.Struct({ entries: Schema.Array(PlanEntryInput) });
 
 /** How long a command runs before it is stopped, unless the call says otherwise. */
 export const commandSeconds = 120;
@@ -158,6 +165,31 @@ export const editorWorld: World = {
             required: ["path", "old_text", "new_text"],
           },
         });
+      tools.push({
+        name: ToolName.make("update_plan"),
+        kind: "think",
+        replay: "safe",
+        description:
+          "Record your plan for the task as a list of steps, each pending, in_progress or completed, with an optional priority (high, medium, low); the user sees it in the editor. Send the whole list each time it changes; keep one step in_progress while you work on it.",
+        input: {
+          type: "object",
+          properties: {
+            entries: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  content: { type: "string" },
+                  status: { type: "string", enum: ["pending", "in_progress", "completed"] },
+                  priority: { type: "string", enum: ["high", "medium", "low"] },
+                },
+                required: ["content", "status"],
+              },
+            },
+          },
+          required: ["entries"],
+        },
+      });
       if (connection.profile.client.capabilities.terminal === true)
         tools.push({
           name: ToolName.make("run_command"),
@@ -245,6 +277,15 @@ export const editorWorld: World = {
         ).pipe(Effect.catch((error) => Effect.succeed(reported(editorFailure("run_command", input.command, error as never)))));
       };
 
+      const updatePlan = (input: typeof UpdatePlan.Type) => {
+        const entries = input.entries.map((entry) => ({ content: entry.content, status: entry.status, priority: entry.priority ?? "medium" }));
+        const count = (status: string) => entries.filter((entry) => entry.status === status).length;
+        return connection.notify("session/update", { sessionId, update: { sessionUpdate: "plan", entries } }).pipe(
+          Effect.as(succeeded(`The plan has ${entries.length} steps: ${count("completed")} completed, ${count("in_progress")} in progress, ${count("pending")} pending.`)),
+          Effect.catch((error) => Effect.succeed(reported(editorFailure("update_plan", "the plan", error as never)))),
+        );
+      };
+
       const decoded = <S extends Schema.Top & { readonly DecodingServices: never }>(schema: S, tool: string, input: unknown, run: (value: S["Type"]) => Effect.Effect<ToolOutcome>) =>
         Schema.decodeUnknownEffect(schema)(input).pipe(
           Effect.matchEffect({ onFailure: (error) => Effect.succeed(rejected(`${tool} does not take this input: ${error.message}`)), onSuccess: run }),
@@ -262,6 +303,8 @@ export const editorWorld: World = {
               return decoded(WriteFile, name, parsed.value, write);
             case "edit_file":
               return decoded(EditFile, name, parsed.value, editText);
+            case "update_plan":
+              return decoded(UpdatePlan, name, parsed.value, updatePlan);
             default:
               return decoded(RunCommand, name, parsed.value, runCommand(call));
           }
