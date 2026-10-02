@@ -3,8 +3,9 @@
  * say of a turn. Both ways of running the CLI (`print.ts`, `repl.ts`) are given the open session.
  *
  * The opening holds the model, its settings and the system prompt; each input is the user's,
- * through the CLI; the conversation is every turn of it. The tools read the folder the CLI runs in
- * (`read_file`, `list_dir`); none changes anything.
+ * through the CLI; the conversation is every turn of it. The tools work on the folder the CLI runs
+ * in: `read_file` and `list_dir` read it, and `write_file` changes it, with permission as
+ * `--permission-mode` gives it.
  */
 
 import { Effect, FileSystem, Layer, Logger } from "effect";
@@ -15,10 +16,13 @@ import type { Fact } from "../../agent-machine/fact.ts";
 import { InputText, SessionId, type TurnId, Via } from "../../agent-machine/names.ts";
 import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { workspaceTools } from "../../agent-tools/workspace.ts";
+import { type PermissionMode, permissions } from "../../agent-policy/permissions.ts";
+import type { Policy } from "../../agent-policy/policy.ts";
+import { ToolCallPolicy } from "../../agent-session/contracts.ts";
 import { openSession, resumeSession, type Session } from "../../agent-session/loop.ts";
 import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
 import { reportedBy } from "../../agent-session/origin.ts";
-import { modelOf, openedWith } from "../../agent-session/configuration/session-setup.ts";
+import { immutableToolCatalogOf, modelOf, openedWith } from "../../agent-session/configuration/session-setup.ts";
 import { countingTurnsAfter, NoTurnEndHooks } from "../../agent-session/turns.ts";
 import { type Asked, Clients, KnownToCli, SettlingForCli } from "./models.ts";
 import { storeFileOf, storing } from "./store.ts";
@@ -33,6 +37,10 @@ export interface Config {
    * a model or settings in this configuration that differ from its own are taken as a change.
    */
   readonly continues?: ReadonlyArray<Fact>;
+  /** Which tool calls run, are vetoed, or are asked about (`--permission-mode`). */
+  readonly permissionMode: PermissionMode;
+  /** Whether anyone is there to answer a question before a call runs: the REPL at a terminal. */
+  readonly canAsk: boolean;
 }
 
 /** Log lines to stderr: for print mode, where stdout holds the answer alone, as a caller parsing it expects. */
@@ -52,6 +60,14 @@ export const LogsToFile = (sessionId: string) =>
 
 /** The tools a session is offered: the ones that read the workspace, the folder the CLI runs in. */
 const workspace = workspaceTools(process.cwd());
+
+/** The permission policy for `config`'s mode, over the tools the session opened with. */
+const PermissionsFor = (config: Config) =>
+  Layer.succeed(ToolCallPolicy, (facts) =>
+    Effect.map(immutableToolCatalogOf(facts), (tools) =>
+      permissions(config.permissionMode, config.canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts) as Policy<unknown>,
+    ),
+  );
 
 /** What the loop needs, for a CLI session whose facts so far started `turns` turns. */
 const Services = (turns: number) => Layer.mergeAll(
@@ -85,7 +101,7 @@ export const withSession = <A, E, R, L>(config: Config, logs: Layer.Layer<never,
     }
     yield* session.idle;
     return yield* use(session).pipe(Effect.ensuring(store.finish));
-  }).pipe(reportedBy({ _tag: "User", via: Via.make("cli") }), Effect.scoped, Effect.provide(Layer.mergeAll(Services(turns), logs)));
+  }).pipe(reportedBy({ _tag: "User", via: Via.make("cli") }), Effect.scoped, Effect.provide(Layer.mergeAll(Services(turns), PermissionsFor(config), logs)));
 };
 
 /** Sends `text` to the session as the user's input, and waits until nothing is under way. */

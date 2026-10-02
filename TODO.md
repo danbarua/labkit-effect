@@ -31,11 +31,12 @@ model.
       change is `ModelChangeArrived` from `User { via: acp }`, taken between turns (M1–M3); the
       log's configuration versions are our host's numbering (labkit-agent), ours to change, as
       `Seq` is the session's.
-- [ ] Tool permission. In the log: `write_file` (kind `edit`) waits for the user; the options are
-      allow once, allow for the session, reject once; allow for the session is a grant for that
-      tool, for all arguments, until the session closes or permissions are reset. Build the policy
-      gate (agent-policy) into the loop against that flow, with which tools only read and which
-      change things as a property of the tool.
+- [ ] Tool permission. Built: each tool call goes through `ToolCallPolicy` in the loop; the
+      permission modes (`default`, `acceptEdits`, `dontAsk`, `bypassPermissions`) by each tool's
+      kind; what is asked and answered recorded (`PermissionAsked`, `PermissionAnswered`); allow
+      for the session read from the facts; the CLI's `--permission-mode` and its REPL question. To
+      do: the ACP host's `session/request_permission`; `plan` and `auto`; allow and deny rules by
+      tool and argument; resetting permissions.
 - [ ] Accounting for ACP. Built: a provider-neutral `usage` on each response; `contextGauge` (used,
       size, cost) and `requestsIn` (a turn's model requests) read from the facts (`accounting.ts`);
       prices with the well-known models; `maxTurnRequests` as an example host policy. To do in the host: send

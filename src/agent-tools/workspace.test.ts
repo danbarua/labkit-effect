@@ -31,8 +31,8 @@ const call = (tool: string, input: unknown) =>
     }).pipe(Effect.provide(runner.pipe(Layer.provide(BunServices.layer)))),
   );
 
-test("the catalog is read_file and list_dir", () => {
-  expect(catalog.map((tool) => tool.name as string)).toEqual(["read_file", "list_dir"]);
+test("the catalog is read_file, list_dir and write_file, each with its kind", () => {
+  expect(catalog.map((tool) => [tool.name as string, tool.kind])).toEqual([["read_file", "read"], ["list_dir", "search"], ["write_file", "edit"]]);
 });
 
 test("list_dir lists one folder, a folder's name ending with /", async () => {
@@ -51,5 +51,12 @@ test("a call that cannot run says why", async () => {
   expect(await call("read_file", { path: "missing.txt" })).toStartWith("reported: missing.txt:");
   expect(await call("read_file", { path: "big.txt" })).toBe('rejected: The result is over 256 KiB. Read fewer lines: {"path":"big.txt","line":1,"limit":100}.');
   expect(await call("read_file", { line: 1 })).toStartWith("rejected: read_file does not take this input:");
-  expect(await call("write_file", { path: "a" })).toBe("NotFound");
+  expect(await call("delete_file", { path: "a" })).toBe("NotFound");
+});
+
+test("write_file creates or replaces a file inside the workspace, whose folder exists", async () => {
+  expect(await call("write_file", { path: "src/b.txt", text: "hello" })).toBe("Wrote 5 bytes to src/b.txt.");
+  expect(await call("read_file", { path: "src/b.txt" })).toBe("hello");
+  expect(await call("write_file", { path: "../escape.txt", text: "x" })).toStartWith("rejected: ../escape.txt is not inside the workspace");
+  expect(await call("write_file", { path: "nowhere/c.txt", text: "x" })).toStartWith("reported: nowhere/c.txt:");
 });

@@ -225,3 +225,20 @@ test("X4: a turn left running is ended though earlier turns came before it; only
     { role: "user", parts: [{ _tag: "Text", text: "and the tests?" }, { _tag: "Text", text: "never mind the tests" }] },
   ]);
 });
+
+test("P8 X4: a call waiting for an answer when the process ended did not run, and is recorded as not run", async () => {
+  const session = asked();
+  observe(session, {
+    _tag: "ModelResponded",
+    turn: "turn-1",
+    provider: "boring",
+    model: "boring-1",
+    parts: [call],
+    ending: { _tag: "Complete" },
+    metadata: json({}),
+  });
+  observe(session, { _tag: "PermissionAsked", call: "c1", asks: json({ question: "run ls?" }) });
+  const { settled } = await resumed(session.journal, "go on");
+  expect(tags(settled).slice(0, 3)).toEqual(["TurnInterrupted", "ToolEnded", "TurnEnded"]);
+  expect(settled[1] as unknown).toMatchObject({ observation: { call: "c1", outcome: { _tag: "Failed", reason: { _tag: "NotRun" } } } });
+});

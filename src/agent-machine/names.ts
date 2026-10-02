@@ -21,6 +21,14 @@ export type CallId = typeof CallId.Type;
 export const ToolName = Schema.String.pipe(Schema.brand("agent-machine/ToolName"));
 export type ToolName = typeof ToolName.Type;
 
+/**
+ * What a tool does, in ACP's names for it: reads, edits, deletes or moves files, searches, runs a
+ * command, thinks, fetches, or something else. Whoever defines a tool says which kind it is; a
+ * permission policy reads it.
+ */
+export const ToolKind = Schema.Literals(["read", "edit", "delete", "move", "search", "execute", "think", "fetch", "other"]);
+export type ToolKind = typeof ToolKind.Type;
+
 /** The name of a model provider. */
 export const ProviderName = Schema.String.pipe(Schema.brand("agent-machine/ProviderName"));
 export type ProviderName = typeof ProviderName.Type;

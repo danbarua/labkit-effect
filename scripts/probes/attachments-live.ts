@@ -116,7 +116,7 @@ function papaya(): Uint8Array {
   return new TextEncoder().encode(out);
 }
 
-const look: ToolSpec = { name: ToolName.make("look"), description: "Returns the picture in front of you, as an image.", input: { type: "object", properties: {} } };
+const look: ToolSpec = { name: ToolName.make("look"), description: "Returns the picture in front of you, as an image.", input: { type: "object", properties: {} }, kind: "read" };
 /** Runs `look`: its output is the image, as bytes, which the loop puts in the blob store. */
 const Looking = Layer.succeed(ToolRunner, {
   run: () => Effect.succeed({ _tag: "Succeeded" as const, output: { mediaType: MediaType.make("image/png"), body: { _tag: "Bytes" as const, bytes: halves() } } }),

@@ -251,6 +251,13 @@ export const Observation = Schema.Union([
    * is run without waiting for the rest of the response, which will hold it as one of its parts.
    */
   Schema.TaggedStruct("ToolCallArrived", { turn: TurnId, call: CallId, tool: ToolName, input: Received }),
+  /**
+   * Before a call runs, a policy asks for an answer (a person's permission): `asks` is what it asks,
+   * as the policy states it. The call waits for `PermissionAnswered`.
+   */
+  Schema.TaggedStruct("PermissionAsked", { call: CallId, asks: Received }),
+  /** The answer to what was asked before `call` runs, as the answerer gave it. */
+  Schema.TaggedStruct("PermissionAnswered", { call: CallId, answer: Received }),
   /** The tool a call asks for began to run. */
   Schema.TaggedStruct("ToolCallDispatched", { call: CallId }),
   /** A tool call ended. */

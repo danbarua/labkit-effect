@@ -55,7 +55,7 @@ and report `TurnStarted`.
 | Decision | Request | Observed outcome |
 |---|---|---|
 | `AskModel` (a turn's first step), `TellModel` (each later step) | `RequestModelResponse` | `ModelRequestDispatched` when the request is made, then `ModelResponded`, `ModelFailed` or `ModelVetoed` |
-| (none: every proposed call is requested) | `RunTool` | `ToolCallDispatched` when the tool begins to run, then `ToolEnded` (`Succeeded`, `Failed`) |
+| (none: every proposed call is requested) | `RunTool` | `PermissionAsked` and `PermissionAnswered` when a policy asks before it runs, `ToolCallDispatched` when the tool begins to run, then `ToolEnded` (`Succeeded`, `Failed`) |
 | (none: the model gave a response with no tool calls) | `BeforeTurnEnded` | input, if any, then `TurnEndReviewed` |
 | (none: the turn was interrupted) | `StopTurnWork` | each request under way reports how far it got |
 

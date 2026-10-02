@@ -4,9 +4,10 @@
 
 import type { Capabilities } from "./configuration/well-known-models.ts";
 import { BlobRef } from "../agent-machine/blob.ts";
-import { Context, type Effect, Schema } from "effect";
+import { Context, Effect, Schema } from "effect";
+import type { Policy } from "../agent-policy/policy.ts";
 import type { Fact } from "../agent-machine/fact.ts";
-import { CallId, type ModelName, ProviderName, ThinkingText, ToolName, type TurnId } from "../agent-machine/names.ts";
+import { CallId, type ModelName, ProviderName, ThinkingText, ToolKind, ToolName, type TurnId } from "../agent-machine/names.ts";
 import { type Observation, ToolOutcome } from "../agent-machine/observation.ts";
 import { Received } from "../agent-machine/received.ts";
 import type { ModelSettings } from "../agent-machine/settings.ts";
@@ -30,8 +31,11 @@ export class ModelProvider extends Context.Service<
   { readonly select: (facts: ReadonlyArray<Fact>, turn: TurnId) => Effect.Effect<Target> }
 >()("agent-session/ModelProvider") {}
 
-/** A tool the model may call: its name, what it does, and the JSON Schema of its input. */
-export const ToolSpec = Schema.Struct({ name: ToolName, description: Schema.String, input: Schema.Json });
+/**
+ * A tool the model may call: its name, what it does, the JSON Schema of its input, and its kind
+ * (`ToolKind`), which is not sent to models.
+ */
+export const ToolSpec = Schema.Struct({ name: ToolName, description: Schema.String, input: Schema.Json, kind: ToolKind });
 export type ToolSpec = typeof ToolSpec.Type;
 
 /**
@@ -129,3 +133,17 @@ export class ToolRunner extends Context.Service<
   ToolRunner,
   { readonly run: (tool: ToolName, input: Received) => Effect.Effect<ToolOutcome> }
 >()("agent-session/ToolRunner") {}
+
+/**
+ * The policy each tool call goes through before it runs, as the session's facts stand when the call
+ * is to run. By default every call runs. What a waiting policy asks is recorded
+ * (`PermissionAsked`), and its answer is whatever is observed for the call (`PermissionAnswered`).
+ */
+export const ToolCallPolicy = Context.Reference<(facts: ReadonlyArray<Fact>) => Effect.Effect<Policy<unknown>>>("agent-session/ToolCallPolicy", {
+  defaultValue: () => () => Effect.succeed(everyCallRuns),
+});
+
+const everyCallRuns: Policy<unknown> = {
+  start: () => ({ _tag: "Decided", verdict: { _tag: "Continue" } }),
+  receive: () => ({ _tag: "Decided", verdict: { _tag: "Continue" } }),
+};

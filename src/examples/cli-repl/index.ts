@@ -56,6 +56,12 @@ const flags = {
   outputFormat: choice("output-format", ["text", "json", "stream-json"], "How the answer is printed (print mode)"),
   verbose: toggle("verbose", "Print the session's facts as they are recorded"),
   continue: toggle("continue", "Continue the latest conversation", "c"),
+  // `plan` and `auto` are not built.
+  permissionMode: choice(
+    "permission-mode",
+    ["default", "manual", "acceptEdits", "dontAsk", "bypassPermissions"],
+    "When a tool call that changes things runs: default asks (manual is the same), acceptEdits runs file edits, dontAsk refuses, bypassPermissions runs all",
+  ),
   // Not built yet:
   // resume: text("resume", "Resume a session", "r"),
   // sessionId: text("session-id", "The session's id"),
@@ -68,7 +74,6 @@ const flags = {
   // tools: list("tools", "Tool names, default, or an empty string"),
   // allowedTools: list("allowedTools", "Tool permission allow rules", "allowed-tools"),
   // disallowedTools: list("disallowedTools", "Tool permission deny rules", "disallowed-tools"),
-  // permissionMode: choice("permission-mode", [...], "Initial permission mode"),
   // permissionPromptTool: text("permission-prompt-tool", "MCP permission handler (print mode)"),
   // mcpConfig: list("mcp-config", "MCP configuration JSON or file paths"),
   // strictMcpConfig: toggle("strict-mcp-config", "Use only the MCP configurations given"),
@@ -102,21 +107,23 @@ const systemOf = (options: Options) =>
  * last, asking the model the flags name or the one it asked; the settings are the ones the flags
  * name, which change those it had.
  */
-const configOf = (options: Options) =>
+const configOf = (options: Options, interactive: boolean) =>
   Effect.gen(function* () {
+    const mode = options.permissionMode ?? "default";
+    const permissions = { permissionMode: mode === "manual" ? "default" : mode, canAsk: interactive && !options.print } as const;
     const settings: ModelSettings = {
       ...(options.effort === undefined ? {} : { effort: options.effort }),
       ...(options.thinking === undefined ? {} : { thinking: options.thinking }),
     };
     const system = yield* systemOf(options);
     if (!options.continue) {
-      const config: Config = { sessionId: crypto.randomUUID(), target: yield* targetOf(options.model), settings, system };
+      const config: Config = { sessionId: crypto.randomUUID(), target: yield* targetOf(options.model), settings, system, ...permissions };
       return config;
     }
     if (system !== undefined) return yield* invalid("A continued session keeps the system prompt it opened with: all sessions have ImmutableSystemPrompt until further notice.");
     const latest = yield* latestSession;
     const now = yield* modelOf(latest.facts);
-    const config: Config = { sessionId: latest.sessionId, target: yield* targetOf(options.model ?? `${now.provider}/${now.model}`), settings, system, continues: latest.facts };
+    const config: Config = { sessionId: latest.sessionId, target: yield* targetOf(options.model ?? `${now.provider}/${now.model}`), settings, system, continues: latest.facts, ...permissions };
     return config;
   });
 
@@ -126,7 +133,7 @@ export const cli = Command.make(
   Effect.fnUntraced(function* (options) {
     const stdio = yield* Stdio.Stdio;
     const interactive = yield* stdio.stdinIsTerminal;
-    const config = yield* configOf(options);
+    const config = yield* configOf(options, interactive);
     if (!options.print) return yield* withSession(config, LogsToFile(config.sessionId), (session) => repl(session, config, options.prompt, interactive));
     // Piped input is read only when no prompt was given: a shell that leaves stdin open would
     // otherwise keep a prompted run waiting for an end of input that never comes.

@@ -1,13 +1,15 @@
 /**
- * Tools that read a workspace, a folder on disk: `read_file` and `list_dir`. Neither changes
- * anything. Each tool is its catalog entry (what the model is offered) and the function that runs
- * it, defined together, so a tool offered is a tool that runs. `workspaceTools(root)` gives the
- * catalog, for a session's opening, and the `ToolRunner` that runs a call.
+ * Tools for a workspace, a folder on disk: `read_file` and `list_dir`, which read, and `write_file`,
+ * which changes it. Each tool is its catalog entry (what the model is offered, with its kind, which
+ * a permission policy reads) and the function that runs it, defined together, so a tool offered is
+ * a tool that runs. `workspaceTools(root)` gives the catalog, for a session's opening, and the
+ * `ToolRunner` that runs a call.
  *
  * A path is relative to the root, or absolute; one that is not inside the root is not accepted.
  * `read_file` reads UTF-8 text, at most 256 KiB in one result; `line` (1-based) and `limit` (a
  * count of lines) read part of a file. `list_dir` lists one folder, without recursion, a folder's
- * name followed by `/`.
+ * name followed by `/`. `write_file` creates or replaces a file with at most 256 KiB of text; the
+ * folder it is in must exist.
  *
  * A call that cannot run fails with the reason: no tool has the name (`NotFound`), the input does
  * not fit (`InputRejected`), or the file system reported an error (`Reported`, with its message).
@@ -29,6 +31,7 @@ const ReadFile = Schema.Struct({
   limit: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
 });
 const ListDir = Schema.Struct({ path: Schema.NonEmptyString });
+const WriteFile = Schema.Struct({ path: Schema.NonEmptyString, text: Schema.String });
 
 interface WorkspaceTool<I> extends ToolSpec {
   readonly decode: (input: unknown) => Effect.Effect<I, Schema.SchemaError>;
@@ -56,6 +59,7 @@ export function workspaceTools(root: string) {
   const tools: ReadonlyArray<WorkspaceTool<unknown>> = [
     tool({
       name: ToolName.make("read_file"),
+      kind: "read",
       description: `Read a UTF-8 file in the workspace, at most 256 KiB per result. Use line (1-based) and limit (a count of lines) to read a large file in parts, for example {"path": "src/a.ts", "line": 1, "limit": 100}. If a path does not exist, list its folder with list_dir.${scope}`,
       input: {
         type: "object",
@@ -78,6 +82,7 @@ export function workspaceTools(root: string) {
     } satisfies WorkspaceTool<typeof ReadFile.Type>),
     tool({
       name: ToolName.make("list_dir"),
+      kind: "search",
       description: `List one folder in the workspace, without recursion; a folder's name ends with /. Use "." for the workspace itself.${scope}`,
       input: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
       decode: Schema.decodeUnknownEffect(ListDir),
@@ -95,9 +100,24 @@ export function workspaceTools(root: string) {
           return listed.join("\n");
         }),
     } satisfies WorkspaceTool<typeof ListDir.Type>),
+    tool({
+      name: ToolName.make("write_file"),
+      kind: "edit",
+      description: `Create a UTF-8 file in the workspace, or replace one, with the text given, at most 256 KiB. The folder it is in must exist.${scope}`,
+      input: { type: "object", properties: { path: { type: "string" }, text: { type: "string" } }, required: ["path", "text"] },
+      decode: Schema.decodeUnknownEffect(WriteFile),
+      run: ({ path, text }) =>
+        Effect.gen(function* () {
+          const full = yield* inside(path);
+          const bytes = Buffer.byteLength(text);
+          if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The text is over 256 KiB (${bytes} bytes). Write less.` });
+          yield* (yield* FileSystem.FileSystem).writeFileString(full, text).pipe(Effect.mapError(reported(path)));
+          return `Wrote ${bytes} bytes to ${path}.`;
+        }),
+    } satisfies WorkspaceTool<typeof WriteFile.Type>),
   ];
 
-  const catalog: ReadonlyArray<ToolSpec> = tools.map(({ name, description, input }) => ({ name, description, input }));
+  const catalog: ReadonlyArray<ToolSpec> = tools.map(({ name, description, input, kind }) => ({ name, description, input, kind }));
 
   const rejected = (problem: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "InputRejected", problem: FailureText.make(problem) } });
 

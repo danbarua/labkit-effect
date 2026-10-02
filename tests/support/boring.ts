@@ -66,6 +66,7 @@ export const BoringToolCatalog: ToolCatalog = {
       name: ToolName.make("echo"),
       description: 'Answers "PONG".',
       input: { type: "object", properties: {} },
+      kind: "other",
     },
   ]),
 };

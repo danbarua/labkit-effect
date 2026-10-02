@@ -1,11 +1,11 @@
 /**
  * What is recorded for the requests of a turn's step that were made and have no outcome: the
  * process that was carrying them out ended, or a record of another harness stops before them. No
- * response was observed, so the response is indeterminate; how each call still running ended was
- * not observed either.
+ * response was observed, so the response is indeterminate; how each call that began to run ended
+ * was not observed either, and a call that had not begun (waiting for an answer) was not run.
  */
 
-import type { ModelName, ProviderName, TurnId } from "./names.ts";
+import type { CallId, ModelName, ProviderName, TurnId } from "./names.ts";
 import type { ModelPart, Observation } from "./observation.ts";
 import { MediaType, ReceivedText } from "./received.ts";
 import type { World } from "./router.ts";
@@ -24,8 +24,12 @@ export function notObserved(
     .map((machine) => machine.state)
     .flatMap((state) => (state._tag === "AwaitingModel" || state._tag === "RunningTools" ? [state] : []))[0];
   if (step === undefined) return [];
+  const began = (call: CallId): boolean => {
+    const state = world.calls.get(call)?.state;
+    return state?._tag === "Running" && state.began;
+  };
   const ends = step.unsettled.map(
-    (call): Observation => ({ _tag: "ToolEnded", call, outcome: { _tag: "Failed", reason: { _tag: "Indeterminate" } } }),
+    (call): Observation => ({ _tag: "ToolEnded", call, outcome: { _tag: "Failed", reason: { _tag: began(call) ? "Indeterminate" : "NotRun" } } }),
   );
   return step._tag === "RunningTools"
     ? ends

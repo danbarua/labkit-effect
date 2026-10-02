@@ -40,7 +40,9 @@ import type { CapturedObservation, ModelPart, Observation, ToolOutcome } from ".
 import type { Origin } from "../agent-machine/origin.ts";
 import type { EffectRequest } from "../agent-machine/request.ts";
 import { emptyHeld, type Held as Throttled, throttle, type ThrottleInput } from "../agent-machine/throttle.ts";
-import { ContextAssembler, ModelClient, ModelProvider, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
+import { ContextAssembler, ModelClient, ModelProvider, ToolCallPolicy, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
+import type { Verdict } from "../agent-policy/policy.ts";
+import type { Received } from "../agent-machine/received.ts";
 import { logKeys } from "./log-keys.ts";
 import { receivedJson, receivedText } from "./received.ts";
 import { ModelStream, ModelStreamInterval, type Streamed } from "./model-stream.ts";
@@ -261,6 +263,33 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
     });
 
   /**
+   * The verdict of the tool call policy on a call, as the facts stand. While the policy waits, what
+   * it asks is recorded (`PermissionAsked`), and the next answer observed for the call
+   * (`PermissionAnswered`) is given to it. A policy that waits without asking is a defect: nothing
+   * would answer it.
+   */
+  const reviewed = (request: Extract<EffectRequest, { _tag: "RunTool" }>): Effect.Effect<Verdict, never, Services> =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const policy = yield* (yield* ToolCallPolicy)((yield* Ref.get(held)).facts);
+        const answers = yield* PubSub.subscribe(recorded);
+        let step = policy.start(request);
+        while (step._tag === "Waiting") {
+          if (step.asks === undefined) return yield* Effect.die(new Error(`The tool call policy waited on ${request.call} without asking anything`));
+          yield* (yield* Report)({ _tag: "PermissionAsked", call: request.call, asks: step.asks }, harnessParts.toolCallPolicy);
+          let answer: Received | undefined;
+          while (answer === undefined) {
+            const fact = yield* PubSub.take(answers);
+            if (fact._tag === "Observed" && fact.observation._tag === "PermissionAnswered" && fact.observation.call === request.call)
+              answer = fact.observation.answer;
+          }
+          step = policy.receive(step.state, { _tag: "Answered", answer });
+        }
+        return step.verdict;
+      }),
+    );
+
+  /**
    * Carries out one request in the world. `stop` is completed when the request's turn is to stop
    * its work: the request then ends what it is doing and reports how far it got.
    */
@@ -333,8 +362,13 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
         const ended = (outcome: ToolOutcome): ReadonlyArray<Observed> => [
           { origin, observation: { _tag: "ToolEnded", call: request.call, outcome } },
         ];
+        const notRun = ended({ _tag: "Failed", reason: { _tag: "NotRun" } });
         return Effect.gen(function* () {
-          if (stop !== undefined && (yield* Deferred.isDone(stop))) return ended({ _tag: "Failed", reason: { _tag: "NotRun" } });
+          if (stop !== undefined && (yield* Deferred.isDone(stop))) return notRun;
+          const verdict = yield* reviewed(request).pipe(Effect.raceFirst(stopped.pipe(Effect.as("stopped" as const))));
+          if (verdict === "stopped") return notRun;
+          if (verdict._tag === "Veto")
+            return [{ origin: harnessParts.toolCallPolicy, observation: { _tag: "ToolEnded", call: request.call, outcome: { _tag: "Failed", reason: { _tag: "Vetoed", reason: verdict.reason } } } }];
           yield* (yield* Report)({ _tag: "ToolCallDispatched", call: request.call }, harnessParts.toolRunner);
           const outcome = yield* (yield* ToolRunner)
             .run(request.tool, request.input)

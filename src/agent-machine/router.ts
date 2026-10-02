@@ -273,6 +273,8 @@ export function deliver(world: World, seq: Seq, observation: Observation): Deliv
         const machine = world.turns.get(observation.turn);
         return machine === undefined ? "undelivered" : toTurn(world, observation.turn, machine, observation, seq);
       }
+      case "PermissionAsked":
+      case "PermissionAnswered":
       case "ToolCallDispatched":
       case "ToolEnded": {
         const machine = world.calls.get(observation.call);
