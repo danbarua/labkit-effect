@@ -22,9 +22,13 @@ import { receivedJson, receivedText } from "./received.ts";
 import { ephemeralSessionStore } from "./session-store.ts";
 import { CountingTurnsInStore, NoTurnEndHooks } from "./turns.ts";
 
-/** `look` changes nothing; `write` leaves things as writing once does; `launch` cannot be run twice. */
+/**
+ * `look` and `check` change nothing (`check` is asked about before it runs); `write` leaves things as
+ * writing once does; `launch` cannot be run twice.
+ */
 const catalog: ReadonlyArray<ToolSpec> = [
   { name: ToolName.make("look"), description: "Looks.", input: { type: "object" }, kind: "read", replay: "safe" },
+  { name: ToolName.make("check"), description: "Checks.", input: { type: "object" }, kind: "other", replay: "safe" },
   { name: ToolName.make("write"), description: "Writes.", input: { type: "object" }, kind: "edit", replay: "idempotent" },
   { name: ToolName.make("launch"), description: "Launches.", input: { type: "object" }, kind: "execute", replay: "unsafe" },
 ];
@@ -149,13 +153,27 @@ test.each([["launch"], ["write"]])("X5: a call that began, to a tool that change
   expect(ending(after)).toEqual(["Completed"]);
 });
 
-test("X5: a call that had not begun, waiting for an answer, is asked about again and runs once allowed", async () => {
+test("X5: a call to a safe tool that had not begun, waiting for an answer, is asked about again and runs once allowed", async () => {
   const session = asked();
-  calls(session, "launch");
-  observe(session, { _tag: "PermissionAsked", call: "c1", asks: json({ tool: "launch" }) });
+  calls(session, "check");
+  observe(session, { _tag: "PermissionAsked", call: "c1", asks: json({ tool: "check" }) });
   const { after, ran } = await wentOn(session.journal);
   expect(tags(after).slice(0, 3)).toEqual(["PermissionAsked", "PermissionAnswered", "ToolCallDispatched"]);
-  expect(ran).toEqual(["launch"]);
+  expect(ran).toEqual(["check"]);
+  expect(ending(after)).toEqual(["Completed"]);
+});
+
+test.each([["launch"], ["write"]])("X5: a call that had not begun, to a tool that changes things (%s), is not run: it ends not run", async (tool: string) => {
+  const session = asked();
+  calls(session, tool);
+  observe(session, { _tag: "PermissionAsked", call: "c1", asks: json({ tool }) });
+  const { after, ran, asked: times } = await wentOn(session.journal);
+  expect(ran).toEqual([]);
+  expect(after[0] as unknown).toMatchObject({
+    origin: { _tag: "Harness", part: "resume" },
+    observation: { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Failed", reason: { _tag: "NotRun" } } },
+  });
+  expect(times).toBe(1);
   expect(ending(after)).toEqual(["Completed"]);
 });
 

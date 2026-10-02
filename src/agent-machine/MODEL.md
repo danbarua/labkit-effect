@@ -129,12 +129,12 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
   how each call that began ended was not observed, and a call that had not begun was not run. The
   request is not made again. The turn ends as `Interrupted`, and the conversation goes on from it.
 - X5. A turn going on from facts that stopped while it ran carries out each request they left with
-  no outcome. A model request is made (again). A tool call that had not begun runs, asked about
-  again if it was waiting for an answer. A call that began, and whose end was not observed, runs
-  again only when its tool's `replay` is `safe`: it changes nothing. Otherwise it ends
-  `Indeterminate` and is not run again, `idempotent` included: what it changes may have changed
-  since, and the model looks before it runs it again. A turn that was being interrupted is given what is known of each request, as
-  X4 says, and ends. The turn then goes on as any other.
+  no outcome. A model request is made (again). A tool call runs (again) only when its tool's
+  `replay` is `safe`: it changes nothing. It is asked about again if it was waiting for an answer.
+  Any other call is not run, `idempotent` included: it ends `Indeterminate` if it had begun, and
+  `NotRun` if it had not. What it would change may have changed since it was asked for, and the
+  model looks before it asks for it again. A turn that was being interrupted is given what is known
+  of each request, as X4 says, and ends. The turn then goes on as any other.
 
 ## What the model has seen
 

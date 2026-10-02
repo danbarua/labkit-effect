@@ -30,11 +30,11 @@ export const ToolKind = Schema.Literals(["read", "edit", "delete", "move", "sear
 export type ToolKind = typeof ToolKind.Type;
 
 /**
- * What running a tool again does, for a call whose end was not observed (its process ended while
- * it ran): `safe`, it changes nothing, so it is run again; `idempotent`, running it again leaves
- * things as running it once does, but what it changes may have changed since, so it is not run
- * again without looking first; `unsafe`, neither, and it is not run again. Whoever defines a tool
- * says which.
+ * What running a tool does to the world, which decides whether a call left with no outcome (its
+ * process ended) runs when the session goes on: `safe`, it changes nothing, and it runs (again);
+ * `idempotent`, running it again leaves things as running it once does; `unsafe`, neither. An
+ * `idempotent` or `unsafe` call does not run when the session goes on: what it would change may
+ * have changed since the model asked for it. Whoever defines a tool says which.
  */
 export const ToolReplay = Schema.Literals(["safe", "idempotent", "unsafe"]);
 export type ToolReplay = typeof ToolReplay.Type;

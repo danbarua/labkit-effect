@@ -126,10 +126,10 @@ export interface Session {
   /**
    * Goes on with the turn the facts left running, when the session went on from facts that stop
    * while a turn runs (`leftRunning`): each request they left with no outcome is carried out. A
-   * model request is made (again). A tool call that had not begun runs; one that began, and whose
-   * end was not observed, runs again when its tool's `replay` is `safe`, and otherwise ends
-   * `Indeterminate`, not run again: an `idempotent` tool's target may have changed since, which the
-   * model is to look at before it runs it again. A turn that was being stopped is given what is
+   * model request is made (again). A tool call runs (again) only when its tool's `replay` is `safe`:
+   * it changes nothing. Any other call is not run: it ends `Indeterminate` if it had begun, and
+   * `NotRun` if not. What it would change may have changed since it was asked for, and the model
+   * looks before it asks for it again. A turn that was being stopped is given what is
    * known of each request, and ends. Input that arrived with no turn started for it starts one.
    * The other choice is `endTurnLeftRunning`; which to make is the host's.
    */
@@ -594,8 +594,12 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
       left.requests,
       (request) => {
         const replay = request._tag === "RunTool" ? (tools.find((tool) => tool.name === request.tool)?.replay ?? "unsafe") : undefined;
-        if (request._tag === "RunTool" && left.began.has(request.call) && replay !== "safe")
-          return record(harnessParts.resume, { _tag: "ToolEnded", call: request.call, outcome: { _tag: "Failed", reason: { _tag: "Indeterminate" } } });
+        if (request._tag === "RunTool" && replay !== "safe")
+          return record(harnessParts.resume, {
+            _tag: "ToolEnded",
+            call: request.call,
+            outcome: { _tag: "Failed", reason: { _tag: left.began.has(request.call) ? "Indeterminate" : "NotRun" } },
+          });
         return FiberSet.run(running, carry({ request, work: about(request, world, facts) })).pipe(Effect.asVoid);
       },
       { discard: true },

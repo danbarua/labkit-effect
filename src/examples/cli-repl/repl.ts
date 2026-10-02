@@ -129,7 +129,7 @@ const shownLeft = (request: LeftRunning["requests"][number], began: ReadonlySet<
     case "RequestModelResponse":
       return "a model request";
     case "RunTool":
-      return `${request.tool} ${oneLine(asText(request.input), 80)} (${began.has(request.call) ? "began; it runs again if it is safe to" : "not begun"})`;
+      return `${request.tool} ${oneLine(asText(request.input), 80)} (${began.has(request.call) ? "began" : "not begun"}; it runs only if it changes nothing)`;
     case "BeforeTurnEnded":
       return "the review before the turn ends";
     default:
