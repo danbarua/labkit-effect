@@ -1,12 +1,13 @@
 /** The REPL's own commands, run against a session whose model client records what it is asked. */
 
 import { expect } from "bun:test";
+import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
 import { KeyedAndLocalCatalog } from "../../agent-host/catalog.ts";
 import { BoringContextAssembler } from "../../../tests/support/boring.ts";
 import { runTest } from "../../../tests/support/run.ts";
-import { test } from "../../../tests/support/test.ts";
+import { test, testFolder } from "../../../tests/support/test.ts";
 import { ModelName, ModelText, ProviderName, SessionId } from "../../agent-machine/names.ts";
 import { ModelClient, type Target, ToolRunner } from "../../agent-session/contracts.ts";
 import { openSession } from "../../agent-session/loop.ts";
@@ -51,7 +52,7 @@ const session = (lines: ReadonlyArray<string>) => {
         // `/settings` alone asks at the terminal which setting to change; here it stands for what it shows first.
         if (line === "/settings") printed.push(yield* inForce(opened));
         else if (line === "(offered)") printed.push(JSON.stringify(yield* offered(opened)));
-        else if (line.startsWith("/")) printed.push(yield* command(opened, line).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(`error: ${String(error.userMessage)}`))));
+        else if (line.startsWith("/")) printed.push(yield* command(opened, line, testFolder()).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(`error: ${String(error.userMessage)}`))));
         else yield* ask(opened, line);
       }
       return { printed, asked };
@@ -93,6 +94,15 @@ test("/settings shows the settings in force, and changes the ones named", async 
   expect(asked[0]?.settings as unknown).toEqual({ effort: "high", maxOutputTokens: 2000 });
 });
 
+test("/export writes the session's transcript as Markdown to .labkit/exports/<session>.md in the folder the CLI runs in", async () => {
+  const { printed } = await session(["hello", "/export"]);
+  const path = join(testFolder(), ".labkit", "exports", "s1.md");
+  expect(printed).toEqual([`Exported this session to ${path}`]);
+  const written = await Bun.file(path).text();
+  expect(written).toContain("# Session `s1`");
+  expect(written).toContain("hello");
+});
+
 test("/tools shows the tools the session opened with: here, none", async () => {
   const { printed } = await session(["/tools"]);
   expect(printed).toEqual(["No tools: the model is offered none."]);
@@ -113,7 +123,7 @@ test("a mistake in a command is said and changes nothing; a line that names no c
 test("a line that starts with / completes to a command, a model, a setting not yet named, and a value the model takes", async () => {
   const { printed } = await session(["(offered)", "/model grok-4.7", "/model claude-sonnet-5-5", "(offered)"]);
   const complete = completions(JSON.parse(printed[0] ?? "") as Parameters<typeof completions>[0]);
-  expect(complete("/")).toEqual(["/model ", "/settings ", "/tools", "/help", "/exit", "/quit"]);
+  expect(complete("/")).toEqual(["/model ", "/settings ", "/tools", "/export", "/help", "/exit", "/quit"]);
   expect(complete("/se")).toEqual(["/settings "]);
   expect(complete("/model openai/gpt-6-s")).toEqual(["/model openai/gpt-6-sol"]);
   expect(complete("/model xai/")).toEqual([]);

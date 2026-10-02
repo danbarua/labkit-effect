@@ -43,6 +43,8 @@ test("the frame's rows count a line wider than the terminal as the rows it wraps
   expect(rowsOf("x".repeat(72), 80)).toBe(1);
   expect(rowsOf("x".repeat(73), 80)).toBe(2);
   expect(rowsOf(`short\n${"x".repeat(200)}\nend`, 80)).toBe(1 + 3 + 1);
+  // A terminal with no width (a pseudo-terminal with no size) wraps nothing.
+  expect(rowsOf(`short\n${"x".repeat(200)}\nend`, 0)).toBe(3);
 });
 
 test("during a paste the frame on the screen stays as it was, and the paste is drawn when it ends", () => {

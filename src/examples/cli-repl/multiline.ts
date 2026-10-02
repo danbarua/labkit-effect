@@ -47,11 +47,14 @@ const painted = (text: string, submitted: boolean) =>
       : `${theme.primaryColor}${theme.prefix}${reset} ${bold}You${reset} ${theme.mutedColor}${theme.pointerSmall}${reset} ${lines}`;
   });
 
-/** How many rows of a terminal `columns` wide the frame for `text` takes: a line wider than the terminal wraps. */
+/**
+ * How many rows of a terminal `columns` wide the frame for `text` takes: a line wider than the
+ * terminal wraps. A terminal that says it has no columns (a pseudo-terminal with no size) wraps nothing.
+ */
 export const rowsOf = (text: string, columns: number): number =>
   frame(text)
     .split("\n")
-    .reduce((rows, line) => rows + Math.max(1, Math.ceil(Bun.stringWidth(line) / columns)), 0);
+    .reduce((rows, line) => rows + (columns > 0 ? Math.max(1, Math.ceil(Bun.stringWidth(line) / columns)) : 1), 0);
 
 /** Erases the frame drawn for `text`, leaving the cursor at the start of its first row. */
 const erased = (text: string, columns: number): string => `\r\x1b[2K${"\x1b[1A\x1b[2K".repeat(rowsOf(text, columns) - 1)}`;

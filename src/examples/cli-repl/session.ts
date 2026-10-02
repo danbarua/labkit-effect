@@ -11,6 +11,7 @@
 import { Effect, Layer, type Scope } from "effect";
 import type { Asked } from "../../agent-host/catalog.ts";
 import { sessionFolderOf, storeFileOf } from "../../agent-host/directory.ts";
+import { RetryIncomplete } from "../../agent-host/incomplete.ts";
 import { PermissionsFor, SessionServices } from "../../agent-host/services.ts";
 import type { Ending } from "../../agent-machine/decision.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
@@ -60,8 +61,11 @@ export const logFileOf = (sessionId: string): string => `${sessionFolderOf(store
 /** The tools a session is offered: the ones that read the workspace, the folder the CLI runs in. */
 const workspace = workspaceTools(process.cwd());
 
-/** What the loop needs, for a CLI session: the workspace's tools; its turns count on from those its store holds. */
-const Services = SessionServices(workspace.runner);
+/**
+ * What the loop needs, for a CLI session: the workspace's tools; its turns count on from those its
+ * store holds; a turn whose response had thinking but no answer is asked once more for it.
+ */
+const Services = SessionServices(workspace.runner, RetryIncomplete(1));
 
 /**
  * What a way of running the CLI does with a session as it opens: follows its facts from the start

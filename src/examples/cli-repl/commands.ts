@@ -10,6 +10,8 @@
  *   out, it is still taken, and adjusted.
  * - `/tools` shows the tools every request offers the model: the session's, as it opened with them
  *   (ImmutableToolCatalog).
+ * - `/export` writes the session's transcript (`markdownOf`) to
+ *   `.labkit/exports/<session>.md` in the folder the CLI runs in, as the ACP host's `/export` does.
  *
  * `completions` gives the prompt what a line that starts with `/` could become: a command, then a
  * model's name or a setting and its values.
@@ -18,7 +20,9 @@
  * turns; what a model does not allow is adjusted, and recorded, when it is next asked.
  */
 
-import { Effect, Schema } from "effect";
+import { join } from "node:path";
+import { Effect, FileSystem, Schema } from "effect";
+import { markdownOf } from "../../agent-host/export.ts";
 import { Prompt } from "effect/cli";
 import { ModelSettings } from "../../agent-machine/settings.ts";
 import type { Session } from "../../agent-session/loop.ts";
@@ -34,6 +38,7 @@ export const commands: ReadonlyArray<readonly [string, string]> = [
   ["/model [name]", "Ask another model; with no name, pick one"],
   ["/settings [name=value …]", "Change the settings named; with none, show them and pick one to change"],
   ["/tools", "Show the tools the model is offered"],
+  ["/export", "Write this session's transcript as Markdown to .labkit/exports/<session>.md"],
   ["/help", "Show these commands"],
   ["/exit", "Quit (also /quit)"],
 ];
@@ -152,8 +157,11 @@ const picked = (session: Session) =>
     return `${option.name}=${value}`;
   });
 
-/** Runs the command `line` names, and returns what to print; undefined when `line` is not one of these commands. */
-export const command = (session: Session, line: string) =>
+/**
+ * Runs the command `line` names, and returns what to print; undefined when `line` is not one of
+ * these commands. `/export` writes under `folder`, the folder the CLI runs in.
+ */
+export const command = (session: Session, line: string, folder: string = process.cwd()) =>
   Effect.gen(function* () {
     const [name, ...words] = line.trim().split(/\s+/);
     switch (name) {
@@ -162,6 +170,16 @@ export const command = (session: Session, line: string) =>
       case "/tools": {
         const tools = yield* immutableToolCatalogOf(yield* session.facts);
         return tools.length === 0 ? "No tools: the model is offered none." : tools.map((tool) => `${tool.name}: ${tool.description}`).join("\n");
+      }
+      case "/export": {
+        const facts = yield* session.facts;
+        const opened = facts[0];
+        const id = opened?._tag === "Observed" && opened.observation._tag === "SessionOpened" ? opened.observation.session : "session";
+        const exports = join(folder, ".labkit", "exports");
+        const path = join(exports, `${id}.md`);
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.makeDirectory(exports, { recursive: true }).pipe(Effect.andThen(fs.writeFileString(path, markdownOf(facts))), Effect.mapError((error) => invalid(`The transcript could not be written to ${path}: ${error.message}`)));
+        return `Exported this session to ${path}`;
       }
       case "/model": {
         const now = yield* modelOf(yield* session.facts);

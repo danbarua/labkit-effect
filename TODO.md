@@ -106,9 +106,10 @@ model.
 
 - [ ] Tools for coding, in the CLI's own: an edit that changes part of a file, a shell (tests,
       git), search (grep, glob). The CLI has `read_file`, `list_dir` and `write_file`.
-- [ ] The CLI does what the ACP host does: opens its session from a draft at the first input
-      (`src/agent-host/draft.ts`, turn zero); `/export` (`markdownOf`); `RetryIncomplete`; text and
-      thinking shown as they arrive (`session.streamed`), not the answer when the turn ends.
+- [ ] The CLI does what the ACP host does. Built: `/export` (`markdownOf`); `RetryIncomplete`; the
+      REPL shows text and thinking as they arrive (`session.streamed`). To do: open its session from
+      a draft at the first input (`src/agent-host/draft.ts`, turn zero), so a CLI quit before any
+      input leaves no session.
 - [ ] The system prompt belongs in context assembly, as configuration; it is to be designed and
       tried. A hard-coded one ("You are a helpful assistant") will do until the host's question
       of where a user's things live has an answer.
