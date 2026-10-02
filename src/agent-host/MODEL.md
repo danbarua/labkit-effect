@@ -61,6 +61,30 @@ but its store and its permission policy: the model its facts name, what is known
 settings are applied (H3), the whole conversation as its context, the clients, turns that count on
 from those its store holds, no turn-end hooks, and `runner` for the host's tools.
 
+## Export
+
+`markdownOf(facts)` (`export.ts`) is a session's transcript as Markdown, read from its facts alone,
+with nothing asked of a model or of the blob store: the body of a host's `/export`. Where it is
+written is the host's business.
+
+- H10. The transcript opens with the session's id and the models it asked: the one it opened
+  with, then each change taken, which is also said where it was taken. Each turn follows in order:
+  each input given to it, where it was given, with its sender and its text as recorded, and each
+  attachment by its media type, size and blob id; each response's answer text, its thinking in a
+  collapsed `<details>` block, and each tool call with the tool's name, its input fenced, what was
+  asked before it ran and the answer on one line, and how it ended (its output, or why it failed:
+  vetoed with the reason, not run, not observed, input rejected, reported by the tool); input
+  dropped when the turn ended; and, when the turn did not end in an answer, how it ended (cut
+  short, failed with the failure, vetoed, interrupted, with no answer). A call whose response was
+  not recorded shows where it arrived. A turn with no `TurnEnded` says it was left running, and a
+  call with no `ToolEnded` that no outcome is recorded.
+- H11. A tool's text output is fenced with more backticks than it holds in a row, and cut after
+  8 KiB of UTF-8, never inside a character, with a line saying how many bytes were left out;
+  bytes are named by their media type and size, and stored bytes by their blob id,
+  and not read. The transcript ends with its totals: the turns started, the model requests made
+  (`requestsIn`), the tokens the responses reported, the cost (`costIn`), and the context gauge of
+  the model asked now when it is a well-known one (`contextGauge`).
+
 ## What is not built
 
 - A source of the catalog read from a hand-written `models.yml`.
