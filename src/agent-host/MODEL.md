@@ -126,9 +126,12 @@ their reasoning.
   times since it started, the hook gives the model `answerNow`: "Your last response had thinking
   but no answer. Give your answer now.", which holds the turn open for one more request. A turn
   answered (`TurnCompleted`) or a response cut short gets nothing. With no answer after its
-  retries the turn ends `Incomplete` and no further request is made. The hook counts its retries
-  itself and the loop's own bound is one above them, so the loop's `holds_exhausted` warning, made
-  whenever a turn has used all its holds, is not what ends a retried turn.
+  retries the turn ends `Incomplete` and no further request is made. The hook counts the inputs
+  the turn-end hooks have given the turn, whichever hook gave them (the facts do not say which);
+  it is the only hook a session runs with, so they are its retries, and the loop's bound on holds
+  is the same number: at the bound the loop asks the hooks again, the hook gives nothing, and the
+  turn ends with no `TurnHoldsExhausted` and no `holds_exhausted` warning, which the loop makes
+  only when a hook would hold the turn again.
 
 ## What is not built
 

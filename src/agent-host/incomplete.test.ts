@@ -69,7 +69,7 @@ const prompted = async (replies: ReadonlyArray<Reply>, retries = 1, prompts = 1)
 const fromSystem = (facts: ReadonlyArray<Fact>) =>
   facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "InputArrived" && fact.observation.from._tag === "System" ? [fact.observation.text] : []));
 
-/** The loop records this, and warns, when a turn has used all the holds it may. */
+/** The loop records this, and warns, when a turn has been held as many times as it may and a hook would hold it again. */
 const exhausted = (facts: ReadonlyArray<Fact>) => facts.some((fact) => fact._tag === "Observed" && fact.observation._tag === "TurnHoldsExhausted");
 
 test("H15: a response with thinking but no answer is followed by the feedback and a second request, whose answer completes the turn without the loop's holds running out", async () => {

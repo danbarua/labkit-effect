@@ -35,8 +35,9 @@ const holdsIn = (facts: ReadonlyArray<Fact>, turn: TurnId): number =>
  * session's facts from the `SessionStore` the layer is built with: a hook's own type requires
  * nothing.
  *
- * The hook counts its own retries, so that another hook's holds do not use them up; the loop's
- * bound on holds is the same number.
+ * It counts the inputs the turn-end hooks have given the turn, whichever hook gave them: the facts
+ * do not say which. It is the only hook a session runs with, so they are its retries, and the
+ * loop's bound on holds is the same number.
  */
 export const RetryIncomplete = (retries = 1): Layer.Layer<TurnEndHooks, never, SessionStore> =>
   Layer.effect(

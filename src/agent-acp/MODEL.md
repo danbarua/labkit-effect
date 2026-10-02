@@ -143,8 +143,8 @@ text and resource links; no load, resume, list, fork or auth methods.
   It counts as sent.
 - AA1. The config options are `model`, then one select for each setting the options offer but
   `observe` and `cache`, with the ids and categories of the table; a setting not offered has none.
-  The host adds `permission_mode` after them (AG18). Every option's current value
-  is among its values: the model asked now is offered even when the catalog does not list it.
+  The host adds `permission_mode` after them (AG18). Every option's current value is among its
+  values: the model asked now is offered even when the catalog does not list it.
 - AA2. A setting's current value is what the model will get (the option's `now`): an effort beyond
   the model's highest shows the nearest it takes, which is offered; the effort said is not. Where
   nothing is sent for a setting, its value is `not_sent`, offered only then.
