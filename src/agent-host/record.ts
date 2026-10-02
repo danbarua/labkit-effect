@@ -1,0 +1,69 @@
+/**
+ * A host's own record of a session: `host.json` in the session's folder, next to its facts
+ * (`directory.ts`). It holds what a host keeps of a session that is not a fact (its working folder,
+ * its title). This module stores it as JSON and returns it as JSON and does not read it: what it
+ * says is the host's.
+ */
+
+import { Data, Effect, FileSystem } from "effect";
+import { sessionFolderOf, storedSessions } from "./directory.ts";
+
+/** A session's record could not be written, or read as JSON. */
+export class RecordFailed extends Data.TaggedError("RecordFailed")<{ readonly file: string; readonly message: string }> {}
+
+/** The file a session's record is in. */
+export const recordFileOf = (root: string, sessionId: string): string => `${sessionFolderOf(root, sessionId)}/host.json`;
+
+/**
+ * Writes `record` as the record of the session `sessionId`, replacing any, and makes the session's
+ * folder when it is not there. It is written under another name, flushed to the disk, and renamed
+ * over the record, so a reader finds the old record or the new and never part of one.
+ */
+export const writeRecord = (root: string, sessionId: string, record: Readonly<Record<string, unknown>>) => {
+  const file = recordFileOf(root, sessionId);
+  const partial = `${file}.partial`;
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    yield* fs.makeDirectory(sessionFolderOf(root, sessionId), { recursive: true });
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const handle = yield* fs.open(partial, { flag: "w" });
+        yield* handle.writeAll(new TextEncoder().encode(`${JSON.stringify(record)}\n`));
+        yield* handle.sync;
+      }),
+    );
+    yield* fs.rename(partial, file);
+  }).pipe(Effect.catchTag("PlatformError", (error) => Effect.fail(new RecordFailed({ file, message: `${file} could not be written: ${error.message}` }))));
+};
+
+/** The record of the session `sessionId` as JSON, or `undefined` when it has none. A file that is not JSON fails with `RecordFailed`. */
+export const readRecord = (root: string, sessionId: string) => {
+  const file = recordFileOf(root, sessionId);
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    if (!(yield* fs.exists(file))) return undefined;
+    const text = yield* fs.readFileString(file);
+    return yield* Effect.try({
+      try: (): unknown => JSON.parse(text),
+      catch: (error) => new RecordFailed({ file, message: `${file} is not JSON: ${error instanceof Error ? error.message : String(error)}` }),
+    });
+  }).pipe(Effect.catchTag("PlatformError", (error) => Effect.fail(new RecordFailed({ file, message: `${file} could not be read: ${error.message}` }))));
+};
+
+/**
+ * The sessions in `root` with a facts file, the one written to last first (`storedSessions`), each
+ * with its record, or `undefined` when it has none or its record does not read: that is logged
+ * (`host_record.unreadable`), and the session is listed without it.
+ */
+export const recordedSessions = (root: string) =>
+  Effect.gen(function* () {
+    const stored = yield* storedSessions(root);
+    return yield* Effect.forEach(stored, ({ sessionId, at }) =>
+      readRecord(root, sessionId).pipe(
+        Effect.catchTag("RecordFailed", (error) =>
+          Effect.logWarning("host_record.unreadable", { session: sessionId, file: error.file, cause: error.message }).pipe(Effect.as(undefined)),
+        ),
+        Effect.map((record) => ({ sessionId, at, record })),
+      ),
+    );
+  });
