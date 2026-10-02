@@ -36,6 +36,7 @@ import { storeFileOf } from "../agent-host/directory.ts";
 import { chooseModel, defaultModel, type Draft, draftOf, opening, optionsOfDraft, saySettings, withDefaults } from "../agent-host/draft.ts";
 import { markdownOf } from "../agent-host/export.ts";
 import { KnownWithLocalServer, localServer, SettlingWithLocalServer } from "../agent-host/local-server.ts";
+import { RetryIncomplete } from "../agent-host/incomplete.ts";
 import { PermissionsFor, SessionServices } from "../agent-host/services.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { InputText, SessionId, type TurnId } from "../agent-machine/names.ts";
@@ -65,9 +66,15 @@ export interface HostOptions<R = never> {
   readonly world?: "editor" | "local" | World<R> | undefined;
   /** The model sessions start with, as `provider/model` (`LABKIT_ACP_MODEL`); left out, the first the catalog lists. */
   readonly model?: string | undefined;
-  /** What a session runs with, given its world's tool runner, over the session's store; `SessionServices` when left out. */
+  /** What a session runs with, given its world's tool runner, over the session's store; `HostSessionServices` when left out. */
   readonly services?: ((runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>) | undefined;
 }
+
+/**
+ * What a session runs with by default: `SessionServices`, with a turn whose last response had
+ * thinking but no answer asked once more for it (`RetryIncomplete(1)`).
+ */
+export const HostSessionServices = (runner: Layer.Layer<ToolRunner>) => SessionServices(runner, RetryIncomplete(1));
 
 /** The options a launcher takes from the environment: `LABKIT_ACP_MODEL` and `LABKIT_ACP_LOCAL_TOOLS`. */
 export const hostOptionsFrom = (env: Readonly<Record<string, string | undefined>>): Pick<HostOptions, "model" | "world"> => ({
@@ -131,7 +138,7 @@ const noModel = `No model to ask: set ${Object.values(keyVariables).join(", ")} 
 export const makeHost = <R = never>(options: HostOptions<R>) => {
   const world: World<R> | World<FileSystem.FileSystem> =
     options.world === undefined || options.world === "editor" ? editorWorld : options.world === "local" ? workspaceWorld : options.world;
-  const services = options.services ?? SessionServices;
+  const services = options.services ?? HostSessionServices;
   return Agent.implement<Protocol.V1Version, ModelCatalog | FileSystem.FileSystem | Scope.Scope | R>(Protocol.v1, {
     capabilities: {
       promptCapabilities: { image: false, audio: false, embeddedContext: false },

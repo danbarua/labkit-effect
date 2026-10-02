@@ -114,6 +114,22 @@ warning, error and fatal records alone.
   cookie); the rest of an error's text stays. A folder or file that cannot be written is said once
   on stderr, and that record and every one after go to stderr: the launcher does not die for its log.
 
+## Turn ends
+
+`SessionServices(runner, hooks)` takes the turn-end hooks a session runs with as a second
+argument, `NoTurnEndHooks` when left out (the CLI). `RetryIncomplete(retries = 1)`
+(`incomplete.ts`) is one hook over the session's store, for models that put their whole answer in
+their reasoning.
+
+- H15. When the latest decision about a turn is `TurnIncomplete` (a whole response with no tool
+  calls and no answer text, agent-machine I4) and the hooks have not held the turn open `retries`
+  times since it started, the hook gives the model `answerNow`: "Your last response had thinking
+  but no answer. Give your answer now.", which holds the turn open for one more request. A turn
+  answered (`TurnCompleted`) or a response cut short gets nothing. With no answer after its
+  retries the turn ends `Incomplete` and no further request is made. The hook counts its retries
+  itself and the loop's own bound is one above them, so the loop's `holds_exhausted` warning, made
+  whenever a turn has used all its holds, is not what ends a retried turn.
+
 ## What is not built
 
 - A source of the catalog read from a hand-written `models.yml`.

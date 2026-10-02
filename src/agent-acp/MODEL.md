@@ -63,7 +63,8 @@ the core; a launcher runs it with `Agent.run` or `Agent.runStdio`, giving it the
 (`ModelCatalog`) and the file system. `HostOptions`: `directory`, the session directory's root;
 `world`, `"editor"` (the default), `"local"` or a world of the host's own; `model`, `provider/model`
 to start sessions with (else the catalog's first, `defaultModel`); `services`, what a session runs
-with given its world's runner (`SessionServices`). `hostOptionsFrom(env)` reads `LABKIT_ACP_MODEL`
+with given its world's runner (`HostSessionServices`: `SessionServices` with `RetryIncomplete(1)`,
+agent-host H15). `hostOptionsFrom(env)` reads `LABKIT_ACP_MODEL`
 and `LABKIT_ACP_LOCAL_TOOLS=1`. It advertises `sessionCapabilities.close` and no prompt content but
 text and resource links; no load, resume, list, fork or auth methods.
 
@@ -215,3 +216,8 @@ text and resource links; no load, resume, list, fork or auth methods.
   Its log is a file, named once on stderr, that holds no secret of the environment, and it exits 0
   when stdin closes.
 - AG15. Sessions are kept in `LABKIT_ACP_SESSIONS_DIR` when it is set, else in `~/.labkit/sessions`.
+- AG16. By default a turn whose response had thinking but no answer (`Incomplete`) is asked once
+  more for its answer (agent-host H15): an answer then reaches the client as `agent_message_chunk`
+  and the prompt ends `end_turn`, with no warning logged; with none again the turn ends
+  `Incomplete` after that one retry, `end_turn` with no answer message. The feedback is not sent to
+  the client (PJ1).

@@ -5,7 +5,7 @@ import { AgentContextAssembler, WholeConversation } from "../agent-context/assem
 import { Notices } from "../agent-context/assemble.ts";
 import { type PermissionMode, permissions } from "../agent-policy/permissions.ts";
 import type { Policy } from "../agent-policy/policy.ts";
-import { ToolCallPolicy, type ToolRunner } from "../agent-session/contracts.ts";
+import { ToolCallPolicy, type ToolRunner, type TurnEndHooks } from "../agent-session/contracts.ts";
 import { ModelFromFacts } from "../agent-session/configuration/model-choice.ts";
 import { immutableToolCatalogOf } from "../agent-session/configuration/session-setup.ts";
 import { CountingTurnsInStore, NoTurnEndHooks } from "../agent-session/turns.ts";
@@ -15,9 +15,13 @@ import { KnownWithLocalServer, SettlingWithLocalServer } from "./local-server.ts
 /**
  * What the loop needs for a session, but its store and its permission policy: the model its facts
  * name, what is known of it and how its settings are applied, the whole conversation as context,
- * the provider clients, turns that count on from those the store holds, and `runner` for its tools.
+ * the provider clients, turns that count on from those the store holds, `runner` for its tools, and
+ * `hooks` before a turn ends (none when left out).
  */
-export const SessionServices = <E, R>(runner: Layer.Layer<ToolRunner, E, R>) =>
+export const SessionServices = <E, R, HE = never, HR = never>(
+  runner: Layer.Layer<ToolRunner, E, R>,
+  hooks: Layer.Layer<TurnEndHooks, HE, HR> = NoTurnEndHooks as Layer.Layer<TurnEndHooks, HE, HR>,
+) =>
   Layer.mergeAll(
     ModelFromFacts.pipe(Layer.provide(KnownWithLocalServer)),
     KnownWithLocalServer,
@@ -25,7 +29,7 @@ export const SessionServices = <E, R>(runner: Layer.Layer<ToolRunner, E, R>) =>
     AgentContextAssembler.pipe(Layer.provide(Layer.mergeAll(WholeConversation, Layer.succeed(Notices, [])))),
     Clients,
     CountingTurnsInStore,
-    NoTurnEndHooks,
+    hooks,
     runner,
   );
 

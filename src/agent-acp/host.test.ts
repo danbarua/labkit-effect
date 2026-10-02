@@ -16,6 +16,7 @@ import * as Agent from "../acp/agent.ts";
 import { fromWebStreams } from "../acp/stdio.ts";
 import { type CatalogSource, ModelCatalog } from "../agent-host/catalog.ts";
 import { storeFileOf } from "../agent-host/directory.ts";
+import { answerNow } from "../agent-host/incomplete.ts";
 import { SessionServices } from "../agent-host/services.ts";
 import { CallId, FailureText, Millis, ModelName, ModelText, ProviderName, ThinkingText, TokenCount, ToolName, type TurnId } from "../agent-machine/names.ts";
 import type { Fact } from "../agent-machine/fact.ts";
@@ -23,10 +24,12 @@ import type { ModelPart, Observation } from "../agent-machine/observation.ts";
 import { ModelClient, type Target, ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
 import { immutableToolCatalogOf } from "../agent-session/configuration/session-setup.ts";
 import { readFacts } from "../agent-session/file-session-store.ts";
+import type { Services } from "../agent-session/loop.ts";
 import { ModelStream, ModelStreamInterval } from "../agent-session/model-stream.ts";
 import { receivedJson, receivedText } from "../agent-session/received.ts";
+import type { SessionStore } from "../agent-session/session-store.ts";
 import { test, testFolder } from "../../tests/support/test.ts";
-import { makeHost } from "./host.ts";
+import { HostSessionServices, makeHost } from "./host.ts";
 import { logKeys } from "./log-keys.ts";
 import { presentFrom } from "./projection.ts";
 import type { World } from "./world.ts";
@@ -126,8 +129,18 @@ interface HostRun {
   readonly stop: () => Promise<unknown>;
 }
 
-/** The host on in-memory pipes, with `script` answering its model requests in order. */
-function startHost(options: { readonly script?: ReadonlyArray<Reply>; readonly world?: World; readonly sources?: ReadonlyArray<CatalogSource> } = {}): HostRun {
+/**
+ * The host on in-memory pipes, with `script` answering its model requests in order. A session runs
+ * with `services` (`SessionServices` when left out) and the scripted model.
+ */
+function startHost(
+  options: {
+    readonly script?: ReadonlyArray<Reply>;
+    readonly world?: World;
+    readonly sources?: ReadonlyArray<CatalogSource>;
+    readonly services?: (runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>;
+  } = {},
+): HostRun {
   const script = [...(options.script ?? [])];
   const targets: Array<string> = [];
   const logged: Array<Logged> = [];
@@ -147,7 +160,7 @@ function startHost(options: { readonly script?: ReadonlyArray<Reply>; readonly w
   const host = makeHost({
     directory,
     ...(options.world === undefined ? {} : { world: options.world }),
-    services: (runner) => Layer.mergeAll(SessionServices(runner), scripted, Layer.succeed(ModelStreamInterval, Millis.make(0))),
+    services: (runner) => Layer.mergeAll((options.services ?? SessionServices)(runner), scripted, Layer.succeed(ModelStreamInterval, Millis.make(0))),
   });
   const capture = Logger.make((log) => {
     const [key, details] = Array.isArray(log.message) ? log.message : [log.message];
@@ -600,4 +613,65 @@ test("AG13: session/close stops the turn under way, whose prompt ends cancelled,
   expect(result.prompted.stopReason).toBe("cancelled");
   expect(result.after).toMatchObject({ code: -32002 });
   expect(endings(await factsOn(storeFileOf(host.directory, result.sessionId)))).toEqual(["Interrupted"]);
+});
+
+test("AG16: by default a response after a tool call with thinking but no answer is asked again; the client gets the answer, not the feedback, and end_turn", async () => {
+  const host = startHost({
+    world: echoWorld,
+    services: HostSessionServices,
+    script: [
+      answer({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "4" } }),
+      answer({ _tag: "Thinking", text: "The echo said 4, so the answer is 4." }),
+      answer({ _tag: "Text", text: "It is 4." }),
+    ],
+  });
+  const { app, log } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    return { sessionId, prompted: await ctx.request("session/prompt", say(sessionId, "What is 2 + 2? Echo it first.")) };
+  });
+  await host.stop();
+  expect(result.prompted.stopReason).toBe("end_turn");
+  expect(kinds(log.updates)).toEqual([
+    "available_commands_update",
+    "tool_call:pending",
+    "tool_call_update:in_progress",
+    "tool_call_update:completed",
+    "agent_thought_chunk",
+    "agent_message_chunk",
+    "usage_update",
+  ]);
+  const texts = log.updates.flatMap((update) => (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text" ? [update.content.text] : []));
+  expect(texts).toEqual(["It is 4."]);
+  expect(JSON.stringify(log.updates)).not.toContain(answerNow);
+  const facts = await factsOn(storeFileOf(host.directory, result.sessionId));
+  expect(observed(facts).filter((fact) => fact.observation._tag === "InputArrived" && fact.observation.from._tag === "System")).toHaveLength(1);
+  expect(endings(facts)).toEqual(["Completed"]);
+  // A retry that answered is routine: the loop's holds do not run out, so it warns of nothing.
+  expect(host.logged.filter((each) => each.level === "Warn" || each.level === "Error" || each.level === "Fatal")).toEqual([]);
+});
+
+test("AG16: a turn whose retry has no answer either ends end_turn after one retry, with no answer message", async () => {
+  const host = startHost({
+    world: echoWorld,
+    services: HostSessionServices,
+    script: [
+      answer({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "4" } }),
+      answer({ _tag: "Thinking", text: "The answer is 4." }),
+      answer({ _tag: "Thinking", text: "Still 4." }),
+    ],
+  });
+  const { app, log } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    return { sessionId, prompted: await ctx.request("session/prompt", say(sessionId, "What is 2 + 2? Echo it first.")) };
+  });
+  await host.stop();
+  expect(result.prompted.stopReason).toBe("end_turn");
+  expect(host.targets).toHaveLength(3);
+  expect(kinds(log.updates).filter((kind) => kind === "agent_message_chunk")).toEqual([]);
+  expect(kinds(log.updates).filter((kind) => kind === "agent_thought_chunk")).toHaveLength(2);
+  expect(endings(await factsOn(storeFileOf(host.directory, result.sessionId)))).toEqual(["Incomplete"]);
 });
