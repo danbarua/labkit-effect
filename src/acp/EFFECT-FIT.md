@@ -35,9 +35,11 @@ from Effect, what we write ourselves instead, and why. Paths under `effect/` are
 ## Do not use Effect for
 
 - **Reading and writing JSON-RPC: `RpcSerialization.ndJsonRpc`.** `src/acp` uses neither half.
-  - Decoding: `stdio.ts` and `http.ts` parse each message themselves, because the library must see
-    the raw input. A line that is not JSON is answered -32700 (`WireInput.Unparsable`), and a
-    malformed response is answered -32600 and fails its call (AP14).
+  - Its decoder drops what the library must answer. A line that is not JSON is swallowed
+    (`rpc/RpcSerialization.ts`, `try { items.push(JSON.parse(line)) } catch {}`), and a message
+    that is not an object is skipped (`decodeJsonRpcRaw`). So -32700 and -32600 for those could
+    never be sent. `stdio.ts` and `http.ts` parse each message themselves and pass a bad line on
+    as `WireInput.Unparsable`.
   - Its encoder speaks Effect's own dialect: `Interrupt`, `Ack` and `Ping` go out as
     `@effect/rpc/*` notifications, errors as `{ _tag: "Cause", data: cause }`, and requests carry
     trace fields.
