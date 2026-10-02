@@ -27,6 +27,7 @@ test("models lists each provider's well-known models, and whether its key is set
   expect(lines.slice(0, 3).map((line) => line.split(":")[0])).toEqual(["anthropic (no ANTHROPIC_API_KEY)", "openai (key set)", "xai (no XAI_API_KEY)"]);
   // Then the local server's models, or that it does not answer.
   expect(lines[3]).toStartWith("localhost (http://localhost:8000/v1): ");
+  expect(lines[4]).toStartWith("Name a model with --model or /model");
   expect(lines[0]).toContain("claude-sonnet-5-5");
   expect(lines[2]).toContain("grok-4.7");
 });
@@ -34,13 +35,13 @@ test("models lists each provider's well-known models, and whether its key is set
 test("with no model there is nothing to ask: it says so and fails", async () => {
   const result = await invoke(["-p", "Hello"]);
   expect(result.code).not.toBe(0);
-  expect(result.stdout + result.stderr).toContain("No model: pass --model");
+  expect(result.stdout + result.stderr).toContain("No model given: pass --model. `bun cli models` lists the models you can use");
 });
 
-test("a model that is not well-known and names no provider is refused by name", async () => {
-  const result = await invoke(["-p", "Hello", "--model", "gpt-99"]);
+test("a name that is no model says how to name one, and the names it is close to", async () => {
+  const result = await invoke(["-p", "Hello", "--model", "GPT-5.5-PRO"]);
   expect(result.code).not.toBe(0);
-  expect(result.stdout + result.stderr).toContain("No model gpt-99 among the well-known models; name it as provider/model.");
+  expect(result.stdout + result.stderr).toContain("No model named GPT-5.5-PRO. Did you mean openai/gpt-5.5-pro? `bun cli models` lists the models you can use");
 });
 
 test("print mode with no prompt and nothing piped says there is no prompt", async () => {
@@ -52,7 +53,7 @@ test("print mode with no prompt and nothing piped says there is no prompt", asyn
 test("a model whose provider has no key set is not asked: it names the variable", async () => {
   const result = await invoke(["-p", "Hello", "--model", "gpt-5.5"]);
   expect(result.code).not.toBe(0);
-  expect(result.stdout + result.stderr).toContain("OPENAI_API_KEY is not set, so openai/gpt-5.5 cannot be asked.");
+  expect(result.stdout + result.stderr).toContain("Set OPENAI_API_KEY before calling openai/* models, or try a different model with --model provider/model.");
 });
 
 test("what the local server lists of a model is what is known of it: its context window, input and reasoning efforts", () => {

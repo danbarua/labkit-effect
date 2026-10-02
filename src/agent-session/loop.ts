@@ -44,7 +44,7 @@ import { ContextAssembler, ModelClient, ModelProvider, ToolCallPolicy, ToolRunne
 import type { Verdict } from "../agent-policy/policy.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { logKeys } from "./log-keys.ts";
-import { receivedJson, receivedText } from "./received.ts";
+import { asText, receivedJson, receivedText } from "./received.ts";
 import { ModelStream, ModelStreamInterval, type Streamed } from "./model-stream.ts";
 import { CurrentOrigin, harnessParts, reportedBy } from "./origin.ts";
 import { Report } from "./report.ts";
@@ -263,6 +263,30 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
     });
 
   /**
+   * What the log says of a tool call that ended: the call, the tool, its input, and how it ended,
+   * with what it returned or why it failed. Content is given by its length and its first 300
+   * characters.
+   */
+  const toolEndedDetails = (request: Extract<EffectRequest, { _tag: "RunTool" }>, outcome: ToolOutcome): Record<string, unknown> => {
+    const shown = (received: Received) => {
+      const text = asText(received);
+      return { chars: text.length, start: text.slice(0, 300) };
+    };
+    const reason = outcome._tag === "Failed" ? outcome.reason : undefined;
+    return {
+      call: request.call,
+      tool: request.tool,
+      input: shown(request.input),
+      outcome: outcome._tag,
+      ...(outcome._tag === "Succeeded" ? { output: shown(outcome.output) } : {}),
+      ...(reason === undefined ? {} : { reason: reason._tag }),
+      ...(reason?._tag === "InputRejected" ? { problem: reason.problem } : {}),
+      ...(reason?._tag === "Reported" ? { error: shown(reason.error) } : {}),
+      ...(reason?._tag === "Vetoed" ? { vetoed: shown(reason.reason) } : {}),
+    };
+  };
+
+  /**
    * The verdict of the tool call policy on a call, as the facts stand. While the policy waits, what
    * it asks is recorded (`PermissionAsked`), and the next answer observed for the call
    * (`PermissionAnswered`) is given to it. A policy that waits without asking is a defect: nothing
@@ -363,18 +387,28 @@ export const sessionFrom = (facts: ReadonlyArray<Fact>): Effect.Effect<Session, 
           { origin, observation: { _tag: "ToolEnded", call: request.call, outcome } },
         ];
         const notRun = ended({ _tag: "Failed", reason: { _tag: "NotRun" } });
+        const vetoed = (reason: Received): ReadonlyArray<Observed> => [
+          { origin: harnessParts.toolCallPolicy, observation: { _tag: "ToolEnded", call: request.call, outcome: { _tag: "Failed", reason: { _tag: "Vetoed", reason } } } },
+        ];
         return Effect.gen(function* () {
           if (stop !== undefined && (yield* Deferred.isDone(stop))) return notRun;
           const verdict = yield* reviewed(request).pipe(Effect.raceFirst(stopped.pipe(Effect.as("stopped" as const))));
           if (verdict === "stopped") return notRun;
-          if (verdict._tag === "Veto")
-            return [{ origin: harnessParts.toolCallPolicy, observation: { _tag: "ToolEnded", call: request.call, outcome: { _tag: "Failed", reason: { _tag: "Vetoed", reason: verdict.reason } } } }];
+          if (verdict._tag === "Veto") return vetoed(verdict.reason);
           yield* (yield* Report)({ _tag: "ToolCallDispatched", call: request.call }, harnessParts.toolRunner);
           const outcome = yield* (yield* ToolRunner)
             .run(request.tool, request.input)
             .pipe(Effect.raceFirst(stopped.pipe(Effect.as<ToolOutcome>({ _tag: "Failed", reason: { _tag: "Indeterminate" } }))));
           return ended(yield* keptOutcome(outcome));
-        });
+        }).pipe(
+          Effect.tap((observed) =>
+            Effect.forEach(
+              observed,
+              ({ observation }) => (observation._tag === "ToolEnded" ? Effect.logInfo(logKeys.loop.toolEnded, toolEndedDetails(request, observation.outcome)) : Effect.void),
+              { discard: true },
+            ),
+          ),
+        );
       }
       case "BeforeTurnEnded":
         return reviewTurnEnd(request.turn).pipe(Effect.raceFirst(stopped.pipe(Effect.as<ReadonlyArray<Observed>>([]))));

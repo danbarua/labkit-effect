@@ -403,8 +403,19 @@ test("another provider's thinking and blocks are left out and logged; a message 
     { role: "user", content: [{ type: "text", text: "Again" }] },
   ]);
   const reason = "produced by other, not boring";
-  expect(logged).toContainEqual([logKeys.provider.partLeftOut, { part: "Thinking", reason }]);
-  expect(logged).toContainEqual([logKeys.provider.partLeftOut, { part: "Unrecognised", reason }]);
+  // One line for the request, describing each part left out.
+  expect(logged.filter((line) => Array.isArray(line) && line[0] === logKeys.provider.partLeftOut)).toEqual([
+    [
+      logKeys.provider.partLeftOut,
+      {
+        count: 2,
+        parts: [
+          { part: "Thinking", from: "other", chars: 33, start: '{"type":"reasoning","summary":[]}', reason },
+          { part: "Unrecognised", from: "other", fields: ["type"], chars: 20, start: '{"type":"reasoning"}', reason },
+        ],
+      },
+    ],
+  ]);
 });
 
 test("requests go to /v1/messages with the client's key and API version", async () => {

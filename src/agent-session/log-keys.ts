@@ -21,12 +21,14 @@ export const logKeys = {
     /** A response ended while parts of it were still arriving; they are not recorded. The details name them. */
     partCut: "provider.response.part_cut",
     /** A part of an earlier response was not sent; the details say which part and why. */
-    partLeftOut: "provider.request.part_left_out",
+    partLeftOut: "provider.request.parts_left_out",
     fileAsPointer: "provider.request.file_as_pointer",
   },
   loop: {
     /** The core made a decision, and it was recorded; the details are the decision and where. */
     decisionRecorded: "loop.decision.recorded",
+    /** A tool call ended; the details are the call, the tool, its input, and how it ended. */
+    toolEnded: "loop.tool.ended",
     /** Carrying out a request died of a defect; the details are what it died of. */
     requestDied: "loop.request.died",
     /** A turn-end hook's feedback held a turn open. */

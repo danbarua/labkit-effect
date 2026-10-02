@@ -92,8 +92,8 @@ test("a mistake in a command is said and changes nothing; a line that names no c
   expect(printed[0]).toStartWith("error: Not settings the session takes:");
   expect(printed[1]).toStartWith("error: Not settings the session takes:");
   expect(printed.slice(2)).toEqual([
-    "error: No model gpt-99 among the well-known models; name it as provider/model.",
-    "error: XAI_API_KEY is not set, so xai/grok-4.7 cannot be asked.",
+    "error: No model named gpt-99. `bun cli models` lists the models you can use; name one as it lists it, or as provider/model (for example openai/gpt-5.5, or localhost/<a model the local server serves>).",
+    "error: Set XAI_API_KEY before calling xai/* models, or try a different model with --model provider/model.",
     undefined,
     "openai/gpt-5.5 effort=low\nthis model takes effort: none, low, medium, high, xhigh",
   ]);

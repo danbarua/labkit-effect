@@ -45,11 +45,41 @@ export function isObject(value: Json): value is Schema.JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * What a part left out of a request held, for the log: its kind, and for a part of a response the
+ * provider that produced it; the fields of a JSON part; its length in characters; and its first 120
+ * characters.
+ */
+function describedPart(part: ContextPart): Record<string, unknown> {
+  const text = (() => {
+    switch (part._tag) {
+      case "Text":
+      case "Commentary":
+        return part.text;
+      case "Thinking":
+        return part.text === "" ? asText(part.received) : part.text;
+      case "Unrecognised":
+        return asText(part.received);
+      default:
+        return JSON.stringify(part);
+    }
+  })();
+  const parsed = part._tag === "Unrecognised" ? parseJson(part.received) : undefined;
+  const fields = parsed !== undefined && "value" in parsed && isObject(parsed.value) ? Object.keys(parsed.value) : undefined;
+  return {
+    part: part._tag,
+    ...("provider" in part ? { from: part.provider } : {}),
+    ...(fields === undefined ? {} : { fields }),
+    chars: text.length,
+    start: text.slice(0, 120),
+  };
+}
+
 /** A part of an earlier response that is not sent, and why. */
 export function leftOut(part: ContextPart, reason: string): Shaped {
   return {
     json: [],
-    supplied: [{ level: "info", event: logKeys.provider.partLeftOut, details: { part: part._tag, reason } }],
+    supplied: [{ level: "info", event: logKeys.provider.partLeftOut, details: { ...describedPart(part), reason } }],
   };
 }
 
@@ -175,13 +205,17 @@ export function renderToolResult(
   }
 }
 
-export const logSupplied = (supplied: ReadonlyArray<Supplied>): Effect.Effect<void> =>
-  Effect.forEach(
-    supplied,
+export const logSupplied = (supplied: ReadonlyArray<Supplied>): Effect.Effect<void> => {
+  // The parts left out of one request are logged in one line, each described.
+  const left = supplied.filter((entry) => entry.event === logKeys.provider.partLeftOut);
+  const rest = supplied.filter((entry) => entry.event !== logKeys.provider.partLeftOut);
+  return Effect.forEach(
+    [...rest, ...(left.length === 0 ? [] : [{ level: "info" as const, event: logKeys.provider.partLeftOut, details: { count: left.length, parts: left.map((entry) => entry.details) } }])],
     (entry) =>
       entry.level === "warning" ? Effect.logWarning(entry.event, entry.details) : Effect.logInfo(entry.event, entry.details),
     { discard: true },
   );
+};
 
 /** The number at `path` in `json`, when there is one. */
 export function numberAt(json: Json | undefined, ...path: ReadonlyArray<string>): number | undefined {

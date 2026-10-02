@@ -184,6 +184,7 @@ export const cli = Command.make(
         );
         const local = yield* localModels;
         yield* Console.log(`localhost (${localServer}): ${local === undefined ? "not answering" : local.length === 0 ? "no models" : local.join(", ")}`);
+        yield* Console.log("Name a model with --model or /model as it is listed here, or as provider/model: openai/gpt-5.5, localhost/<a local model>.");
       }),
     ).pipe(Command.withDescription("The known models, which providers have a key set, and the local server's models")),
   ]),

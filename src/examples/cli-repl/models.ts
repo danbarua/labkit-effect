@@ -44,21 +44,54 @@ export interface Asked {
   readonly model: ModelName;
 }
 
+/** How a model can be named, said wherever a name is not found. */
+const howToName = "`bun cli models` lists the models you can use; name one as it lists it, or as provider/model (for example openai/gpt-5.5, or localhost/<a model the local server serves>).";
+
+/** The names among `names` that `wanted` is close to: the same apart from case, or containing it. */
+const closeTo = (wanted: string, names: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const lower = wanted.toLowerCase();
+  return names.filter((name) => name.toLowerCase() === lower || name.toLowerCase().includes(lower) || lower.includes(name.toLowerCase()));
+};
+
 /**
- * The provider and model a name gives: `provider/model`, or a well-known model. A provider
- * whose key is not set cannot be asked, and the variable is named.
+ * The provider and model a name gives:
+ *
+ * - `anthropic/…`, `openai/…`, `xai/…`: that provider's model, as named.
+ * - `localhost/…`: a model the local server serves, as it lists it.
+ * - A name alone: the model of that name among the ones listed for Anthropic, OpenAI and xAI, or
+ *   among the local server's.
+ *
+ * A name not found says how to name a model, with the names it is close to. A provider whose key
+ * is not set cannot be asked, and the variable to set is named.
  */
 export const targetOf = (model: string | undefined) =>
   Effect.gen(function* () {
-    if (model === undefined) return yield* invalid("No model: pass --model (bun cli models lists them).");
+    if (model === undefined) return yield* invalid(`No model given: pass --model. ${howToName}`);
     const slash = model.indexOf("/");
-    const named = slash > 0 && (model.slice(0, slash) in known || model.slice(0, slash) === "localhost");
-    const provider = named ? model.slice(0, slash) : Object.keys(known).find((each) => model in (known[each] ?? {}));
-    if (provider === undefined) return yield* invalid(`No model ${model} among the well-known models; name it as provider/model.`);
-    const target: Asked = { provider: ProviderName.make(provider), model: ModelName.make(named ? model.slice(slash + 1) : model) };
-    const variable = keyVariables[provider];
-    if (variable !== undefined && keyOf(provider) === undefined)
-      return yield* invalid(`${variable} is not set, so ${target.provider}/${target.model} cannot be asked.`);
+    const prefix = slash > 0 ? model.slice(0, slash) : undefined;
+    const local = yield* localModels;
+    const found = ((): { readonly provider: string; readonly model: string } | undefined => {
+      if (prefix !== undefined && prefix in known) return { provider: prefix, model: model.slice(slash + 1) };
+      if (prefix === "localhost") {
+        const name = model.slice(slash + 1);
+        return local === undefined || local.includes(name) ? { provider: "localhost", model: name } : undefined;
+      }
+      const wellKnown = Object.keys(known).find((each) => model in (known[each] ?? {}));
+      if (wellKnown !== undefined) return { provider: wellKnown, model };
+      return local?.includes(model) === true ? { provider: "localhost", model } : undefined;
+    })();
+    if (found === undefined) {
+      const names = [...Object.entries(known).flatMap(([provider, models]) => Object.keys(models).map((each) => `${provider}/${each}`)), ...(local ?? []).map((each) => `localhost/${each}`)];
+      const close = closeTo(prefix === "localhost" ? model.slice(slash + 1) : model, names);
+      const unanswered = prefix === "localhost" && local === undefined ? ` The local server at ${localUrl} is not answering.` : "";
+      return yield* invalid(`No model named ${model}.${unanswered}${close.length === 0 ? "" : ` Did you mean ${close.join(" or ")}?`} ${howToName}`);
+    }
+    if (found.provider === "localhost" && local === undefined)
+      return yield* invalid(`The local server at ${localUrl} is not answering, so localhost/${found.model} cannot be asked.`);
+    const variable = keyVariables[found.provider];
+    if (variable !== undefined && keyOf(found.provider) === undefined)
+      return yield* invalid(`Set ${variable} before calling ${found.provider}/* models, or try a different model with --model provider/model.`);
+    const target: Asked = { provider: ProviderName.make(found.provider), model: ModelName.make(found.model) };
     return target;
   });
 
