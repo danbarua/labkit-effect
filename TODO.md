@@ -137,10 +137,9 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       changes shape during a stream); a call's `arguments` sent as a JSON object are read as its
       text; a call's name sent whole again as it grows (llama.cpp) is the whole name;
       `finish_reason` `end_turn` (xAI) and `model_length` (Mistral) are classified, and `error`
-      (Mistral, OpenRouter) and Groq's `x_groq.error` fail the request. To do, from the back-ends' documentation and source:
+      (Mistral, OpenRouter) and Groq's `x_groq.error` fail the request; the usage is read where
+      each back-end puts it (Groq's `x_groq.usage`, SGLang's top-level `reasoning_tokens`). To do, from the back-ends' documentation and source:
       - Mistral: no `stream_options` (its schema refuses fields it does not define).
-      - Groq: a stream's usage in `x_groq.usage`. SGLang: reasoning
-        tokens at the top of `usage`. DeepSeek: `prompt_cache_hit_tokens`.
       - The output limit's name: OpenAI takes `max_completion_tokens` (it refuses `max_tokens`
         for its o-series models); Mistral takes only `max_tokens`.
 - [ ] Models. Built: the well-known models as generated `const` data (`bun run models:refresh`:

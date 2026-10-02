@@ -19,9 +19,9 @@
  * tool's name), its arguments kept as the text received, and a call's other fields (Gemini's
  * `extra_content`) are `Unrecognised` holding the call; any other field of the message
  * (`refusal`, ...) is `Unrecognised`, holding that field. As the chunks arrive, the text each adds
- * to the thinking and to the answer is passed on. The stop is the choice's `finish_reason`; the usage is the last chunk's; everything
- * else the chunks held is `metadata`. A request that fails, after retries, is observed as
- * `ModelFailed`.
+ * to the thinking and to the answer is passed on. The stop is the choice's `finish_reason`; the
+ * usage is the last a chunk held (`usageIn`); everything else the chunks held is `metadata`. A
+ * request that fails, after retries, is observed as `ModelFailed`.
  */
 
 import type { BlobId } from "../../agent-machine/blob.ts";
@@ -294,15 +294,28 @@ const endings = new Map([
   ["content_filter", "Refused"],
 ] as const);
 
-/** A Chat Completions usage in the core's terms: its `prompt_tokens` include those read from the cache. */
+/**
+ * A Chat Completions usage in the core's terms: its `prompt_tokens` include those read from the
+ * cache. The thinking and the cache read are where OpenAI puts them, or at the top of the usage
+ * (SGLang's `reasoning_tokens`, some of Together's models' `cached_tokens`).
+ */
 const chatUsageIn = (reported: Json | undefined) => {
   const usage = usageOf({
     input: numberAt(reported, "prompt_tokens"),
     output: numberAt(reported, "completion_tokens"),
-    thinking: numberAt(reported, "completion_tokens_details", "reasoning_tokens"),
-    cacheRead: numberAt(reported, "prompt_tokens_details", "cached_tokens"),
+    thinking: numberAt(reported, "completion_tokens_details", "reasoning_tokens") ?? numberAt(reported, "reasoning_tokens"),
+    cacheRead: numberAt(reported, "prompt_tokens_details", "cached_tokens") ?? numberAt(reported, "cached_tokens"),
+    cacheWrite: numberAt(reported, "prompt_tokens_details", "cache_write_tokens"),
   });
   return usage === undefined ? {} : { usage };
+};
+
+/** The usage a chunk holds: as `usage`, in Groq's `x_groq`, or in its choice (Kimi's documentation shows it there). */
+const usageIn = (chunk: Schema.JsonObject, choice: Json | undefined): Json | undefined => {
+  const groq = chunk["x_groq"];
+  return [chunk["usage"], isObject(groq ?? null) ? (groq as Schema.JsonObject)["usage"] : undefined, isObject(choice ?? null) ? (choice as Schema.JsonObject)["usage"] : undefined].find(
+    (each) => each !== undefined && each !== null,
+  );
 };
 
 /**
@@ -421,7 +434,7 @@ const respondOnce = (
             // Groq says why it stopped a stream early in `x_groq.error`.
             const reported = chunk["error"] ?? (isObject(chunk["x_groq"] ?? null) ? (chunk["x_groq"] as Schema.JsonObject)["error"] : undefined);
             if (reported !== undefined && reported !== null) return yield* invalidOutput(caller, `The stream reported an error: ${JSON.stringify(reported)}`);
-            const { choices, usage, ...metadata } = chunk;
+            const { choices, usage: _usage, ...metadata } = chunk;
             const choice = Array.isArray(choices) ? (choices as ReadonlyArray<Json>)[0] : undefined;
             // A server that answers whole sends the message where a chunk sends its delta; what arrives
             // whole adds no text as it arrives.
@@ -437,7 +450,7 @@ const respondOnce = (
                 yield* Effect.forEach(callParts(callOf(call)), (part) => passOn({ _tag: "Part", part }), { discard: true });
               }
             const finish = choice !== undefined && isObject(choice) && choice["finish_reason"] !== null && choice["finish_reason"] !== undefined ? choice["finish_reason"] : so.finish;
-            return { finish, usage: usage !== null && usage !== undefined ? usage : so.usage, metadata: { ...so.metadata, ...(metadata as Record<string, Json>) } };
+            return { finish, usage: usageIn(chunk, choice) ?? so.usage, metadata: { ...so.metadata, ...(metadata as Record<string, Json>) } };
           }),
       ),
     );

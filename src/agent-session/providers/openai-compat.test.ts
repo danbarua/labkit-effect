@@ -234,6 +234,22 @@ test.each([
   });
 });
 
+test.each([
+  ["Groq's, in x_groq", { x_groq: { id: "req_1", usage: { prompt_tokens: 40, completion_tokens: 12 } } }, {}, { input: 40, output: 12 }],
+  ["SGLang's, its thinking at the top", { usage: { prompt_tokens: 40, completion_tokens: 12, reasoning_tokens: 5 } }, {}, { input: 40, output: 12, thinking: 5 }],
+  ["Together's, its cache read at the top", { usage: { prompt_tokens: 40, completion_tokens: 12, cached_tokens: 32 } }, {}, { input: 40, output: 12, cacheRead: 32 }],
+  ["in the choice", {}, { usage: { prompt_tokens: 40, completion_tokens: 12, prompt_tokens_details: { cached_tokens: 32, cache_write_tokens: 8 } } }, { input: 40, output: 12, cacheRead: 32, cacheWrite: 8 }],
+])("the usage where a back-end puts it: %s", async (_name, onChunk, onChoice, usage) => {
+  const usageAt = () =>
+    chatChunks([
+      { id: "u1", choices: [{ index: 0, delta: { role: "assistant", content: "5." }, finish_reason: null }] },
+      { id: "u1", choices: [{ index: 0, delta: {}, finish_reason: "stop", ...onChoice }], ...onChunk },
+    ]);
+  const { facts } = await turn([usageAt]);
+  const responded = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded");
+  expect((responded as unknown as { readonly observation: { readonly usage: unknown } }).observation.usage).toEqual(usage);
+});
+
 test("the response streams: its usage comes in the last chunk, and a tool call is run once its response has it", async () => {
   const { facts } = await turn([{ ...callsAdd, usage: { prompt_tokens: 40, completion_tokens: 12, completion_tokens_details: { reasoning_tokens: 5 } } }, answers]);
   const observed = facts.flatMap((fact) => (fact._tag === "Observed" ? [fact.observation] : []));
