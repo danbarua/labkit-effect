@@ -10,6 +10,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import { test, testFolder } from "../../tests/support/test.ts";
+import { hostOptionsFrom } from "./host.ts";
 import { sessionsDirectoryFrom } from "./main.ts";
 
 const secret = "sk-launcher-test-0123456789";
@@ -77,6 +78,14 @@ test("AG14: the launcher serves the host on stdin and stdout and nothing else on
   expect(text).not.toContain(secret);
   // A draft that was never prompted leaves no session on disk.
   expect(existsSync(join(folder, "sessions"))).toBe(false);
+});
+
+test("AG16: LABKIT_ACP_RETRIES is how many times a turn with thinking and no answer is asked again; anything but a whole number of 0 or more is left out", () => {
+  expect(hostOptionsFrom({ LABKIT_ACP_RETRIES: "2" }).retries).toBe(2);
+  expect(hostOptionsFrom({ LABKIT_ACP_RETRIES: "0" }).retries).toBe(0);
+  expect(hostOptionsFrom({ LABKIT_ACP_RETRIES: "-1" }).retries).toBeUndefined();
+  expect(hostOptionsFrom({ LABKIT_ACP_RETRIES: "two" }).retries).toBeUndefined();
+  expect(hostOptionsFrom({}).retries).toBeUndefined();
 });
 
 test("AG15: sessions are kept in LABKIT_ACP_SESSIONS_DIR, else in ~/.labkit/sessions", () => {

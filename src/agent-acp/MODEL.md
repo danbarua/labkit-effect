@@ -250,7 +250,8 @@ twice.
   more for its answer (agent-host H15): an answer then reaches the client as `agent_message_chunk`
   and the prompt ends `end_turn`, with no warning logged; with none again the turn ends
   `Incomplete` after that one retry, `end_turn` with no answer message. The feedback is not sent to
-  the client (PJ1).
+  the client (PJ1). `LABKIT_ACP_RETRIES` sets how many times it is asked (0: never); a value that is
+  not a whole number of 0 or more is logged, and 1 is used.
 - AG18. Each session has a permission mode, which the host keeps: it starts as the launcher says
   (`LABKIT_ACP_PERMISSION_MODE`, else `default`) and is the option `permission_mode` (category
   `mode`); a change applies from the next tool call. A value that is not a mode is -32602.

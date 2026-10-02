@@ -5,7 +5,8 @@
  *
  * Taken from the environment: `LABKIT_ACP_MODEL` (the model sessions start with, `provider/model`),
  * `LABKIT_ACP_LOCAL_TOOLS=1` (the stopgap tools on the local disk), `LABKIT_ACP_PERMISSION_MODE` (the
- * permission mode sessions start in: `default`, `acceptEdits`, `bypassPermissions`, `dontAsk`), `LABKIT_ACP_SESSIONS_DIR` (where
+ * permission mode sessions start in: `default`, `acceptEdits`, `bypassPermissions`, `dontAsk`),
+ * `LABKIT_ACP_RETRIES` (how often a turn with thinking and no answer is asked again; 1), `LABKIT_ACP_SESSIONS_DIR` (where
  * sessions are kept, default `~/.labkit/sessions`), the `LABKIT_ACP_LOG_*` variables, and the
  * providers' keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`).
  */
@@ -29,10 +30,15 @@ export const sessionsDirectoryFrom = (env: Readonly<Record<string, string | unde
 export const launch = (env: Readonly<Record<string, string | undefined>>) => {
   const options = hostOptionsFrom(env);
   const mode = env["LABKIT_ACP_PERMISSION_MODE"];
-  const unknownMode =
+  const retries = env["LABKIT_ACP_RETRIES"];
+  const unknownMode = Effect.all([
     mode !== undefined && mode !== "" && options.permissionMode === undefined
       ? Effect.logWarning(logKeys.config.permissionModeUnknown, { value: mode, used: "default", modes: PermissionMode.literals })
-      : Effect.void;
+      : Effect.void,
+    retries !== undefined && retries !== "" && options.retries === undefined
+      ? Effect.logWarning(logKeys.config.retriesUnknown, { value: retries, used: 1, expected: "a whole number of 0 or more" })
+      : Effect.void,
+  ]);
   return unknownMode.pipe(
     Effect.andThen(
       Agent.runStdio({

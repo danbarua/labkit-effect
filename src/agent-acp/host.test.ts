@@ -826,7 +826,7 @@ test("AG13: session/close stops the turn under way, whose prompt ends cancelled,
 test("AG16: by default a response after a tool call with thinking but no answer is asked again; the client gets the answer, not the feedback, and end_turn", async () => {
   const host = startHost({
     world: echoWorld,
-    services: HostSessionServices,
+    services: HostSessionServices(),
     script: [
       answer({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "4" } }),
       answer({ _tag: "Thinking", text: "The echo said 4, so the answer is 4." }),
@@ -864,7 +864,7 @@ test("AG16: by default a response after a tool call with thinking but no answer 
 test("AG16: a turn whose retry has no answer either ends end_turn after one retry, with no answer message", async () => {
   const host = startHost({
     world: echoWorld,
-    services: HostSessionServices,
+    services: HostSessionServices(),
     script: [
       answer({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "4" } }),
       answer({ _tag: "Thinking", text: "The answer is 4." }),

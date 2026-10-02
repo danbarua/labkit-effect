@@ -94,12 +94,6 @@ model.
       core: Forks, under Sessions); `session/delete`; additional directories.
 - [ ] The ACP host in an editor: the launch command, and VS Code's behaviour with what it sends and
       draws (config options as selects, thinking, permission, tool call content). Then JetBrains.
-- [ ] Incomplete responses. Built: `RetryIncomplete(retries)` (`src/agent-host/incomplete.ts`), a
-      turn-end hook that asks again, once, for the answer of a response that had thinking and no
-      answer (some local models put the whole answer in their reasoning: Qwen3.5-9B with an effort
-      set did, after a tool result); the ACP host runs with it. The loop asks the hooks at its
-      bound too, and records `TurnHoldsExhausted` and warns only when they would hold the turn
-      again. To do: `retries` as a host setting.
 - [ ] The MCP servers a client names in `session/new`, their tools offered to the model (the ACP
       host's world is given them and ignores them). Effect has MCP's schemas, protocol and a server
       (`effect/ai/McpSchema`, `McpProtocol`, `McpServer`) and no client: a client built from them,

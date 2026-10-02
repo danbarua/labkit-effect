@@ -84,6 +84,11 @@ export interface HostOptions<R = never> {
   readonly model?: string | undefined;
   /** The permission mode sessions start in (`LABKIT_ACP_PERMISSION_MODE`); left out, `default`. The user can change it. */
   readonly permissionMode?: PermissionMode | undefined;
+  /**
+   * How many times a turn whose response had thinking but no answer is asked again for it
+   * (`LABKIT_ACP_RETRIES`; 0 asks never); 1 when left out. Used by the default `services`.
+   */
+  readonly retries?: number | undefined;
   /** What a session runs with, given its world's tool runner, over the session's store; `HostSessionServices` when left out. */
   readonly services?: ((runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>) | undefined;
   /** The most sessions one page of `session/list` gives; 50 when left out. */
@@ -92,20 +97,26 @@ export interface HostOptions<R = never> {
 
 /**
  * What a session runs with by default: `SessionServices`, with a turn whose last response had
- * thinking but no answer asked once more for it (`RetryIncomplete(1)`).
+ * thinking but no answer asked again for it, `retries` times (`RetryIncomplete`).
  */
-export const HostSessionServices = (runner: Layer.Layer<ToolRunner>) => SessionServices(runner, RetryIncomplete(1));
+export const HostSessionServices =
+  (retries = 1) =>
+  (runner: Layer.Layer<ToolRunner>) =>
+    SessionServices(runner, RetryIncomplete(retries));
 
 /**
- * The options a launcher takes from the environment: `LABKIT_ACP_MODEL`, `LABKIT_ACP_LOCAL_TOOLS` and
- * `LABKIT_ACP_PERMISSION_MODE` (a value that is not a mode is left out; `launch` says so).
+ * The options a launcher takes from the environment: `LABKIT_ACP_MODEL`, `LABKIT_ACP_LOCAL_TOOLS`,
+ * `LABKIT_ACP_PERMISSION_MODE` and `LABKIT_ACP_RETRIES` (a value that is not a mode, or not a whole
+ * number of 0 or more, is left out; `launch` says so).
  */
-export const hostOptionsFrom = (env: Readonly<Record<string, string | undefined>>): Pick<HostOptions, "model" | "world" | "permissionMode"> => {
+export const hostOptionsFrom = (env: Readonly<Record<string, string | undefined>>): Pick<HostOptions, "model" | "world" | "permissionMode" | "retries"> => {
   const mode = env["LABKIT_ACP_PERMISSION_MODE"];
+  const retries = env["LABKIT_ACP_RETRIES"];
   return {
     model: env["LABKIT_ACP_MODEL"] === "" ? undefined : env["LABKIT_ACP_MODEL"],
     world: env["LABKIT_ACP_LOCAL_TOOLS"] === "1" ? "local" : "editor",
     permissionMode: Schema.is(PermissionMode)(mode) ? mode : undefined,
+    retries: retries !== undefined && /^\d+$/.test(retries) ? Number(retries) : undefined,
   };
 };
 
@@ -193,7 +204,7 @@ const noModel = `No model to ask: set ${Object.values(keyVariables).join(", ")} 
 export const makeHost = <R = never>(options: HostOptions<R>) => {
   const world: World<R> | World<FileSystem.FileSystem> =
     options.world === undefined || options.world === "editor" ? editorWorld : options.world === "local" ? workspaceWorld : options.world;
-  const services = options.services ?? HostSessionServices;
+  const services = options.services ?? HostSessionServices(options.retries);
   return Agent.implement<Protocol.V1Version, ModelCatalog | FileSystem.FileSystem | Path.Path | Scope.Scope | R>(Protocol.v1, {
     capabilities: {
       promptCapabilities: { image: true, audio: false, embeddedContext: true },
