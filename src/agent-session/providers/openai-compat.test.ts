@@ -2,7 +2,11 @@
 
 import { afterAll, expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Logger } from "effect";
+import { ModelName, ProviderName, ThinkingText, TurnId } from "../../agent-machine/names.ts";
+import { ModelClient, type ModelContext } from "../contracts.ts";
+import { logKeys } from "../log-keys.ts";
+import { receivedJson } from "../received.ts";
 import type { Observation } from "../../agent-machine/observation.ts";
 import { BoringModelProvider } from "../../../tests/support/boring.ts";
 import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
@@ -248,6 +252,43 @@ test.each([
   const { facts } = await turn([usageAt]);
   const responded = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded");
   expect((responded as unknown as { readonly observation: { readonly usage: unknown } }).observation.usage).toEqual(usage);
+});
+
+test("two responses with nothing between them are one message: the later one's field goes back, and the earlier one's is logged as left out", async () => {
+  const logged: Array<unknown> = [];
+  const capture = Logger.make((options) => {
+    logged.push(options.message);
+  });
+  const provider = recordingServer([answers]);
+  stops.push(provider.stop);
+  const boring = ProviderName.make("boring");
+  const from = { _tag: "Response" as const, model: ModelName.make("boring-1"), turn: TurnId.make("turn-1") };
+  const thought = (text: string) => ({ _tag: "Thinking" as const, provider: boring, from, text: ThinkingText.make(text), received: receivedJson({ reasoning_content: text }) });
+  const context: ModelContext = {
+    system: undefined,
+    tools: [],
+    messages: [
+      { role: "user", parts: [{ _tag: "Text", text: "Hello" }] },
+      { role: "assistant", parts: [thought("First."), { _tag: "Text", text: "Wait." }, thought("Second."), { _tag: "Text", text: "Done." }] },
+      { role: "user", parts: [{ _tag: "Text", text: "Again" }] },
+    ],
+  };
+  await runTest(
+    Effect.gen(function* () {
+      const client = yield* ModelClient;
+      yield* client.respond({ provider: boring, model: ModelName.make("boring-1") }, context, TurnId.make("turn-2"));
+    }).pipe(Effect.provide(Layer.mergeAll(OpenAiCompatModelClient.pipe(Layer.provide(openAiCompatAt(provider.url))), Logger.layer([capture], { mergeWithExisting: true })))),
+  );
+  expect((provider.bodies[0] as { readonly messages: ReadonlyArray<unknown> }).messages[1]).toEqual({
+    role: "assistant",
+    content: [
+      { type: "text", text: "Wait." },
+      { type: "text", text: "Done." },
+    ],
+    reasoning_content: "Second.",
+  });
+  const lines = logged.filter((line) => Array.isArray(line) && line[0] === logKeys.provider.partLeftOut) as Array<[string, Record<string, unknown>]>;
+  expect(lines[0]?.[1]["parts"]).toMatchObject([{ part: "Thinking", start: "First.", reason: "a later response in the same message holds reasoning_content too" }]);
 });
 
 test("the response streams: its usage comes in the last chunk, and a tool call is run once its response has it", async () => {

@@ -32,7 +32,7 @@ import type * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
 import { CallId, ModelText, StopReason, ThinkingText, ToolName, type TurnId } from "../../agent-machine/names.ts";
 import type { ModelPart, Observation } from "../../agent-machine/observation.ts";
-import { type ContextMessage, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
+import { type ContextMessage, type ContextPart, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
 import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEventsOrWhole, type Retries, withRetries } from "../provider-call.ts";
 import { ModelStream, type Streamed } from "../model-stream.ts";
 import { reportAdjusted } from "../configuration/settings.ts";
@@ -146,6 +146,7 @@ function keptFields(
   const fields: Record<string, Json> = {};
   const content = new Map<number, ReadonlyArray<Json>>();
   const extras = new Map<string, Readonly<Record<string, Json>>>();
+  const setBy = new Map<string, ContextPart>();
   const supplied = message.parts.flatMap((part, at) => {
     if (part._tag !== "Thinking" && part._tag !== "Unrecognised") return [];
     const back = sentBack(part, target);
@@ -158,8 +159,11 @@ function keptFields(
         return [];
       }
       if (field !== "tool_calls" || !Array.isArray(value)) {
+        // Two responses with nothing between them are one message: the later one's field is kept.
+        const earlier = setBy.get(field);
         fields[field] = value as Json;
-        return [];
+        setBy.set(field, part);
+        return earlier === undefined ? [] : leftOut(earlier, `a later response in the same message holds ${field} too`).supplied;
       }
       return (value as ReadonlyArray<Json>).flatMap((call) => {
         const id = isObject(call) ? call["id"] : undefined;
