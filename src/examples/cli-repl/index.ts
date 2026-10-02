@@ -114,7 +114,7 @@ const resumed = (named: string, interactive: boolean) =>
   Effect.gen(function* () {
     if (named !== "") return yield* readSession(named);
     if (!interactive) return yield* invalid("--resume needs a session id when there is no terminal to pick one at.");
-    const stored = yield* storedSessions;
+    const stored = yield* storedSessions();
     if (stored.length === 0) return yield* invalid(`No session to resume: ${storeFolder} holds none.`);
     const choices = yield* Effect.forEach(stored, ({ sessionId, at }) =>
       readSession(sessionId).pipe(
@@ -147,7 +147,7 @@ const configOf = (options: Options, interactive: boolean) =>
       return config;
     }
     if (system !== undefined) return yield* invalid("A continued session keeps the system prompt it opened with: all sessions have ImmutableSystemPrompt until further notice.");
-    const latest = options.resume === undefined ? yield* latestSession : yield* resumed(options.resume, interactive);
+    const latest = options.resume === undefined ? yield* latestSession() : yield* resumed(options.resume, interactive);
     const now = yield* modelOf(latest.facts);
     const config: Config = { sessionId: latest.sessionId, target: yield* targetOf(options.model ?? `${now.provider}/${now.model}`), settings, system, continues: latest.facts, ...permissions };
     return config;

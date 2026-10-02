@@ -19,13 +19,13 @@ import { workspaceTools } from "../../agent-tools/workspace.ts";
 import { type PermissionMode, permissions } from "../../agent-policy/permissions.ts";
 import type { Policy } from "../../agent-policy/policy.ts";
 import { ToolCallPolicy } from "../../agent-session/contracts.ts";
-import { openSession, resumeSession, type Session } from "../../agent-session/loop.ts";
+import { endTurnLeftRunning, type Session, sessionFrom } from "../../agent-session/loop.ts";
 import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
 import { reportedBy } from "../../agent-session/origin.ts";
 import { immutableToolCatalogOf, modelOf, openedWith } from "../../agent-session/configuration/session-setup.ts";
 import { countingTurnsAfter, NoTurnEndHooks } from "../../agent-session/turns.ts";
 import { type Asked, Clients, KnownToCli, SettlingForCli } from "./models.ts";
-import { storeFileOf, storing } from "./store.ts";
+import { journal, storeFileOf } from "./store.ts";
 
 export interface Config {
   readonly sessionId: string;
@@ -83,15 +83,19 @@ const Services = (turns: number) => Layer.mergeAll(
 
 /**
  * Opens a session with `config`, or goes on from the one it continues, and runs `use` with it, with
- * the loop's services and `logs`. Its facts are kept in the session store as they are recorded.
- * What `use` reports is the user's, through the CLI.
+ * the loop's services and `logs`. Its facts are kept in the session store as they are recorded
+ * (`journal`); a write that fails stops the session and is said, and when `use` ends, however it
+ * ends, the facts not yet written are written. What `use` reports is the user's, through the CLI.
  */
 export const withSession = <A, E, R, L>(config: Config, logs: Layer.Layer<never, never, L>, use: (session: Session) => Effect.Effect<A, E, R>) => {
   const before = config.continues ?? [];
   const turns = before.filter((fact) => fact._tag === "Observed" && fact.observation._tag === "TurnStarted").length;
   return Effect.gen(function* () {
-    const session = before.length === 0 ? yield* openSession : yield* resumeSession(before);
-    const store = yield* storing(session, storeFileOf(config.sessionId));
+    // The journal is opened before the session goes on, so that what resuming records (the end of a
+    // turn the facts left running) is written too.
+    const session = yield* sessionFrom(before);
+    const store = yield* journal(session, storeFileOf(config.sessionId), config.sessionId, before);
+    yield* endTurnLeftRunning(session, before);
     if (before.length === 0)
       yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: config.settings }, system: config.system, tools: workspace.catalog }));
     else {
@@ -100,7 +104,9 @@ export const withSession = <A, E, R, L>(config: Config, logs: Layer.Layer<never,
       if (changed) yield* session.observe({ _tag: "ModelChangeArrived", provider: config.target.provider, model: config.target.model, settings: config.settings });
     }
     yield* session.idle;
-    return yield* use(session).pipe(Effect.ensuring(store.finish));
+    const ended = yield* Effect.exit(use(session).pipe(Effect.raceFirst(store.failed), Effect.onInterrupt(() => store.finish.pipe(Effect.ignore))));
+    yield* store.finish;
+    return yield* ended;
   }).pipe(reportedBy({ _tag: "User", via: Via.make("cli") }), Effect.scoped, Effect.provide(Layer.mergeAll(Services(turns), PermissionsFor(config), logs)));
 };
 
