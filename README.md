@@ -58,3 +58,29 @@ bun scripts/trajectories/sweep.ts claude-code   # read the counts of observation
 The adapter tests start [VidaiMock](https://github.com/vidaiUK/VidaiMock), a server that answers as
 the providers' APIs do. `scripts/vidaimock.ts` downloads the pinned release for this platform into
 `.tools/`, refusing an archive whose SHA-256 differs from the one it holds.
+
+## The ACP agent
+
+`bun src/agent-acp/main.ts` is the command an editor launches: protocol v1 on stdin and stdout, a log
+file whose path it says once on stderr, exit 0 when stdin closes. It has been driven with the
+official SDK's client against the local Qwen; it has not yet been seen in an editor. For VS Code's
+ACP Client extension, the setting is the one the labkit monorepo's host uses
+(`docs/agent/vscode-acp.md` there), with this command:
+
+```json
+{
+  "acp.agents": {
+    "labkit-effect": {
+      "command": "/opt/homebrew/bin/bun",
+      "args": ["/ABS/labkit-effect/src/agent-acp/main.ts"],
+      "env": { "LABKIT_ACP_MODEL": "localhost/<a model the local server lists>" }
+    }
+  }
+}
+```
+
+The environment: `LABKIT_ACP_MODEL` (the model new sessions start on, `provider/model`; else the
+first the catalog lists), a provider's key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`) or
+the local server at `http://localhost:8000/v1`, `LABKIT_ACP_SESSIONS_DIR` (default
+`~/.labkit/sessions`), `LABKIT_ACP_LOCAL_TOOLS=1` (tools on the local disk instead of through the
+editor: a stopgap), and `LABKIT_ACP_LOG_DIR`, `_LEVEL`, `_MAX_BYTES`, `_BACKUPS`.
