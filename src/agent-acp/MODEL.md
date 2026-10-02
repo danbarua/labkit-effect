@@ -83,10 +83,16 @@ text and resource links; no load, resume, list, fork or auth methods.
 - `log-keys.ts`: the events the host logs. Each carries the `connection` (minted per connection),
   `request` (set by the peer), `session`, `turn` and `call` it is about as log annotations, the
   names the loop uses.
+- `main.ts`: the launcher, `bun src/agent-acp/main.ts`: `launch(env)` runs `makeHost` on this
+  process's stdin and stdout (`Agent.runStdio`) with the model catalog of the providers whose key is
+  set and the local server (`KeyedAndLocalCatalog`) and the log file of `agent-host/launcher-logs.ts`.
+  From the environment: `LABKIT_ACP_MODEL`, `LABKIT_ACP_LOCAL_TOOLS`, `LABKIT_ACP_SESSIONS_DIR`
+  (`sessionsDirectoryFrom`; default `~/.labkit/sessions`), the `LABKIT_ACP_LOG_*` variables, and the
+  providers' keys.
 
 ## What is not built
 
-- The launcher and the HTTP host.
+- The HTTP host.
 - The host's own updates but for `usage_update`, the config options and
   `available_commands_update`: `session_info_update`, `current_mode_update`, `plan`.
 - `session/load`, `resume`, `list`, `fork`; MCP servers (a world is given them and ignores them);
@@ -204,3 +210,7 @@ text and resource links; no load, resume, list, fork or auth methods.
   runs them and how their calls are shown.
 - AG13. `session/close` cancels the turn under way, waits for its prompt (which ends
   `cancelled`), and closes the session's scope; a later request naming it is -32002.
+- AG14. The launcher serves the host on stdin and stdout, and puts nothing but protocol on stdout.
+  Its log is a file, named once on stderr, that holds no secret of the environment, and it exits 0
+  when stdin closes.
+- AG15. Sessions are kept in `LABKIT_ACP_SESSIONS_DIR` when it is set, else in `~/.labkit/sessions`.
