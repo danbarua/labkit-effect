@@ -52,8 +52,9 @@ export type PartSource = typeof PartSource.Type;
 /**
  * One part of a message the model is sent. `Commentary` is what a model wrote for whoever is
  * watching, which is not its answer. `Thinking` and `Unrecognised` are parts of a response that
- * only the provider that produced it reads: its adapter sends them back unchanged, in their place;
- * any other provider's adapter leaves them out. Each says where it came from (`PartSource`).
+ * only where it came from reads: an adapter sends them back unchanged, in their place, to where
+ * they came from; elsewhere thinking goes as its text, and anything else is left out
+ * (`sentBack`). Each says where it came from (`PartSource`).
  */
 export const ContextPart = Schema.Union([
   Schema.TaggedStruct("Text", { text: Schema.String }),

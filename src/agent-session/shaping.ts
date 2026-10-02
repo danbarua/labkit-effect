@@ -108,12 +108,29 @@ export function leftOut(part: ContextPart, reason: string): Shaped {
   };
 }
 
+/** Where an earlier response's part may go back as it was received: to its provider, or to its provider's same model. */
+export type SentBackTo = "Provider" | "Model";
+
 /**
- * The JSON a provider's own part is sent back as: what was received, unchanged. Another provider's
- * part is left out: only the provider that produced it reads it.
+ * The JSON an earlier response's thinking or other part is sent back as. To where it came from
+ * (its provider, or with `"Model"` its provider's same model): what was received, unchanged.
+ * Anywhere else, thinking with text goes as that text, in the adapter's form (`asText`); anything
+ * else is left out, as only where it came from reads it.
  */
-export function sentBack(part: Extract<ContextPart, { _tag: "Thinking" | "Unrecognised" }>, target: Target): Shaped {
-  if (part.provider !== target.provider) return leftOut(part, `produced by ${part.provider}, not ${target.provider}`);
+export function sentBack(
+  part: Extract<ContextPart, { _tag: "Thinking" | "Unrecognised" }>,
+  target: Target,
+  to: SentBackTo,
+  asText: (text: string) => Shaped,
+): Shaped {
+  const model = part.from._tag === "Response" ? part.from.model : undefined;
+  const elsewhere =
+    part.provider !== target.provider
+      ? `produced by ${part.provider}, not ${target.provider}`
+      : to === "Model" && model !== undefined && model !== target.model
+        ? `produced by ${part.provider}/${model}, not ${target.provider}/${target.model}`
+        : undefined;
+  if (elsewhere !== undefined) return part._tag === "Thinking" && part.text.length > 0 ? asText(part.text) : leftOut(part, elsewhere);
   const parsed = parseJson(part.received);
   return "value" in parsed ? { json: [parsed.value], supplied: [] } : leftOut(part, parsed.reason);
 }

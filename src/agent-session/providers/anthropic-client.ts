@@ -116,7 +116,8 @@ function blocks(
     }
     case "Thinking":
     case "Unrecognised":
-      return sentBack(part, target);
+      // Anthropic reads its own thinking from any of its models, and drops what a model cannot read.
+      return sentBack(part, target, "Provider", (text) => ({ json: [{ type: "text", text }], supplied: [] }));
     case "File": {
       // An image goes as an `image` block, a PDF as a `document` block, both in base64.
       const file = fileAs(part.blob, files, (mediaType) => takesFile(knownOf(target), mediaType));

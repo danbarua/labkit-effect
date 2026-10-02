@@ -6,9 +6,10 @@
  * Out: the system text is a `system` message; the context's messages become chat messages: text
  * as `text` content parts, the model's tool calls as an assistant message's `tool_calls`, each tool
  * outcome as a `tool` message carrying the text the model is sent. The catalog is sent as
- * `function` tools. What an earlier response from this provider held besides its text and calls
- * goes back as it came: its other fields (`reasoning_content`, ...) on its message, and a call's
- * other fields on the call; another provider's are left out, and logged. Of the session's settings
+ * `function` tools. What an earlier response from this provider and model held besides its text
+ * and calls goes back as it came: its other fields (`reasoning_content`, ...) on its message, and a
+ * call's other fields on the call. Another model's thinking goes as text; its other parts are left
+ * out, and logged. Of the session's settings
  * the reasoning effort is sent, as
  * `reasoning_effort` (`openai-compat-settings.ts`); each other one asked for is recorded as adjusted.
  *
@@ -128,10 +129,11 @@ function chatMessages(
 }
 
 /**
- * What an earlier response held besides its text and its calls, put back as it came
- * (`sentBack`): each of the message's other fields (`reasoning_content`, ...); the chunks of its
- * content that are not text (Mistral's thinking), by the part that holds them; and each call's
- * other fields (Gemini's `extra_content`) on the call with its id.
+ * What an earlier response held besides its text and its calls, put back as it came to the same
+ * provider and model (`sentBack`): each of the message's other fields (`reasoning_content`, ...);
+ * the chunks of its content that are not text (Mistral's thinking), by the part that holds them;
+ * and each call's other fields (Gemini's `extra_content`) on the call with its id. Another model's
+ * thinking goes as text in the content, in its place.
  */
 function keptFields(
   message: ContextMessage,
@@ -149,7 +151,8 @@ function keptFields(
   const setBy = new Map<string, ContextPart>();
   const supplied = message.parts.flatMap((part, at) => {
     if (part._tag !== "Thinking" && part._tag !== "Unrecognised") return [];
-    const back = sentBack(part, target);
+    // One server can serve many models, and a router many vendors: each model's own goes back to it alone.
+    const back = sentBack(part, target, "Model", (text) => ({ json: [{ content: [{ type: "text", text }] }], supplied: [] }));
     const [piece] = back.json as ReadonlyArray<Json>;
     if (piece === undefined) return back.supplied;
     if (!isObject(piece)) return leftOut(part, "it is not a message's fields").supplied;

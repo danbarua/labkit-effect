@@ -126,7 +126,7 @@ function items(
       }
       case "Thinking":
       case "Unrecognised":
-        return sentBack(part, target);
+        return sentBack(part, target, "Provider", (text) => ({ json: [{ role: "assistant", content: [{ type: "output_text", text }] }], supplied: [] }));
       case "File": {
         // An image goes as `input_image`, a PDF as `input_file`, each as a data URL, in a message of its own.
         const { role, type } = textAs(message);

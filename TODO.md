@@ -133,10 +133,11 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       - tool calls, both ways (Qwen called `read_file` and `write_file` through the CLI);
       - streaming: a tool call passed on once the next begins; a server that answers whole is
         read as one chunk;
-      - what a response held besides its text and calls goes back to the provider that produced
-        it, as it came: the message's other fields (`reasoning_content`, `reasoning`, ...), a
-        call's (Gemini's `extra_content`), and the chunks of a `content` that is a list
-        (Mistral's thinking, which changes shape during a stream);
+      - what a response held besides its text and calls goes back to the provider and model that
+        produced it, as it came: the message's other fields (`reasoning_content`, `reasoning`,
+        ...), a call's (Gemini's `extra_content`), and the chunks of a `content` that is a list
+        (Mistral's thinking, which changes shape during a stream); another model's thinking goes
+        as text, as opencode and pi-mono send it;
       - a call's `arguments` sent as a JSON object are read as its text; a call's name sent whole
         again as it grows (llama.cpp) is the whole name;
       - `finish_reason` `end_turn` (xAI) and `model_length` (Mistral) are classified; `error`
