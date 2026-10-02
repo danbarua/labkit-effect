@@ -126,22 +126,29 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 - [ ] Each provider's image and file formats, from what was measured, in place of models.dev's
       "takes images: yes or no".
 - [ ] The Chat Completions adapter against the local server (Rapid-MLX, vLLM-compatible, at
-      `http://localhost:8000/v1`; OpenAPI docs at `/docs`). Built: the reasoning effort is sent as
-      `reasoning_effort` (Qwen3.5-9B takes `none` to `xhigh` and refuses `max`); tool calls, both
-      ways (Qwen called `read_file` and `write_file` through the CLI); streaming, with the usage in
-      the last chunk and a tool call passed on once the next begins (a server that answers whole
-      is read as one chunk); the output limit, as `max_tokens`, when one is set; what a response
-      held besides its text and calls goes back to the provider that produced it as it came: the
-      message's other fields (`reasoning_content`, `reasoning`, ...), a call's (Gemini's
-      `extra_content`), and the chunks of a `content` that is a list (Mistral's thinking, which
-      changes shape during a stream); a call's `arguments` sent as a JSON object are read as its
-      text; a call's name sent whole again as it grows (llama.cpp) is the whole name;
-      `finish_reason` `end_turn` (xAI) and `model_length` (Mistral) are classified, and `error`
-      (Mistral, OpenRouter) and Groq's `x_groq.error` fail the request; the usage is read where
-      each back-end puts it (Groq's `x_groq.usage`, SGLang's top-level `reasoning_tokens`). To do, from the back-ends' documentation and source:
-      - Mistral: no `stream_options` (its schema refuses fields it does not define).
-      - The output limit's name: OpenAI takes `max_completion_tokens` (it refuses `max_tokens`
-        for its o-series models); Mistral takes only `max_tokens`.
+      `http://localhost:8000/v1`; OpenAPI docs at `/docs`), and what the back-ends' documentation
+      and source say a client must do. Built:
+      - the reasoning effort, as `reasoning_effort` (Qwen3.5-9B takes `none` to `xhigh` and
+        refuses `max`); the output limit, as `max_tokens`, when one is set;
+      - tool calls, both ways (Qwen called `read_file` and `write_file` through the CLI);
+      - streaming: a tool call passed on once the next begins; a server that answers whole is
+        read as one chunk;
+      - what a response held besides its text and calls goes back to the provider that produced
+        it, as it came: the message's other fields (`reasoning_content`, `reasoning`, ...), a
+        call's (Gemini's `extra_content`), and the chunks of a `content` that is a list
+        (Mistral's thinking, which changes shape during a stream);
+      - a call's `arguments` sent as a JSON object are read as its text; a call's name sent whole
+        again as it grows (llama.cpp) is the whole name;
+      - `finish_reason` `end_turn` (xAI) and `model_length` (Mistral) are classified; `error`
+        (Mistral, OpenRouter) and Groq's `x_groq.error` fail the request;
+      - the usage, where each back-end puts it (`usage`, Groq's `x_groq.usage`, SGLang's
+        top-level `reasoning_tokens`).
+
+      To do:
+      - Mistral: a way for a host to leave out `stream_options`, when one sends to Mistral. Its
+        schema refuses fields it does not define (read from the schema; not seen).
+      - OpenAI, when a host sends its Chat Completions there: the output limit as
+        `max_completion_tokens` (it refuses `max_tokens` for its o-series models).
 - [ ] Models. Built: the well-known models as generated `const` data (`bun run models:refresh`:
       models.dev's catalog merged with `well-known-models.measured.json`); a settings type per
       well-known model (`SettingsFor`); the values to offer for each setting of a model as it is
