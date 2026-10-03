@@ -23,9 +23,9 @@
 
 import { isAbsolute, relative, resolve } from "node:path";
 import { Duration, Effect, FileSystem, Layer, Option, Schema } from "effect";
-import type { AgentConnection } from "../acp/agent.ts";
-import type { V1Version } from "../acp/protocol.ts";
-import { type McpServer, type SessionId, type TerminalId, ToolCallId } from "../acp/schema/v1.gen.ts";
+import type { AgentConnection } from "effective-acp/agent";
+import type { V1Version } from "effective-acp/protocol";
+import { type McpServer, type SessionId, type TerminalId, ToolCallId } from "effective-acp/schema/v1";
 import { type CallId, FailureText, ToolName } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import { ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";

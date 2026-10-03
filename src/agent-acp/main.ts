@@ -15,7 +15,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { BunRuntime, BunServices, BunStdio } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
-import * as Agent from "../acp/agent.ts";
+import * as Agent from "effective-acp/agent";
 import { KeyedAndLocalCatalog } from "../agent-host/catalog.ts";
 import { LauncherLogs, launcherLogOptionsFrom } from "../agent-host/launcher-logs.ts";
 import { PermissionMode } from "../agent-policy/permissions.ts";

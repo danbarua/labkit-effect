@@ -18,8 +18,8 @@
  * `config_option_update`, `current_mode_update`, `plan`, and `session/request_permission`.
  */
 
-import type { ContentBlock, SessionUpdate, ToolCallContent, ToolCallLocation, ToolKind } from "../acp/schema/v1.gen.ts";
-import { ToolCallId } from "../acp/schema/v1.gen.ts";
+import type { ContentBlock, SessionUpdate, ToolCallContent, ToolCallLocation, ToolKind } from "effective-acp/schema/v1";
+import { ToolCallId } from "effective-acp/schema/v1";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { CallId, ToolName, TurnId } from "../agent-machine/names.ts";
 import type { CapturedObservation, ModelPart, ToolFailure, ToolOutcome } from "../agent-machine/observation.ts";

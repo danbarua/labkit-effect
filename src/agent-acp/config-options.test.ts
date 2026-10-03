@@ -3,7 +3,7 @@
 import { expect } from "bun:test";
 import { Effect } from "effect";
 import { test } from "../../tests/support/test.ts";
-import type { SessionConfigOption } from "../acp/schema/v1.gen.ts";
+import type { SessionConfigOption } from "effective-acp/schema/v1";
 import { ModelName, ProviderName, TokenCount } from "../agent-machine/names.ts";
 import type { ModelSettings } from "../agent-machine/settings.ts";
 import type { Asked } from "../agent-host/catalog.ts";

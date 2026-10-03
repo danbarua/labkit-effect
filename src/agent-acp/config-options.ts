@@ -24,8 +24,8 @@
  */
 
 import { Data, Schema } from "effect";
-import type { SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption } from "../acp/schema/v1.gen.ts";
-import { SessionConfigId, SessionConfigValueId } from "../acp/schema/v1.gen.ts";
+import type { SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption } from "effective-acp/schema/v1";
+import { SessionConfigId, SessionConfigValueId } from "effective-acp/schema/v1";
 import { TokenCount } from "../agent-machine/names.ts";
 import type { Observation } from "../agent-machine/observation.ts";
 import type { ModelSettings } from "../agent-machine/settings.ts";

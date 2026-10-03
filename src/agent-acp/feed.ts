@@ -17,9 +17,9 @@
  */
 
 import { type Context, Deferred, Effect, Fiber, PubSub, Queue, References, type Scope } from "effect";
-import type { AgentConnection } from "../acp/agent.ts";
-import type { V1Version } from "../acp/protocol.ts";
-import type { SessionId, SessionUpdate } from "../acp/schema/v1.gen.ts";
+import type { AgentConnection } from "effective-acp/agent";
+import type { V1Version } from "effective-acp/protocol";
+import type { SessionId, SessionUpdate } from "effective-acp/schema/v1";
 import type { Fact } from "../agent-machine/fact.ts";
 import { type CallId, type TurnId, Via } from "../agent-machine/names.ts";
 import type { Origin } from "../agent-machine/origin.ts";

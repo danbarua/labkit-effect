@@ -6,7 +6,7 @@ import { boringOpening } from "../../tests/support/boring.ts";
 import { observe, open } from "../../tests/support/drive.ts";
 import { json } from "../../tests/support/received.ts";
 import { test } from "../../tests/support/test.ts";
-import type { SessionUpdate } from "../acp/schema/v1.gen.ts";
+import type { SessionUpdate } from "effective-acp/schema/v1";
 import type { Fact } from "../agent-machine/fact.ts";
 import { ToolName } from "../agent-machine/names.ts";
 import { CapturedObservation } from "../agent-machine/observation.ts";

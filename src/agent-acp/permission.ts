@@ -7,8 +7,8 @@
  */
 
 import { Data } from "effect";
-import type { RequestPermissionRequest, RequestPermissionResponse, SessionId } from "../acp/schema/v1.gen.ts";
-import { PermissionOptionId, ToolCallId } from "../acp/schema/v1.gen.ts";
+import type { RequestPermissionRequest, RequestPermissionResponse, SessionId } from "effective-acp/schema/v1";
+import { PermissionOptionId, ToolCallId } from "effective-acp/schema/v1";
 import type { Received } from "../agent-machine/received.ts";
 import { answerPicking, type PermissionQuestion } from "../agent-policy/permissions.ts";
 import { parseJson } from "../agent-session/received.ts";

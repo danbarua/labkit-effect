@@ -14,8 +14,8 @@
  */
 
 import { Schema } from "effect";
-import { ErrorCode, type JsonRpcError } from "../acp/json-rpc.ts";
-import type { StopReason } from "../acp/schema/v1.gen.ts";
+import { ErrorCode, type JsonRpcError } from "effective-acp/json-rpc";
+import type { StopReason } from "effective-acp/schema/v1";
 import type { Ending } from "../agent-machine/decision.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { TurnId } from "../agent-machine/names.ts";

@@ -12,8 +12,9 @@ Both hosts are built here, and labkit imports the libraries from here. The core 
 between a host and the models (machines, messages, streams of events): the workspace, the working
 folder, the tool catalog, the configuration UI and what a session is called are the host's.
 
-ACP: the protocol is built (`src/acp`: schemas, the peer, stdio and Streamable HTTP, negotiation;
-its `MODEL.md`, and `EFFECT-FIT.md` for where Effect fits). The host, which joins it to the
+ACP: the protocol is built, as a package of its own (`effective-acp`,
+github.com/danbarua/effective-acp: schemas, the peer, stdio and Streamable HTTP, negotiation; its
+`src/MODEL.md`, and `src/EFFECT-FIT.md` for where Effect fits). The host, which joins it to the
 session, is built for protocol v1 over stdio (`src/agent-acp`, `bun src/agent-acp/main.ts`; its
 `MODEL.md`) and has run the scenario below against the local Qwen with the SDK's client. It has not
 yet been seen in an editor. VS Code comes first, then the JetBrains AI extension (PyCharm,
@@ -111,7 +112,7 @@ model.
 - [ ] The MCP servers a client names in `session/new`, their tools offered to the model (the ACP
       host's world is given them and ignores them). Effect has MCP's schemas, protocol and a server
       (`effect/ai/McpSchema`, `McpProtocol`, `McpServer`) and no client: a client built from them,
-      as `src/acp` was built.
+      as `effective-acp` was built.
 - [ ] The ACP host over Streamable HTTP (`Agent.layerHttp`), with a token and one holder for a
       session, for labkit-web.
 

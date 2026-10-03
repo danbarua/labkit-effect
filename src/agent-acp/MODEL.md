@@ -1,7 +1,7 @@
 # agent-acp
 
-The ACP host: it joins the protocol (`src/acp`) to a session of the core. It imports both; `src/acp`
-imports nothing of the core.
+The ACP host: it joins the protocol (the `effective-acp` package) to a session of the core. It
+imports both; `effective-acp` imports nothing of the core.
 
 ## What is built
 

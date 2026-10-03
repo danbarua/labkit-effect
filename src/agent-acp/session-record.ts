@@ -4,8 +4,8 @@
  */
 
 import { Data, Option, Schema } from "effect";
-import type { ListSessionsResponse, SessionInfo } from "../acp/schema/v1.gen.ts";
-import { SessionId } from "../acp/schema/v1.gen.ts";
+import type { ListSessionsResponse, SessionInfo } from "effective-acp/schema/v1";
+import { SessionId } from "effective-acp/schema/v1";
 
 /** The most characters a title has. */
 const titleLength = 120;

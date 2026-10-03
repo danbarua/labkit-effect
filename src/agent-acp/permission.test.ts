@@ -2,7 +2,7 @@
 
 import { expect } from "bun:test";
 import { test } from "../../tests/support/test.ts";
-import { PermissionOptionId, SessionId } from "../acp/schema/v1.gen.ts";
+import { PermissionOptionId, SessionId } from "effective-acp/schema/v1";
 import { CallId, ToolName } from "../agent-machine/names.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { OptionId, OptionName, type PermissionQuestion, permissions, questionIn } from "../agent-policy/permissions.ts";

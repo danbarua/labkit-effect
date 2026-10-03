@@ -5,7 +5,7 @@
  */
 
 import { Effect } from "effect";
-import type { SessionUpdate } from "../acp/schema/v1.gen.ts";
+import type { SessionUpdate } from "effective-acp/schema/v1";
 import type { Fact } from "../agent-machine/fact.ts";
 import { contextGauge } from "../agent-session/accounting.ts";
 import { modelOf } from "../agent-session/configuration/session-setup.ts";

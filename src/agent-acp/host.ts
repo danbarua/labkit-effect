@@ -34,11 +34,11 @@
 
 import { isAbsolute, join } from "node:path";
 import { Clock, type Context, Effect, Exit, Fiber, FileSystem, Layer, Option, type Path, Schema, Scope, Semaphore } from "effect";
-import * as Agent from "../acp/agent.ts";
-import { ErrorCode, type JsonRpcError } from "../acp/json-rpc.ts";
-import * as Protocol from "../acp/protocol.ts";
-import type { ContentBlock, McpServer, SessionConfigOption, SessionUpdate } from "../acp/schema/v1.gen.ts";
-import { SessionId as AcpSessionId } from "../acp/schema/v1.gen.ts";
+import * as Agent from "effective-acp/agent";
+import { ErrorCode, type JsonRpcError } from "effective-acp/json-rpc";
+import * as Protocol from "effective-acp/protocol";
+import type { ContentBlock, McpServer, SessionConfigOption, SessionUpdate } from "effective-acp/schema/v1";
+import { SessionId as AcpSessionId } from "effective-acp/schema/v1";
 import { type Asked, askable, keyVariables, ModelCatalog, targetOf } from "../agent-host/catalog.ts";
 import { sessionFolderOf, storeFileOf } from "../agent-host/directory.ts";
 import type { BlobRef } from "../agent-machine/blob.ts";
