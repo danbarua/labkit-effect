@@ -11,12 +11,9 @@
  *   of the responses that reported their usage to a model with a price: one interrupted, or not
  *   observed, or from a model that is not well-known (a local model) adds nothing. The requests a
  *   summarizer makes are not among the facts, so their cost is not in it.
- * - `requestsIn`: how many model requests a turn has made, which is how many steps it has taken
- *   (`AskModel`, `TellModel`). A request a fallback sends to another provider is the same request.
  */
 
 import type { Fact } from "../agent-machine/fact.ts";
-import type { TurnId } from "../agent-machine/names.ts";
 import type { Observation, Usage } from "../agent-machine/observation.ts";
 import { type Capabilities, capabilitiesOf, type Price } from "./configuration/well-known-models.ts";
 
@@ -67,7 +64,3 @@ export function contextGauge(facts: ReadonlyArray<Fact>, provider: string, model
   const used = last === undefined ? 0 : last.input + last.output - (last.thinking ?? 0);
   return { used, size, cost: { amount: costIn(facts), currency: "USD" } };
 }
-
-/** How many model requests `turn` has made: its steps. */
-export const requestsIn = (facts: ReadonlyArray<Fact>, turn: TurnId): number =>
-  facts.filter((fact) => fact._tag === "Decided" && (fact.decision._tag === "AskModel" || fact.decision._tag === "TellModel") && fact.decision.turn === turn).length;

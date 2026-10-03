@@ -5,7 +5,8 @@ import { observe, open, opened } from "../../tests/support/drive.ts";
 import { json } from "../../tests/support/received.ts";
 import { test } from "../../tests/support/test.ts";
 import { TokenCount, TurnId } from "../agent-machine/names.ts";
-import { contextGauge, costOf, requestsIn } from "./accounting.ts";
+import { contextGauge, costOf } from "./accounting.ts";
+import { requestsIn } from "../agent-machine/turn-requests.ts";
 import { capabilitiesOf } from "./configuration/well-known-models.ts";
 
 const tokens = (count: number) => TokenCount.make(count);

@@ -17,7 +17,8 @@ import type { CallId, ModelName, ProviderName, Seq, ToolName } from "../agent-ma
 import type { InputSource, Observation, ToolFailure, ToolOutcome } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { PermissionAnswer, questionIn } from "../agent-policy/permissions.ts";
-import { contextGauge, costIn, requestsIn } from "../agent-session/accounting.ts";
+import { contextGauge, costIn } from "../agent-session/accounting.ts";
+import { requestsIn } from "../agent-machine/turn-requests.ts";
 import { asText } from "../agent-session/received.ts";
 import { blobPointer } from "../agent-session/shaping.ts";
 

@@ -1,13 +1,10 @@
 /**
  * Example policies (`src/agent-policy`): a deny list of tool names, asking a person
- * before a tool runs, holding model requests until a time, a spent budget, and a limit on a turn's
- * model requests. They show the shape
+ * before a tool runs, holding model requests until a time, and a spent budget. They show the shape
  * a policy takes; none is part of the policy layer, and none is wired into the loop.
  */
 
-import type { Fact } from "../agent-machine/fact.ts";
 import type { Policy } from "../agent-policy/policy.ts";
-import { requestsIn } from "../agent-session/accounting.ts";
 import { asText, receivedJson } from "../agent-session/received.ts";
 
 /** Vetoes running any tool named in `denied`. */
@@ -50,17 +47,3 @@ export const budgetSpent: Policy<unknown> = {
   start: () => ({ _tag: "Decided", verdict: { _tag: "Veto", reason: receivedJson({ budget: "80% of the month used" }) } }),
   receive: () => ({ _tag: "Decided", verdict: { _tag: "Continue" } }),
 };
-
-/**
- * Vetoes a turn's model request beyond the `limit`-th: ACP's `max_turn_requests`. `facts` are the
- * session's as recorded; the decision to make the request (`AskModel`, `TellModel`) is recorded
- * before it is asked for, so it is counted. The veto ends the turn; the host answers its prompt
- * with the stop reason `max_turn_requests`.
- */
-export const maxTurnRequests = (limit: number, facts: () => ReadonlyArray<Fact>): Policy<unknown> => ({
-  start: (request) =>
-    request._tag === "RequestModelResponse" && requestsIn(facts(), request.turn) > limit
-      ? { _tag: "Decided", verdict: { _tag: "Veto", reason: receivedJson({ stop: "max_turn_requests", limit }) } }
-      : { _tag: "Decided", verdict: { _tag: "Continue" } },
-  receive: () => ({ _tag: "Decided", verdict: { _tag: "Continue" } }),
-});

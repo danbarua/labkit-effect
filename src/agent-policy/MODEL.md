@@ -16,6 +16,7 @@ Dan: "something might execute a decision to continue, veto or delay an Effect." 
   options: allow once, allow the tool for the rest of the session, reject.
 - `loop-breaker.ts`: a model that makes the same call again and again in a row is told so, then
   stopped: one policy on tool calls, one on model requests.
+- `max-turn-requests.ts`: a limit on a turn's model requests, ACP's `max_turn_requests`.
 - In the loop (`agent-session/loop.ts`): each tool call goes through the session's tool call
   policies (`ToolCallPolicies`) before it runs, and each model request through its model request
   policies (`ModelRequestPolicies`) before it is made. A host composes each list.
@@ -70,3 +71,6 @@ Dan: "something might execute a decision to continue, veto or delay an Effect." 
   made again after others (running the tests, editing, running them again) starts the count again.
   A call is counted by its place in that order, so calls in one response reviewed together count as
   the model made them. Both count from the facts.
+- P11. `maxTurnRequests` vetoes a turn's model request beyond the `limit`-th (1000 by default),
+  counted from the facts (`requestsIn`: the turn's `AskModel` and `TellModel`, the request reviewed
+  among them), with the reason `{ "stop": "max_turn_requests", "limit": <limit> }`.

@@ -5,6 +5,7 @@ import { AgentContextAssembler, WholeConversation } from "../agent-context/assem
 import { Notices } from "../agent-context/assemble.ts";
 import { type PermissionMode, permissions } from "../agent-policy/permissions.ts";
 import { type LoopBreakerSettings, loopBreakerDefaults, repeatedCalls, repeatingTurns } from "../agent-policy/loop-breaker.ts";
+import { maxTurnRequests } from "../agent-policy/max-turn-requests.ts";
 import type { Policy } from "../agent-policy/policy.ts";
 import type { PolicyOfFacts, ToolRunner } from "../agent-session/contracts.ts";
 import { ModelFromFacts } from "../agent-session/configuration/model-choice.ts";
@@ -43,6 +44,12 @@ export const permissionsFor =
       immutableToolCatalogOf(facts),
       (tools) => permissions(typeof mode === "function" ? mode() : mode, canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts) as Policy<unknown>,
     );
+
+/** The limit on a turn's model requests (`agent-policy/max-turn-requests.ts`), 1000 when not given: a model request policy. */
+export const turnRequestLimit =
+  (limit?: number): PolicyOfFacts =>
+  (facts) =>
+    Effect.succeed(maxTurnRequests(facts, limit));
 
 /** The loop breaker's two policies (`agent-policy/loop-breaker.ts`): one on tool calls, one on model requests. */
 export const loopBreaker = (settings: LoopBreakerSettings = loopBreakerDefaults) => ({

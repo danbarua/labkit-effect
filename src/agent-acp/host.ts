@@ -49,11 +49,11 @@ import { markdownOf } from "../agent-host/export.ts";
 import { KnownWithLocalServer, localServer, SettlingWithLocalServer } from "../agent-host/local-server.ts";
 import { retryIncomplete } from "../agent-host/incomplete.ts";
 import { readRecord, RecordFailed, recordedSessions, recordFileOf, writeRecord } from "../agent-host/record.ts";
-import { permissionsFor, SessionServices } from "../agent-host/services.ts";
+import { permissionsFor, SessionServices, turnRequestLimit } from "../agent-host/services.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { leftRunning } from "../agent-machine/left-running.ts";
 import { InputText, SessionId, type TurnId } from "../agent-machine/names.ts";
-import { MaxHolds, type Target, ToolCallPolicies, type ToolRunner, TurnEndHooks } from "../agent-session/contracts.ts";
+import { MaxHolds, ModelRequestPolicies, type Target, ToolCallPolicies, type ToolRunner, TurnEndHooks } from "../agent-session/contracts.ts";
 import { SourcedToolRunner, ToolSources, toolsOf } from "../agent-session/tool-sources.ts";
 import { FileBackedSessionStore } from "../agent-session/file-session-store.ts";
 import { endTurnLeftRunning, openSession, type Services, type Session } from "../agent-session/loop.ts";
@@ -96,6 +96,11 @@ export interface HostOptions<R = never> {
    * says which were ignored.
    */
   readonly strictToolInput?: boolean | undefined;
+  /**
+   * The most model requests one turn makes: the request beyond it is vetoed, and the prompt ends
+   * with the stop reason `max_turn_requests` (`agent-policy/max-turn-requests.ts`); 1000 when left out.
+   */
+  readonly maxTurnRequests?: number | undefined;
   /** What a session runs with, given its world's tool runner, over the session's store; `HostSessionServices` when left out. */
   readonly services?: ((runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>) | undefined;
   /** The most sessions one page of `session/list` gives; 50 when left out. */
@@ -303,7 +308,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const file = storeFileOf(options.directory, id);
               // The session's blobs (its inputs' images and files) are kept in its folder, so a session gone on from its facts has them.
               const blobs = BlobsInFolder(join(sessionFolderOf(options.directory, id), "blobs"));
-              const policies = Layer.succeed(ToolCallPolicies, [permissionsFor(permissionMode, true)]);
+              const policies = Layer.mergeAll(
+                Layer.succeed(ToolCallPolicies, [permissionsFor(permissionMode, true)]),
+                Layer.succeed(ModelRequestPolicies, [turnRequestLimit(options.maxTurnRequests)]),
+              );
               const runner = SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, world.sources)));
               const layer = Layer.mergeAll(services(runner), policies, blobs).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
               const context = yield* Layer.buildWithScope(layer, scope);

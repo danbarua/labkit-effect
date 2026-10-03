@@ -272,6 +272,9 @@ twice.
 - AG20. `editorWorld` offers `update_plan { entries }` to every client: each call sends the whole
   plan as a `plan` update (an entry's priority `medium` unless given), and succeeds with the count
   of steps by status. It is of kind `think`: it runs in every permission mode without asking.
+- AG21. A turn makes at most `maxTurnRequests` model requests (1000 when the launcher does not
+  say): the request beyond it is vetoed (`agent-policy` P11), and the prompt ends with the stop
+  reason `max_turn_requests`.
 - AG17. `editorWorld` offers `edit_file` to a client that advertised both `fs` methods, and
   `run_command` to one that advertised `terminal`. `edit_file` reads the file through the editor
   and writes it back with one occurrence of `old_text` replaced; `old_text` that occurs never or

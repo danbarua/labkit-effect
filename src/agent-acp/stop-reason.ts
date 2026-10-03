@@ -23,7 +23,7 @@ import { asText, parseJson } from "../agent-session/received.ts";
 
 export type Stop = { readonly stopReason: StopReason } | { readonly error: JsonRpcErrorObject };
 
-/** The reason the turn-request limit records (`maxTurnRequests` in `src/examples/policies.ts`); it may say more. */
+/** The reason the turn-request limit records (`agent-policy/max-turn-requests.ts`); it may say more. */
 const isTurnLimit = Schema.is(Schema.Struct({ stop: Schema.Literal("max_turn_requests") }));
 
 const stopFor = (ending: Ending): Stop => {

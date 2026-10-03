@@ -8,7 +8,7 @@ import { Millis } from "../../src/agent-machine/names.ts";
 import type { EffectRequest } from "../../src/agent-machine/request.ts";
 import { receivedText } from "../../src/agent-session/received.ts";
 import { every, type Policy, type PolicyMessage, type PolicyStep } from "../../src/agent-policy/policy.ts";
-import { askPerson, budgetSpent, denyTools, maxTurnRequests, notBefore } from "../../src/examples/policies.ts";
+import { askPerson, budgetSpent, denyTools, notBefore } from "../../src/examples/policies.ts";
 import { observe, open, opened } from "../support/drive.ts";
 import { json } from "../support/received.ts";
 import { test } from "../support/test.ts";
@@ -79,26 +79,4 @@ test("a vetoed model request, given to the core as ModelVetoed, ends the turn wi
     decision: { _tag: "TurnEnded", turn: "turn-1", ending: { _tag: "Vetoed", reason: json({ budget: "80% of the month used" }) } },
   });
   expect(session.world.agent.state).toMatchObject({ _tag: "Idle" });
-});
-
-test("a turn's model requests beyond the limit are vetoed, and the veto ends the turn (ACP's max_turn_requests)", () => {
-  const session = open();
-  observe(session, opened);
-  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
-  const limit = maxTurnRequests(1, () => session.journal);
-  expect(limit.start(askModel("turn-1"))).toEqual({ _tag: "Decided", verdict: { _tag: "Continue" } });
-  observe(session, {
-    _tag: "ModelResponded",
-    turn: "turn-1",
-    provider: "boring",
-    model: "boring-1",
-    parts: [{ _tag: "ToolCall", call: "c1", tool: "ls", input: json({}) }],
-    ending: { _tag: "Complete" },
-    metadata: json({}),
-  });
-  observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json([]) } });
-  const second = limit.start(askModel("turn-1"));
-  expect(second as unknown).toEqual({ _tag: "Decided", verdict: { _tag: "Veto", reason: json({ stop: "max_turn_requests", limit: 1 }) } });
-  observe(session, { _tag: "ModelVetoed", turn: "turn-1", reason: json({ stop: "max_turn_requests", limit: 1 }) });
-  expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Vetoed" } } });
 });

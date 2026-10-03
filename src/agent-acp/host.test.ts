@@ -151,6 +151,7 @@ function startHost(
     readonly sources?: ReadonlyArray<CatalogSource>;
     readonly services?: (runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>;
     readonly pageSize?: number;
+    readonly maxTurnRequests?: number;
   } = {},
 ): HostRun {
   const script = [...(options.script ?? [])];
@@ -187,6 +188,7 @@ function startHost(
     directory,
     ...(options.world === undefined ? {} : { world: options.world }),
     ...(options.pageSize === undefined ? {} : { pageSize: options.pageSize }),
+    ...(options.maxTurnRequests === undefined ? {} : { maxTurnRequests: options.maxTurnRequests }),
     services: (runner) => Layer.mergeAll((options.services ?? SessionServices)(runner), scripted, Layer.succeed(ModelStreamInterval, Millis.make(0))),
   });
   const capture = Logger.make((log) => {
@@ -835,6 +837,28 @@ test("AG13: session/close stops the turn under way, whose prompt ends cancelled,
   expect(result.prompted.stopReason).toBe("cancelled");
   expect(result.after).toMatchObject({ code: -32002 });
   expect(endings(await factsOn(storeFileOf(host.directory, result.sessionId)))).toEqual(["Interrupted"]);
+});
+
+test("AG21: a turn that would make more model requests than maxTurnRequests ends with max_turn_requests", async () => {
+  const host = startHost({
+    world: echoWorld,
+    maxTurnRequests: 2,
+    script: [
+      answer({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "1" } }),
+      answer({ _tag: "ToolCall", call: "echo-2", tool: "echo", input: { say: "2" } }),
+      answer({ _tag: "Text", text: "Never asked for." }),
+    ],
+  });
+  const { app } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    return { sessionId, prompted: await ctx.request("session/prompt", say(sessionId, "Echo forever.")) };
+  });
+  await host.stop();
+  expect(result.prompted.stopReason).toBe("max_turn_requests");
+  expect(host.targets).toHaveLength(2);
+  expect(endings(await factsOn(storeFileOf(host.directory, result.sessionId)))).toEqual(["Vetoed"]);
 });
 
 test("AG16: by default a response after a tool call with thinking but no answer is asked again; the client gets the answer, not the feedback, and end_turn", async () => {
