@@ -10,10 +10,11 @@
  * failed or gave no answer, or the answer itself when the last response did not stream it. Each tool
  * call is shown as it ends: the tool and its input, then what it returned or why it failed. Before a tool call that needs permission runs, the question is recorded
  * (`PermissionAsked`), and the REPL asks it: the user picks an option, which is recorded as the
- * answer (`PermissionAnswered`). Ctrl+C at the question rejects the call.
+ * answer (`PermissionAnswered`). Ctrl+C at the question rejects the call. While a turn runs, Ctrl+C
+ * interrupts it, and other keys are dropped (`turn-keys.ts`).
  */
 
-import { Console, Effect, PubSub } from "effect";
+import { Console, Deferred, Effect, PubSub } from "effect";
 import { Prompt } from "effect/cli";
 import type { Fact } from "../../agent-machine/fact.ts";
 import { answerPicking, OptionId, type PermissionQuestion, questionIn } from "../../agent-policy/permissions.ts";
@@ -25,6 +26,7 @@ import { command, completions, offered } from "./commands.ts";
 import { bracketedPaste, Multiline } from "./multiline.ts";
 import { answerTo, ask, type Config, endingOf, type Host, lastTurn, logFileOf } from "./session.ts";
 import type { LeftRunning } from "../../agent-machine/left-running.ts";
+import { type TurnKeys, turnKeys } from "./turn-keys.ts";
 
 /** Of each session the REPL follows: the turns whose last response printed its text as it arrived. */
 const streamedLast = new WeakMap<Session, Map<TurnId, boolean>>();
@@ -38,9 +40,10 @@ const replyTo = (session: Session, facts: ReadonlyArray<Fact>): string | undefin
   const ending = endingOf(facts, turn);
   const answer = answerTo(facts, turn);
   if (ending?._tag === "Failed") return `(the turn failed: ${ending.failure})`;
-  if (answer === "") return `(the turn ended ${ending?._tag ?? "with nothing recorded"}, with no answer)`;
-  // An answer cut short by a length limit (the output limit, or the context window) says so.
-  const cut = ending?._tag === "CutShort" ? "(cut short: the response reached its length limit)" : undefined;
+  if (answer === "") return ending?._tag === "Interrupted" ? "(interrupted)" : `(the turn ended ${ending?._tag ?? "with nothing recorded"}, with no answer)`;
+  // An answer cut short by a length limit (the output limit, or the context window), or by Ctrl+C, says so.
+  const cut =
+    ending?._tag === "CutShort" ? "(cut short: the response reached its length limit)" : ending?._tag === "Interrupted" ? "(interrupted)" : undefined;
   if (turn !== undefined && streamedLast.get(session)?.get(turn) === true) return cut;
   return cut === undefined ? answer : `${answer}\n${cut}`;
 };
@@ -51,7 +54,28 @@ const printReply = (session: Session) =>
     return reply === undefined ? Effect.void : Console.log(reply);
   });
 
-const turn = (session: Session, input: string) => ask(session, input).pipe(Effect.andThen(printReply(session)));
+/** Of each session the REPL follows at a terminal: who holds its keys while a turn runs. */
+const keysOf = new WeakMap<Session, TurnKeys>();
+
+/**
+ * A turn: the input to the model, and what is printed once it ends. While it runs the REPL holds
+ * the terminal's keys (`turn-keys.ts`): Ctrl+C interrupts the turn, which ends `Interrupted`.
+ */
+const turn = (session: Session, input: string) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const keys = keysOf.get(session);
+      if (keys !== undefined) {
+        const interrupted = yield* Deferred.make<void>();
+        yield* Effect.acquireRelease(
+          Effect.sync(() => keys.hold(() => Deferred.doneUnsafe(interrupted, Effect.void))),
+          () => Effect.sync(keys.release),
+        );
+        yield* Effect.forkScoped(Deferred.await(interrupted).pipe(Effect.andThen(session.cancel), Effect.ignore));
+      }
+      yield* ask(session, input);
+    }),
+  ).pipe(Effect.andThen(printReply(session)));
 
 /** The input `call` was given, as the facts hold it with the call. */
 const inputOf = (facts: ReadonlyArray<Fact>, call: CallId): string => {
@@ -120,6 +144,8 @@ const following = (session: Session) =>
   Effect.gen(function* () {
     const recorded = yield* session.subscribe;
     const streamed = yield* session.streamed;
+    const keys = turnKeys();
+    keysOf.set(session, keys);
     const last = new Map<TurnId, boolean>();
     streamedLast.set(session, last);
     // The kind of text the line printed last holds, while it is not ended; whether this response printed any answer.
@@ -159,10 +185,10 @@ const following = (session: Session) =>
         if (question === undefined) return;
         const rejecting = question.options.find((option) => option.kind === "reject_once")?.optionId ?? OptionId.make("reject-once");
         yield* endLine;
-        const picked = yield* Prompt.Select({
-          message: shown(question, inputOf(yield* session.facts, call)),
-          choices: question.options.map((option) => ({ title: option.name, value: option.optionId })),
-        }).pipe(Effect.catchTag("QuitError", () => Effect.succeed(rejecting)));
+        const message = shown(question, inputOf(yield* session.facts, call));
+        const picked = yield* keys
+          .lend(Prompt.Select({ message, choices: question.options.map((option) => ({ title: option.name, value: option.optionId })) }))
+          .pipe(Effect.catchTag("QuitError", () => Effect.succeed(rejecting)));
         yield* session.observe({ _tag: "PermissionAnswered", call, answer: answerPicking(picked) });
       });
     yield* Effect.forkScoped(Effect.forever(PubSub.take(recorded).pipe(Effect.flatMap(answer))));
