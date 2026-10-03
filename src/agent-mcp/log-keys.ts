@@ -31,6 +31,8 @@ export const logKeys = {
     progress: "mcp.server.progress",
     /** The server said its tool list changed (`notifications/tools/list_changed`). */
     toolsChanged: "mcp.server.tools_changed",
+    /** A server's tool is not offered: its name, once made one providers take, is too long or the same as another's. */
+    toolLeftOut: "mcp.server.tool_left_out",
     /** The server's input closed: nothing more can be sent to it. */
     stdinClosed: "mcp.server.stdin_closed",
   },

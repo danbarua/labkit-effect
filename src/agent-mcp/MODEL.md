@@ -16,6 +16,9 @@ tried first (TODO.md, the MCP servers entry): it drops what a server sends unask
   that is ready. A server must answer `initialize` within `connectTimeout` (30 seconds unless a
   host says).
 - `source.ts`: a server's tools as a tool source, under the namespace `mcp__<server>`.
+- `servers.ts`: the servers one session keeps, `startMcpServers(given, roots)`: their tool sources,
+  the notices that tell the model of a server not running, and their changes as the session
+  records them (`McpServerChanged`).
 
 ## What is not built
 
@@ -60,4 +63,14 @@ tried first (TODO.md, the MCP servers entry): it drops what a server sends unask
 - MT3. A call's input must be a JSON object; other input is refused (`InputRejected`). Its result
   is recorded as the server sent it (`mcpToolResult`); one with `isError: true` is the tool's
   failure (`Reported`). A call the server does not answer fails `Reported`, saying why.
+- MK1. A session's servers are started at once, in its scope. Once all have settled, the tools of
+  those that are ready are tool sources, in the order the servers were given. A server reached at a
+  URL is not started: it has failed, saying its transport is not supported.
+- MK2. The model is told, once, of each server that is not running when it is first asked, and of
+  each that stops later; and once more when one runs again. A server ready when the session starts
+  is not mentioned.
+- MK3. Each change of a server's state is recorded as `McpServerChanged`, from the state it is in
+  when recording starts; a server still connecting is not recorded. A server that is ready offers its
+  tools by the names they are offered under. `reconnect` starts a server's process again and gives
+  its state once it has settled.
 

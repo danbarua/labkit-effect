@@ -4,8 +4,8 @@
  * then `roots` and `slow`); `echo` answers its `message`; `roots` asks the client for its roots
  * (`roots/list`) and answers with them; `slow` never answers, and when the client cancels it
  * (`notifications/cancelled`) the server logs "cancelled <id>" (`notifications/message`); an
- * unknown tool is the error -32602; `exit` ends the server's process with exit code 7. After
- * `notifications/initialized` it logs "initialized".
+ * unknown tool is the error -32602; `exit` ends the server's process with exit code 7, and is
+ * listed only when `MCP_FAKE_EXIT=1`. After `notifications/initialized` it logs "initialized".
  */
 
 const write = (message: unknown) => process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -13,7 +13,9 @@ const tools = {
   echo: { name: "echo", description: "Answers its message.", inputSchema: { type: "object", properties: { message: { type: "string" } }, required: ["message"] }, annotations: { readOnlyHint: true } },
   roots: { name: "roots", description: "Answers with the client's roots.", inputSchema: { type: "object" } },
   slow: { name: "slow", description: "Never answers.", inputSchema: { type: "object" } },
+  exit: { name: "exit", description: "Ends the server's process.", inputSchema: { type: "object" } },
 };
+const listed = process.env["MCP_FAKE_EXIT"] === "1" ? [tools.roots, tools.slow, tools.exit] : [tools.roots, tools.slow];
 /** Calls waiting for the client's answer to the server's own request, by that request's id. */
 const asked = new Map<string, number | string>();
 let next = 0;
@@ -41,7 +43,7 @@ const handle = (message: { id?: number | string; method?: string; params?: Recor
       return write({
         jsonrpc: "2.0",
         id: message.id,
-        result: params["cursor"] === "2" ? { tools: [tools.roots, tools.slow] } : { tools: [tools.echo], nextCursor: "2" },
+        result: params["cursor"] === "2" ? { tools: listed } : { tools: [tools.echo], nextCursor: "2" },
       });
     case "tools/call": {
       const args = (params["arguments"] ?? {}) as Record<string, unknown>;
