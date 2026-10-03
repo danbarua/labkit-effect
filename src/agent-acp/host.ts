@@ -57,12 +57,13 @@ import { MaxHolds, ModelRequestPolicies, type Target, ToolCallPolicies, type Too
 import { SourcedToolRunner, ToolSources, toolsOf } from "../agent-session/tool-sources.ts";
 import { FileBackedSessionStore } from "../agent-session/file-session-store.ts";
 import { endTurnLeftRunning, openSession, type Services, type Session } from "../agent-session/loop.ts";
-import type { SessionStore } from "../agent-session/session-store.ts";
+import type { SessionStore, SessionStoreFailed } from "../agent-session/session-store.ts";
 import { reportedBy } from "../agent-session/origin.ts";
 import { modelOf } from "../agent-session/configuration/session-setup.ts";
 import { optionsFor, type Options } from "../agent-session/configuration/options.ts";
+import { type ConfigurationGate, makeConfigurationGate } from "../agent-session/configuration/gate.ts";
 import { knownCapabilities } from "../agent-session/configuration/well-known-models.ts";
-import { changeOf, configOptions, InvalidChange, permissionId, permissionModeOf, permissionOption } from "./config-options.ts";
+import { type Change, changeOf, configOptions, InvalidChange, permissionId, permissionModeOf, permissionOption } from "./config-options.ts";
 import { PermissionMode } from "../agent-policy/permissions.ts";
 import { acpUser, type Feed, startFeed } from "./feed.ts";
 import { logKeys } from "./log-keys.ts";
@@ -145,7 +146,34 @@ interface Opened {
   readonly context: Context.Context<Services>;
   readonly scope: Scope.Closeable;
   readonly feed: Feed;
+  /** When the user's changes are made: at once between turns, else held until the turn ends (agent-session G1–G3). */
+  readonly gate: ConfigurationGate<HeldChange, SessionStoreFailed>;
 }
+
+/** What a user changes of an open session: its model and settings, and its permission mode. */
+interface HeldChange {
+  readonly model?: Change | undefined;
+  readonly permissionMode?: PermissionMode | undefined;
+}
+
+/** Two changes as one: the later's model and permission mode, and the settings of both, the later's winning. */
+const mergeHeld = (held: HeldChange, next: HeldChange): HeldChange => ({
+  model:
+    next.model === undefined
+      ? held.model
+      : held.model === undefined
+        ? next.model
+        : { ...next.model, ...(held.model.settings === undefined && next.model.settings === undefined ? {} : { settings: { ...held.model.settings, ...next.model.settings } }) },
+  permissionMode: next.permissionMode ?? held.permissionMode,
+});
+
+/** The model the facts will ask from the next turn, with the change held, if any. */
+const withHeld = (configured: Target, held: HeldChange | undefined): Target => {
+  const change = held?.model;
+  if (change === undefined) return configured;
+  const settings = { ...configured.settings, ...change.settings };
+  return { provider: change.provider, model: change.model, ...(Object.keys(settings).length === 0 ? {} : { settings }) };
+};
 
 /** A session this connection holds: one it made, a draft until its first prompt and then open, or one it started from its facts, open. */
 interface Entry {
@@ -255,19 +283,38 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           knownCapabilities(target.provider, target.model).pipe(Effect.provideContext(known));
 
         /** The configuration of the session as it will be from the next turn, with what a change is taken against. */
+        /** Gives a user's change to the open session's gate; a change that could not be recorded is -32603. */
+        const submitted = (opened: Opened, change: HeldChange, configId: string) =>
+          opened.gate.submit(change).pipe(
+            Effect.catchTag("SessionStoreFailed", (error) =>
+              Effect.logError(logKeys.config.refused, { configId, doing: "recording the change", cause: error.message }).pipe(
+                Effect.andThen(Effect.fail(rpcError(ErrorCode.InternalError, `The change could not be recorded: ${error.message}`))),
+              ),
+            ),
+          );
+
+        /** Makes the change the open session's gate holds, if no turn runs; one that could not be recorded is logged. */
+        const settled = (entry: Entry) =>
+          entry.state._tag === "Open"
+            ? entry.state.opened.gate.settle.pipe(
+                Effect.catchTag("SessionStoreFailed", (error) => Effect.logError(logKeys.config.refused, { doing: "recording a change held until the turn ended", cause: error.message })),
+              )
+            : Effect.void;
+
         const configurationOf = (entry: Entry) =>
           Effect.gen(function* () {
+            const held = entry.state._tag === "Open" ? yield* entry.state.opened.gate.held : undefined;
             const configured: Options =
               entry.state._tag === "Draft"
                 ? yield* optionsOfDraft(entry.state.draft)
-                : yield* Effect.flatMap(Effect.flatMap(entry.state.opened.session.facts, configuredOf), optionsFor);
+                : yield* optionsFor(withHeld(yield* Effect.flatMap(entry.state.opened.session.facts, configuredOf), held));
             const models = yield* askable;
             const limit = (yield* capabilitiesOf(configured))?.output;
             return {
               configured,
               models,
               limit,
-              options: [...configOptions(configured, models, limit), permissionOption(entry.permissionMode)] as ReadonlyArray<SessionConfigOption>,
+              options: [...configOptions(configured, models, limit), permissionOption(held?.permissionMode ?? entry.permissionMode)] as ReadonlyArray<SessionConfigOption>,
             };
           }).pipe(Effect.provideContext(known));
 
@@ -299,7 +346,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
         const startSession = <A extends { readonly feed: Feed }, E, X>(
           id: AcpSessionId,
           world: WorldSession,
-          permissionMode: () => PermissionMode,
+          permissionMode: { readonly get: () => PermissionMode; readonly set: (mode: PermissionMode) => void },
           go: (session: Session, context: Context.Context<Services>, follow: (initial: ProjectionState) => Effect.Effect<Feed>) => Effect.Effect<A, E, X>,
         ) =>
           Effect.gen(function* () {
@@ -309,7 +356,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               // The session's blobs (its inputs' images and files) are kept in its folder, so a session gone on from its facts has them.
               const blobs = BlobsInFolder(join(sessionFolderOf(options.directory, id), "blobs"));
               const policies = Layer.mergeAll(
-                Layer.succeed(ToolCallPolicies, [permissionsFor(permissionMode, true)]),
+                Layer.succeed(ToolCallPolicies, [permissionsFor(permissionMode.get, true)]),
                 Layer.succeed(ModelRequestPolicies, [turnRequestLimit(options.maxTurnRequests)]),
               );
               const runner = SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, world.sources)));
@@ -322,8 +369,19 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   Scope.provide(scope),
                 );
 
+              const gate = yield* makeConfigurationGate<HeldChange, SessionStoreFailed>({
+                running: Effect.map(session.turn, (turn) => turn !== undefined),
+                merge: mergeHeld,
+                make: (change) =>
+                  Effect.gen(function* () {
+                    if (change.permissionMode !== undefined) permissionMode.set(change.permissionMode);
+                    if (change.model !== undefined)
+                      yield* session.observe({ _tag: "ModelChangeArrived", ...change.model }).pipe(Effect.provideContext(context), reportedBy(acpUser));
+                    yield* Effect.logInfo(logKeys.config.made, { model: change.model, permissionMode: change.permissionMode });
+                  }),
+              });
               const made = yield* go(session, context, follow);
-              return { ...made, session, context, scope };
+              return { ...made, session, context, scope, gate };
             }).pipe(Effect.onError(() => Scope.close(scope, Exit.void)));
           });
 
@@ -341,7 +399,13 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             const record = recordFor(entry.cwd, text);
             yield* writeRecord(options.directory, entry.id, record).pipe(Effect.catch(failed("writing the session's record at its first prompt")));
             yield* Effect.logInfo(logKeys.record.written, { file: recordFileOf(options.directory, entry.id), cwd: record.cwd, titled: record.title !== undefined });
-            const opened = yield* startSession(entry.id, entry.world, () => entry.permissionMode, (session, context, follow) =>
+            const mode = {
+              get: () => entry.permissionMode,
+              set: (next: PermissionMode) => {
+                entry.permissionMode = next;
+              },
+            };
+            const opened = yield* startSession(entry.id, entry.world, mode, (session, context, follow) =>
               Effect.gen(function* () {
                 // The feed first: the session has no facts yet, and it sends everything from the opening on, live.
                 const feed = yield* follow(start);
@@ -512,7 +576,13 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               // The policy reads the entry's mode at each call; the entry exists once the session started, and until then the mode is the launcher's.
               const initialMode = options.permissionMode ?? "default";
               let held: Entry | undefined;
-              const opened = yield* startSession(sessionId, its, () => held?.permissionMode ?? initialMode, (session, context, follow) =>
+              const mode = {
+                get: () => held?.permissionMode ?? initialMode,
+                set: (next: PermissionMode) => {
+                  if (held !== undefined) held.permissionMode = next;
+                },
+              };
+              const opened = yield* startSession(sessionId, its, mode, (session, context, follow) =>
                 Effect.gen(function* () {
                   const left = leftRunning(yield* session.facts);
                   if (left !== undefined) {
@@ -648,8 +718,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                         yield* Effect.logWarning(logKeys.config.refused, { configId, value: params.value, cause: mode.reason });
                         return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, mode.reason, { configId }));
                       }
-                      entry.permissionMode = mode;
-                      yield* Effect.logInfo(logKeys.config.changed, { configId, value: mode, applies: "from the next tool call" });
+                      const said = entry.state._tag === "Draft" ? "made" : yield* submitted(entry.state.opened, { permissionMode: mode }, configId);
+                      if (entry.state._tag === "Draft") entry.permissionMode = mode;
+                      yield* Effect.logInfo(logKeys.config.changed, { configId, value: mode, applies: said === "made" ? "now: no turn runs" : "when the turn ends" });
                       return { configOptions: (yield* configurationOf(entry)).options };
                     }
                     const now = yield* configurationOf(entry);
@@ -668,22 +739,12 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                           ? draft
                           : chooseModel(draft, { provider: change.provider, model: change.model });
                       entry.state = { _tag: "Draft", draft: change.settings === undefined ? moved : saySettings(moved, change.settings) };
-                    } else {
-                      const { session, context } = entry.state.opened;
-                      yield* session.observe({ _tag: "ModelChangeArrived", ...change }).pipe(
-                        Effect.provideContext(context),
-                        reportedBy(acpUser),
-                        Effect.catchTag("SessionStoreFailed", (error) =>
-                          Effect.logError(logKeys.config.refused, { configId, doing: "recording the change", cause: error.message }).pipe(
-                            Effect.andThen(Effect.fail(rpcError(ErrorCode.InternalError, `The change could not be recorded: ${error.message}`))),
-                          ),
-                        ),
-                      );
                     }
+                    const said = entry.state._tag === "Draft" ? "draft" : yield* submitted(entry.state.opened, { model: change }, configId);
                     yield* Effect.logInfo(logKeys.config.changed, {
                       configId,
                       value: params.value,
-                      applies: entry.state._tag === "Draft" ? "to the draft" : "from the next turn",
+                      applies: said === "draft" ? "to the draft" : said === "made" ? "now: no turn runs" : "when the turn ends",
                     });
                     return { configOptions: (yield* configurationOf(entry)).options };
                   }),
@@ -707,6 +768,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 }
                 const self = yield* Effect.fiber;
                 entry.prompt = self;
+                // A change held while a turn ran with no prompt of this connection's (one gone on with at load) is made before this one starts.
+                yield* settled(entry);
                 const run =
                   prompt.length === 1 && text.trim() === "/export"
                     ? exportOf(entry)
@@ -723,7 +786,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   Effect.ensuring(
                     Effect.sync(() => {
                       entry.prompt = undefined;
-                    }),
+                    }).pipe(Effect.andThen(settled(entry))),
                   ),
                 );
               }),

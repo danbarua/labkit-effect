@@ -49,7 +49,7 @@ model.
       for the session read from the facts; the CLI's `--permission-mode` and its REPL question;
       for ACP, the `session/request_permission` request and its answer, where the client's
       cancelled outcome is a refusal (`src/agent-acp/permission.ts`), asked by the host's feed; the
-      mode as an ACP option the user changes (`permission_mode`), from the next call. To do: `plan`
+      mode as an ACP option the user changes (`permission_mode`), from the next turn. To do: `plan`
       and `auto`; allow and deny rules by tool and argument; resetting permissions; a change of
       mode recorded in the session's facts (the ACP host keeps it only while the session is open).
       - `run_command` (the CLI's and the ACP host's) runs any shell command, and permission is

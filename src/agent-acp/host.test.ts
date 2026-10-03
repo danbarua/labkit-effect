@@ -92,6 +92,15 @@ const held = (text: string, started: Deferred.Deferred<void>, release?: Deferred
     return yield* answer({ _tag: "Text", text: "" })(turn, target).pipe(Effect.map((responded) => ({ ...responded, parts: [toPart({ _tag: "Text", text })] })));
   });
 
+/** A request that passes on `call` as a completed part, says it started, waits for `release`, then answers with the call. */
+const heldCall = (call: Extract<Piece, { _tag: "ToolCall" }>, started: Deferred.Deferred<void>, release: Deferred.Deferred<void>): Reply => (turn, target) =>
+  Effect.gen(function* () {
+    yield* (yield* ModelStream)({ _tag: "Part", part: toPart(call) });
+    yield* Deferred.succeed(started, undefined);
+    yield* Deferred.await(release);
+    return yield* answer(call)(turn, target);
+  });
+
 /** A request that passes on `call` as a completed part, says it started, and never answers. */
 const heldAfterCall = (call: Extract<Piece, { _tag: "ToolCall" }>, started: Deferred.Deferred<void>): Reply => () =>
   Effect.gen(function* () {
@@ -507,7 +516,7 @@ test("AG20: update_plan sends the whole plan to the editor as a plan update, wit
   });
 });
 
-test("AG18: the permission mode is an option of category mode; changed, it applies from the next call: a write runs without asking, then is asked about again", async () => {
+test("AG18: the permission mode is an option of category mode; changed between turns, it applies at once: a write runs without asking, then is asked about again", async () => {
   const write = (call: string) => answer({ _tag: "ToolCall", call, tool: "write_file", input: { path: "a.txt", content: call } });
   const host = startHost({ script: [write("w-1"), answer({ _tag: "Text", text: "One." }), write("w-2"), answer({ _tag: "Text", text: "Two." })] });
   const { app, log } = sdkClient();
@@ -534,10 +543,19 @@ test("AG18: the permission mode is an option of category mode; changed, it appli
   expect(result.refused).toMatchObject({ code: -32602 });
 });
 
-test("AG5: set_config_option changes the draft; once the session is open it is ModelChangeArrived from the user through ACP, taken at the next step; a value not offered is -32602", async () => {
+test("AG5: set_config_option changes the draft; once the session is open it is ModelChangeArrived from the user through ACP, held while a turn runs and made when it ends; a value not offered is -32602", async () => {
   const started = Deferred.makeUnsafe<void>();
   const release = Deferred.makeUnsafe<void>();
-  const host = startHost({ script: [answer({ _tag: "Text", text: "One." }), held("Two.", started, release), answer({ _tag: "Text", text: "Three." })] });
+  // The second turn takes two steps: a tool call, then its answer. The change made during its first step waits for its end.
+  const host = startHost({
+    world: echoWorld,
+    script: [
+      answer({ _tag: "Text", text: "One." }),
+      heldCall({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "2" } }, started, release),
+      answer({ _tag: "Text", text: "Two." }),
+      answer({ _tag: "Text", text: "Three." }),
+    ],
+  });
   const { app } = sdkClient();
   const result = await app.connectWith(host.stream, async (ctx) => {
     await initialize(ctx);
@@ -554,8 +572,9 @@ test("AG5: set_config_option changes the draft; once the session is open it is M
     return { sessionId, changed, refused };
   });
   await host.stop();
+  // The answer shows the change held, as the next turn will run.
   expect(result.changed.configOptions.find((option) => option.id === "model")).toMatchObject({ currentValue: "openai/gpt-6-luna" });
-  expect(host.targets).toEqual(["openai/gpt-6-sol", "openai/gpt-6-sol", "openai/gpt-6-luna"]);
+  expect(host.targets).toEqual(["openai/gpt-6-sol", "openai/gpt-6-sol", "openai/gpt-6-sol", "openai/gpt-6-luna"]);
   expect(result.refused).toMatchObject({ code: -32602 });
   const facts = await factsOn(storeFileOf(host.directory, result.sessionId));
   expect(facts[0]).toMatchObject({ observation: { model: { settings: { maxOutputTokens: 16384 } } } });

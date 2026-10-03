@@ -222,9 +222,11 @@ twice.
   `cancelled`. A prompt request the client cancels (`$/cancel_request`) cancels its turn the same
   way. The session takes the next prompt.
 - AG5. `session/set_config_option` changes a draft (`chooseModel`, `saySettings`). On an open session
-  it is `ModelChangeArrived` from the user through ACP, taken at once between turns and otherwise
-  at the turn's next step (agent-machine M1); the answer is every option as the configuration will
-  be, the changes not yet taken included, and the same options are sent as `config_option_update`
+  it goes through the session's configuration gate (agent-session G1–G3): made at once between
+  turns (`ModelChangeArrived` from the user through ACP), and while a turn runs held until it ends,
+  so the model that started the turn completes it. The gate is settled when a prompt's turn ends
+  and before a prompt starts one. The answer is every option as the configuration will be, the
+  changes held or not yet taken included, and the same options are sent as `config_option_update`
   (a client may draw its controls from updates alone). A value the option does not offer, or an
   option no session has, is -32602, and sends nothing.
 - AG6. `/export`, alone in a prompt, writes the session's transcript (`markdownOf`) to
@@ -264,7 +266,8 @@ twice.
   not a whole number of 0 or more is logged, and 1 is used.
 - AG18. Each session has a permission mode, which the host keeps: it starts as the launcher says
   (`LABKIT_ACP_PERMISSION_MODE`, else `default`) and is the option `permission_mode` (category
-  `mode`); a change applies from the next tool call. A value that is not a mode is -32602.
+  `mode`); a change goes through the gate as a change of model does (AG5): at once between turns,
+  and while a turn runs when it ends. A value that is not a mode is -32602.
 - AG19. The host takes images and embedded resources in a prompt (`promptCapabilities.image`,
   `embeddedContext`): each is put in the session's blob store, kept in its folder (`blobs/`), and
   attached to the input by reference, with its media type and the name its URI ends in; a

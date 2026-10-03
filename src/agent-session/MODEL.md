@@ -53,3 +53,19 @@ under way with `turn`. The CLI still gives observations with `observe` and waits
   once its requests have reported how far they got (agent-machine X1–X3). A call waiting for a
   permission answer ends `NotRun` and the question is no longer waited on. With no turn under way
   `cancel` records nothing.
+
+## Rules: when a user's change of configuration is made
+
+A user's change of model or settings is a fact once it is observed (`ModelChangeArrived`). When it
+is observed is decided outside the core, by the session's configuration gate
+(`configuration/gate.ts`), so that the model that started a turn completes it. The fallback chain's
+change does not go through the gate: it is observed at once, and the core takes it between steps.
+
+- G1. While no turn runs, a change is made at once.
+- G2. While a turn runs, a change is held; changes held are merged in the order they came, the
+  later's fields winning, and made as one when the host settles the gate: when the turn ends, and
+  before a turn starts. Settling while a turn runs makes nothing.
+  A change held is not a fact: if the process ends while it is held, it is lost.
+- G3. A change submitted after the turn has ended and before the host settles is made with the one
+  held: none is lost.
+

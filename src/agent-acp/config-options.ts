@@ -168,7 +168,7 @@ export const permissionId = "permission_mode";
 export const permissionOption = (mode: PermissionMode): SessionConfigOption => ({
   id: SessionConfigId.make(permissionId),
   name: "Permissions",
-  description: "Which tool calls run without asking, from the next call.",
+  description: "Which tool calls run without asking, from the next turn.",
   category: "mode",
   type: "select",
   currentValue: SessionConfigValueId.make(mode),

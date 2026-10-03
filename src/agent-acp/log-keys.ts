@@ -41,8 +41,10 @@ export const logKeys = {
     unreadable: "acp_host.record.unreadable",
   },
   config: {
-    /** `session/set_config_option` changed the configuration: of the draft, or from the next turn. */
+    /** `session/set_config_option` changed the configuration: of the draft, at once (no turn ran), or when the turn ends. */
     changed: "acp_host.config.changed",
+    /** A user's change was made: observed, or set; one held while a turn ran is made when it ends. */
+    made: "acp_host.config.made",
     /** `session/set_config_option` was refused: why. */
     refused: "acp_host.config.refused",
     /** `LABKIT_ACP_PERMISSION_MODE` names no permission mode: its value, and the mode used instead. */
