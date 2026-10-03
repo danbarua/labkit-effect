@@ -14,7 +14,8 @@ const invoke = async (args: ReadonlyArray<string>, env: Record<string, string> =
     stdin: new Blob([""]),
     stdout: "pipe",
     stderr: "pipe",
-    env: { PATH: process.env["PATH"] ?? "", NO_COLOR: "1", FORCE_COLOR: "0", ...env },
+    // The test's folder is its home too, so the user's own configuration (~/.config/labkit) is not read.
+    env: { PATH: process.env["PATH"] ?? "", HOME: testFolder(), NO_COLOR: "1", FORCE_COLOR: "0", ...env },
   });
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   return { stdout, stderr, code };
@@ -54,6 +55,19 @@ test("a model whose provider has no key set is not asked: it names the variable"
   const result = await invoke(["-p", "Hello", "--model", "gpt-5.5"]);
   expect(result.code).not.toBe(0);
   expect(result.stdout + result.stderr).toContain("Set OPENAI_API_KEY before calling openai/* models, or try a different model with --model provider/model.");
+});
+
+test("a configuration that cannot be used is said, naming the layer, before any model is asked", async () => {
+  const result = await invoke(["-p", "Hello", "--settings", '{"toolCalls": ["loopBraker"]}']);
+  expect(result.code).not.toBe(0);
+  expect(result.stdout + result.stderr).toContain('The configuration cannot be used: --settings: toolCalls[0]: "loopBraker" is neither in plugins nor a plug-in');
+});
+
+test("an MCP server the configuration says is required, which does not start, keeps the session from opening, saying why", async () => {
+  const servers = JSON.stringify({ mcpServers: { missing: { command: "/no/such/server", required: true } } });
+  const result = await invoke(["-p", "Hello", "--model", "gpt-5.5", "--mcp-config", servers], { OPENAI_API_KEY: "set" });
+  expect(result.code).not.toBe(0);
+  expect(result.stdout + result.stderr).toContain("The session needs MCP servers that are not running: missing (it failed: its process could not be started:");
 });
 
 test("--resume with no id is given an empty one, which asks for a session to be picked", () => {

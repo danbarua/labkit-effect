@@ -26,7 +26,9 @@ import { type McpServer, startMcpServer } from "./server.ts";
 import { mcpToolSource, namespaceOf } from "./source.ts";
 
 /** A server a host was given: one to start as a process, or one at a URL, which is not started. */
-export type GivenServer = { readonly _tag: "Stdio"; readonly server: McpServerStdio } | { readonly _tag: "Unsupported"; readonly name: string; readonly transport: string };
+export type GivenServer =
+  | { readonly _tag: "Stdio"; readonly server: McpServerStdio; readonly connectTimeout?: Duration.Input | undefined }
+  | { readonly _tag: "Unsupported"; readonly name: string; readonly transport: string };
 
 type Change = Extract<Observation, { _tag: "McpServerChanged" }>;
 
@@ -71,8 +73,8 @@ export const startMcpServers = (
 ): Effect.Effect<McpServers, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const started = yield* Effect.forEach(
-      given.flatMap((each) => (each._tag === "Stdio" ? [each.server] : [])),
-      (server) => startMcpServer(server, roots, options),
+      given.flatMap((each) => (each._tag === "Stdio" ? [each] : [])),
+      (each) => startMcpServer(each.server, roots, { connectTimeout: each.connectTimeout ?? options.connectTimeout }),
       { concurrency: "unbounded" },
     );
     const unsupported = given.flatMap((each) =>

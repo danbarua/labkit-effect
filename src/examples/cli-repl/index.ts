@@ -14,6 +14,11 @@
  * With `--output-format json` the answer comes with the session's figures; with `stream-json` each
  * fact is printed as it is recorded, then the result.
  *
+ * Its policies, turn-end hooks and MCP servers are its configuration (`configuration.ts`): its own
+ * defaults, the user's file (`~/.config/labkit/policies.yml`), the project's and the local one (in
+ * `.labkit/` in the folder it runs in), `--settings`, `--mcp-config`, then the flags
+ * (`--permission-mode`, `--max-turns`, `--max-budget-usd`), the last write winning.
+ *
  * Each session's facts and log are kept in `logs/cli/<session>/` (`agent-host/directory.ts`); `--continue` goes on from the
  * one written to last, `--resume <session>` from the one named (with no id, one picked from a list), so `bun run cli:watch --continue` restarts on a change to the code and
  * keeps the conversation.
@@ -23,6 +28,7 @@
  * cli` keeps bun's echo of the script off stdout.
  */
 
+import { cliConfiguration } from "./configuration.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Console, Effect, Option, Stdio, Stream } from "effect";
 import { Argument, Command, Flag, Prompt } from "effect/cli";
@@ -67,22 +73,22 @@ const flags = {
     ["default", "manual", "acceptEdits", "dontAsk", "bypassPermissions"],
     "When a tool call that changes things runs: default asks (manual is the same), acceptEdits runs file edits, dontAsk refuses, bypassPermissions runs all",
   ),
+  sessionId: text("session-id", "The new session's id"),
+  maxTurns: optional(Flag.Int("max-turns").pipe(Flag.withDescription("The most model requests one turn makes; the next ends it"))),
+  maxBudgetUsd: optional(Flag.Finite("max-budget-usd").pipe(Flag.withDescription("The session's budget in US dollars: once it has cost that much, its next model request ends its turn"))),
+  mcpConfig: Flag.String("mcp-config").pipe(Flag.atLeast(0), Flag.withDescription("MCP servers, as JSON or a file of it, as Claude Code's .mcp.json; the flag may be given again")),
+  strictMcpConfig: toggle("strict-mcp-config", "Use only the MCP servers --mcp-config names"),
+  settings: text("settings", "Settings: JSON, or a file of JSON or YAML, over the files"),
+  settingSources: text("setting-sources", "Which settings files to read, comma-separated: user, project, local (all when not given)"),
   // Not built yet:
-  // sessionId: text("session-id", "The session's id"),
   // name: text("name", "Session display name", "n"),
   // forkSession: toggle("fork-session", "Fork the continued or resumed session"),
   // fallbackModel: text("fallback-model", "Comma-separated fallback models"),
-  // maxTurns: positive("max-turns", true),
-  // maxBudgetUsd: positive("max-budget-usd"),
   // autocompact: text("autocompact", "Auto-compact window: auto, a token count or a percentage"),
   // tools: list("tools", "Tool names, default, or an empty string"),
   // allowedTools: list("allowedTools", "Tool permission allow rules", "allowed-tools"),
   // disallowedTools: list("disallowedTools", "Tool permission deny rules", "disallowed-tools"),
   // permissionPromptTool: text("permission-prompt-tool", "MCP permission handler (print mode)"),
-  // mcpConfig: list("mcp-config", "MCP configuration JSON or file paths"),
-  // strictMcpConfig: toggle("strict-mcp-config", "Use only the MCP configurations given"),
-  // settings: text("settings", "Settings JSON or file path"),
-  // settingSources: text("setting-sources", "Comma-separated settings sources: user,project,local"),
   // addDir: list("add-dir", "Additional working directories"),
   // agents: text("agents", "Custom agent definitions as JSON or a JSON file path"),
   // agent: text("agent", "Agent to use for this session"),
@@ -137,9 +143,17 @@ const resumed = (named: string, interactive: boolean) =>
  */
 const configOf = (options: Options, interactive: boolean) =>
   Effect.gen(function* () {
-    const mode = options.permissionMode ?? "default";
+    const configuration = yield* cliConfiguration(process.cwd(), {
+      settingSources: options.settingSources,
+      settings: options.settings,
+      mcpConfig: options.mcpConfig,
+      strictMcpConfig: options.strictMcpConfig,
+      permissionMode: options.permissionMode === "manual" ? "default" : options.permissionMode,
+      maxTurns: options.maxTurns,
+      maxBudgetUsd: options.maxBudgetUsd,
+    });
     const permissions = {
-      permissionMode: mode === "manual" ? "default" : mode,
+      configuration,
       canAsk: interactive && !options.print,
       persist: !options.noSessionPersistence,
       strictToolInput: options.strictToolInput,
@@ -151,9 +165,10 @@ const configOf = (options: Options, interactive: boolean) =>
     const system = yield* systemOf(options);
     if (options.continue && options.resume !== undefined) return yield* invalid("Pass --continue or --resume, not both.");
     if (!options.continue && options.resume === undefined) {
-      const config: Config = { sessionId: crypto.randomUUID(), target: yield* targetOf(options.model), settings, system, ...permissions };
+      const config: Config = { sessionId: options.sessionId ?? crypto.randomUUID(), target: yield* targetOf(options.model), settings, system, ...permissions };
       return config;
     }
+    if (options.sessionId !== undefined) return yield* invalid("--session-id names a new session: a continued or resumed one keeps its own.");
     if (system !== undefined) return yield* invalid("A continued session keeps the system prompt it opened with: all sessions have ImmutableSystemPrompt until further notice.");
     const latest = options.resume === undefined ? yield* latestSession(storeFolder) : yield* resumed(options.resume, interactive);
     const now = yield* modelOf(latest.facts);
@@ -165,6 +180,7 @@ const configOf = (options: Options, interactive: boolean) =>
       SessionNotFound: (error) => Effect.fail(invalid(`No session ${error.sessionId} in ${error.root}.`)),
       NoSessionStored: (error) => Effect.fail(invalid(`No session to continue: ${error.root} holds none.`)),
       SessionStoreFailed: (error) => Effect.fail(invalid(error.message)),
+      ConfigInvalid: (error) => Effect.fail(invalid(`The configuration cannot be used: ${error.message}`)),
     }),
   );
 

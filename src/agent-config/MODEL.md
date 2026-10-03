@@ -37,7 +37,9 @@ mcpServers:
 
 ## What is not built
 
-- The hosts read no layer yet: the CLI and the ACP host compose their lists in code.
+- The ACP host reads no layer yet: it composes its lists in code. The CLI reads its layers
+  (`examples/cli-repl/configuration.ts`): its defaults, the files, `--settings`, `--mcp-config`,
+  then its flags.
 - `every` does not yet say which entry, by its name, vetoed.
 - A change of settings during a session (a draft, taken between turns): TODO.md, Configuration.
 - Plug-ins on `knownModels`, `settling` and `toolSources`: the seams are there, no built-in is on

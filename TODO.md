@@ -113,9 +113,10 @@ model.
       machine over a session-scoped process group; the ACP host starts the servers a client names,
       offers their tools after the world's under `mcp__<server>`, tells the model of one not
       running, records their states (`McpServerChanged`), and serves `/mcp` and
-      `/mcp reconnect <server>`. To do: `required: true` for a server in the configuration file,
-      which makes a session fail to open when the server does not connect (with the config
-      loader's wiring); MCP servers in the CLI; the Streamable HTTP transport; tools a server offers
+      `/mcp reconnect <server>`; the CLI starts the servers its configuration names (its files,
+      `--mcp-config`), and one marked `required: true` that does not connect keeps the session from
+      opening. To do: the ACP host reading the configuration (its servers, and `required`); `/mcp`
+      in the REPL; the Streamable HTTP transport; tools a server offers
       after the session opened (after a reconnect, or `notifications/tools/list_changed`), with
       per-turn tool lists; sampling and elicitation; a result's images and audio sent to the model
       as images and audio where its provider takes them in a tool's result (Anthropic's does), not
