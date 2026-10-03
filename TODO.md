@@ -127,6 +127,33 @@ model.
 - [ ] The ACP host over Streamable HTTP (`Agent.layerHttp`), with a token and one holder for a
       session, for labkit-web.
 
+### Configuration
+
+- [ ] Plug-ins and `policies.yml`. Dan's decisions (2026-10-03):
+      - A plug-in declares a Schema for its settings, with a default for each, and the entries it
+        adds to the seams it knows (policies, turn-end hooks, tool sources, information providers);
+        the file is decoded against the registry's Schemas: `use` first, against the names
+        registered, then the entry with its plug-in's own Schema, refusing properties it does not
+        have. A JSON Schema made from the same Schemas is what an editor checks the file with while
+        it is typed. An extension is a module the file names, loaded before the entries are
+        decoded, registered as a built-in is.
+      - One ordered list per seam (`toolCalls:`, `modelRequests:`, ...), each entry `use: <name>`
+        and its settings; a plug-in on two seams is listed in each.
+      - A setting that is a function is named in the file: the loop breaker's `key` is a name
+        (`toolAndInput`) its plug-in maps to the function.
+      - The file is read with Effect's YAML (`effect/encoding/Yaml`), not `Bun.YAML`. Effect's
+        `Config.schema` drops a property it does not know without a word, so it does not read it.
+      - A session's plug-ins and settings are recorded when it opens; the file is what new sessions
+        start with. A change is observed (a draft) and taken (admitted) only between turns, when the
+        machines have settled: always, a model's change too and the permission mode's too. A user
+        who wants it sooner cancels the turn.
+      - The name an entry is used by (`use`) says which entry vetoed (`every` reports it, into the
+        origin and the log) and which turn-end hook held a turn, so a hook counts its own holds.
+      Not decided: where the file is kept.
+- [ ] Later (Dan, 2026-10-03): a change that tightens the permission mode taken between the steps
+      of a turn, delivered through the inbox as steering is; and a way to cancel input queued in the
+      inbox that has not been delivered.
+
 ### The coding agent
 
 - [ ] The CLI does what the ACP host does. Built: `/export` (`markdownOf`); `retryIncomplete`; the
