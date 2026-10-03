@@ -28,9 +28,9 @@ import { anthropicAt, openAiAt, openAiCompatAt } from "../../../tests/support/pr
 import { runTest } from "../../../tests/support/run.ts";
 
 test("a provider that cannot be reached fails as a network error, retried first", async () => {
-  const gone = Bun.serve({ port: 0, fetch: () => new Response() });
-  const url = gone.url;
-  await gone.stop(true);
+  // Port 1 on this machine has no server: the connection is refused. (A port freed by a server the
+  // test stopped can be taken by another test's server meanwhile, which answers.)
+  const url = new URL("http://127.0.0.1:1/");
   const logged: Array<unknown> = [];
   const observed = await runTest(
     Effect.gen(function* () {
