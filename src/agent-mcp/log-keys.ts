@@ -19,6 +19,8 @@ export const logKeys = {
     notRead: "mcp.peer.not_read",
   },
   server: {
+    /** A server's state changed: what happened, the state before and after, its run, what it says, and its tools once ready. */
+    changed: "mcp.server.changed",
     /** The server answered `initialize`: the version offered and the one it answered, and what it says of itself. */
     initialized: "mcp.server.initialized",
     /** The server wrote a line to stderr. */

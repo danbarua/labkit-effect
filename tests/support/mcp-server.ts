@@ -4,7 +4,8 @@
  * then `roots` and `slow`); `echo` answers its `message`; `roots` asks the client for its roots
  * (`roots/list`) and answers with them; `slow` never answers, and when the client cancels it
  * (`notifications/cancelled`) the server logs "cancelled <id>" (`notifications/message`); an
- * unknown tool is the error -32602. After `notifications/initialized` it logs "initialized".
+ * unknown tool is the error -32602; `exit` ends the server's process with exit code 7. After
+ * `notifications/initialized` it logs "initialized".
  */
 
 const write = (message: unknown) => process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -54,6 +55,8 @@ const handle = (message: { id?: number | string; method?: string; params?: Recor
         }
         case "slow":
           return;
+        case "exit":
+          return process.exit(7);
         default:
           return write({ jsonrpc: "2.0", id: message.id, error: { code: -32602, message: `Unknown tool: ${String(params["name"])}` } });
       }

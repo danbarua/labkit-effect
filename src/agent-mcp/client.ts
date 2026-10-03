@@ -10,11 +10,12 @@
  * (`notifications/message`), the progress it reports, a change of its tool list and every line it
  * writes to stderr are logged.
  *
- * Results are decoded with `McpSchema`'s schemas: a field they do not have is left out, and a tool's
- * annotations not given take the defaults MCP states (`destructiveHint: true`, and so on).
+ * A tool's result is kept as the server sent it (`ToolResult`). The rest is decoded with
+ * `McpSchema`'s schemas: a field they do not have is left out, and a tool's annotations not given
+ * take the defaults MCP states (`destructiveHint: true`, and so on).
  */
 
-import { Data, Effect, Queue, Schema, type Scope, Stream } from "effect";
+import { Data, Effect, Queue, Schema, type Scope, type Sink, Stream } from "effect";
 import { McpSchema } from "effect/ai";
 import { type Wire, WireError, WireInput } from "effective-acp/json-rpc";
 import * as Methods from "effective-acp/methods";
@@ -57,8 +58,8 @@ export interface McpConnection {
   readonly initialized: McpSchema.InitializeResult;
   /** The server's tools, every page of them. */
   readonly tools: Effect.Effect<ReadonlyArray<McpSchema.Tool>, McpFailed>;
-  /** Calls a tool. A tool's own failure is a result with `isError`; `McpFailed` is the request's. */
-  readonly call: (name: string, args: Readonly<Record<string, unknown>>) => Effect.Effect<McpSchema.CallToolResult, McpFailed>;
+  /** Calls a tool, giving its result as the server sent it. A tool's own failure is a result with `isError: true`; `McpFailed` is the request's. */
+  readonly call: (name: string, args: Readonly<Record<string, unknown>>) => Effect.Effect<ToolResult, McpFailed>;
   /** Completes when the connection ends: the server's output closed, or the scope closed. */
   readonly closed: Effect.Effect<void>;
 }
@@ -68,8 +69,20 @@ const request = <Name extends string, P extends Schema.Top, R extends Schema.Top
 const notification = <Name extends string, P extends Schema.Top>(rpc: { readonly _tag: Name; readonly payloadSchema: P }) =>
   Methods.notification(rpc._tag, rpc.payloadSchema);
 
+/**
+ * A tool's result as the server sent it: a JSON object (`content`, and `structuredContent`,
+ * `isError` and whatever else it has), kept whole, so that it can be recorded as received.
+ */
+export const ToolResult = Schema.Record(Schema.String, Schema.Json);
+export type ToolResult = typeof ToolResult.Type;
+
 /** What this client asks of a server. */
-const calls = Methods.make(request(McpSchema.Initialize), request(McpSchema.Ping), request(McpSchema.ListTools), request(McpSchema.CallTool));
+const calls = Methods.make(
+  request(McpSchema.Initialize),
+  request(McpSchema.Ping),
+  request(McpSchema.ListTools),
+  Methods.request(McpSchema.CallTool._tag, McpSchema.CallTool.payloadSchema, ToolResult),
+);
 /** What this client tells a server. */
 const tells = Methods.make(notification(McpSchema.InitializedNotification));
 /** What this client serves. */
@@ -102,6 +115,13 @@ const wireOf = (stdout: Stream.Stream<Uint8Array, unknown>, stdin: Queue.Queue<U
   };
 };
 
+/** A running server's input, output and error output: a run's handle (`agent-process`), or a child's. */
+export interface ServerPipes {
+  readonly stdin: Sink.Sink<void, Uint8Array, never, unknown>;
+  readonly stdout: Stream.Stream<Uint8Array, unknown>;
+  readonly stderr: Stream.Stream<Uint8Array, unknown>;
+}
+
 /**
  * Starts `server` and connects to it, in the scope given; its process ends with the scope. `roots`
  * are what it is told when it asks (`roots/list`).
@@ -111,11 +131,22 @@ export const connectStdio = (
   roots: ReadonlyArray<Root>,
 ): Effect.Effect<McpConnection, McpFailed, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
-    const failed = (reason: string) => (cause: unknown) => new McpFailed({ server: server.name, reason, cause });
     const handle = yield* ChildProcess.make(server.command, [...server.args], {
       env: { ...process.env, ...server.env },
       ...(server.cwd === undefined ? {} : { cwd: server.cwd }),
-    }).pipe(Effect.mapError(failed(`${server.command} could not be started`)));
+    }).pipe(Effect.mapError((cause) => new McpFailed({ server: server.name, reason: `${server.command} could not be started`, cause })));
+    return yield* connect(server.name, handle, roots);
+  });
+
+/**
+ * Connects to the server named `name` over `pipes`, in the scope given: `initialize`, then
+ * `notifications/initialized`. `roots` are what it is told when it asks (`roots/list`).
+ */
+export const connect = (name: string, pipes: ServerPipes, roots: ReadonlyArray<Root>): Effect.Effect<McpConnection, McpFailed, Scope.Scope> =>
+  Effect.gen(function* () {
+    const server = { name };
+    const failed = (reason: string) => (cause: unknown) => new McpFailed({ server: name, reason, cause });
+    const handle = pipes;
     const stdin = yield* Queue.unbounded<Uint8Array>();
     yield* Stream.fromQueue(stdin).pipe(
       Stream.run(handle.stdin),

@@ -5,7 +5,7 @@ import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Logger } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
-import { connectStdio, McpFailed, protocolVersion } from "./client.ts";
+import { connectStdio, McpFailed, protocolVersion, type ToolResult } from "./client.ts";
 import { logKeys } from "./log-keys.ts";
 
 const fake = { name: "fake", command: process.execPath, args: [new URL("../../tests/support/mcp-server.ts", import.meta.url).pathname], env: {} };
@@ -25,8 +25,10 @@ const connected = <A, E>(use: (connection: Effect.Success<ReturnType<typeof conn
   ).then((value) => ({ value, logged: logged.flat() }));
 };
 
-const textOf = (result: { readonly content: ReadonlyArray<unknown> }) =>
-  result.content.flatMap((block) => (typeof block === "object" && block !== null && "text" in block ? [String(block.text)] : [])).join("");
+const textOf = (result: ToolResult) =>
+  (Array.isArray(result["content"]) ? result["content"] : [])
+    .flatMap((block) => (typeof block === "object" && block !== null && !Array.isArray(block) && typeof block["text"] === "string" ? [block["text"]] : []))
+    .join("");
 
 test("MC1 MC5: initialize offers this client's version and the server's answer is kept; its tools are listed across pages; a call gives the tool's result", async () => {
   const { value, logged } = await connected((connection) =>
