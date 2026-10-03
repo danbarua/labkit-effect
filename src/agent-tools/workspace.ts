@@ -2,8 +2,8 @@
  * Tools for a workspace, a folder on disk: `read_file` and `list_dir`, which read; `write_file` and
  * `edit_file`, which change it; and `run_command`, which runs a shell command in it. Each tool is its catalog entry (what the model is offered, with its kind, which
  * a permission policy reads) and the function that runs it, defined together, so a tool offered is
- * a tool that runs. `workspaceTools(root)` gives the catalog, for a session's opening, and the
- * `ToolRunner` that runs a call.
+ * a tool that runs. `workspaceTools(root)` gives the catalog, and the tool source (`ToolSource`,
+ * the host's own tools, with no namespace) that runs a call, given the file system.
  *
  * A path is relative to the root, or absolute; one that is not inside the root is not accepted.
  * `read_file` reads UTF-8 text, at most 256 KiB in one result; `line` (1-based) and `limit` (a
@@ -26,10 +26,11 @@
  */
 
 import { isAbsolute, relative, resolve } from "node:path";
-import { Data, Duration, Effect, FileSystem, Layer, Option, Schema } from "effect";
+import { Data, Duration, Effect, FileSystem, Option, Schema } from "effect";
 import { FailureText, ToolName } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
-import { ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
+import type { ToolSpec } from "../agent-session/contracts.ts";
+import type { ToolSource } from "../agent-session/tool-sources.ts";
 import { type Decoded, decoderOf, ignoredNote, jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
 import { parseJson, receivedText } from "../agent-session/received.ts";
@@ -241,37 +242,35 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
   const rejected = (problem: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "InputRejected", problem: FailureText.make(problem) } });
 
   /** Runs the tool a call names on its input, with the file system it is given. */
-  const runner = Layer.effect(
-    ToolRunner,
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      return {
-        run: (name, input) => {
-          const found = tools.find((each) => each.name === name);
-          if (found === undefined) return Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "NotFound" } });
-          const parsed = parseJson(input);
-          if ("reason" in parsed) return Effect.succeed(rejected(`The input could not be read: ${parsed.reason}.`));
-          return found.decode(parsed.value).pipe(
-            Effect.mapError((error) => new Rejected({ problem: `${name} does not take this input: ${error.message}` })),
-            Effect.flatMap(({ value, ignored }) => {
-              const note = ignoredNote(name, ignored);
-              const logged = ignored.length === 0 ? Effect.void : Effect.logWarning(logKeys.tools.inputIgnored, { tool: name, ignored });
-              return logged.pipe(
-                Effect.andThen(found.run(value)),
-                Effect.map((output): ToolOutcome => ({ _tag: "Succeeded", output: receivedText(`${output}${note}`) })),
-                Effect.catchTag("Reported", (error) => Effect.fail(new Reported({ message: `${error.message}${note}` }))),
-              );
-            }),
-            Effect.catchTags({
-              Rejected: (error) => Effect.succeed(rejected(error.problem)),
-              Reported: (error) => Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(error.message) } }),
-            }),
-            Effect.provideService(FileSystem.FileSystem, fs),
-          );
-        },
-      };
-    }),
-  );
+  const source: Effect.Effect<ToolSource, never, FileSystem.FileSystem> = Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    return {
+      tools: catalog,
+      run: (name, input) => {
+        const found = tools.find((each) => each.name === name);
+        if (found === undefined) return Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "NotFound" } });
+        const parsed = parseJson(input);
+        if ("reason" in parsed) return Effect.succeed(rejected(`The input could not be read: ${parsed.reason}.`));
+        return found.decode(parsed.value).pipe(
+          Effect.mapError((error) => new Rejected({ problem: `${name} does not take this input: ${error.message}` })),
+          Effect.flatMap(({ value, ignored }) => {
+            const note = ignoredNote(name, ignored);
+            const logged = ignored.length === 0 ? Effect.void : Effect.logWarning(logKeys.tools.inputIgnored, { tool: name, ignored });
+            return logged.pipe(
+              Effect.andThen(found.run(value)),
+              Effect.map((output): ToolOutcome => ({ _tag: "Succeeded", output: receivedText(`${output}${note}`) })),
+              Effect.catchTag("Reported", (error) => Effect.fail(new Reported({ message: `${error.message}${note}` }))),
+            );
+          }),
+          Effect.catchTags({
+            Rejected: (error) => Effect.succeed(rejected(error.problem)),
+            Reported: (error) => Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(error.message) } }),
+          }),
+          Effect.provideService(FileSystem.FileSystem, fs),
+        );
+      },
+    };
+  });
 
-  return { catalog, runner };
+  return { catalog, source };
 }

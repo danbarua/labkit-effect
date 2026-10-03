@@ -18,7 +18,8 @@ mkdirSync(join(root, "src"));
 writeFileSync(join(root, "src", "a.txt"), "one\ntwo\nthree\nfour");
 writeFileSync(join(root, "big.txt"), "x".repeat(300 * 1024));
 
-const { catalog, runner } = workspaceTools(root);
+const { catalog, source } = workspaceTools(root);
+const runner = Layer.effect(ToolRunner, source);
 
 /** What a call of `tool` with `input` gives: its output, or its failure. */
 const call = (tool: string, input: unknown) =>
@@ -55,7 +56,7 @@ test("a tool's input schema is its Schema's, closed to other properties; a call 
     Effect.gen(function* () {
       const outcome = yield* (yield* ToolRunner).run(ToolName.make("read_file"), receivedJson({ path: "src/a.txt", lines: 2 }), CallId.make("call-1"));
       return outcome._tag === "Failed" && outcome.reason._tag === "InputRejected" ? outcome.reason.problem : "not refused";
-    }).pipe(Effect.provide(strict.runner.pipe(Layer.provide(BunServices.layer)))),
+    }).pipe(Effect.provide(Layer.effect(ToolRunner, strict.source).pipe(Layer.provide(BunServices.layer)))),
   );
   expect(refused).toStartWith("read_file does not take this input: Expected no excess property");
 });

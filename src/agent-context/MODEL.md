@@ -6,8 +6,9 @@ in `DESIGN.next.md`.
 ## What is built
 
 - A1. A session's system prompt and tools are recorded when it opens. `opening(session, model)`
-  asks each system prompt provider and each tool catalog, in the order listed, joins the prompts
-  and appends the catalogs, and makes the `SessionOpened` observation that holds them.
+  asks each system prompt provider, in the order listed, and joins the prompts; its tools are those
+  its tool sources offer (`ToolSources`, in order, a namespaced source's under its namespace); and
+  it makes the `SessionOpened` observation that holds them.
 - A2. Every request's system prompt and tools are read from the session's facts, not asked for
   again: the facts are the one place they are held.
 - A3. The conversation a request carries is given by the `Conversation` service.

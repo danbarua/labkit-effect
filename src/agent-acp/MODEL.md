@@ -81,8 +81,9 @@ it from the state the stored facts leave in the projection, after the replay, so
 twice.
 
 - `world.ts`: the `World` is what the host does not know of a session. `open({ sessionId, cwd,
-  mcpServers, connection })` gives its system prompt, its tools (`ToolSpec`), the `ToolRunner` that
-  runs them and their presentation (`Present`). `editorWorld` (the default) goes through the
+  mcpServers, connection })` gives its system prompt, its tool sources (`ToolSource`: tools, and
+  what runs a call to one; the session's tools are theirs joined, `agent-session/tool-sources.ts`)
+  and their presentation (`Present`). `editorWorld` (the default) goes through the
   editor: `read_file { path, line?, limit? }` (kind `read`) with `fs/read_text_file`, offered only
   when the client advertised `fs.readTextFile`, and `write_file { path, content }` (kind `edit`) with
   `fs/write_text_file`, offered only with `fs.writeTextFile`; 256 KiB at most each way;

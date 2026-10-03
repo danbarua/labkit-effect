@@ -116,8 +116,7 @@ const echoWorld: World = {
   open: () =>
     Effect.succeed({
       system: "Test.",
-      tools: [echoTool],
-      runner: Layer.succeed(ToolRunner, { run: (_name, input) => Effect.succeed({ _tag: "Succeeded", output: input }) }),
+      sources: [{ tools: [echoTool], run: (_name, input) => Effect.succeed({ _tag: "Succeeded", output: input }) }],
       present: presentFrom([echoTool]),
     }),
 };
@@ -905,14 +904,16 @@ const runsWorld = (runs: Array<string>, hold?: Deferred.Deferred<void>): World =
   open: () =>
     Effect.succeed({
       system: "Test.",
-      tools: [echoTool],
-      runner: Layer.succeed(ToolRunner, {
-        run: (name, input): Effect.Effect<ToolOutcome> =>
-          Effect.suspend(() => {
-            runs.push(name);
-            return hold === undefined ? Effect.succeed({ _tag: "Succeeded", output: input }) : Deferred.succeed(hold, undefined).pipe(Effect.andThen(Effect.never));
-          }),
-      }),
+      sources: [
+        {
+          tools: [echoTool],
+          run: (name, input): Effect.Effect<ToolOutcome> =>
+            Effect.suspend(() => {
+              runs.push(name);
+              return hold === undefined ? Effect.succeed({ _tag: "Succeeded", output: input }) : Deferred.succeed(hold, undefined).pipe(Effect.andThen(Effect.never));
+            }),
+        },
+      ],
       present: presentFrom([echoTool]),
     }),
 });

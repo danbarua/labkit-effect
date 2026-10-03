@@ -16,8 +16,6 @@ import {
   Notices,
   type SystemPromptProvider,
   SystemPrompts,
-  type ToolCatalog,
-  ToolCatalogs,
 } from "./assemble.ts";
 import type { ContextMessage } from "../agent-session/contracts.ts";
 import { logKeys } from "./log-keys.ts";
@@ -27,7 +25,8 @@ import {
   SystemTimeNoticeProvider,
 } from "./example-providers.ts";
 import { ModelName, ProviderName, Seq, SessionId } from "../agent-machine/names.ts";
-import { BoringSystemPromptProvider, BoringToolCatalog } from "../../tests/support/boring.ts";
+import { BoringSystemPromptProvider, BoringTools } from "../../tests/support/boring.ts";
+import { type ToolSource, ToolSources } from "../agent-session/tool-sources.ts";
 import { runTest } from "../../tests/support/run.ts";
 
 const model = (name: string, contextWindow: number): ModelChoice => ({
@@ -42,14 +41,14 @@ const large = model("boring-1m", 1_000_000);
 /** The providers, one of each kind, as layers; a test replaces the ones it varies. */
 interface Setup {
   readonly systemPrompts: ReadonlyArray<SystemPromptProvider>;
-  readonly toolCatalogs: ReadonlyArray<ToolCatalog>;
+  readonly toolSources: ReadonlyArray<ToolSource>;
   readonly notices: ReadonlyArray<NoticeProvider>;
   readonly modelSelectors: readonly [ModelSelector, ...ReadonlyArray<ModelSelector>];
 }
 
 const oneOfEach: Setup = {
   systemPrompts: [BoringSystemPromptProvider],
-  toolCatalogs: [BoringToolCatalog],
+  toolSources: [BoringTools],
   notices: [SystemTimeNoticeProvider],
   modelSelectors: [FixedModelSelector(small), ContextWindowAwareModelSelector(large)],
 };
@@ -70,7 +69,7 @@ const run = (setup: Setup, messages: ReadonlyArray<ContextMessage>) => {
   const layers = Layer.mergeAll(
     Layer.succeed(Conversation, { messages: () => Effect.succeed(messages) }),
     Layer.succeed(SystemPrompts, setup.systemPrompts),
-    Layer.succeed(ToolCatalogs, setup.toolCatalogs),
+    Layer.succeed(ToolSources, setup.toolSources),
     Layer.succeed(Notices, setup.notices),
     Layer.succeed(ModelSelectors, setup.modelSelectors),
     TestClock.layer(),
@@ -101,17 +100,17 @@ test("A1 A2 A3: one provider of each kind: the system prompt and tools recorded 
   expect(logged).toEqual([]);
 });
 
-test("A1: the system prompts are joined, and the tool catalogs appended, in the order the providers are listed", async () => {
+test("A1: the system prompts are joined, and the tool sources' tools joined, in the order they are listed; a namespaced source's tools are offered under its namespace", async () => {
   const { assembled } = await run(
     {
       ...oneOfEach,
       systemPrompts: [BoringSystemPromptProvider, { system: Effect.succeed(["Answer briefly."]) }],
-      toolCatalogs: [BoringToolCatalog, BoringToolCatalog],
+      toolSources: [BoringTools, { ...BoringTools, namespace: "mcp__boring" }],
     },
     conversation("Ping?"),
   );
   expect(assembled.system).toEqual(["You are a helpful assistant.\n\nAnswer briefly."]);
-  expect(assembled.tools.map((tool) => tool.name as string)).toEqual(["echo", "echo"]);
+  expect(assembled.tools.map((tool) => tool.name as string)).toEqual(["echo", "mcp__boring__echo"]);
 });
 
 test("a conversation estimated not to fit the 500k model goes to the 1M model, and the move is logged", async () => {

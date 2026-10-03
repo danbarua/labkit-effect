@@ -54,6 +54,7 @@ import type { Fact } from "../agent-machine/fact.ts";
 import { leftRunning } from "../agent-machine/left-running.ts";
 import { InputText, SessionId, type TurnId } from "../agent-machine/names.ts";
 import { MaxHolds, type Target, ToolCallPolicies, type ToolRunner, TurnEndHooks } from "../agent-session/contracts.ts";
+import { SourcedToolRunner, ToolSources, toolsOf } from "../agent-session/tool-sources.ts";
 import { FileBackedSessionStore } from "../agent-session/file-session-store.ts";
 import { endTurnLeftRunning, openSession, type Services, type Session } from "../agent-session/loop.ts";
 import type { SessionStore } from "../agent-session/session-store.ts";
@@ -303,7 +304,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               // The session's blobs (its inputs' images and files) are kept in its folder, so a session gone on from its facts has them.
               const blobs = BlobsInFolder(join(sessionFolderOf(options.directory, id), "blobs"));
               const policies = Layer.succeed(ToolCallPolicies, [permissionsFor(permissionMode, true)]);
-              const layer = Layer.mergeAll(services(world.runner), policies, blobs).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
+              const runner = SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, world.sources)));
+              const layer = Layer.mergeAll(services(runner), policies, blobs).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
               const context = yield* Layer.buildWithScope(layer, scope);
               const session = yield* openSession.pipe(Effect.provideContext(context), Scope.provide(scope));
 
@@ -536,7 +538,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 facts: (yield* opened.session.facts).length,
                 replayed: opened.replayed,
                 turnsLeftRunning: opened.left === undefined ? [] : [opened.left],
-                tools: its.tools.map((tool) => tool.name),
+                tools: (yield* toolsOf(its.sources)).catalog.map((tool) => tool.name),
                 mcpServers: mcpServers.length,
               });
               // The updates follow the response: the response is written before this handler's fiber ends.
@@ -566,8 +568,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 const id = AcpSessionId.make(crypto.randomUUID());
                 const opened = yield* (world as World<R | FileSystem.FileSystem>).open({ sessionId: id, cwd, mcpServers, connection, strictInput: options.strictToolInput ?? false });
                 const capabilities = yield* capabilitiesOf(model);
+                const { catalog } = yield* toolsOf(opened.sources);
                 const draft = withDefaults(
-                  draftOf({ model, tools: opened.tools, ...(opened.system === undefined ? {} : { system: opened.system }) }),
+                  draftOf({ model, tools: catalog, ...(opened.system === undefined ? {} : { system: opened.system }) }),
                   capabilities,
                 );
                 const entry: Entry = {
@@ -584,7 +587,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 yield* Effect.logInfo(logKeys.session.created, {
                   cwd,
                   model: `${model.provider}/${model.model}`,
-                  tools: opened.tools.map((tool) => tool.name),
+                  tools: catalog.map((tool) => tool.name),
                   mcpServers: mcpServers.length,
                 }).pipe(Effect.annotateLogs({ session: id }));
                 // The update follows the response: the response is written before this handler's fiber ends.

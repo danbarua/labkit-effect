@@ -61,9 +61,10 @@ What is described here is built; where the hosts are going is in `DESIGN.next.md
 
 `Clients` is one model client reaching each provider whose key is set, and the local server, the
 keys read when the layer is built. `SessionServices(runner)` is what the loop needs for a session
-but its store and its permission policy: the model its facts name, what is known of it and how its
-settings are applied (H3), the whole conversation as its context, the clients, turns that count on
-from those its store holds, no turn-end hooks, and `runner` for the host's tools.
+but its store, its policies and its turn-end hooks: the model its facts name, what is known of it
+and how its settings are applied (H3), the whole conversation as its context, the clients, turns
+that count on from those its store holds, and `runner` for its tools (`SourcedToolRunner`, over the
+host's tool sources).
 
 ## Export
 

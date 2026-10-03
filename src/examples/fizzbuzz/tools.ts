@@ -1,16 +1,16 @@
 /**
- * The FizzBuzz tools, their catalogs, and the runner. Each tool's input is one `Schema`: the model
- * is offered its JSON Schema, and a call's input is decoded with it, so what is offered is what
- * runs. A call that does not decode fails with `InputRejected` and the decoder's message; a tool not
- * in the catalogs fails with `NotFound`.
+ * The FizzBuzz tools, as tool sources: `classify` alone, or with `report_error`. Each tool's input is
+ * one `Schema`: the model is offered its JSON Schema, and a call's input is decoded with it, so what
+ * is offered is what runs. A call that does not decode fails with `InputRejected` and the decoder's
+ * message; a tool the source does not offer fails with `NotFound`.
  */
 
-import { Effect, Layer, Schema } from "effect";
-import type { ToolCatalog } from "../../agent-context/assemble.ts";
+import { Effect, Schema } from "effect";
 import { FailureText, ToolName } from "../../agent-machine/names.ts";
 import type { ToolOutcome } from "../../agent-machine/observation.ts";
 import type { Received } from "../../agent-machine/received.ts";
-import { ToolRunner, type ToolSpec } from "../../agent-session/contracts.ts";
+import type { ToolSpec } from "../../agent-session/contracts.ts";
+import type { ToolSource } from "../../agent-session/tool-sources.ts";
 import { parseJson, receivedJson } from "../../agent-session/received.ts";
 
 export const Label = Schema.Literals(["Fizz", "Buzz", "FizzBuzz"]);
@@ -78,16 +78,16 @@ export const reportError = tool(
   ({ error_code }) => ({ reported: error_code }),
 );
 
-/** `classify` only. */
-export const FizzBuzzToolCatalog: ToolCatalog = { tools: Effect.succeed([classify.spec]) };
-
-/** `classify` and `report_error`. */
-export const AdvancedFizzBuzzToolCatalog: ToolCatalog = { tools: Effect.succeed([classify.spec, reportError.spec]) };
-
-/** Runs `classify` and `report_error`, whichever catalog offered them. */
-export const FizzBuzzToolRunner = Layer.succeed(ToolRunner, {
+const sourceOf = (tools: ReadonlyArray<typeof classify>): ToolSource => ({
+  tools: tools.map((each) => each.spec),
   run: (name, input) => {
-    const found = [classify, reportError].find((candidate) => candidate.spec.name === name);
+    const found = tools.find((candidate) => candidate.spec.name === name);
     return Effect.succeed(found === undefined ? { _tag: "Failed", reason: { _tag: "NotFound" } } : found.run(input));
   },
 });
+
+/** `classify` only. */
+export const FizzBuzzTools: ToolSource = sourceOf([classify]);
+
+/** `classify` and `report_error`. */
+export const AdvancedFizzBuzzTools: ToolSource = sourceOf([classify, reportError]);

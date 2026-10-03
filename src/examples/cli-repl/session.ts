@@ -23,6 +23,7 @@ import type { PermissionMode } from "../../agent-policy/permissions.ts";
 import { leftRunning, type LeftRunning } from "../../agent-machine/left-running.ts";
 import { MaxHolds, ModelRequestPolicies, ToolCallPolicies, TurnEndHooks } from "../../agent-session/contracts.ts";
 import { endTurnLeftRunning, openSession, type Session } from "../../agent-session/loop.ts";
+import { offeredTools, SourcedToolRunner, ToolSources } from "../../agent-session/tool-sources.ts";
 import { FileBackedSessionStore } from "../../agent-session/file-session-store.ts";
 import { ephemeralSessionStore, SessionStoreFailed } from "../../agent-session/session-store.ts";
 import { reportedBy } from "../../agent-session/origin.ts";
@@ -69,12 +70,14 @@ export const logFileOf = (sessionId: string): string => `${sessionFolderOf(store
 const workspaceOf = (config: Config) => workspaceTools(process.cwd(), { strictInput: config.strictToolInput });
 
 /**
- * What the loop needs, for a CLI session: the workspace's tools; its turns count on from those its
- * store holds; a turn whose response had thinking but no answer is asked once more for it (its only
- * turn-end hook).
+ * What the loop needs, for a CLI session: its tool sources, the workspace's alone; its turns count on
+ * from those its store holds; a turn whose response had thinking but no answer is asked once more
+ * for it (its only turn-end hook).
  */
-const servicesOf = (workspace: ReturnType<typeof workspaceOf>) =>
-  Layer.mergeAll(SessionServices(workspace.runner), Layer.succeed(TurnEndHooks, [retryIncomplete(1)]), Layer.succeed(MaxHolds, 1));
+const servicesOf = (workspace: ReturnType<typeof workspaceOf>) => {
+  const sources = Layer.effect(ToolSources, Effect.map(workspace.source, (source) => [source]));
+  return Layer.mergeAll(SessionServices(SourcedToolRunner), Layer.succeed(TurnEndHooks, [retryIncomplete(1)]), Layer.succeed(MaxHolds, 1)).pipe(Layer.provideMerge(sources));
+};
 
 /**
  * The policies a CLI session's requests go through: the loop breaker, then, for tool calls,
@@ -139,7 +142,7 @@ export const withSession = <A, E, R, L, H>(
     yield* host.follow(session);
     const facts = yield* session.facts;
     if (facts.length === 0)
-      yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: config.settings }, system: config.system, tools: workspace.catalog }));
+      yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: config.settings }, system: config.system, tools: yield* offeredTools }));
     else {
       const left = leftRunning(facts);
       if (left === undefined) yield* session.goOn;

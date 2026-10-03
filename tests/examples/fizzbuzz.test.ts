@@ -1,6 +1,6 @@
 import { expect } from "bun:test";
 import { test } from "../support/test.ts";
-import { Effect, Metric } from "effect";
+import { Effect, Layer, Metric } from "effect";
 import { TestClock } from "effect/testing";
 import { Conversation } from "../../src/agent-context/assemble.ts";
 import { estimatedTokens } from "../../src/agent-context/example-providers.ts";
@@ -11,7 +11,8 @@ import { conversationOf } from "../../src/agent-session/conversation.ts";
 import { asText, receivedJson } from "../../src/agent-session/received.ts";
 import { FizzBuzzCompaction } from "../../src/examples/fizzbuzz/compaction.ts";
 import { advanced, basic, countingUser, play } from "../../src/examples/fizzbuzz/scenario.ts";
-import { FizzBuzzToolRunner } from "../../src/examples/fizzbuzz/tools.ts";
+import { AdvancedFizzBuzzTools } from "../../src/examples/fizzbuzz/tools.ts";
+import { SourcedToolRunner, ToolSources } from "../../src/agent-session/tool-sources.ts";
 import { CountedToolRunner } from "../../src/instrumentation/tool-metrics.ts";
 import { toolStats } from "../../src/instrumentation/tool-stats.ts";
 import { runTest } from "../support/run.ts";
@@ -171,7 +172,7 @@ test("a tool call whose input does not fit its schema is rejected with the decod
   const outcome = await runTest(
     Effect.gen(function* () {
       return yield* (yield* ToolRunner).run(ToolName.make("classify"), receivedJson({ label: "Fuzz" }), CallId.make("call-1"));
-    }).pipe(Effect.provide(FizzBuzzToolRunner)),
+    }).pipe(Effect.provide(SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, [AdvancedFizzBuzzTools]))))),
   );
   expect(outcome as unknown).toEqual({
     _tag: "Failed",
@@ -190,7 +191,7 @@ test("tool usage for the session is counted from its facts", async () => {
 });
 
 test("tool metrics, recorded live and attributed by session, agree with the counts from each session's facts", async () => {
-  const counted = { ...advanced, tools: CountedToolRunner(FizzBuzzToolRunner) };
+  const counted = { ...advanced, tools: CountedToolRunner(SourcedToolRunner) };
   const { alice, bob, snapshot } = await runTest(
     Effect.gen(function* () {
       const alice = yield* play(["1", "3", "7", "5"], { ...counted, session: "alice" });

@@ -14,6 +14,7 @@ import type { ModelName, ProviderName, SessionId } from "../agent-machine/names.
 import type { ModelTarget, Observation } from "../agent-machine/observation.ts";
 import type { ContextMessage, ToolSpec } from "../agent-session/contracts.ts";
 import { openedWith, immutableSystemPromptOf, immutableToolCatalogOf } from "../agent-session/configuration/session-setup.ts";
+import { offeredTools } from "../agent-session/tool-sources.ts";
 
 /** A model a request can go to, and how much context it takes. */
 export interface ModelChoice {
@@ -41,10 +42,6 @@ export interface SystemPromptProvider {
   readonly system: Effect.Effect<ReadonlyArray<string>>;
 }
 
-export interface ToolCatalog {
-  readonly tools: Effect.Effect<ReadonlyArray<ToolSpec>>;
-}
-
 export interface NoticeProvider {
   readonly notices: Effect.Effect<ReadonlyArray<string>>;
 }
@@ -67,10 +64,6 @@ export class SystemPrompts extends Context.Service<SystemPrompts, ReadonlyArray<
   "agent-context/SystemPrompts",
 ) {}
 
-export class ToolCatalogs extends Context.Service<ToolCatalogs, ReadonlyArray<ToolCatalog>>()(
-  "agent-context/ToolCatalogs",
-) {}
-
 export class Notices extends Context.Service<Notices, ReadonlyArray<NoticeProvider>>()("agent-context/Notices") {}
 
 /** At least one, so there is always a model. */
@@ -84,16 +77,17 @@ const appended = <A>(outputs: ReadonlyArray<Effect.Effect<ReadonlyArray<A>>>): E
 
 /**
  * The opening of a session that asks `model`: its system prompt is the system prompt providers'
- * outputs in order, joined by blank lines, and its tools the tool catalogs' in order. What they
- * give is recorded, and every request is sent what was recorded, not what they would give later.
+ * outputs in order, joined by blank lines, and its tools those its tool sources offer, in order
+ * (`ToolSources`). What they give is recorded, and every request is sent what was recorded, not
+ * what they would give later.
  */
 export const opening = (
   session: SessionId,
   model: ModelTarget,
-): Effect.Effect<Extract<Observation, { _tag: "SessionOpened" }>, never, SystemPrompts | ToolCatalogs> =>
+): Effect.Effect<Extract<Observation, { _tag: "SessionOpened" }>, never, SystemPrompts> =>
   Effect.gen(function* () {
     const system = yield* appended((yield* SystemPrompts).map((provider) => provider.system));
-    const tools = yield* appended((yield* ToolCatalogs).map((catalog) => catalog.tools));
+    const tools = yield* offeredTools;
     return openedWith({ session, model, system: system.length === 0 ? undefined : system.join("\n\n"), tools });
   });
 

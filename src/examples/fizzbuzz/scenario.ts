@@ -1,6 +1,6 @@
 /**
  * Plays a FizzBuzz conversation through the loop: the session opens asking the scripted model, with
- * the FizzBuzz system prompt and the setup's tool catalog recorded; each input the user sends is
+ * the FizzBuzz system prompt and the setup's tools recorded; each input the user sends is
  * observed, and the loop carries out everything that follows. The result is the session's facts and
  * every context the model was sent.
  */
@@ -11,8 +11,6 @@ import {
   Notices,
   opening,
   SystemPrompts,
-  type ToolCatalog,
-  ToolCatalogs,
 } from "../../agent-context/assemble.ts";
 import { AgentContextAssembler, WholeConversation } from "../../agent-context/assembler.ts";
 import { type CompactionPolicy, compactIfDue, Summaries, SummariesInMemory } from "../../agent-context/compaction.ts";
@@ -28,17 +26,18 @@ import { ModelFromFacts } from "../../agent-session/configuration/model-choice.t
 import { CountingTurns } from "../../agent-session/turns.ts";
 import { scriptedFizzBuzzModel } from "./model.ts";
 import { FizzBuzzSystemPromptProvider } from "./prompt.ts";
-import { AdvancedFizzBuzzToolCatalog, FizzBuzzToolCatalog, FizzBuzzToolRunner } from "./tools.ts";
+import { AdvancedFizzBuzzTools, FizzBuzzTools } from "./tools.ts";
+import { SourcedToolRunner, type ToolSource, ToolSources } from "../../agent-session/tool-sources.ts";
 
 /** A user who counts: `count` messages, each the number after the one the model should have returned. */
 export const countingUser = (count: number): ReadonlyArray<string> =>
   Array.from({ length: count }, (_, index) => String(2 * index + 1));
 
 export interface Setup {
-  readonly catalog: ToolCatalog;
+  readonly source: ToolSource;
   /** How the conversation is viewed for each request. */
   readonly conversation: Layer.Layer<Conversation, never, Summaries>;
-  /** Runs the tools; the FizzBuzz runner when not given. */
+  /** Runs the tools; the runner of the setup's source when not given. */
   readonly tools?: Layer.Layer<ToolRunner>;
   /** The session's id; "fizzbuzz" when not given. */
   readonly session?: string;
@@ -55,9 +54,9 @@ export interface Setup {
   readonly summaries?: Layer.Layer<Summaries>;
 }
 
-export const basic: Setup = { catalog: FizzBuzzToolCatalog, conversation: WholeConversation };
+export const basic: Setup = { source: FizzBuzzTools, conversation: WholeConversation };
 
-export const advanced: Setup = { catalog: AdvancedFizzBuzzToolCatalog, conversation: WholeConversation };
+export const advanced: Setup = { source: AdvancedFizzBuzzTools, conversation: WholeConversation };
 
 export interface Played {
   readonly facts: ReadonlyArray<Fact>;
@@ -86,10 +85,9 @@ const played = (inputs: ReadonlyArray<string>, setup: Setup, summaries: Summarie
     ),
     Layer.succeed(Summaries, summaries),
     CountingTurns,
-    setup.tools ?? FizzBuzzToolRunner,
+    setup.tools ?? SourcedToolRunner,
     Layer.succeed(SystemPrompts, [FizzBuzzSystemPromptProvider]),
-    Layer.succeed(ToolCatalogs, [setup.catalog]),
-  );
+  ).pipe(Layer.provideMerge(Layer.succeed(ToolSources, [setup.source])));
   return Effect.gen(function* () {
     const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
     const compaction = setup.compaction;

@@ -4,7 +4,9 @@
  */
 
 import { Effect, Layer } from "effect";
-import type { SystemPromptProvider, ToolCatalog } from "../../src/agent-context/assemble.ts";
+import type { SystemPromptProvider } from "../../src/agent-context/assemble.ts";
+import type { ToolSource } from "../../src/agent-session/tool-sources.ts";
+import { receivedText } from "../../src/agent-session/received.ts";
 import type { Fact } from "../../src/agent-machine/fact.ts";
 import { ModelName, ProviderName, type Seq, SessionId, ToolName, type TurnId } from "../../src/agent-machine/names.ts";
 import { ContextAssembler, type ModelContext, ModelProvider, type ToolSpec } from "../../src/agent-session/contracts.ts";
@@ -60,8 +62,8 @@ export const BoringSystemPromptProvider: SystemPromptProvider = {
 };
 
 /** One tool, `echo`, which answers "PONG". */
-export const BoringToolCatalog: ToolCatalog = {
-  tools: Effect.succeed([
+export const BoringTools: ToolSource = {
+  tools: [
     {
       name: ToolName.make("echo"),
       description: 'Answers "PONG".',
@@ -69,7 +71,8 @@ export const BoringToolCatalog: ToolCatalog = {
       kind: "other",
       replay: "safe",
     },
-  ]),
+  ],
+  run: () => Effect.succeed({ _tag: "Succeeded", output: receivedText("PONG") }),
 };
 
 /** The session's system prompt and tools, and its whole conversation: every turn of it. */

@@ -1,9 +1,9 @@
 /**
  * What the ACP host does not know of a session: the world it works in. From `session/new`'s working
  * folder, the MCP servers the client named and the connection (the client's capabilities, its
- * `fs/*` methods), a world gives the session's system prompt, its tools (`ToolSpec`), the
- * `ToolRunner` that runs them and how their calls are shown (`Present`). The core is told what
- * happened; it never sees the world.
+ * `fs/*` methods), a world gives the session's system prompt, its tool sources (`ToolSource`: the
+ * tools and what runs a call to one) and how their calls are shown (`Present`). The core is told
+ * what happened; it never sees the world.
  *
  * - `editorWorld`, the default: the tools go through the editor. `read_file` reads with the client's
  *   `fs/read_text_file`, so the model sees the editor's unsaved buffers; `write_file` writes with
@@ -22,13 +22,14 @@
  */
 
 import { isAbsolute, relative, resolve } from "node:path";
-import { Duration, Effect, FileSystem, Layer, Option, Schema } from "effect";
+import { Duration, Effect, FileSystem, Option, Schema } from "effect";
 import type { AgentConnection } from "effective-acp/agent";
 import type { V1Version } from "effective-acp/protocol";
 import { type McpServer, type SessionId, type TerminalId, ToolCallId } from "effective-acp/schema/v1";
 import { type CallId, FailureText, ToolName } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
-import { ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
+import type { ToolSpec } from "../agent-session/contracts.ts";
+import type { ToolSource } from "../agent-session/tool-sources.ts";
 import { decoderOf, ignoredNote, jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
 import { asText, parseJson, receivedText } from "../agent-session/received.ts";
@@ -52,8 +53,8 @@ export interface WorldOpening {
 /** One session's world: fixed when the session is made, and the same for every turn of it. */
 export interface WorldSession {
   readonly system: string | undefined;
-  readonly tools: ReadonlyArray<ToolSpec>;
-  readonly runner: Layer.Layer<ToolRunner>;
+  /** In order: the session's tools are theirs, joined (`toolsOf`). */
+  readonly sources: ReadonlyArray<ToolSource>;
   readonly present: Present;
 }
 
@@ -295,7 +296,8 @@ export const editorWorld: World = {
           }),
         );
 
-      const runner = Layer.succeed(ToolRunner, {
+      const source: ToolSource = {
+        tools,
         run: (name, input, call) => {
           if (!tools.some((tool) => tool.name === name)) return Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "NotFound" } });
           const parsed = parseJson(input);
@@ -313,7 +315,7 @@ export const editorWorld: World = {
               return decoded(RunCommand, name, parsed.value, runCommand(call));
           }
         },
-      });
+      };
 
       const plain = presentFrom(tools);
       // The title names what the call is about, its command or its path, so a permission prompt
@@ -335,7 +337,7 @@ export const editorWorld: World = {
           : located;
       };
 
-      return { system: `The working folder is ${cwd}.`, tools, runner, present };
+      return { system: `The working folder is ${cwd}.`, sources: [source], present };
     }),
 };
 
@@ -351,8 +353,7 @@ export const workspaceWorld: World<FileSystem.FileSystem> = {
       const workspace = workspaceTools(cwd, { strictInput });
       return {
         system: `The working folder is ${cwd}.`,
-        tools: workspace.catalog,
-        runner: workspace.runner.pipe(Layer.provide(Layer.succeed(FileSystem.FileSystem, fs))),
+        sources: [yield* workspace.source.pipe(Effect.provideService(FileSystem.FileSystem, fs))],
         present: presentFrom(workspace.catalog),
       };
     }),

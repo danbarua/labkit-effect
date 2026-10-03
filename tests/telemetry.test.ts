@@ -13,7 +13,7 @@ import { ModelClient, type ProviderRequest } from "../src/agent-session/contract
 import { FallbackModelClient } from "../src/agent-session/model-fallback.ts";
 import { scriptedFizzBuzzModel } from "../src/examples/fizzbuzz/model.ts";
 import { advanced, play } from "../src/examples/fizzbuzz/scenario.ts";
-import { FizzBuzzToolRunner } from "../src/examples/fizzbuzz/tools.ts";
+import { SourcedToolRunner } from "../src/agent-session/tool-sources.ts";
 import { type SpanLine, SpansTo, TelemetryToFiles } from "../src/instrumentation/telemetry.ts";
 import { CountedToolRunner } from "../src/instrumentation/tool-metrics.ts";
 import { runTest } from "./support/run.ts";
@@ -100,7 +100,7 @@ test("with OTEL_EXPORTER_OTLP_ENDPOINT set, the spans go to it and to the file, 
   try {
     const base = join(testFolder(), "telemetry");
     await runTest(
-      play(["1", "3", "7"], { ...advanced, session: "erin", tools: CountedToolRunner(FizzBuzzToolRunner) }).pipe(
+      play(["1", "3", "7"], { ...advanced, session: "erin", tools: CountedToolRunner(SourcedToolRunner) }).pipe(
         Effect.provide(TelemetryToFiles(base)),
         Effect.provideService(Metric.MetricRegistry, new Map()),
         Effect.provideService(

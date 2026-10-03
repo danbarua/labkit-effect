@@ -112,7 +112,8 @@ model.
 - [ ] The MCP servers a client names in `session/new`, their tools offered to the model (the ACP
       host's world is given them and ignores them). Effect has MCP's schemas, protocol and a server
       (`effect/ai/McpSchema`, `McpProtocol`, `McpServer`) and no client: a client built from them,
-      as `effective-acp` was built.
+      as `effective-acp` was built. Each server is a tool source (`ToolSource`) with the namespace
+      `mcp__<server>`, after the world's own.
 - [ ] The ACP host over Streamable HTTP (`Agent.layerHttp`), with a token and one holder for a
       session, for labkit-web.
 
