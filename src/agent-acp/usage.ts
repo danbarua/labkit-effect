@@ -9,7 +9,7 @@ import type { SessionUpdate } from "effective-acp/schema/v1";
 import type { Fact } from "../agent-machine/fact.ts";
 import { contextGauge } from "../agent-session/accounting.ts";
 import { modelOf } from "../agent-session/configuration/session-setup.ts";
-import { KnownModels } from "../agent-session/configuration/well-known-models.ts";
+import { knownCapabilities } from "../agent-session/configuration/well-known-models.ts";
 
 export type UsageUpdate = Extract<SessionUpdate, { sessionUpdate: "usage_update" }>;
 
@@ -17,7 +17,7 @@ export type UsageUpdate = Extract<SessionUpdate, { sessionUpdate: "usage_update"
 export const usageUpdate = (facts: ReadonlyArray<Fact>): Effect.Effect<UsageUpdate | undefined> =>
   Effect.gen(function* () {
     const target = yield* modelOf(facts);
-    const known = target.capabilities ?? (yield* (yield* KnownModels)(target.provider, target.model));
+    const known = target.capabilities ?? (yield* knownCapabilities(target.provider, target.model));
     const gauge = contextGauge(facts, target.provider, target.model, known);
     return gauge === undefined ? undefined : { sessionUpdate: "usage_update", used: gauge.used, size: gauge.size, cost: gauge.cost };
   });

@@ -7,18 +7,18 @@
 
 import { Effect, Layer } from "effect";
 import { ModelProvider } from "../contracts.ts";
-import { KnownModels } from "./well-known-models.ts";
+import { KnownModels, knownCapabilities } from "./well-known-models.ts";
 import { modelOf } from "./session-setup.ts";
 
 export const ModelFromFacts = Layer.effect(
   ModelProvider,
   Effect.gen(function* () {
-    const known = yield* KnownModels;
+    const sources = yield* KnownModels;
     return {
       select: (facts) =>
         Effect.gen(function* () {
           const target = yield* modelOf(facts);
-          const capabilities = yield* known(target.provider, target.model);
+          const capabilities = yield* knownCapabilities(target.provider, target.model).pipe(Effect.provideService(KnownModels, sources));
           return capabilities === undefined ? target : { ...target, capabilities };
         }),
     };

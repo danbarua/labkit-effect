@@ -25,10 +25,10 @@ What is described here is built; where the hosts are going is in `DESIGN.next.md
 - H3. What is known of a `localhost` model is what the local server's list says of it (`GET
   /v1/models`, its `models` entries): its context window, the kinds of input it takes (text when
   none is said) and its reasoning efforts. An entry or a value written some other way drops only
-  itself (`localCapabilities`). `KnownWithLocalServer` asks the server once, when first needed,
-  and logs that it did not answer; the other providers' models are the well-known ones.
-  `SettlingWithLocalServer` applies a `localhost` model's settings as the Chat Completions adapter
-  does.
+  itself (`localCapabilities`). `KnownWithLocalServer` puts the server in front of the well-known
+  models in `KnownModels`: it asks the server once, when first needed, logs that it did not answer,
+  and knows only `localhost` models. `SettlingWithLocalServer` puts the Chat Completions adapter's
+  settings function in front in `Settling`, for `localhost`.
 - H4. `permissionsFor(mode, canAsk)` is the permission policy (`agent-policy/permissions.ts`) for
   `mode`, a tool call policy: a call is judged by the kind its tool has in the catalog the session
   opened with (a tool not in it is taken to change things), and asked about only when `canAsk`.

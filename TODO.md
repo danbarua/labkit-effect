@@ -253,8 +253,8 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       models.dev's catalog merged with `well-known-models.measured.json`); a settings type per
       well-known model (`SettingsFor`); the values to offer for each setting of a model as it is
       set now, which are the ones its provider's adapter applies as asked (`choicesFor`); what is
-      known of a model travels on each request's target, from `KnownModels`, which a host can
-      provide (the CLI gives a `localhost` model what its server lists); the CLI's `/settings`
+      known of a model travels on each request's target, from `KnownModels`, whose sources a host
+      can put in front (the CLI gives a `localhost` model what its server lists); the CLI's `/settings`
       picks among the choices, and its prompt completes commands, models and settings with Tab.
       To do: when a setting is changed, `/settings` says what this provider does with the value
       (OpenAI caches for minutes whatever is asked; xAI has no cache setting), so the user knows

@@ -26,7 +26,7 @@ import { markdownOf } from "../../agent-host/export.ts";
 import { Prompt } from "effect/cli";
 import { ModelSettings } from "../../agent-machine/settings.ts";
 import type { Session } from "../../agent-session/loop.ts";
-import { KnownModels } from "../../agent-session/configuration/well-known-models.ts";
+import { knownCapabilities } from "../../agent-session/configuration/well-known-models.ts";
 import { immutableToolCatalogOf, modelOf } from "../../agent-session/configuration/session-setup.ts";
 import { optionsOf, type SettingOption } from "../../agent-session/configuration/options.ts";
 import { askable } from "../../agent-host/catalog.ts";
@@ -68,7 +68,7 @@ export const inForce = (session: Session) =>
           : [];
       }),
     );
-    const known = yield* (yield* KnownModels)(target.provider, target.model);
+    const known = yield* knownCapabilities(target.provider, target.model);
     return [
       `${target.provider}/${target.model}${sent.length === 0 ? (notSent.size === 0 ? " (no settings said)" : "") : ` ${sent.join(" ")}`}`,
       ...(notSent.size === 0 ? [] : [`not sent to this model: ${[...notSent.values()].join(", ")}`]),

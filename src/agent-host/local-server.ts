@@ -7,8 +7,8 @@
  */
 
 import { Effect, Layer, Option, Schema } from "effect";
-import { type Capabilities, capabilitiesOf, KnownModels } from "../agent-session/configuration/well-known-models.ts";
-import { Settling } from "../agent-session/configuration/options.ts";
+import { type Capabilities, KnownModels, type ModelKnowledge, wellKnown } from "../agent-session/configuration/well-known-models.ts";
+import { Settling, type SettlingSource, wellKnownSettling } from "../agent-session/configuration/options.ts";
 import { openAiCompatSettle } from "../agent-session/providers/openai-compat-settings.ts";
 
 /** Where the local server is. */
@@ -85,15 +85,13 @@ export const KnownWithLocalServer = Layer.effect(
         ),
       ),
     );
-    return (provider, model) => (provider === "localhost" ? Effect.map(local, (models) => models.get(model)) : Effect.succeed(capabilitiesOf(provider, model)));
+    const localModels: ModelKnowledge = (provider, model) => (provider === "localhost" ? Effect.map(local, (models) => models.get(model)) : Effect.succeed(undefined));
+    return [localModels, wellKnown];
   }),
 );
 
-/** The settings function for each provider: the default ones, and for `localhost` the Chat Completions adapter's. */
-export const SettlingWithLocalServer = Layer.effect(
-  Settling,
-  Effect.gen(function* () {
-    const settling = yield* Settling;
-    return (provider) => (provider === "localhost" ? openAiCompatSettle : settling(provider));
-  }),
-);
+/** For `localhost`, the Chat Completions adapter's settings function. */
+const localSettling: SettlingSource = (provider) => (provider === "localhost" ? openAiCompatSettle : undefined);
+
+/** The settings function for each provider: for `localhost` the Chat Completions adapter's, and the default ones. */
+export const SettlingWithLocalServer = Layer.succeed(Settling, [localSettling, wellKnownSettling]);

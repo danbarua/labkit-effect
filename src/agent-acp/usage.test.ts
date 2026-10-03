@@ -44,6 +44,6 @@ test("AA9: the window is the model's the session asks now, after a change of mod
 test("AA9: a model nothing is known of has no gauge; one the host knows has its window", async () => {
   const local = session("localhost", "qwen/qwen3-8b");
   expect(await Effect.runPromise(usageUpdate(local))).toBeUndefined();
-  const known = Effect.provideService(usageUpdate(local), KnownModels, () => Effect.succeed({ context: 32768, input: ["text"], price: { input: 0, output: 0 } }));
+  const known = Effect.provideService(usageUpdate(local), KnownModels, [() => Effect.succeed({ context: 32768, input: ["text"], price: { input: 0, output: 0 } })]);
   expect(await Effect.runPromise(known)).toEqual({ sessionUpdate: "usage_update", used: 1150, size: 32768, cost: { amount: 0, currency: "USD" } });
 });

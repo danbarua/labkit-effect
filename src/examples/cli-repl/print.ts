@@ -9,7 +9,7 @@ import { Console, Effect, Fiber, PubSub, Ref, Schema } from "effect";
 import { Fact } from "../../agent-machine/fact.ts";
 import { contextGauge } from "../../agent-session/accounting.ts";
 import type { Session } from "../../agent-session/loop.ts";
-import { type Capabilities, KnownModels } from "../../agent-session/configuration/well-known-models.ts";
+import { type Capabilities, knownCapabilities } from "../../agent-session/configuration/well-known-models.ts";
 import { invalid } from "./invalid.ts";
 import { answerTo, ask, type Config, endingOf, lastTurn } from "./session.ts";
 
@@ -58,7 +58,7 @@ export const printOnce = (session: Session, config: Config, prompt: string, form
     const printer = facts || format === "stream-json" ? yield* printingFacts(session) : undefined;
     yield* ask(session, prompt);
     if (printer !== undefined) yield* printer.finish;
-    const known = yield* (yield* KnownModels)(config.target.provider, config.target.model);
+    const known = yield* knownCapabilities(config.target.provider, config.target.model);
     const result = resultOf(yield* session.facts, config, started, known);
     yield* Console.log(format === "json" ? JSON.stringify(result, null, 2) : format === "stream-json" ? JSON.stringify(result) : result.result);
     if (result.is_error) return yield* invalid(`The turn ended ${result.subtype}.`);

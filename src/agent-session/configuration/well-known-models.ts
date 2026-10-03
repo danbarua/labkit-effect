@@ -22,6 +22,7 @@
 import { Context, Effect } from "effect";
 import type { ModelName, ProviderName } from "../../agent-machine/names.ts";
 import type { Effort, ModelSettings, ThinkingMode } from "../../agent-machine/settings.ts";
+import { firstAnswer } from "../first-answer.ts";
 import { wellKnownModels } from "./well-known-models.gen.ts";
 
 export interface Price {
@@ -62,15 +63,26 @@ export function capabilitiesOf(provider: ProviderName | string, model: ModelName
   return name === undefined ? undefined : models[name];
 }
 
+/** What one source knows of a model: its capabilities, or `undefined` when it does not know it. */
+export type ModelKnowledge = (provider: ProviderName, model: ModelName) => Effect.Effect<Capabilities | undefined>;
+
+/** The well-known models. */
+export const wellKnown: ModelKnowledge = (provider, model) => Effect.succeed(capabilitiesOf(provider, model));
+
 /**
  * What is known of each model, for whoever chooses the model for a request (`ModelFromFacts` puts
- * it on the request's target). By default it is the well-known models'; a host that knows more
- * (a local server that says what its models take) provides its own.
+ * it on the request's target): sources asked in order, the first that knows a model answering
+ * (`firstAnswer`). By default the well-known models; a host that knows more (a local server that
+ * says what its models take) puts its source in front.
  */
-export const KnownModels = Context.Reference<(provider: ProviderName, model: ModelName) => Effect.Effect<Capabilities | undefined>>(
-  "agent-session/KnownModels",
-  { defaultValue: () => (provider, model) => Effect.succeed(capabilitiesOf(provider, model)) },
-);
+export const KnownModels = Context.Reference<ReadonlyArray<ModelKnowledge>>("agent-session/KnownModels", { defaultValue: () => [wellKnown] });
+
+/** What is known of `model` of `provider`: the first answer of `KnownModels`. */
+export const knownCapabilities = (provider: ProviderName, model: ModelName): Effect.Effect<Capabilities | undefined> =>
+  Effect.gen(function* () {
+    const sources = yield* KnownModels;
+    return yield* firstAnswer(sources.map((source) => source(provider, model)));
+  });
 
 /** What is known of the model a request goes to: what its target carries, or the well-known model's. */
 export const knownOf = (target: { readonly provider: ProviderName; readonly model: ModelName; readonly capabilities?: Capabilities }): Capabilities | undefined =>

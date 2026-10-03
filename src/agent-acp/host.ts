@@ -60,7 +60,7 @@ import type { SessionStore } from "../agent-session/session-store.ts";
 import { reportedBy } from "../agent-session/origin.ts";
 import { modelOf } from "../agent-session/configuration/session-setup.ts";
 import { optionsFor, type Options } from "../agent-session/configuration/options.ts";
-import { KnownModels } from "../agent-session/configuration/well-known-models.ts";
+import { knownCapabilities } from "../agent-session/configuration/well-known-models.ts";
 import { changeOf, configOptions, InvalidChange, permissionId, permissionModeOf, permissionOption } from "./config-options.ts";
 import { PermissionMode } from "../agent-policy/permissions.ts";
 import { acpUser, type Feed, startFeed } from "./feed.ts";
@@ -246,9 +246,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             .pipe(Effect.catch((error) => Effect.logWarning(logKeys.update.notSent, { kind: update.sessionUpdate, cause: error.message })));
 
         const capabilitiesOf = (target: { readonly provider: Asked["provider"]; readonly model: Asked["model"] }) =>
-          Effect.gen(function* () {
-            return yield* (yield* KnownModels)(target.provider, target.model);
-          }).pipe(Effect.provideContext(known));
+          knownCapabilities(target.provider, target.model).pipe(Effect.provideContext(known));
 
         /** The configuration of the session as it will be from the next turn, with what a change is taken against. */
         const configurationOf = (entry: Entry) =>

@@ -8,7 +8,7 @@
  *
  * The values offered are the ones the provider's adapter applies as asked (`choicesFor`). Which
  * adapter's settings function answers for a provider is `Settling`: by default the three providers
- * with well-known models; a host that reaches another provider says which answers for it.
+ * with well-known models; a host that reaches another provider puts its source in front.
  */
 
 import { Context, Effect } from "effect";
@@ -21,16 +21,32 @@ import { openAiSettle } from "../providers/openai-settings.ts";
 import { xAiSettle } from "../providers/xai-settings.ts";
 import { modelOf } from "./session-setup.ts";
 import { choicesFor, settingOf, type Settled } from "./settings.ts";
-import { KnownModels } from "./well-known-models.ts";
+import { firstAnswer } from "../first-answer.ts";
+import { knownCapabilities } from "./well-known-models.ts";
 
 export type Settle = (target: Target) => Settled;
 
 const settling: Readonly<Record<string, Settle>> = { anthropic: anthropicSettle, openai: openAiSettle, xai: xAiSettle };
 
-/** The settings function of the adapter that reaches `provider`, when one is known. */
-export const Settling = Context.Reference<(provider: ProviderName) => Settle | undefined>("agent-session/Settling", {
-  defaultValue: () => (provider) => settling[provider],
-});
+/** What one source knows of how settings are applied for a provider: its adapter's settings function, or `undefined`. */
+export type SettlingSource = (provider: ProviderName) => Settle | undefined;
+
+/** The providers with well-known models. */
+export const wellKnownSettling: SettlingSource = (provider) => settling[provider];
+
+/**
+ * Which adapter's settings function answers for a provider: sources asked in order, the first that
+ * knows the provider answering (`firstAnswer`). By default the providers with well-known models; a
+ * host that reaches another provider puts its source in front.
+ */
+export const Settling = Context.Reference<ReadonlyArray<SettlingSource>>("agent-session/Settling", { defaultValue: () => [wellKnownSettling] });
+
+/** The settings function of the adapter that reaches `provider`: the first answer of `Settling`. */
+export const settleFor = (provider: ProviderName): Effect.Effect<Settle | undefined> =>
+  Effect.gen(function* () {
+    const sources = yield* Settling;
+    return yield* firstAnswer(sources.map((source) => Effect.sync(() => source(provider))));
+  });
 
 /**
  * A setting to offer: the value the model will get (`now`), when one is sent, and for a setting
@@ -52,13 +68,13 @@ export interface Options {
 
 /**
  * The configuration of `target`, with no session behind it. A target with no capabilities gets
- * them from `KnownModels`. For a provider with no settings function known, every value of every
+ * them from `KnownModels` (`knownCapabilities`). For a provider with no settings function known, every value of every
  * setting is offered and taken as said.
  */
 export const optionsFor = (target: Target): Effect.Effect<Options> =>
   Effect.gen(function* () {
-    const capabilities = target.capabilities ?? (yield* (yield* KnownModels)(target.provider, target.model));
-    const settle = (yield* Settling)(target.provider) ?? (() => ({ fields: {}, headers: {}, adjusted: [] }));
+    const capabilities = target.capabilities ?? (yield* knownCapabilities(target.provider, target.model));
+    const settle = (yield* settleFor(target.provider)) ?? (() => ({ fields: {}, headers: {}, adjusted: [] }));
     const full: Target = { ...target, ...(capabilities === undefined ? {} : { capabilities }) };
     const { maxOutputTokens, ...listed } = choicesFor(full, settle);
     const settings = target.settings ?? {};
