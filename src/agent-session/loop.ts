@@ -432,71 +432,73 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
     const stopped = stop === undefined ? Effect.never : Deferred.await(stop);
     switch (request._tag) {
       case "RequestModelResponse":
-        return passingOn(
-          request.turn,
-          Effect.gen(function* () {
-            // The request is reviewed before a model is chosen for it: a vetoed request is not made.
-            const step = (yield* policiesNow(yield* ModelRequestPolicies)).start(request);
-            if (step._tag === "Waiting")
-              return yield* Effect.die(new Error(`A model request policy waited on turn ${request.turn}: nothing answers or wakes a policy that waits on a model request`));
-            if (step.verdict._tag === "Veto") {
-              yield* Effect.logInfo(logKeys.loop.modelVetoed, { turn: request.turn, reason: asText(step.verdict.reason) });
-              return [{ origin: harnessParts.modelRequestPolicy, observation: { _tag: "ModelVetoed", turn: request.turn, reason: step.verdict.reason } } satisfies Observed];
-            }
-            const facts = yield* store.facts;
-            const target = yield* (yield* ModelProvider).select(facts, request.turn);
-            const context = yield* (yield* ContextAssembler).assemble(facts, request.turn);
-            const asked: Origin = { _tag: "Provider", provider: target.provider };
-            const report = yield* Report;
-            const passOn = yield* ModelStream;
-            const arrived = yield* Ref.make<ReadonlyArray<ModelPart>>([]);
-            // A tool call that is complete is recorded, so the core runs it without waiting for the
-            // rest of the response; every completed part is kept, for a response stopped early.
-            const sink = (streamed: Streamed) =>
-              Effect.gen(function* () {
-                if (streamed._tag === "Part") {
-                  const part = streamed.part;
-                  if (part._tag === "ToolCall")
-                    yield* report(
-                      { _tag: "ToolCallArrived", turn: request.turn, call: part.call, tool: part.tool, input: part.input },
-                      asked,
-                    );
-                  yield* Ref.update(arrived, (parts) => [...parts, part]);
-                }
-                yield* passOn(streamed);
-              });
-            const asFarAsArrived = stopped.pipe(
-              Effect.andThen(Ref.get(arrived)),
-              Effect.map(
-                (parts): Extract<Observation, { _tag: "ModelResponded" }> => ({
-                  _tag: "ModelResponded",
+        return Effect.gen(function* () {
+          // The request is reviewed before a model is chosen for it: a vetoed request is not made, and streams nothing.
+          const step = (yield* policiesNow(yield* ModelRequestPolicies)).start(request);
+          if (step._tag === "Waiting")
+            return yield* Effect.die(new Error(`A model request policy waited on turn ${request.turn}: nothing answers or wakes a policy that waits on a model request`));
+          if (step.verdict._tag === "Veto") {
+            yield* Effect.logInfo(logKeys.loop.modelVetoed, { turn: request.turn, reason: asText(step.verdict.reason) });
+            return [{ origin: harnessParts.modelRequestPolicy, observation: { _tag: "ModelVetoed", turn: request.turn, reason: step.verdict.reason } } satisfies Observed];
+          }
+          return yield* passingOn(
+            request.turn,
+            Effect.gen(function* () {
+              const facts = yield* store.facts;
+              const target = yield* (yield* ModelProvider).select(facts, request.turn);
+              const context = yield* (yield* ContextAssembler).assemble(facts, request.turn);
+              const asked: Origin = { _tag: "Provider", provider: target.provider };
+              const report = yield* Report;
+              const passOn = yield* ModelStream;
+              const arrived = yield* Ref.make<ReadonlyArray<ModelPart>>([]);
+              // A tool call that is complete is recorded, so the core runs it without waiting for the
+              // rest of the response; every completed part is kept, for a response stopped early.
+              const sink = (streamed: Streamed) =>
+                Effect.gen(function* () {
+                  if (streamed._tag === "Part") {
+                    const part = streamed.part;
+                    if (part._tag === "ToolCall")
+                      yield* report(
+                        { _tag: "ToolCallArrived", turn: request.turn, call: part.call, tool: part.tool, input: part.input },
+                        asked,
+                      );
+                    yield* Ref.update(arrived, (parts) => [...parts, part]);
+                  }
+                  yield* passOn(streamed);
+                });
+              const asFarAsArrived = stopped.pipe(
+                Effect.andThen(Ref.get(arrived)),
+                Effect.map(
+                  (parts): Extract<Observation, { _tag: "ModelResponded" }> => ({
+                    _tag: "ModelResponded",
+                    turn: request.turn,
+                    provider: target.provider,
+                    model: target.model,
+                    parts,
+                    ending: { _tag: "Interrupted" },
+                    metadata: receivedJson({}),
+                  }),
+                ),
+              );
+              yield* report(
+                {
+                  _tag: "ModelRequestDispatched",
                   turn: request.turn,
                   provider: target.provider,
                   model: target.model,
-                  parts,
-                  ending: { _tag: "Interrupted" },
-                  metadata: receivedJson({}),
-                }),
-              ),
-            );
-            yield* report(
-              {
-                _tag: "ModelRequestDispatched",
-                turn: request.turn,
-                provider: target.provider,
-                model: target.model,
-                sent: sentAs(context),
-              },
-              harnessParts.loop,
-            );
-            const outcome = yield* (yield* ModelClient)
-              .respond(target, context, request.turn)
-              .pipe(Effect.provideService(ModelStream, sink), Effect.raceFirst(asFarAsArrived));
-            // A response names the provider that gave it, which a fallback makes another than the one asked.
-            const provider = outcome._tag === "ModelResponded" ? outcome.provider : target.provider;
-            return [{ origin: { _tag: "Provider", provider }, observation: outcome } satisfies Observed];
-          }),
-        );
+                  sent: sentAs(context),
+                },
+                harnessParts.loop,
+              );
+              const outcome = yield* (yield* ModelClient)
+                .respond(target, context, request.turn)
+                .pipe(Effect.provideService(ModelStream, sink), Effect.raceFirst(asFarAsArrived));
+              // A response names the provider that gave it, which a fallback makes another than the one asked.
+              const provider = outcome._tag === "ModelResponded" ? outcome.provider : target.provider;
+              return [{ origin: { _tag: "Provider", provider }, observation: outcome } satisfies Observed];
+            }),
+          );
+        });
       case "RunTool": {
         const origin: Origin = { _tag: "Tool", tool: request.tool };
         const ended = (outcome: ToolOutcome): ReadonlyArray<Observed> => [
