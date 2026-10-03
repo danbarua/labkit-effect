@@ -8,11 +8,13 @@
  *   anyone can be asked is the host's to say (`HostSays.canAsk`).
  * - `maxTurnRequests` (`agent-policy/max-turn-requests.ts`), on `modelRequests`: `limit` (1000).
  * - `retryIncomplete` (`agent-host/incomplete.ts`), on `turnEnd`: `retries` (1).
+ * - `maxBudget` (`agent-host/services.ts`), on `modelRequests`: `usd`, which it has no default for:
+ *   a model request once the session has cost that much is vetoed.
  */
 
 import { Effect, Schema } from "effect";
 import { retryIncomplete as retryIncompleteHook } from "../agent-host/incomplete.ts";
-import { loopBreaker as loopBreakerPolicies, permissionsFor, turnRequestLimit } from "../agent-host/services.ts";
+import { budgetLimit, loopBreaker as loopBreakerPolicies, permissionsFor, turnRequestLimit } from "../agent-host/services.ts";
 import { type CallKey, sameToolAndInput } from "../agent-policy/loop-breaker.ts";
 import { defaultMaxTurnRequests } from "../agent-policy/max-turn-requests.ts";
 import { PermissionMode } from "../agent-policy/permissions.ts";
@@ -51,4 +53,8 @@ export const retryIncomplete = plugin("retryIncomplete", Schema.Struct({ retries
   turnEnd: retryIncompleteHook(retries),
 }));
 
-export const builtins: ReadonlyArray<AnyPlugin> = [loopBreaker, permissions, maxTurnRequests, retryIncomplete];
+export const maxBudget = plugin("maxBudget", Schema.Struct({ usd: Schema.Number.check(Schema.isGreaterThan(0)) }), ["modelRequests"], ({ usd }) => ({
+  modelRequests: budgetLimit(usd),
+}));
+
+export const builtins: ReadonlyArray<AnyPlugin> = [loopBreaker, permissions, maxTurnRequests, retryIncomplete, maxBudget];

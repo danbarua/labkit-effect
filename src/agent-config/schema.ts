@@ -12,6 +12,7 @@ import { builtins } from "./builtins.ts";
 import { type AnyPlugin, seams } from "./plugin.ts";
 
 const serverSchema = Schema.Struct({
+  type: Schema.optionalKey(Schema.Literal("stdio")),
   command: Schema.NonEmptyString,
   args: Schema.optionalKey(Schema.Array(Schema.String)),
   env: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),

@@ -1,6 +1,6 @@
 /**
  * What a plug-in is: a name (`use`, its key in a configuration file), a Schema for its settings
- * with a default for every setting, the seams it adds to, and the entries it adds to them, given
+ * with a default for every setting that has one (a budget has none), the seams it adds to, and the entries it adds to them, given
  * its settings and what the host says (`HostSays`).
  *
  * A seam is one of the ordered lists a session's logic plugs into (`agent-session`): the tool call

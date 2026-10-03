@@ -1,8 +1,9 @@
 /**
  * A session's configuration, read from layers merged in order, the last write winning (`merge.ts`):
  * the user's file (`~/.config/<name>/policies.yml`), then the project's (`<project>/.<name>/policies.yml`),
- * then what a host adds (a settings file named on its command line, its flags). A file that is not
- * there is an empty layer. `<name>` is `configName` unless the caller says another.
+ * then the user's own for the project (`<project>/.<name>/policies.local.yml`), then what a host
+ * adds (a settings file named on its command line, its flags). A file that is not there is an empty
+ * layer. `<name>` is `configName` unless the caller says another.
  *
  * A layer is a mapping (YAML, read with `effect/encoding` `Yaml`; or a value a host makes) of:
  *
@@ -37,10 +38,22 @@ import { type AnyPlugin, type Seam, seams } from "./plugin.ts";
 /** The name of the configuration's folders, until the product has one. */
 export const configName = "labkit";
 
-/** The files a session's policies are read from, the user's first: `~/.config/<name>/policies.yml`, `<project>/.<name>/policies.yml`. */
-export const policyFiles = (project: string, options: { readonly name?: string; readonly home?: string } = {}): ReadonlyArray<string> => {
+/** Where a configuration file is: the user's, the project's (kept with it), or the user's own for the project (`local`, kept out of its history). */
+export type FileSource = "user" | "project" | "local";
+
+export const fileSources: ReadonlyArray<FileSource> = ["user", "project", "local"];
+
+/**
+ * The files a session's policies are read from, in order: `~/.config/<name>/policies.yml`,
+ * `<project>/.<name>/policies.yml`, `<project>/.<name>/policies.local.yml`.
+ */
+export const policyFiles = (project: string, options: { readonly name?: string; readonly home?: string } = {}): Readonly<Record<FileSource, string>> => {
   const name = options.name ?? configName;
-  return [join(options.home ?? homedir(), ".config", name, "policies.yml"), join(project, `.${name}`, "policies.yml")];
+  return {
+    user: join(options.home ?? homedir(), ".config", name, "policies.yml"),
+    project: join(project, `.${name}`, "policies.yml"),
+    local: join(project, `.${name}`, "policies.local.yml"),
+  };
 };
 
 /** A configuration that cannot be used: the layer, where in it, and what is wrong. */
@@ -94,6 +107,8 @@ const topKeys: ReadonlyArray<string> = ["plugins", ...seams, "maxHolds", "mcpSer
 const MaxHolds = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 const McpServer = Schema.Struct({
+  /** Claude Code's `.mcp.json` says it; only `stdio` is started. */
+  type: Schema.optionalKey(Schema.Literal("stdio")),
   command: Schema.NonEmptyString,
   args: Schema.optionalKey(Schema.Array(Schema.String)),
   env: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
@@ -179,7 +194,8 @@ const listOf = (
 /** The MCP servers in `mcpServers`, by name. */
 const mcpServersOf = (layers: ReadonlyArray<LayerSource>, value: unknown): Effect.Effect<ReadonlyArray<McpServerConfig>, ConfigInvalid> =>
   Effect.gen(function* () {
-    if (value === undefined) return [];
+    // `null` is no servers: a later layer that writes it takes away those of the layers before it.
+    if (value === undefined || value === null) return [];
     const invalid = (path: ReadonlyArray<string>, problem: string) => new ConfigInvalid({ file: writerOf(layers, path), path: path.join("."), problem });
     if (!isMapping(value)) return yield* invalid(["mcpServers"], "Expected a mapping of names to servers");
     return yield* Effect.forEach(Object.entries(value), ([name, configured]) =>
@@ -246,11 +262,19 @@ export const fileLayer = (file: string, trusted: boolean): Effect.Effect<LayerSo
     return { name: file, value: { ...parsed, extensions: listed.map((path) => (isAbsolute(path) ? path : resolve(dirname(file), path))) }, trusted };
   });
 
-/** The layers of `policyFiles`: the user's file, trusted, then the project's, not; a file that is not there is left out. */
-export const policyLayers = (project: string, options: { readonly name?: string; readonly home?: string } = {}): Effect.Effect<ReadonlyArray<LayerSource>, ConfigInvalid, FileSystem.FileSystem> =>
+/**
+ * The layers of `policyFiles`, those of `sources` (all, unless said), in order: the user's file, which
+ * is trusted, then the project's and the local one, which are in the project's folder, and are not. A
+ * file that is not there is left out.
+ */
+export const policyLayers = (
+  project: string,
+  options: { readonly name?: string; readonly home?: string; readonly sources?: ReadonlyArray<FileSource> } = {},
+): Effect.Effect<ReadonlyArray<LayerSource>, ConfigInvalid, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    const [user, own] = policyFiles(project, options);
-    const layers = [yield* fileLayer(user!, true), yield* fileLayer(own!, false)];
+    const files = policyFiles(project, options);
+    const read = fileSources.filter((source) => (options.sources ?? fileSources).includes(source));
+    const layers = yield* Effect.forEach(read, (source) => fileLayer(files[source], source === "user"));
     return layers.filter((layer): layer is LayerSource => layer !== undefined);
   });
 

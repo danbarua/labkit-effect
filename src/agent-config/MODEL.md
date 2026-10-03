@@ -22,10 +22,10 @@ mcpServers:
 
 ## What is built
 
-- `plugin.ts`: what a plug-in is (`use`, a settings Schema with a default for every setting, the
+- `plugin.ts`: what a plug-in is (`use`, a settings Schema with a default for every setting that has one, the
   seams it is on, its entries), the seams, and what the host says (`HostSays`: whether anyone can be
   asked).
-- `builtins.ts`: `loopBreaker`, `permissions`, `maxTurnRequests`, `retryIncomplete`, over the logic
+- `builtins.ts`: `loopBreaker`, `permissions`, `maxTurnRequests`, `retryIncomplete`, `maxBudget`, over the logic
   in `agent-policy` and `agent-host`.
 - `file.ts`: the layers (`policyLayers`: the user's file, `~/.config/<name>/policies.yml`, trusted,
   then the project's, `<project>/.<name>/policies.yml`, not; `<name>` being `configName`, `labkit`,
@@ -77,5 +77,12 @@ mcpServers:
 - CF9. Two of one plug-in, with different settings, are two names in `plugins`, each with `use`.
 - CF10. `mcpServers` maps a name to a server: its `command`, `args`, `env`, `cwd`, whether a
   session needs it (`required`, false unless said) and how long it has to connect
-  (`connectTimeout`, a duration). They merge key by key, so a project can add a server or change one
-  of the user's.
+  (`connectTimeout`, a duration); `type: stdio` may be said, as Claude Code's `.mcp.json` does. They
+  merge key by key, so a project can add a server or change one of the user's; a layer that writes
+  `mcpServers: null` takes away those of the layers before it.
+- CF11. `maxBudget` vetoes a model request once the session has cost its `usd` or more (`costIn`:
+  a model with no known price costs nothing). It has no default, so a list that names it needs it in
+  `plugins`.
+- CF12. The file layers are the user's (`~/.config/<name>/policies.yml`, trusted), the project's
+  (`<project>/.<name>/policies.yml`) and the user's own for the project
+  (`<project>/.<name>/policies.local.yml`), in that order; a host may read only some of them.

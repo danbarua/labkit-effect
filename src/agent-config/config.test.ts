@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { DateTime, Duration, Effect } from "effect";
 import { boringOpening } from "../../tests/support/boring.ts";
+import { observe, open, opened } from "../../tests/support/drive.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { test, testFolder, testOrigin } from "../../tests/support/test.ts";
 import type { Fact } from "../agent-machine/fact.ts";
@@ -150,14 +151,14 @@ test("CF2: what the host says, that no file does: whether anyone can be asked, w
 test("CF3: a mistake is refused naming the layer that wrote it, where in it, and what is wrong", async () => {
   const at = (text: string) => write("user/policies.yml", text);
   expect(await refusal([at("toolCalls: [loopBraker]\n")])).toEndWith(
-    'user/policies.yml: toolCalls[0]: "loopBraker" is neither in plugins nor a plug-in; the plug-ins are: loopBreaker, permissions, maxTurnRequests, retryIncomplete',
+    'user/policies.yml: toolCalls[0]: "loopBraker" is neither in plugins nor a plug-in; the plug-ins are: loopBreaker, permissions, maxTurnRequests, retryIncomplete, maxBudget',
   );
   expect(await refusal([at("toolCalls: [maxTurnRequests]\n")])).toEndWith("toolCalls[0]: maxTurnRequests is maxTurnRequests, which is not on toolCalls; it is on modelRequests");
   expect(await refusal([at("plugins:\n  loopBreaker:\n    nudgAt: 2\n")])).toEndWith("plugins.loopBreaker.nudgAt: loopBreaker has no setting nudgAt; its settings are: nudgeAt, stopAt, key");
   expect(await refusal([at("plugins:\n  permissions:\n    mode: yolo\n")])).toEndWith(
     'plugins.permissions.mode: Expected "default" | "acceptEdits" | "dontAsk" | "bypassPermissions" at ["mode"]',
   );
-  expect(await refusal([at("plugins:\n  mine:\n    use: loopBraker\n")])).toEndWith('plugins.mine.use: "loopBraker" is not a plug-in; those are: loopBreaker, permissions, maxTurnRequests, retryIncomplete');
+  expect(await refusal([at("plugins:\n  mine:\n    use: loopBraker\n")])).toEndWith('plugins.mine.use: "loopBraker" is not a plug-in; those are: loopBreaker, permissions, maxTurnRequests, retryIncomplete, maxBudget');
   expect(await refusal([at("toolcalls: [permissions]\n")])).toEndWith(
     "toolcalls: Not a key of the configuration; those are: plugins, toolCalls, modelRequests, turnEnd, knownModels, settling, toolSources, maxHolds, mcpServers, extensions",
   );
@@ -174,20 +175,28 @@ test("CF3: across layers, a mistake names the layer that wrote the value at faul
   expect(await refusal([user2, [project2, false]])).toContain("home/two.yml: toolCalls[0]");
 });
 
-test("CF4: layers merge in order, the last write winning: mappings key by key, deeply; any other value, a list included, replaced whole", async () => {
+test("CF4 CF12: layers merge in order, the last write winning: mappings key by key, deeply; any other value, a list included, replaced whole; the user's file, the project's, then the local one", async () => {
   expect(merged([{ a: { b: 1, c: [1, 2] }, d: "x" }, { a: { c: [3] }, e: true }, { d: "y" }])).toEqual({ a: { b: 1, c: [3] }, d: "y", e: true });
   const layers = await runTest(policyLayers(join(testFolder(), "project"), { home: join(testFolder(), "home") }).pipe(Effect.provide(BunServices.layer)));
   expect(layers).toEqual([]);
+  // The user's own for the project comes last, and is not trusted; the sources read can be chosen.
+  write("project/.labkit/policies.local.yml", "plugins:\n  maxTurnRequests:\n    limit: 20\n");
   write("home/.config/labkit/policies.yml", "plugins:\n  maxTurnRequests:\n    limit: 10\n  loopBreaker:\n    nudgeAt: 4\ntoolCalls: [loopBreaker, permissions]\nmodelRequests: [maxTurnRequests]\n");
   write("project/.labkit/policies.yml", "plugins:\n  loopBreaker:\n    stopAt: 8\ntoolCalls: [permissions]\n");
   const configuration = await runTest(
     Effect.flatMap(policyLayers(join(testFolder(), "project"), { home: join(testFolder(), "home") }), (each) => loadConfiguration(each)).pipe(Effect.provide(BunServices.layer)),
   );
-  // The project's toolCalls replace the user's; the user's modelRequests stand; the project changes one setting of the user's loop breaker.
+  // The project's toolCalls replace the user's; the user's modelRequests stand, with the local file's limit.
   expect(listed(configuration)).toEqual({
     toolCalls: [["permissions", "permissions", { mode: "default" }]],
-    modelRequests: [["maxTurnRequests", "maxTurnRequests", { limit: 10 }]],
+    modelRequests: [["maxTurnRequests", "maxTurnRequests", { limit: 20 }]],
   });
+  const userOnly = await runTest(
+    Effect.flatMap(policyLayers(join(testFolder(), "project"), { home: join(testFolder(), "home"), sources: ["user"] }), (each) => loadConfiguration(each)).pipe(
+      Effect.provide(BunServices.layer),
+    ),
+  );
+  expect(listed(userOnly)["modelRequests"]).toEqual([["maxTurnRequests", "maxTurnRequests", { limit: 10 }]]);
   const both = await load([write("home/a.yml", "plugins:\n  loopBreaker:\n    nudgeAt: 4\n"), [write("project/b.yml", "plugins:\n  loopBreaker:\n    stopAt: 8\ntoolCalls: [loopBreaker]\n"), false]]);
   expect(listed(both)["toolCalls"]).toEqual([["loopBreaker", "loopBreaker", { nudgeAt: 4, stopAt: 8, key: "toolAndInput" }]]);
 });
@@ -329,6 +338,25 @@ test("CF10: mcpServers are servers by name, merged key by key, so a project can 
   );
 });
 
+test("CF11: maxBudget vetoes a model request once the session has cost its usd or more; it has no default, so a list naming it needs it in plugins", async () => {
+  const session = open();
+  observe(session, opened);
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "go" });
+  // 1,000,000 output tokens of claude-sonnet-5-5: $10.
+  observe(session, { _tag: "ModelResponded", turn: "turn-1", provider: "anthropic", model: "claude-sonnet-5-5", parts: [{ _tag: "Text", text: "Done." }], ending: { _tag: "Complete" }, usage: { input: 0, output: 1_000_000 }, metadata: receivedJson({}) });
+  const verdict = (usd: number) =>
+    runTest(
+      Effect.gen(function* () {
+        const configuration = yield* loadConfiguration([{ name: "test", trusted: true, value: { plugins: { maxBudget: { usd } }, modelRequests: ["maxBudget"] } }]);
+        const policy = every(yield* Effect.forEach(seamListsOf(configuration, { canAsk: true }).modelRequests ?? [], (policyOf) => policyOf(session.journal)));
+        return verdictOf(policy, { _tag: "RequestModelResponse", turn: TurnId.make("turn-1") });
+      }),
+    );
+  expect(await verdict(20)).toBe("runs");
+  expect(await verdict(10)).toBe('vetoed: {"stop":"max_budget_usd","usd":10,"spent":10}');
+  expect(await refusal([write("user/budget.yml", "modelRequests: [maxBudget]\n")])).toContain('modelRequests[0]: Missing key at ["usd"]');
+});
+
 test("CF8: the JSON Schema of a file takes, in plugins, each plug-in's settings under its own name and use with settings under another; each seam's list takes names", () => {
   const schema = policiesJsonSchema() as {
     readonly properties: Readonly<Record<string, { readonly properties?: Readonly<Record<string, { readonly properties: Readonly<Record<string, unknown>> }>>; readonly additionalProperties?: { readonly anyOf: ReadonlyArray<{ readonly required: ReadonlyArray<string> }> }; readonly items?: unknown }>>;
@@ -336,8 +364,8 @@ test("CF8: the JSON Schema of a file takes, in plugins, each plug-in's settings 
   };
   expect(schema.additionalProperties).toBe(false);
   const plugins = schema.properties["plugins"];
-  expect(Object.keys(plugins?.properties ?? {})).toEqual(["loopBreaker", "permissions", "maxTurnRequests", "retryIncomplete"]);
+  expect(Object.keys(plugins?.properties ?? {})).toEqual(["loopBreaker", "permissions", "maxTurnRequests", "retryIncomplete", "maxBudget"]);
   expect(Object.keys(plugins?.properties?.["loopBreaker"]?.properties ?? {})).toEqual(["nudgeAt", "stopAt", "key"]);
-  expect(plugins?.additionalProperties?.anyOf.map((each) => each.required)).toEqual([["use"], ["use"], ["use"], ["use"]]);
+  expect(plugins?.additionalProperties?.anyOf.map((each) => each.required)).toEqual([["use"], ["use"], ["use"], ["use"], ["use", "usd"]]);
   expect(schema.properties["toolCalls"]?.items).toEqual({ type: "string" });
 });
