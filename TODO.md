@@ -211,10 +211,9 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 - [ ] A provider's usage window (a subscription's limit, which resets in hours) as a policy of
       its own, once there is a configuration story: today a rate limit whose wait is longer than
       `Retries.longestWait` (1 minute) fails the request at once, with the wait it said.
-- [ ] A model request policy that waits. Today one that waits fails the request: a policy's
-      `Waiting` does not say when it is to be woken, nothing sends it `Tick`, and nothing answers
-      it (`PermissionAsked` names a tool call). The usage window above, a pause on a provider, and
-      `notBefore` in `src/examples/policies.ts` all wait.
+- [ ] A model request policy that waits, woken when it may go on (the usage window above, a pause
+      on a provider, `notBefore` in `src/examples/policies.ts`). Dan: fail it for now, telling the
+      user to wait; waking it needs background jobs and watchdogs, a more stateful runtime.
 
 - [ ] Effect's `Response.Usage` shape for a response's token counts, in place of our own.
 - [ ] Each provider's image and file formats, from what was measured, in place of models.dev's

@@ -22,8 +22,8 @@ Dan: "something might execute a decision to continue, veto or delay an Effect." 
 
 ## What is not built
 
-- A model request policy that waits: nothing answers or wakes it, so the usage window and a pause
-  on a provider cannot be written as one yet (TODO.md).
+- Waking a model request policy that waits: that needs background jobs and watchdogs, which the
+  runtime does not have. Until then a held request fails, telling the user to wait (P9).
 - Claude Code's `plan` and `auto` modes; allow and deny rules by tool and argument
   (`--allowedTools`, `--disallowedTools`).
 
@@ -60,7 +60,8 @@ Dan: "something might execute a decision to continue, veto or delay an Effect." 
   stops, or when the process ends and the session goes on from its facts, ends `NotRun`.
 - P9. In the loop, each list of policies is applied in order, as `every`. A vetoed model request is
   not made: `ModelVetoed` is recorded, from the model request policy, and the turn ends `Vetoed`. A
-  model request policy that waits is a defect, which fails the request.
+  model request held by a policy that waits is not made either: `ModelFailed` is recorded, saying to
+  wait and try again, with what the policy asks.
 - P10. The loop breaker vetoes the `nudgeAt`-th identical call in a row (3 by default), and each
   after it, with a reason the model reads as the call's result; once a turn's last `stopAt` calls
   (5) are identical, it vetoes the turn's next model request. Calls are identical when `key` gives

@@ -160,8 +160,8 @@ export const ToolCallPolicies = Context.Reference<ReadonlyArray<PolicyOfFacts>>(
 
 /**
  * The policies each model request goes through before it is made, in order, as `ToolCallPolicies`.
- * None by default. A veto ends the request's turn (`ModelVetoed`). A policy here is to decide at
- * once: nothing answers or wakes one that waits on a model request.
+ * None by default. A veto ends the request's turn (`ModelVetoed`). A policy that waits fails the
+ * request (`ModelFailed`), telling the user to wait: nothing wakes it.
  */
 export const ModelRequestPolicies = Context.Reference<ReadonlyArray<PolicyOfFacts>>("agent-session/ModelRequestPolicies", {
   defaultValue: () => [],

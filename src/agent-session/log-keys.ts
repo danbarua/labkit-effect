@@ -42,6 +42,8 @@ export const logKeys = {
     toolEnded: "loop.tool.ended",
     /** A model request policy vetoed a turn's request, which ends the turn; the details are the turn and the reason. */
     modelVetoed: "loop.model.vetoed",
+    /** A model request policy held a turn's request, which fails the turn; the details are the turn and what the user is told. */
+    modelHeld: "loop.model.held",
     /** Carrying out a request died of a defect; the details are what it died of. */
     requestDied: "loop.request.died",
     /** A turn-end hook's feedback held a turn open. */

@@ -435,8 +435,18 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
         return Effect.gen(function* () {
           // The request is reviewed before a model is chosen for it: a vetoed request is not made, and streams nothing.
           const step = (yield* policiesNow(yield* ModelRequestPolicies)).start(request);
-          if (step._tag === "Waiting")
-            return yield* Effect.die(new Error(`A model request policy waited on turn ${request.turn}: nothing answers or wakes a policy that waits on a model request`));
+          // A policy that waits holds the request; nothing wakes it, so the turn fails, telling the user to wait.
+          if (step._tag === "Waiting") {
+            const asks = step.asks === undefined ? "" : ` ${asText(step.asks)}`;
+            const failure = FailureText.make(`Not sent: a policy holds model requests for now. Wait, then try again.${asks}`);
+            yield* Effect.logWarning(logKeys.loop.modelHeld, { turn: request.turn, failure });
+            return [
+              {
+                origin: harnessParts.modelRequestPolicy,
+                observation: { _tag: "ModelFailed", turn: request.turn, failure, error: step.asks ?? receivedText(failure) },
+              } satisfies Observed,
+            ];
+          }
           if (step.verdict._tag === "Veto") {
             yield* Effect.logInfo(logKeys.loop.modelVetoed, { turn: request.turn, reason: asText(step.verdict.reason) });
             return [{ origin: harnessParts.modelRequestPolicy, observation: { _tag: "ModelVetoed", turn: request.turn, reason: step.verdict.reason } } satisfies Observed];

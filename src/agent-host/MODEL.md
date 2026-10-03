@@ -32,9 +32,10 @@ What is described here is built; where the hosts are going is in `DESIGN.next.md
 - H4. `permissionsFor(mode, canAsk)` is the permission policy (`agent-policy/permissions.ts`) for
   `mode`, a tool call policy: a call is judged by the kind its tool has in the catalog the session
   opened with (a tool not in it is taken to change things), and asked about only when `canAsk`.
-  `loopBreaker(settings)` is the loop breaker's two policies, one for each list. The CLI and the ACP
-  host put the loop breaker first among the tool call policies, then permission, so no one is asked
-  to permit a call the loop breaker vetoes.
+  `loopBreaker(settings)` is the loop breaker's two policies, one for each list. The CLI puts the
+  loop breaker first among the tool call policies, then permission, so no one is asked to permit a
+  call the loop breaker vetoes. The ACP host has permission alone: ACP has no stop reason for a turn
+  the loop breaker stops.
 - H5. A folder of sessions (`directory.ts`, its root given) keeps each in `<root>/<session>/`, its
   facts in `facts.jsonl`. `storedSessions` lists the ones with a facts file, the one written to last
   first; `readSession` reads one (`SessionNotFound` when the root does not hold it); `latestSession`
