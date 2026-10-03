@@ -387,7 +387,7 @@ test("AG2: the first prompt opens the draft; thinking and text stream, write_fil
   const texts = log.updates.flatMap((update) => (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text" ? [update.content.text] : []));
   expect(texts.join("")).toBe("Writing.Done.");
   expect(log.asked).toHaveLength(1);
-  expect(log.asked[0]?.toolCall).toMatchObject({ toolCallId: "call-1", title: "write_file", kind: "edit", locations: [{ path: join(host.cwd, "notes.txt") }] });
+  expect(log.asked[0]?.toolCall).toMatchObject({ toolCallId: "call-1", title: "write_file: notes.txt", kind: "edit", locations: [{ path: join(host.cwd, "notes.txt") }] });
   expect(log.files).toEqual([{ method: "fs/write_text_file", path: join(host.cwd, "notes.txt"), sessionId, content: "hello" }]);
   const facts = await factsOn(storeFileOf(host.directory, sessionId));
   expect(facts[0]).toMatchObject({
@@ -701,6 +701,9 @@ test("AG17: edit_file replaces one occurrence through fs/*, shown as a diff; run
   expect(text("run-3")).toContain("started\\n[Still running after 1 seconds: stopped.]");
   // The edit's change is shown as a diff when permission is asked; a command's terminal is shown in
   // its call once it has one, and still when it has ended.
+  // A call's title names its command or its path, so the question says what it asks about.
+  expect(log.asked.find((asked) => asked.toolCall.toolCallId === "run-1")?.toolCall.title).toBe("run_command: ls");
+  expect(log.asked.find((asked) => asked.toolCall.toolCallId === "edit-1")?.toolCall.title).toBe("edit_file: a.txt");
   expect(log.asked.find((asked) => asked.toolCall.toolCallId === "edit-1")?.toolCall.content).toEqual([
     { type: "diff", path: join(host.cwd, "a.txt"), oldText: "alpha", newText: "beta" },
   ]);

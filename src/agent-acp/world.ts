@@ -119,6 +119,12 @@ const commandOutcome = (
   return Option.isSome(exited) && exited.value.exitCode === 0 ? succeeded(text) : reported(text);
 };
 
+/** `text` on one line of at most 120 characters, for a title. */
+const oneLine = (text: string): string => {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length <= 120 ? line : `${line.slice(0, 119)}…`;
+};
+
 /** What a failed call to the editor is, for the model to read. */
 const editorFailure = (method: string, path: string, error: { readonly _tag?: string; readonly message?: string; readonly reason?: string }): string =>
   `${method} ${path}: ${error._tag === "PeerClosed" ? `the editor's connection closed (${error.reason ?? ""})` : (error.message ?? error._tag ?? "the editor gave no reason")}`;
@@ -312,12 +318,14 @@ export const editorWorld: World = {
       });
 
       const plain = presentFrom(tools);
-      // A file's path as its location; an edit's change as a diff, before it runs (when permission
-      // is asked) and once it succeeded; a command's terminal, once it has one.
+      // The title names what the call is about, its command or its path, so a permission prompt
+      // says what it asks about; a file's path is its location; an edit's change is a diff, before
+      // it runs (when permission is asked) and once it succeeded; a command's terminal, once it has one.
       const present: Present = (call, outcome) => {
-        const shown = plain(call, outcome);
         const parsed = parseJson(call.input);
         const input = "value" in parsed && typeof parsed.value === "object" && parsed.value !== null ? (parsed.value as Record<string, unknown>) : {};
+        const about = typeof input["command"] === "string" ? input["command"] : typeof input["path"] === "string" ? input["path"] : undefined;
+        const shown = { ...plain(call, outcome), ...(about === undefined ? {} : { title: `${call.tool}: ${oneLine(about)}` }) };
         const terminalId = terminals.get(call.call);
         if (call.tool === "run_command" && terminalId !== undefined) return { ...shown, content: [{ type: "terminal", terminalId }] };
         const at = typeof input["path"] === "string" ? inside(cwd, input["path"]) : undefined;
