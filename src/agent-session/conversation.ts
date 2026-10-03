@@ -1,13 +1,14 @@
 /**
  * The conversation as the model is sent it, projected from facts: each input given to a turn is a
  * user message, each response an assistant message with its text and tool calls, followed by a
- * user message with a result for every call it made, each notice an instruction message where it
- * was inserted. Consecutive messages from one role become one.
+ * user message with a result for every call it made (as `tool-output.ts` says it is sent), each
+ * notice an instruction message where it was inserted. Consecutive messages from one role become one.
  *
  * A response's thinking and the parts the harness does not recognise stay in their place, marked
  * with the provider that produced them; which provider reads them is its adapter's business.
  */
 
+import { outcomeAsSent } from "./tool-output.ts";
 import type { BlobRef } from "../agent-machine/blob.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { CallId, NoticeText, Seq } from "../agent-machine/names.ts";
@@ -51,9 +52,8 @@ function callsOf(facts: ReadonlyArray<Fact>): Calls {
  * when it began to run, and that it was not run when it did not.
  */
 function outcomeOf(call: CallId, calls: Calls): ToolOutcome {
-  return (
-    calls.ended.get(call) ?? { _tag: "Failed", reason: { _tag: calls.dispatched.has(call) ? "Indeterminate" : "NotRun" } }
-  );
+  const ended = calls.ended.get(call);
+  return ended === undefined ? { _tag: "Failed", reason: { _tag: calls.dispatched.has(call) ? "Indeterminate" : "NotRun" } } : outcomeAsSent(ended);
 }
 
 /** The messages a fact adds. */

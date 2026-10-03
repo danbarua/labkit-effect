@@ -69,3 +69,11 @@ change does not go through the gate: it is observed at once, and the core takes 
 - G3. A change submitted after the turn has ended and before the host settles is made with the one
   held: none is lost.
 
+## Rules: a tool's output as the model is sent it
+
+- TO1. A tool's output is recorded as received, and the conversation view (`conversation.ts`) sends
+  it as `tool-output.ts` says. An MCP server's result (`mcpToolResult`) is sent as plain text: each
+  text block's text, an embedded text resource's text, a resource link as a Markdown link, an image
+  or audio block as a line naming its type, one per line; with no text, its `structuredContent` as
+  JSON. A tool's own failure (`isError`) is sent the same way. Any other output is sent as recorded.
+
