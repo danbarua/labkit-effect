@@ -144,7 +144,13 @@ model.
       Prior art, read for this (notes in the session's scratchpad): yolk-sdk, pi-codemode,
       Cloudflare's code mode, Anthropic's programmatic tool calling, smolagents.
 - [ ] A loop breaker: a model that repeats the same calls is told so, then stopped, as a
-      configurable policy (efferent nudges at 3 repeats and stops at 5; omp has one too).
+      configurable policy (efferent nudges at 3 repeats and stops at 5; omp has one too). Not a
+      turn-end hook: a looping model does not end its turn, it calls again, step after step. It is
+      two policies that count from the turn's facts (no state beside them, so a session gone on
+      from its facts counts the same): the tool call policy (built) vetoes the Nth identical call
+      (same tool, same input) in a turn with a reason the model reads as the call's result; a
+      policy on model requests (not built, under agent-policy) vetoes the next request at M, and
+      the turn ends Vetoed. N, M and what counts as identical are its settings.
 - [ ] The system prompt belongs in context assembly, as configuration; it is to be designed and
       tried. A hard-coded one ("You are a helpful assistant") will do until the host's question
       of where a user's things live has an answer.
@@ -205,7 +211,11 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       per provider or per provider and key; fixed window or token bucket; it reads the provider's
       rate-limit headers and waits out a 429; in memory, or in Redis across processes; marked
       unstable in 4.0.0), and `Semaphore` or `PartitionedSemaphore` for how many requests are in
-      flight at once.
+      flight at once. Its `times` (retries after a 429) defaults to no limit, and it waits until the
+      reset the provider says: set `times: 0`, so that it only paces requests and our retries
+      (`withRetries`, with `longestWait`) decide what a 429 becomes. Beside it, a breaker on each
+      provider: after repeated failures, no request for a while, rather than each session finding
+      out for itself.
 - [ ] A provider's usage window (a subscription's limit, which resets in hours) as a policy of
       its own, once there is a configuration story: today a rate limit whose wait is longer than
       `Retries.longestWait` (1 minute) fails the request at once, with the wait it said.
