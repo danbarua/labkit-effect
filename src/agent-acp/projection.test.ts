@@ -11,7 +11,7 @@ import type { Fact } from "../agent-machine/fact.ts";
 import { ToolName } from "../agent-machine/names.ts";
 import { CapturedObservation } from "../agent-machine/observation.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
-import { type Present, presentFrom, type ProjectionContext, type ProjectionInput, project } from "./projection.ts";
+import { next, type Present, presentFrom, type ProjectionContext, type ProjectionInput, type ProjectionState, project, start } from "./projection.ts";
 
 const tools: ReadonlyArray<ToolSpec> = [
   { name: ToolName.make("ls"), description: "Lists files.", input: { type: "object" }, kind: "read", replay: "safe" },
@@ -77,6 +77,9 @@ const updated = (call: string, status: string, more: object = {}) => ({ sessionU
 const joined = (updates: ReadonlyArray<SessionUpdate>, kind: "agent_message_chunk" | "agent_thought_chunk") =>
   updates.flatMap((update) => (update.sessionUpdate === kind && update.content.type === "text" ? [update.content.text] : [])).join("");
 
+/** The updates as sorted JSON: which were sent, whatever their order. */
+const encoded = (updates: ReadonlyArray<SessionUpdate>) => updates.map((update) => JSON.stringify(update)).sort();
+
 /** Every merge of `a` and `b` that keeps each one's own order. */
 function* merges<A>(a: ReadonlyArray<A>, b: ReadonlyArray<A>): Generator<ReadonlyArray<A>> {
   if (a.length === 0 || b.length === 0) {
@@ -122,15 +125,15 @@ const deltas = (stream: Stream, step: 1 | 2) =>
       )
     : stream(delta("Text", "One file"), delta("Text", ": a.ts."), arrived(answer("One file: a.ts.")));
 
-test("PJ1 PJ2 PJ4 PJ5 PJ6: replay of a recorded turn: the input, the call as it went, then each response's parts", () => {
+test("PJ1 PJ2 PJ4 PJ5 PJ6 PJ11: replay of a recorded turn: the input, then each response's parts, its call as it went after them", () => {
   const { session } = listing();
   expect(project(session.journal, replay).updates).toEqual([
     user("list the files"),
+    thought("I should list them."),
+    said("Listing."),
     announced("c1", "ls", "read"),
     updated("c1", "in_progress"),
     updated("c1", "completed", { content: output('["a.ts"]') }),
-    thought("I should list them."),
-    said("Listing."),
     said("One file: a.ts."),
   ] as never);
 });
@@ -201,11 +204,13 @@ test("PJ3 PJ9: two requests in a turn, the first's ModelResponded taken after th
   ] as never);
 });
 
-test("PJ2: live with no deltas, from a scripted client or a whole answer: each part whole when ModelResponded is taken, as on replay", () => {
+test("PJ2 PJ11: live with no deltas, from a scripted client or a whole answer: each part whole when ModelResponded is taken, the same updates as on replay, which takes the response before its call", () => {
   const scripted = listing();
-  expect(project(scripted.inputs, live).updates).toEqual(project(scripted.session.journal, replay).updates.slice(1));
+  expect(encoded(project(scripted.inputs, live).updates)).toEqual(encoded(project(scripted.session.journal, replay).updates.slice(1)));
+  expect(project(scripted.inputs, live).updates.at(-1)).toEqual(said("One file: a.ts."));
   const whole = listing((stream, step) => (step === 1 ? stream(arrived(thinking("I should list them.")), arrived(answer("Listing."))) : stream(arrived(answer("One file: a.ts.")))));
-  expect(project(whole.inputs, live).updates).toEqual(project(whole.session.journal, replay).updates.slice(1));
+  expect(encoded(project(whole.inputs, live).updates)).toEqual(encoded(project(whole.session.journal, replay).updates.slice(1)));
+  expect(joined(project(whole.inputs, live).updates, "agent_message_chunk")).toBe("Listing.One file: a.ts.");
 });
 
 test("PJ10: text of only whitespace is sent with the next text of its kind, and not at all when a call or the response's end comes first: no blank message", () => {
@@ -434,4 +439,156 @@ test("PJ8: projecting stored facts gives the state to go on from live: a call al
     said("One "),
     said("file."),
   ] as never);
+});
+
+/** The updates of `inputs` in the order given, each through `next`: what a replay gave without PJ11's reorder. */
+const inStoredOrder = (inputs: ReadonlyArray<ProjectionInput>, context: ProjectionContext) =>
+  inputs.reduce<{ state: ProjectionState; updates: Array<SessionUpdate> }>(
+    (done, input) => {
+      const step = next(done.state, input, context);
+      return { state: step.state, updates: [...done.updates, ...step.updates] };
+    },
+    { state: start, updates: [] },
+  );
+
+/** Each update's kind, a call update's with its status; consecutive chunks of one kind count once, since deltas split text. */
+const kinds = (updates: ReadonlyArray<SessionUpdate>) =>
+  updates
+    .map((update) => (update.sessionUpdate === "tool_call_update" ? `${update.sessionUpdate}:${update.status}` : update.sessionUpdate))
+    .filter((kind, index, all) => !(kind.endsWith("_chunk") && all[index - 1] === kind));
+
+const withoutInputs = (updates: ReadonlyArray<SessionUpdate>) => updates.filter((update) => update.sessionUpdate !== "user_message_chunk");
+
+/** Whether `before` comes ahead of `after` among `facts`, by the observations' tags. */
+const ahead = (facts: ReadonlyArray<Fact>, before: string, after: string) => {
+  const at = (tag: string) => facts.findIndex((input) => input._tag === "Observed" && input.observation._tag === tag);
+  return at(before) !== -1 && at(before) < at(after);
+};
+
+test("PJ11: a call that arrived, ran and ended before its response was recorded is replayed after the response's thinking and text, as live sent them", () => {
+  const { session, inputs } = listing(deltas);
+  // As the loop records them: the call's facts, its end included, before the ModelResponded that holds it.
+  expect(ahead(session.journal, "ToolEnded", "ModelResponded")).toBe(true);
+  const loaded = project(session.journal, replay).updates;
+  expect(loaded.slice(1, 6)).toEqual([
+    thought("I should list them."),
+    said("Listing."),
+    announced("c1", "ls", "read"),
+    updated("c1", "in_progress"),
+    updated("c1", "completed", { content: output('["a.ts"]') }),
+  ] as never);
+  expect(kinds(withoutInputs(loaded))).toEqual(kinds(project(inputs, live).updates));
+  expect(kinds(withoutInputs(inStoredOrder(session.journal, replay).updates))).not.toEqual(kinds(project(inputs, live).updates));
+});
+
+test("PJ11: several requests in a turn: each response is taken before its own request's first call, and each text is sent once, in order", () => {
+  const cat = { call: "c2", tool: "ls", input: json({ path: "src" }) };
+  const { session, fact } = recording();
+  fact(asked("list the files"));
+  fact(dispatched());
+  fact({ _tag: "ToolCallArrived", turn: "turn-1", ...ls });
+  fact({ _tag: "ToolCallDispatched", call: "c1" });
+  fact({ _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } });
+  fact(responded([thinking("I should list them."), answer("Listing."), { _tag: "ToolCall", ...ls }]));
+  fact(dispatched());
+  fact({ _tag: "ToolCallArrived", turn: "turn-1", ...cat });
+  fact({ _tag: "ToolCallDispatched", call: "c2" });
+  fact({ _tag: "ToolEnded", call: "c2", outcome: { _tag: "Succeeded", output: json(["b.ts"]) } });
+  fact(responded([answer("And src."), { _tag: "ToolCall", ...cat }]));
+  fact(dispatched());
+  fact(responded([answer("Two files.")]));
+  const loaded = project(session.journal, replay);
+  expect(loaded.updates).toEqual([
+    user("list the files"),
+    thought("I should list them."),
+    said("Listing."),
+    announced("c1", "ls", "read"),
+    updated("c1", "in_progress"),
+    updated("c1", "completed", { content: output('["a.ts"]') }),
+    said("And src."),
+    announced("c2", "ls", "read"),
+    updated("c2", "in_progress"),
+    updated("c2", "completed", { content: output('["b.ts"]') }),
+    said("Two files."),
+  ] as never);
+  expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
+});
+
+test("PJ11: a response with two calls and text between them: each call is announced at its place among the parts, and the calls' status updates follow all of the response", () => {
+  const rm = { call: "c2", tool: "rm", input: json({ path: "a.ts" }) };
+  const { session, fact } = recording();
+  fact(asked("list, then remove a.ts"));
+  fact(dispatched());
+  fact({ _tag: "ToolCallArrived", turn: "turn-1", ...ls });
+  fact({ _tag: "ToolCallDispatched", call: "c1" });
+  fact({ _tag: "ToolCallArrived", turn: "turn-1", ...rm });
+  fact({ _tag: "ToolCallDispatched", call: "c2" });
+  fact({ _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } });
+  fact({ _tag: "ToolEnded", call: "c2", outcome: { _tag: "Succeeded", output: json("removed") } });
+  fact(responded([answer("Listing."), { _tag: "ToolCall", ...ls }, answer("Removing."), { _tag: "ToolCall", ...rm }]));
+  // The whole response comes first, its calls announced in part order; then the calls' facts as recorded,
+  // whose ToolCallArrived announce nothing more.
+  expect(project(session.journal, replay).updates).toEqual([
+    user("list, then remove a.ts"),
+    said("Listing."),
+    announced("c1", "ls", "read"),
+    said("Removing."),
+    announced("c2", "rm", "delete"),
+    updated("c1", "in_progress"),
+    updated("c2", "in_progress"),
+    updated("c1", "completed", { content: output('["a.ts"]') }),
+    updated("c2", "completed", { content: output('"removed"') }),
+  ] as never);
+});
+
+test("PJ11: what has no call in its request is left in place: a request without calls, a request with no response, and a response with no request", () => {
+  const { session, fact } = recording();
+  fact(asked("hi"));
+  fact(dispatched());
+  fact(responded([thinking("Greet."), answer("Hello.")]));
+  fact(asked("remove a.ts"));
+  // No ModelRequestDispatched: the response is not paired with a request, and stays after the call.
+  fact({ _tag: "ToolCallArrived", turn: "turn-2", call: "c2", tool: "rm", input: json({ path: "a.ts" }) });
+  fact(responded([answer("Removing.")], "Complete", "turn-2"));
+  fact(dispatched("turn-2"));
+  const loaded = project(session.journal, replay);
+  expect(loaded.updates).toEqual(inStoredOrder(session.journal, replay).updates);
+  expect(loaded.updates).toEqual([user("hi"), thought("Greet."), said("Hello."), user("remove a.ts"), announced("c2", "rm", "delete"), said("Removing.")] as never);
+  expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
+});
+
+test("PJ11: a request the harness answered as interrupted, with a call that never ended: the call is announced by its arrival, then fails, as before", () => {
+  const { session, fact } = recording();
+  fact(asked("remove a.ts"));
+  fact(dispatched());
+  fact({ _tag: "ToolCallArrived", turn: "turn-1", call: "c1", tool: "rm", input: json({ path: "a.ts" }) });
+  fact({ _tag: "ToolCallDispatched", call: "c1" });
+  fact(responded([], "Indeterminate"));
+  fact({ _tag: "ToolEnded", call: "c1", outcome: { _tag: "Failed", reason: { _tag: "Reported", error: json({ error: "interrupted" }) } } });
+  const loaded = project(session.journal, replay);
+  // The empty response moves before the arrival and sends nothing, so the order is that of the stored facts.
+  expect(loaded.updates).toEqual(inStoredOrder(session.journal, replay).updates);
+  expect(loaded.updates).toEqual([
+    user("remove a.ts"),
+    announced("c1", "rm", "delete"),
+    updated("c1", "in_progress"),
+    updated("c1", "failed", { content: output('{"error":"interrupted"}') }),
+  ] as never);
+  expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
+});
+
+test("PJ11: captured items mixed into a replay keep their place and change nothing it sends; the reorder only reorders, and leaves the same state", () => {
+  const { session, inputs } = listing();
+  expect(inputs.some((input) => input._tag !== "Observed" && input._tag !== "Decided")).toBe(true);
+  expect(project(inputs, replay).updates).toEqual(project(session.journal, replay).updates);
+  const loaded = project(session.journal, replay);
+  // Live does not reorder, and without captured items it echoes no input: the same updates as a replay, in the stored order.
+  expect(encoded(withoutInputs(loaded.updates))).toEqual(encoded(project(session.journal, live).updates));
+  expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
+});
+
+test("PJ11: live does not reorder: a call recorded before its response is sent at its fact", () => {
+  const { session } = listing();
+  const updates = project(session.journal, live).updates;
+  expect(updates.slice(0, 4)).toEqual([announced("c1", "ls", "read"), updated("c1", "in_progress"), updated("c1", "completed", { content: output('["a.ts"]') }), thought("I should list them.")] as never);
 });

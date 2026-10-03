@@ -155,6 +155,14 @@ twice.
 - PJ10. Text of only whitespace is sent with the next text of its kind; when a call or the
   response's end comes first it is not sent, live or on replay, so a client shows no blank message.
   It counts as sent.
+- PJ11. On replay a request's response is projected before its calls. Stored, a request's tool
+  calls are recorded as they arrive and may have ended before its `ModelResponded`, which holds the
+  whole response; live, its thinking and text were sent as they streamed, before the calls. A replay
+  therefore takes each `ModelResponded` before the first `ToolCallArrived` of its request, so it
+  sends the response's parts in order, each call announced at its place among them, then what
+  became of the calls: the order live had. Nothing is added or dropped, and the state it leaves is
+  the same (PJ8). Live with no deltas (a whole answer) sends the same updates, but a call's
+  announcement comes before the text of its response, which is known only when the response ends.
 - AA1. The config options are `model`, then one select for each setting the options offer but
   `observe` and `cache`, with the ids and categories of the table; a setting not offered has none.
   The host adds `permission_mode` after them (AG18). Every option's current value is among its
@@ -291,9 +299,11 @@ twice.
   request carries the earlier turns.
 - AL4. A turn the stored facts left running (their process ended mid-turn) is ended at load or
   resume (`endTurnLeftRunning`): it ends `Interrupted`, each call it left running fails, no tool
-  runs and no model request is made. The replay shows its interruption once. With no turn left
-  running, the session goes on (`goOn`) once its feed has started, so input left waiting starts its
-  turn live. The next prompt runs a new turn.
+  runs and no model request is made. A replay shows each such call once, as `failed`; a turn with
+  no call under way shows only its input, since ACP has no update for how a turn ended (its stop
+  reason is in the answer to its prompt alone). With no turn left running, the session goes on
+  (`goOn`) once its feed has started, so input left waiting starts its turn live. The next prompt
+  runs a new turn.
 - AL5. `session/resume` is `session/load` with nothing replayed: the client has the history.
 - AL6. `session/list` is a page (`pageOf`, of `pageSize`) of the sessions in the session directory
   with a record, the one written to last first, filtered by `cwd` when it is given. A session with
@@ -310,3 +320,6 @@ twice.
   annotated with the connection and the session. A routine load logs no warning or error; a
   session not stored, a load refused and a bad cursor are warnings, a store that cannot be opened
   and a directory that cannot be read are errors, each with its cause.
+- AL9. A session started by `session/load` or `session/resume` offers `permission_mode` (AG18) at
+  the launcher's mode, as a new session does: the mode it had when it was closed is not kept. A
+  mode set after the load applies from the session's next tool call.

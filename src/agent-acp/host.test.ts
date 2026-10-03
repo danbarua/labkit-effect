@@ -906,6 +906,22 @@ const runsWorld = (runs: Array<string>, hold?: Deferred.Deferred<void>): World =
 const replayOf = (facts: ReadonlyArray<Fact>): Array<Update> =>
   JSON.parse(JSON.stringify(project(facts, { mode: "replay", present: presentFrom([echoTool]) }).updates)) as Array<Update>;
 
+/** A `session/update` notification as the agent wrote it to the wire. */
+const isUpdateNotification = (
+  message: Record<string, unknown>,
+): message is { readonly method: "session/update"; readonly params: { readonly update: Update } } =>
+  message["method"] === "session/update" && typeof message["params"] === "object" && message["params"] !== null && "update" in message["params"];
+
+/**
+ * The updates the agent wrote before it answered a `session/load` or `session/resume` (the first answer with config options). The
+ * client's own handlers may run a tick after its request resolves, so the wire, not the client's log, is the witness of "before".
+ */
+const updatesBeforeAnswer = (host: HostRun): Array<Update> => {
+  const answered = host.wire.findIndex((message) => typeof message["result"] === "object" && message["result"] !== null && "configOptions" in message["result"]);
+  expect(answered).toBeGreaterThan(0);
+  return host.wire.slice(0, answered).flatMap((message) => (isUpdateNotification(message) ? [message.params.update] : []));
+};
+
 /** The updates the host sends of a session it started from its facts, after its answer. */
 const announced = ["available_commands_update", "session_info_update", "usage_update"];
 
@@ -984,11 +1000,8 @@ test("AL3 AL8: session/load in a new process replays the stored turn in order be
   await host.stop();
   expect(kinds(replay)[0]).toBe("user_message_chunk");
   expect(kinds(replay)).toEqual(expect.arrayContaining(["agent_thought_chunk", "tool_call:pending", "tool_call_update:completed", "agent_message_chunk"]));
-  // On the wire, the agent wrote each stored update once, in the projection's order, and all of them before the answer (the load's
-  // answer is the first with config options); the client's handlers may run a tick after its request resolves, so they are not the witness.
-  const answered = host.wire.findIndex((message) => typeof message["result"] === "object" && message["result"] !== null && "configOptions" in message["result"]);
-  expect(answered).toBeGreaterThan(0);
-  const written = host.wire.slice(0, answered).flatMap((message) => (message["method"] === "session/update" ? [(message["params"] as { update: Update }).update] : []));
+  // On the wire, the agent wrote each stored update once, in the projection's order, and all of them before the answer.
+  const written = updatesBeforeAnswer(host);
   expect(written).toHaveLength(replay.length);
   expect(written).toMatchObject(replay);
   expect(log.updates.slice(0, replay.length)).toMatchObject(replay);
@@ -1010,37 +1023,45 @@ test("AL3 AL8: session/load in a new process replays the stored turn in order be
   });
 });
 
-test("AL3: a loaded session offers permission_mode, starting at the launcher's mode, and a mode set after the load decides its next tool call", async () => {
+test("AL9: a session started by session/load or by session/resume offers permission_mode at the launcher's mode, not the mode it had when it was closed, and a mode set after it decides its next tool call", async () => {
   const write = (call: string) => answer({ _tag: "ToolCall", call, tool: "write_file", input: { path: "a.txt", content: call } });
   const first = startHost({ script: [write("w-1"), answer({ _tag: "Text", text: "One." })] });
   const stored = await sdkClient().app.connectWith(first.stream, async (ctx) => {
     await initialize(ctx);
     const created = await ctx.request("session/new", { cwd: first.cwd, mcpServers: [] });
+    // Closed in a mode other than the launcher's: a reopened session does not have it.
+    await ctx.request("session/set_config_option", { sessionId: created.sessionId, configId: "permission_mode", value: "bypassPermissions" });
     await ctx.request("session/prompt", say(created.sessionId, "Write one"));
     return created.sessionId;
   });
   await first.stop();
-  const host = startHost({ script: [write("w-2"), answer({ _tag: "Text", text: "Two." }), write("w-3"), answer({ _tag: "Text", text: "Three." })] });
-  const { app, log } = sdkClient();
-  const result = await app.connectWith(host.stream, async (ctx) => {
-    await initialize(ctx);
-    const loaded = await ctx.request("session/load", { sessionId: stored, cwd: host.cwd, mcpServers: [] });
-    const changed = await ctx.request("session/set_config_option", { sessionId: stored, configId: "permission_mode", value: "bypassPermissions" });
-    await ctx.request("session/prompt", say(stored, "Write two"));
-    await ctx.request("session/set_config_option", { sessionId: stored, configId: "permission_mode", value: "default" });
-    await ctx.request("session/prompt", say(stored, "Write three"));
-    return { loaded, changed };
-  });
-  await host.stop();
   const option = (options: ReadonlyArray<acp.SessionConfigOption> | null | undefined) => options?.find((each) => each.id === "permission_mode");
-  expect(option(result.loaded.configOptions)).toMatchObject({ category: "mode", currentValue: "default" });
-  expect(option(result.changed.configOptions)).toMatchObject({ currentValue: "bypassPermissions" });
-  // In bypass mode the write ran without a question; back in the default mode the next one was asked about.
-  expect(log.asked.map((asked) => asked.toolCall.toolCallId)).toEqual(["w-3"]);
-  expect(log.files.filter((each) => each.method === "fs/write_text_file").map((each) => each.content)).toEqual(["w-2", "w-3"]);
+  for (const method of ["session/load", "session/resume"] as const) {
+    const name = method.slice("session/".length);
+    const host = startHost({ script: [write(`${name}-2`), answer({ _tag: "Text", text: "Two." }), write(`${name}-3`), answer({ _tag: "Text", text: "Three." })] });
+    const { app, log } = sdkClient();
+    const result = await app.connectWith(host.stream, async (ctx) => {
+      await initialize(ctx);
+      const started =
+        method === "session/load"
+          ? await ctx.request("session/load", { sessionId: stored, cwd: host.cwd, mcpServers: [] })
+          : await ctx.request("session/resume", { sessionId: stored, cwd: host.cwd });
+      const changed = await ctx.request("session/set_config_option", { sessionId: stored, configId: "permission_mode", value: "bypassPermissions" });
+      await ctx.request("session/prompt", say(stored, "Write two"));
+      await ctx.request("session/set_config_option", { sessionId: stored, configId: "permission_mode", value: "default" });
+      await ctx.request("session/prompt", say(stored, "Write three"));
+      return { started, changed };
+    });
+    await host.stop();
+    expect(option(result.started.configOptions)).toMatchObject({ category: "mode", currentValue: "default" });
+    expect(option(result.changed.configOptions)).toMatchObject({ currentValue: "bypassPermissions" });
+    // In bypass mode the write ran without a question; back in the default mode the next one was asked about.
+    expect(log.asked.map((asked) => asked.toolCall.toolCallId)).toEqual([`${name}-3`]);
+    expect(log.files.filter((each) => each.method === "fs/write_text_file").map((each) => each.content)).toEqual([`${name}-2`, `${name}-3`]);
+  }
 });
 
-test("AL4 AL8: loading a session whose process ended mid-turn ends that turn, with no tool run and no model request; its interruption is replayed once, and the next prompt works", async () => {
+test("AL4 AL8: loading a session whose process ended with a tool call running ends that turn, with no tool run and no model request; the call is replayed once, as failed, and the next prompt works", async () => {
   const held = Deferred.makeUnsafe<void>();
   const first = startHost({ world: runsWorld([], held), script: [answer({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "ping" } })] });
   const sessionId = await sdkClient().app.connectWith(first.stream, async (ctx) => {
@@ -1086,6 +1107,41 @@ test("AL4 AL8: loading a session whose process ended mid-turn ends that turn, wi
   expect(host.logged.find((each) => each.key === logKeys.session.loaded)).toMatchObject({
     details: { replayed: replay.length, turnsLeftRunning: [ended?.annotations["turn"]] },
   });
+});
+
+test("AL4: loading a session whose process ended with a model request in flight and no call under way ends the turn, with no model request made; the replay shows its input alone, and the next prompt works", async () => {
+  const started = Deferred.makeUnsafe<void>();
+  const first = startHost({ world: echoWorld, script: [held("Working on it.", started)] });
+  const sessionId = await sdkClient().app.connectWith(first.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const created = await ctx.request("session/new", { cwd: first.cwd, mcpServers: [] });
+    void failure(ctx.request("session/prompt", say(created.sessionId, "Think about it")));
+    await Effect.runPromise(Deferred.await(started));
+    await first.hangUp();
+    return created.sessionId;
+  });
+  await first.ended;
+  const file = storeFileOf(first.directory, sessionId);
+  expect(endings(await factsOn(file))).toEqual([]);
+
+  const host = startHost({ world: echoWorld, script: [answer({ _tag: "Text", text: "Fresh." })] });
+  const { app, until } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    await ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] });
+    const atLoad = { targets: host.targets.length, facts: await factsOn(file) };
+    await until((updates) => updates.some((update) => update.sessionUpdate === "usage_update"));
+    const prompted = await ctx.request("session/prompt", say(sessionId, "Again"));
+    return { atLoad, prompted };
+  });
+  await host.stop();
+  expect(result.atLoad.targets).toBe(0);
+  expect(endings(result.atLoad.facts)).toEqual(["Interrupted"]);
+  expect(observed(result.atLoad.facts).map((fact) => fact.observation._tag)).not.toContain("ToolCallArrived");
+  // What the stream sent before the process ended was never recorded, and ACP has no update for an interrupted turn: the client has the input alone.
+  expect(kinds(updatesBeforeAnswer(host))).toEqual(["user_message_chunk"]);
+  expect(result.prompted.stopReason).toBe("end_turn");
+  expect(endings(await factsOn(file))).toEqual(["Interrupted", "Completed"]);
 });
 
 test("AL5 AL8: session/resume starts the stored session and replays nothing, then sends the commands, title and usage; the next prompt reaches the model with the earlier turn, and the record keeps its working folder", async () => {

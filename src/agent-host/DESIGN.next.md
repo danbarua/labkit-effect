@@ -85,7 +85,8 @@ if lower (`vscode-workspace.ts` in labkit-agent).
   gone on with: the editor that closed mid-turn is not watching, and what the turn had begun (a
   model request, tools that change things) should not run unseen. The order matters because the
   feed subscribes to facts when it starts: end the turn left running, replay the facts through the
-  projection (load only), start the feed from the state the replay leaves, and only then `goOn`.
+  projection (load only), start the feed from the state the replay leaves, and then `goOn` when no
+  turn was left running (input left waiting starts its turn, which the feed sends).
 - A fork copied as it is would keep `SessionOpened { session }` naming its source, which the loop's
   log annotations, the `/export` header and compaction's summaries read. The core has no identity
   for a fork yet (`TODO.md`, Sessions), so the ACP host does not advertise `fork`.
@@ -98,7 +99,9 @@ items (`session.streamed`: `ModelDelta`, `ModelPartArrived`, `ModelResponseEnded
 order, and says the updates each gives. The two feeds have no order between them, and each
 response's text is sent once whichever merge a host makes (`agent-acp` PJ9). A load has no request
 under way (a turn left running is ended before the facts are read), so there are no deltas to miss
-between the replay and the feed that goes on from it.
+between the replay and the feed that goes on from it. The stored facts record a request's calls
+before its response, which holds its thinking and text; a load takes each response first, as live
+sent them (`agent-acp` PJ11).
 
 | Core | ACP update |
 |---|---|

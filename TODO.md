@@ -91,16 +91,21 @@ model.
       (`ModelDelta`, `ModelPartArrived`, `ModelResponseEnded`), merged in any order, to the client's
       updates, one function for the live view and for `session/load` (`src/agent-acp/projection.ts`),
       which the ACP host's feed sends: text and thinking as they arrive, tool calls and how they
-      end; `session/load` sends the projection of the stored facts before its answer, and the feed
-      goes on from the state they leave; the model's plan (`update_plan`) as a `plan` update. To
-      do: the last plan sent again on `session/load`.
+      end; `session/load` sends the projection of the stored facts before its answer, each response
+      before the calls it made, as live sent them, and the feed goes on from the state they leave;
+      the model's plan (`update_plan`) as a `plan` update. To do: the last plan sent again on
+      `session/load`. Open: live with no deltas (a server that answers whole) announces a call
+      before its response's text, which is known only when the response ends.
 - [ ] The ACP host's sessions across processes. Built: each session's facts in a file
       (`FileBackedSessionStore`, `~/.labkit/sessions`); the host's record of a session (`host.json`:
       the working folder, a title from the first prompt), written at turn zero; `session/load` (the
       stored facts replayed before the answer), `session/resume` (no replay) and `session/list`
       (by working folder, newest first, paged), with `session_info_update`; a turn the facts left
       running is ended, not gone on with; `session/close`. To do: `session/fork` (it waits for the
-      core: Forks, under Sessions); `session/delete`; additional directories.
+      core: Forks, under Sessions); `session/delete`; additional directories. Open: the permission
+      mode is not in the host's record, so a reopened session starts at the launcher's mode; ACP has
+      no update for how a turn ended, so a replay of a turn that ended with no answer and no call
+      under way (interrupted, failed) shows its input alone.
 - [ ] The ACP host in an editor: the launch command, and VS Code's behaviour with what it sends and
       draws (config options as selects, thinking, permission, tool call content). Then JetBrains.
 - [ ] The MCP servers a client names in `session/new`, their tools offered to the model (the ACP

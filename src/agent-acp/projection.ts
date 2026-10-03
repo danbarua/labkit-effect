@@ -298,11 +298,59 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
   }
 }
 
-/** The updates `inputs` give, in order, from `from`; and the state after them. */
+/**
+ * `inputs` in the order live sent them, for a replay. The loop records a tool call as the model's
+ * stream passes it, so a request's calls, and even their ends, come before the `ModelResponded`
+ * that holds the whole response. A request runs from a `ModelRequestDispatched` to its turn's next
+ * `ModelResponded`; when calls arrived in it, that response is taken just before the first
+ * `ToolCallArrived`. Every other input keeps its place: the result is a permutation of `inputs`.
+ */
+function inLiveOrder(inputs: ReadonlyArray<ProjectionInput>): ReadonlyArray<ProjectionInput> {
+  // Each turn's request in flight: the position of its first ToolCallArrived, or undefined before one.
+  const open = new Map<TurnId, number | undefined>();
+  // The response to take before the input at each position, and the positions of the responses so moved.
+  const before = new Map<number, ProjectionInput>();
+  const moved = new Set<number>();
+  inputs.forEach((input, index) => {
+    if (input._tag !== "Observed") return;
+    const observation = input.observation;
+    switch (observation._tag) {
+      case "ModelRequestDispatched":
+        open.set(observation.turn, undefined);
+        return;
+      case "ToolCallArrived":
+        if (open.has(observation.turn) && open.get(observation.turn) === undefined) open.set(observation.turn, index);
+        return;
+      case "ModelResponded": {
+        const anchor = open.get(observation.turn);
+        open.delete(observation.turn);
+        if (anchor === undefined) return;
+        before.set(anchor, input);
+        moved.add(index);
+        return;
+      }
+      default:
+        return;
+    }
+  });
+  if (moved.size === 0) return inputs;
+  const ordered: Array<ProjectionInput> = [];
+  inputs.forEach((input, index) => {
+    const response = before.get(index);
+    if (response !== undefined) ordered.push(response);
+    if (!moved.has(index)) ordered.push(input);
+  });
+  return ordered;
+}
+
+/**
+ * The updates `inputs` give, in order, from `from`; and the state after them. On replay, each
+ * request's response is taken before its first tool call, as live sent them (`inLiveOrder`).
+ */
 export function project(inputs: ReadonlyArray<ProjectionInput>, context: ProjectionContext, from: ProjectionState = start): Projected {
   const updates: Array<SessionUpdate> = [];
   let state = from;
-  for (const input of inputs) {
+  for (const input of context.mode === "replay" ? inLiveOrder(inputs) : inputs) {
     const step = next(state, input, context);
     state = step.state;
     updates.push(...step.updates);
