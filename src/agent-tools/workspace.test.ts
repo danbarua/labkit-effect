@@ -1,7 +1,7 @@
 /** The workspace tools, run on a folder made for the test. */
 
 import { expect } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
@@ -56,6 +56,36 @@ test("run_command runs sh -c in the workspace: exit 0 succeeds with the output; 
   expect(await call("run_command", { command: "ls src | head -1" })).toBe("a.txt\n[Exit code 0.]");
   expect(await call("run_command", { command: "echo out; echo err >&2; exit 3" })).toBe("reported: out\nerr\n[Exit code 3.]");
   expect(await call("run_command", { command: "sleep 5", timeout_seconds: 1 })).toBe("reported: [Still running after 1 seconds: stopped.]");
+});
+
+/** Whether process `pid` is running. */
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+test("run_command is a process group: stopped at its time, what it started is stopped too; ended by itself, what it left in the background runs on", async () => {
+  const stopped = await call("run_command", { command: "sleep 30 & echo $! > stopped.pid; wait", timeout_seconds: 1 });
+  expect(stopped).toBe("reported: [Still running after 1 seconds: stopped.]");
+  const orphan = Number(readFileSync(join(root, "stopped.pid"), "utf8"));
+  await Bun.sleep(100);
+  expect(alive(orphan)).toBe(false);
+  const ran = await call("run_command", { command: "nohup sleep 30 > /dev/null 2>&1 & echo $!" });
+  const server = Number(ran.split("\n")[0]);
+  expect(alive(server)).toBe(true);
+  process.kill(server, "SIGKILL");
+  rmSync(join(root, "stopped.pid"));
+});
+
+test("run_command keeps the last 256 KiB of a long output, read as it comes", async () => {
+  const output = await call("run_command", { command: "head -c 600000 /dev/zero | tr '\\0' x; echo; echo end" });
+  expect(output).toStartWith("[The output's beginning was cut: its last 256 KiB follow.]\n");
+  expect(output).toEndWith("x\nend\n[Exit code 0.]");
+  expect(Buffer.byteLength(output)).toBeLessThan(256 * 1024 + 200);
 });
 
 test("list_dir lists one folder, a folder's name ending with /", async () => {

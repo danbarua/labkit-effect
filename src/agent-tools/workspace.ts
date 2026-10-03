@@ -14,9 +14,11 @@
  * `write_file` does not: it writes the same text whenever it runs, but the file may have changed
  * since (`"idempotent"`). `edit_file` replaces the one occurrence of a text in a file; text that
  * occurs never or more than once is refused. `run_command` runs `sh -c <command>` in the root, and
- * gives its output (stdout, then stderr; the last 256 KiB) and how it ended: exit code 0 succeeds,
- * any other end fails with the output. It is stopped after its time (`commandSeconds` unless the
- * call says, at most 600 seconds), or when the call is interrupted. Neither runs again when a
+ * gives its output (stdout, then stderr; the last 256 KiB, kept as it is read) and how it ended:
+ * exit code 0 succeeds, any other end fails with the output. It runs as a process group of its own,
+ * stopped whole, what it started included, after its time (`commandSeconds` unless the call says,
+ * at most 600 seconds) or when the call is interrupted; a command that ends by itself leaves what
+ * it started in the background to run on. Neither runs again when a
  * session goes on (`"unsafe"`).
  *
  * A call that cannot run fails with the reason: no tool has the name (`NotFound`), the input does
@@ -48,6 +50,25 @@ const RunCommand = Schema.Struct({
 
 /** How long a command runs before it is stopped, unless the call says otherwise. */
 export const commandSeconds = 120;
+
+/**
+ * What `stream` gives, read to its end keeping only its last `max` bytes or so: a command's output is
+ * cut to its tail while it is read, not after.
+ */
+const tailOf = async (stream: ReadableStream<Uint8Array>, max: number): Promise<{ readonly text: string; readonly cut: boolean }> => {
+  const chunks: Array<Uint8Array> = [];
+  let held = 0;
+  let dropped = false;
+  for await (const chunk of stream) {
+    chunks.push(chunk);
+    held += chunk.byteLength;
+    while (chunks.length > 1 && held - (chunks[0]?.byteLength ?? 0) >= max) {
+      held -= chunks.shift()?.byteLength ?? 0;
+      dropped = true;
+    }
+  }
+  return { text: Buffer.concat(chunks).toString("utf8"), cut: dropped };
+};
 
 /** The last `max` bytes of `text`, never inside a character, and whether any were left out. */
 const lastBytes = (text: string, max: number): { readonly kept: string; readonly cut: boolean } => {
@@ -185,23 +206,32 @@ export function workspaceTools(root: string) {
       decode: Schema.decodeUnknownEffect(RunCommand),
       run: ({ command, timeout_seconds }) => {
         const seconds = timeout_seconds ?? commandSeconds;
-        // The process is stopped however the call ends: at its time, or when the call is interrupted.
+        // The command is a process group of its own (`detached`). Stopped (at its time, or when the
+        // call is interrupted), the whole group is killed, what it started included; a command that
+        // ends by itself leaves what it started to run on (`nohup server &`).
         return Effect.acquireUseRelease(
-          Effect.sync(() => Bun.spawn(["/bin/sh", "-c", command], { cwd: root, stdin: "ignore", stdout: "pipe", stderr: "pipe" })),
+          Effect.sync(() => Bun.spawn(["/bin/sh", "-c", command], { cwd: root, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true })),
           (child) =>
-            Effect.promise(() => Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])).pipe(
+            Effect.promise(() => Promise.all([tailOf(child.stdout, maxReadBytes), tailOf(child.stderr, maxReadBytes), child.exited])).pipe(
               Effect.timeoutOption(Duration.seconds(seconds)),
             ),
-          (child) =>
+          (child, exit) =>
             Effect.sync(() => {
-              if (child.exitCode === null && child.signalCode === null) child.kill();
+              if (exit._tag === "Success" && Option.isSome(exit.value)) return;
+              try {
+                process.kill(-child.pid, "SIGKILL");
+              } catch {
+                // The group has ended already.
+              }
             }),
         ).pipe(
           Effect.flatMap((ended) => {
             if (Option.isNone(ended)) return Effect.fail(new Reported({ message: `[Still running after ${seconds} seconds: stopped.]` }));
-            const [stdout, stderr, code] = ended.value;
+            const [out, err, code] = ended.value;
+            const [stdout, stderr] = [out.text, err.text];
             const output = `${stdout}${stdout !== "" && stderr !== "" && !stdout.endsWith("\n") ? "\n" : ""}${stderr}`;
-            const { kept, cut } = lastBytes(output, maxReadBytes);
+            const last = lastBytes(output, maxReadBytes);
+            const [kept, cut] = [last.kept, last.cut || out.cut || err.cut];
             const text = `${cut ? "[The output's beginning was cut: its last 256 KiB follow.]\n" : ""}${kept}${kept === "" || kept.endsWith("\n") ? "" : "\n"}[Exit code ${code}.]`;
             return code === 0 ? Effect.succeed(text) : Effect.fail(new Reported({ message: text }));
           }),
