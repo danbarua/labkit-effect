@@ -53,7 +53,7 @@ import type { CapturedObservation, ModelPart, Observation, ToolOutcome } from ".
 import type { Origin } from "../agent-machine/origin.ts";
 import type { EffectRequest } from "../agent-machine/request.ts";
 import { emptyHeld, type Held as Throttled, throttle, type ThrottleInput } from "../agent-machine/throttle.ts";
-import { ContextAssembler, ModelClient, ModelProvider, ModelRequestPolicies, type PolicyOfFacts, ToolCallPolicies, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
+import { ContextAssembler, MaxHolds, ModelClient, ModelProvider, ModelRequestPolicies, type PolicyOfFacts, ToolCallPolicies, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
 import { every, type Policy, type Verdict } from "../agent-policy/policy.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { logKeys } from "./log-keys.ts";
@@ -146,7 +146,7 @@ const holdsOf = (facts: ReadonlyArray<Fact>, turn: TurnId): number =>
   ).holds;
 
 /** What the loop needs to carry out requests. */
-export type Services = ModelProvider | ContextAssembler | ModelClient | Turns | ToolRunner | TurnEndHooks;
+export type Services = ModelProvider | ContextAssembler | ModelClient | Turns | ToolRunner;
 
 /** What the user gives a turn: the text, and the files that came with it. */
 export type Prompt = Pick<Extract<Observation, { _tag: "InputArrived" }>, "text" | "attachments">;
@@ -287,11 +287,13 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
    */
   const reviewTurnEnd = (turn: TurnId): Effect.Effect<ReadonlyArray<Observed>, never, Services> =>
     Effect.gen(function* () {
-      const { hooks, maxHolds } = yield* TurnEndHooks;
-      const holds = holdsOf(yield* store.facts, turn);
+      const hooks = yield* TurnEndHooks;
+      const maxHolds = yield* MaxHolds;
+      const facts = yield* store.facts;
+      const holds = holdsOf(facts, turn);
       const origin = harnessParts.turnEndHooks;
       const reviewed: Observed = { origin, observation: { _tag: "TurnEndReviewed", turn } };
-      const feedback = (yield* Effect.forEach(hooks, (hook) => hook(turn))).flat();
+      const feedback = (yield* Effect.forEach(hooks, (hook) => hook(facts, turn))).flat();
       if (feedback.length === 0) return [reviewed];
       if (holds >= maxHolds) {
         yield* Effect.logWarning(logKeys.loop.holdsExhausted, { holds, maxHolds, feedback });

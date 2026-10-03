@@ -120,10 +120,10 @@ warning, error and fatal records alone.
 
 ## Turn ends
 
-`SessionServices(runner, hooks)` takes the turn-end hooks a session runs with as a second
-argument, `NoTurnEndHooks` when left out (the CLI). `RetryIncomplete(retries = 1)`
-(`incomplete.ts`) is one hook over the session's store, for models that put their whole answer in
-their reasoning.
+A host composes the turn-end hooks a session runs with (`TurnEndHooks`, in order) and how many
+times they may hold a turn (`MaxHolds`). `retryIncomplete(retries = 1)` (`incomplete.ts`) is one
+hook, for models that put their whole answer in their reasoning; the CLI and the ACP host run it
+alone, with `MaxHolds` its `retries`.
 
 - H15. When the latest decision about a turn is `TurnIncomplete` (a whole response with no tool
   calls and no answer text, agent-machine I4) and the hooks have not held the turn open `retries`

@@ -6,23 +6,20 @@ import { Notices } from "../agent-context/assemble.ts";
 import { type PermissionMode, permissions } from "../agent-policy/permissions.ts";
 import { type LoopBreakerSettings, loopBreakerDefaults, repeatedCalls, repeatingTurns } from "../agent-policy/loop-breaker.ts";
 import type { Policy } from "../agent-policy/policy.ts";
-import type { PolicyOfFacts, ToolRunner, TurnEndHooks } from "../agent-session/contracts.ts";
+import type { PolicyOfFacts, ToolRunner } from "../agent-session/contracts.ts";
 import { ModelFromFacts } from "../agent-session/configuration/model-choice.ts";
 import { immutableToolCatalogOf } from "../agent-session/configuration/session-setup.ts";
-import { CountingTurnsInStore, NoTurnEndHooks } from "../agent-session/turns.ts";
+import { CountingTurnsInStore } from "../agent-session/turns.ts";
 import { Clients } from "./clients.ts";
 import { KnownWithLocalServer, SettlingWithLocalServer } from "./local-server.ts";
 
 /**
- * What the loop needs for a session, but its store and its policies: the model its facts
- * name, what is known of it and how its settings are applied, the whole conversation as context,
- * the provider clients, turns that count on from those the store holds, `runner` for its tools, and
- * `hooks` before a turn ends (none when left out).
+ * What the loop needs for a session, but its store, its policies and its turn-end hooks: the model
+ * its facts name, what is known of it and how its settings are applied, the whole conversation as
+ * context, the provider clients, turns that count on from those the store holds, and `runner` for
+ * its tools.
  */
-export const SessionServices = <E, R, HE = never, HR = never>(
-  runner: Layer.Layer<ToolRunner, E, R>,
-  hooks: Layer.Layer<TurnEndHooks, HE, HR> = NoTurnEndHooks as Layer.Layer<TurnEndHooks, HE, HR>,
-) =>
+export const SessionServices = <E, R>(runner: Layer.Layer<ToolRunner, E, R>) =>
   Layer.mergeAll(
     ModelFromFacts.pipe(Layer.provide(KnownWithLocalServer)),
     KnownWithLocalServer,
@@ -30,7 +27,6 @@ export const SessionServices = <E, R, HE = never, HR = never>(
     AgentContextAssembler.pipe(Layer.provide(Layer.mergeAll(WholeConversation, Layer.succeed(Notices, [])))),
     Clients,
     CountingTurnsInStore,
-    hooks,
     runner,
   );
 

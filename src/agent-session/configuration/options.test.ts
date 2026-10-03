@@ -10,7 +10,7 @@ import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { ModelClient, ToolRunner } from "../contracts.ts";
 import { openSession } from "../loop.ts";
 import { EphemeralSessionStore } from "../session-store.ts";
-import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { CountingTurns } from "../turns.ts";
 import { ModelFromFacts } from "./model-choice.ts";
 import { optionsFor, optionsOf, type Options } from "./options.ts";
 import { openedWith } from "./session-setup.ts";
@@ -32,7 +32,6 @@ test("the options are the model, the settings in force, and each setting to offe
           ModelFromFacts,
           BoringContextAssembler,
           CountingTurns,
-          NoTurnEndHooks,
           Layer.succeed(ModelClient, { respond: () => Effect.die("no request") }),
           Layer.succeed(ToolRunner, { run: () => Effect.die("no tools") }),
         ),
@@ -103,7 +102,6 @@ const services = Layer.mergeAll(
   ModelFromFacts,
   BoringContextAssembler,
   CountingTurns,
-  NoTurnEndHooks,
   EphemeralSessionStore,
   Layer.succeed(ModelClient, { respond: () => Effect.die("no request") }),
   Layer.succeed(ToolRunner, { run: () => Effect.die("no tools") }),

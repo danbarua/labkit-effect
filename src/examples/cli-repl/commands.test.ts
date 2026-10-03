@@ -15,7 +15,7 @@ import { EphemeralSessionStore } from "../../agent-session/session-store.ts";
 import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
 import { receivedJson } from "../../agent-session/received.ts";
 import { openedWith } from "../../agent-session/configuration/session-setup.ts";
-import { CountingTurns, NoTurnEndHooks } from "../../agent-session/turns.ts";
+import { CountingTurns } from "../../agent-session/turns.ts";
 import { command, completions, inForce, offered } from "./commands.ts";
 import { ask } from "./session.ts";
 
@@ -67,7 +67,6 @@ const session = (lines: ReadonlyArray<string>) => {
           BoringContextAssembler,
           recording,
           CountingTurns,
-          NoTurnEndHooks,
           Layer.succeed(ToolRunner, { run: () => Effect.die("no tools") }),
         ),
       ),

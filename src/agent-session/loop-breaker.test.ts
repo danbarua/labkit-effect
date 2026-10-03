@@ -14,7 +14,7 @@ import { openSession } from "./loop.ts";
 import { harnessParts } from "./origin.ts";
 import { asText, receivedJson } from "./received.ts";
 import { EphemeralSessionStore } from "./session-store.ts";
-import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
+import { CountingTurns } from "./turns.ts";
 
 /** A model that calls `echo` with the same input at every request. */
 const repeatsEcho = () => {
@@ -53,7 +53,6 @@ test("P9 P10: calls 1 and 2 run, 3 to 5 are vetoed with a reason the model reads
           repeatsEcho(),
           SmolToolRunner,
           CountingTurns,
-          NoTurnEndHooks,
           Layer.succeed(ToolCallPolicies, [(facts) => Effect.succeed(repeatedCalls(facts))]),
           Layer.succeed(ModelRequestPolicies, [(facts) => Effect.succeed(repeatingTurns(facts))]),
         ),

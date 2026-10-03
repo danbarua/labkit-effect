@@ -118,7 +118,7 @@ model.
 
 ### The coding agent
 
-- [ ] The CLI does what the ACP host does. Built: `/export` (`markdownOf`); `RetryIncomplete`; the
+- [ ] The CLI does what the ACP host does. Built: `/export` (`markdownOf`); `retryIncomplete`; the
       REPL shows text and thinking as they arrive (`session.streamed`). To do: open its session from
       a draft at the first input (`src/agent-host/draft.ts`, turn zero), so a CLI quit before any
       input leaves no session.

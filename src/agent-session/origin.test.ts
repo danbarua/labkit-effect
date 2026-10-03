@@ -9,7 +9,7 @@ import { openSession } from "./loop.ts";
 import { EphemeralSessionStore } from "./session-store.ts";
 import { receivedJson } from "./received.ts";
 import { TurnContextAssembler } from "./turn-context.ts";
-import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
+import { CountingTurns } from "./turns.ts";
 import { BoringModelProvider, boringOpening } from "../../tests/support/boring.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { SmolToolRunner, smolCatalog } from "../../tests/support/smol-tools.ts";
@@ -37,7 +37,7 @@ const scripted = () => {
 };
 
 const services = () =>
-  Layer.mergeAll(BoringModelProvider, TurnContextAssembler, scripted(), CountingTurns, NoTurnEndHooks, SmolToolRunner);
+  Layer.mergeAll(BoringModelProvider, TurnContextAssembler, scripted(), CountingTurns, SmolToolRunner);
 
 const input = { _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation;
 

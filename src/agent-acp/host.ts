@@ -47,13 +47,13 @@ import { Blobs, BlobsInFolder } from "../agent-session/blobs.ts";
 import { chooseModel, defaultModel, type Draft, draftOf, opening, optionsOfDraft, saySettings, withDefaults } from "../agent-host/draft.ts";
 import { markdownOf } from "../agent-host/export.ts";
 import { KnownWithLocalServer, localServer, SettlingWithLocalServer } from "../agent-host/local-server.ts";
-import { RetryIncomplete } from "../agent-host/incomplete.ts";
+import { retryIncomplete } from "../agent-host/incomplete.ts";
 import { readRecord, RecordFailed, recordedSessions, recordFileOf, writeRecord } from "../agent-host/record.ts";
 import { permissionsFor, SessionServices } from "../agent-host/services.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { leftRunning } from "../agent-machine/left-running.ts";
 import { InputText, SessionId, type TurnId } from "../agent-machine/names.ts";
-import { type Target, ToolCallPolicies, type ToolRunner } from "../agent-session/contracts.ts";
+import { MaxHolds, type Target, ToolCallPolicies, type ToolRunner, TurnEndHooks } from "../agent-session/contracts.ts";
 import { FileBackedSessionStore } from "../agent-session/file-session-store.ts";
 import { endTurnLeftRunning, openSession, type Services, type Session } from "../agent-session/loop.ts";
 import type { SessionStore } from "../agent-session/session-store.ts";
@@ -103,12 +103,12 @@ export interface HostOptions<R = never> {
 
 /**
  * What a session runs with by default: `SessionServices`, with a turn whose last response had
- * thinking but no answer asked again for it, `retries` times (`RetryIncomplete`).
+ * thinking but no answer asked again for it, `retries` times (`retryIncomplete`, its only hook).
  */
 export const HostSessionServices =
   (retries = 1) =>
   (runner: Layer.Layer<ToolRunner>) =>
-    SessionServices(runner, RetryIncomplete(retries));
+    Layer.mergeAll(SessionServices(runner), Layer.succeed(TurnEndHooks, [retryIncomplete(retries)]), Layer.succeed(MaxHolds, retries));
 
 /**
  * The options a launcher takes from the environment: `LABKIT_ACP_MODEL`, `LABKIT_ACP_LOCAL_TOOLS`,

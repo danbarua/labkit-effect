@@ -12,7 +12,7 @@ import type { Fact } from "../../agent-machine/fact.ts";
 import { InputText, ModelName, ProviderName, TurnId } from "../../agent-machine/names.ts";
 import type { ModelClient, ModelContext, ProviderRequest } from "../contracts.ts";
 import { BoringModelProvider } from "../../../tests/support/boring.ts";
-import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { CountingTurns } from "../turns.ts";
 import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
 import { logKeys } from "../log-keys.ts";
 import { openSession } from "../loop.ts";
@@ -86,7 +86,6 @@ const oneTurn = (client: Layer.Layer<ModelClient>) => {
     client,
     TurnContextAssembler,
     CountingTurns,
-    NoTurnEndHooks,
     SmolToolRunner,
     Logger.layer([Logger.make((options) => logged.push(options.message))], { mergeWithExisting: true }),
   );

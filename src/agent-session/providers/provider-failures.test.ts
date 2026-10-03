@@ -17,7 +17,7 @@ import { conversationOf } from "../conversation.ts";
 import { openSession } from "../loop.ts";
 import { EphemeralSessionStore } from "../session-store.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
-import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { CountingTurns } from "../turns.ts";
 import { BoringModelProvider, boringOpening } from "../../../tests/support/boring.ts";
 import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
 import { logKeys } from "../log-keys.ts";
@@ -217,7 +217,6 @@ test("TC4: a stream closed after a tool call of it was passed on is not made aga
           TurnContextAssembler,
           openAiModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiAt(new URL(`http://127.0.0.1:${server.port}`)))),
           CountingTurns,
-          NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),

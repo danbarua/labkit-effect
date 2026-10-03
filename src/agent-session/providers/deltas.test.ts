@@ -19,7 +19,7 @@ import { openSession } from "../loop.ts";
 import { ModelStreamInterval } from "../model-stream.ts";
 import { EphemeralSessionStore } from "../session-store.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
-import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { CountingTurns } from "../turns.ts";
 import { AnthropicModelClient } from "./anthropic-client.ts";
 import { openAiCompatModelClient } from "./openai-compat-client.ts";
 import { OpenAiModelClient } from "./openai-client.ts";
@@ -54,7 +54,7 @@ const streamedIn = (client: Layer.Layer<ModelClient>) =>
       yield* session.idle;
       return yield* PubSub.takeAll(streamed);
     }).pipe(
-      Effect.provide(Layer.mergeAll(BoringModelProvider, TurnContextAssembler, client, CountingTurns, NoTurnEndHooks, SmolToolRunner)),
+      Effect.provide(Layer.mergeAll(BoringModelProvider, TurnContextAssembler, client, CountingTurns, SmolToolRunner)),
       Effect.provideService(ModelStreamInterval, Millis.make(0)),
     ),
   );

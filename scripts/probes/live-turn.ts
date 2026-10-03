@@ -33,7 +33,7 @@ import { OpenAiModelClient } from "../../src/agent-session/providers/openai-clie
 import { XAiModelClient, xAiClient } from "../../src/agent-session/providers/xai-client.ts";
 import { openedWith } from "../../src/agent-session/configuration/session-setup.ts";
 import { TurnContextAssembler } from "../../src/agent-session/turn-context.ts";
-import { CountingTurns, NoTurnEndHooks } from "../../src/agent-session/turns.ts";
+import { CountingTurns } from "../../src/agent-session/turns.ts";
 import { SmolToolRunner, smolCatalog } from "../../tests/support/smol-tools.ts";
 import { TelemetryToFiles } from "../../src/instrumentation/telemetry.ts";
 import { transcript } from "./transcript.ts";
@@ -100,7 +100,6 @@ const facts = await Effect.runPromise(
         TurnContextAssembler,
         client,
         CountingTurns,
-        NoTurnEndHooks,
         SmolToolRunner,
         TelemetryToFiles(join(run, "telemetry")),
       ),

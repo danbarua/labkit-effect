@@ -12,7 +12,7 @@
 import { Effect, Layer, type Scope } from "effect";
 import type { Asked } from "../../agent-host/catalog.ts";
 import { sessionFolderOf, storeFileOf } from "../../agent-host/directory.ts";
-import { RetryIncomplete } from "../../agent-host/incomplete.ts";
+import { retryIncomplete } from "../../agent-host/incomplete.ts";
 import { loopBreaker, permissionsFor, SessionServices } from "../../agent-host/services.ts";
 import type { Ending } from "../../agent-machine/decision.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
@@ -21,7 +21,7 @@ import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { workspaceTools } from "../../agent-tools/workspace.ts";
 import type { PermissionMode } from "../../agent-policy/permissions.ts";
 import { leftRunning, type LeftRunning } from "../../agent-machine/left-running.ts";
-import { ModelRequestPolicies, ToolCallPolicies } from "../../agent-session/contracts.ts";
+import { MaxHolds, ModelRequestPolicies, ToolCallPolicies, TurnEndHooks } from "../../agent-session/contracts.ts";
 import { endTurnLeftRunning, openSession, type Session } from "../../agent-session/loop.ts";
 import { FileBackedSessionStore } from "../../agent-session/file-session-store.ts";
 import { ephemeralSessionStore, SessionStoreFailed } from "../../agent-session/session-store.ts";
@@ -70,9 +70,11 @@ const workspaceOf = (config: Config) => workspaceTools(process.cwd(), { strictIn
 
 /**
  * What the loop needs, for a CLI session: the workspace's tools; its turns count on from those its
- * store holds; a turn whose response had thinking but no answer is asked once more for it.
+ * store holds; a turn whose response had thinking but no answer is asked once more for it (its only
+ * turn-end hook).
  */
-const servicesOf = (workspace: ReturnType<typeof workspaceOf>) => SessionServices(workspace.runner, RetryIncomplete(1));
+const servicesOf = (workspace: ReturnType<typeof workspaceOf>) =>
+  Layer.mergeAll(SessionServices(workspace.runner), Layer.succeed(TurnEndHooks, [retryIncomplete(1)]), Layer.succeed(MaxHolds, 1));
 
 /**
  * The policies a CLI session's requests go through: the loop breaker, then, for tool calls,

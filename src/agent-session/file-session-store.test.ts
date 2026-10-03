@@ -21,7 +21,7 @@ import { FileBackedSessionStore, readFacts } from "./file-session-store.ts";
 import { openSession, type Session } from "./loop.ts";
 import { receivedJson, receivedText } from "./received.ts";
 import { ephemeralSessionStore, SessionStore, SessionStoreFailed } from "./session-store.ts";
-import { CountingTurnsInStore, NoTurnEndHooks } from "./turns.ts";
+import { CountingTurnsInStore } from "./turns.ts";
 
 /** The session's file, in the test's folder. */
 const fileIn = () => join(testFolder(), "s1.jsonl");
@@ -55,7 +55,7 @@ const Answering = Layer.succeed(ToolRunner, { run: () => Effect.succeed({ _tag: 
 /** The loop's services over `store`, with `model` and `tools`. */
 const over = (store: Layer.Layer<SessionStore, SessionStoreFailed, FileSystem.FileSystem>, model = Scripted, tools = Answering) => {
   const kept = store.pipe(Layer.provide(BunServices.layer));
-  return Layer.mergeAll(BunServices.layer, BoringModelProvider, WholeSessionAssembler, model, tools, NoTurnEndHooks, CountingTurnsInStore).pipe(Layer.provideMerge(kept));
+  return Layer.mergeAll(BunServices.layer, BoringModelProvider, WholeSessionAssembler, model, tools, CountingTurnsInStore).pipe(Layer.provideMerge(kept));
 };
 
 const ask = (session: Session, text: string) =>
@@ -269,7 +269,7 @@ test("J2: each append is flushed to the disk before it returns: a tool runs only
       yield* ask(session, "echo hi");
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(BunServices.layer, BoringModelProvider, WholeSessionAssembler, Scripted, tools, NoTurnEndHooks, CountingTurnsInStore).pipe(Layer.provideMerge(store)),
+        Layer.mergeAll(BunServices.layer, BoringModelProvider, WholeSessionAssembler, Scripted, tools, CountingTurnsInStore).pipe(Layer.provideMerge(store)),
       ),
     ),
   );

@@ -18,7 +18,7 @@ import { openSession } from "../agent-session/loop.ts";
 import { EphemeralSessionStore } from "../agent-session/session-store.ts";
 import { AnthropicModelClient } from "../agent-session/providers/anthropic-client.ts";
 import { Report } from "../agent-session/report.ts";
-import { CountingTurns, NoTurnEndHooks } from "../agent-session/turns.ts";
+import { CountingTurns } from "../agent-session/turns.ts";
 import { BoringModelProvider, boringOpening } from "../../tests/support/boring.ts";
 import { observe, open, opened } from "../../tests/support/drive.ts";
 import { anthropicAt } from "../../tests/support/providers.ts";
@@ -95,7 +95,6 @@ test("S5 A4: a later request carries each earlier notice where it was sent, and 
           AgentContextAssembler.pipe(Layer.provide(Layer.mergeAll(WholeConversation, Layer.succeed(Notices, [counted])))),
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(new URL("/v1/messages", server.url)))),
           CountingTurns,
-          NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),

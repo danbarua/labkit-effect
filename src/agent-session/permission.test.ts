@@ -14,7 +14,7 @@ import { ModelClient, ToolCallPolicies } from "./contracts.ts";
 import { openSession } from "./loop.ts";
 import { EphemeralSessionStore } from "./session-store.ts";
 import { receivedJson } from "./received.ts";
-import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
+import { CountingTurns } from "./turns.ts";
 
 /** A model that calls `echo` once, then answers. */
 const callsEchoOnce = () => {
@@ -75,7 +75,6 @@ const answeredWith = (option: string) =>
           callsEchoOnce(),
           SmolToolRunner,
           CountingTurns,
-          NoTurnEndHooks,
           Layer.succeed(ToolCallPolicies, [(facts) => Effect.succeed(permissions("default", true, () => "other", facts) as Policy<unknown>)]),
         ),
       ),

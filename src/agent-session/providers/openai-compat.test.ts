@@ -9,7 +9,7 @@ import { logKeys } from "../log-keys.ts";
 import { receivedJson } from "../received.ts";
 import type { Observation } from "../../agent-machine/observation.ts";
 import { BoringModelProvider } from "../../../tests/support/boring.ts";
-import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { CountingTurns } from "../turns.ts";
 import { openSession } from "../loop.ts";
 import { EphemeralSessionStore } from "../session-store.ts";
 import { OpenAiCompatModelClient } from "./openai-compat-client.ts";
@@ -44,7 +44,6 @@ async function turn(responses: ReadonlyArray<unknown>) {
           TurnContextAssembler,
           OpenAiCompatModelClient.pipe(Layer.provide(openAiCompatAt(provider.url))),
           CountingTurns,
-          NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),
@@ -321,7 +320,7 @@ test("a stream that ends with no finish_reason was cut short: the request fails,
       return yield* session.facts;
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(BoringModelProvider, TurnContextAssembler, OpenAiCompatModelClient.pipe(Layer.provide(openAiCompatAt(server.url))), CountingTurns, NoTurnEndHooks, SmolToolRunner),
+        Layer.mergeAll(BoringModelProvider, TurnContextAssembler, OpenAiCompatModelClient.pipe(Layer.provide(openAiCompatAt(server.url))), CountingTurns, SmolToolRunner),
       ),
     ),
   );

@@ -5,7 +5,7 @@ import { test } from "../../../tests/support/test.ts";
 import { Effect, Layer } from "effect";
 import type { Observation } from "../../agent-machine/observation.ts";
 import { BoringModelProvider } from "../../../tests/support/boring.ts";
-import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { CountingTurns } from "../turns.ts";
 import { openSession } from "../loop.ts";
 import { EphemeralSessionStore } from "../session-store.ts";
 import { OpenAiModelClient } from "./openai-client.ts";
@@ -39,7 +39,6 @@ async function turn(responses: ReadonlyArray<unknown>) {
           TurnContextAssembler,
           OpenAiModelClient.pipe(Layer.provide(openAiAt(provider.url))),
           CountingTurns,
-          NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),

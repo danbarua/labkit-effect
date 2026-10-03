@@ -128,17 +128,19 @@ export class Turns extends Context.Service<Turns, { readonly start: Effect.Effec
 ) {}
 
 /**
- * What runs before a turn may end. Each hook returns feedback for the model, which the turn is given
- * as input, holding it open; no feedback lets it end. After `maxHolds` holds in one turn, feedback
- * the hooks still give is not given to it, and the turn ends.
+ * What runs before `turn` may end, as the session's facts stand: feedback for the model, which the
+ * turn is given as input, holding it open. No feedback lets it end.
  */
-export class TurnEndHooks extends Context.Service<
-  TurnEndHooks,
-  {
-    readonly hooks: ReadonlyArray<(turn: TurnId) => Effect.Effect<ReadonlyArray<string>>>;
-    readonly maxHolds: number;
-  }
->()("agent-session/TurnEndHooks") {}
+export type TurnEndHook = (facts: ReadonlyArray<Fact>, turn: TurnId) => Effect.Effect<ReadonlyArray<string>>;
+
+/** The hooks that run before a turn may end, in order; the turn is given their feedback in that order. None by default. */
+export const TurnEndHooks = Context.Reference<ReadonlyArray<TurnEndHook>>("agent-session/TurnEndHooks", { defaultValue: () => [] });
+
+/**
+ * How many times the turn-end hooks may hold one turn open. After that, feedback they still give is
+ * not given to it, and the turn ends. None by default: a host that runs hooks says how many.
+ */
+export const MaxHolds = Context.Reference<number>("agent-session/MaxHolds", { defaultValue: () => 0 });
 
 /** Runs one tool call (`call`, by which a host can show it as it runs) and reports how it ended. */
 export class ToolRunner extends Context.Service<

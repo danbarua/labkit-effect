@@ -43,7 +43,7 @@ import { OpenAiCompatModelClient } from "../../src/agent-session/providers/opena
 import { xAiClient, XAiModelClient } from "../../src/agent-session/providers/xai-client.ts";
 import { openedWith } from "../../src/agent-session/configuration/session-setup.ts";
 import { TurnContextAssembler } from "../../src/agent-session/turn-context.ts";
-import { CountingTurns, NoTurnEndHooks } from "../../src/agent-session/turns.ts";
+import { CountingTurns } from "../../src/agent-session/turns.ts";
 import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { transcript } from "./transcript.ts";
 
@@ -176,7 +176,7 @@ const facts = await Effect.runPromise(
   }).pipe(
     reportedBy({ _tag: "Test", name: TestName.make(`attachments-live ${provider} ${model}`) }),
     Effect.scoped,
-    Effect.provide(Layer.mergeAll(ModelFromFacts, TurnContextAssembler, client, CountingTurns, NoTurnEndHooks, viaTool ? Looking : SmolToolRunner, BlobsInFolder(blobFolder).pipe(Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))))),
+    Effect.provide(Layer.mergeAll(ModelFromFacts, TurnContextAssembler, client, CountingTurns, viaTool ? Looking : SmolToolRunner, BlobsInFolder(blobFolder).pipe(Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))))),
   ),
 );
 

@@ -9,7 +9,7 @@ import { openSession } from "./loop.ts";
 import { EphemeralSessionStore } from "./session-store.ts";
 import { receivedJson } from "./received.ts";
 import { TurnContextAssembler } from "./turn-context.ts";
-import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
+import { CountingTurns } from "./turns.ts";
 import { BoringModelProvider, boringOpening } from "../../tests/support/boring.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
@@ -45,7 +45,7 @@ function gated(gates: ReadonlyArray<Deferred.Deferred<void>>) {
 }
 
 const services = (model: Layer.Layer<ModelClient>) =>
-  Layer.mergeAll(BoringModelProvider, TurnContextAssembler, model, CountingTurns, NoTurnEndHooks, SmolToolRunner);
+  Layer.mergeAll(BoringModelProvider, TurnContextAssembler, model, CountingTurns, SmolToolRunner);
 
 const input = (text: string) => ({ _tag: "InputArrived", from: { _tag: "User" }, text }) as unknown as Observation;
 

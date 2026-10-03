@@ -14,7 +14,7 @@ import { capabilitiesOf } from "../agent-session/configuration/well-known-models
 import { ModelClient, ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
 import { openSession } from "../agent-session/loop.ts";
 import { EphemeralSessionStore } from "../agent-session/session-store.ts";
-import { CountingTurns, NoTurnEndHooks } from "../agent-session/turns.ts";
+import { CountingTurns } from "../agent-session/turns.ts";
 import { type Asked, type CatalogSource, ModelCatalog } from "./catalog.ts";
 import { chooseModel, defaultModel, draftOf, opening, optionsOfDraft, saySettings, withDefaults } from "./draft.ts";
 
@@ -43,7 +43,6 @@ const services = Layer.mergeAll(
   ModelFromFacts,
   BoringContextAssembler,
   CountingTurns,
-  NoTurnEndHooks,
   EphemeralSessionStore,
   Layer.succeed(ModelClient, { respond: () => Effect.die("no request") }),
   Layer.succeed(ToolRunner, { run: () => Effect.die("no tools") }),

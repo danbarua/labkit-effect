@@ -1,4 +1,4 @@
-/** `RetryIncomplete`: a turn whose response had thinking but no answer is asked again for it. */
+/** `retryIncomplete`: a turn whose response had thinking but no answer is asked again for it. */
 
 import { expect } from "bun:test";
 import { Effect, Layer } from "effect";
@@ -9,12 +9,12 @@ import { test } from "../../tests/support/test.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { InputText, ModelText, ThinkingText } from "../agent-machine/names.ts";
 import type { Observation } from "../agent-machine/observation.ts";
-import { ModelClient, type ModelContext } from "../agent-session/contracts.ts";
+import { MaxHolds, ModelClient, type ModelContext, TurnEndHooks } from "../agent-session/contracts.ts";
 import { openSession } from "../agent-session/loop.ts";
 import { receivedJson } from "../agent-session/received.ts";
 import { EphemeralSessionStore } from "../agent-session/session-store.ts";
 import { CountingTurns } from "../agent-session/turns.ts";
-import { answerNow, RetryIncomplete } from "./incomplete.ts";
+import { answerNow, retryIncomplete } from "./incomplete.ts";
 
 /** What the model gives each request, in order: its thinking alone, its answer, or its thinking cut short. */
 type Reply = "thinks" | "answers" | "cut";
@@ -46,12 +46,13 @@ const scripted = (replies: ReadonlyArray<Reply>) => {
 };
 
 /**
- * `prompts` prompts through the loop with `RetryIncomplete(retries)` over the session's store: how
+ * `prompts` prompts through the loop with `retryIncomplete(retries)` as its hook, held at most `retries` times: how
  * each ended, the facts, and each request's messages' text.
  */
 const prompted = async (replies: ReadonlyArray<Reply>, retries = 1, prompts = 1) => {
   const model = scripted(replies);
-  const services = Layer.mergeAll(BoringModelProvider, BoringContextAssembler, model.layer, SmolToolRunner, CountingTurns, RetryIncomplete(retries)).pipe(
+  const hooks = Layer.mergeAll(Layer.succeed(TurnEndHooks, [retryIncomplete(retries)]), Layer.succeed(MaxHolds, retries));
+  const services = Layer.mergeAll(BoringModelProvider, BoringContextAssembler, model.layer, SmolToolRunner, CountingTurns, hooks).pipe(
     Layer.provideMerge(EphemeralSessionStore),
   );
   const { endings, facts } = await runTest(

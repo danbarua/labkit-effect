@@ -19,7 +19,7 @@ import { endTurnLeftRunning, openSession } from "./loop.ts";
 import { ephemeralSessionStore } from "./session-store.ts";
 import { ModelFromFacts } from "./configuration/model-choice.ts";
 import { receivedJson } from "./received.ts";
-import { countingTurnsAfter, NoTurnEndHooks } from "./turns.ts";
+import { countingTurnsAfter } from "./turns.ts";
 
 /** Facts up to a first request: the session opened, input given, a turn started, the model asked. */
 function asked(): DrivenMachines {
@@ -73,7 +73,7 @@ const resumed = (facts: ReadonlyArray<Fact>, then?: string, turns = 1) => {
     }).pipe(
       Effect.provide(
         // The facts hold `turns` turns: the turns that start now are counted on from them.
-        Layer.mergeAll(ModelFromFacts, WholeSessionAssembler, model, countingTurnsAfter(turns), NoTurnEndHooks, SmolToolRunner),
+        Layer.mergeAll(ModelFromFacts, WholeSessionAssembler, model, countingTurnsAfter(turns), SmolToolRunner),
       ),
     ),
   );
@@ -199,7 +199,7 @@ test("X4: a session made from facts holds them as given; a turn they leave runni
       const made = yield* session.facts;
       yield* endTurnLeftRunning(session);
       return { made, ended: (yield* session.facts).slice(made.length) };
-    }).pipe(Effect.provide(Layer.mergeAll(ModelFromFacts, WholeSessionAssembler, NoModel, countingTurnsAfter(1), NoTurnEndHooks, SmolToolRunner))),
+    }).pipe(Effect.provide(Layer.mergeAll(ModelFromFacts, WholeSessionAssembler, NoModel, countingTurnsAfter(1), SmolToolRunner))),
   );
   expect(made).toEqual(driven.journal);
   expect(tags(ended)).toEqual(["TurnInterrupted", "ModelResponded", "TurnEnded"]);

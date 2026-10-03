@@ -18,7 +18,7 @@ import { ModelClient, ToolCallPolicies } from "./contracts.ts";
 import { endTurnLeftRunning, openSession, type Prompt, type Session } from "./loop.ts";
 import { receivedJson, receivedText } from "./received.ts";
 import { EphemeralSessionStore, ephemeralSessionStore, SessionStore, SessionStoreFailed } from "./session-store.ts";
-import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
+import { CountingTurns } from "./turns.ts";
 
 /**
  * What the model does for each request, in order; past the end of the list it answers. `gate`
@@ -63,7 +63,7 @@ const scripted = (replies: ReadonlyArray<Reply>) => {
 const asking = Layer.succeed(ToolCallPolicies, [(facts) => Effect.succeed(permissions("default", true, () => "other", facts) as Policy<unknown>)]);
 
 const services = (replies: ReadonlyArray<Reply>, policy: Layer.Layer<never> = Layer.empty) =>
-  Layer.mergeAll(BoringModelProvider, BoringContextAssembler, scripted(replies), SmolToolRunner, CountingTurns, NoTurnEndHooks, policy);
+  Layer.mergeAll(BoringModelProvider, BoringContextAssembler, scripted(replies), SmolToolRunner, CountingTurns, policy);
 const said = (text: string): Prompt => ({ text: InputText.make(text) });
 
 const tagOf = (fact: Fact): string => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag);

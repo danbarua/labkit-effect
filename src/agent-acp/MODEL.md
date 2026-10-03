@@ -67,8 +67,8 @@ the core; a launcher runs it with `Agent.run` or `Agent.runStdio`, giving it the
 (`ModelCatalog`) and the file system. `HostOptions`: `directory`, the session directory's root;
 `world`, `"editor"` (the default), `"local"` or a world of the host's own; `model`, `provider/model`
 to start sessions with (else the catalog's first, `defaultModel`); `services`, what a session runs
-with given its world's runner (`HostSessionServices`: `SessionServices` with `RetryIncomplete(1)`,
-agent-host H15); `pageSize`, the most sessions a page of `session/list` gives (50).
+with given its world's runner (`HostSessionServices`: `SessionServices` with `retryIncomplete(1)`
+as its turn-end hook, held at most once, agent-host H15); `pageSize`, the most sessions a page of `session/list` gives (50).
 `hostOptionsFrom(env)` reads `LABKIT_ACP_MODEL` and `LABKIT_ACP_LOCAL_TOOLS=1`. It advertises
 `loadSession`, the session methods `close`, `list` and `resume`, and no prompt content but text and
 resource links; no fork and no auth methods.

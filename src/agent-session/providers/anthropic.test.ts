@@ -11,7 +11,7 @@ import { json } from "../../../tests/support/received.ts";
 import { receivedJson } from "../received.ts";
 import type { Observation } from "../../agent-machine/observation.ts";
 import { BoringModelProvider } from "../../../tests/support/boring.ts";
-import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { CountingTurns } from "../turns.ts";
 import { AnthropicModelClient } from "./anthropic-client.ts";
 import { openSession } from "../loop.ts";
 import { EphemeralSessionStore } from "../session-store.ts";
@@ -62,7 +62,6 @@ async function toolResultSent(call: { name: string; input: unknown }) {
           TurnContextAssembler,
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.server.url))),
           CountingTurns,
-          NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),
@@ -275,7 +274,6 @@ test("a tool turn sends the catalog, then the call and its result, as Messages b
           TurnContextAssembler,
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))),
           CountingTurns,
-          NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),
@@ -355,7 +353,6 @@ test("thinking, an empty one included, and blocks nobody knows go back to the pr
           TurnContextAssembler,
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))),
           CountingTurns,
-          NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),

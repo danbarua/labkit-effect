@@ -21,7 +21,7 @@ import { choicesFor } from "./settings.ts";
 import { sentIn } from "../sent.ts";
 import { modelOf, openedWith } from "./session-setup.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
-import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { CountingTurns } from "../turns.ts";
 import { observe, open, opened } from "../../../tests/support/drive.ts";
 import { anthropicAt } from "../../../tests/support/providers.ts";
 import { anthropicStream } from "../../../tests/support/streams.ts";
@@ -352,7 +352,6 @@ test("M3: a request carries the settings the model allows; what was adjusted is 
           TurnContextAssembler,
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(new URL("/v1/messages", server.url)))),
           CountingTurns,
-          NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),

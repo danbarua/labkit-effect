@@ -15,7 +15,7 @@ import { ModelClient, type Target } from "./contracts.ts";
 import { ModelFromFacts } from "./configuration/model-choice.ts";
 import { openedWith } from "./configuration/session-setup.ts";
 import { BoringContextAssembler } from "../../tests/support/boring.ts";
-import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
+import { CountingTurns } from "./turns.ts";
 import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { logKeys } from "./log-keys.ts";
 import { openSession } from "./loop.ts";
@@ -85,7 +85,6 @@ const oneTurn = async (
           chain(status),
           BoringContextAssembler,
           CountingTurns,
-          NoTurnEndHooks,
           SmolToolRunner,
           Logger.layer([Logger.make((options) => logged.push(options.message))], { mergeWithExisting: true }),
         ),

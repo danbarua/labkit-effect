@@ -20,7 +20,7 @@ import { ModelClient, ToolCallPolicies, ToolRunner, type ToolSpec } from "./cont
 import { openSession } from "./loop.ts";
 import { receivedJson, receivedText } from "./received.ts";
 import { ephemeralSessionStore } from "./session-store.ts";
-import { CountingTurnsInStore, NoTurnEndHooks } from "./turns.ts";
+import { CountingTurnsInStore } from "./turns.ts";
 
 /**
  * `look` and `check` change nothing (`check` is asked about before it runs); `write` leaves things as
@@ -104,7 +104,6 @@ const wentOn = (facts: ReadonlyArray<Fact>) => {
           WholeSessionAssembler,
           model,
           tools,
-          NoTurnEndHooks,
           CountingTurnsInStore,
           Layer.succeed(ToolCallPolicies, [(held) => Effect.succeed(permissions("default", true, (name) => catalog.find((tool) => tool.name === name)?.kind, held) as Policy<unknown>)]),
         ).pipe(Layer.provideMerge(store)),

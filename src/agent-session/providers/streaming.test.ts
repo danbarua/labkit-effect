@@ -16,7 +16,7 @@ import { OpenAiModelClient } from "./openai-client.ts";
 import { receivedJson } from "../received.ts";
 import { ToolRunner } from "../contracts.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
-import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { CountingTurns } from "../turns.ts";
 import { BoringModelProvider, boringOpening, WholeSessionAssembler } from "../../../tests/support/boring.ts";
 import { anthropicAt, openAiAt } from "../../../tests/support/providers.ts";
 import { json } from "../../../tests/support/received.ts";
@@ -154,7 +154,6 @@ test("Anthropic: a response cut short records the parts that were completed, and
           TurnContextAssembler,
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(new URL("/v1/messages", url)))),
           CountingTurns,
-          NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),
@@ -180,7 +179,6 @@ test("Anthropic: a stream that ends without message_stop fails the request, and 
           TurnContextAssembler,
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(new URL("/v1/messages", url)))),
           CountingTurns,
-          NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),
@@ -218,7 +216,6 @@ test("OpenAI: an item still arriving when the response ended is not recorded", a
           TurnContextAssembler,
           OpenAiModelClient.pipe(Layer.provide(openAiAt(url))),
           CountingTurns,
-          NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),
@@ -251,7 +248,6 @@ test("V1: while a response arrives, its events and each completed part are passe
           TurnContextAssembler,
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(new URL("/v1/messages", url)))),
           CountingTurns,
-          NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),
@@ -320,7 +316,6 @@ test("TC2 TC3: a tool call is run as soon as it is complete in the stream, befor
           TurnContextAssembler,
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(new URL("/v1/messages", server.url)))),
           CountingTurns,
-          NoTurnEndHooks,
           tools,
         ),
       ),
@@ -397,7 +392,6 @@ test("X1: interrupted while a response streams and its tool runs: both are stopp
           WholeSessionAssembler,
           AnthropicModelClient.pipe(Layer.provide(anthropicAt(new URL("/v1/messages", server.url)))),
           CountingTurns,
-          NoTurnEndHooks,
           tools,
         ),
       ),

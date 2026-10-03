@@ -7,8 +7,8 @@ import { ModelName, ModelText, ProviderName, SessionId, StopReason, TurnId } fro
 import { CurrentWork, type Work } from "./work.ts";
 import type { Observation } from "../agent-machine/observation.ts";
 import { BoringContextAssembler, BoringModelProvider } from "../../tests/support/boring.ts";
-import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
-import { ModelClient, ModelProvider, TurnEndHooks } from "./contracts.ts";
+import { CountingTurns } from "./turns.ts";
+import { MaxHolds, ModelClient, ModelProvider, TurnEndHooks } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
 import { openSession } from "./loop.ts";
 import { EphemeralSessionStore } from "./session-store.ts";
@@ -57,7 +57,7 @@ test("while a request is carried out, CurrentWork and every log line name its se
       yield* session.idle;
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(provider, client, BoringContextAssembler, CountingTurns, NoTurnEndHooks, SmolToolRunner, Logger.layer([capture], { mergeWithExisting: true })),
+        Layer.mergeAll(provider, client, BoringContextAssembler, CountingTurns, SmolToolRunner, Logger.layer([capture], { mergeWithExisting: true })),
       ),
     ),
   );
@@ -99,10 +99,13 @@ async function answeringTurn(hooks: ReadonlyArray<() => ReadonlyArray<string>>, 
   const provider = Layer.succeed(ModelProvider, {
     select: () => Effect.succeed({ provider: ProviderName.make("stub"), model: ModelName.make("stub-1") }),
   });
-  const turnEndHooks = Layer.succeed(TurnEndHooks, {
-    hooks: hooks.map((hook) => () => Effect.sync(hook)),
-    maxHolds,
-  });
+  const turnEndHooks = Layer.mergeAll(
+    Layer.succeed(
+      TurnEndHooks,
+      hooks.map((hook) => () => Effect.sync(hook)),
+    ),
+    Layer.succeed(MaxHolds, maxHolds),
+  );
   const facts = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
@@ -197,7 +200,7 @@ test("a subscriber receives every fact recorded after it subscribed, in order", 
         yield* session.idle;
         return { received: yield* PubSub.takeAll(subscription), facts: yield* session.facts };
       }),
-    ).pipe(Effect.provide(Layer.mergeAll(provider, client, BoringContextAssembler, CountingTurns, NoTurnEndHooks, SmolToolRunner))),
+    ).pipe(Effect.provide(Layer.mergeAll(provider, client, BoringContextAssembler, CountingTurns, SmolToolRunner))),
   );
   expect([...received]).toEqual(facts.slice(1));
 });
@@ -219,7 +222,6 @@ test("a request that dies of a defect is logged with what it died of, and record
           BoringContextAssembler,
           dying,
           CountingTurns,
-          NoTurnEndHooks,
           SmolToolRunner,
           Logger.layer([Logger.make((options) => logged.push(options.message))], { mergeWithExisting: true }),
         ),

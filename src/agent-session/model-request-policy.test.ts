@@ -13,7 +13,7 @@ import { openSession } from "./loop.ts";
 import { harnessParts } from "./origin.ts";
 import { receivedJson } from "./received.ts";
 import { EphemeralSessionStore } from "./session-store.ts";
-import { CountingTurns, NoTurnEndHooks } from "./turns.ts";
+import { CountingTurns } from "./turns.ts";
 
 /** Holds every model request, asking for the hour it may go on at. */
 const holding: Policy<unknown> = {
@@ -37,7 +37,6 @@ test("P9: a request a policy holds is not made; the turn fails, saying to wait, 
           Layer.succeed(ModelClient, { respond: () => Effect.die(new Error("no request is made")) }),
           SmolToolRunner,
           CountingTurns,
-          NoTurnEndHooks,
           Layer.succeed(ModelRequestPolicies, [() => Effect.succeed(holding)]),
         ),
       ),

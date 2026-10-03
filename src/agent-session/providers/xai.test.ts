@@ -12,7 +12,7 @@ import { openSession } from "../loop.ts";
 import { EphemeralSessionStore } from "../session-store.ts";
 import { receivedJson } from "../received.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
-import { CountingTurns, NoTurnEndHooks } from "../turns.ts";
+import { CountingTurns } from "../turns.ts";
 import { openAiCompactions } from "./openai-compaction.ts";
 import { XAiModelClient } from "./xai-client.ts";
 import grokStream from "./grok-stream.json" with { type: "json" };
@@ -68,7 +68,6 @@ async function session(url: URL, settings: object, context?: ModelContext) {
           context === undefined ? TurnContextAssembler : Layer.succeed(ContextAssembler, { assemble: () => Effect.succeed(context) }),
           XAiModelClient.pipe(Layer.provide(openAiAt(url))),
           CountingTurns,
-          NoTurnEndHooks,
           SmolToolRunner,
         ),
       ),

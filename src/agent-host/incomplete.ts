@@ -4,12 +4,11 @@
  * (`TurnIncomplete`, agent-machine I4). Some local models put the whole answer in their reasoning.
  */
 
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { TurnId } from "../agent-machine/names.ts";
-import { TurnEndHooks } from "../agent-session/contracts.ts";
+import type { TurnEndHook } from "../agent-session/contracts.ts";
 import { harnessParts } from "../agent-session/origin.ts";
-import { SessionStore } from "../agent-session/session-store.ts";
 
 /** What the model is told when its last response had thinking but no answer. */
 export const answerNow = "Your last response had thinking but no answer. Give your answer now.";
@@ -28,24 +27,15 @@ const holdsIn = (facts: ReadonlyArray<Fact>, turn: TurnId): number =>
   }, 0);
 
 /**
- * One hook: `answerNow` when the latest decision about the turn is `TurnIncomplete` and the hooks
+ * The hook: `answerNow` when the latest decision about the turn is `TurnIncomplete` and the hooks
  * have not held the turn open `retries` times, nothing otherwise. A turn answered has
  * `TurnCompleted` there; a response cut short has neither, so the latest is the request that asked
- * for it. A turn still without an answer after its retries ends `Incomplete`. The hook reads the
- * session's facts from the `SessionStore` the layer is built with: a hook's own type requires
- * nothing.
+ * for it. A turn still without an answer after its retries ends `Incomplete`.
  *
  * It counts the inputs the turn-end hooks have given the turn, whichever hook gave them: the facts
- * do not say which. It is the only hook a session runs with, so they are its retries, and the
- * loop's bound on holds is the same number.
+ * do not say which. With other hooks in the list, their holds count against its retries.
  */
-export const RetryIncomplete = (retries = 1): Layer.Layer<TurnEndHooks, never, SessionStore> =>
-  Layer.effect(
-    TurnEndHooks,
-    Effect.gen(function* () {
-      const store = yield* SessionStore;
-      const hook = (turn: TurnId) =>
-        Effect.map(store.facts, (facts) => (latestDecision(facts, turn) === "TurnIncomplete" && holdsIn(facts, turn) < retries ? [answerNow] : []));
-      return { hooks: [hook], maxHolds: retries };
-    }),
-  );
+export const retryIncomplete =
+  (retries = 1): TurnEndHook =>
+  (facts, turn) =>
+    Effect.succeed(latestDecision(facts, turn) === "TurnIncomplete" && holdsIn(facts, turn) < retries ? [answerNow] : []);
