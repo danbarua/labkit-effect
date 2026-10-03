@@ -64,7 +64,12 @@ export class SystemPrompts extends Context.Service<SystemPrompts, ReadonlyArray<
   "agent-context/SystemPrompts",
 ) {}
 
-export class Notices extends Context.Service<Notices, ReadonlyArray<NoticeProvider>>()("agent-context/Notices") {}
+/**
+ * What gives the model notices before a request, in order (their notices are joined); none by
+ * default. A host composes the list. A notice is recorded when it is inserted (`NoticeInserted`), so a
+ * provider may read live state, not only the facts: what it said is in the facts once said.
+ */
+export const Notices = Context.Reference<ReadonlyArray<NoticeProvider>>("agent-context/Notices", { defaultValue: () => [] });
 
 /** At least one, so there is always a model. */
 export class ModelSelectors extends Context.Service<
@@ -94,7 +99,7 @@ export const opening = (
 /** Everything but the model, for the session's `facts`: the system prompt and tools as recorded. */
 export const assembleContents = (
   facts: ReadonlyArray<Fact>,
-): Effect.Effect<Contents, never, Conversation | Notices> =>
+): Effect.Effect<Contents, never, Conversation> =>
   Effect.gen(function* () {
     const system = immutableSystemPromptOf(facts);
     return {
@@ -108,7 +113,7 @@ export const assembleContents = (
 /** The contents for the session's `facts`, and the model they go to. */
 export const assemble = (
   facts: ReadonlyArray<Fact>,
-): Effect.Effect<AssembledContext, never, Conversation | Notices | ModelSelectors> =>
+): Effect.Effect<AssembledContext, never, Conversation | ModelSelectors> =>
   Effect.gen(function* () {
     const contents = yield* assembleContents(facts);
     const [first, ...rest] = yield* ModelSelectors;

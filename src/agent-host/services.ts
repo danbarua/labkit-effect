@@ -2,7 +2,6 @@
 
 import { Effect, Layer } from "effect";
 import { AgentContextAssembler, WholeConversation } from "../agent-context/assembler.ts";
-import { Notices } from "../agent-context/assemble.ts";
 import { type PermissionMode, permissions } from "../agent-policy/permissions.ts";
 import { type LoopBreakerSettings, loopBreakerDefaults, repeatedCalls, repeatingTurns } from "../agent-policy/loop-breaker.ts";
 import { maxTurnRequests } from "../agent-policy/max-turn-requests.ts";
@@ -17,15 +16,16 @@ import { KnownWithLocalServer, SettlingWithLocalServer } from "./local-server.ts
 /**
  * What the loop needs for a session, but its store, its policies and its turn-end hooks: the model
  * its facts name, what is known of it and how its settings are applied, the whole conversation as
- * context, the provider clients, turns that count on from those the store holds, and `runner` for
- * its tools.
+ * context, with the notices of the context the layer is built in (`Notices`: none unless the host
+ * provides them), the provider clients, turns that count on from those the store holds, and
+ * `runner` for its tools.
  */
 export const SessionServices = <E, R>(runner: Layer.Layer<ToolRunner, E, R>) =>
   Layer.mergeAll(
     ModelFromFacts.pipe(Layer.provide(KnownWithLocalServer)),
     KnownWithLocalServer,
     SettlingWithLocalServer,
-    AgentContextAssembler.pipe(Layer.provide(Layer.mergeAll(WholeConversation, Layer.succeed(Notices, [])))),
+    AgentContextAssembler.pipe(Layer.provide(WholeConversation)),
     Clients,
     CountingTurnsInStore,
     runner,

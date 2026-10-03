@@ -15,12 +15,13 @@ import { ContextAssembler, type ModelContext } from "../agent-session/contracts.
 import { nextMessages, noticeMessage } from "../agent-session/conversation.ts";
 import { harnessParts } from "../agent-session/origin.ts";
 import { Report } from "../agent-session/report.ts";
-import { assembleContents, Conversation, Notices } from "./assemble.ts";
+import { assembleContents, Conversation } from "./assemble.ts";
 
 export const AgentContextAssembler = Layer.effect(
   ContextAssembler,
   Effect.gen(function* () {
-    const services = yield* Effect.context<Conversation | Notices>();
+    // The notices given (`Notices`) are the ones in the context the layer is built in.
+    const services = yield* Effect.context<Conversation>();
     return {
       assemble: (facts, turn) =>
         Effect.gen(function* () {
