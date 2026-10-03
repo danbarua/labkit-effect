@@ -373,6 +373,7 @@ test("AG2: the first prompt opens the draft; thinking and text stream, write_fil
   expect(result.changed.configOptions.find((option) => option.id === "effort")).toMatchObject({ currentValue: "high" });
   expect(kinds(log.updates)).toEqual([
     "available_commands_update",
+    "config_option_update",
     "session_info_update",
     "agent_thought_chunk",
     "agent_message_chunk",
@@ -524,6 +525,9 @@ test("AG18: the permission mode is an option of category mode; changed, it appli
   const option = (options: ReadonlyArray<acp.SessionConfigOption> | null | undefined) => options?.find((each) => each.id === "permission_mode");
   expect(option(result.created.configOptions)).toMatchObject({ category: "mode", currentValue: "default" });
   expect(option(result.changed.configOptions)).toMatchObject({ currentValue: "bypassPermissions" });
+  // Each accepted change is sent as an update too, every option as it now is; the refused one is not.
+  const sent = log.updates.flatMap((update) => (update.sessionUpdate === "config_option_update" ? [option(update.configOptions)?.currentValue] : []));
+  expect(sent).toEqual(["bypassPermissions", "default"]);
   expect(log.asked.map((asked) => asked.toolCall.toolCallId)).toEqual(["w-2"]);
   expect(log.files.filter((each) => each.method === "fs/write_text_file").map((each) => each.content)).toEqual(["w-1", "w-2"]);
   expect(result.refused).toMatchObject({ code: -32602 });

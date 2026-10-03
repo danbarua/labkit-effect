@@ -223,8 +223,9 @@ twice.
 - AG5. `session/set_config_option` changes a draft (`chooseModel`, `saySettings`). On an open session
   it is `ModelChangeArrived` from the user through ACP, taken at once between turns and otherwise
   at the turn's next step (agent-machine M1); the answer is every option as the configuration will
-  be, the changes not yet taken included. A value the option does not offer, or an option no
-  session has, is -32602.
+  be, the changes not yet taken included, and the same options are sent as `config_option_update`
+  (a client may draw its controls from updates alone). A value the option does not offer, or an
+  option no session has, is -32602, and sends nothing.
 - AG6. `/export`, alone in a prompt, writes the session's transcript (`markdownOf`) to
   `<cwd>/.labkit/exports/<sessionId>.md`, says where in an `agent_message_chunk` and answers
   `end_turn` without asking the model; on a draft it says there is nothing to export.

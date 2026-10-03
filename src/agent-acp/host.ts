@@ -669,6 +669,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                     });
                     return { configOptions: (yield* configurationOf(entry)).options };
                   }),
+                ).pipe(
+                  // The options are sent as an update too: a client may draw its controls from updates alone (labkit's does).
+                  Effect.tap(({ configOptions }) => send(entry.id, { sessionUpdate: "config_option_update", configOptions })),
                 );
               }),
               params.sessionId,
