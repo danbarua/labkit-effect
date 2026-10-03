@@ -15,12 +15,12 @@ tried first (TODO.md, the MCP servers entry): it drops what a server sends unask
   each run of its process; `reconnect` starts the process again; `call` calls a tool of the run
   that is ready. A server must answer `initialize` within `connectTimeout` (30 seconds unless a
   host says).
+- `source.ts`: a server's tools as a tool source, under the namespace `mcp__<server>`.
 
 ## What is not built
 
 - The Streamable HTTP transport, and the SSE one.
-- A server's tools as a tool source (`agent-session/tool-sources.ts`, `mcp__<server>`), and the MCP
-  servers an ACP client names in `session/new` or a CLI is configured with.
+- The MCP servers an ACP client names in `session/new` or a CLI is configured with.
 - Sampling and elicitation: the client does not offer them, so a server does not ask.
 - A change of a server's tool list (`notifications/tools/list_changed`) is logged, not acted on;
   so are tools a reconnected server lists that it did not list before.
@@ -50,3 +50,14 @@ tried first (TODO.md, the MCP servers entry): it drops what a server sends unask
   reconnected (`reconnect`): its process starts again, as a new run, and is connected anew.
 - MS5. A server that does not answer `initialize` within `connectTimeout` has failed, and its
   process group is stopped: none is left behind.
+- MT1. A server's tools are offered under `mcp__<server>`; every character of the server's or a
+  tool's name that providers do not take in a tool's name (anything but letters, digits, `_` and
+  `-`) is offered as `_`. A tool whose name is then longer than 64 characters, or the same as
+  another of the server's, is left out, and the reason is given.
+- MT2. A tool the server says only reads (`readOnlyHint`) is of kind `read` and safe to run again;
+  one it says is idempotent (`idempotentHint`) is idempotent; any other is of kind `other` and
+  unsafe to run again.
+- MT3. A call's input must be a JSON object; other input is refused (`InputRejected`). Its result
+  is recorded as the server sent it (`mcpToolResult`); one with `isError: true` is the tool's
+  failure (`Reported`). A call the server does not answer fails `Reported`, saying why.
+
