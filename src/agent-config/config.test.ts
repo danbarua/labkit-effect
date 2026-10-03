@@ -1,10 +1,10 @@
-/** Policies read from configuration files: decoded per seam, checked, merged in layers, extended, and made into a session's seam lists. */
+/** A session's configuration: plug-ins configured once and listed by name per seam, merged in layers, checked, extended, and made into a session's seam lists. */
 
 import { expect } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
-import { DateTime, Effect } from "effect";
+import { DateTime, Duration, Effect } from "effect";
 import { boringOpening } from "../../tests/support/boring.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { test, testFolder, testOrigin } from "../../tests/support/test.ts";
@@ -14,8 +14,8 @@ import type { EffectRequest } from "../agent-machine/request.ts";
 import { every, type Policy } from "../agent-policy/policy.ts";
 import { MaxHolds, ModelRequestPolicies, ToolCallPolicies, type ToolSpec, TurnEndHooks } from "../agent-session/contracts.ts";
 import { asText, receivedJson } from "../agent-session/received.ts";
-import { loadConfiguration, policyFiles } from "./file.ts";
-import { merged } from "./merge.ts";
+import { type Configuration, fileLayer, type LayerSource, loadConfiguration, policyLayers } from "./file.ts";
+import { merged, over } from "./merge.ts";
 import { policiesJsonSchema } from "./schema.ts";
 import { seamLayer, seamListsOf } from "./seams.ts";
 
@@ -27,12 +27,20 @@ const write = (path: string, text: string): string => {
   return full;
 };
 
-const load = (files: ReadonlyArray<string>) => runTest(loadConfiguration(files).pipe(Effect.provide(BunServices.layer)));
+/** The layers in `files`, each with whether it is trusted (the user's: true unless said). */
+const layersOf = (files: ReadonlyArray<string | readonly [string, boolean]>) =>
+  Effect.map(
+    Effect.forEach(files, (file) => (typeof file === "string" ? fileLayer(file, true) : fileLayer(file[0], file[1]))),
+    (layers) => layers.filter((layer): layer is LayerSource => layer !== undefined),
+  );
+
+const load = (files: ReadonlyArray<string | readonly [string, boolean]>) =>
+  runTest(Effect.flatMap(layersOf(files), (layers) => loadConfiguration(layers)).pipe(Effect.provide(BunServices.layer)));
 
 /** What loading `files` fails with, as its message. */
-const refusal = (files: ReadonlyArray<string>) =>
+const refusal = (files: ReadonlyArray<string | readonly [string, boolean]>) =>
   runTest(
-    loadConfiguration(files).pipe(
+    Effect.flatMap(layersOf(files), (layers) => loadConfiguration(layers)).pipe(
       Effect.flip,
       Effect.map((error) => error.message),
       Effect.provide(BunServices.layer),
@@ -57,31 +65,39 @@ const verdictOf = <S>(policy: Policy<S>, request: EffectRequest): string => {
   return step._tag === "Waiting" ? "asks" : step.verdict._tag === "Continue" ? "runs" : `vetoed: ${asText(step.verdict.reason)}`;
 };
 
-test("CF1: a file lists each seam's entries in order, each a plug-in and its settings, a setting not given taking its default; they become the session's seam lists", async () => {
+/** Each seam's entries, as their names, plug-ins and settings. */
+const listed = (configuration: Configuration) =>
+  Object.fromEntries(Object.entries(configuration.lists).map(([seam, entries]) => [seam, entries.map((entry) => [entry.name, entry.plugin.use, entry.settings])]));
+
+test("CF1: plug-ins are configured once, by name, in plugins; each seam lists names in order, a plug-in's own name taking its defaults; they become the session's seam lists", async () => {
   const file = write(
     "user/policies.yml",
     `# yaml-language-server: $schema=./policies.schema.json
-toolCalls:
-  - use: loopBreaker
+plugins:
+  loopBreaker:
     nudgeAt: 2
-  - use: permissions
+  permissions:
     mode: dontAsk
-modelRequests:
-  - use: maxTurnRequests
-turnEnd:
-  - use: retryIncomplete
+  retryIncomplete:
     retries: 2
+toolCalls: [loopBreaker, permissions]
+modelRequests: [loopBreaker, maxTurnRequests]
+turnEnd: [retryIncomplete]
 maxHolds: 2
 `,
   );
   const configuration = await load([file]);
-  expect(Object.fromEntries(Object.entries(configuration.lists).map(([seam, entries]) => [seam, entries.map((entry) => [entry.plugin.use, entry.settings])]))).toEqual({
+  expect(listed(configuration)).toEqual({
     toolCalls: [
-      ["loopBreaker", { nudgeAt: 2, stopAt: 5, key: "toolAndInput" }],
-      ["permissions", { mode: "dontAsk" }],
+      ["loopBreaker", "loopBreaker", { nudgeAt: 2, stopAt: 5, key: "toolAndInput" }],
+      ["permissions", "permissions", { mode: "dontAsk" }],
     ],
-    modelRequests: [["maxTurnRequests", { limit: 1000 }]],
-    turnEnd: [["retryIncomplete", { retries: 2 }]],
+    // The loop breaker's settings are the same on both lists: they are said once.
+    modelRequests: [
+      ["loopBreaker", "loopBreaker", { nudgeAt: 2, stopAt: 5, key: "toolAndInput" }],
+      ["maxTurnRequests", "maxTurnRequests", { limit: 1000 }],
+    ],
+    turnEnd: [["retryIncomplete", "retryIncomplete", { retries: 2 }]],
   });
   const provided = await runTest(
     Effect.gen(function* () {
@@ -98,11 +114,27 @@ maxHolds: 2
   expect(provided.toolCalls[1]).toStartWith("vetoed: Not run: look has been called with this same input 2 times in a row.");
   // dontAsk vetoes a call to a tool that edits.
   expect(provided.toolCalls[2]).toStartWith("vetoed: ");
-  expect({ modelRequests: provided.modelRequests, turnEnd: provided.turnEnd, maxHolds: provided.maxHolds }).toEqual({ modelRequests: 1, turnEnd: 1, maxHolds: 2 });
+  expect({ modelRequests: provided.modelRequests, turnEnd: provided.turnEnd, maxHolds: provided.maxHolds }).toEqual({ modelRequests: 2, turnEnd: 1, maxHolds: 2 });
+});
+
+test("CF4: a later layer that writes a plug-in empty ({}) changes none of its settings; one that writes it null puts it back to its defaults", async () => {
+  const user = write("home/policies.yml", "plugins:\n  loopBreaker:\n    nudgeAt: 4\ntoolCalls: [loopBreaker]\n");
+  const empty = write("project/empty.yml", "plugins:\n  loopBreaker: {}\n");
+  const reset = write("project/reset.yml", "plugins:\n  loopBreaker:\n");
+  expect(listed(await load([user, [empty, false]]))["toolCalls"]).toEqual([["loopBreaker", "loopBreaker", { nudgeAt: 4, stopAt: 5, key: "toolAndInput" }]]);
+  expect(listed(await load([user, [reset, false]]))["toolCalls"]).toEqual([["loopBreaker", "loopBreaker", { nudgeAt: 3, stopAt: 5, key: "toolAndInput" }]]);
+});
+
+test("CF9: two of one plug-in, with different settings, are two names in plugins, each saying which plug-in it is (use)", async () => {
+  const file = write("user/policies.yml", "plugins:\n  strict:\n    use: loopBreaker\n    stopAt: 3\n  loopBreaker:\ntoolCalls: [strict]\nmodelRequests: [loopBreaker]\n");
+  expect(listed(await load([file]))).toEqual({
+    toolCalls: [["strict", "loopBreaker", { nudgeAt: 3, stopAt: 3, key: "toolAndInput" }]],
+    modelRequests: [["loopBreaker", "loopBreaker", { nudgeAt: 3, stopAt: 5, key: "toolAndInput" }]],
+  });
 });
 
 test("CF2: what the host says, that no file does: whether anyone can be asked, which permissions reads", async () => {
-  const file = write("user/policies.yml", "toolCalls:\n  - use: permissions\n");
+  const file = write("user/policies.yml", "toolCalls: [permissions]\n");
   const configuration = await load([file]);
   const verdict = (canAsk: boolean) =>
     runTest(
@@ -115,37 +147,132 @@ test("CF2: what the host says, that no file does: whether anyone can be asked, w
   expect(await verdict(false)).toStartWith("vetoed: ");
 });
 
-test("CF3: a mistake is refused naming the file, where in it, and what is wrong", async () => {
+test("CF3: a mistake is refused naming the layer that wrote it, where in it, and what is wrong", async () => {
   const at = (text: string) => write("user/policies.yml", text);
-  expect(await refusal([at("toolCalls:\n  - use: loopBraker\n")])).toEndWith(
-    'user/policies.yml: toolCalls[0].use: "loopBraker" is not a plug-in on toolCalls; those are: loopBreaker, permissions',
+  expect(await refusal([at("toolCalls: [loopBraker]\n")])).toEndWith(
+    'user/policies.yml: toolCalls[0]: "loopBraker" is neither in plugins nor a plug-in; the plug-ins are: loopBreaker, permissions, maxTurnRequests, retryIncomplete',
   );
-  expect(await refusal([at("toolCalls:\n  - use: maxTurnRequests\n")])).toEndWith(
-    'toolCalls[0].use: "maxTurnRequests" is not a plug-in on toolCalls; those are: loopBreaker, permissions',
+  expect(await refusal([at("toolCalls: [maxTurnRequests]\n")])).toEndWith("toolCalls[0]: maxTurnRequests is maxTurnRequests, which is not on toolCalls; it is on modelRequests");
+  expect(await refusal([at("plugins:\n  loopBreaker:\n    nudgAt: 2\n")])).toEndWith("plugins.loopBreaker.nudgAt: loopBreaker has no setting nudgAt; its settings are: nudgeAt, stopAt, key");
+  expect(await refusal([at("plugins:\n  permissions:\n    mode: yolo\n")])).toEndWith(
+    'plugins.permissions.mode: Expected "default" | "acceptEdits" | "dontAsk" | "bypassPermissions" at ["mode"]',
   );
-  expect(await refusal([at("toolCalls:\n  - use: loopBreaker\n    nudgAt: 2\n")])).toEndWith('toolCalls[0]: loopBreaker: Expected no excess property at ["nudgAt"]');
-  expect(await refusal([at("toolCalls:\n  - use: permissions\n    mode: yolo\n")])).toEndWith(
-    'toolCalls[0]: permissions: Expected "default" | "acceptEdits" | "dontAsk" | "bypassPermissions" at ["mode"]',
+  expect(await refusal([at("plugins:\n  mine:\n    use: loopBraker\n")])).toEndWith('plugins.mine.use: "loopBraker" is not a plug-in; those are: loopBreaker, permissions, maxTurnRequests, retryIncomplete');
+  expect(await refusal([at("toolcalls: [permissions]\n")])).toEndWith(
+    "toolcalls: Not a key of the configuration; those are: plugins, toolCalls, modelRequests, turnEnd, knownModels, settling, toolSources, maxHolds, mcpServers, extensions",
   );
-  expect(await refusal([at("toolcalls:\n  - use: permissions\n")])).toEndWith("toolcalls: Not a key of the file; those are: toolCalls, modelRequests, turnEnd, knownModels, settling, toolSources, maxHolds, extensions");
-  expect(await refusal([at("toolCalls:\n  use: permissions\n")])).toEndWith("toolCalls: Expected a list of entries, each `use: <plug-in>` and its settings");
+  expect(await refusal([at("toolCalls:\n  use: permissions\n")])).toEndWith("toolCalls: Expected a list of names, each one in plugins or a plug-in's own");
+});
+
+test("CF3: across layers, a mistake names the layer that wrote the value at fault, not the last one read", async () => {
+  const user = write("home/policies.yml", "plugins:\n  strict:\n    use: loopBreaker\ntoolCalls: [strict, permissions]\n");
+  const project = write("project/policies.yml", "plugins:\n  strict:\n    stopAt: 0\n");
+  // The project sets one setting of the user's plug-in: it is the project's mistake.
+  expect(await refusal([user, [project, false]])).toEndWith('project/policies.yml: plugins.strict.stopAt: Expected a value greater than or equal to 1 at ["stopAt"]');
+  const project2 = write("project/two.yml", "maxHolds: 1\n");
+  const user2 = write("home/two.yml", "toolCalls: [nobody]\n");
+  expect(await refusal([user2, [project2, false]])).toContain("home/two.yml: toolCalls[0]");
 });
 
 test("CF4: layers merge in order, the last write winning: mappings key by key, deeply; any other value, a list included, replaced whole", async () => {
   expect(merged([{ a: { b: 1, c: [1, 2] }, d: "x" }, { a: { c: [3] }, e: true }, { d: "y" }])).toEqual({ a: { b: 1, c: [3] }, d: "y", e: true });
-  const [user, project] = policyFiles(join(testFolder(), "project"), { home: join(testFolder(), "home") });
-  if (user === undefined || project === undefined) throw new Error("expected the user's file and the project's");
-  write("home/.config/labkit/policies.yml", "toolCalls:\n  - use: loopBreaker\n  - use: permissions\nmodelRequests:\n  - use: maxTurnRequests\n    limit: 10\n");
-  write("project/.labkit/policies.yml", "toolCalls:\n  - use: permissions\n    mode: acceptEdits\n");
-  const configuration = await load([user, project]);
-  // The project's toolCalls replace the user's; the user's modelRequests stand.
-  expect(configuration.lists.toolCalls?.map((entry) => [entry.plugin.use, entry.settings])).toEqual([["permissions", { mode: "acceptEdits" }]]);
-  expect(configuration.lists.modelRequests?.map((entry) => entry.settings)).toEqual([{ limit: 10 }]);
+  const layers = await runTest(policyLayers(join(testFolder(), "project"), { home: join(testFolder(), "home") }).pipe(Effect.provide(BunServices.layer)));
+  expect(layers).toEqual([]);
+  write("home/.config/labkit/policies.yml", "plugins:\n  maxTurnRequests:\n    limit: 10\n  loopBreaker:\n    nudgeAt: 4\ntoolCalls: [loopBreaker, permissions]\nmodelRequests: [maxTurnRequests]\n");
+  write("project/.labkit/policies.yml", "plugins:\n  loopBreaker:\n    stopAt: 8\ntoolCalls: [permissions]\n");
+  const configuration = await runTest(
+    Effect.flatMap(policyLayers(join(testFolder(), "project"), { home: join(testFolder(), "home") }), (each) => loadConfiguration(each)).pipe(Effect.provide(BunServices.layer)),
+  );
+  // The project's toolCalls replace the user's; the user's modelRequests stand; the project changes one setting of the user's loop breaker.
+  expect(listed(configuration)).toEqual({
+    toolCalls: [["permissions", "permissions", { mode: "default" }]],
+    modelRequests: [["maxTurnRequests", "maxTurnRequests", { limit: 10 }]],
+  });
+  const both = await load([write("home/a.yml", "plugins:\n  loopBreaker:\n    nudgeAt: 4\n"), [write("project/b.yml", "plugins:\n  loopBreaker:\n    stopAt: 8\ntoolCalls: [loopBreaker]\n"), false]]);
+  expect(listed(both)["toolCalls"]).toEqual([["loopBreaker", "loopBreaker", { nudgeAt: 4, stopAt: 8, key: "toolAndInput" }]]);
 });
 
-test("CF5: a file that is not there is an empty layer; a seam no file lists is not provided, so the host's own list or the default stands", async () => {
-  const configuration = await load(policyFiles(join(testFolder(), "nowhere"), { home: join(testFolder(), "no-home") }));
-  expect(configuration).toEqual({ lists: {} });
+test("CF4: an overlay changes part of a base, key by key: a base enabling every provider and an overlay disabling some give the rest", () => {
+  const base = { providers: { anthropic: { enabled: true, models: ["opus", "sonnet"] }, openai: { enabled: true }, xai: { enabled: true } } };
+  const anthropicOnly = { providers: { openai: { enabled: false }, xai: { enabled: false } } };
+  expect(merged([base, anthropicOnly])).toEqual({ providers: { anthropic: { enabled: true, models: ["opus", "sonnet"] }, openai: { enabled: false }, xai: { enabled: false } } });
+  // An empty layer, one that says nothing of a key, or an empty mapping, changes nothing; null is a value, and replaces.
+  expect(merged([base, {}])).toEqual(base);
+  expect(merged([base, { providers: {} }])).toEqual(base);
+  expect(merged([{ a: { b: 1 } }, { a: null }])).toEqual({ a: null });
+  expect(merged([{ a: [1, 2] }, { a: undefined }])).toEqual({ a: [1, 2] });
+});
+
+test("CF4: a value that is not a mapping cuts off what an earlier layer had under it: layers are merged in order, and the order matters", () => {
+  const a = { k: { x: 1 } };
+  const b = { k: 5 };
+  const c = { k: { y: 2 } };
+  // In order: b replaced a's mapping, and c's starts again.
+  expect(merged([a, b, c])).toEqual({ k: { y: 2 } });
+  // Merged the other way round, a's x would survive: the merge is a fold in order, not a grouping of any.
+  expect(over(a, over(b, c))).toEqual({ k: { x: 1, y: 2 } });
+});
+
+/** Random layers, from a seed: nested mappings of a few keys, each value a number, string, boolean, null, list or mapping. */
+const randomLayers = (seed: number) => {
+  let state = seed;
+  const next = () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const pick = <A>(values: ReadonlyArray<A>): A => values[Math.floor(next() * values.length)]!;
+  const value = (depth: number): unknown => {
+    const kind = pick(depth < 3 ? ["number", "string", "boolean", "null", "list", "mapping", "mapping"] : ["number", "string", "boolean", "null", "list"]);
+    switch (kind) {
+      case "number":
+        return Math.floor(next() * 10);
+      case "string":
+        return pick(["x", "y", "z"]);
+      case "boolean":
+        return next() < 0.5;
+      case "null":
+        return null;
+      case "list":
+        return Array.from({ length: Math.floor(next() * 3) }, () => Math.floor(next() * 10));
+      default:
+        return mapping(depth + 1);
+    }
+  };
+  const mapping = (depth: number): Record<string, unknown> => Object.fromEntries(["a", "b", "c"].filter(() => next() < 0.6).map((key) => [key, value(depth)]));
+  return Array.from({ length: 1 + Math.floor(next() * 5) }, () => mapping(0));
+};
+
+const isMapping = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
+const at = (value: unknown, path: ReadonlyArray<string>): unknown => path.reduce<unknown>((inner, key) => (isMapping(inner) ? inner[key] : undefined), value);
+
+/** Every path of `value` to a value that is not a mapping. A mapping, empty or not, is merged key by key: it writes only its keys. */
+const leaves = (value: unknown, path: ReadonlyArray<string> = []): ReadonlyArray<ReadonlyArray<string>> =>
+  isMapping(value) ? Object.entries(value).flatMap(([key, inner]) => leaves(inner, [...path, key])) : path.length === 0 ? [] : [path];
+
+test("CF4: for 2000 sets of random layers, each leaf of the merge is the last layer's write to its path, and no later layer replaced anything above it; every leaf of the last layer is in the merge", () => {
+  for (let seed = 1; seed <= 2000; seed++) {
+    const layers = randomLayers(seed);
+    const result = merged(layers);
+    for (const path of leaves(result)) {
+      const writer = layers.map((layer) => at(layer, path) !== undefined).lastIndexOf(true);
+      expect({ seed, path, value: at(result, path) }).toEqual({ seed, path, value: at(layers[writer], path) });
+      // No layer after it wrote a value that is not a mapping above the path.
+      for (const later of layers.slice(writer + 1))
+        for (let length = 1; length < path.length; length++) {
+          const above = at(later, path.slice(0, length));
+          expect({ seed, path, cut: above !== undefined && !isMapping(above) }).toEqual({ seed, path, cut: false });
+        }
+    }
+    const last = layers.at(-1)!;
+    for (const path of leaves(last)) expect({ seed, path, value: at(result, path) }).toEqual({ seed, path, value: at(last, path) });
+  }
+});
+
+test("CF5: a file that is not there is an empty layer; a seam no layer lists is not provided, so the host's own list or the default stands", async () => {
+  const configuration = await load([join(testFolder(), "nowhere.yml")]);
+  expect(configuration).toEqual({ lists: {}, mcpServers: [] });
   const lists = seamListsOf(configuration, { canAsk: true });
   expect(lists).toEqual({});
   const provided = Effect.gen(function* () {
@@ -155,15 +282,15 @@ test("CF5: a file that is not there is an empty layer; a seam no file lists is n
 });
 
 test("CF6: turn-end hooks need maxHolds, in some layer", async () => {
-  const hooks = write("user/policies.yml", "turnEnd:\n  - use: retryIncomplete\n");
+  const hooks = write("user/policies.yml", "turnEnd: [retryIncomplete]\n");
   expect(await refusal([hooks])).toEndWith("maxHolds: Required when turnEnd lists hooks: how many times they may hold one turn open");
   const holds = write("project/policies.yml", "maxHolds: 1\n");
-  expect((await load([hooks, holds])).maxHolds).toBe(1);
+  expect((await load([hooks, [holds, false]])).maxHolds).toBe(1);
 });
 
-test("CF7: an extension the file names, relative to its folder, registers the plug-ins it exports, as built-ins are; a name used twice is refused", async () => {
+test("CF7: an extension a trusted layer names, relative to its folder, registers the plug-ins it exports; a project's layer may not name one; a name used twice is refused", async () => {
   const extension = new URL("../../tests/support/config-extension.ts", import.meta.url).pathname;
-  const file = write("user/policies.yml", `extensions:\n  - ${extension}\ntoolCalls:\n  - use: denyTools\n    tools: [change]\n  - use: permissions\n    mode: bypassPermissions\n`);
+  const file = write("user/policies.yml", `extensions:\n  - ${extension}\nplugins:\n  denyTools:\n    tools: [change]\n  permissions:\n    mode: bypassPermissions\ntoolCalls: [denyTools, permissions]\n`);
   const configuration = await load([file]);
   const verdicts = await runTest(
     Effect.gen(function* () {
@@ -174,24 +301,43 @@ test("CF7: an extension the file names, relative to its folder, registers the pl
   expect(verdicts).toEqual(["runs", 'vetoed: {"denied":"change"}']);
   // A path relative to the file's folder.
   write("user/extension.ts", `export { default } from ${JSON.stringify(extension)};\n`);
-  const relative = write("user/relative.yml", "extensions:\n  - ./extension.ts\ntoolCalls:\n  - use: denyTools\n");
-  expect((await load([relative])).lists.toolCalls?.map((entry) => [entry.plugin.use, entry.settings])).toEqual([["denyTools", { tools: [] }]]);
-  // The same module named by two layers is loaded once; two modules exporting one name are refused.
+  const relative = write("user/relative.yml", "extensions:\n  - ./extension.ts\ntoolCalls: [denyTools]\n");
+  expect(listed(await load([relative]))["toolCalls"]).toEqual([["denyTools", "denyTools", { tools: [] }]]);
+  // A project's layer does not run code; a plug-in the user's extension registers it may use.
+  const project = write("project/policies.yml", `extensions:\n  - ${extension}\n`);
+  expect(await refusal([[project, false]])).toEndWith("project/policies.yml: extensions: Extensions are loaded only from the user's own configuration: a project's does not run code");
+  const uses = write("project/uses.yml", "plugins:\n  denyTools:\n    tools: [look]\n");
+  expect(listed(await load([relative, [uses, false]]))["toolCalls"]).toEqual([["denyTools", "denyTools", { tools: ["look"] }]]);
+  // The same module named twice is loaded once; two modules exporting one name are refused.
   const twice = write("user/twice.yml", `extensions:\n  - ${extension}\n`);
-  const again = write("project/again.yml", `extensions:\n  - ${extension}\n`);
-  expect((await load([twice, again])).lists).toEqual({});
-  const clash = write("project/clash.yml", "extensions:\n  - ../user/extension.ts\n");
+  expect((await load([twice, twice])).lists).toEqual({});
+  const clash = write("user/clash.yml", "extensions:\n  - ./extension.ts\n");
   expect(await refusal([twice, clash])).toEndWith("extensions: Two plug-ins are named denyTools");
 });
 
-test("CF8: the JSON Schema of a file names each seam's plug-ins and their settings, and no other property", () => {
-  const schema = policiesJsonSchema() as { readonly properties: Record<string, { readonly items?: { readonly anyOf?: ReadonlyArray<{ readonly properties: Record<string, unknown>; readonly required: ReadonlyArray<string>; readonly additionalProperties: boolean }> } }>; readonly additionalProperties: boolean };
-  expect(schema.additionalProperties).toBe(false);
-  const entries = schema.properties["toolCalls"]?.items?.anyOf ?? [];
-  expect(entries.map((entry) => entry.properties["use"])).toEqual([{ type: "string", enum: ["loopBreaker"] }, { type: "string", enum: ["permissions"] }]);
-  expect(entries.map((entry) => [entry.required, entry.additionalProperties])).toEqual([
-    [["use"], false],
-    [["use"], false],
+test("CF10: mcpServers are servers by name, merged key by key, so a project can add one or change one of the user's", async () => {
+  const user = write("home/policies.yml", "mcpServers:\n  github:\n    command: gh-mcp\n    args: [--read-only]\n  files:\n    command: files-mcp\n");
+  const project = write("project/policies.yml", "mcpServers:\n  github:\n    required: true\n    connectTimeout: 10 seconds\n  db:\n    command: db-mcp\n    env:\n      DB: local\n");
+  const configuration = await load([user, [project, false]]);
+  expect(configuration.mcpServers.map((server) => ({ ...server, connectTimeout: server.connectTimeout === undefined ? undefined : Duration.toMillis(Duration.fromInputUnsafe(server.connectTimeout)) }))).toEqual([
+    { name: "github", command: "gh-mcp", args: ["--read-only"], env: {}, required: true, connectTimeout: 10_000 },
+    { name: "files", command: "files-mcp", args: [], env: {}, required: false, connectTimeout: undefined },
+    { name: "db", command: "db-mcp", args: [], env: { DB: "local" }, required: false, connectTimeout: undefined },
   ]);
-  expect(Object.keys(entries[0]?.properties ?? {})).toEqual(["use", "nudgeAt", "stopAt", "key"]);
+  expect(await refusal([write("home/bad.yml", "mcpServers:\n  github:\n    command: gh-mcp\n    connectTimeout: soon\n")])).toEndWith(
+    'mcpServers.github.connectTimeout: "soon" is not a duration, such as "30 seconds"',
+  );
+});
+
+test("CF8: the JSON Schema of a file takes, in plugins, each plug-in's settings under its own name and use with settings under another; each seam's list takes names", () => {
+  const schema = policiesJsonSchema() as {
+    readonly properties: Readonly<Record<string, { readonly properties?: Readonly<Record<string, { readonly properties: Readonly<Record<string, unknown>> }>>; readonly additionalProperties?: { readonly anyOf: ReadonlyArray<{ readonly required: ReadonlyArray<string> }> }; readonly items?: unknown }>>;
+    readonly additionalProperties: boolean;
+  };
+  expect(schema.additionalProperties).toBe(false);
+  const plugins = schema.properties["plugins"];
+  expect(Object.keys(plugins?.properties ?? {})).toEqual(["loopBreaker", "permissions", "maxTurnRequests", "retryIncomplete"]);
+  expect(Object.keys(plugins?.properties?.["loopBreaker"]?.properties ?? {})).toEqual(["nudgeAt", "stopAt", "key"]);
+  expect(plugins?.additionalProperties?.anyOf.map((each) => each.required)).toEqual([["use"], ["use"], ["use"], ["use"]]);
+  expect(schema.properties["toolCalls"]?.items).toEqual({ type: "string" });
 });
