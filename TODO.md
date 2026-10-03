@@ -114,6 +114,16 @@ model.
       (`effect/ai/McpSchema`, `McpProtocol`, `McpServer`) and no client: a client built from them,
       as `effective-acp` was built. Each server is a tool source (`ToolSource`) with the namespace
       `mcp__<server>`, after the world's own.
+      Effect's `RpcClient` over `McpSchema.ClientRequestRpcs`, through a transport of our own over
+      a child's stdio, against `@modelcontextprotocol/server-everything` (2026-10-03): `initialize`,
+      `tools/list` and `tools/call` work. It sends a notification with an id (the server answers
+      -32601, and without `initialized` it does not offer its sampling, elicitation and roots
+      tools); a request from the server (`roots/list`, `sampling/createMessage`) and a notification
+      (`notifications/tools/list_changed`, `notifications/message`) are dropped, so the call that
+      led to the request waits for ever; cancelling sends `@effect/rpc/Interrupt`, not
+      `notifications/cancelled`; and fields its schemas do not have are dropped (`tasks`, a tool's
+      `execution`). These are `effective-acp`'s reasons for its own JSON-RPC peer
+      (`EFFECT-FIT.md`), so the client is built on a copy of that peer, with `McpSchema`'s schemas.
 - [ ] The ACP host over Streamable HTTP (`Agent.layerHttp`), with a token and one holder for a
       session, for labkit-web.
 
