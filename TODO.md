@@ -57,7 +57,9 @@ model.
         unasked. Needed: permission by command (allow for the session names the command, or
         its first words, as Claude Code's `Bash(git log:*)` does), deny rules that hold in every
         mode, and a command split at `;`, `&&`, `|` and `$(…)` judged part by part, so that an
-        allowed `git log` cannot carry another command.
+        allowed `git log` cannot carry another command. Dan has a bash invocation parser and
+        classifier, which builds a tree of what chained invocations intend: the policy starts
+        from it, with Jev classifying what it cannot.
 - [ ] Accounting for ACP. Built: a provider-neutral `usage` on each response; `contextGauge` (used,
       size, cost) and `requestsIn` (a turn's model requests) read from the facts (`accounting.ts`);
       prices with the well-known models; `maxTurnRequests` as an example host policy; for ACP,
