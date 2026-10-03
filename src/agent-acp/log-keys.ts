@@ -52,6 +52,12 @@ export const logKeys = {
     /** `LABKIT_ACP_RETRIES` is not a whole number of 0 or more: its value, and the number used instead. */
     retriesUnknown: "acp_host.config.retries_unknown",
   },
+  mcp: {
+    /** A change of an MCP server's state could not be recorded in the session's facts: the server, its state, and why. */
+    notRecorded: "acp_host.mcp.not_recorded",
+    /** `/mcp reconnect` started a server again: its name, and its state once settled. */
+    reconnected: "acp_host.mcp.reconnected",
+  },
   prompt: {
     /** `session/prompt` arrived: the blocks it carries. */
     received: "acp_host.prompt.received",

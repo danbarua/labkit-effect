@@ -278,6 +278,20 @@ twice.
 - AG21. A turn makes at most `maxTurnRequests` model requests (1000 when the launcher does not
   say): the request beyond it is vetoed (`agent-policy` P11), and the prompt ends with the stop
   reason `max_turn_requests`.
+- AG22. The MCP servers a client names in `session/new`, `session/load` or `session/resume` are
+  started at once (`agent-mcp` MK1), in the entry's scope, which `session/close` closes: their
+  processes end with it. A server has `mcpConnectTimeout` (30 seconds unless the launcher says) to
+  connect. The tools of those ready are offered after the world's, under `mcp__<server>`; a call is
+  shown with its result as the model is sent it (`agent-session` TO1). Once the session opens it
+  records each server's state, and each change of it (`McpServerChanged`, from the harness part
+  "mcp servers").
+- AG23. A server that cannot be started, or does not connect, leaves the session running: the model
+  is told it is not running (`agent-mcp` MK2), and its tools are not offered. `/mcp`, alone in a
+  prompt, says how each server is; `/mcp reconnect <server>` starts one again and says how it went
+  and whether its tools are offered in the session. Both are answered without the model, and are in
+  the commands the host advertises. A server at a URL is refused (-32602) by `effective-acp`, as the
+  host does not offer MCP over HTTP or SSE. Two servers whose tools would be offered under one name
+  are -32602, and nothing is started.
 - AG17. `editorWorld` offers `edit_file` to a client that advertised both `fs` methods, and
   `run_command` to one that advertised `terminal`. `edit_file` reads the file through the editor
   and writes it back with one occurrence of `old_text` replaced; `old_text` that occurs never or

@@ -7,7 +7,7 @@
  */
 
 import { expect } from "bun:test";
-import { existsSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import { BunServices } from "@effect/platform-bun";
@@ -878,6 +878,65 @@ test("AG21: a turn that would make more model requests than maxTurnRequests ends
   expect(result.prompted.stopReason).toBe("max_turn_requests");
   expect(host.targets).toHaveLength(2);
   expect(endings(await factsOn(storeFileOf(host.directory, result.sessionId)))).toEqual(["Vetoed"]);
+});
+
+/** The test MCP server (`tests/support/mcp-server.ts`), as a client names it in `session/new`. */
+const fakeMcp = (name: string): acp.McpServer => ({ name, command: process.execPath, args: [new URL("../../tests/support/mcp-server.ts", import.meta.url).pathname], env: [] });
+
+test("AG22: the MCP servers a client names are started; their tools are offered after the world's, under mcp__<server>; a call runs on the server and is shown with its result as text; the session records each server's state once it opens", async () => {
+  const host = startHost({
+    world: echoWorld,
+    script: [answer({ _tag: "ToolCall", call: "m-1", tool: "mcp__fake__echo", input: { message: "hi" } }), answer({ _tag: "Text", text: "Done." })],
+  });
+  const { app, log } = sdkClient();
+  // The server runs in the session's working folder.
+  mkdirSync(host.cwd, { recursive: true });
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [fakeMcp("fake")] });
+    return { sessionId, prompted: await ctx.request("session/prompt", say(sessionId, "Echo hi.")) };
+  });
+  await host.stop();
+  expect(result.prompted.stopReason).toBe("end_turn");
+  expect(host.contexts[0]?.tools.map((tool) => tool.name as string)).toEqual(["echo", "mcp__fake__echo", "mcp__fake__roots", "mcp__fake__slow"]);
+  const completed = log.updates.find((update) => update.sessionUpdate === "tool_call_update" && update.status === "completed");
+  expect(completed).toMatchObject({ toolCallId: "m-1", content: [{ type: "content", content: { type: "text", text: "hi" } }] });
+  const facts = await factsOn(storeFileOf(host.directory, result.sessionId));
+  const changed = observed(facts).filter((fact) => fact.observation._tag === "McpServerChanged");
+  expect(changed.map((fact) => [fact.origin, fact.observation]) as unknown).toEqual([
+    [{ _tag: "Harness", part: "mcp servers" }, { _tag: "McpServerChanged", server: "fake", state: { _tag: "Ready", tools: ["mcp__fake__echo", "mcp__fake__roots", "mcp__fake__slow"] } }],
+  ]);
+  expect(facts[0]).toMatchObject({ observation: { _tag: "SessionOpened" } });
+});
+
+test("AG23: a server that cannot be started leaves the session running: the model is told it is not running and the session records it failed; /mcp says how each server is; a server at a URL is refused, as the host does not offer HTTP; two servers whose tools would share a name are -32602", async () => {
+  const host = startHost({ script: [answer({ _tag: "Text", text: "Hello." })] });
+  const { app, log } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [{ name: "missing", command: "/no/such/server", args: [], env: [] }] });
+    const remote = await failure(ctx.request("session/new", { cwd: host.cwd, mcpServers: [{ type: "http", name: "remote", url: "http://localhost:1/mcp", headers: [] }] }));
+    await ctx.request("session/prompt", say(sessionId, "Hi."));
+    await ctx.request("session/prompt", say(sessionId, "/mcp"));
+    await ctx.request("session/prompt", say(sessionId, "/mcp reconnect nobody"));
+    const clashing = await failure(ctx.request("session/new", { cwd: host.cwd, mcpServers: [fakeMcp("a.b"), fakeMcp("a_b")] }));
+    return { sessionId, clashing, remote };
+  });
+  await host.stop();
+  const notice = host.contexts[0]?.messages.at(-1);
+  expect(notice?.role).toBe("instruction");
+  const told = notice?.parts.flatMap((part) => (part._tag === "Text" ? [part.text as string] : [])) ?? [];
+  expect(told).toHaveLength(1);
+  expect(told[0]).toStartWith("The MCP server missing is not running, so its tools cannot be called: it failed: its process could not be started:");
+  const said = log.updates.flatMap((update) => (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text" ? [update.content.text] : []));
+  expect(said.at(-2)).toStartWith("missing: it failed: its process could not be started:");
+  expect(said.at(-1)).toBe("No MCP server of this session is named nobody.");
+  const facts = await factsOn(storeFileOf(host.directory, result.sessionId));
+  expect(observed(facts).filter((fact) => fact.observation._tag === "McpServerChanged").map((fact) => fact.observation)).toMatchObject([
+    { server: "missing", state: { _tag: "Failed" } },
+  ]);
+  expect(result.remote).toMatchObject({ code: -32602, data: { capability: "agentCapabilities.mcpCapabilities.http" } });
+  expect(result.clashing).toMatchObject({ code: -32602, message: "The MCP servers a.b and a_b would offer their tools under one name, mcp__a_b" });
 });
 
 test("AG16: by default a response after a tool call with thinking but no answer is asked again; the client gets the answer, not the feedback, and end_turn", async () => {
