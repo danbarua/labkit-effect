@@ -103,7 +103,7 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
             yield* Effect.logWarning(logKeys.permission.failed, {
               tool: question.tool,
               doing: "asking the client session/request_permission",
-              cause: "_tag" in error ? `${error._tag}: ${error.message}` : `${error.code}: ${error.message}`,
+              cause: `${error._tag}: ${error.message}`,
               answer: "reject_once",
             });
             return rejectOnce(question);

@@ -14,14 +14,14 @@
  */
 
 import { Schema } from "effect";
-import { ErrorCode, type JsonRpcError } from "effective-acp/json-rpc";
+import { ErrorCode, type JsonRpcErrorObject } from "effective-acp/json-rpc";
 import type { StopReason } from "effective-acp/schema/v1";
 import type { Ending } from "../agent-machine/decision.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { TurnId } from "../agent-machine/names.ts";
 import { asText, parseJson } from "../agent-session/received.ts";
 
-export type Stop = { readonly stopReason: StopReason } | { readonly error: JsonRpcError };
+export type Stop = { readonly stopReason: StopReason } | { readonly error: JsonRpcErrorObject };
 
 /** The reason the turn-request limit records (`maxTurnRequests` in `src/examples/policies.ts`); it may say more. */
 const isTurnLimit = Schema.is(Schema.Struct({ stop: Schema.Literal("max_turn_requests") }));

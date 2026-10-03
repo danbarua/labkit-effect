@@ -35,7 +35,7 @@
 import { isAbsolute, join } from "node:path";
 import { Clock, type Context, Effect, Exit, Fiber, FileSystem, Layer, Option, type Path, Schema, Scope, Semaphore } from "effect";
 import * as Agent from "effective-acp/agent";
-import { ErrorCode, type JsonRpcError } from "effective-acp/json-rpc";
+import { ErrorCode, type JsonRpcErrorObject } from "effective-acp/json-rpc";
 import * as Protocol from "effective-acp/protocol";
 import type { ContentBlock, McpServer, SessionConfigOption, SessionUpdate } from "effective-acp/schema/v1";
 import { SessionId as AcpSessionId } from "effective-acp/schema/v1";
@@ -131,7 +131,7 @@ export const hostOptionsFrom = (env: Readonly<Record<string, string | undefined>
 /** The command the host runs itself, without the model. */
 const exportCommand = { name: "export", description: "Write this session's transcript as Markdown to .labkit/exports/<session>.md in the working folder." };
 
-const rpcError = (code: number, message: string, data?: unknown): JsonRpcError => ({ code, message, ...(data === undefined ? {} : { data }) });
+const rpcError = (code: number, message: string, data?: unknown): JsonRpcErrorObject => ({ code, message, ...(data === undefined ? {} : { data }) });
 
 /** An open session: the core's, the services its operations run with, its scope and its feed. */
 interface Opened {
@@ -232,7 +232,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
         const traced = <A, E, X>(effect: Effect.Effect<A, E, X>, session?: string) =>
           effect.pipe(Effect.annotateLogs({ connection: connectionId, ...(session === undefined ? {} : { session }) }));
 
-        const entryOf = (sessionId: string): Effect.Effect<Entry, JsonRpcError> => {
+        const entryOf = (sessionId: string): Effect.Effect<Entry, JsonRpcErrorObject> => {
           const entry = entries.get(sessionId);
           if (entry !== undefined) return Effect.succeed(entry);
           return Effect.logWarning(logKeys.session.unknown, { sessionId }).pipe(
@@ -266,7 +266,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           }).pipe(Effect.provideContext(known));
 
         /** The model `session/new` starts with, or why there is none. */
-        const startingModel: Effect.Effect<Asked, JsonRpcError, ModelCatalog> =
+        const startingModel: Effect.Effect<Asked, JsonRpcErrorObject, ModelCatalog> =
           options.model === undefined
             ? Effect.filterOrFail(defaultModel, (model): model is Asked => model !== undefined, () => rpcError(ErrorCode.InternalError, noModel))
             : targetOf(options.model).pipe(
