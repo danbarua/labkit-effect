@@ -30,6 +30,7 @@ import { Data, Duration, Effect, FileSystem, Layer, Option, Schema } from "effec
 import { FailureText, ToolName } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import { ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
+import { decoderOf, jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { parseJson, receivedText } from "../agent-session/received.ts";
 
 /** The most bytes `read_file` returns in one result. */
@@ -109,12 +110,8 @@ export function workspaceTools(root: string) {
       kind: "read",
       replay: "safe",
       description: `Read a UTF-8 file in the workspace, at most 256 KiB per result. Use line (1-based) and limit (a count of lines) to read a large file in parts, for example {"path": "src/a.ts", "line": 1, "limit": 100}. If a path does not exist, list its folder with list_dir.${scope}`,
-      input: {
-        type: "object",
-        properties: { path: { type: "string" }, line: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1 } },
-        required: ["path"],
-      },
-      decode: Schema.decodeUnknownEffect(ReadFile),
+      input: jsonSchemaOf(ReadFile),
+      decode: decoderOf(ReadFile),
       run: ({ path, line, limit }) =>
         Effect.gen(function* () {
           const full = yield* inside(path);
@@ -133,8 +130,8 @@ export function workspaceTools(root: string) {
       kind: "search",
       replay: "safe",
       description: `List one folder in the workspace, without recursion; a folder's name ends with /. Use "." for the workspace itself.${scope}`,
-      input: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
-      decode: Schema.decodeUnknownEffect(ListDir),
+      input: jsonSchemaOf(ListDir),
+      decode: decoderOf(ListDir),
       run: ({ path }) =>
         Effect.gen(function* () {
           const full = yield* inside(path);
@@ -154,8 +151,8 @@ export function workspaceTools(root: string) {
       kind: "edit",
       replay: "idempotent",
       description: `Create a UTF-8 file in the workspace, or replace one, with the text given, at most 256 KiB. The folder it is in must exist.${scope}`,
-      input: { type: "object", properties: { path: { type: "string" }, text: { type: "string" } }, required: ["path", "text"] },
-      decode: Schema.decodeUnknownEffect(WriteFile),
+      input: jsonSchemaOf(WriteFile),
+      decode: decoderOf(WriteFile),
       run: ({ path, text }) =>
         Effect.gen(function* () {
           const full = yield* inside(path);
@@ -170,12 +167,8 @@ export function workspaceTools(root: string) {
       kind: "edit",
       replay: "unsafe",
       description: `Replace one occurrence of old_text in a UTF-8 file in the workspace with new_text. old_text must occur exactly once: include enough of the lines around it to make it so.${scope}`,
-      input: {
-        type: "object",
-        properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } },
-        required: ["path", "old_text", "new_text"],
-      },
-      decode: Schema.decodeUnknownEffect(EditFile),
+      input: jsonSchemaOf(EditFile),
+      decode: decoderOf(EditFile),
       run: ({ path, old_text, new_text }) =>
         Effect.gen(function* () {
           const full = yield* inside(path);
@@ -198,12 +191,8 @@ export function workspaceTools(root: string) {
       kind: "execute",
       replay: "unsafe",
       description: `Run a shell command (sh -c) in the workspace, and get its output (stdout, then stderr; the last 256 KiB) and how it exited. It is stopped after timeout_seconds (${commandSeconds} unless given; at most 600). Use it to search files (grep, find), run tests and use git.${scope}`,
-      input: {
-        type: "object",
-        properties: { command: { type: "string" }, timeout_seconds: { type: "integer", minimum: 1, maximum: 600 } },
-        required: ["command"],
-      },
-      decode: Schema.decodeUnknownEffect(RunCommand),
+      input: jsonSchemaOf(RunCommand),
+      decode: decoderOf(RunCommand),
       run: ({ command, timeout_seconds }) => {
         const seconds = timeout_seconds ?? commandSeconds;
         // The command is a process group of its own (`detached`). Stopped (at its time, or when the

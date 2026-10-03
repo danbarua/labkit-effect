@@ -29,6 +29,7 @@ import { type McpServer, type SessionId, type TerminalId, ToolCallId } from "eff
 import { type CallId, FailureText, ToolName } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import { ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
+import { decoderOf, jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { parseJson, receivedText } from "../agent-session/received.ts";
 import { workspaceTools } from "../agent-tools/workspace.ts";
 import { type Present, presentFrom } from "./projection.ts";
@@ -145,11 +146,7 @@ export const editorWorld: World = {
           kind: "read",
           replay: "safe",
           description: `Read a UTF-8 file as the editor has it, unsaved changes included, at most 256 KiB per result. Use line (1-based) and limit (a count of lines) to read a large file in parts, for example {"path": "src/a.ts", "line": 1, "limit": 100}.${scope}`,
-          input: {
-            type: "object",
-            properties: { path: { type: "string" }, line: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1 } },
-            required: ["path"],
-          },
+          input: jsonSchemaOf(ReadFile),
         });
       if (fs?.writeTextFile === true)
         tools.push({
@@ -157,7 +154,7 @@ export const editorWorld: World = {
           kind: "edit",
           replay: "idempotent",
           description: `Create a UTF-8 file, or replace one, with the content given, at most 256 KiB, through the editor.${scope}`,
-          input: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
+          input: jsonSchemaOf(WriteFile),
         });
       if (fs?.readTextFile === true && fs.writeTextFile === true)
         tools.push({
@@ -165,11 +162,7 @@ export const editorWorld: World = {
           kind: "edit",
           replay: "unsafe",
           description: `Replace one occurrence of old_text in a UTF-8 file with new_text, through the editor, its unsaved changes included. old_text must occur exactly once: include enough of the lines around it to make it so.${scope}`,
-          input: {
-            type: "object",
-            properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } },
-            required: ["path", "old_text", "new_text"],
-          },
+          input: jsonSchemaOf(EditFile),
         });
       tools.push({
         name: ToolName.make("update_plan"),
@@ -177,24 +170,7 @@ export const editorWorld: World = {
         replay: "safe",
         description:
           "Record your plan for the task as a list of steps, each pending, in_progress or completed, with an optional priority (high, medium, low); the user sees it in the editor. Send the whole list each time it changes; keep one step in_progress while you work on it.",
-        input: {
-          type: "object",
-          properties: {
-            entries: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  content: { type: "string" },
-                  status: { type: "string", enum: ["pending", "in_progress", "completed"] },
-                  priority: { type: "string", enum: ["high", "medium", "low"] },
-                },
-                required: ["content", "status"],
-              },
-            },
-          },
-          required: ["entries"],
-        },
+        input: jsonSchemaOf(UpdatePlan),
       });
       if (connection.profile.client.capabilities.terminal === true)
         tools.push({
@@ -202,11 +178,7 @@ export const editorWorld: World = {
           kind: "execute",
           replay: "unsafe",
           description: `Run a shell command (sh -c) in the editor's terminal, in the working folder, and get its output (the last 256 KiB) and how it exited. It is stopped after timeout_seconds (${commandSeconds} unless given; at most 600). Use it to list and search files (ls, find, grep), run tests and use git.${scope}`,
-          input: {
-            type: "object",
-            properties: { command: { type: "string" }, timeout_seconds: { type: "integer", minimum: 1, maximum: 600 } },
-            required: ["command"],
-          },
+          input: jsonSchemaOf(RunCommand),
         });
 
       const read = (input: typeof ReadFile.Type) => {
@@ -293,7 +265,7 @@ export const editorWorld: World = {
       };
 
       const decoded = <S extends Schema.Top & { readonly DecodingServices: never }>(schema: S, tool: string, input: unknown, run: (value: S["Type"]) => Effect.Effect<ToolOutcome>) =>
-        Schema.decodeUnknownEffect(schema)(input).pipe(
+        decoderOf(schema)(input).pipe(
           Effect.matchEffect({ onFailure: (error) => Effect.succeed(rejected(`${tool} does not take this input: ${error.message}`)), onSuccess: run }),
         );
 

@@ -41,6 +41,17 @@ test("the catalog is read_file, list_dir, write_file, edit_file and run_command,
   ]);
 });
 
+test("a tool's input schema is its Schema's, closed to other properties, and a call with another property is refused", async () => {
+  expect(catalog.find((tool) => tool.name === "read_file")?.input).toEqual({
+    type: "object",
+    properties: { path: { type: "string", minLength: 1 }, line: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1 } },
+    required: ["path"],
+    additionalProperties: false,
+  });
+  expect(catalog.find((tool) => tool.name === "run_command")?.input).toMatchObject({ properties: { timeout_seconds: { minimum: 1, maximum: 600 } } });
+  expect(await call("read_file", { path: "src/a.txt", lines: 2 })).toStartWith("rejected: read_file does not take this input:");
+});
+
 test("edit_file replaces the one occurrence of a text; one that occurs never or more than once is refused, and nothing is written", async () => {
   writeFileSync(join(root, "src", "e.txt"), "alpha and a");
   expect(await call("edit_file", { path: "src/e.txt", old_text: "alpha", new_text: "beta" })).toBe("Edited src/e.txt.");
