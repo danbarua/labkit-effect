@@ -81,4 +81,5 @@ The environment: `LABKIT_ACP_MODEL` (the model new sessions start on, `provider/
 first the catalog lists), a provider's key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`) or
 the local server at `http://localhost:8000/v1`, `LABKIT_ACP_SESSIONS_DIR` (default
 `~/.labkit/sessions`), `LABKIT_ACP_LOCAL_TOOLS=1` (tools on the local disk instead of through the
-editor: a stopgap), and `LABKIT_ACP_LOG_DIR`, `_LEVEL`, `_MAX_BYTES`, `_BACKUPS`.
+editor: a stopgap), `LABKIT_ACP_STRICT_TOOL_INPUT=1` (refuse a tool call whose input has
+properties its tool does not take; without it, the call runs without them, and its result says so), and `LABKIT_ACP_LOG_DIR`, `_LEVEL`, `_MAX_BYTES`, `_BACKUPS`.

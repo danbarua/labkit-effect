@@ -4,6 +4,10 @@
  */
 
 export const logKeys = {
+  tools: {
+    /** A tool call's input had properties its tool does not take; the call ran without them (strict input off). */
+    inputIgnored: "tool.input.ignored",
+  },
   blobs: {
     /** A blob's file holds bytes whose hash is not its id; the store finds nothing for it. */
     notAsStored: "blobs.file.not_as_stored",

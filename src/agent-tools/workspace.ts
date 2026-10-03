@@ -30,7 +30,8 @@ import { Data, Duration, Effect, FileSystem, Layer, Option, Schema } from "effec
 import { FailureText, ToolName } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import { ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
-import { decoderOf, jsonSchemaOf } from "../agent-session/tool-input.ts";
+import { type Decoded, decoderOf, ignoredNote, jsonSchemaOf } from "../agent-session/tool-input.ts";
+import { logKeys } from "../agent-session/log-keys.ts";
 import { parseJson, receivedText } from "../agent-session/received.ts";
 
 /** The most bytes `read_file` returns in one result. */
@@ -82,7 +83,7 @@ const lastBytes = (text: string, max: number): { readonly kept: string; readonly
 };
 
 interface WorkspaceTool<I> extends ToolSpec {
-  readonly decode: (input: unknown) => Effect.Effect<I, Schema.SchemaError>;
+  readonly decode: (input: unknown) => Effect.Effect<Decoded<I>, Schema.SchemaError>;
   readonly run: (input: I) => Effect.Effect<string, Rejected | Reported, FileSystem.FileSystem>;
 }
 
@@ -93,7 +94,13 @@ class Reported extends Data.TaggedError("Reported")<{ readonly message: string }
 
 const tool = <I>(definition: WorkspaceTool<I>): WorkspaceTool<unknown> => definition as unknown as WorkspaceTool<unknown>;
 
-export function workspaceTools(root: string) {
+/**
+ * The workspace tools for the folder `root`. With `strictInput`, a call whose input has properties
+ * its tool does not take is refused; without (the default), it runs without them, and its result
+ * says which were ignored.
+ */
+export function workspaceTools(root: string, options: { readonly strictInput?: boolean } = {}) {
+  const strict = options.strictInput ?? false;
   const inside = (path: string) => {
     const full = resolve(root, path);
     const from = relative(root, full);
@@ -111,7 +118,7 @@ export function workspaceTools(root: string) {
       replay: "safe",
       description: `Read a UTF-8 file in the workspace, at most 256 KiB per result. Use line (1-based) and limit (a count of lines) to read a large file in parts, for example {"path": "src/a.ts", "line": 1, "limit": 100}. If a path does not exist, list its folder with list_dir.${scope}`,
       input: jsonSchemaOf(ReadFile),
-      decode: decoderOf(ReadFile),
+      decode: decoderOf(ReadFile, strict),
       run: ({ path, line, limit }) =>
         Effect.gen(function* () {
           const full = yield* inside(path);
@@ -131,7 +138,7 @@ export function workspaceTools(root: string) {
       replay: "safe",
       description: `List one folder in the workspace, without recursion; a folder's name ends with /. Use "." for the workspace itself.${scope}`,
       input: jsonSchemaOf(ListDir),
-      decode: decoderOf(ListDir),
+      decode: decoderOf(ListDir, strict),
       run: ({ path }) =>
         Effect.gen(function* () {
           const full = yield* inside(path);
@@ -152,7 +159,7 @@ export function workspaceTools(root: string) {
       replay: "idempotent",
       description: `Create a UTF-8 file in the workspace, or replace one, with the text given, at most 256 KiB. The folder it is in must exist.${scope}`,
       input: jsonSchemaOf(WriteFile),
-      decode: decoderOf(WriteFile),
+      decode: decoderOf(WriteFile, strict),
       run: ({ path, text }) =>
         Effect.gen(function* () {
           const full = yield* inside(path);
@@ -168,7 +175,7 @@ export function workspaceTools(root: string) {
       replay: "unsafe",
       description: `Replace one occurrence of old_text in a UTF-8 file in the workspace with new_text. old_text must occur exactly once: include enough of the lines around it to make it so.${scope}`,
       input: jsonSchemaOf(EditFile),
-      decode: decoderOf(EditFile),
+      decode: decoderOf(EditFile, strict),
       run: ({ path, old_text, new_text }) =>
         Effect.gen(function* () {
           const full = yield* inside(path);
@@ -192,7 +199,7 @@ export function workspaceTools(root: string) {
       replay: "unsafe",
       description: `Run a shell command (sh -c) in the workspace, and get its output (stdout, then stderr; the last 256 KiB) and how it exited. It is stopped after timeout_seconds (${commandSeconds} unless given; at most 600). Use it to search files (grep, find), run tests and use git.${scope}`,
       input: jsonSchemaOf(RunCommand),
-      decode: decoderOf(RunCommand),
+      decode: decoderOf(RunCommand, strict),
       run: ({ command, timeout_seconds }) => {
         const seconds = timeout_seconds ?? commandSeconds;
         // The command is a process group of its own (`detached`). Stopped (at its time, or when the
@@ -246,8 +253,15 @@ export function workspaceTools(root: string) {
           if ("reason" in parsed) return Effect.succeed(rejected(`The input could not be read: ${parsed.reason}.`));
           return found.decode(parsed.value).pipe(
             Effect.mapError((error) => new Rejected({ problem: `${name} does not take this input: ${error.message}` })),
-            Effect.flatMap(found.run),
-            Effect.map((output): ToolOutcome => ({ _tag: "Succeeded", output: receivedText(output) })),
+            Effect.flatMap(({ value, ignored }) => {
+              const note = ignoredNote(name, ignored);
+              const logged = ignored.length === 0 ? Effect.void : Effect.logWarning(logKeys.tools.inputIgnored, { tool: name, ignored });
+              return logged.pipe(
+                Effect.andThen(found.run(value)),
+                Effect.map((output): ToolOutcome => ({ _tag: "Succeeded", output: receivedText(`${output}${note}`) })),
+                Effect.catchTag("Reported", (error) => Effect.fail(new Reported({ message: `${error.message}${note}` }))),
+              );
+            }),
             Effect.catchTags({
               Rejected: (error) => Effect.succeed(rejected(error.problem)),
               Reported: (error) => Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(error.message) } }),

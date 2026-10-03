@@ -48,6 +48,11 @@ export interface Config {
   readonly permissionMode: PermissionMode;
   /** Whether anyone is there to answer a question before a call runs: the REPL at a terminal. */
   readonly canAsk: boolean;
+  /**
+   * Whether a tool call whose input has properties its tool does not take is refused
+   * (`--strict-tool-input`); if not, it runs without them, and its result says which were ignored.
+   */
+  readonly strictToolInput: boolean;
 }
 
 /**
@@ -59,14 +64,14 @@ export const storeFolder = "logs/cli";
 /** Where a session's log lines go when they go to a file: beside its facts. */
 export const logFileOf = (sessionId: string): string => `${sessionFolderOf(storeFolder, sessionId)}/cli.log`;
 
-/** The tools a session is offered: the ones that read the workspace, the folder the CLI runs in. */
-const workspace = workspaceTools(process.cwd());
+/** The tools a session is offered: the workspace's, the folder the CLI runs in. */
+const workspaceOf = (config: Config) => workspaceTools(process.cwd(), { strictInput: config.strictToolInput });
 
 /**
  * What the loop needs, for a CLI session: the workspace's tools; its turns count on from those its
  * store holds; a turn whose response had thinking but no answer is asked once more for it.
  */
-const Services = SessionServices(workspace.runner, RetryIncomplete(1));
+const servicesOf = (workspace: ReturnType<typeof workspaceOf>) => SessionServices(workspace.runner, RetryIncomplete(1));
 
 /**
  * What a way of running the CLI does with a session as it opens: follows its facts from the start
@@ -111,6 +116,7 @@ export const withSession = <A, E, R, L, H>(
   host: Host<H>,
   use: (session: Session) => Effect.Effect<A, E, R>,
 ) => {
+  const workspace = workspaceOf(config);
   const store = config.persist ? FileBackedSessionStore(storeFileOf(storeFolder, config.sessionId)) : ephemeralSessionStore(config.continues ?? []);
   return Effect.gen(function* () {
     const session = yield* openSession;
@@ -136,7 +142,7 @@ export const withSession = <A, E, R, L, H>(
     reportedBy({ _tag: "User", via: Via.make("cli") }),
     Effect.scoped,
     // The store logs as it opens (a lock taken over, a line cut off): to the session's log, as the rest does.
-    Effect.provide(Layer.mergeAll(Services, PermissionsFor(config.permissionMode, config.canAsk), logs).pipe(Layer.provideMerge(store.pipe(Layer.provide(logs))))),
+    Effect.provide(Layer.mergeAll(servicesOf(workspace), PermissionsFor(config.permissionMode, config.canAsk), logs).pipe(Layer.provideMerge(store.pipe(Layer.provide(logs))))),
     Effect.mapError((error) => (error instanceof SessionStoreFailed ? invalid(error.message) : error)),
   );
 };

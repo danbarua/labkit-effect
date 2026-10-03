@@ -41,7 +41,7 @@ test("the catalog is read_file, list_dir, write_file, edit_file and run_command,
   ]);
 });
 
-test("a tool's input schema is its Schema's, closed to other properties, and a call with another property is refused", async () => {
+test("a tool's input schema is its Schema's, closed to other properties; a call with another property runs without it and says so, or, with strictInput, is refused", async () => {
   expect(catalog.find((tool) => tool.name === "read_file")?.input).toEqual({
     type: "object",
     properties: { path: { type: "string", minLength: 1 }, line: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1 } },
@@ -49,7 +49,15 @@ test("a tool's input schema is its Schema's, closed to other properties, and a c
     additionalProperties: false,
   });
   expect(catalog.find((tool) => tool.name === "run_command")?.input).toMatchObject({ properties: { timeout_seconds: { minimum: 1, maximum: 600 } } });
-  expect(await call("read_file", { path: "src/a.txt", lines: 2 })).toStartWith("rejected: read_file does not take this input:");
+  expect(await call("read_file", { path: "src/a.txt", lines: 2, extra: { a: 1 } })).toBe("one\ntwo\nthree\nfour\n[Not inputs of read_file, so ignored: lines, extra.]");
+  const strict = workspaceTools(root, { strictInput: true });
+  const refused = await runTest(
+    Effect.gen(function* () {
+      const outcome = yield* (yield* ToolRunner).run(ToolName.make("read_file"), receivedJson({ path: "src/a.txt", lines: 2 }), CallId.make("call-1"));
+      return outcome._tag === "Failed" && outcome.reason._tag === "InputRejected" ? outcome.reason.problem : "not refused";
+    }).pipe(Effect.provide(strict.runner.pipe(Layer.provide(BunServices.layer)))),
+  );
+  expect(refused).toStartWith("read_file does not take this input: Expected no excess property");
 });
 
 test("edit_file replaces the one occurrence of a text; one that occurs never or more than once is refused, and nothing is written", async () => {

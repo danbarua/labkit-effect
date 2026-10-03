@@ -60,6 +60,7 @@ const flags = {
   continue: toggle("continue", "Continue the latest conversation", "c"),
   resume: text("resume", "Resume a session by its id; with none, pick one from a list", "r"),
   noSessionPersistence: toggle("no-session-persistence", "Keep the session's facts in memory only, not in its file"),
+  strictToolInput: toggle("strict-tool-input", "Refuse a tool call whose input has properties its tool does not take, rather than run it without them"),
   // `plan` and `auto` are not built.
   permissionMode: choice(
     "permission-mode",
@@ -137,7 +138,12 @@ const resumed = (named: string, interactive: boolean) =>
 const configOf = (options: Options, interactive: boolean) =>
   Effect.gen(function* () {
     const mode = options.permissionMode ?? "default";
-    const permissions = { permissionMode: mode === "manual" ? "default" : mode, canAsk: interactive && !options.print, persist: !options.noSessionPersistence } as const;
+    const permissions = {
+      permissionMode: mode === "manual" ? "default" : mode,
+      canAsk: interactive && !options.print,
+      persist: !options.noSessionPersistence,
+      strictToolInput: options.strictToolInput,
+    } as const;
     const settings: ModelSettings = {
       ...(options.effort === undefined ? {} : { effort: options.effort }),
       ...(options.thinking === undefined ? {} : { thinking: options.thinking }),

@@ -29,8 +29,9 @@ import { type McpServer, type SessionId, type TerminalId, ToolCallId } from "eff
 import { type CallId, FailureText, ToolName } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import { ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
-import { decoderOf, jsonSchemaOf } from "../agent-session/tool-input.ts";
-import { parseJson, receivedText } from "../agent-session/received.ts";
+import { decoderOf, ignoredNote, jsonSchemaOf } from "../agent-session/tool-input.ts";
+import { logKeys } from "../agent-session/log-keys.ts";
+import { asText, parseJson, receivedText } from "../agent-session/received.ts";
 import { workspaceTools } from "../agent-tools/workspace.ts";
 import { type Present, presentFrom } from "./projection.ts";
 
@@ -41,6 +42,11 @@ export interface WorldOpening {
   readonly cwd: string;
   readonly mcpServers: ReadonlyArray<McpServer>;
   readonly connection: AgentConnection<V1Version>;
+  /**
+   * Whether a tool call whose input has properties its tool does not take is refused; if not, it
+   * runs without them, and its result says which were ignored.
+   */
+  readonly strictInput: boolean;
 }
 
 /** One session's world: fixed when the session is made, and the same for every turn of it. */
@@ -126,6 +132,12 @@ const oneLine = (text: string): string => {
   return line.length <= 120 ? line : `${line.slice(0, 119)}…`;
 };
 
+/** `outcome` with `note` after its output, or after the error it reported. */
+const noted = (outcome: ToolOutcome, note: string): ToolOutcome => {
+  if (outcome._tag === "Succeeded") return succeeded(`${asText(outcome.output)}${note}`);
+  return outcome.reason._tag === "Reported" ? reported(`${asText(outcome.reason.error)}${note}`) : outcome;
+};
+
 /** What a failed call to the editor is, for the model to read. */
 const editorFailure = (method: string, path: string, error: { readonly _tag?: string; readonly message?: string; readonly reason?: string }): string =>
   `${method} ${path}: ${error._tag === "PeerClosed" ? `the editor's connection closed (${error.reason ?? ""})` : (error.message ?? error._tag ?? "the editor gave no reason")}`;
@@ -135,7 +147,7 @@ const editorFailure = (method: string, path: string, error: { readonly _tag?: st
  * `fs/read_text_file`, `write_file` with `fs/write_text_file`.
  */
 export const editorWorld: World = {
-  open: ({ sessionId, cwd, connection }) =>
+  open: ({ sessionId, cwd, connection, strictInput }) =>
     Effect.sync(() => {
       const fs = connection.profile.client.capabilities.fs;
       const scope = ` Relative paths are inside the working folder, ${cwd}.`;
@@ -264,9 +276,23 @@ export const editorWorld: World = {
         );
       };
 
-      const decoded = <S extends Schema.Top & { readonly DecodingServices: never }>(schema: S, tool: string, input: unknown, run: (value: S["Type"]) => Effect.Effect<ToolOutcome>) =>
-        decoderOf(schema)(input).pipe(
-          Effect.matchEffect({ onFailure: (error) => Effect.succeed(rejected(`${tool} does not take this input: ${error.message}`)), onSuccess: run }),
+      const decoded = <S extends Schema.Top & { readonly DecodingServices: never; readonly EncodingServices: never }>(
+        schema: S,
+        tool: string,
+        input: unknown,
+        run: (value: S["Type"]) => Effect.Effect<ToolOutcome>,
+      ) =>
+        decoderOf(schema, strictInput)(input).pipe(
+          Effect.matchEffect({
+            onFailure: (error) => Effect.succeed(rejected(`${tool} does not take this input: ${error.message}`)),
+            onSuccess: ({ value, ignored }) =>
+              ignored.length === 0
+                ? run(value)
+                : Effect.logWarning(logKeys.tools.inputIgnored, { tool, ignored }).pipe(
+                    Effect.andThen(run(value)),
+                    Effect.map((outcome) => noted(outcome, ignoredNote(tool, ignored))),
+                  ),
+          }),
         );
 
       const runner = Layer.succeed(ToolRunner, {
@@ -319,10 +345,10 @@ export const editorWorld: World = {
  * is not told of writes.
  */
 export const workspaceWorld: World<FileSystem.FileSystem> = {
-  open: ({ cwd }) =>
+  open: ({ cwd, strictInput }) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspace = workspaceTools(cwd);
+      const workspace = workspaceTools(cwd, { strictInput });
       return {
         system: `The working folder is ${cwd}.`,
         tools: workspace.catalog,

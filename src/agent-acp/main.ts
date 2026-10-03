@@ -6,7 +6,9 @@
  * Taken from the environment: `LABKIT_ACP_MODEL` (the model sessions start with, `provider/model`),
  * `LABKIT_ACP_LOCAL_TOOLS=1` (the stopgap tools on the local disk), `LABKIT_ACP_PERMISSION_MODE` (the
  * permission mode sessions start in: `default`, `acceptEdits`, `bypassPermissions`, `dontAsk`),
- * `LABKIT_ACP_RETRIES` (how often a turn with thinking and no answer is asked again; 1), `LABKIT_ACP_SESSIONS_DIR` (where
+ * `LABKIT_ACP_RETRIES` (how often a turn with thinking and no answer is asked again; 1),
+ * `LABKIT_ACP_STRICT_TOOL_INPUT=1` (refuse a tool call with input properties its tool does not
+ * take; without it, the call runs without them and says so), `LABKIT_ACP_SESSIONS_DIR` (where
  * sessions are kept, default `~/.labkit/sessions`), the `LABKIT_ACP_LOG_*` variables, and the
  * providers' keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`).
  */

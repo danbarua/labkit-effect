@@ -89,6 +89,12 @@ export interface HostOptions<R = never> {
    * (`LABKIT_ACP_RETRIES`; 0 asks never); 1 when left out. Used by the default `services`.
    */
   readonly retries?: number | undefined;
+  /**
+   * Whether a tool call whose input has properties its tool does not take is refused
+   * (`LABKIT_ACP_STRICT_TOOL_INPUT=1`); if not (the default), it runs without them, and its result
+   * says which were ignored.
+   */
+  readonly strictToolInput?: boolean | undefined;
   /** What a session runs with, given its world's tool runner, over the session's store; `HostSessionServices` when left out. */
   readonly services?: ((runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>) | undefined;
   /** The most sessions one page of `session/list` gives; 50 when left out. */
@@ -106,10 +112,11 @@ export const HostSessionServices =
 
 /**
  * The options a launcher takes from the environment: `LABKIT_ACP_MODEL`, `LABKIT_ACP_LOCAL_TOOLS`,
- * `LABKIT_ACP_PERMISSION_MODE` and `LABKIT_ACP_RETRIES` (a value that is not a mode, or not a whole
+ * `LABKIT_ACP_PERMISSION_MODE`, `LABKIT_ACP_RETRIES` and `LABKIT_ACP_STRICT_TOOL_INPUT=1` (a value
+ * that is not a mode, or not a whole
  * number of 0 or more, is left out; `launch` says so).
  */
-export const hostOptionsFrom = (env: Readonly<Record<string, string | undefined>>): Pick<HostOptions, "model" | "world" | "permissionMode" | "retries"> => {
+export const hostOptionsFrom = (env: Readonly<Record<string, string | undefined>>): Pick<HostOptions, "model" | "world" | "permissionMode" | "retries" | "strictToolInput"> => {
   const mode = env["LABKIT_ACP_PERMISSION_MODE"];
   const retries = env["LABKIT_ACP_RETRIES"];
   return {
@@ -117,6 +124,7 @@ export const hostOptionsFrom = (env: Readonly<Record<string, string | undefined>
     world: env["LABKIT_ACP_LOCAL_TOOLS"] === "1" ? "local" : "editor",
     permissionMode: Schema.is(PermissionMode)(mode) ? mode : undefined,
     retries: retries !== undefined && /^\d+$/.test(retries) ? Number(retries) : undefined,
+    strictToolInput: env["LABKIT_ACP_STRICT_TOOL_INPUT"] === "1",
   };
 };
 
@@ -491,7 +499,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             }
             starting.add(sessionId);
             return yield* Effect.gen(function* () {
-              const its = yield* (world as World<R | FileSystem.FileSystem>).open({ sessionId, cwd, mcpServers, connection });
+              const its = yield* (world as World<R | FileSystem.FileSystem>).open({ sessionId, cwd, mcpServers, connection, strictInput: options.strictToolInput ?? false });
               // The policy reads the entry's mode at each call; the entry exists once the session started, and until then the mode is the launcher's.
               const initialMode = options.permissionMode ?? "default";
               let held: Entry | undefined;
@@ -557,7 +565,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   Effect.tapError((error) => Effect.logWarning(logKeys.session.refused, { cwd, cause: error.message })),
                 );
                 const id = AcpSessionId.make(crypto.randomUUID());
-                const opened = yield* (world as World<R | FileSystem.FileSystem>).open({ sessionId: id, cwd, mcpServers, connection });
+                const opened = yield* (world as World<R | FileSystem.FileSystem>).open({ sessionId: id, cwd, mcpServers, connection, strictInput: options.strictToolInput ?? false });
                 const capabilities = yield* capabilitiesOf(model);
                 const draft = withDefaults(
                   draftOf({ model, tools: opened.tools, ...(opened.system === undefined ? {} : { system: opened.system }) }),
