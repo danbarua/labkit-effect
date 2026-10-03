@@ -34,6 +34,6 @@
     "@effect/ai-openai-compat": "4.0.0",
     "@logtape/logtape": "^2.3.9",
     "effect": "^4.0.0",
-    "effective-acp": "github:danbarua/effective-acp#22a31e3"
+    "effective-acp": "0.1.0"
   }
 }
