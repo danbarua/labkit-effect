@@ -259,6 +259,9 @@ export function deliver(world: World, seq: Seq, observation: Observation): Deliv
         return toAgent(world, observation, seq);
       case "InputCancelled":
         return { world: withdrawn(world, observation.input), outputs: none };
+      case "McpServerChanged":
+        // Recorded for the session's record and its host: no machine acts on it, and nothing follows.
+        return { world, outputs: none };
       case "ModelResponded":
       case "ModelFailed":
       case "ModelAttemptFailed":

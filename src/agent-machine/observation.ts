@@ -13,6 +13,7 @@ import {
   AdjustmentReason,
   FailureText,
   InputText,
+  McpServerName,
   ModelName,
   ModelText,
   PolicyName,
@@ -180,6 +181,20 @@ export const Observation = Schema.Union([
   Schema.TaggedStruct("TurnStarted", { turn: TurnId }),
   /** The input recorded at `input`, still queued, was cancelled by its sender. */
   Schema.TaggedStruct("InputCancelled", { input: Seq }),
+  /**
+   * An MCP server the session keeps changed state: ready, with the tools it offers by the names they
+   * are offered under; failed (it could not be started, or did not connect) or exited, and why;
+   * stopped. Recorded for the session's record and its host: no machine acts on it.
+   */
+  Schema.TaggedStruct("McpServerChanged", {
+    server: McpServerName,
+    state: Schema.Union([
+      Schema.TaggedStruct("Ready", { tools: Schema.Array(ToolName) }),
+      Schema.TaggedStruct("Failed", { reason: FailureText }),
+      Schema.TaggedStruct("Exited", { reason: FailureText }),
+      Schema.TaggedStruct("Stopped", {}),
+    ]),
+  }),
   /**
    * A request for a model response was made: it was handed to `provider` for `model`, carrying
    * `sent` (the system prompt, the tools and the conversation, as the layer that assembled them

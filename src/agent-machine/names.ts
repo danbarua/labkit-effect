@@ -21,6 +21,10 @@ export type CallId = typeof CallId.Type;
 export const ToolName = Schema.String.pipe(Schema.brand("agent-machine/ToolName"));
 export type ToolName = typeof ToolName.Type;
 
+/** The name of an MCP server a session keeps, as its host was given it. */
+export const McpServerName = Schema.String.pipe(Schema.brand("agent-machine/McpServerName"));
+export type McpServerName = typeof McpServerName.Type;
+
 /**
  * What a tool does, in ACP's names for it: reads, edits, deletes or moves files, searches, runs a
  * command, thinks, fetches, or something else. Whoever defines a tool says which kind it is; a

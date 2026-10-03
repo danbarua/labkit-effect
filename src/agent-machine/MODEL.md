@@ -45,6 +45,9 @@ has not yet confirmed or reworded it.
   reported it (a user through some surface, another session, a provider, a tool, a part of the
   harness, a test). A decision has none: it is the core's own. Whoever gives a session an
   observation says who it is; giving one with no origin is a defect.
+- R7. Some observations are recorded for the session's record and its host, and no machine acts on
+  them: `McpServerChanged` (an MCP server the session keeps became ready, failed, exited or
+  stopped). Nothing follows from one, and it is not `ObservationNotExpected`, in any state.
 
 ## Decisions and effects
 

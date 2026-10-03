@@ -41,6 +41,8 @@ export const harnessParts = {
   toolCallPolicy: harness("tool call policy"),
   /** Decides whether a model request is made: lets it, or vetoes it. */
   modelRequestPolicy: harness("model request policy"),
+  /** Keeps the session's MCP servers: says when one is ready, failed, exited or stopped. */
+  mcpServers: harness("mcp servers"),
   /** Puts a session's settings into a request a model accepts. */
   modelSettings: harness("model settings"),
 } as const;
