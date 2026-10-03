@@ -127,6 +127,21 @@ test("a rate limit is retried after the wait it says (Retry-After), not the doub
   expect(events(logKeys.provider.requestRetried)).toMatchObject([[logKeys.provider.requestRetried, { reason: "RateLimitError", retry: 1, wait: "1s" }]]);
 });
 
+test("a rate limit whose wait is longer than the longest to wait out (a usage window) fails at once, with its wait, and is not retried", async () => {
+  const window = "HTTP/1.1 429 Too Many Requests\r\ncontent-type: application/json\r\nretry-after: 18000\r\ncontent-length: 2\r\n\r\n{}";
+  const server = rawServer([window, jsonWith(answer, answer.length)]);
+  const { observed, events } = await asked(
+    openAiCompatModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(server.url))),
+  );
+  server.stop();
+  expect(server.requests()).toBe(1);
+  expect(observed as unknown).toMatchObject({ _tag: "ModelFailed", failure: expect.stringContaining("Retry after 5h") });
+  expect(events(logKeys.provider.requestRetried)).toEqual([]);
+  expect(events(logKeys.provider.notRetried)).toMatchObject([
+    [logKeys.provider.notRetried, { reason: "RateLimitError", why: "the rate limit's wait, 5h, is longer than 1m" }],
+  ]);
+});
+
 test("a failure before the provider begins to respond is retried", async () => {
   const unavailable = "HTTP/1.1 503 Service Unavailable\r\ncontent-type: text/plain\r\ncontent-length: 4\r\n\r\nbusy";
   const server = rawServer([unavailable, jsonWith(answer, answer.length)]);

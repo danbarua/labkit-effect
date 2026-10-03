@@ -28,10 +28,16 @@ export interface Caller {
   readonly method: string;
 }
 
-/** How a request is retried: how many times at most, and the first wait, which doubles each time. */
+/**
+ * How a request is retried: how many times at most; the first wait, which doubles each time; and the
+ * longest a rate limit's wait may be for it to be waited out (1 minute unless given). A rate limit
+ * that says to wait longer (a usage window that resets in hours) is not waited for: its failure goes
+ * to the turn at once, with the wait it said.
+ */
 export interface Retries {
   readonly times: number;
   readonly firstWait: Duration.Input;
+  readonly longestWait?: Duration.Input;
 }
 
 export const defaultRetries: Retries = { times: 3, firstWait: "500 millis" };
@@ -264,13 +270,16 @@ const retrying = (retries: Retries) =>
   Schedule.exponential(retries.firstWait).pipe(
     Schedule.while(({ input, attempt }: Schedule.Metadata<Duration.Duration, Attempted>) =>
       Effect.gen(function* () {
-        if (!input.error.reason.isRetryable || attempt > retries.times) return false;
-        if (!input.began) return true;
-        yield* Effect.logWarning(logKeys.provider.notRetried, {
-          reason: input.error.reason._tag,
-          message: input.error.message,
-          why: "the provider had begun to respond",
-        });
+        const reason = input.error.reason;
+        if (!reason.isRetryable || attempt > retries.times) return false;
+        const longest = Duration.fromInputUnsafe(retries.longestWait ?? "1 minute");
+        const why = input.began
+          ? "the provider had begun to respond"
+          : reason._tag === "RateLimitError" && reason.retryAfter !== undefined && Duration.isGreaterThan(Duration.fromInputUnsafe(reason.retryAfter), longest)
+            ? `the rate limit's wait, ${Duration.format(Duration.fromInputUnsafe(reason.retryAfter))}, is longer than ${Duration.format(longest)}`
+            : undefined;
+        if (why === undefined) return true;
+        yield* Effect.logWarning(logKeys.provider.notRetried, { reason: reason._tag, message: input.error.message, why });
         return false;
       }),
     ),

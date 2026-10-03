@@ -1,7 +1,7 @@
 /**
- * A tool's input from one Schema: the JSON Schema the model is offered (`ToolSpec.input`), and the
- * decoder its runner reads a call's input with. Both refuse properties the Schema does not have,
- * so what the model is told and what is accepted are the same.
+ * A tool's input from one Schema: the JSON Schema the model is offered (`ToolSpec.input`), closed to
+ * properties the Schema does not have, and the decoder its runner reads a call's input with, which
+ * refuses such properties when strict and otherwise leaves them out and names them.
  */
 
 import { Effect, Schema } from "effect";

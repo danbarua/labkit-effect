@@ -199,6 +199,17 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 
 ### Providers
 
+- [ ] One limit on each provider for every session a runtime holds, at the HTTP client the provider
+      adapters share, so that agents run side by side do not use up a provider's rate limits (omp
+      does this). Effect has it: `HttpClient.withRateLimiter` over `persistence/RateLimiter` (keyed,
+      per provider or per provider and key; fixed window or token bucket; it reads the provider's
+      rate-limit headers and waits out a 429; in memory, or in Redis across processes; marked
+      unstable in 4.0.0), and `Semaphore` or `PartitionedSemaphore` for how many requests are in
+      flight at once.
+- [ ] A provider's usage window (a subscription's limit, which resets in hours) as a policy of
+      its own, once there is a configuration story: today a rate limit whose wait is longer than
+      `Retries.longestWait` (1 minute) fails the request at once, with the wait it said.
+
 - [ ] Effect's `Response.Usage` shape for a response's token counts, in place of our own.
 - [ ] Each provider's image and file formats, from what was measured, in place of models.dev's
       "takes images: yes or no".
