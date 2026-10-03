@@ -117,7 +117,9 @@ model.
       which makes a session fail to open when the server does not connect (with the config
       loader's wiring); MCP servers in the CLI; the Streamable HTTP transport; tools a server offers
       after the session opened (after a reconnect, or `notifications/tools/list_changed`), with
-      per-turn tool lists; sampling and elicitation.
+      per-turn tool lists; sampling and elicitation; a result's images and audio sent to the model
+      as images and audio where its provider takes them in a tool's result (Anthropic's does), not
+      as a line naming them.
       Effect's `RpcClient` over `McpSchema.ClientRequestRpcs`, through a transport of our own over
       a child's stdio, against `@modelcontextprotocol/server-everything` (2026-10-03): `initialize`,
       `tools/list` and `tools/call` work. It sends a notification with an id (the server answers
@@ -156,6 +158,11 @@ model.
       Not decided: where the file is kept.
 - [ ] Later (Dan, 2026-10-03): a change that tightens the permission mode taken between the steps
       of a turn, delivered through the inbox as steering is.
+- [ ] Parked (Dan, 2026-10-03): permission in headless mode (`-p`), where no one can answer a
+      question: allow and deny lists by tool and argument (Claude Code's `--allowedTools`,
+      `--disallowedTools`), or a tool that answers permission questions (its
+      `--permission-prompt-tool`, an MCP tool). Today such a call is vetoed, the reason saying how
+      to let it run (agent-policy P7).
 - [ ] Withdrawing input queued for a turn that has not been delivered: the core does it
       (`InputCancelled`, agent-machine `queued-input.test.ts`); no host lets the user do it. The ACP
       host queues no input (a second prompt while one runs is refused) and the CLI drops keys while
