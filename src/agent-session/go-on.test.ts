@@ -16,7 +16,7 @@ import { leftRunning } from "../agent-machine/left-running.ts";
 import { ModelText, StopReason, ToolName } from "../agent-machine/names.ts";
 import { answerPicking, OptionId, permissions } from "../agent-policy/permissions.ts";
 import type { Policy } from "../agent-policy/policy.ts";
-import { ModelClient, ToolCallPolicy, ToolRunner, type ToolSpec } from "./contracts.ts";
+import { ModelClient, ToolCallPolicies, ToolRunner, type ToolSpec } from "./contracts.ts";
 import { openSession } from "./loop.ts";
 import { receivedJson, receivedText } from "./received.ts";
 import { ephemeralSessionStore } from "./session-store.ts";
@@ -106,7 +106,7 @@ const wentOn = (facts: ReadonlyArray<Fact>) => {
           tools,
           NoTurnEndHooks,
           CountingTurnsInStore,
-          Layer.succeed(ToolCallPolicy, (held) => Effect.succeed(permissions("default", true, (name) => catalog.find((tool) => tool.name === name)?.kind, held) as Policy<unknown>)),
+          Layer.succeed(ToolCallPolicies, [(held) => Effect.succeed(permissions("default", true, (name) => catalog.find((tool) => tool.name === name)?.kind, held) as Policy<unknown>)]),
         ).pipe(Layer.provideMerge(store)),
       ),
     ),

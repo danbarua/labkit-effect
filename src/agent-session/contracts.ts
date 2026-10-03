@@ -146,16 +146,23 @@ export class ToolRunner extends Context.Service<
   { readonly run: (tool: ToolName, input: Received, call: CallId) => Effect.Effect<ToolOutcome> }
 >()("agent-session/ToolRunner") {}
 
+/** A policy as a session's facts stand when the request it reviews is to be carried out. */
+export type PolicyOfFacts = (facts: ReadonlyArray<Fact>) => Effect.Effect<Policy<unknown>>;
+
 /**
- * The policy each tool call goes through before it runs, as the session's facts stand when the call
- * is to run. By default every call runs. What a waiting policy asks is recorded
+ * The policies each tool call goes through before it runs, in order (`every`: the first veto is the
+ * verdict). None by default, so every call runs. What a waiting policy asks is recorded
  * (`PermissionAsked`), and its answer is whatever is observed for the call (`PermissionAnswered`).
  */
-export const ToolCallPolicy = Context.Reference<(facts: ReadonlyArray<Fact>) => Effect.Effect<Policy<unknown>>>("agent-session/ToolCallPolicy", {
-  defaultValue: () => () => Effect.succeed(everyCallRuns),
+export const ToolCallPolicies = Context.Reference<ReadonlyArray<PolicyOfFacts>>("agent-session/ToolCallPolicies", {
+  defaultValue: () => [],
 });
 
-const everyCallRuns: Policy<unknown> = {
-  start: () => ({ _tag: "Decided", verdict: { _tag: "Continue" } }),
-  receive: () => ({ _tag: "Decided", verdict: { _tag: "Continue" } }),
-};
+/**
+ * The policies each model request goes through before it is made, in order, as `ToolCallPolicies`.
+ * None by default. A veto ends the request's turn (`ModelVetoed`). A policy here is to decide at
+ * once: nothing answers or wakes one that waits on a model request.
+ */
+export const ModelRequestPolicies = Context.Reference<ReadonlyArray<PolicyOfFacts>>("agent-session/ModelRequestPolicies", {
+  defaultValue: () => [],
+});

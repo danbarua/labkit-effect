@@ -14,7 +14,7 @@ import { CallId, FailureText, InputText, ModelText, StopReason, ToolName, TurnId
 import { MediaType } from "../agent-machine/received.ts";
 import { answerPicking, OptionId, permissions } from "../agent-policy/permissions.ts";
 import type { Policy } from "../agent-policy/policy.ts";
-import { ModelClient, ToolCallPolicy } from "./contracts.ts";
+import { ModelClient, ToolCallPolicies } from "./contracts.ts";
 import { endTurnLeftRunning, openSession, type Prompt, type Session } from "./loop.ts";
 import { receivedJson, receivedText } from "./received.ts";
 import { EphemeralSessionStore, ephemeralSessionStore, SessionStore, SessionStoreFailed } from "./session-store.ts";
@@ -60,7 +60,7 @@ const scripted = (replies: ReadonlyArray<Reply>) => {
 };
 
 /** A policy that asks the user before every call; nothing here answers. */
-const asking = Layer.succeed(ToolCallPolicy, (facts) => Effect.succeed(permissions("default", true, () => "other", facts) as Policy<unknown>));
+const asking = Layer.succeed(ToolCallPolicies, [(facts) => Effect.succeed(permissions("default", true, () => "other", facts) as Policy<unknown>)]);
 
 const services = (replies: ReadonlyArray<Reply>, policy: Layer.Layer<never> = Layer.empty) =>
   Layer.mergeAll(BoringModelProvider, BoringContextAssembler, scripted(replies), SmolToolRunner, CountingTurns, NoTurnEndHooks, policy);

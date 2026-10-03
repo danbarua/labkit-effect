@@ -49,11 +49,11 @@ import { markdownOf } from "../agent-host/export.ts";
 import { KnownWithLocalServer, localServer, SettlingWithLocalServer } from "../agent-host/local-server.ts";
 import { RetryIncomplete } from "../agent-host/incomplete.ts";
 import { readRecord, RecordFailed, recordedSessions, recordFileOf, writeRecord } from "../agent-host/record.ts";
-import { PermissionsFor, SessionServices } from "../agent-host/services.ts";
+import { loopBreaker, permissionsFor, SessionServices } from "../agent-host/services.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { leftRunning } from "../agent-machine/left-running.ts";
 import { InputText, SessionId, type TurnId } from "../agent-machine/names.ts";
-import type { Target, ToolRunner } from "../agent-session/contracts.ts";
+import { ModelRequestPolicies, type Target, ToolCallPolicies, type ToolRunner } from "../agent-session/contracts.ts";
 import { FileBackedSessionStore } from "../agent-session/file-session-store.ts";
 import { endTurnLeftRunning, openSession, type Services, type Session } from "../agent-session/loop.ts";
 import type { SessionStore } from "../agent-session/session-store.ts";
@@ -304,7 +304,13 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const file = storeFileOf(options.directory, id);
               // The session's blobs (its inputs' images and files) are kept in its folder, so a session gone on from its facts has them.
               const blobs = BlobsInFolder(join(sessionFolderOf(options.directory, id), "blobs"));
-              const layer = Layer.mergeAll(services(world.runner), PermissionsFor(permissionMode, true), blobs).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
+              // The loop breaker comes first among the tool call policies, so no one is asked to permit a call it vetoes.
+              const breaker = loopBreaker();
+              const policies = Layer.mergeAll(
+                Layer.succeed(ToolCallPolicies, [breaker.toolCalls, permissionsFor(permissionMode, true)]),
+                Layer.succeed(ModelRequestPolicies, [breaker.modelRequests]),
+              );
+              const layer = Layer.mergeAll(services(world.runner), policies, blobs).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
               const context = yield* Layer.buildWithScope(layer, scope);
               const session = yield* openSession.pipe(Effect.provideContext(context), Scope.provide(scope));
 

@@ -39,6 +39,8 @@ export const harnessParts = {
   toolRunner: harness("tool runner"),
   /** Decides whether a tool call runs: lets it, vetoes it, or asks first. */
   toolCallPolicy: harness("tool call policy"),
+  /** Decides whether a model request is made: lets it, or vetoes it. */
+  modelRequestPolicy: harness("model request policy"),
   /** Puts a session's settings into a request a model accepts. */
   modelSettings: harness("model settings"),
 } as const;

@@ -13,7 +13,7 @@ import { Effect, Layer, type Scope } from "effect";
 import type { Asked } from "../../agent-host/catalog.ts";
 import { sessionFolderOf, storeFileOf } from "../../agent-host/directory.ts";
 import { RetryIncomplete } from "../../agent-host/incomplete.ts";
-import { PermissionsFor, SessionServices } from "../../agent-host/services.ts";
+import { loopBreaker, permissionsFor, SessionServices } from "../../agent-host/services.ts";
 import type { Ending } from "../../agent-machine/decision.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
 import { InputText, SessionId, type TurnId, Via } from "../../agent-machine/names.ts";
@@ -21,6 +21,7 @@ import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { workspaceTools } from "../../agent-tools/workspace.ts";
 import type { PermissionMode } from "../../agent-policy/permissions.ts";
 import { leftRunning, type LeftRunning } from "../../agent-machine/left-running.ts";
+import { ModelRequestPolicies, ToolCallPolicies } from "../../agent-session/contracts.ts";
 import { endTurnLeftRunning, openSession, type Session } from "../../agent-session/loop.ts";
 import { FileBackedSessionStore } from "../../agent-session/file-session-store.ts";
 import { ephemeralSessionStore, SessionStoreFailed } from "../../agent-session/session-store.ts";
@@ -72,6 +73,19 @@ const workspaceOf = (config: Config) => workspaceTools(process.cwd(), { strictIn
  * store holds; a turn whose response had thinking but no answer is asked once more for it.
  */
 const servicesOf = (workspace: ReturnType<typeof workspaceOf>) => SessionServices(workspace.runner, RetryIncomplete(1));
+
+/**
+ * The policies a CLI session's requests go through: the loop breaker, then, for tool calls,
+ * permission by the configured mode. The loop breaker comes first, so no one is asked to permit a
+ * call it vetoes.
+ */
+const policies = (config: Config) => {
+  const breaker = loopBreaker();
+  return Layer.mergeAll(
+    Layer.succeed(ToolCallPolicies, [breaker.toolCalls, permissionsFor(config.permissionMode, config.canAsk)]),
+    Layer.succeed(ModelRequestPolicies, [breaker.modelRequests]),
+  );
+};
 
 /**
  * What a way of running the CLI does with a session as it opens: follows its facts from the start
@@ -142,7 +156,7 @@ export const withSession = <A, E, R, L, H>(
     reportedBy({ _tag: "User", via: Via.make("cli") }),
     Effect.scoped,
     // The store logs as it opens (a lock taken over, a line cut off): to the session's log, as the rest does.
-    Effect.provide(Layer.mergeAll(servicesOf(workspace), PermissionsFor(config.permissionMode, config.canAsk), logs).pipe(Layer.provideMerge(store.pipe(Layer.provide(logs))))),
+    Effect.provide(Layer.mergeAll(servicesOf(workspace), policies(config), logs).pipe(Layer.provideMerge(store.pipe(Layer.provide(logs))))),
     Effect.mapError((error) => (error instanceof SessionStoreFailed ? invalid(error.message) : error)),
   );
 };

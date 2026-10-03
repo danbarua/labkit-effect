@@ -75,7 +75,7 @@ resource links; no fork and no auth methods.
 
 A session is started, at turn zero or from its facts file by `session/load` or `session/resume`,
 the same way: in a scope of its own forked from the connection's, over `FileBackedSessionStore` of
-its facts file, with the services its world's runner gives and `PermissionsFor("default", true)`,
+its facts file, with the services its world's runner gives and its policies (`agent-host` H4),
 and with a feed. Turn zero starts the feed before the opening is observed. Load and resume start
 it from the state the stored facts leave in the projection, after the replay, so nothing is sent
 twice.

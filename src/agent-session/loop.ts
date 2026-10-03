@@ -53,8 +53,8 @@ import type { CapturedObservation, ModelPart, Observation, ToolOutcome } from ".
 import type { Origin } from "../agent-machine/origin.ts";
 import type { EffectRequest } from "../agent-machine/request.ts";
 import { emptyHeld, type Held as Throttled, throttle, type ThrottleInput } from "../agent-machine/throttle.ts";
-import { ContextAssembler, ModelClient, ModelProvider, ToolCallPolicy, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
-import type { Verdict } from "../agent-policy/policy.ts";
+import { ContextAssembler, ModelClient, ModelProvider, ModelRequestPolicies, type PolicyOfFacts, ToolCallPolicies, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
+import { every, type Policy, type Verdict } from "../agent-policy/policy.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { logKeys } from "./log-keys.ts";
 import { asText, receivedJson, receivedText } from "./received.ts";
@@ -387,20 +387,27 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
     };
   };
 
+  /** The policies of `list`, as the facts stand now, applied in order (`every`). */
+  const policiesNow = (list: ReadonlyArray<PolicyOfFacts>): Effect.Effect<Policy<unknown>> =>
+    Effect.gen(function* () {
+      const facts = yield* store.facts;
+      return every(yield* Effect.forEach(list, (policyOf) => policyOf(facts))) as Policy<unknown>;
+    });
+
   /**
-   * The verdict of the tool call policy on a call, as the facts stand. While the policy waits, what
-   * it asks is recorded (`PermissionAsked`), and the next answer observed for the call
-   * (`PermissionAnswered`) is given to it. A policy that waits without asking is a defect: nothing
+   * The verdict of the tool call policies on a call, as the facts stand. While they wait, what they
+   * ask is recorded (`PermissionAsked`), and the next answer observed for the call
+   * (`PermissionAnswered`) is given to them. A policy that waits without asking is a defect: nothing
    * would answer it.
    */
   const reviewed = (request: Extract<EffectRequest, { _tag: "RunTool" }>): Effect.Effect<Verdict, never, Services> =>
     Effect.scoped(
       Effect.gen(function* () {
-        const policy = yield* (yield* ToolCallPolicy)(yield* store.facts);
+        const policy = yield* policiesNow(yield* ToolCallPolicies);
         const answers = yield* PubSub.subscribe(recorded);
         let step = policy.start(request);
         while (step._tag === "Waiting") {
-          if (step.asks === undefined) return yield* Effect.die(new Error(`The tool call policy waited on ${request.call} without asking anything`));
+          if (step.asks === undefined) return yield* Effect.die(new Error(`A tool call policy waited on ${request.call} without asking anything`));
           yield* (yield* Report)({ _tag: "PermissionAsked", call: request.call, asks: step.asks }, harnessParts.toolCallPolicy);
           let answer: Received | undefined;
           while (answer === undefined) {
@@ -428,6 +435,14 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
         return passingOn(
           request.turn,
           Effect.gen(function* () {
+            // The request is reviewed before a model is chosen for it: a vetoed request is not made.
+            const step = (yield* policiesNow(yield* ModelRequestPolicies)).start(request);
+            if (step._tag === "Waiting")
+              return yield* Effect.die(new Error(`A model request policy waited on turn ${request.turn}: nothing answers or wakes a policy that waits on a model request`));
+            if (step.verdict._tag === "Veto") {
+              yield* Effect.logInfo(logKeys.loop.modelVetoed, { turn: request.turn, reason: asText(step.verdict.reason) });
+              return [{ origin: harnessParts.modelRequestPolicy, observation: { _tag: "ModelVetoed", turn: request.turn, reason: step.verdict.reason } } satisfies Observed];
+            }
             const facts = yield* store.facts;
             const target = yield* (yield* ModelProvider).select(facts, request.turn);
             const context = yield* (yield* ContextAssembler).assemble(facts, request.turn);

@@ -14,12 +14,16 @@ Dan: "something might execute a decision to continue, veto or delay an Effect." 
 - `permissions.ts`: permission to run a tool call, by Claude Code's permission modes (`default`,
   `acceptEdits`, `dontAsk`, `bypassPermissions`), from each tool's kind. What it asks offers ACP's
   options: allow once, allow the tool for the rest of the session, reject.
-- In the loop (`agent-session/loop.ts`): each tool call goes through the session's tool call policy
-  (`ToolCallPolicy`) before it runs. Model requests are not reviewed.
+- `loop-breaker.ts`: a model that makes the same call again and again in a row is told so, then
+  stopped: one policy on tool calls, one on model requests.
+- In the loop (`agent-session/loop.ts`): each tool call goes through the session's tool call
+  policies (`ToolCallPolicies`) before it runs, and each model request through its model request
+  policies (`ModelRequestPolicies`) before it is made. A host composes each list.
 
 ## What is not built
 
-- A policy on model requests in the loop (`ModelVetoed` from a verdict).
+- A model request policy that waits: nothing answers or wakes it, so the usage window and a pause
+  on a provider cannot be written as one yet (TODO.md).
 - Claude Code's `plan` and `auto` modes; allow and deny rules by tool and argument
   (`--allowedTools`, `--disallowedTools`).
 
@@ -54,3 +58,14 @@ Dan: "something might execute a decision to continue, veto or delay an Effect." 
   only once an answer is observed for the call (`PermissionAnswered`) and the policy lets it. A
   vetoed call ends `Vetoed` and never begins to run. A call waiting for an answer when its turn
   stops, or when the process ends and the session goes on from its facts, ends `NotRun`.
+- P9. In the loop, each list of policies is applied in order, as `every`. A vetoed model request is
+  not made: `ModelVetoed` is recorded, from the model request policy, and the turn ends `Vetoed`. A
+  model request policy that waits is a defect, which fails the request.
+- P10. The loop breaker vetoes the `nudgeAt`-th identical call in a row (3 by default), and each
+  after it, with a reason the model reads as the call's result; once a turn's last `stopAt` calls
+  (5) are identical, it vetoes the turn's next model request. Calls are identical when `key` gives
+  them the same key: by default, the same tool and the same input as received. Calls are in a row
+  when no other call of their turn came between them, in the order they are first recorded: a call
+  made again after others (running the tests, editing, running them again) starts the count again.
+  A call is counted by its place in that order, so calls in one response reviewed together count as
+  the model made them. Both count from the facts.

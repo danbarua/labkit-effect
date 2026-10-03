@@ -10,7 +10,7 @@ import { CallId, ModelText, StopReason, ToolName } from "../agent-machine/names.
 import type { Observation } from "../agent-machine/observation.ts";
 import { answerPicking, OptionId, permissions } from "../agent-policy/permissions.ts";
 import type { Policy } from "../agent-policy/policy.ts";
-import { ModelClient, ToolCallPolicy } from "./contracts.ts";
+import { ModelClient, ToolCallPolicies } from "./contracts.ts";
 import { openSession } from "./loop.ts";
 import { EphemeralSessionStore } from "./session-store.ts";
 import { receivedJson } from "./received.ts";
@@ -76,7 +76,7 @@ const answeredWith = (option: string) =>
           SmolToolRunner,
           CountingTurns,
           NoTurnEndHooks,
-          Layer.succeed(ToolCallPolicy, (facts) => Effect.succeed(permissions("default", true, () => "other", facts) as Policy<unknown>)),
+          Layer.succeed(ToolCallPolicies, [(facts) => Effect.succeed(permissions("default", true, () => "other", facts) as Policy<unknown>)]),
         ),
       ),
     ),

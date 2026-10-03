@@ -43,7 +43,7 @@ model.
       `Seq` is the session's.
       Built: ACP's config options, and `session/set_config_option` as the change it asks, served by
       the ACP host for a draft and for an open session.
-- [ ] Tool permission. Built: each tool call goes through `ToolCallPolicy` in the loop; the
+- [ ] Tool permission. Built: each tool call goes through `ToolCallPolicies` in the loop; the
       permission modes (`default`, `acceptEdits`, `dontAsk`, `bypassPermissions`) by each tool's
       kind; what is asked and answered recorded (`PermissionAsked`, `PermissionAnswered`); allow
       for the session read from the facts; the CLI's `--permission-mode` and its REPL question;
@@ -143,14 +143,6 @@ model.
         is not run again. The model looks at the world through its tools and writes another.
       Prior art, read for this (notes in the session's scratchpad): yolk-sdk, pi-codemode,
       Cloudflare's code mode, Anthropic's programmatic tool calling, smolagents.
-- [ ] A loop breaker: a model that repeats the same calls is told so, then stopped, as a
-      configurable policy (efferent nudges at 3 repeats and stops at 5; omp has one too). Not a
-      turn-end hook: a looping model does not end its turn, it calls again, step after step. It is
-      two policies that count from the turn's facts (no state beside them, so a session gone on
-      from its facts counts the same): the tool call policy (built) vetoes the Nth identical call
-      (same tool, same input) in a turn with a reason the model reads as the call's result; a
-      policy on model requests (not built, under agent-policy) vetoes the next request at M, and
-      the turn ends Vetoed. N, M and what counts as identical are its settings.
 - [ ] The system prompt belongs in context assembly, as configuration; it is to be designed and
       tried. A hard-coded one ("You are a helpful assistant") will do until the host's question
       of where a user's things live has an answer.
@@ -219,6 +211,10 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 - [ ] A provider's usage window (a subscription's limit, which resets in hours) as a policy of
       its own, once there is a configuration story: today a rate limit whose wait is longer than
       `Retries.longestWait` (1 minute) fails the request at once, with the wait it said.
+- [ ] A model request policy that waits. Today one that waits fails the request: a policy's
+      `Waiting` does not say when it is to be woken, nothing sends it `Tick`, and nothing answers
+      it (`PermissionAsked` names a tool call). The usage window above, a pause on a provider, and
+      `notBefore` in `src/examples/policies.ts` all wait.
 
 - [ ] Effect's `Response.Usage` shape for a response's token counts, in place of our own.
 - [ ] Each provider's image and file formats, from what was measured, in place of models.dev's
