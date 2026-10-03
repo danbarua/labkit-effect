@@ -51,6 +51,13 @@ model.
       mode as an ACP option the user changes (`permission_mode`), from the next call. To do: `plan`
       and `auto`; allow and deny rules by tool and argument; resetting permissions; a change of
       mode recorded in the session's facts (the ACP host keeps it only while the session is open).
+      - `run_command` (the CLI's and the ACP host's) runs any shell command, and permission is
+        given per tool: "Allow for the rest of the session" on one call allows every command
+        after it (`rm`, `git push`, `curl … | sh`), and `bypassPermissions` runs them all
+        unasked. Needed: permission by command (allow for the session names the command, or
+        its first words, as Claude Code's `Bash(git log:*)` does), deny rules that hold in every
+        mode, and a command split at `;`, `&&`, `|` and `$(…)` judged part by part, so that an
+        allowed `git log` cannot carry another command.
 - [ ] Accounting for ACP. Built: a provider-neutral `usage` on each response; `contextGauge` (used,
       size, cost) and `requestsIn` (a turn's model requests) read from the facts (`accounting.ts`);
       prices with the well-known models; `maxTurnRequests` as an example host policy; for ACP,
