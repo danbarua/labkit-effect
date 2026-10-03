@@ -13,8 +13,8 @@ tried first (TODO.md, the MCP servers entry): it drops what a server sends unask
 - `server-machine.ts`, `server.ts`: one MCP server a session keeps, over its process group
   (`agent-process`): `startMcpServer(server, roots)` starts it in the scope given and connects on
   each run of its process; `reconnect` starts the process again; `call` calls a tool of the run
-  that is ready. A server must answer `initialize` within `connectTimeout` (30 seconds unless a
-  host says).
+  that is ready. A server must answer `initialize` and list its tools within `connectTimeout` (30
+  seconds unless a host says).
 - `source.ts`: a server's tools as a tool source, under the namespace `mcp__<server>`.
 - `servers.ts`: the servers one session keeps, `startMcpServers(given, roots)`: their tool sources,
   the notices that tell the model of a server not running, and their changes as the session
@@ -52,8 +52,8 @@ tried first (TODO.md, the MCP servers entry): it drops what a server sends unask
   `McpFailed`, saying the server is not running and why.
 - MS4. A server whose process ended has exited, and a call to it fails saying so, until it is
   reconnected (`reconnect`): its process starts again, as a new run, and is connected anew.
-- MS5. A server that does not answer `initialize` within `connectTimeout` has failed, and its
-  process group is stopped: none is left behind.
+- MS5. A server that does not answer `initialize` and list its tools within `connectTimeout` has
+  failed, and its process group is stopped: none is left behind.
 - MT1. A server's tools are offered under `mcp__<server>`; every character of the server's or a
   tool's name that providers do not take in a tool's name (anything but letters, digits, `_` and
   `-`) is offered as `_`. A tool whose name is then longer than 64 characters, or the same as

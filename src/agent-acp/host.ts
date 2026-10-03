@@ -328,9 +328,11 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             const world: WorldSession = {
               system: opened.system,
               sources: [...opened.sources, ...mcp.sources],
-              // An MCP tool's call is shown with its result as the model is sent it.
-              present: (call, outcome) =>
-                catalog.some((tool) => tool.name === call.tool) ? mcpPresent(call, outcome === undefined ? undefined : outcomeAsSent(outcome)) : opened.present(call, outcome),
+              // A call is shown with its result as the model is sent it: an MCP server's as text, whether or not the server is here now.
+              present: (call, outcome) => {
+                const sent = outcome === undefined ? undefined : outcomeAsSent(outcome);
+                return catalog.some((tool) => tool.name === call.tool) ? mcpPresent(call, sent) : opened.present(call, sent);
+              },
             };
             return { world, scope, mcp };
           });

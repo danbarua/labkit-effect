@@ -4,8 +4,8 @@
  * scope it is given (a session's), it ends with it. `reconnect` starts the server's process again
  * and connects to it anew; `stop` ends it.
  *
- * A run that does not answer `initialize` within `connectTimeout` has failed, and its process is
- * stopped, so none is left behind. A call is made on the run that is ready; while none is, it fails
+ * A run that does not answer `initialize` and list its tools within `connectTimeout` has failed, and
+ * its process is stopped, so none is left behind. A call is made on the run that is ready; while none is, it fails
  * with what is known of the server. Every change of state is logged.
  */
 
@@ -18,7 +18,7 @@ import { connect, McpFailed, type McpConnection, type McpServerStdio, type Root,
 import { logKeys } from "./log-keys.ts";
 import { describe, initialMcpServerState, type McpServerEvent, type McpServerState, stepMcpServer } from "./server-machine.ts";
 
-/** How long a server has to answer `initialize` once its process runs, unless a host says otherwise. */
+/** How long a server has to answer `initialize` and list its tools once its process runs, unless a host says otherwise. */
 export const defaultConnectTimeout: Duration.Input = "30 seconds";
 
 export interface McpServer {
@@ -68,15 +68,18 @@ export const startMcpServer = (
         .pipe(Effect.flatMap((effects) => Effect.forEach(effects, () => stopProcess, { discard: true })));
 
     const group = yield* makeProcessGroup({ name: `mcp ${server.name}`, command: server.command, args: server.args, env: server.env, cwd: server.cwd }, (run, handle) =>
-      connect(server.name, handle, roots).pipe(
+      Effect.gen(function* () {
+        const connection = yield* connect(server.name, handle, roots);
+        return { connection, tools: yield* connection.tools };
+      }).pipe(
         Effect.timeoutOrElse({
           duration: timeout,
-          orElse: () => Effect.fail(new McpFailed({ server: server.name, reason: `did not answer initialize within ${Duration.format(Duration.fromInputUnsafe(timeout))}` })),
+          orElse: () =>
+            Effect.fail(new McpFailed({ server: server.name, reason: `did not answer initialize and tools/list within ${Duration.format(Duration.fromInputUnsafe(timeout))}` })),
         }),
-        Effect.flatMap((connection) =>
+        Effect.flatMap(({ connection, tools }) =>
           Effect.gen(function* () {
             connections.set(run, connection);
-            const tools = yield* connection.tools;
             yield* dispatch({ _tag: "Connected", run, tools });
           }),
         ),

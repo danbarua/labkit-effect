@@ -5,7 +5,8 @@
  * (`roots/list`) and answers with them; `slow` never answers, and when the client cancels it
  * (`notifications/cancelled`) the server logs "cancelled <id>" (`notifications/message`); an
  * unknown tool is the error -32602; `exit` ends the server's process with exit code 7, and is
- * listed only when `MCP_FAKE_EXIT=1`. After `notifications/initialized` it logs "initialized".
+ * listed only when `MCP_FAKE_EXIT=1`. With `MCP_FAKE_NO_LIST=1` it never answers `tools/list`.
+ * After `notifications/initialized` it logs "initialized".
  */
 
 const write = (message: unknown) => process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -40,6 +41,7 @@ const handle = (message: { id?: number | string; method?: string; params?: Recor
     case "notifications/cancelled":
       return write({ jsonrpc: "2.0", method: "notifications/message", params: { level: "info", data: `cancelled ${String(params["requestId"])}` } });
     case "tools/list":
+      if (process.env["MCP_FAKE_NO_LIST"] === "1") return;
       return write({
         jsonrpc: "2.0",
         id: message.id,

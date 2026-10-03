@@ -85,15 +85,23 @@ test("MS3: a server whose process cannot be started has failed, and a call to it
   expect(seen.refused).toStartWith("missing: echo was not called: the server is not running (it failed: its process could not be started:");
 });
 
-test("MS5: a server that does not answer initialize in time has failed, and its process is stopped", async () => {
-  const seen = await runTest(
+test("MS5: a server that does not answer initialize, or does not list its tools, in time has failed, and its process is stopped", async () => {
+  const settle = (server: Parameters<typeof startMcpServer>[0]) =>
     Effect.gen(function* () {
-      const server = yield* startMcpServer({ name: "silent", command: "/bin/sh", args: ["-c", "sleep 30"], env: {} }, [], { connectTimeout: "300 millis" });
-      const settled = yield* server.settled;
+      const started = yield* startMcpServer(server, [], { connectTimeout: "300 millis" });
+      const settled = yield* started.settled;
       // Its process group was stopped (agent-process PG4: a stopped group's processes are ended).
       yield* Effect.sleep("50 millis");
-      return { settled, process: (yield* server.process)._tag };
+      return { settled, process: (yield* started.process)._tag };
+    });
+  const seen = await runTest(
+    Effect.gen(function* () {
+      return {
+        silent: yield* settle({ name: "silent", command: "/bin/sh", args: ["-c", "sleep 30"], env: {} }),
+        unlisted: yield* settle({ ...fake, name: "unlisted", env: { MCP_FAKE_NO_LIST: "1" } }),
+      };
     }).pipe(Effect.provide(BunServices.layer)),
   );
-  expect(seen).toEqual({ settled: { _tag: "Failed", run: 1, reason: "did not answer initialize within 300ms" }, process: "Idle" });
+  const failed = { _tag: "Failed", run: 1, reason: "did not answer initialize and tools/list within 300ms" };
+  expect(seen as unknown).toEqual({ silent: { settled: failed, process: "Idle" }, unlisted: { settled: failed, process: "Idle" } });
 });
