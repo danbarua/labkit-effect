@@ -52,6 +52,11 @@ test("a provider that cannot be reached fails as a network error, retried first"
   expect(observed).toMatchObject({ _tag: "ModelFailed" });
   expect(events(logKeys.provider.requestFailed)).toMatchObject([[logKeys.provider.requestFailed, { reason: "NetworkError" }]]);
   expect(events(logKeys.provider.requestRetried)).toHaveLength(2);
+  // Each retry is logged before its wait: the first wait, then twice it.
+  expect(events(logKeys.provider.requestRetried).map((line) => (line as [string, { retry: number; of: number; wait: string }])[1])).toMatchObject([
+    { retry: 1, of: 2, wait: "1ms" },
+    { retry: 2, of: 2, wait: "2ms" },
+  ]);
 });
 
 /**
@@ -108,6 +113,17 @@ test("a body that ends before its Content-Length fails the request, which is not
   expect(server.requests()).toBe(1);
   expect(events(logKeys.provider.requestRetried)).toEqual([]);
   expect(events(logKeys.provider.notRetried)).toMatchObject([[logKeys.provider.notRetried, { reason: "NetworkError" }]]);
+});
+
+test("a rate limit is retried after the wait it says (Retry-After), not the doubled wait", async () => {
+  const limited = "HTTP/1.1 429 Too Many Requests\r\ncontent-type: application/json\r\nretry-after: 1\r\ncontent-length: 2\r\n\r\n{}";
+  const server = rawServer([limited, jsonWith(answer, answer.length)]);
+  const { observed, events } = await asked(
+    openAiCompatModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(server.url))),
+  );
+  server.stop();
+  expect(observed as unknown).toMatchObject({ _tag: "ModelResponded" });
+  expect(events(logKeys.provider.requestRetried)).toMatchObject([[logKeys.provider.requestRetried, { reason: "RateLimitError", retry: 1, wait: "1s" }]]);
 });
 
 test("a failure before the provider begins to respond is retried", async () => {
