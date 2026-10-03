@@ -109,11 +109,15 @@ model.
       (interrupted, failed) shows what its finished requests sent and nothing of how it ended.
 - [ ] The ACP host in an editor: the launch command, and VS Code's behaviour with what it sends and
       draws (config options as selects, thinking, permission, tool call content). Then JetBrains.
-- [ ] The MCP servers a client names in `session/new`, their tools offered to the model (the ACP
-      host's world is given them and ignores them). Effect has MCP's schemas, protocol and a server
-      (`effect/ai/McpSchema`, `McpProtocol`, `McpServer`) and no client: a client built from them,
-      as `effective-acp` was built. Each server is a tool source (`ToolSource`) with the namespace
-      `mcp__<server>`, after the world's own.
+- [ ] MCP servers. Built (`src/agent-mcp`, on `src/agent-process`): the stdio client; each server a
+      machine over a session-scoped process group; the ACP host starts the servers a client names,
+      offers their tools after the world's under `mcp__<server>`, tells the model of one not
+      running, records their states (`McpServerChanged`), and serves `/mcp` and
+      `/mcp reconnect <server>`. To do: `required: true` for a server in the configuration file,
+      which makes a session fail to open when the server does not connect (with the config
+      loader's wiring); MCP servers in the CLI; the Streamable HTTP transport; tools a server offers
+      after the session opened (after a reconnect, or `notifications/tools/list_changed`), with
+      per-turn tool lists; sampling and elicitation.
       Effect's `RpcClient` over `McpSchema.ClientRequestRpcs`, through a transport of our own over
       a child's stdio, against `@modelcontextprotocol/server-everything` (2026-10-03): `initialize`,
       `tools/list` and `tools/call` work. It sends a notification with an id (the server answers

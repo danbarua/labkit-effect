@@ -23,7 +23,8 @@ tried first (TODO.md, the MCP servers entry): it drops what a server sends unask
 ## What is not built
 
 - The Streamable HTTP transport, and the SSE one.
-- The MCP servers an ACP client names in `session/new` or a CLI is configured with.
+- MCP servers in the CLI (the ACP host starts those a client names: `agent-acp` AG22, AG23), and
+  `required: true`, which waits for the configuration file.
 - Sampling and elicitation: the client does not offer them, so a server does not ask.
 - A change of a server's tool list (`notifications/tools/list_changed`) is logged, not acted on;
   so are tools a reconnected server lists that it did not list before.
