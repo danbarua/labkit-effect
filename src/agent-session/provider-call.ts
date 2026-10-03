@@ -184,8 +184,23 @@ export const postJson = (http: HttpClient.HttpClient, caller: Caller, post: Post
   );
 
 /** A response's server-sent events: each event's data, parsed as JSON, as it arrives. */
+/**
+ * How long a response's stream may send nothing, not a byte, before the request fails: the
+ * connection has gone quiet. A server's keep-alive comments count as something.
+ */
+export const ModelStreamIdle = Context.Reference<Duration.Input>("agent-session/ModelStreamIdle", { defaultValue: () => "10 minutes" });
+
 const eventsOf = (caller: Caller, response: HttpClientResponse.HttpClientResponse): Stream.Stream<Json, AiError.AiError> =>
+  Stream.unwrap(Effect.map(ModelStreamIdle, (idle) => quietFails(caller, response, idle)));
+
+/** `response`'s events, failing if its bytes stop for `idle`. */
+const quietFails = (caller: Caller, response: HttpClientResponse.HttpClientResponse, idle: Duration.Input): Stream.Stream<Json, AiError.AiError> =>
   response.stream.pipe(
+    Stream.timeoutOrElse({
+      duration: idle,
+      orElse: () =>
+        Stream.fail(bodyCut(caller, response.request, `The response's stream sent nothing for ${Duration.format(Duration.fromInputUnsafe(idle))}`)),
+    }),
     Stream.decodeText,
     Stream.pipeThroughChannel(Sse.decode()),
     Stream.mapError((error) => {

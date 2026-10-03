@@ -24,6 +24,7 @@ import { logKeys } from "../log-keys.ts";
 import { anthropicModelClient } from "./anthropic-client.ts";
 import { openAiModelClient } from "./openai-client.ts";
 import { openAiCompatModelClient } from "./openai-compat-client.ts";
+import { ModelStreamIdle } from "../provider-call.ts";
 import { anthropicAt, openAiAt, openAiCompatAt } from "../../../tests/support/providers.ts";
 import { runTest } from "../../../tests/support/run.ts";
 
@@ -213,4 +214,47 @@ test("TC4: a stream closed after a tool call of it was passed on is not made aga
   expect(facts.some((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelFailed")).toBe(true);
   expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Failed" } } });
   expect(conversationOf(facts).flatMap((message) => message.parts.map((part) => part._tag))).toEqual(["Text"]);
+});
+
+/** A Chat Completions server that streams `chunks`, each after `wait` milliseconds, then ends. */
+const streaming = (parts: ReadonlyArray<{ readonly wait: number; readonly text: string }>) => {
+  const server = Bun.serve({
+    port: 0,
+    fetch: () =>
+      new Response(
+        new ReadableStream({
+          async start(controller) {
+            for (const part of parts) {
+              await Bun.sleep(part.wait);
+              controller.enqueue(new TextEncoder().encode(part.text));
+            }
+            controller.close();
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      ),
+  });
+  stops.push(() => server.stop(true));
+  return server.url;
+};
+
+const chunk = (delta: unknown, finish_reason: string | null = null) => `data: ${JSON.stringify({ id: "c1", choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+
+test("a stream that sends nothing for ModelStreamIdle fails the request, which is not made again; keep-alive comments count as something", async () => {
+  const quiet = streaming([
+    { wait: 0, text: chunk({ role: "assistant", content: "Hal" }) },
+    { wait: 1000, text: chunk({}, "stop") },
+  ]);
+  const silent = await asked(Layer.mergeAll(openAiCompatModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(quiet))), Layer.succeed(ModelStreamIdle, "100 millis")));
+  expect(silent.observed as unknown).toMatchObject({ _tag: "ModelFailed", failure: expect.stringContaining("sent nothing for 100ms") });
+  expect(silent.events(logKeys.provider.notRetried)).toHaveLength(1);
+  const kept = streaming([
+    { wait: 0, text: chunk({ role: "assistant", content: "Hal" }) },
+    ...[1, 2, 3, 4, 5, 6].map(() => ({ wait: 50, text: ": keepalive\n\n" })),
+    { wait: 50, text: chunk({ content: "lo" }) },
+    { wait: 0, text: chunk({}, "stop") },
+    { wait: 0, text: "data: [DONE]\n\n" },
+  ]);
+  const alive = await asked(Layer.mergeAll(openAiCompatModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(kept))), Layer.succeed(ModelStreamIdle, "100 millis")));
+  expect(alive.observed as unknown).toMatchObject({ _tag: "ModelResponded", parts: [{ _tag: "Text", text: "Hallo" }] });
 });
