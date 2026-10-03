@@ -155,8 +155,11 @@ model.
         origin and the log) and which turn-end hook held a turn, so a hook counts its own holds.
       Not decided: where the file is kept.
 - [ ] Later (Dan, 2026-10-03): a change that tightens the permission mode taken between the steps
-      of a turn, delivered through the inbox as steering is; and a way to cancel input queued in the
-      inbox that has not been delivered.
+      of a turn, delivered through the inbox as steering is.
+- [ ] Withdrawing input queued for a turn that has not been delivered: the core does it
+      (`InputCancelled`, agent-machine `queued-input.test.ts`); no host lets the user do it. The ACP
+      host queues no input (a second prompt while one runs is refused) and the CLI drops keys while
+      a turn runs, so it comes with a host that queues input (labkit-web's).
 
 ### The coding agent
 
