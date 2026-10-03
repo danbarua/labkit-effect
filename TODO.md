@@ -104,8 +104,8 @@ model.
       running is ended, not gone on with; `session/close`. To do: `session/fork` (it waits for the
       core: Forks, under Sessions); `session/delete`; additional directories. Open: the permission
       mode is not in the host's record, so a reopened session starts at the launcher's mode; ACP has
-      no update for how a turn ended, so a replay of a turn that ended with no answer and no call
-      under way (interrupted, failed) shows its input alone.
+      no update for how a turn ended, so a replay of a turn that ended without an answer
+      (interrupted, failed) shows what its finished requests sent and nothing of how it ended.
 - [ ] The ACP host in an editor: the launch command, and VS Code's behaviour with what it sends and
       draws (config options as selects, thinking, permission, tool call content). Then JetBrains.
 - [ ] The MCP servers a client names in `session/new`, their tools offered to the model (the ACP

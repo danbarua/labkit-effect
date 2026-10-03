@@ -299,11 +299,13 @@ twice.
   request carries the earlier turns.
 - AL4. A turn the stored facts left running (their process ended mid-turn) is ended at load or
   resume (`endTurnLeftRunning`): it ends `Interrupted`, each call it left running fails, no tool
-  runs and no model request is made. A replay shows each such call once, as `failed`; a turn with
-  no call under way shows only its input, since ACP has no update for how a turn ended (its stop
-  reason is in the answer to its prompt alone). With no turn left running, the session goes on
-  (`goOn`) once its feed has started, so input left waiting starts its turn live. The next prompt
-  runs a new turn.
+  runs and no model request is made. A replay shows the requests that were answered as usual, with
+  each call left running `failed`. A request that was in flight adds only the calls that had
+  arrived in it, each as it ended (`failed` when it was left running), since the text and thinking
+  it streamed were never recorded. ACP has no update for how a turn ended (its stop reason is in the
+  answer to its prompt alone), so a turn whose only request was in flight, with no call arrived,
+  shows its input alone. With no turn left running, the session goes on (`goOn`) once its feed has
+  started, so input left waiting starts its turn live. The next prompt runs a new turn.
 - AL5. `session/resume` is `session/load` with nothing replayed: the client has the history.
 - AL6. `session/list` is a page (`pageOf`, of `pageSize`) of the sessions in the session directory
   with a record, the one written to last first, filtered by `cwd` when it is given. A session with

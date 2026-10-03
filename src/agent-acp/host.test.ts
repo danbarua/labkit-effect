@@ -92,6 +92,14 @@ const held = (text: string, started: Deferred.Deferred<void>, release?: Deferred
     return yield* answer({ _tag: "Text", text: "" })(turn, target).pipe(Effect.map((responded) => ({ ...responded, parts: [toPart({ _tag: "Text", text })] })));
   });
 
+/** A request that passes on `call` as a completed part, says it started, and never answers. */
+const heldAfterCall = (call: Extract<Piece, { _tag: "ToolCall" }>, started: Deferred.Deferred<void>): Reply => () =>
+  Effect.gen(function* () {
+    yield* (yield* ModelStream)({ _tag: "Part", part: toPart(call) });
+    yield* Deferred.succeed(started, undefined);
+    return yield* Effect.never;
+  });
+
 const failed: Reply = (turn) =>
   Effect.succeed({ _tag: "ModelFailed", turn, failure: FailureText.make("The provider answered 529: overloaded"), error: receivedText("overloaded") });
 
@@ -998,8 +1006,7 @@ test("AL3 AL8: session/load in a new process replays the stored turn in order be
     return { loaded, beforePrompt, prompted };
   });
   await host.stop();
-  expect(kinds(replay)[0]).toBe("user_message_chunk");
-  expect(kinds(replay)).toEqual(expect.arrayContaining(["agent_thought_chunk", "tool_call:pending", "tool_call_update:completed", "agent_message_chunk"]));
+  expect(kinds(replay)).toEqual(["user_message_chunk", "agent_thought_chunk", "tool_call:pending", "tool_call_update:in_progress", "tool_call_update:completed", "agent_message_chunk"]);
   // On the wire, the agent wrote each stored update once, in the projection's order, and all of them before the answer.
   const written = updatesBeforeAnswer(host);
   expect(written).toHaveLength(replay.length);
@@ -1141,6 +1148,114 @@ test("AL4: loading a session whose process ended with a model request in flight 
   // What the stream sent before the process ended was never recorded, and ACP has no update for an interrupted turn: the client has the input alone.
   expect(kinds(updatesBeforeAnswer(host))).toEqual(["user_message_chunk"]);
   expect(result.prompted.stopReason).toBe("end_turn");
+  expect(endings(await factsOn(file))).toEqual(["Interrupted", "Completed"]);
+});
+
+test("AL4: loading a session whose process ended with the turn's second request in flight replays the first request as it ran, and the request under way adds nothing", async () => {
+  const started = Deferred.makeUnsafe<void>();
+  const first = startHost({
+    world: echoWorld,
+    script: [answer({ _tag: "Thinking", text: "Echo it first." }, { _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "ping" } }), held("Working on it.", started)],
+  });
+  const sessionId = await sdkClient().app.connectWith(first.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const created = await ctx.request("session/new", { cwd: first.cwd, mcpServers: [] });
+    void failure(ctx.request("session/prompt", say(created.sessionId, "Echo ping")));
+    await Effect.runPromise(Deferred.await(started));
+    await first.hangUp();
+    return created.sessionId;
+  });
+  await first.ended;
+  const file = storeFileOf(first.directory, sessionId);
+  const stored = await factsOn(file);
+  expect(endings(stored)).toEqual([]);
+  // The first request was answered and its call ran; the second was made and never answered.
+  const left = observed(stored).map((fact) => fact.observation._tag);
+  expect(left.filter((tag) => tag === "ModelRequestDispatched")).toHaveLength(2);
+  expect(left.filter((tag) => tag === "ModelResponded")).toHaveLength(1);
+  expect(left.lastIndexOf("ModelRequestDispatched")).toBeGreaterThan(left.lastIndexOf("ModelResponded"));
+
+  const host = startHost({ world: echoWorld, script: [answer({ _tag: "Text", text: "Fresh." })] });
+  const { app, until } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    await ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] });
+    const atLoad = { targets: host.targets.length, facts: await factsOn(file) };
+    await until((updates) => updates.some((update) => update.sessionUpdate === "usage_update"));
+    const prompted = await ctx.request("session/prompt", say(sessionId, "Again"));
+    return { atLoad, prompted };
+  });
+  await host.stop();
+  const { atLoad } = result;
+  expect(atLoad.targets).toBe(0);
+  expect(endings(atLoad.facts)).toEqual(["Interrupted"]);
+  // The request under way is given the harness's response: nothing arrived of it, and how it ended is not known.
+  const responses = atLoad.facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "ModelResponded" ? [fact.observation] : []));
+  expect(responses.map((response) => response.ending._tag)).toEqual(["Complete", "Indeterminate"]);
+  expect(responses.at(-1)?.parts).toEqual([]);
+  expect(observed(atLoad.facts).at(-1)).toMatchObject({ origin: { _tag: "Harness", part: "resume" }, observation: { _tag: "ModelResponded" } });
+  const written = updatesBeforeAnswer(host);
+  expect(kinds(written)).toEqual(["user_message_chunk", "agent_thought_chunk", "tool_call:pending", "tool_call_update:in_progress", "tool_call_update:completed"]);
+  expect(written).toEqual(replayOf(atLoad.facts));
+  expect(result.prompted.stopReason).toBe("end_turn");
+  expect(endings(await factsOn(file))).toEqual(["Interrupted", "Completed"]);
+});
+
+test("AL4 PJ11: loading a session whose process ended with a request in flight and a call it had made still running records that call once, in the response the harness gives, and replays it once: announced, started, failed", async () => {
+  const started = Deferred.makeUnsafe<void>();
+  const toolBegan = Deferred.makeUnsafe<void>();
+  const first = startHost({
+    world: runsWorld([], toolBegan),
+    script: [heldAfterCall({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "ping" } }, started)],
+  });
+  const sessionId = await sdkClient().app.connectWith(first.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const created = await ctx.request("session/new", { cwd: first.cwd, mcpServers: [] });
+    void failure(ctx.request("session/prompt", say(created.sessionId, "Echo ping")));
+    await Effect.runPromise(Effect.all([Deferred.await(started), Deferred.await(toolBegan)]));
+    await first.hangUp();
+    return created.sessionId;
+  });
+  await first.ended;
+  const file = storeFileOf(first.directory, sessionId);
+  const stored = await factsOn(file);
+  // The call arrived while the response streamed and began to run; neither it nor the response ended.
+  const left = observed(stored).map((fact) => fact.observation._tag);
+  expect(left).toEqual(expect.arrayContaining(["ToolCallArrived", "ToolCallDispatched"]));
+  expect(left.filter((tag) => tag === "ToolEnded" || tag === "ModelResponded")).toEqual([]);
+  expect(endings(stored)).toEqual([]);
+
+  const runs: Array<string> = [];
+  const host = startHost({ world: runsWorld(runs), script: [answer({ _tag: "Text", text: "Fresh." })] });
+  const { app, until } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    await ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] });
+    const atLoad = { targets: host.targets.length, runs: runs.length, facts: await factsOn(file) };
+    await until((updates) => updates.some((update) => update.sessionUpdate === "usage_update"));
+    const prompted = await ctx.request("session/prompt", say(sessionId, "Again"));
+    return { atLoad, prompted };
+  });
+  await host.stop();
+  const { atLoad } = result;
+  expect(atLoad.targets).toBe(0);
+  expect(atLoad.runs).toBe(0);
+  // The call's end comes first, then the response the harness gives, which holds the call that had arrived.
+  const recorded = observed(atLoad.facts.slice(stored.length));
+  expect(recorded.map((fact) => fact.observation._tag)).toEqual(["TurnInterrupted", "ToolEnded", "ModelResponded"]);
+  expect(recorded.map((fact) => fact.observation)).toMatchObject([
+    { _tag: "TurnInterrupted" },
+    { _tag: "ToolEnded", call: "echo-1", outcome: { _tag: "Failed", reason: { _tag: "Indeterminate" } } },
+    { _tag: "ModelResponded", ending: { _tag: "Indeterminate" }, parts: [{ _tag: "ToolCall", call: "echo-1", tool: "echo" }] },
+  ]);
+  expect(endings(atLoad.facts)).toEqual(["Interrupted"]);
+  const written = updatesBeforeAnswer(host);
+  expect(kinds(written)).toEqual(["user_message_chunk", "tool_call:pending", "tool_call_update:in_progress", "tool_call_update:failed"]);
+  expect(written.filter((update) => update.sessionUpdate === "tool_call")).toHaveLength(1);
+  expect(written).toEqual(replayOf(atLoad.facts));
+  expect(written.at(-1)).toMatchObject({ toolCallId: "echo-1", content: [{ type: "content", content: { type: "text", text: "How it ended was not observed" } }] });
+  expect(result.prompted.stopReason).toBe("end_turn");
+  expect(runs).toEqual([]);
   expect(endings(await factsOn(file))).toEqual(["Interrupted", "Completed"]);
 });
 

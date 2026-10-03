@@ -557,23 +557,52 @@ test("PJ11: what has no call in its request is left in place: a request without 
   expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
 });
 
-test("PJ11: a request the harness answered as interrupted, with a call that never ended: the call is announced by its arrival, then fails, as before", () => {
+test("PJ11 PJ4: a request the harness answered as interrupted, as the core records it: the call announced once, by the response's part, and then failed", () => {
+  const rm = { call: "c1", tool: "rm", input: json({ path: "a.ts" }) };
   const { session, fact } = recording();
   fact(asked("remove a.ts"));
   fact(dispatched());
-  fact({ _tag: "ToolCallArrived", turn: "turn-1", call: "c1", tool: "rm", input: json({ path: "a.ts" }) });
+  fact({ _tag: "ToolCallArrived", turn: "turn-1", ...rm });
   fact({ _tag: "ToolCallDispatched", call: "c1" });
-  fact(responded([], "Indeterminate"));
-  fact({ _tag: "ToolEnded", call: "c1", outcome: { _tag: "Failed", reason: { _tag: "Reported", error: json({ error: "interrupted" }) } } });
+  // What `endTurnLeftRunning` records once the process running them has ended (agent-machine `notObserved`): the end of each call
+  // still running, then the request's response, which carries the calls that had arrived as its parts.
+  fact({ _tag: "TurnInterrupted", turn: "turn-1" });
+  fact({ _tag: "ToolEnded", call: "c1", outcome: { _tag: "Failed", reason: { _tag: "Indeterminate" } } });
+  fact(responded([{ _tag: "ToolCall", ...rm }], "Indeterminate"));
+  expect(ahead(session.journal, "ToolEnded", "ModelResponded")).toBe(true);
   const loaded = project(session.journal, replay);
-  // The empty response moves before the arrival and sends nothing, so the order is that of the stored facts.
+  // The response moves before the arrival and announces the call from its part; the arrival then announces nothing (PJ4), so the updates are those of the stored order.
   expect(loaded.updates).toEqual(inStoredOrder(session.journal, replay).updates);
   expect(loaded.updates).toEqual([
     user("remove a.ts"),
     announced("c1", "rm", "delete"),
     updated("c1", "in_progress"),
-    updated("c1", "failed", { content: output('{"error":"interrupted"}') }),
+    updated("c1", "failed", { content: output("How it ended was not observed") }),
   ] as never);
+  expect(loaded.updates.filter((update) => update.sessionUpdate === "tool_call")).toHaveLength(1);
+  expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
+});
+
+test("PJ11 PJ4: a request the harness answered as interrupted whose call had ended before the process did: the call is announced once, by the response's part, and completed", () => {
+  const rm = { call: "c1", tool: "rm", input: json({ path: "a.ts" }) };
+  const { session, fact } = recording();
+  fact(asked("remove a.ts"));
+  fact(dispatched());
+  fact({ _tag: "ToolCallArrived", turn: "turn-1", ...rm });
+  fact({ _tag: "ToolCallDispatched", call: "c1" });
+  fact({ _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } });
+  // The request was still streaming: the harness gives it the calls that had arrived, and records no end for one that had ended.
+  fact({ _tag: "TurnInterrupted", turn: "turn-1" });
+  fact(responded([{ _tag: "ToolCall", ...rm }], "Indeterminate"));
+  const loaded = project(session.journal, replay);
+  expect(loaded.updates).toEqual(inStoredOrder(session.journal, replay).updates);
+  expect(loaded.updates).toEqual([
+    user("remove a.ts"),
+    announced("c1", "rm", "delete"),
+    updated("c1", "in_progress"),
+    updated("c1", "completed", { content: output('["a.ts"]') }),
+  ] as never);
+  expect(loaded.updates.filter((update) => update.sessionUpdate === "tool_call")).toHaveLength(1);
   expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
 });
 
