@@ -490,9 +490,8 @@ function finish(references: SchemaRepresentation.References, brands: ReadonlySet
       // The definition's description is the declaration's doc comment.
       const annotations = output._tag === "Reference" ? undefined : clean(output.annotations, ["description"]);
       const described: Representation = output._tag === "Reference" ? output : { ...output, annotations };
-      if (!brands.has(name)) return [name, present(described)];
-      if (described._tag !== "String" || described.checks.length > 0) throw new Error(`${name} was to be branded but is not a plain string`);
-      return [name, { ...described, annotations: { ...annotations, brands: [`acp/${name}`] } }];
+      if (brands.has(name) && (described._tag !== "String" || described.checks.length > 0)) throw new Error(`${name} was to be branded but is not a plain string`);
+      return [name, present(described)];
     }),
   );
 }
@@ -575,12 +574,17 @@ function schemasModule(version: (typeof versions)[number], sdkVersion: string, i
   const values = ["Schema", ...new Set(helperNames.flatMap((name) => helpers[name].imports))].sort();
   const imports = [
     `import { ${values.join(", ")} } from "effect";`,
+    ...(brands.size === 0 ? [] : [`import type * as Brand from "effect/Brand";`]),
     ...generated.artifacts.flatMap((artifact) => (artifact._tag === "Import" ? [artifact.importDeclaration.replace(/;?$/, ";")] : [])),
   ];
   if (generated.artifacts.some((artifact) => artifact._tag !== "Import")) throw new Error("the code generator emitted an artifact other than an import");
+  // Effect's code generator writes no brands (a brand is a TypeScript distinction its representation does
+  // not hold): a branded definition gets its brand here, on its type and its schema.
   const declarations = generated.references.nonRecursives.map(({ $ref, code: { runtime, Type } }) => {
     const comment = doc(definitions[$ref] !== undefined && isObject(definitions[$ref]) ? definitions[$ref]["description"] : undefined);
-    return `${comment}export type ${$ref} = ${Type};\n${comment}export const ${$ref} = ${runtime};\n`;
+    const brand = JSON.stringify(`acp/${$ref}`);
+    const [type, schema] = brands.has($ref) ? [`${Type} & Brand.Brand<${brand}>`, `${runtime}.pipe(Schema.brand(${brand}))`] : [Type, runtime];
+    return `${comment}export type ${$ref} = ${type};\n${comment}export const ${$ref} = ${schema};\n`;
   });
   return [header(version, sdkVersion), imports.join("\n"), "", ...helperNames.map((name) => `${helpers[name].code}\n`), ...declarations].join("\n");
 }

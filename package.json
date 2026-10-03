@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.5.0",
-    "@effect/platform-bun": "4.0.0-rc.118",
+    "@effect/platform-bun": "4.0.0",
     "@effect/tsgo": "^0.46.1",
     "@types/bun": "latest",
     "oxlint": "1.85.0",
@@ -30,10 +30,10 @@
     "typescript": "^7"
   },
   "dependencies": {
-    "@effect/ai-anthropic": "4.0.0-rc.118",
-    "@effect/ai-openai": "4.0.0-rc.118",
-    "@effect/ai-openai-compat": "4.0.0-rc.118",
+    "@effect/ai-anthropic": "4.0.0",
+    "@effect/ai-openai": "4.0.0",
+    "@effect/ai-openai-compat": "4.0.0",
     "@logtape/logtape": "^2.3.9",
-    "effect": "^4.0.0-rc.118"
+    "effect": "^4.0.0"
   }
 }

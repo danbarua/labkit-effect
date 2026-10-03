@@ -1,6 +1,6 @@
 # Where Effect fits in the ACP library, and where it does not
 
-A running note, kept while building `src/acp` on `effect@4.0.0-rc.118`. Each entry says what we use
+A running note, kept while building `src/acp` on `effect@4.0.0-rc.118`, and `4.0.0` since. Each entry says what we use
 from Effect, what we write ourselves instead, and why. Paths under `effect/` are in
 `repos/effect/packages/effect/src/`.
 
@@ -87,6 +87,10 @@ from Effect, what we write ourselves instead, and why. Paths under `effect/` are
   `anyOf`/`oneOf`, an `allOf` naming a union, and `not`. It also ignores `x-*` keywords. The
   generator rewrites those forms first and carries the `x-deserialize-*` markers through a
   `contentSchema` annotation, which the importer keeps.
+- **Brands in `toCodeDocument`.** From `4.0.0` it writes no brand: a brand is a TypeScript
+  distinction that a representation does not hold (`rc.118` wrote a `brands` annotation as
+  `Schema.brand`). The generator adds the brand to each definition it brands, on its type and its
+  schema.
 - **Recursive definitions in `toCodeDocument`.** It would type a recursive definition as a codec
   whose encoded side equals its decoded side, which brands and lenient arrays are not. ACP has no
   recursive definition, so the generator refuses one.
