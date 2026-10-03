@@ -65,7 +65,6 @@ contents are estimated not to fit.
 - Anthropic's own compaction (its compaction block) is not asked for. The request a
   `providerCompaction` makes is not recorded with the session's facts, and one that fails is a
   defect.
-- Caching. No request marks anything for the provider's cache.
 - Model selectors in the loop. The loop asks `ModelProvider` for the model (from the session's
   facts), so `ModelSelectors` and `assemble` are used only by their tests.
 - Forks as sessions, the turn pointer, and addressing facts by session and position.

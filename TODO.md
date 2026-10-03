@@ -122,6 +122,29 @@ model.
       REPL shows text and thinking as they arrive (`session.streamed`). To do: open its session from
       a draft at the first input (`src/agent-host/draft.ts`, turn zero), so a CLI quit before any
       input leaves no session.
+- [ ] Code mode: the model writes a script that calls the session's tools as functions and composes
+      them (map, filter, chain), and the harness runs it as one tool call. Dan's decisions
+      (2026-10-03):
+      - The runtime is QuickJS compiled to WebAssembly (`@earendil-works/pi-codemode`, which runs
+        under Bun: tested), behind an abstraction, so that execution can move to another sandbox
+        later; an IPython kernel per session comes after, then a bridge from a local kernel to a
+        remote one (a Colab VM).
+      - The script is a machine of its own, a child of the call machine, posting messages to its
+        parent's inbox; the tool calls it makes are carried out as calls attributed to it.
+      - What goes back to the model is an envelope, with nothing the script has to ask for: its
+        result (text or JSON), `logs[]` (from a `console.log` shim), its errors, its wall-clock
+        time. The logs stream to the host as they come.
+      - Headless: a call inside a script that would need permission is refused. Which tools a script
+        may call is configured: `permitted` (those that need no permission), `safe`, or a list the
+        host or user gives; a call to a tool outside it is refused all the same.
+      - The functions a script calls are generated from the tools' schemas, and check their input
+        first, failing early with the schema's message.
+      - A crash in the middle of a script leaves it indeterminate, its logs as far as they got; it
+        is not run again. The model looks at the world through its tools and writes another.
+      Prior art, read for this (notes in the session's scratchpad): yolk-sdk, pi-codemode,
+      Cloudflare's code mode, Anthropic's programmatic tool calling, smolagents.
+- [ ] A loop breaker: a model that repeats the same calls is told so, then stopped, as a
+      configurable policy (efferent nudges at 3 repeats and stops at 5; omp has one too).
 - [ ] The system prompt belongs in context assembly, as configuration; it is to be designed and
       tried. A hard-coded one ("You are a helpful assistant") will do until the host's question
       of where a user's things live has an answer.
@@ -171,7 +194,8 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       What the host needs of the core: given a session's facts, a new `SessionId` and optionally a
       position (whole turns up to it), the facts a new session begins with, its opening naming the
       new session; the host appends them to a new store. Whether window summaries and blobs follow
-      a fork is the core's to say.
+      a fork is the core's to say. A write-up of the problem, from the Claude Code session that
+      untangled forked sessions: https://claude.ai/artifact/2BK693wUdiGbTGcJJyCB4Y
 
 ### Providers
 
@@ -268,9 +292,19 @@ observations not expected or undelivered. On 2026-10-02: Codex 0 of 171 files; C
       and the Codex importer counts and drops it.
 - [ ] Claude Code starts tools while a response streams; the importer gives such results after the
       message and does not record the early start (`ToolCallArrived`).
-- [ ] Not mapped yet: subagents and messages between agents (for moderated debates and peer review
-      later), images, `fork-context-ref`, `model_refusal_no_fallback`, developer messages (system
-      prompts).
+- [ ] Codex: every tool result is recorded as `Succeeded` (`scripts/trajectories/codex.ts`). Failures
+      are in the files: `exec_command_end.exit_code`, `patch_apply_end.success`, the exit-code
+      header of a tool's output, and `success`. agents-bridge's Codex normalizer reads them
+      (github.com/jagenaujagenau/agents-bridge, `CodexNormalizer.ts:165-183, 425-513` at
+      `5ce9a787`; it has no license, so its format knowledge is ours to read, not its code to copy).
+- [ ] Claude Code: subagents' sessions are skipped (`claude-code.ts` drops every `isSidechain`
+      record). They are files of their own: `<parent>/subagents/[workflows/<wf>/]agent-<id>.jsonl`, or
+      a flat `agent-<id>.jsonl`, with a `.meta.json` beside it naming the `agentType`; Codex's
+      children name their parent in `session_meta.source.subagent.thread_spawn` (agents-bridge,
+      `ClaudeCodeAdapter.ts:66-92`, `CodexAdapter.ts:103-117`). Import them as sessions of their own,
+      linked to the parent's call that started them.
+- [ ] Not mapped yet: messages between agents (for moderated debates and peer review later),
+      images, `fork-context-ref`, `model_refusal_no_fallback`, developer messages (system prompts).
 
 ## Parked by Dan
 

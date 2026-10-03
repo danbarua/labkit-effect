@@ -8,6 +8,8 @@
     "module": "NodeNext",
     "moduleDetection": "force",
     "types": ["bun"],
+    // A package's `bun` export condition (effective-acp's TypeScript source) before its declarations.
+    "customConditions": ["bun"],
 
     // Bundler mode
     "moduleResolution": "nodenext",
