@@ -105,7 +105,7 @@ const wentOn = (facts: ReadonlyArray<Fact>) => {
           model,
           tools,
           CountingTurnsInStore,
-          Layer.succeed(ToolCallPolicies, [(held) => Effect.succeed(permissions("default", true, (name) => catalog.find((tool) => tool.name === name)?.kind, held) as Policy<unknown>)]),
+          Layer.succeed(ToolCallPolicies, [{ name: "permissions", policy: (held) => Effect.succeed(permissions("default", true, (name) => catalog.find((tool) => tool.name === name)?.kind, held) as Policy<unknown>) }]),
         ).pipe(Layer.provideMerge(store)),
       ),
     ),

@@ -105,7 +105,7 @@ maxHolds: 2
   });
   const provided = await runTest(
     Effect.gen(function* () {
-      const toolCalls = every(yield* Effect.forEach(yield* ToolCallPolicies, (policyOf) => policyOf(facts())));
+      const toolCalls = every(yield* Effect.forEach(yield* ToolCallPolicies, (entry) => entry.policy(facts())));
       return {
         toolCalls: [verdictOf(toolCalls, run("c1", "look")), verdictOf(toolCalls, run("c2", "look")), verdictOf(toolCalls, run("c3", "change"))],
         modelRequests: (yield* ModelRequestPolicies).length,
@@ -143,7 +143,7 @@ test("CF2: what the host says, that no file does: whether anyone can be asked, w
   const verdict = (canAsk: boolean) =>
     runTest(
       Effect.gen(function* () {
-        const policy = every(yield* Effect.forEach(yield* ToolCallPolicies, (policyOf) => policyOf(facts())));
+        const policy = every(yield* Effect.forEach(yield* ToolCallPolicies, (entry) => entry.policy(facts())));
         return verdictOf(policy, run("c3", "change"));
       }).pipe(Effect.provide(seamLayer(seamListsOf(configuration, { canAsk })))),
     );
@@ -301,7 +301,7 @@ test("CF7: an extension a trusted layer names, relative to its folder, registers
   const configuration = await load([file]);
   const verdicts = await runTest(
     Effect.gen(function* () {
-      const policy = every(yield* Effect.forEach(yield* ToolCallPolicies, (policyOf) => policyOf(facts())));
+      const policy = every(yield* Effect.forEach(yield* ToolCallPolicies, (entry) => entry.policy(facts())));
       return [verdictOf(policy, run("c1", "look")), verdictOf(policy, run("c3", "change"))];
     }).pipe(Effect.provide(seamLayer(seamListsOf(configuration, { canAsk: true })))),
   );
@@ -349,7 +349,7 @@ test("CF11: maxBudget vetoes a model request once the session has cost its usd o
     runTest(
       Effect.gen(function* () {
         const configuration = yield* loadConfiguration([{ name: "test", trusted: true, value: { plugins: { maxBudget: { usd } }, modelRequests: ["maxBudget"] } }]);
-        const policy = every(yield* Effect.forEach(seamListsOf(configuration, { canAsk: true }).modelRequests ?? [], (policyOf) => policyOf(session.journal)));
+        const policy = every(yield* Effect.forEach(seamListsOf(configuration, { canAsk: true }).modelRequests ?? [], (entry) => entry.policy(session.journal)));
         return verdictOf(policy, { _tag: "RequestModelResponse", turn: TurnId.make("turn-1") });
       }),
     );

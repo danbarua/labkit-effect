@@ -1,7 +1,7 @@
 /** The loop breaker in the loop: a model that repeats a call is told so, then its turn is stopped by a model request policy. */
 
 import { expect } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Logger } from "effect";
 import { BoringContextAssembler, BoringModelProvider, boringOpening } from "../../tests/support/boring.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { smolCatalog, SmolToolRunner } from "../../tests/support/smol-tools.ts";
@@ -11,7 +11,7 @@ import type { Observation } from "../agent-machine/observation.ts";
 import { repeatedCalls, repeatingTurns } from "../agent-policy/loop-breaker.ts";
 import { ModelClient, ModelRequestPolicies, ToolCallPolicies } from "./contracts.ts";
 import { openSession } from "./loop.ts";
-import { harnessParts } from "./origin.ts";
+import { policyPart } from "./origin.ts";
 import { asText, receivedJson } from "./received.ts";
 import { EphemeralSessionStore } from "./session-store.ts";
 import { CountingTurns } from "./turns.ts";
@@ -37,7 +37,11 @@ const repeatsEcho = () => {
   });
 };
 
-test("P9 P10: calls 1 and 2 run, 3 to 5 are vetoed with a reason the model reads, and the next request is vetoed, ending the turn Vetoed", async () => {
+test("P9 P10: calls 1 and 2 run, 3 to 5 are vetoed with a reason the model reads, and the next request is vetoed, ending the turn Vetoed; each veto is recorded from, and logged naming, the policy that made it", async () => {
+  const logged: Array<unknown> = [];
+  const capture = Logger.make((options) => {
+    logged.push(options.message);
+  });
   const observed = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
@@ -53,8 +57,9 @@ test("P9 P10: calls 1 and 2 run, 3 to 5 are vetoed with a reason the model reads
           repeatsEcho(),
           SmolToolRunner,
           CountingTurns,
-          Layer.succeed(ToolCallPolicies, [(facts) => Effect.succeed(repeatedCalls(facts))]),
-          Layer.succeed(ModelRequestPolicies, [(facts) => Effect.succeed(repeatingTurns(facts))]),
+          Layer.succeed(ToolCallPolicies, [{ name: "loopBreaker", policy: (facts) => Effect.succeed(repeatedCalls(facts)) }]),
+          Layer.succeed(ModelRequestPolicies, [{ name: "loopBreaker", policy: (facts) => Effect.succeed(repeatingTurns(facts)) }]),
+          Logger.layer([capture], { mergeWithExisting: true }),
         ),
       ),
     ),
@@ -73,7 +78,13 @@ test("P9 P10: calls 1 and 2 run, 3 to 5 are vetoed with a reason the model reads
   const vetoed = observed.flatMap((fact) =>
     fact._tag === "Observed" && fact.observation._tag === "ModelVetoed" ? [{ origin: fact.origin, reason: asText(fact.observation.reason) }] : [],
   );
-  expect(vetoed).toEqual([{ origin: harnessParts.modelRequestPolicy, reason: "Stopped: echo was called with the same input 5 times in a row." }]);
+  expect(vetoed).toEqual([{ origin: policyPart("model request policy", "loopBreaker"), reason: "Stopped: echo was called with the same input 5 times in a row." }]);
+  const vetoedCalls = observed.flatMap((fact) =>
+    fact._tag === "Observed" && fact.observation._tag === "ToolEnded" && fact.observation.outcome._tag === "Failed" ? [fact.origin] : [],
+  );
+  expect(vetoedCalls).toEqual([0, 1, 2].map(() => policyPart("tool call policy", "loopBreaker")));
+  const vetoes = logged.flat().filter((each): each is { readonly by: string } => typeof each === "object" && each !== null && "by" in each);
+  expect(vetoes.map((each) => each.by)).toEqual(["loopBreaker", "loopBreaker", "loopBreaker", "loopBreaker"]);
   const turnEnded = observed.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? [fact.decision.ending._tag] : []));
   expect(turnEnded).toEqual(["Vetoed"]);
 });

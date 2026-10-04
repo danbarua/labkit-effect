@@ -40,8 +40,10 @@ export const logKeys = {
     storeFailed: "loop.store.failed",
     /** A tool call ended; the details are the call, the tool, its input, and how it ended. */
     toolEnded: "loop.tool.ended",
-    /** A model request policy vetoed a turn's request, which ends the turn; the details are the turn and the reason. */
+    /** A model request policy vetoed a turn's request, which ends the turn; the details are the turn, the policy by its name, and the reason. */
     modelVetoed: "loop.model.vetoed",
+    /** A tool call policy vetoed a call, which does not run; the details are the call, its tool, the policy by its name, and the reason. */
+    toolVetoed: "loop.tool.vetoed",
     /** A model request policy held a turn's request, which fails the turn; the details are the turn and what the user is told. */
     modelHeld: "loop.model.held",
     /** Carrying out a request died of a defect; the details are what it died of. */

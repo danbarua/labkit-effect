@@ -432,8 +432,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               // The session's blobs (its inputs' images and files) are kept in its folder, so a session gone on from its facts has them.
               const blobs = BlobsInFolder(join(sessionFolderOf(options.directory, id), "blobs"));
               const policies = Layer.mergeAll(
-                Layer.succeed(ToolCallPolicies, [permissionsFor(permissionMode.get, true)]),
-                Layer.succeed(ModelRequestPolicies, [turnRequestLimit(options.maxTurnRequests)]),
+                Layer.succeed(ToolCallPolicies, [{ name: "permissions", policy: permissionsFor(permissionMode.get, true) }]),
+                Layer.succeed(ModelRequestPolicies, [{ name: "maxTurnRequests", policy: turnRequestLimit(options.maxTurnRequests) }]),
               );
               const runner = SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, world.sources)));
               // The model is told of the session's MCP servers that are not running (agent-mcp MK2).

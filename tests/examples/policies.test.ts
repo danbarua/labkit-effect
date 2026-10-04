@@ -22,9 +22,9 @@ const runTool = (call: string, tool: string) =>
   ({ _tag: "RunTool", call, tool, input: json({}) }) as unknown as EffectRequest;
 const askModel = (turn: string) => ({ _tag: "RequestModelResponse", turn }) as unknown as EffectRequest;
 
-test("P1 P2 P3: a denied tool is vetoed before the person is asked; another tool waits for the answer", () => {
+test("P1 P2 P3: a denied tool is vetoed before the person is asked, the veto saying which policy it was (by); another tool waits for the answer", () => {
   const policy = every([denyTools(["rm"]), askPerson]);
-  expect(decide(policy, runTool("c1", "rm")) as unknown).toEqual({ _tag: "Decided", verdict: { _tag: "Veto", reason: json({ denied: "rm" }) } });
+  expect(decide(policy, runTool("c1", "rm")) as unknown).toEqual({ _tag: "Decided", verdict: { _tag: "Veto", reason: json({ denied: "rm" }) }, by: 0 });
   expect(decide(policy, runTool("c2", "ls")) as unknown).toMatchObject({ _tag: "Waiting", asks: json({ question: "run?", tool: "ls" }) });
 });
 
@@ -37,6 +37,7 @@ test("P1: the person's answer lets the waiting call continue, or vetoes it", () 
   expect(decide(policy, runTool("c2", "ls"), [{ _tag: "Answered", answer: receivedText("not on main") }]) as unknown).toEqual({
     _tag: "Decided",
     verdict: { _tag: "Veto", reason: json({ person: "not on main" }) },
+    by: 1,
   });
 });
 

@@ -23,6 +23,13 @@ export const reportedBy =
 
 const harness = (part: string): Extract<Origin, { _tag: "Harness" }> => ({ _tag: "Harness", part: HarnessPart.make(part) });
 
+/**
+ * A policy of a list (`seam`: "tool call policy", which decides whether a tool call runs; "model
+ * request policy", whether a model request is made), by its name in the list: what reports its veto,
+ * its question, or the request it holds.
+ */
+export const policyPart = (seam: string, name: string): Extract<Origin, { _tag: "Harness" }> => harness(`${seam} ${name}`);
+
 /** The parts of the harness that report observations. */
 export const harnessParts = {
   /** Starts turns. */
@@ -37,10 +44,6 @@ export const harnessParts = {
   resume: harness("resume"),
   /** Hands each tool call to the tool that runs it. */
   toolRunner: harness("tool runner"),
-  /** Decides whether a tool call runs: lets it, vetoes it, or asks first. */
-  toolCallPolicy: harness("tool call policy"),
-  /** Decides whether a model request is made: lets it, or vetoes it. */
-  modelRequestPolicy: harness("model request policy"),
   /** Keeps the session's MCP servers: says when one is ready, failed, exited or stopped. */
   mcpServers: harness("mcp servers"),
   /** Puts a session's settings into a request a model accepts. */

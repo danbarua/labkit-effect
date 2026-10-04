@@ -46,8 +46,8 @@ Dan: "something might execute a decision to continue, veto or delay an Effect." 
   verdict or waits again. Waiting is how a policy delays an effect.
 - P2. A waiting policy can say what it wants answered (`asks`). The layer that shows it to someone
   interprets it.
-- P3. `every([...])` applies policies in order. The first veto is the verdict; the request continues
-  when every policy lets it continue.
+- P3. `every([...])` applies policies in order. The first veto is the verdict, and says which
+  policy it was (`by`, its position); the request continues when every policy lets it continue.
 - P5. A call to a tool that only reads (`read`, `search`, `think`, `fetch`) runs in every mode. A
   call to a tool that changes things, or whose kind is not known: `default` asks; `acceptEdits` runs
   one that edits, deletes or moves files and asks for others; `dontAsk` vetoes; `bypassPermissions`
@@ -59,10 +59,13 @@ Dan: "something might execute a decision to continue, veto or delay an Effect." 
   only once an answer is observed for the call (`PermissionAnswered`) and the policy lets it. A
   vetoed call ends `Vetoed` and never begins to run. A call waiting for an answer when its turn
   stops, or when the process ends and the session goes on from its facts, ends `NotRun`.
-- P9. In the loop, each list of policies is applied in order, as `every`. A vetoed model request is
-  not made: `ModelVetoed` is recorded, from the model request policy, and the turn ends `Vetoed`. A
-  model request held by a policy that waits is not made either: `ModelFailed` is recorded, saying to
-  wait and try again, with what the policy asks.
+- P9. In the loop, each list of policies is applied in order, as `every`. Each entry of a list has a
+  name (`NamedPolicy`), and what a policy decides is recorded from it by its name (`tool call policy
+  <name>`, `model request policy <name>`) and logged with the name: a veto (`loop.tool.vetoed`,
+  `loop.model.vetoed`), a question (`PermissionAsked`), a request held. A vetoed model request is
+  not made: `ModelVetoed` is recorded and the turn ends `Vetoed`. A model request held by a policy
+  that waits is not made either: `ModelFailed` is recorded, saying to wait and try again, with what
+  the policy asks.
 - P10. The loop breaker vetoes the `nudgeAt`-th identical call in a row (3 by default), and each
   after it, with a reason the model reads as the call's result; once a turn's last `stopAt` calls
   (5) are identical, it vetoes the turn's next model request. Calls are identical when `key` gives

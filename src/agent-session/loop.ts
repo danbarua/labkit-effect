@@ -53,13 +53,13 @@ import type { CapturedObservation, ModelPart, Observation, ToolOutcome } from ".
 import type { Origin } from "../agent-machine/origin.ts";
 import type { EffectRequest } from "../agent-machine/request.ts";
 import { emptyHeld, type Held as Throttled, throttle, type ThrottleInput } from "../agent-machine/throttle.ts";
-import { ContextAssembler, MaxHolds, ModelClient, ModelProvider, ModelRequestPolicies, type PolicyOfFacts, ToolCallPolicies, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
-import { every, type Policy, type Verdict } from "../agent-policy/policy.ts";
+import { ContextAssembler, MaxHolds, ModelClient, ModelProvider, ModelRequestPolicies, type NamedPolicy, ToolCallPolicies, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
+import { every, type EveryState, type Policy, type Verdict } from "../agent-policy/policy.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { logKeys } from "./log-keys.ts";
 import { asText, receivedJson, receivedText } from "./received.ts";
 import { ModelStream, ModelStreamInterval, type Streamed } from "./model-stream.ts";
-import { CurrentOrigin, harnessParts, reportedBy } from "./origin.ts";
+import { CurrentOrigin, harnessParts, policyPart, reportedBy } from "./origin.ts";
 import { Report } from "./report.ts";
 import { sentAs } from "./sent.ts";
 import { immutableToolCatalogOf, modelOf } from "./configuration/session-setup.ts";
@@ -389,11 +389,12 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
     };
   };
 
-  /** The policies of `list`, as the facts stand now, applied in order (`every`). */
-  const policiesNow = (list: ReadonlyArray<PolicyOfFacts>): Effect.Effect<Policy<unknown>> =>
+  /** The policies of `list`, as the facts stand now, applied in order (`every`), and the name of the one at a position. */
+  const policiesNow = (list: ReadonlyArray<NamedPolicy>): Effect.Effect<{ readonly policy: Policy<EveryState>; readonly nameAt: (index: number | undefined) => string }> =>
     Effect.gen(function* () {
       const facts = yield* store.facts;
-      return every(yield* Effect.forEach(list, (policyOf) => policyOf(facts))) as Policy<unknown>;
+      const policy = every(yield* Effect.forEach(list, (entry) => entry.policy(facts)));
+      return { policy, nameAt: (index) => (index === undefined ? "" : (list[index]?.name ?? "")) };
     });
 
   /**
@@ -402,15 +403,17 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
    * (`PermissionAnswered`) is given to them. A policy that waits without asking is a defect: nothing
    * would answer it.
    */
-  const reviewed = (request: Extract<EffectRequest, { _tag: "RunTool" }>): Effect.Effect<Verdict, never, Services> =>
+  const reviewed = (
+    request: Extract<EffectRequest, { _tag: "RunTool" }>,
+  ): Effect.Effect<Exclude<Verdict, { _tag: "Veto" }> | (Extract<Verdict, { _tag: "Veto" }> & { readonly by: string }), never, Services> =>
     Effect.scoped(
       Effect.gen(function* () {
-        const policy = yield* policiesNow(yield* ToolCallPolicies);
+        const { policy, nameAt } = yield* policiesNow(yield* ToolCallPolicies);
         const answers = yield* PubSub.subscribe(recorded);
         let step = policy.start(request);
         while (step._tag === "Waiting") {
           if (step.asks === undefined) return yield* Effect.die(new Error(`A tool call policy waited on ${request.call} without asking anything`));
-          yield* (yield* Report)({ _tag: "PermissionAsked", call: request.call, asks: step.asks }, harnessParts.toolCallPolicy);
+          yield* (yield* Report)({ _tag: "PermissionAsked", call: request.call, asks: step.asks }, policyPart("tool call policy", nameAt(step.state.index)));
           let answer: Received | undefined;
           while (answer === undefined) {
             const fact = yield* PubSub.take(answers);
@@ -419,7 +422,9 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
           }
           step = policy.receive(step.state, { _tag: "Answered", answer });
         }
-        return step.verdict;
+        if (step.verdict._tag === "Veto")
+          yield* Effect.logInfo(logKeys.loop.toolVetoed, { call: request.call, tool: request.tool, by: nameAt(step.by), reason: asText(step.verdict.reason) });
+        return step.verdict._tag === "Veto" ? { ...step.verdict, by: nameAt(step.by) } : step.verdict;
       }),
     );
 
@@ -436,7 +441,8 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
       case "RequestModelResponse":
         return Effect.gen(function* () {
           // The request is reviewed before a model is chosen for it: a vetoed request is not made, and streams nothing.
-          const step = (yield* policiesNow(yield* ModelRequestPolicies)).start(request);
+          const { policy, nameAt } = yield* policiesNow(yield* ModelRequestPolicies);
+          const step = policy.start(request);
           // A policy that waits holds the request; nothing wakes it, so the turn fails, telling the user to wait.
           if (step._tag === "Waiting") {
             const asks = step.asks === undefined ? "" : ` ${asText(step.asks)}`;
@@ -444,14 +450,14 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
             yield* Effect.logWarning(logKeys.loop.modelHeld, { turn: request.turn, failure });
             return [
               {
-                origin: harnessParts.modelRequestPolicy,
+                origin: policyPart("model request policy", nameAt(step.state.index)),
                 observation: { _tag: "ModelFailed", turn: request.turn, failure, error: step.asks ?? receivedText(failure) },
               } satisfies Observed,
             ];
           }
           if (step.verdict._tag === "Veto") {
-            yield* Effect.logInfo(logKeys.loop.modelVetoed, { turn: request.turn, reason: asText(step.verdict.reason) });
-            return [{ origin: harnessParts.modelRequestPolicy, observation: { _tag: "ModelVetoed", turn: request.turn, reason: step.verdict.reason } } satisfies Observed];
+            yield* Effect.logInfo(logKeys.loop.modelVetoed, { turn: request.turn, by: nameAt(step.by), reason: asText(step.verdict.reason) });
+            return [{ origin: policyPart("model request policy", nameAt(step.by)), observation: { _tag: "ModelVetoed", turn: request.turn, reason: step.verdict.reason } } satisfies Observed];
           }
           return yield* passingOn(
             request.turn,
@@ -517,14 +523,14 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
           { origin, observation: { _tag: "ToolEnded", call: request.call, outcome } },
         ];
         const notRun = ended({ _tag: "Failed", reason: { _tag: "NotRun" } });
-        const vetoed = (reason: Received): ReadonlyArray<Observed> => [
-          { origin: harnessParts.toolCallPolicy, observation: { _tag: "ToolEnded", call: request.call, outcome: { _tag: "Failed", reason: { _tag: "Vetoed", reason } } } },
+        const vetoed = (reason: Received, by: string): ReadonlyArray<Observed> => [
+          { origin: policyPart("tool call policy", by), observation: { _tag: "ToolEnded", call: request.call, outcome: { _tag: "Failed", reason: { _tag: "Vetoed", reason } } } },
         ];
         return Effect.gen(function* () {
           if (stop !== undefined && (yield* Deferred.isDone(stop))) return notRun;
           const verdict = yield* reviewed(request).pipe(Effect.raceFirst(stopped.pipe(Effect.as("stopped" as const))));
           if (verdict === "stopped") return notRun;
-          if (verdict._tag === "Veto") return vetoed(verdict.reason);
+          if (verdict._tag === "Veto") return vetoed(verdict.reason, verdict.by);
           yield* (yield* Report)({ _tag: "ToolCallDispatched", call: request.call }, harnessParts.toolRunner);
           const outcome = yield* (yield* ToolRunner)
             .run(request.tool, request.input, request.call)

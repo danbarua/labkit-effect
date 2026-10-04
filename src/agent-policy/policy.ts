@@ -27,7 +27,8 @@ export const PolicyMessage = Schema.Union([
 export type PolicyMessage = typeof PolicyMessage.Type;
 
 export type PolicyStep<State> =
-  | { readonly _tag: "Decided"; readonly verdict: Verdict }
+  /** A verdict. `by`, when policies are combined (`every`), is the position of the one whose verdict it is. */
+  | { readonly _tag: "Decided"; readonly verdict: Verdict; readonly by?: number }
   /**
    * No verdict yet. `asks` is what the policy wants answered, if anything, as it states it; the
    * layer that shows it to someone interprets it.
@@ -64,7 +65,7 @@ export function every(policies: ReadonlyArray<Policy<unknown>>): Policy<EverySta
       case "Decided":
         switch (step.verdict._tag) {
           case "Veto":
-            return step;
+            return { ...step, by: index };
           case "Continue": {
             const next = policies[index + 1];
             return next === undefined ? step : from(request, index + 1, next.start(request));

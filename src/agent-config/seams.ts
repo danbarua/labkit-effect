@@ -8,15 +8,15 @@
 import { Effect, Layer } from "effect";
 import { Settling, type SettlingSource } from "../agent-session/configuration/options.ts";
 import { KnownModels, type ModelKnowledge } from "../agent-session/configuration/well-known-models.ts";
-import { MaxHolds, ModelRequestPolicies, type PolicyOfFacts, ToolCallPolicies, type TurnEndHook, TurnEndHooks } from "../agent-session/contracts.ts";
+import { MaxHolds, ModelRequestPolicies, type NamedPolicy, ToolCallPolicies, type TurnEndHook, TurnEndHooks } from "../agent-session/contracts.ts";
 import { ToolSources } from "../agent-session/tool-sources.ts";
 import type { Configuration } from "./file.ts";
 import type { Entries, HostSays, Seam } from "./plugin.ts";
 
 /** Each seam the configuration lists, as the session's list for it, and `maxHolds` when it says it. */
 export interface SeamLists {
-  readonly toolCalls?: ReadonlyArray<PolicyOfFacts>;
-  readonly modelRequests?: ReadonlyArray<PolicyOfFacts>;
+  readonly toolCalls?: ReadonlyArray<NamedPolicy>;
+  readonly modelRequests?: ReadonlyArray<NamedPolicy>;
   readonly turnEnd?: ReadonlyArray<TurnEndHook>;
   readonly knownModels?: ReadonlyArray<ModelKnowledge>;
   readonly settling?: ReadonlyArray<SettlingSource>;
@@ -35,11 +35,18 @@ const listOf = <S extends Seam>(configuration: Configuration, seam: S, host: Hos
     return made as Entries[S];
   });
 
+/** The policies `seam` lists, each by the name it is listed by. */
+const namedListOf = (configuration: Configuration, seam: "toolCalls" | "modelRequests", host: HostSays): ReadonlyArray<NamedPolicy> | undefined => {
+  const made = listOf(configuration, seam, host);
+  const names = configuration.lists[seam] ?? [];
+  return made?.map((policy, index) => ({ name: names[index]?.name ?? "", policy }));
+};
+
 /** The seam lists of `configuration`, with what the host says. */
 export const seamListsOf = (configuration: Configuration, host: HostSays): SeamLists => {
   const lists = {
-    toolCalls: listOf(configuration, "toolCalls", host),
-    modelRequests: listOf(configuration, "modelRequests", host),
+    toolCalls: namedListOf(configuration, "toolCalls", host),
+    modelRequests: namedListOf(configuration, "modelRequests", host),
     turnEnd: listOf(configuration, "turnEnd", host),
     knownModels: listOf(configuration, "knownModels", host),
     settling: listOf(configuration, "settling", host),

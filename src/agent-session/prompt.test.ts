@@ -60,7 +60,7 @@ const scripted = (replies: ReadonlyArray<Reply>) => {
 };
 
 /** A policy that asks the user before every call; nothing here answers. */
-const asking = Layer.succeed(ToolCallPolicies, [(facts) => Effect.succeed(permissions("default", true, () => "other", facts) as Policy<unknown>)]);
+const asking = Layer.succeed(ToolCallPolicies, [{ name: "permissions", policy: (facts) => Effect.succeed(permissions("default", true, () => "other", facts) as Policy<unknown>) }]);
 
 const services = (replies: ReadonlyArray<Reply>, policy: Layer.Layer<never> = Layer.empty) =>
   Layer.mergeAll(BoringModelProvider, BoringContextAssembler, scripted(replies), SmolToolRunner, CountingTurns, policy);

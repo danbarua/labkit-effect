@@ -10,7 +10,7 @@ import type { Observation } from "../agent-machine/observation.ts";
 import type { Policy } from "../agent-policy/policy.ts";
 import { ModelClient, ModelRequestPolicies } from "./contracts.ts";
 import { openSession } from "./loop.ts";
-import { harnessParts } from "./origin.ts";
+import { policyPart } from "./origin.ts";
 import { receivedJson } from "./received.ts";
 import { EphemeralSessionStore } from "./session-store.ts";
 import { CountingTurns } from "./turns.ts";
@@ -37,7 +37,7 @@ test("P9: a request a policy holds is not made; the turn fails, saying to wait, 
           Layer.succeed(ModelClient, { respond: () => Effect.die(new Error("no request is made")) }),
           SmolToolRunner,
           CountingTurns,
-          Layer.succeed(ModelRequestPolicies, [() => Effect.succeed(holding)]),
+          Layer.succeed(ModelRequestPolicies, [{ name: "holding", policy: () => Effect.succeed(holding) }]),
         ),
       ),
     ),
@@ -45,7 +45,7 @@ test("P9: a request a policy holds is not made; the turn fails, saying to wait, 
   const observed = facts.flatMap((fact) => (fact._tag === "Observed" ? [{ origin: fact.origin, observation: fact.observation }] : []));
   expect(observed.some(({ observation }) => observation._tag === "ModelRequestDispatched")).toBe(false);
   expect(observed.filter(({ observation }) => observation._tag === "ModelFailed")).toMatchObject([
-    { origin: harnessParts.modelRequestPolicy, observation: { failure: 'Not sent: a policy holds model requests for now. Wait, then try again. {"until":"15:00"}' } },
+    { origin: policyPart("model request policy", "holding"), observation: { failure: 'Not sent: a policy holds model requests for now. Wait, then try again. {"until":"15:00"}' } },
   ]);
   const ended = facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? [fact.decision.ending._tag] : []));
   expect(ended).toEqual(["Failed"]);

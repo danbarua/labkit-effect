@@ -75,7 +75,7 @@ const answeredWith = (option: string) =>
           callsEchoOnce(),
           SmolToolRunner,
           CountingTurns,
-          Layer.succeed(ToolCallPolicies, [(facts) => Effect.succeed(permissions("default", true, () => "other", facts) as Policy<unknown>)]),
+          Layer.succeed(ToolCallPolicies, [{ name: "permissions", policy: (facts) => Effect.succeed(permissions("default", true, () => "other", facts) as Policy<unknown>) }]),
         ),
       ),
     ),

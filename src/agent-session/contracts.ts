@@ -151,12 +151,18 @@ export class ToolRunner extends Context.Service<
 /** A policy as a session's facts stand when the request it reviews is to be carried out. */
 export type PolicyOfFacts = (facts: ReadonlyArray<Fact>) => Effect.Effect<Policy<unknown>>;
 
+/** A policy of a list, by the name the list knows it by: what a veto or a question of its says came from it. */
+export interface NamedPolicy {
+  readonly name: string;
+  readonly policy: PolicyOfFacts;
+}
+
 /**
  * The policies each tool call goes through before it runs, in order (`every`: the first veto is the
  * verdict). None by default, so every call runs. What a waiting policy asks is recorded
  * (`PermissionAsked`), and its answer is whatever is observed for the call (`PermissionAnswered`).
  */
-export const ToolCallPolicies = Context.Reference<ReadonlyArray<PolicyOfFacts>>("agent-session/ToolCallPolicies", {
+export const ToolCallPolicies = Context.Reference<ReadonlyArray<NamedPolicy>>("agent-session/ToolCallPolicies", {
   defaultValue: () => [],
 });
 
@@ -165,6 +171,6 @@ export const ToolCallPolicies = Context.Reference<ReadonlyArray<PolicyOfFacts>>(
  * None by default. A veto ends the request's turn (`ModelVetoed`). A policy that waits fails the
  * request (`ModelFailed`), telling the user to wait: nothing wakes it.
  */
-export const ModelRequestPolicies = Context.Reference<ReadonlyArray<PolicyOfFacts>>("agent-session/ModelRequestPolicies", {
+export const ModelRequestPolicies = Context.Reference<ReadonlyArray<NamedPolicy>>("agent-session/ModelRequestPolicies", {
   defaultValue: () => [],
 });
