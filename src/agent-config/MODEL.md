@@ -80,8 +80,10 @@ mcpServers:
 - CF10. `mcpServers` maps a name to a server: its `command`, `args`, `env`, `cwd`, whether a
   session needs it (`required`, false unless said) and how long it has to connect
   (`connectTimeout`, a duration); `type: stdio` may be said, as Claude Code's `.mcp.json` does. They
-  merge key by key, so a project can add a server or change one of the user's; a layer that writes
-  `mcpServers: null` takes away those of the layers before it.
+  merge key by key, so a later layer of the user's can add a server or change one; a layer that
+  writes `mcpServers: null` takes away those of the layers before it. A server is a command the
+  session runs, so only a trusted layer may name one: a project's layer that does is refused, until
+  a folder can be trusted (TODO.md).
 - CF11. `maxBudget` vetoes a model request once the session has cost its `usd` or more (`costIn`:
   a model with no known price costs nothing). It has no default, so a list that names it needs it in
   `plugins`.

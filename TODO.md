@@ -116,7 +116,10 @@ model.
       `/mcp reconnect <server>`; the CLI starts the servers its configuration names (its files,
       `--mcp-config`), and one marked `required: true` that does not connect keeps the session from
       opening. To do: the ACP host reading the configuration (its servers, and `required`); `/mcp`
-      in the REPL; the Streamable HTTP transport; tools a server offers
+      in the REPL, its completions and hints from a machine of the command line's state; MCP
+      servers reached at a URL, which are not supported at all today: a client for the Streamable
+      HTTP transport (and the deprecated HTTP+SSE one), then the ACP host advertising
+      `mcpCapabilities.http` and `.sse`; tools a server offers
       after the session opened (after a reconnect, or `notifications/tools/list_changed`), with
       per-turn tool lists; sampling and elicitation; a result's images and audio sent to the model
       as images and audio where its provider takes them in a tool's result (Anthropic's does), not
@@ -135,6 +138,13 @@ model.
       session, for labkit-web.
 
 ### Configuration
+
+- [ ] Trusted folders (Dan, 2026-10-04): a project's configuration is not read until its folder is
+      trusted. Until then a project's layer may not name extensions or MCP servers (both run code:
+      agent-config CF7, CF10); once a folder is trusted, its layers may.
+- [ ] The product's name (Dan is thinking of `whitelabel-agent`), as one definition a host can brand:
+      the configuration's folders (`agent-config` `configName`, `labkit`) and the environment
+      variables' prefix (`LABKIT_ACP_`).
 
 - [ ] Plug-ins and `policies.yml`. Dan's decisions (2026-10-03):
       - A plug-in declares a Schema for its settings, with a default for each, and the entries it

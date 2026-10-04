@@ -20,6 +20,7 @@ import { McpSchema } from "effect/ai";
 import { type Wire, WireError, WireInput } from "effective-acp/json-rpc";
 import * as Methods from "effective-acp/methods";
 import { ChildProcess, type ChildProcessSpawner } from "effect/process";
+import { withoutCredentials } from "../agent-process/environment.ts";
 import { logKeys } from "./log-keys.ts";
 import * as Peer from "./peer.ts";
 
@@ -132,7 +133,8 @@ export const connectStdio = (
 ): Effect.Effect<McpConnection, McpFailed, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const handle = yield* ChildProcess.make(server.command, [...server.args], {
-      env: { ...process.env, ...server.env },
+      env: { ...withoutCredentials(process.env).env, ...server.env },
+      extendEnv: false,
       ...(server.cwd === undefined ? {} : { cwd: server.cwd }),
     }).pipe(Effect.mapError((cause) => new McpFailed({ server: server.name, reason: `${server.command} could not be started`, cause })));
     return yield* connect(server.name, handle, roots);

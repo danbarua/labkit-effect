@@ -6,11 +6,15 @@
  * session's scope all end it that way. What a consumer does with a run's input and output (`onRun`)
  * runs in the run's scope, and ends with it.
  *
- * Every change of state is logged, with the group's name and everything the state says.
+ * A run is given this process's environment without the variables that hold credentials
+ * (`environment.ts`), and the command's own `env` over it. Every change of state is logged, with the
+ * group's name and everything the state says, and each run's environment by the names left out and
+ * set, never their values.
  */
 
 import { Effect, Exit, Scope, Semaphore, Stream, SubscriptionRef } from "effect";
 import { ChildProcess, type ChildProcessSpawner } from "effect/process";
+import { withoutCredentials } from "./environment.ts";
 import { logKeys } from "./log-keys.ts";
 import { initialProcessState, type ProcessEffect, type ProcessEvent, type ProcessState, stepProcess } from "./machine.ts";
 
@@ -63,8 +67,12 @@ export const makeProcessGroup = (
       Effect.gen(function* () {
         const runScope = yield* Scope.fork(scope);
         runs.set(run, runScope);
+        // This process's environment without its credentials, then the command's own, as said.
+        const inherited = withoutCredentials(process.env);
+        yield* Effect.logInfo(logKeys.process.environment, { name: command.name, run, leftOut: inherited.left, set: Object.keys(command.env) });
         const started = yield* ChildProcess.make(command.command, [...command.args], {
-          env: { ...process.env, ...command.env },
+          env: { ...inherited.env, ...command.env },
+          extendEnv: false,
           ...(command.cwd === undefined ? {} : { cwd: command.cwd }),
         }).pipe(Scope.provide(runScope), Effect.provideContext(context), Effect.result);
         if (started._tag === "Failure") {

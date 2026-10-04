@@ -18,8 +18,10 @@
  * - `mcpServers`: the MCP servers a session starts, by name, each its `command`, `args`, `env`, `cwd`,
  *   whether the session needs it (`required`), and how long it has to connect (`connectTimeout`).
  * - `extensions`: modules to load, each exporting by default a plug-in or a list of them, a path
- *   relative to its file's folder. Only a trusted layer, the user's own, may name them: a project's
- *   file comes with the project, and does not run code.
+ *   relative to its file's folder.
+ *
+ * Only a trusted layer, the user's own, may name extensions or MCP servers: both run code, and a
+ * project's file comes with the project.
  *
  * The layers are decoded merged. A mistake is refused naming the layer that last wrote the value at
  * fault, where in it, and what is wrong. A plug-in's settings are decoded with its Schema, refusing a
@@ -227,6 +229,9 @@ export const decodeLayers = (layers: ReadonlyArray<LayerSource>, registry: Reado
       if (unknown !== undefined) return yield* new ConfigInvalid({ file: layer.name, path: unknown, problem: `Not a key of the configuration; those are: ${topKeys.join(", ")}` });
       if (!layer.trusted && layer.value["extensions"] !== undefined)
         return yield* new ConfigInvalid({ file: layer.name, path: "extensions", problem: "Extensions are loaded only from the user's own configuration: a project's does not run code" });
+      // A server is a command the session runs: a project's layer that names or changes one would run code that came with the project.
+      if (!layer.trusted && layer.value["mcpServers"] !== undefined)
+        return yield* new ConfigInvalid({ file: layer.name, path: "mcpServers", problem: "MCP servers are started only from the user's own configuration: a project's does not run commands" });
     }
     const value = merged(layers.map((layer) => layer.value ?? {}));
     const all = isMapping(value) ? value : {};

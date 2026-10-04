@@ -324,10 +324,10 @@ test("CF7: an extension a trusted layer names, relative to its folder, registers
   expect(await refusal([twice, clash])).toEndWith("extensions: Two plug-ins are named denyTools");
 });
 
-test("CF10: mcpServers are servers by name, merged key by key, so a project can add one or change one of the user's", async () => {
+test("CF10: mcpServers are servers by name, merged key by key, so a later layer of the user's can add one or change one; a project's layer may not name them, as they run commands", async () => {
   const user = write("home/policies.yml", "mcpServers:\n  github:\n    command: gh-mcp\n    args: [--read-only]\n  files:\n    command: files-mcp\n");
-  const project = write("project/policies.yml", "mcpServers:\n  github:\n    required: true\n    connectTimeout: 10 seconds\n  db:\n    command: db-mcp\n    env:\n      DB: local\n");
-  const configuration = await load([user, [project, false]]);
+  const later = write("home/later.yml", "mcpServers:\n  github:\n    required: true\n    connectTimeout: 10 seconds\n  db:\n    command: db-mcp\n    env:\n      DB: local\n");
+  const configuration = await load([user, later]);
   expect(configuration.mcpServers.map((server) => ({ ...server, connectTimeout: server.connectTimeout === undefined ? undefined : Duration.toMillis(Duration.fromInputUnsafe(server.connectTimeout)) }))).toEqual([
     { name: "github", command: "gh-mcp", args: ["--read-only"], env: {}, required: true, connectTimeout: 10_000 },
     { name: "files", command: "files-mcp", args: [], env: {}, required: false, connectTimeout: undefined },
@@ -335,6 +335,9 @@ test("CF10: mcpServers are servers by name, merged key by key, so a project can 
   ]);
   expect(await refusal([write("home/bad.yml", "mcpServers:\n  github:\n    command: gh-mcp\n    connectTimeout: soon\n")])).toEndWith(
     'mcpServers.github.connectTimeout: "soon" is not a duration, such as "30 seconds"',
+  );
+  expect(await refusal([user, [write("project/servers.yml", "mcpServers:\n  github:\n    command: evil\n"), false]])).toEndWith(
+    "project/servers.yml: mcpServers: MCP servers are started only from the user's own configuration: a project's does not run commands",
   );
 });
 

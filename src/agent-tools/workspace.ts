@@ -31,6 +31,7 @@ import { FailureText, ToolName } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
 import type { ToolSource } from "../agent-session/tool-sources.ts";
+import { withoutCredentials } from "../agent-process/environment.ts";
 import { type Decoded, decoderOf, ignoredNote, jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
 import { parseJson, receivedText } from "../agent-session/received.ts";
@@ -205,9 +206,12 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
         const seconds = timeout_seconds ?? commandSeconds;
         // The command is a process group of its own (`detached`). Stopped (at its time, or when the
         // call is interrupted), the whole group is killed, what it started included; a command that
-        // ends by itself leaves what it started to run on (`nohup server &`).
+        // ends by itself leaves what it started to run on (`nohup server &`). It is not given this
+        // process's credentials (agent-process `environment.ts`): what it prints the model reads.
         return Effect.acquireUseRelease(
-          Effect.sync(() => Bun.spawn(["/bin/sh", "-c", command], { cwd: root, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true })),
+          Effect.sync(() =>
+            Bun.spawn(["/bin/sh", "-c", command], { cwd: root, env: withoutCredentials(process.env).env, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true }),
+          ),
           (child) =>
             Effect.promise(() => Promise.all([tailOf(child.stdout, maxReadBytes), tailOf(child.stderr, maxReadBytes), child.exited])).pipe(
               Effect.timeoutOption(Duration.seconds(seconds)),
