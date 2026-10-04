@@ -168,6 +168,27 @@ ships the agent gives its own at its entry point; the CLI's `main(brand)` and th
   (`<PREFIX>ACP_*`), where `/export` writes (`.<name>/exports`), what the ACP host calls itself to a
   client (`agentInfo`) and the MCP client to a server (`clientInfo`), and the CLI's command.
 
+`launch.ts` is what both hosts are launched with: the options they share (`launchFlags`), where a
+flag not given is read from (`launchVariables`), and the configuration's layers the options make
+(`launchConfiguration`, over the host's own defaults; agent-config).
+
+- H19. The options are `--model`, `--permission-mode` (`manual` is `default`), `--strict-tool-input`,
+  `--max-turns`, `--max-budget-usd`, `--mcp-config` (given again for more), `--strict-mcp-config`,
+  `--settings` and `--setting-sources`. A flag not given is read from its variable: the brand's
+  prefix (H18), the host's part (`ACP_` for the ACP launcher's, none for the CLI's), then the
+  flag's name in capitals, `_` for `-` (`LABKIT_MAX_TURNS`, `LABKIT_ACP_MAX_TURNS`); `--mcp-config`
+  takes one value from it. A flag given wins; an empty variable is none; a variable the flag would
+  not take is the flag's error. A variable that is no flag's twin is read as it is named
+  (`OTEL_EXPORTER_OTLP_ENDPOINT`), after the one with the brand's prefix and the host's part.
+- H20. The layers, merged in order, the last write winning: the host's defaults; the user's file,
+  and the project's and the local one when `--setting-sources` names them (agent-config CF12:
+  named, they still may not name extensions or MCP servers); `--settings` (JSON, or a file of JSON
+  or YAML); with `--strict-mcp-config`, no MCP servers but those `--mcp-config` names; each
+  `--mcp-config` (JSON or a file of it, as Claude Code's `.mcp.json`); then the flags:
+  `--permission-mode` sets the permission plug-in's mode, `--max-turns` the turn's most model
+  requests and `--max-budget-usd` the session's budget, a plug-in a flag sets being added last to
+  the model requests' list when it is not on it.
+
 ## What is not built
 
 - A source of the catalog read from a hand-written `models.yml`.

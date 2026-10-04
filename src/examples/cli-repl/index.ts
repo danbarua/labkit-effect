@@ -27,7 +27,9 @@
  * keeps the conversation.
  *
  * It runs as the brand `main` is given, else the one the environment names (`LABKIT_BRAND`), else
- * labkit (`agent-host/brand.ts`): the brand names its command and its folders.
+ * labkit (`agent-host/brand.ts`): the brand names its command and its folders. The options it shares
+ * with the ACP launcher (`agent-host/launch.ts`) are read from their variables when not given:
+ * `--max-turns` from `LABKIT_MAX_TURNS`, and so on.
  *
  * Calling it from an agent's shell tool, use `-p` with the prompt as an argument: without `-p` the
  * REPL waits for input, and without a prompt `-p` reads it from stdin to its end. `bun --silent
@@ -36,7 +38,7 @@
 
 import { cliConfiguration } from "./configuration.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Console, Effect, Option, Stdio, Stream } from "effect";
+import { ConfigProvider, Console, Effect, Option, Stdio, Stream } from "effect";
 import { Argument, Command, Flag, Prompt } from "effect/cli";
 import { Effort, type ModelSettings, ThinkingMode } from "../../agent-machine/settings.ts";
 import { modelOf } from "../../agent-session/configuration/session-setup.ts";
@@ -44,6 +46,7 @@ import { KeyedAndLocalCatalog, keyOf, keyVariables, known, ModelCatalog } from "
 import { latestSession, readSession, storedSessions, summaryOf } from "../../agent-host/directory.ts";
 import { LogsToFile, LogsToStderr } from "../../agent-host/logs.ts";
 import { Brand, brandFrom } from "../../agent-host/brand.ts";
+import { launchFlags, launchVariables } from "../../agent-host/launch.ts";
 import { invalid } from "./invalid.ts";
 import { targetOf } from "./models.ts";
 import { printOnce } from "./print.ts";
@@ -61,7 +64,6 @@ const arg = (name: string) => Argument.String(name).pipe(Argument.optional, Argu
 
 const flags = {
   print: toggle("print", "Ask once, print the answer and exit", "p"),
-  model: text("model", "A well-known model, or provider/model"),
   effort: choice("effort", Effort.literals, "Reasoning effort; a model that does not take it is sent the nearest it does"),
   thinking: choice("thinking", ThinkingMode.literals, "When the model thinks"),
   systemPrompt: text("system-prompt", "The system prompt"),
@@ -73,20 +75,9 @@ const flags = {
   continue: toggle("continue", "Continue the latest conversation", "c"),
   resume: text("resume", "Resume a session by its id; with none, pick one from a list", "r"),
   noSessionPersistence: toggle("no-session-persistence", "Keep the session's facts in memory only, not in its file"),
-  strictToolInput: toggle("strict-tool-input", "Refuse a tool call whose input has properties its tool does not take, rather than run it without them"),
-  // `plan` and `auto` are not built.
-  permissionMode: choice(
-    "permission-mode",
-    ["default", "manual", "acceptEdits", "dontAsk", "bypassPermissions"],
-    "When a tool call that changes things runs: default asks (manual is the same), acceptEdits runs file edits, dontAsk refuses, bypassPermissions runs all",
-  ),
   sessionId: text("session-id", "The new session's id"),
-  maxTurns: optional(Flag.Int("max-turns").pipe(Flag.withDescription("The most model requests one turn makes; the next ends it"))),
-  maxBudgetUsd: optional(Flag.Finite("max-budget-usd").pipe(Flag.withDescription("The session's budget in US dollars: once it has cost that much, its next model request ends its turn"))),
-  mcpConfig: Flag.String("mcp-config").pipe(Flag.atLeast(0), Flag.withDescription("MCP servers, as JSON or a file of it, as Claude Code's .mcp.json; the flag may be given again")),
-  strictMcpConfig: toggle("strict-mcp-config", "Use only the MCP servers --mcp-config names"),
-  settings: text("settings", "Settings: JSON, or a file of JSON or YAML, over the files"),
-  settingSources: text("setting-sources", "Which settings files to read, comma-separated: user, project, local (only user when not given)"),
+  // The options the ACP launcher takes too, each with its variable as its twin.
+  ...launchFlags,
   // Not built yet:
   // name: text("name", "Session display name", "n"),
   // forkSession: toggle("fork-session", "Fork the continued or resumed session"),
@@ -151,15 +142,7 @@ const resumed = (named: string, interactive: boolean) =>
 const configOf = (options: Options, interactive: boolean) =>
   Effect.gen(function* () {
     const brand = yield* Brand;
-    const configuration = yield* cliConfiguration(process.cwd(), {
-      settingSources: options.settingSources,
-      settings: options.settings,
-      mcpConfig: options.mcpConfig,
-      strictMcpConfig: options.strictMcpConfig,
-      permissionMode: options.permissionMode === "manual" ? "default" : options.permissionMode,
-      maxTurns: options.maxTurns,
-      maxBudgetUsd: options.maxBudgetUsd,
-    }, { name: brand.name });
+    const configuration = yield* cliConfiguration(process.cwd(), options, { name: brand.name });
     const permissions = {
       configuration,
       canAsk: interactive && !options.print,
@@ -255,7 +238,11 @@ export const withResumeValue = (args: ReadonlyArray<string>): ReadonlyArray<stri
  * server's.
  */
 export const run = (args: ReadonlyArray<string>, brand: Brand = brandFrom(process.env)) =>
-  Command.runWith(cliOf(brand), { version: brand.version })(withResumeValue(args)).pipe(Effect.provide(KeyedAndLocalCatalog), Effect.provideService(Brand, brand));
+  Command.runWith(cliOf(brand), { version: brand.version })(withResumeValue(args)).pipe(
+    Effect.provide(KeyedAndLocalCatalog),
+    Effect.provideService(Brand, brand),
+    Effect.provideService(ConfigProvider.ConfigProvider, launchVariables(brand)),
+  );
 
 /** Runs the CLI with this process's arguments, as `brand`: a package's bin gives its own. */
 export const main = (brand: Brand = brandFrom(process.env)) => run(process.argv.slice(2), brand).pipe(Effect.provide(BunServices.layer), BunRuntime.runMain);

@@ -8,7 +8,8 @@ import { Effect } from "effect";
 import { runTest } from "../../../tests/support/run.ts";
 import { test, testFolder } from "../../../tests/support/test.ts";
 import type { Configuration } from "../../agent-config/file.ts";
-import { cliConfiguration, type ConfigFlags } from "./configuration.ts";
+import type { ConfigFlags } from "../../agent-host/launch.ts";
+import { cliConfiguration } from "./configuration.ts";
 
 const write = (path: string, text: string): string => {
   const full = join(testFolder(), path);

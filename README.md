@@ -50,6 +50,8 @@ bun install
 bun run vidaimock:install   # the mock provider server the adapter tests run against
 bun run check               # installs it if missing, then typecheck, lint, check:brands, check:rules, tests
 bun run acp:logs [--errors]  # the newest ACP launch log (~/.labkit/logs; LABKIT_ACP_LOG_DIR, _LEVEL, _MAX_BYTES, _BACKUPS)
+bun cli --help              # the CLI; --model, --permission-mode, --max-turns and its other shared options
+                            # are read from LABKIT_MODEL, LABKIT_PERMISSION_MODE, ... when not given
 bun scripts/trajectories/sweep.ts codex         # run both sweeps after changing a core machine, and
 bun scripts/trajectories/sweep.ts claude-code   # read the counts of observations not expected
 ```
