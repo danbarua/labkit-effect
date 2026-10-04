@@ -36,7 +36,7 @@ const functional = {
   "abstract/no-in-place-change": "error",
   "no-plusplus": "error",
   "no-nested-ternary": "error",
-  // A `switch` over a union names every member, or has a default: a new member is a decision the compiler asks for.
+  // A `switch` over a union names every member: a `default` does not count, so a new member is a decision the compiler asks for.
   "typescript/switch-exhaustiveness-check": "error",
 } as const;
 
