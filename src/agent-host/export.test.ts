@@ -1,10 +1,12 @@
 /** A session's transcript as Markdown, read from its facts alone. */
 
 import { expect } from "bun:test";
+import { Schema } from "effect";
 import { boringOpening } from "../../tests/support/boring.ts";
 import { type DrivenMachines, observe, open } from "../../tests/support/drive.ts";
 import { json } from "../../tests/support/received.ts";
 import { test } from "../../tests/support/test.ts";
+import { Fact } from "../agent-machine/fact.ts";
 import { answerPicking, OptionId } from "../agent-policy/permissions.ts";
 import { markdownOf } from "./export.ts";
 
@@ -241,3 +243,121 @@ test("H10 H11: a change of model: the heading names each model asked, the transc
     ),
   );
 });
+
+/** `entries`, each an observation or a decision, as facts in order: observations from a test, all at one time. */
+const factsOf = (entries: ReadonlyArray<{ readonly observation: unknown } | { readonly decision: unknown }>): ReadonlyArray<Fact> =>
+  entries.map((entry, at) =>
+    Schema.decodeUnknownSync(Fact)(
+      "observation" in entry
+        ? { _tag: "Observed", seq: at + 1, time: "2026-10-04T12:00:00.000Z", origin: { _tag: "Test", name: "export" }, observation: entry.observation }
+        : { _tag: "Decided", seq: at + 1, time: "2026-10-04T12:00:00.000Z", decision: entry.decision },
+    ),
+  );
+
+test("H10 H11: the transcript names each input's speaker, each way a tool call failed, an unrecognised part, dropped input, and each way a turn ended without an answer", () => {
+  const facts = factsOf([
+    { observation: boringOpening() },
+    { observation: { _tag: "InputArrived", from: { _tag: "System" }, text: "Check the files." } },
+    { observation: { _tag: "TurnStarted", turn: "turn-1" } },
+    { decision: { _tag: "InputDelivered", turn: "turn-1", inputs: [2] } },
+    {
+      observation: responded("turn-1", [
+        { _tag: "Unrecognised", received: plain("a part of a kind not known") },
+        call("c1", "gone", {}),
+        call("c2", "cat", { path: 1 }),
+        call("c3", "write", { path: "a" }),
+        call("c4", "rm", { path: "b" }),
+      ]),
+    },
+    { observation: { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Failed", reason: { _tag: "NotFound" } } } },
+    { observation: { _tag: "ToolEnded", call: "c2", outcome: { _tag: "Failed", reason: { _tag: "InputRejected", problem: "path is not a string" } } } },
+    { observation: { _tag: "ToolEnded", call: "c3", outcome: { _tag: "Failed", reason: { _tag: "Reported", error: plain("disk full") } } } },
+    { observation: { _tag: "ToolEnded", call: "c4", outcome: { _tag: "Failed", reason: { _tag: "NotRun" } } } },
+    { decision: { _tag: "TurnEnded", turn: "turn-1", ending: { _tag: "Incomplete" } } },
+    { observation: { _tag: "InputArrived", from: { _tag: "Agent", agent: "helper" }, text: "Summarise." } },
+    { observation: { _tag: "TurnStarted", turn: "turn-2" } },
+    { decision: { _tag: "InputDelivered", turn: "turn-2", inputs: [11] } },
+    { observation: { _tag: "InputArrived", from: { _tag: "User" }, text: "Also count them." } },
+    { decision: { _tag: "InputDropped", turn: "turn-2", inputs: [14] } },
+    { decision: { _tag: "TurnEnded", turn: "turn-2", ending: { _tag: "CutShort" } } },
+    { observation: { _tag: "TurnStarted", turn: "turn-3" } },
+    { decision: { _tag: "TurnEnded", turn: "turn-3", ending: { _tag: "Failed", failure: "the provider refused the request" } } },
+    { observation: { _tag: "TurnStarted", turn: "turn-4" } },
+    { decision: { _tag: "TurnEnded", turn: "turn-4", ending: { _tag: "Vetoed", reason: plain("the budget is spent") } } },
+  ]);
+  const transcript = markdownOf(facts);
+  expect(transcript.slice(transcript.indexOf("## Turn 1"), transcript.indexOf("## Totals"))).toMatchInlineSnapshot(`
+    "## Turn 1
+
+    ### System
+
+    Check the files.
+
+    ### Assistant
+
+    _A part of the response was not recognised: a part of a kind not known_
+
+    #### Tool call \`gone\` (\`c1\`)
+
+    \`\`\`json
+    {}
+    \`\`\`
+
+    Failed: no tool is named \`gone\`.
+
+    #### Tool call \`cat\` (\`c2\`)
+
+    \`\`\`json
+    {"path":1}
+    \`\`\`
+
+    Failed: the tool rejected its input: path is not a string
+
+    #### Tool call \`write\` (\`c3\`)
+
+    \`\`\`json
+    {"path":"a"}
+    \`\`\`
+
+    Failed; the tool reported:
+
+    \`\`\`
+    disk full
+    \`\`\`
+
+    #### Tool call \`rm\` (\`c4\`)
+
+    \`\`\`json
+    {"path":"b"}
+    \`\`\`
+
+    Not run.
+
+    _The turn ended with no answer._
+
+    ## Turn 2
+
+    ### Agent \`helper\`
+
+    Summarise.
+
+    _Input given while the turn ran was dropped, as the turn did not end in an answer:_
+
+    ### User
+
+    Also count them.
+
+    _The turn ended cut short: the model's response stopped at a limit._
+
+    ## Turn 3
+
+    _The turn failed: the provider refused the request_
+
+    ## Turn 4
+
+    _A request to the model was vetoed, and the turn ended: the budget is spent_
+
+    "
+  `);
+});
+

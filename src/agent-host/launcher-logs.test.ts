@@ -129,6 +129,20 @@ test("H13: a record that would take the file past maxBytes rotates it first: .js
   expect(indices).toEqual(Array.from({ length: indices.length }, (_, offset) => indices[0]! + offset));
 });
 
+test("H13: with backups set to 0, a record that would take the file past maxBytes deletes the file and starts it again: no backup is kept", async () => {
+  const dir = `${testFolder()}/logs`;
+  await launched(
+    { dir, maxBytes: 1000, backups: 0 },
+    Effect.forEach(Array.from({ length: 20 }, (_, index) => index), (index) => Effect.logInfo(`entry ${index} ${"x".repeat(200)}`), { discard: true }),
+  );
+  const file = fileOf(dir);
+  expect(readdirSync(dir)).toEqual([file.slice(dir.length + 1)]);
+  expect(Bun.file(file).size).toBeLessThanOrEqual(1000);
+  const indices = (await linesOf(file)).map(({ message }) => Number(/entry (\d+)/.exec(String(message))![1]));
+  expect(indices.at(-1)).toBe(19);
+  expect(indices[0]).toBeGreaterThan(0);
+});
+
 test("H13: a record past 256 KiB is cut to fit, saying how many bytes were left out; it is not dropped", async () => {
   const dir = `${testFolder()}/logs`;
   const big = `"é😀\\x`.repeat(60 * 1024);
