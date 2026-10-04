@@ -23,7 +23,7 @@ import type { ProcessState } from "../agent-process/machine.ts";
 import { isCredential } from "../agent-process/environment.ts";
 import { makeProcessGroup } from "../agent-process/process-group.ts";
 import { type ClientInfo, connect, McpFailed, type McpConnection, type McpServerStdio, type Root, type ToolResult } from "./client.ts";
-import { connectRemote, type HttpRejection, type McpServerRemote, rejectionOf, type RemoteRefused } from "./http.ts";
+import { connectRemote, type HttpRejection, type McpServerRemote, rejectionOf, type RemoteRefused, whereOf } from "./http.ts";
 import { logKeys } from "./log-keys.ts";
 import { describe, initialMcpServerState, type McpServerEvent, type McpServerState, stepMcpServer } from "./server-machine.ts";
 
@@ -163,7 +163,8 @@ export const startMcpServer = (
 
     const runs: Runs = isRemote(server)
       ? yield* remoteRuns(dispatch, (run, scope) =>
-          connectOn(run, remoteConnection(server, roots, options.clientInfo, timeout, (event) => dispatch(event({ run })), scope)),
+          // A run that ended is stopped too: nothing is left of it.
+          connectOn(run, remoteConnection(server, roots, options.clientInfo, timeout, (event) => dispatch(event({ run })).pipe(Effect.andThen(Effect.suspend(() => stopRun))), scope)),
         )
       : yield* stdioRuns(server, dispatch, (run, handle) => connectOn(run, connect(server.name, handle, roots, options.clientInfo)));
     stopRun = runs.stopRun;
@@ -311,19 +312,28 @@ const remoteConnection = (
         const watched = current;
         yield* watched.connection.closed;
         if (current !== watched) continue;
-        yield* Effect.logWarning(logKeys.server.connectionLost, { server: server.name, url: server.url });
+        yield* Effect.logWarning(logKeys.server.connectionLost, { server: server.name, url: whereOf(server.url) });
         if ((yield* Effect.result(renew(watched)))._tag === "Failure") return;
       }
     }).pipe(Effect.forkIn(runScope));
 
+    /** Whether HTTP refused a request for its credentials. */
+    const credentialsRefused = (error: McpFailed) => {
+      const status = rejectionOf(error)?.status;
+      return status === 401 || status === 403;
+    };
+
     const call: McpConnection["call"] = (tool, args) =>
       Effect.gen(function* () {
-        const used = current;
+        // A connection being made anew is waited for.
+        const used = yield* lock.withPermit(Effect.sync(() => current));
         return yield* used.connection.call(tool, args).pipe(
+          // Credentials refused mid-session (a key revoked): the run has failed or needs authorization, and the call fails.
+          Effect.tapError((error) => (credentialsRefused(error) ? ended(({ run }) => refusalOf(server, run, rejectionOf(error)!)) : Effect.void)),
           Effect.catchIf(
             (error) => rejectionOf(error)?.sessionExpired === true,
             () =>
-              Effect.logWarning(logKeys.server.sessionRenewed, { server: server.name, url: server.url, tool }).pipe(
+              Effect.logWarning(logKeys.server.sessionRenewed, { server: server.name, url: whereOf(server.url), tool }).pipe(
                 Effect.andThen(renew(used)),
                 Effect.mapError((failed) => (failed._tag === "McpFailed" ? failed : new McpFailed({ server: server.name, reason: failed.rejection.said, cause: failed }))),
                 Effect.flatMap((made) => made.connection.call(tool, args)),

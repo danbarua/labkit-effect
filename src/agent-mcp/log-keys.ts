@@ -55,5 +55,7 @@ export const logKeys = {
     streamEnded: "mcp.http.stream_ended",
     /** The server's stream could not be read on: why. */
     streamBroke: "mcp.http.stream_broke",
+    /** The session could not be ended (DELETE) as the connection closed: the status, or why. */
+    notEnded: "mcp.http.not_ended",
   },
 } as const;

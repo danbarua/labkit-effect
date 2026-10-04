@@ -12,7 +12,8 @@
  *   posted to; everything the server sends comes on the stream.
  *
  * With `auth`, every request needs `Authorization: Bearer <token>`, else 401, with a
- * `WWW-Authenticate` that points at OAuth's metadata when `oauth`. `expire` forgets every session;
+ * `WWW-Authenticate` that points at OAuth's metadata when `oauth`; `setToken` changes it. `expire`
+ * forgets every session;
  * `dropStreams` ends every stream (an HTTP+SSE session goes with its stream). Every request is kept
  * (`requests`): its method, path, and the MCP headers it carried.
  */
@@ -45,6 +46,8 @@ export interface FakeHttpServer {
   readonly deleted: ReadonlyArray<string>;
   readonly expire: () => void;
   readonly dropStreams: () => void;
+  /** The token `auth` takes from now on: the one a client has is revoked. */
+  readonly setToken: (token: string) => void;
   readonly stop: () => void;
 }
 
@@ -66,6 +69,7 @@ const encoder = new TextEncoder();
 const event = (message: unknown, name?: string) => encoder.encode(`${name === undefined ? "" : `event: ${name}\n`}data: ${JSON.stringify(message)}\n\n`);
 
 export const startFakeHttpServer = (options: FakeHttpOptions): FakeHttpServer => {
+  let token = options.auth?.token;
   const sessions = new Map<string, Session>();
   const requests: Array<SeenRequest> = [];
   const deleted: Array<string> = [];
@@ -123,7 +127,7 @@ export const startFakeHttpServer = (options: FakeHttpOptions): FakeHttpServer =>
         accept: request.headers.get("accept"),
         carried: messages.map((message) => message.method ?? "response"),
       });
-      if (options.auth !== undefined && request.headers.get("authorization") !== `Bearer ${options.auth.token}`) return unauthorized(url.origin);
+      if (token !== undefined && request.headers.get("authorization") !== `Bearer ${token}`) return unauthorized(url.origin);
 
       if (options.transport === "sse") {
         if (request.method === "GET" && url.pathname === "/sse") {
@@ -212,6 +216,9 @@ export const startFakeHttpServer = (options: FakeHttpOptions): FakeHttpServer =>
     requests,
     deleted,
     expire: () => sessions.clear(),
+    setToken: (next) => {
+      token = next;
+    },
     dropStreams: () => {
       for (const [id, session] of sessions) {
         try {

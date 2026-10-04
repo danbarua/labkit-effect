@@ -88,6 +88,16 @@ const methodsOf = (message: JsonRpcMessage | ReadonlyArray<JsonRpcMessage>): Rea
 const answeredBy = (value: unknown): JsonRpcId | undefined =>
   typeof value === "object" && value !== null && !("method" in value) && "id" in value ? (value.id as JsonRpcId) : undefined;
 
+/** A URL as the log says it: its origin and path, without a query, which may hold a credential. */
+export const whereOf = (url: string): string => {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return "(not a URL)";
+  }
+};
+
 /** What an error says: its message, or itself as JSON. */
 const textOf = (error: unknown): string => (error instanceof Error ? error.message : JSON.stringify(error));
 
@@ -119,7 +129,7 @@ const makeInbox = (server: McpServerRemote) =>
     /** Answers each request in `message` with the endpoint's refusal. */
     const refused = (message: JsonRpcMessage | ReadonlyArray<JsonRpcMessage>, rejection: HttpRejection) =>
       Effect.gen(function* () {
-        yield* Effect.logWarning(logKeys.http.refused, { server: server.name, url: server.url, methods: methodsOf(message), ...rejection });
+        yield* Effect.logWarning(logKeys.http.refused, { server: server.name, url: whereOf(server.url), methods: methodsOf(message), ...rejection });
         const text = rejection.status === 0 ? rejection.said : `HTTP ${rejection.status}${rejection.sessionExpired ? " (the session has ended)" : ""}: ${rejection.said}`;
         for (const id of requestIdsOf(message)) yield* deliver(WireInput.Json({ value: { jsonrpc: "2.0", id, error: { code: refusedCode, message: text, data: { http: rejection } } } }));
       });
@@ -148,12 +158,15 @@ const makeInbox = (server: McpServerRemote) =>
 
 /** What a refusing response says, read from it. */
 const rejectionFrom = (response: HttpClientResponse.HttpClientResponse, withSession: boolean): Effect.Effect<HttpRejection> =>
-  Effect.map(Effect.orElseSucceed(response.text, () => ""), (body) => ({
-    status: response.status,
-    authenticate: response.headers["www-authenticate"],
-    sessionExpired: withSession && response.status === 404,
-    said: body.slice(0, saidLimit),
-  }));
+  Effect.map(
+    Effect.catch(response.text, (error) => Effect.succeed(`(its body could not be read: ${error.message})`)),
+    (body) => ({
+      status: response.status,
+      authenticate: response.headers["www-authenticate"],
+      sessionExpired: withSession && response.status === 404,
+      said: body.slice(0, saidLimit),
+    }),
+  );
 
 const unreached = (error: { readonly message: string }): HttpRejection => ({ status: 0, sessionExpired: false, said: `the server could not be reached: ${error.message}` });
 
@@ -192,7 +205,7 @@ const streamableHttp = (server: McpServerRemote): Effect.Effect<RemoteWire, neve
         const given = response.headers["mcp-session-id"];
         if (given !== undefined && given !== session) {
           session = given;
-          yield* Effect.logInfo(logKeys.http.session, { server: server.name, url: server.url });
+          yield* Effect.logInfo(logKeys.http.session, { server: server.name, url: whereOf(server.url) });
         }
         if (response.status >= 400) return yield* refused(message, yield* rejectionFrom(response, withSession));
         if (response.status === 202 || response.status === 204) return;
@@ -204,24 +217,30 @@ const streamableHttp = (server: McpServerRemote): Effect.Effect<RemoteWire, neve
     const listen = Effect.gen(function* () {
       const response = yield* execute(HttpClientRequest.get(server.url).pipe(HttpClientRequest.setHeaders(headersOf("text/event-stream"))));
       if (response.status === 405) {
-        yield* Effect.logInfo(logKeys.http.noStream, { server: server.name, url: server.url });
+        yield* Effect.logInfo(logKeys.http.noStream, { server: server.name, url: whereOf(server.url) });
         return false;
       }
       if (response.status >= 400) {
-        yield* Effect.logWarning(logKeys.http.streamRefused, { server: server.name, url: server.url, ...(yield* rejectionFrom(response, true)) });
+        yield* Effect.logWarning(logKeys.http.streamRefused, { server: server.name, url: whereOf(server.url), ...(yield* rejectionFrom(response, true)) });
         return false;
       }
       yield* eventsOf(response.stream).pipe(Stream.runForEach((event) => deliver(parsed(event.data))));
-      yield* Effect.logInfo(logKeys.http.streamEnded, { server: server.name, url: server.url });
+      yield* Effect.logInfo(logKeys.http.streamEnded, { server: server.name, url: whereOf(server.url) });
       return true;
-    }).pipe(Effect.catch((error) => Effect.logWarning(logKeys.http.streamBroke, { server: server.name, url: server.url, cause: textOf(error) }).pipe(Effect.as(false))));
+    }).pipe(Effect.catch((error) => Effect.logWarning(logKeys.http.streamBroke, { server: server.name, url: whereOf(server.url), cause: textOf(error) }).pipe(Effect.as(false))));
 
     yield* Effect.addFinalizer(() =>
       session === undefined
         ? Effect.void
         : http
             .execute(HttpClientRequest.make("DELETE")(server.url).pipe(HttpClientRequest.setHeaders(headersOf("application/json"))))
-            .pipe(Effect.timeout("2 seconds"), Effect.ignore),
+            .pipe(
+              Effect.timeout("2 seconds"),
+              Effect.flatMap((response) =>
+                response.status < 400 ? Effect.void : Effect.logWarning(logKeys.http.notEnded, { server: server.name, url: whereOf(server.url), status: response.status }),
+              ),
+              Effect.catch((error) => Effect.logWarning(logKeys.http.notEnded, { server: server.name, url: whereOf(server.url), cause: textOf(error) })),
+            ),
     );
 
     const wire: Wire = {
@@ -260,8 +279,8 @@ const httpSse = (server: McpServerRemote): Effect.Effect<RemoteWire, RemoteRefus
       Stream.runForEach((event) =>
         event.event === "endpoint" ? Deferred.succeed(endpoint, new URL(event.data, server.url).href).pipe(Effect.asVoid) : deliver(parsed(event.data)),
       ),
-      Effect.catch((error) => Effect.logWarning(logKeys.http.streamBroke, { server: server.name, url: server.url, cause: textOf(error) })),
-      Effect.andThen(Effect.logInfo(logKeys.http.streamEnded, { server: server.name, url: server.url })),
+      Effect.catch((error) => Effect.logWarning(logKeys.http.streamBroke, { server: server.name, url: whereOf(server.url), cause: textOf(error) })),
+      Effect.andThen(Effect.logInfo(logKeys.http.streamEnded, { server: server.name, url: whereOf(server.url) })),
       // The stream is the connection: when it ends, the wire does.
       Effect.ensuring(Queue.end(inbox)),
       Effect.forkIn(scope),
@@ -273,7 +292,8 @@ const httpSse = (server: McpServerRemote): Effect.Effect<RemoteWire, RemoteRefus
         const response = yield* execute(
           HttpClientRequest.post(posted).pipe(HttpClientRequest.setHeaders(headersOf("application/json")), HttpClientRequest.bodyText(JSON.stringify(message), "application/json")),
         );
-        if (response.status >= 400) return yield* refused(message, yield* rejectionFrom(response, false));
+        // The endpoint's URL carries the session: a 404 there is the session ended.
+        if (response.status >= 400) return yield* refused(message, yield* rejectionFrom(response, true));
         // The answers come on the stream; a body, if the server sends one, is read as messages too.
         if (response.status !== 202 && response.status !== 204) yield* Effect.forkIn(answers([], messagesOf(response).pipe(Stream.filter((text) => text.trim() !== ""))), scope);
       }).pipe(Effect.catch((error) => refused(message, unreached(error))));

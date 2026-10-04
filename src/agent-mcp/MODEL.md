@@ -29,8 +29,6 @@ tried first (TODO.md, the MCP servers entry): it drops what a server sends unask
 - OAuth: a server that asks for it needs authorization (MS7); a token can be given in its headers.
 - Resuming a Streamable HTTP stream that broke off (`Last-Event-ID`): a request whose stream ends
   before its answer fails, saying so.
-- MCP servers in the CLI (the ACP host starts those a client names: `agent-acp` AG22, AG23), and
-  `required: true`, which waits for the configuration file.
 - Sampling and elicitation: the client does not offer them, so a server does not ask.
 - A change of a server's tool list (`notifications/tools/list_changed`) is logged, not acted on;
   so are tools a reconnected server lists that it did not list before.
@@ -71,7 +69,8 @@ tried first (TODO.md, the MCP servers entry): it drops what a server sends unask
   fails, and is not made again: whether it ran is not known. When a new connection cannot be made,
   the run has ended; when the server refuses the credentials or asks for them, it has failed or
   needs authorization (MS7).
-- MS7. A remote server that answers 401 or 403 needs authorization when its headers give no
+- MS7. A remote server that answers 401 or 403, connecting or to a request once ready (a key
+  revoked), needs authorization when its headers give no
   credentials (an `Authorization` header, or one named for a credential: `X-API-Key`), saying
   whether it asks for OAuth (a `WWW-Authenticate` that names OAuth's metadata), which this client
   does not do; with credentials given, it has failed: they were refused.
@@ -87,7 +86,9 @@ tried first (TODO.md, the MCP servers entry): it drops what a server sends unask
   with it.
 - MH3. A request the endpoint refuses fails with what HTTP said (`rejectionOf`: its status, its
   `WWW-Authenticate`, the start of its body, and whether the session had ended); a server not
-  reached is status 0. The headers a server is given go with every request, and are never logged.
+  reached is status 0. The headers a server is given go with every request, and are never logged;
+  its URL is logged without its query. An HTTP+SSE endpoint's 404 is the session ended, as its URL
+  carries the session.
 - MT1. A server's tools are offered under `mcp__<server>`; every character of the server's or a
   tool's name that providers do not take in a tool's name (anything but letters, digits, `_` and
   `-`) is offered as `_`. A tool whose name is then longer than 64 characters, or the same as

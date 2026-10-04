@@ -24,14 +24,17 @@ const textOf = (result: ToolResult) =>
 const remoteOf = (fake: FakeHttpServer, transport: "http" | "sse", headers: Readonly<Record<string, string>> = {}): McpServerRemote => ({ name: "fake", transport, url: fake.url, headers });
 
 /** Runs `use` with a fake server of `options`, and what was logged meanwhile: each record's message. */
-const withFake = async <A, E>(options: FakeHttpOptions, use: (fake: FakeHttpServer) => Effect.Effect<A, E, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner>) => {
+const withFake = async <A, E>(
+  options: FakeHttpOptions,
+  use: (fake: FakeHttpServer, logged: ReadonlyArray<unknown>) => Effect.Effect<A, E, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner>,
+) => {
   const fake = startFakeHttpServer(options);
   const logged: Array<unknown> = [];
   const capture = Logger.make((log) => {
     logged.push(log.message);
   });
   try {
-    const value = await runTest(use(fake).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, Logger.layer([capture], { mergeWithExisting: true })))));
+    const value = await runTest(use(fake, logged).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, Logger.layer([capture], { mergeWithExisting: true })))));
     return { value, logged: logged.flat(), fake };
   } finally {
     fake.stop();
@@ -40,7 +43,10 @@ const withFake = async <A, E>(options: FakeHttpOptions, use: (fake: FakeHttpServ
 
 /** The data of the messages the server logged (`notifications/message`). */
 const saidIn = (logged: ReadonlyArray<unknown>) =>
-  logged.filter((each): each is { data: string } => typeof each === "object" && each !== null && "data" in each).map((each) => each.data);
+  logged.flat().filter((each): each is { data: string } => typeof each === "object" && each !== null && "data" in each).map((each) => each.data);
+
+/** Waits, within five seconds, until `done`: for what happens in the background (a stream's messages, a connection made anew). */
+const until = (done: () => boolean) => Effect.sleep("20 millis").pipe(Effect.repeat({ until: done, times: 250 }));
 
 interface Transport {
   readonly name: string;
@@ -55,14 +61,14 @@ const transports: ReadonlyArray<Transport> = [
 ];
 
 test.each([...transports])("MC1 MC4 MH1: over $name, the client initializes, lists every page of tools, calls one, and a refused call fails naming the server", async ({ options, transport }: Transport) => {
-  const { value, logged } = await withFake(options, (fake) =>
+  const { value, logged } = await withFake(options, (fake, logged) =>
     Effect.gen(function* () {
       const connection = yield* connectRemote(remoteOf(fake, transport), roots, { name: "acme", version: "2.0.0" });
       const tools = yield* connection.tools;
       const echoed = textOf(yield* connection.call("echo", { message: "hi" }));
       const unknown = yield* Effect.flip(connection.call("no_such_tool", {}));
       // The server's log line arrives on a stream of its own (the GET stream, or HTTP+SSE's).
-      yield* Effect.sleep("200 millis");
+      yield* until(() => saidIn(logged).includes("initialized by acme 2.0.0"));
       return { server: connection.initialized.serverInfo.name, tools: tools.map((tool) => tool.name), echoed, unknown: unknown.message };
     }),
   );
@@ -76,12 +82,12 @@ test.each([...transports])("MC1 MC4 MH1: over $name, the client initializes, lis
 test.each(transports.filter((each) => each.options.respond !== "json"))(
   "MC2 MC3 MH1: over $name, the server's request during a call (roots/list) is answered, and a call interrupted is cancelled at the server",
   async ({ options, transport }: Transport) => {
-    const { value, logged } = await withFake(options, (fake) =>
+    const { value, logged } = await withFake(options, (fake, logged) =>
       Effect.gen(function* () {
         const connection = yield* connectRemote(remoteOf(fake, transport), roots);
         const asked = JSON.parse(textOf(yield* connection.call("roots", {})));
         yield* connection.call("slow", {}).pipe(Effect.timeout("200 millis"), Effect.ignore);
-        yield* Effect.sleep("300 millis");
+        yield* until(() => saidIn(logged).some((data) => data.startsWith("cancelled")));
         return asked;
       }),
     );
@@ -95,7 +101,7 @@ test("MH1: Streamable HTTP: after initialize every message carries the session a
     Effect.gen(function* () {
       const connection = yield* connectRemote(remoteOf(fake, "http"), roots);
       yield* connection.tools;
-      yield* Effect.sleep("100 millis");
+      yield* until(() => fake.requests.some((request) => request.method === "GET"));
     }),
   );
   const [initialize, ...after] = fake.requests;
@@ -111,13 +117,12 @@ test("MH1: Streamable HTTP: after initialize every message carries the session a
 });
 
 test("MH1: Streamable HTTP: a server that offers no GET stream (405) is used without one, and says so", async () => {
-  const { value, logged } = await withFake({ transport: "http", getStream: false }, (fake) =>
+  const { value, logged } = await withFake({ transport: "http", getStream: false }, (fake, logged) =>
     Effect.gen(function* () {
       const connection = yield* connectRemote(remoteOf(fake, "http"), roots);
       const echoed = textOf(yield* connection.call("echo", { message: "still" }));
-      // The GET is made in the background once initialized: its 405 is waited for, and then what it logs.
-      yield* Effect.sleep("20 millis").pipe(Effect.repeat({ until: () => fake.requests.some((request) => request.method === "GET"), times: 100 }));
-      yield* Effect.sleep("100 millis");
+      // The GET is made in the background once initialized: what its 405 logs is waited for.
+      yield* until(() => logged.flat().includes(logKeys.http.noStream));
       return echoed;
     }),
   );
@@ -152,7 +157,7 @@ test("MH3: a request the endpoint refuses fails with what HTTP said; a server no
 });
 
 /** The first state of `server` that `is` accepts, within five seconds. */
-const until = (server: McpServer, is: (state: McpServerState) => boolean) =>
+const stateWhen = (server: McpServer, is: (state: McpServerState) => boolean) =>
   server.changes.pipe(Stream.filter(is), Stream.runHead, Effect.timeout("5 seconds"), Effect.map((state) => (state._tag === "Some" ? state.value : undefined)));
 
 test("MS6: a remote server that no longer has the session is given a new one, and the call it refused is made again once, said in a warning", async () => {
@@ -176,7 +181,8 @@ test("MS6: an HTTP+SSE server whose stream ends between requests is connected an
       const server = yield* startMcpServer(remoteOf(fake, "sse"), roots);
       yield* server.settled;
       fake.dropStreams();
-      yield* Effect.sleep("300 millis");
+      // Connected anew: a second stream, and `initialize` on it.
+      yield* until(() => fake.requests.filter((request) => request.carried.includes("initialize")).length === 2);
       return { echoed: textOf(yield* server.call("echo", { message: "again" })), now: (yield* server.state)._tag };
     }),
   );
@@ -201,13 +207,29 @@ test("MS7: a server that asks for credentials none are given for needs authoriza
   expect((await settle({ transport: "http", auth: { token: "right" } }, { Authorization: "Bearer right" }))._tag).toBe("Ready");
 });
 
+test("MS7: a key revoked mid-session: the next call fails, and the server has failed, saying its credentials were refused", async () => {
+  const { value } = await withFake({ transport: "http", auth: { token: "right" } }, (fake) =>
+    Effect.gen(function* () {
+      const server = yield* startMcpServer(remoteOf(fake, "http", { Authorization: "Bearer right" }), roots);
+      const ready = (yield* server.settled)._tag;
+      fake.setToken("rotated");
+      const refused = yield* Effect.flip(server.call("echo", { message: "now" }));
+      const failed = yield* stateWhen(server, (state) => state._tag === "Failed");
+      return { ready, refused: refused.message, failed, running: yield* server.running };
+    }),
+  );
+  expect(value.ready).toBe("Ready");
+  expect(value.refused).toStartWith("fake: tools/call echo failed");
+  expect(value.failed).toEqual({ _tag: "Failed", run: 1, reason: "the server refused the credentials given (HTTP 401: Unauthorized)" });
+});
+
 test("MS4: reconnecting a remote server ends its session and makes another, as a new run", async () => {
   const { value, fake } = await withFake({ transport: "http" }, (fake) =>
     Effect.gen(function* () {
       const server = yield* startMcpServer(remoteOf(fake, "http"), roots);
       yield* server.settled;
       yield* server.reconnect;
-      const again = yield* until(server, (state) => state._tag === "Ready" && state.run === 2);
+      const again = yield* stateWhen(server, (state) => state._tag === "Ready" && state.run === 2);
       return { again: again?.run, echoed: textOf(yield* server.call("echo", { message: "two" })) };
     }),
   );
