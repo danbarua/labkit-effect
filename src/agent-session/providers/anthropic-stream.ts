@@ -6,6 +6,7 @@
  * response was cut short, or the request was stopped) is not part of it.
  */
 
+import { Array as Arr, Order } from "effect";
 import { isObject, type Json } from "../shaping.ts";
 
 interface JsonObject {
@@ -55,7 +56,8 @@ const text = (value: Json | undefined): string => (typeof value === "string" ? v
 /** The block with the delta applied, or the delta's type when it is one this machine does not know. */
 function applied(arriving: Arriving, delta: JsonObject): Arriving | string {
   const { block } = arriving;
-  switch (delta["type"]) {
+  const type = text(delta["type"]);
+  switch (type) {
     case "text_delta":
       return { ...arriving, block: { ...block, text: text(block["text"]) + text(delta["text"]) } };
     case "thinking_delta":
@@ -69,7 +71,7 @@ function applied(arriving: Arriving, delta: JsonObject): Arriving | string {
       return { ...arriving, block: { ...block, citations: [...citations, delta["citation"] ?? null] } };
     }
     default:
-      return text(delta["type"]);
+      return type;
   }
 }
 
@@ -86,7 +88,7 @@ function finished(arriving: Arriving): JsonObject | undefined {
 export function assemble(state: Assembling, event: Json): Assembled {
   if (!isObject(event)) return { state };
   const index = typeof event["index"] === "number" ? event["index"] : -1;
-  switch (event["type"]) {
+  switch (text(event["type"])) {
     case "message_start":
       return { state: { ...state, message: object(event["message"]) } };
     case "content_block_start": {
@@ -106,8 +108,7 @@ export function assemble(state: Assembling, event: Json): Assembled {
       const arriving = state.arriving.get(index);
       const completed = arriving === undefined ? undefined : finished(arriving);
       if (completed === undefined) return { state };
-      const stillArriving = new Map(state.arriving);
-      stillArriving.delete(index);
+      const stillArriving = new Map([...state.arriving].filter(([at]) => at !== index));
       return { state: { ...state, arriving: stillArriving, complete: new Map([...state.complete, [index, completed]]) }, completed };
     }
     case "message_delta":
@@ -129,6 +130,9 @@ export function assemble(state: Assembling, event: Json): Assembled {
   }
 }
 
+/** Entries of a map by block index, in index order. */
+const byIndex: Order.Order<readonly [number, unknown]> = Order.mapInput(Order.Number, ([at]) => at);
+
 /** The message as far as it is complete; undefined when the stream never started one. */
 export function assembled(state: Assembling): JsonObject | undefined {
   if (state.message === undefined) return undefined;
@@ -137,11 +141,11 @@ export function assembled(state: Assembling): JsonObject | undefined {
     ...state.message,
     ...state.changed,
     ...(usage === undefined ? {} : { usage }),
-    content: [...state.complete].sort(([a], [b]) => a - b).map(([, block]) => block),
+    content: Arr.sort(state.complete, byIndex).map(([, block]) => block),
   };
 }
 
 /** The types of the blocks that were still arriving, in order. */
 export function cut(state: Assembling): ReadonlyArray<string> {
-  return [...state.arriving].sort(([a], [b]) => a - b).map(([, arriving]) => text(arriving.block["type"]));
+  return Arr.sort(state.arriving, byIndex).map(([, arriving]) => text(arriving.block["type"]));
 }

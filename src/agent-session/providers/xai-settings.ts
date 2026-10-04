@@ -23,25 +23,36 @@ import type { Target } from "../contracts.ts";
 import { knownOf } from "../configuration/well-known-models.ts";
 
 export function xAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyArray<string>): Settled {
-  const adjusted: Array<Adjustment> = [];
   const { thinking, observe, maxOutputTokens, cache } = settings;
-  if (cache !== undefined)
-    adjusted.push({
-      adjusted: { _tag: "Cache", asked: cache },
-      reason: "xAI caches every request for as long as the server keeps it, and has no setting for how long",
-    });
-  if (observe === "off" || observe === "progress_only")
-    adjusted.push({
-      adjusted: { _tag: "Observe", asked: observe, used: "all" },
-      reason: "xAI returns the reasoning's summary with every response, and cannot be asked not to",
-    });
-  if (thinking === "before_answer" || thinking === "between_tools")
-    adjusted.push({
-      adjusted: { _tag: "Thinking", asked: thinking, used: "auto" },
-      reason: "xAI's Responses endpoint has no setting for when the model thinks",
-    });
   const { sent: sentEffort, adjusted: effortAdjusted } = effortFor(settings, efforts);
-  adjusted.push(...effortAdjusted);
+  const cacheAdjusted: ReadonlyArray<Adjustment> =
+    cache === undefined
+      ? []
+      : [
+          {
+            adjusted: { _tag: "Cache", asked: cache },
+            reason: "xAI caches every request for as long as the server keeps it, and has no setting for how long",
+          },
+        ];
+  const observeAdjusted: ReadonlyArray<Adjustment> =
+    observe === "off" || observe === "progress_only"
+      ? [
+          {
+            adjusted: { _tag: "Observe", asked: observe, used: "all" },
+            reason: "xAI returns the reasoning's summary with every response, and cannot be asked not to",
+          },
+        ]
+      : [];
+  const thinkingAdjusted: ReadonlyArray<Adjustment> =
+    thinking === "before_answer" || thinking === "between_tools"
+      ? [
+          {
+            adjusted: { _tag: "Thinking", asked: thinking, used: "auto" },
+            reason: "xAI's Responses endpoint has no setting for when the model thinks",
+          },
+        ]
+      : [];
+  const adjusted = [...cacheAdjusted, ...observeAdjusted, ...thinkingAdjusted, ...effortAdjusted];
   return {
     fields: {
       ...(sentEffort === undefined ? {} : { reasoning: { effort: sentEffort } }),

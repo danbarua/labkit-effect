@@ -28,7 +28,7 @@
 import type { BlobId } from "../../agent-machine/blob.ts";
 import { knownOf, takesFile } from "../configuration/well-known-models.ts";
 import { OpenAiClient } from "@effect/ai-openai-compat";
-import { Effect, Layer, Ref, type Schema, Stream } from "effect";
+import { Array as Arr, Effect, HashSet, Layer, Order, Ref, type Schema, Stream } from "effect";
 import type * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
 import { CallId, ModelText, StopReason, ThinkingText, ToolName, type TurnId } from "../../agent-machine/names.ts";
@@ -145,38 +145,51 @@ function keptFields(
   readonly calls: ReadonlyArray<Readonly<Record<string, Json>>>;
   readonly supplied: Shaped["supplied"];
 } {
-  const fields: Record<string, Json> = {};
-  const content = new Map<number, ReadonlyArray<Json>>();
-  const extras = new Map<string, Readonly<Record<string, Json>>>();
-  const setBy = new Map<string, ContextPart>();
-  const supplied = message.parts.flatMap((part, at) => {
-    if (part._tag !== "Thinking" && part._tag !== "Unrecognised") return [];
-    // One server can serve many models, and a router many vendors: each model's own goes back to it alone.
-    const back = sentBack(part, target, "Model", (text) => ({ json: [{ content: [{ type: "text", text }] }], supplied: [] }));
-    const [piece] = back.json as ReadonlyArray<Json>;
-    if (piece === undefined) return back.supplied;
-    if (!isObject(piece)) return leftOut(part, "it is not a message's fields").supplied;
-    return Object.entries(piece).flatMap(([field, value]) => {
-      if (field === "content" && Array.isArray(value)) {
-        content.set(at, value);
-        return [];
-      }
-      if (field !== "tool_calls" || !Array.isArray(value)) {
-        // Two responses with nothing between them are one message: the later one's field is kept.
-        const earlier = setBy.get(field);
-        fields[field] = value as Json;
-        setBy.set(field, part);
-        return earlier === undefined ? [] : leftOut(earlier, `a later response in the same message holds ${field} too`).supplied;
-      }
-      return (value as ReadonlyArray<Json>).flatMap((call) => {
-        const id = isObject(call) ? call["id"] : undefined;
-        if (typeof id !== "string" || !calls.some((own) => own["id"] === id)) return leftOut(part, "its call is not in the message").supplied;
-        extras.set(id, call as Readonly<Record<string, Json>>);
-        return [];
-      });
-    });
-  });
-  return { fields, content, calls: calls.map((own) => ({ ...extras.get(own["id"] as string), ...own })), supplied };
+  const kept = message.parts.reduce<Kept>(
+    (kept, part, at) => {
+      if (part._tag !== "Thinking" && part._tag !== "Unrecognised") return kept;
+      // One server can serve many models, and a router many vendors: each model's own goes back to it alone.
+      const back = sentBack(part, target, "Model", (text) => ({ json: [{ content: [{ type: "text", text }] }], supplied: [] }));
+      const [piece] = back.json as ReadonlyArray<Json>;
+      if (piece === undefined) return { ...kept, supplied: [...kept.supplied, ...back.supplied] };
+      if (!isObject(piece)) return { ...kept, supplied: [...kept.supplied, ...leftOut(part, "it is not a message's fields").supplied] };
+      return Object.entries(piece).reduce((kept, [field, value]) => keptWith(kept, part, at, field, value as Json, calls), kept);
+    },
+    { fields: {}, content: new Map(), extras: new Map(), setBy: new Map(), supplied: [] },
+  );
+  return { fields: kept.fields, content: kept.content, calls: calls.map((own) => ({ ...kept.extras.get(own["id"] as string), ...own })), supplied: kept.supplied };
+}
+
+/** What `keptFields` has kept of the parts so far. */
+interface Kept {
+  readonly fields: Readonly<Record<string, Json>>;
+  /** The chunks of each part's content, by the part's position. */
+  readonly content: ReadonlyMap<number, ReadonlyArray<Json>>;
+  /** Each call's other fields, by its id. */
+  readonly extras: ReadonlyMap<string, Readonly<Record<string, Json>>>;
+  /** The part each field was kept from. */
+  readonly setBy: ReadonlyMap<string, ContextPart>;
+  readonly supplied: Shaped["supplied"];
+}
+
+/** `kept` with one field of what `part`, at `at` in its message, held. */
+function keptWith(kept: Kept, part: ContextPart, at: number, field: string, value: Json, calls: ReadonlyArray<Readonly<Record<string, Json>>>): Kept {
+  if (field === "content" && Array.isArray(value)) return { ...kept, content: new Map<number, ReadonlyArray<Json>>([...kept.content, [at, value]]) };
+  if (field !== "tool_calls" || !Array.isArray(value)) {
+    // Two responses with nothing between them are one message: the later one's field is kept.
+    const earlier = kept.setBy.get(field);
+    return {
+      ...kept,
+      fields: { ...kept.fields, [field]: value },
+      setBy: new Map([...kept.setBy, [field, part]]),
+      supplied: earlier === undefined ? kept.supplied : [...kept.supplied, ...leftOut(earlier, `a later response in the same message holds ${field} too`).supplied],
+    };
+  }
+  return (value as ReadonlyArray<Json>).reduce<Kept>((kept, call) => {
+    const id = isObject(call) ? call["id"] : undefined;
+    if (typeof id !== "string" || !calls.some((own) => own["id"] === id)) return { ...kept, supplied: [...kept.supplied, ...leftOut(part, "its call is not in the message").supplied] };
+    return { ...kept, extras: new Map([...kept.extras, [id, call as Readonly<Record<string, Json>>]]) };
+  }, kept);
 }
 
 function body(target: Target, context: ModelContext, files: ReadonlyMap<BlobId, Uint8Array> = new Map()): Shaped {
@@ -334,18 +347,31 @@ const usageIn = (chunk: Schema.JsonObject, choice: Json | undefined): Json | und
  * its `id` names, or a new one.
  */
 interface Building {
-  readonly fields: Map<string, Json>;
-  readonly calls: Map<number, { id?: string; name?: string; arguments: string; rest: Record<string, Json> }>;
+  readonly fields: ReadonlyMap<string, Json>;
+  readonly calls: ReadonlyMap<number, BuiltCall>;
 }
 
-const asChunks = (value: Json): ReadonlyArray<Json> => (typeof value === "string" ? [{ type: "text", text: value }] : Array.isArray(value) ? value : [value]);
+/** A tool call as its deltas have built it. */
+interface BuiltCall {
+  readonly id?: string;
+  readonly name?: string;
+  readonly arguments: string;
+  readonly rest: Readonly<Record<string, Json>>;
+}
 
-const joined = (before: Json | undefined, delta: Json): Json =>
-  typeof before === "string" && typeof delta === "string"
-    ? before + delta
-    : before !== undefined && (Array.isArray(before) || Array.isArray(delta)) && (typeof before === "string" || Array.isArray(before))
-      ? chunksJoined(asChunks(before), asChunks(delta))
-      : delta;
+const nothingBuilt: Building = { fields: new Map(), calls: new Map() };
+
+const asChunks = (value: Json): ReadonlyArray<Json> => {
+  if (typeof value === "string") return [{ type: "text", text: value }];
+  return Array.isArray(value) ? value : [value];
+};
+
+const joined = (before: Json | undefined, delta: Json): Json => {
+  if (typeof before === "string" && typeof delta === "string") return before + delta;
+  if (before !== undefined && (Array.isArray(before) || Array.isArray(delta)) && (typeof before === "string" || Array.isArray(before)))
+    return chunksJoined(asChunks(before), asChunks(delta));
+  return delta;
+};
 
 /**
  * `before`'s chunks with `more` after them: a text chunk after a text chunk adds its text to it, and
@@ -365,40 +391,56 @@ function chunksJoined(before: ReadonlyArray<Json>, more: ReadonlyArray<Json>): R
   }, before);
 }
 
-function added(building: Building, delta: Schema.JsonObject): ReadonlyArray<number> {
+/** `building` with `delta` added, and the indexes of the calls it added to. */
+function added(building: Building, delta: Schema.JsonObject): { readonly building: Building; readonly touched: ReadonlyArray<number> } {
   const { role: _role, tool_calls, ...rest } = delta;
-  for (const [field, value] of Object.entries(rest)) if (value !== null && value !== undefined) building.fields.set(field, joined(building.fields.get(field), value));
-  if (!Array.isArray(tool_calls)) return [];
-  return (tool_calls as ReadonlyArray<Json>).flatMap((each) => {
-    if (!isObject(each)) return [];
+  const fields = Object.entries(rest).reduce<ReadonlyMap<string, Json>>(
+    (fields, [field, value]) => (value === null || value === undefined ? fields : new Map([...fields, [field, joined(fields.get(field), value)]])),
+    building.fields,
+  );
+  if (!Array.isArray(tool_calls)) return { building: { ...building, fields }, touched: [] };
+  const [calls, touched] = Arr.mapAccum(tool_calls as ReadonlyArray<Json>, building.calls, (calls, each): readonly [ReadonlyMap<number, BuiltCall>, ReadonlyArray<number>] => {
+    if (!isObject(each)) return [calls, []];
     const { index, id, function: fn, type: _type, ...extra } = each;
-    const byId = typeof id === "string" ? [...building.calls].find(([, call]) => call.id === id)?.[0] : undefined;
-    const at = typeof index === "number" ? index : (byId ?? building.calls.size);
-    const call = building.calls.get(at) ?? { arguments: "", rest: {} };
+    const byId = typeof id === "string" ? [...calls].find(([, call]) => call.id === id)?.[0] : undefined;
+    const at = typeof index === "number" ? index : (byId ?? calls.size);
+    const call = calls.get(at) ?? { arguments: "", rest: {} };
     const named = isObject(fn ?? null) ? (fn as { readonly name?: Json; readonly arguments?: Json }) : {};
-    building.calls.set(at, {
-      ...(call.id === undefined && typeof id === "string" ? { id } : call.id === undefined ? {} : { id: call.id }),
+    const built: BuiltCall = {
+      ...idOf(call.id, id),
       ...nameOf(call.name, named.name),
-      arguments: call.arguments + (typeof named.arguments === "string" ? named.arguments : named.arguments === undefined || named.arguments === null ? "" : JSON.stringify(named.arguments)),
+      arguments: call.arguments + argumentsText(named.arguments),
       rest: { ...call.rest, ...(extra as Record<string, Json>) },
-    });
-    return [at];
+    };
+    return [new Map([...calls, [at, built]]), [at]];
   });
+  return { building: { fields, calls }, touched: touched.flat() };
 }
+
+/** A call's id as its deltas give it: the first one given. */
+const idOf = (before: string | undefined, given: Json | undefined): { readonly id?: string } => {
+  if (before !== undefined) return { id: before };
+  return typeof given === "string" ? { id: given } : {};
+};
+
+/** What a delta adds to a call's arguments: their text, or an object as its JSON text. */
+const argumentsText = (given: Json | undefined): string => {
+  if (typeof given === "string") return given;
+  if (given === undefined || given === null) return "";
+  return JSON.stringify(given);
+};
 
 /**
  * A call's name as its deltas give it: the first one given, or a later one that starts with it,
  * as llama.cpp sends the name whole again each time it grows.
  */
-const nameOf = (before: string | undefined, given: Json | undefined): { readonly name?: string } =>
-  typeof given === "string" && given.length > 0 && (before === undefined || given.startsWith(before))
-    ? { name: given }
-    : before === undefined
-      ? {}
-      : { name: before };
+const nameOf = (before: string | undefined, given: Json | undefined): { readonly name?: string } => {
+  if (typeof given === "string" && given.length > 0 && (before === undefined || given.startsWith(before))) return { name: given };
+  return before === undefined ? {} : { name: before };
+};
 
 /** A tool call as the message holds it, from what its deltas built. */
-const callOf = (call: { id?: string; name?: string; arguments: string; rest: Record<string, Json> }): Json => ({
+const callOf = (call: BuiltCall): Json => ({
   id: call.id ?? null,
   type: "function",
   function: { name: call.name ?? null, arguments: call.arguments },
@@ -409,8 +451,20 @@ const callOf = (call: { id?: string; name?: string; arguments: string; rest: Rec
 const messageOf = (building: Building): Schema.JsonObject => ({
   role: "assistant",
   ...Object.fromEntries(building.fields),
-  ...(building.calls.size === 0 ? {} : { tool_calls: [...building.calls].sort(([a], [b]) => a - b).map(([, call]) => callOf(call)) }),
+  ...(building.calls.size === 0 ? {} : { tool_calls: Arr.sort(building.calls, byIndex).map(([, call]) => callOf(call)) }),
 });
+
+/** Calls by their index. */
+const byIndex: Order.Order<readonly [number, BuiltCall]> = Order.mapInput(Order.Number, ([at]) => at);
+
+/** What a response's chunks have given so far, and the calls passed on. */
+interface Streaming {
+  readonly finish: Json | undefined;
+  readonly usage: Json | undefined;
+  readonly metadata: Readonly<Record<string, Json>>;
+  readonly building: Building;
+  readonly passed: HashSet.HashSet<number>;
+}
 
 /**
  * One request. The response streams (`stream: true`, with its usage in the last chunk): each chunk
@@ -429,11 +483,9 @@ const respondOnce = (
 ): Effect.Effect<Responded, AiError.AiError> =>
   Effect.gen(function* () {
     const passOn = yield* ModelStream;
-    const building: Building = { fields: new Map(), calls: new Map() };
-    const passed = new Set<number>();
     const end = yield* postEventsOrWhole(http, caller, post).pipe(
       Stream.runFoldEffect(
-        (): { readonly finish: Json | undefined; readonly usage: Json | undefined; readonly metadata: Record<string, Json> } => ({ finish: undefined, usage: undefined, metadata: {} }),
+        (): Streaming => ({ finish: undefined, usage: undefined, metadata: {}, building: nothingBuilt, passed: HashSet.empty() }),
         (so, chunk) =>
           Effect.gen(function* () {
             yield* passOn({ _tag: "Chunk", chunk: receivedJson(chunk) });
@@ -448,25 +500,29 @@ const respondOnce = (
             const streamedDelta = choice !== undefined && isObject(choice) ? choice["delta"] : undefined;
             const delta = choice !== undefined && isObject(choice) ? (streamedDelta ?? choice["message"]) : undefined;
             if (streamedDelta !== undefined && isObject(streamedDelta)) yield* Effect.forEach(deltasIn(streamedDelta), passOn, { discard: true });
-            const touched = delta !== undefined && isObject(delta) ? added(building, delta) : [];
+            const { building, touched } = delta !== undefined && isObject(delta) ? added(so.building, delta) : { building: so.building, touched: [] };
             // A call is whole once a later one begins.
             const later = Math.max(-1, ...touched);
-            for (const [at, call] of building.calls)
-              if (at < later && !passed.has(at)) {
-                passed.add(at);
-                yield* Effect.forEach(callParts(callOf(call)), (part) => passOn({ _tag: "Part", part }), { discard: true });
-              }
+            const whole = [...building.calls].filter(([at]) => at < later && !HashSet.has(so.passed, at));
+            yield* Effect.forEach(whole, ([, call]) => Effect.forEach(callParts(callOf(call)), (part) => passOn({ _tag: "Part", part }), { discard: true }), { discard: true });
             const finish = choice !== undefined && isObject(choice) && choice["finish_reason"] !== null && choice["finish_reason"] !== undefined ? choice["finish_reason"] : so.finish;
-            return { finish, usage: usageIn(chunk, choice) ?? so.usage, metadata: { ...so.metadata, ...(metadata as Record<string, Json>) } };
+            return {
+              finish,
+              usage: usageIn(chunk, choice) ?? so.usage,
+              metadata: { ...so.metadata, ...(metadata as Record<string, Json>) },
+              building,
+              passed: HashSet.union(so.passed, HashSet.fromIterable(whole.map(([at]) => at))),
+            };
           }),
       ),
     );
+    const { building, passed } = end;
     if (end.finish === undefined) return yield* invalidOutput(caller, `The stream ended with no finish_reason: ${JSON.stringify(messageOf(building))}`);
     // Mistral and OpenRouter end a response that failed with `finish_reason: "error"`.
     if (end.finish === "error") return yield* invalidOutput(caller, `The response ended with finish_reason "error": ${JSON.stringify(messageOf(building))}`);
     const message = messageOf(building);
     const responded = parts(message);
-    const unpassed = [...building.calls].filter(([at]) => !passed.has(at)).sort(([a], [b]) => a - b);
+    const unpassed = Arr.sort([...building.calls].filter(([at]) => !HashSet.has(passed, at)), byIndex);
     yield* Effect.forEach(
       [...fieldParts(message), ...unpassed.flatMap(([, call]) => callParts(callOf(call)))],
       (part) => passOn({ _tag: "Part", part }),

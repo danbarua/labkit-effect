@@ -32,12 +32,11 @@ const classes: ReadonlyArray<ModelClass> = [
   {
     // Thinking cannot be turned off, and there is no between-tools mode.
     matches: (model) => /^claude-(opus-5-5|fable-5|mythos-5)/.test(model),
-    thinking: (asked) =>
-      asked === "off"
-        ? { used: "auto", reason: "this model does not allow thinking to be turned off" }
-        : asked === "between_tools"
-          ? { used: "auto", reason: "this model has no between-tools thinking" }
-          : { used: asked },
+    thinking: (asked) => {
+      if (asked === "off") return { used: "auto", reason: "this model does not allow thinking to be turned off" };
+      if (asked === "between_tools") return { used: "auto", reason: "this model has no between-tools thinking" };
+      return { used: asked };
+    },
   },
   {
     // Thinking cannot be turned off; between-tools is its lowest setting, accepted at high effort or below.
@@ -63,34 +62,48 @@ const displays: Record<Observe, string> = { all: "summarized", progress_only: "u
 /** The beta that `display: "updates"` needs. */
 const updatesBeta = "thinking-display-updates-2026-08-18";
 
-export function anthropicSettings(model: ModelName, settings: ModelSettings = {}): Settled {
-  const adjusted: Array<Adjustment> = [];
-  const thinking = ((): Exclude<ThinkingMode, "before_answer"> | undefined => {
-    const asked = settings.thinking;
-    if (asked === undefined) return undefined;
-    // The Messages API has no setting that makes a model think before every answer.
-    const sayable: Allowed =
-      asked === "before_answer"
-        ? { used: "auto", reason: "the Messages API has no setting for thinking before every answer" }
-        : { used: asked };
-    const allowed = classes.find((each) => each.matches(model))?.thinking(sayable.used, settings.effort) ?? { used: sayable.used };
-    const reason = allowed.reason ?? sayable.reason;
-    if (reason !== undefined) adjusted.push({ adjusted: { _tag: "Thinking", asked, used: allowed.used }, reason });
-    return allowed.used === "before_answer" ? "auto" : allowed.used;
-  })();
+type SentThinking = Exclude<ThinkingMode, "before_answer">;
 
-  const observe = settings.observe;
-  const display = ((): string | undefined => {
-    if (observe === undefined || thinking === "off") return undefined;
-    if (thinking !== "between_tools") return displays[observe];
-    // `between_tools` takes no `display`, and returns its progress updates as text whatever is asked.
-    if (observe === "off")
-      adjusted.push({
-        adjusted: { _tag: "Observe", asked: observe, used: "progress_only" },
-        reason: "between-tools thinking returns its progress updates as text",
-      });
-    return undefined;
-  })();
+/** The thinking `model` is sent when `asked` for, and what of it was adjusted. */
+const thinkingFor = (
+  model: ModelName,
+  asked: ThinkingMode | undefined,
+  effort: Effort | undefined,
+): { readonly thinking: SentThinking | undefined; readonly adjusted: ReadonlyArray<Adjustment> } => {
+  if (asked === undefined) return { thinking: undefined, adjusted: [] };
+  // The Messages API has no setting that makes a model think before every answer.
+  const sayable: Allowed =
+    asked === "before_answer"
+      ? { used: "auto", reason: "the Messages API has no setting for thinking before every answer" }
+      : { used: asked };
+  const allowed = classes.find((each) => each.matches(model))?.thinking(sayable.used, effort) ?? { used: sayable.used };
+  const reason = allowed.reason ?? sayable.reason;
+  return {
+    thinking: allowed.used === "before_answer" ? "auto" : allowed.used,
+    adjusted: reason === undefined ? [] : [{ adjusted: { _tag: "Thinking", asked, used: allowed.used }, reason }],
+  };
+};
+
+/** The `display` sent for `observe` when the thinking sent is `thinking`, and what of it was adjusted. */
+const displayFor = (
+  observe: Observe | undefined,
+  thinking: SentThinking | undefined,
+): { readonly display: string | undefined; readonly adjusted: ReadonlyArray<Adjustment> } => {
+  if (observe === undefined || thinking === "off") return { display: undefined, adjusted: [] };
+  if (thinking !== "between_tools") return { display: displays[observe], adjusted: [] };
+  // `between_tools` takes no `display`, and returns its progress updates as text whatever is asked.
+  return {
+    display: undefined,
+    adjusted:
+      observe === "off"
+        ? [{ adjusted: { _tag: "Observe", asked: observe, used: "progress_only" }, reason: "between-tools thinking returns its progress updates as text" }]
+        : [],
+  };
+};
+
+export function anthropicSettings(model: ModelName, settings: ModelSettings = {}): Settled {
+  const { thinking, adjusted: thinkingAdjusted } = thinkingFor(model, settings.thinking, settings.effort);
+  const { display, adjusted: displayAdjusted } = displayFor(settings.observe, thinking);
 
   const thinkingField: Json | undefined =
     thinking === undefined && display === undefined
@@ -104,7 +117,7 @@ export function anthropicSettings(model: ModelName, settings: ModelSettings = {}
       ...(settings.cache === "1h" ? { cache_control: { type: "ephemeral", ttl: "1h" } } : {}),
     },
     headers: display === displays.progress_only ? { "anthropic-beta": updatesBeta } : {},
-    adjusted,
+    adjusted: [...thinkingAdjusted, ...displayAdjusted],
   };
 }
 

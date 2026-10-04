@@ -18,20 +18,27 @@ import type { Target } from "../contracts.ts";
 import { knownOf } from "../configuration/well-known-models.ts";
 
 export function openAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyArray<string>): Settled {
-  const adjusted: Array<Adjustment> = [];
   const { thinking, observe, maxOutputTokens, cache } = settings;
-  if (cache === "off")
-    adjusted.push({
-      adjusted: { _tag: "Cache", asked: cache, used: "5m" },
-      reason: "the Responses API caches every long enough request for minutes, and cannot be asked not to",
-    });
-  if (thinking === "before_answer" || thinking === "between_tools")
-    adjusted.push({
-      adjusted: { _tag: "Thinking", asked: thinking, used: "auto" },
-      reason: "the Responses API has no setting for when the model thinks",
-    });
   const { sent, adjusted: effortAdjusted } = effortFor(settings, efforts);
-  adjusted.push(...effortAdjusted);
+  const cacheAdjusted: ReadonlyArray<Adjustment> =
+    cache === "off"
+      ? [
+          {
+            adjusted: { _tag: "Cache", asked: cache, used: "5m" },
+            reason: "the Responses API caches every long enough request for minutes, and cannot be asked not to",
+          },
+        ]
+      : [];
+  const thinkingAdjusted: ReadonlyArray<Adjustment> =
+    thinking === "before_answer" || thinking === "between_tools"
+      ? [
+          {
+            adjusted: { _tag: "Thinking", asked: thinking, used: "auto" },
+            reason: "the Responses API has no setting for when the model thinks",
+          },
+        ]
+      : [];
+  const adjusted = [...cacheAdjusted, ...thinkingAdjusted, ...effortAdjusted];
   const reasoning = {
     ...(sent === undefined ? {} : { effort: sent }),
     // A summary is the only thinking content the API returns on request; commentary comes unasked.

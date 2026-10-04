@@ -27,7 +27,7 @@
 import type { BlobId } from "../../agent-machine/blob.ts";
 import { knownOf, takesFile } from "../configuration/well-known-models.ts";
 import { OpenAiClient } from "@effect/ai-openai";
-import { Effect, Layer, Ref, type Schema, Stream } from "effect";
+import { Effect, HashMap, Layer, Option, Ref, type Schema, Stream } from "effect";
 import * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
 import { CallId, ModelText, StopReason, ThinkingText, ToolName, type TurnId } from "../../agent-machine/names.ts";
@@ -219,13 +219,20 @@ const endings = new Map([
 const stillArriving = (item: Json): boolean =>
   isObject(item) && (item["status"] === "incomplete" || item["status"] === "in_progress");
 
+/** The HTTP status a stream's error code stands for, when it stands for one. */
+const statusOfCode = (code: Json | undefined): number | undefined => {
+  if (code === "rate_limit_exceeded") return 429;
+  if (code === "server_error") return 500;
+  return undefined;
+};
+
 /** An error the stream reported, in a `response.failed` event's response or an `error` event. */
 const failedInStream = (event: Schema.JsonObject): AiError.AiError => {
   const response = event["response"];
   const error = response !== undefined && isObject(response) ? response["error"] : event;
   const code = error !== undefined && error !== null && isObject(error) ? error["code"] : undefined;
   const description = `The stream reported a failure: ${JSON.stringify(error ?? event)}`;
-  const status = code === "rate_limit_exceeded" ? 429 : code === "server_error" ? 500 : undefined;
+  const status = statusOfCode(code);
   return AiError.make({
     ...caller,
     reason:
@@ -247,6 +254,16 @@ export const responsesUsageIn = (reported: Json | undefined) => {
 };
 
 /**
+ * What a response's stream has given so far: the response its last event carried, what each output
+ * item's text deltas are added to, and the last summary part each reasoning item's deltas were in.
+ */
+interface Reading {
+  readonly response: Json | undefined;
+  readonly kinds: HashMap.HashMap<number, "Text" | "Commentary">;
+  readonly summaries: HashMap.HashMap<number, number>;
+}
+
+/**
  * One request. The response streams: each event is passed on as it arrives and each output item's
  * parts when the item is done (`ModelStream`); the observation is made from the response the
  * stream's last event carries.
@@ -259,54 +276,52 @@ const respondOnce = (
 ): Effect.Effect<Responded, AiError.AiError> =>
   Effect.gen(function* () {
     const passOn = yield* ModelStream;
-    // What each output item's text deltas are added to, and the last summary part each reasoning item's deltas were in.
-    const kinds = new Map<number, "Text" | "Commentary">();
-    const summaries = new Map<number, number>();
     const ended = yield* postEvents(http, caller, post).pipe(
       Stream.runFoldEffect(
-        (): Json | undefined => undefined,
-        (response, event) =>
+        (): Reading => ({ response: undefined, kinds: HashMap.empty(), summaries: HashMap.empty() }),
+        (reading, event) =>
           Effect.gen(function* () {
             yield* passOn({ _tag: "Chunk", chunk: receivedJson(event) });
-            if (!isObject(event)) return response;
+            if (!isObject(event)) return reading;
             const at = typeof event["output_index"] === "number" ? event["output_index"] : -1;
-            switch (event["type"]) {
+            switch (typeof event["type"] === "string" ? event["type"] : "") {
               case "response.output_item.added": {
                 const item = event["item"];
                 if (isObject(item ?? null) && (item as Schema.JsonObject)["type"] === "message")
-                  kinds.set(at, (item as Schema.JsonObject)["phase"] === "commentary" ? "Commentary" : "Text");
-                return response;
+                  return { ...reading, kinds: HashMap.set(reading.kinds, at, (item as Schema.JsonObject)["phase"] === "commentary" ? "Commentary" : "Text") };
+                return reading;
               }
               case "response.output_text.delta":
-                if (typeof event["delta"] === "string") yield* passOn({ _tag: "Delta", kind: kinds.get(at) ?? "Text", text: event["delta"] });
-                return response;
+                if (typeof event["delta"] === "string")
+                  yield* passOn({ _tag: "Delta", kind: Option.getOrElse(HashMap.get(reading.kinds, at), () => "Text" as const), text: event["delta"] });
+                return reading;
               case "response.reasoning_summary_text.delta": {
-                if (typeof event["delta"] !== "string") return response;
+                if (typeof event["delta"] !== "string") return reading;
                 // The summary's parts are joined by a blank line in the thinking's text, and so in its deltas.
                 const index = typeof event["summary_index"] === "number" ? event["summary_index"] : 0;
-                const last = summaries.get(at);
-                if (last !== undefined && index > last) yield* passOn({ _tag: "Delta", kind: "Thinking", text: "\n\n" });
-                summaries.set(at, index);
+                const last = HashMap.get(reading.summaries, at);
+                if (Option.isSome(last) && index > last.value) yield* passOn({ _tag: "Delta", kind: "Thinking", text: "\n\n" });
                 yield* passOn({ _tag: "Delta", kind: "Thinking", text: event["delta"] });
-                return response;
+                return { ...reading, summaries: HashMap.set(reading.summaries, at, index) };
               }
               case "response.output_item.done": {
                 const item = event["item"] ?? null;
                 if (!stillArriving(item))
                   yield* Effect.forEach(parts(item), (part) => passOn({ _tag: "Part", part }), { discard: true });
-                return response;
+                return reading;
               }
               case "response.completed":
               case "response.incomplete":
-                return event["response"];
+                return { ...reading, response: event["response"] };
               case "response.failed":
               case "error":
                 return yield* failedInStream(event);
               default:
-                return response;
+                return reading;
             }
           }),
       ),
+      Effect.map((reading) => reading.response),
     );
     if (ended === undefined || !isObject(ended) || !Array.isArray(ended["output"]))
       return yield* invalidOutput(caller, `The stream ended without a response: ${JSON.stringify(ended ?? null)}`);

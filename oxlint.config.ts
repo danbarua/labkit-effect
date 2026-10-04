@@ -41,7 +41,7 @@ const functional = {
 } as const;
 
 /** The modules under `src/` held to `functional`, besides the abstract layers. */
-const functionalModules = ["agent-process", "agent-config", "agent-tools", "agent-host", "agent-mcp", "agent-context"] as const;
+const functionalModules = ["agent-process", "agent-config", "agent-tools", "agent-host", "agent-mcp", "agent-context", "agent-session/providers"] as const;
 
 /**
  * Files that are glue to an imperative API, where mutable state or loops are needed. Each entry
