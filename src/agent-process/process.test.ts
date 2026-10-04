@@ -3,6 +3,7 @@
 import { expect } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
 import { Deferred, Effect, Exit, Scope, Stream } from "effect";
+import fc from "fast-check";
 import type { ChildProcessSpawner } from "effect/process";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
@@ -112,4 +113,31 @@ test("PG5: closing the scope the group was made in (the session's) ends its grou
     }).pipe(Effect.provide(BunServices.layer)),
   );
   expect(seen).toEqual({ process: true, child: true });
+});
+
+const processEvent = fc.oneof(
+  fc.constant({ _tag: "Start" } as const),
+  fc.constant({ _tag: "Restart" } as const),
+  fc.constant({ _tag: "Stop" } as const),
+  fc.record({ _tag: fc.constant("Started" as const), run: fc.integer({ min: 0, max: 6 }), pid: fc.integer({ min: 1, max: 99 }) }),
+  fc.record({ _tag: fc.constant("StartFailed" as const), run: fc.integer({ min: 0, max: 6 }), reason: fc.constant("no") }),
+  fc.record({ _tag: fc.constant("Ended" as const), run: fc.integer({ min: 0, max: 6 }), code: fc.option(fc.integer({ min: 0, max: 3 }), { nil: undefined }), signal: fc.constant(undefined) }),
+);
+
+test("PG1: for any events, the run never goes back; a run is spawned only when started from no live run or started again, and is then the current one; what is reported about another run changes nothing", () => {
+  fc.assert(
+    fc.property(fc.array(processEvent, { maxLength: 30 }), (events) => {
+      events.reduce<ProcessState>((state, event) => {
+        const step = stepProcess(state, event);
+        expect(step.state.run).toBeGreaterThanOrEqual(state.run);
+        const live = state._tag === "Starting" || state._tag === "Running";
+        const spawned = step.effects.filter((effect) => effect._tag === "Spawn");
+        expect(spawned.length).toBe(event._tag === "Restart" || (event._tag === "Start" && !live) ? 1 : 0);
+        for (const effect of spawned) expect(effect.run).toBe(step.state.run);
+        if ((event._tag === "Started" || event._tag === "StartFailed" || event._tag === "Ended") && event.run !== state.run) expect(step).toEqual({ state, effects: [] });
+        return step.state;
+      }, initialProcessState);
+    }),
+    { numRuns: 1000 },
+  );
 });

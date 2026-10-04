@@ -3,6 +3,7 @@
 import { expect } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, Stream } from "effect";
+import fc from "fast-check";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
 import type { ToolResult } from "./client.ts";
@@ -104,4 +105,35 @@ test("MS5: a server that does not answer initialize, or does not list its tools,
   );
   const failed = { _tag: "Failed", run: 1, reason: "did not answer initialize and tools/list within 300ms" };
   expect(seen as unknown).toEqual({ silent: { settled: failed, process: "Idle" }, unlisted: { settled: failed, process: "Idle" } });
+});
+
+const run = fc.integer({ min: 0, max: 5 });
+const serverEvent = fc.oneof(
+  fc.record({
+    _tag: fc.constant("Process" as const),
+    state: fc.oneof(
+      fc.record({ _tag: fc.constant("Idle" as const), run }),
+      fc.record({ _tag: fc.constant("Starting" as const), run }),
+      fc.record({ _tag: fc.constant("Running" as const), run, pid: fc.constant(1) }),
+      fc.record({ _tag: fc.constant("Exited" as const), run, code: fc.constant(0), signal: fc.constant(undefined) }),
+      fc.record({ _tag: fc.constant("Failed" as const), run, reason: fc.constant("no") }),
+    ),
+  }),
+  fc.record({ _tag: fc.constant("Connected" as const), run, tools: fc.constant([]) }),
+  fc.record({ _tag: fc.constant("ConnectFailed" as const), run, reason: fc.constant("no") }),
+);
+
+test("MS1: for any events, the run a server's state names never goes back, and what arrives about an earlier run changes nothing", () => {
+  fc.assert(
+    fc.property(fc.array(serverEvent, { maxLength: 30 }), (events) => {
+      events.reduce<McpServerState>((state, event) => {
+        const step = stepMcpServer(state, event);
+        expect(step.state.run).toBeGreaterThanOrEqual(state.run);
+        const about = event._tag === "Process" ? event.state.run : event.run;
+        if (about < state.run) expect(step).toEqual({ state, effects: [] });
+        return step.state;
+      }, initialMcpServerState);
+    }),
+    { numRuns: 1000 },
+  );
 });

@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { DateTime, Duration, Effect } from "effect";
+import fc from "fast-check";
 import { boringOpening } from "../../tests/support/boring.ts";
 import { observe, open, opened } from "../../tests/support/drive.ts";
 import { runTest } from "../../tests/support/run.ts";
@@ -222,36 +223,19 @@ test("CF4: a value that is not a mapping cuts off what an earlier layer had unde
   expect(over(a, over(b, c))).toEqual({ k: { x: 1, y: 2 } });
 });
 
-/** Random layers, from a seed: nested mappings of a few keys, each value a number, string, boolean, null, list or mapping. */
-const randomLayers = (seed: number) => {
-  let state = seed;
-  const next = () => {
-    state = (state + 0x6d2b79f5) | 0;
-    let t = Math.imul(state ^ (state >>> 15), 1 | state);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  const pick = <A>(values: ReadonlyArray<A>): A => values[Math.floor(next() * values.length)]!;
-  const value = (depth: number): unknown => {
-    const kind = pick(depth < 3 ? ["number", "string", "boolean", "null", "list", "mapping", "mapping"] : ["number", "string", "boolean", "null", "list"]);
-    switch (kind) {
-      case "number":
-        return Math.floor(next() * 10);
-      case "string":
-        return pick(["x", "y", "z"]);
-      case "boolean":
-        return next() < 0.5;
-      case "null":
-        return null;
-      case "list":
-        return Array.from({ length: Math.floor(next() * 3) }, () => Math.floor(next() * 10));
-      default:
-        return mapping(depth + 1);
-    }
-  };
-  const mapping = (depth: number): Record<string, unknown> => Object.fromEntries(["a", "b", "c"].filter(() => next() < 0.6).map((key) => [key, value(depth)]));
-  return Array.from({ length: 1 + Math.floor(next() * 5) }, () => mapping(0));
-};
+/** Layers as parsed: mappings of a few keys, nested, each value a number, string, boolean, null, list or mapping. */
+const layers = fc.letrec((tie) => ({
+  value: fc.oneof(
+    { depthSize: "small", withCrossShrink: true },
+    fc.integer({ min: 0, max: 9 }),
+    fc.constantFrom("x", "y", "z"),
+    fc.boolean(),
+    fc.constant(null),
+    fc.array(fc.integer({ min: 0, max: 9 }), { maxLength: 2 }),
+    tie("mapping"),
+  ),
+  mapping: fc.dictionary(fc.constantFrom("a", "b", "c"), tie("value"), { maxKeys: 3 }),
+})).mapping;
 
 const isMapping = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 const at = (value: unknown, path: ReadonlyArray<string>): unknown => path.reduce<unknown>((inner, key) => (isMapping(inner) ? inner[key] : undefined), value);
@@ -260,23 +244,35 @@ const at = (value: unknown, path: ReadonlyArray<string>): unknown => path.reduce
 const leaves = (value: unknown, path: ReadonlyArray<string> = []): ReadonlyArray<ReadonlyArray<string>> =>
   isMapping(value) ? Object.entries(value).flatMap(([key, inner]) => leaves(inner, [...path, key])) : path.length === 0 ? [] : [path];
 
-test("CF4: for 2000 sets of random layers, each leaf of the merge is the last layer's write to its path, and no later layer replaced anything above it; every leaf of the last layer is in the merge", () => {
-  for (let seed = 1; seed <= 2000; seed++) {
-    const layers = randomLayers(seed);
-    const result = merged(layers);
-    for (const path of leaves(result)) {
-      const writer = layers.map((layer) => at(layer, path) !== undefined).lastIndexOf(true);
-      expect({ seed, path, value: at(result, path) }).toEqual({ seed, path, value: at(layers[writer], path) });
-      // No layer after it wrote a value that is not a mapping above the path.
-      for (const later of layers.slice(writer + 1))
-        for (let length = 1; length < path.length; length++) {
-          const above = at(later, path.slice(0, length));
-          expect({ seed, path, cut: above !== undefined && !isMapping(above) }).toEqual({ seed, path, cut: false });
-        }
-    }
-    const last = layers.at(-1)!;
-    for (const path of leaves(last)) expect({ seed, path, value: at(result, path) }).toEqual({ seed, path, value: at(last, path) });
-  }
+test("CF4: for any layers, each leaf of the merge is the last layer's write to its path, and no later layer replaced anything above it; every leaf of the last layer is in the merge", () => {
+  fc.assert(
+    fc.property(fc.array(layers, { minLength: 1, maxLength: 5 }), (written) => {
+      const result = merged(written);
+      for (const path of leaves(result)) {
+        const writer = written.map((layer) => at(layer, path) !== undefined).lastIndexOf(true);
+        expect(at(result, path)).toEqual(at(written[writer], path));
+        // No layer after it wrote a value that is not a mapping above the path.
+        for (const later of written.slice(writer + 1))
+          for (let length = 1; length < path.length; length++) {
+            const above = at(later, path.slice(0, length));
+            expect(above === undefined || isMapping(above)).toBe(true);
+          }
+      }
+      const last = written.at(-1);
+      for (const path of leaves(last)) expect(at(result, path)).toEqual(at(last, path));
+    }),
+    { numRuns: 2000 },
+  );
+});
+
+test("CF4: merging is a fold in order: a layer that writes nothing changes nothing, and merging the merge of some layers with the rest is merging them all", () => {
+  fc.assert(
+    fc.property(fc.array(layers, { maxLength: 5 }), fc.array(layers, { maxLength: 5 }), (before, after) => {
+      expect(merged([...before, {}])).toEqual(merged(before));
+      expect(merged([merged(before), ...after])).toEqual(merged([...before, ...after]));
+    }),
+    { numRuns: 1000 },
+  );
 });
 
 test("CF5: a file that is not there is an empty layer; a seam no layer lists is not provided, so the host's own list or the default stands", async () => {

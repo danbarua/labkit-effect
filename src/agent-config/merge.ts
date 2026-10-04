@@ -16,5 +16,5 @@ export const over = (before: unknown, after: unknown): unknown => {
   return Object.fromEntries(keys.map((key) => [key, over(before[key], after[key])]));
 };
 
-/** `layers` written one over another, the first at the bottom. */
-export const merged = (layers: ReadonlyArray<unknown>): unknown => layers.reduce<unknown>(over, undefined);
+/** `layers` written one over another, the first at the bottom, over an empty mapping: the merge of no layers is `{}`. */
+export const merged = (layers: ReadonlyArray<unknown>): unknown => layers.reduce<unknown>(over, {});
