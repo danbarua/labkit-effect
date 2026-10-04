@@ -26,7 +26,7 @@
  */
 
 import { isAbsolute, relative, resolve } from "node:path";
-import { Data, Duration, Effect, FileSystem, Option, Schema } from "effect";
+import { Array as Arr, Chunk, Data, Duration, Effect, FileSystem, Option, Order, Schema, Stream } from "effect";
 import { FailureText, ToolName } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
@@ -55,33 +55,50 @@ const RunCommand = Schema.Struct({
 /** How long a command runs before it is stopped, unless the call says otherwise. */
 export const commandSeconds = 120;
 
-/**
- * What `stream` gives, read to its end keeping only its last `max` bytes or so: a command's output is
- * cut to its tail while it is read, not after.
- */
-const tailOf = async (stream: ReadableStream<Uint8Array>, max: number): Promise<{ readonly text: string; readonly cut: boolean }> => {
-  const chunks: Array<Uint8Array> = [];
-  let held = 0;
-  let dropped = false;
-  for await (const chunk of stream) {
-    chunks.push(chunk);
-    held += chunk.byteLength;
-    while (chunks.length > 1 && held - (chunks[0]?.byteLength ?? 0) >= max) {
-      held -= chunks.shift()?.byteLength ?? 0;
-      dropped = true;
-    }
-  }
-  return { text: Buffer.concat(chunks).toString("utf8"), cut: dropped };
+/** The end of a stream read so far: its newest chunks, how many bytes they hold, and whether older chunks were dropped. */
+interface Tail {
+  readonly chunks: Chunk.Chunk<Uint8Array>;
+  readonly held: number;
+  readonly cut: boolean;
+}
+
+const noTail: Tail = { chunks: Chunk.empty(), held: 0, cut: false };
+
+/** `tail` without its oldest chunks, dropped one at a time while the newer chunks still hold at least `max` bytes. */
+const dropOldest = (tail: Tail, max: number): Tail => {
+  const oldest = Chunk.head(tail.chunks);
+  if (Option.isNone(oldest) || Chunk.size(tail.chunks) < 2 || tail.held - oldest.value.byteLength < max) return tail;
+  return dropOldest({ chunks: Chunk.drop(tail.chunks, 1), held: tail.held - oldest.value.byteLength, cut: true }, max);
 };
 
-/** The last `max` bytes of `text`, never inside a character, and whether any were left out. */
+/**
+ * Reads `stream` to its end and returns about its last `max` bytes as text, and whether older bytes
+ * were dropped. The output is cut to its tail while it is read, so a long output is never held whole.
+ */
+const tailOf = (stream: ReadableStream<Uint8Array>, max: number): Effect.Effect<{ readonly text: string; readonly cut: boolean }> =>
+  Stream.fromReadableStream({ evaluate: () => stream, onError: (cause) => cause }).pipe(
+    Stream.runFold(
+      () => noTail,
+      (tail, chunk: Uint8Array) => dropOldest({ chunks: Chunk.append(tail.chunks, chunk), held: tail.held + chunk.byteLength, cut: tail.cut }, max),
+    ),
+    Effect.map((tail) => ({ text: Buffer.concat(Chunk.toReadonlyArray(tail.chunks)).toString("utf8"), cut: tail.cut })),
+    // A pipe that cannot be read is a defect, as it was when the stream was read with a loop.
+    Effect.orDie,
+  );
+
+/** Whether `byte` is a UTF-8 continuation byte (10xxxxxx): one inside a character, not its first. */
+const continues = (byte: number): boolean => (byte & 0xc0) === 0x80;
+
+/**
+ * Returns the last `max` bytes of `text`, and whether any bytes were dropped. When the cut would fall
+ * inside a character, the kept text starts at the next character.
+ */
 const lastBytes = (text: string, max: number): { readonly kept: string; readonly cut: boolean } => {
   const bytes = Buffer.from(text, "utf8");
   if (bytes.length <= max) return { kept: text, cut: false };
-  let start = bytes.length - max;
-  // A continuation byte (10xxxxxx) is inside a character: step on to the next character's first byte.
-  while (start < bytes.length && ((bytes[start] ?? 0) & 0xc0) === 0x80) start++;
-  return { kept: bytes.subarray(start).toString("utf8"), cut: true };
+  const from = bytes.length - max;
+  const characterStart = bytes.subarray(from).findIndex((byte) => !continues(byte));
+  return { kept: bytes.subarray(characterStart === -1 ? bytes.length : from + characterStart).toString("utf8"), cut: true };
 };
 
 interface WorkspaceTool<I> extends ToolSpec {
@@ -148,7 +165,7 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
           const full = yield* inside(path);
           const fs = yield* FileSystem.FileSystem;
           const names = yield* fs.readDirectory(full).pipe(Effect.mapError(reported(path)));
-          const listed = yield* Effect.forEach([...names].sort(), (name) =>
+          const listed = yield* Effect.forEach(Arr.sort(names, Order.String), (name) =>
             fs.stat(resolve(full, name)).pipe(
               Effect.map((info) => (info.type === "Directory" ? `${name}/` : name)),
               Effect.mapError(reported(`${path}/${name}`)),
@@ -216,7 +233,7 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
             Bun.spawn(["/bin/sh", "-c", command], { cwd: root, env: { ...environment }, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true }),
           ),
           (child) =>
-            Effect.promise(() => Promise.all([tailOf(child.stdout, maxReadBytes), tailOf(child.stderr, maxReadBytes), child.exited])).pipe(
+            Effect.all([tailOf(child.stdout, maxReadBytes), tailOf(child.stderr, maxReadBytes), Effect.promise(() => child.exited)], { concurrency: "unbounded" }).pipe(
               Effect.timeoutOption(Duration.seconds(seconds)),
             ),
           (child, exit) =>
