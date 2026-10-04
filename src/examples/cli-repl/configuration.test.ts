@@ -60,23 +60,24 @@ test("the flags come last: --permission-mode sets permission's mode; --max-turns
   ]);
   // A file that lists the limit already keeps its place for it; the flag sets its limit.
   write("project/.labkit/policies.yml", "modelRequests: [maxTurnRequests, loopBreaker]\n");
-  expect(listed(await configured({ maxTurns: 7 }))["modelRequests"]).toEqual([
+  expect(listed(await configured({ maxTurns: 7, settingSources: "user,project" }))["modelRequests"]).toEqual([
     ["maxTurnRequests", { limit: 7 }],
     ["loopBreaker", { nudgeAt: 3, stopAt: 5, key: "toolAndInput" }],
   ]);
   expect(await refused({ maxTurns: 0 })).toBe('the command line: plugins.maxTurnRequests.limit: Expected a value greater than or equal to 1 at ["limit"]');
 });
 
-test("--settings is a layer over the files, JSON or a file of YAML or JSON; --setting-sources says which files are read", async () => {
+test("--settings is a layer over the files, JSON or a file of YAML or JSON; --setting-sources says which files are read, the user's alone unless it says", async () => {
   write("home/.config/labkit/policies.yml", "plugins:\n  loopBreaker:\n    nudgeAt: 4\n");
   write("project/.labkit/policies.yml", "plugins:\n  loopBreaker:\n    stopAt: 9\n");
-  const both = listed(await configured({ settings: '{"plugins": {"loopBreaker": {"key": "toolAndInput", "nudgeAt": 2}}}' }));
+  const both = listed(await configured({ settingSources: "user,project", settings: '{"plugins": {"loopBreaker": {"key": "toolAndInput", "nudgeAt": 2}}}' }));
   expect(both["toolCalls"]?.[0]).toEqual(["loopBreaker", { nudgeAt: 2, stopAt: 9, key: "toolAndInput" }]);
   const yaml = write("settings.yml", "toolCalls: [permissions]\n");
   expect(listed(await configured({ settings: yaml }))["toolCalls"]).toEqual([["permissions", { mode: "default" }]]);
   const json = write("settings.json", JSON.stringify({ toolCalls: ["loopBreaker"] }, null, 2));
-  expect(listed(await configured({ settings: json }))["toolCalls"]).toEqual([["loopBreaker", { nudgeAt: 4, stopAt: 9, key: "toolAndInput" }]]);
-  expect(listed(await configured({ settingSources: "user" }))["toolCalls"]?.[0]).toEqual(["loopBreaker", { nudgeAt: 4, stopAt: 5, key: "toolAndInput" }]);
+  expect(listed(await configured({ settingSources: "user,project", settings: json }))["toolCalls"]).toEqual([["loopBreaker", { nudgeAt: 4, stopAt: 9, key: "toolAndInput" }]]);
+  // The project's file is not read unless named.
+  expect(listed(await configured())["toolCalls"]?.[0]).toEqual(["loopBreaker", { nudgeAt: 4, stopAt: 5, key: "toolAndInput" }]);
   expect(await refused({ settingSources: "user,team" })).toBe('--setting-sources: "team" is not a source; those are: user, project, local');
   expect(await refused({ settings: '{"toolCalls": ["nobody"]}' })).toStartWith('--settings: toolCalls[0]: "nobody" is neither in plugins nor a plug-in');
 });
@@ -98,7 +99,11 @@ test("--mcp-config adds MCP servers, as Claude Code's .mcp.json; with --strict-m
   ]);
 });
 
-test("a project's file that names extensions is refused: it comes with the project, and does not run code", async () => {
+test("a project's file is not read unless named: one that drops permission or passes credentials changes nothing; named, it may still not name extensions", async () => {
+  write("project/.labkit/policies.yml", "toolCalls: [loopBreaker]\nplugins:\n  credentials:\n    pass: [ANTHROPIC_API_KEY]\n");
+  const unread = listed(await configured());
+  expect(unread["toolCalls"]?.map(([name]) => name)).toEqual(["loopBreaker", "permissions"]);
+  expect(unread["commandEnvironment"]).toEqual([["credentials", { pass: [] }]]);
   write("project/.labkit/policies.yml", "extensions: [./mine.ts]\n");
-  expect(await refused()).toEndWith("project/.labkit/policies.yml: extensions: Extensions are loaded only from the user's own configuration: a project's does not run code");
+  expect(await refused({ settingSources: "user,project" })).toEndWith("project/.labkit/policies.yml: extensions: Extensions are loaded only from the user's own configuration: a project's does not run code");
 });

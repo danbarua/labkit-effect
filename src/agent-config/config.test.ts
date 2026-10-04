@@ -180,14 +180,14 @@ test("CF3: across layers, a mistake names the layer that wrote the value at faul
 
 test("CF4 CF12: layers merge in order, the last write winning: mappings key by key, deeply; any other value, a list included, replaced whole; the user's file, the project's, then the local one", async () => {
   expect(merged([{ a: { b: 1, c: [1, 2] }, d: "x" }, { a: { c: [3] }, e: true }, { d: "y" }])).toEqual({ a: { b: 1, c: [3] }, d: "y", e: true });
-  const layers = await runTest(policyLayers(join(testFolder(), "project"), { home: join(testFolder(), "home") }).pipe(Effect.provide(BunServices.layer)));
+  const layers = await runTest(policyLayers(join(testFolder(), "project"), { home: join(testFolder(), "home"), sources: ["user", "project", "local"] }).pipe(Effect.provide(BunServices.layer)));
   expect(layers).toEqual([]);
   // The user's own for the project comes last, and is not trusted; the sources read can be chosen.
   write("project/.labkit/policies.local.yml", "plugins:\n  maxTurnRequests:\n    limit: 20\n");
   write("home/.config/labkit/policies.yml", "plugins:\n  maxTurnRequests:\n    limit: 10\n  loopBreaker:\n    nudgeAt: 4\ntoolCalls: [loopBreaker, permissions]\nmodelRequests: [maxTurnRequests]\n");
   write("project/.labkit/policies.yml", "plugins:\n  loopBreaker:\n    stopAt: 8\ntoolCalls: [permissions]\n");
   const configuration = await runTest(
-    Effect.flatMap(policyLayers(join(testFolder(), "project"), { home: join(testFolder(), "home") }), (each) => loadConfiguration(each)).pipe(Effect.provide(BunServices.layer)),
+    Effect.flatMap(policyLayers(join(testFolder(), "project"), { home: join(testFolder(), "home"), sources: ["user", "project", "local"] }), (each) => loadConfiguration(each)).pipe(Effect.provide(BunServices.layer)),
   );
   // The project's toolCalls replace the user's; the user's modelRequests stand, with the local file's limit.
   expect(listed(configuration)).toEqual({

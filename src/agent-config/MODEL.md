@@ -94,7 +94,10 @@ mcpServers:
   `plugins`.
 - CF12. The file layers are the user's (`~/.config/<name>/policies.yml`, trusted), the project's
   (`<project>/.<name>/policies.yml`) and the user's own for the project
-  (`<project>/.<name>/policies.local.yml`), in that order; a host may read only some of them.
+  (`<project>/.<name>/policies.local.yml`), in that order. Only the user's is read unless the others
+  are named: a folder's files could turn off permission or give the model's commands credentials,
+  and are read only when asked for, until a folder can be trusted. Named, they are still not trusted
+  (CF7, CF10).
 - CF13. What a command the model runs is given of the environment is a seam of its own
   (`commandEnvironment`): transforms, in order, the first given this process's environment, which a
   host gives the commands it runs. `credentials` leaves out the variables that hold credentials

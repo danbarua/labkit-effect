@@ -4,8 +4,10 @@
  * 1. the CLI's own defaults: the loop breaker, then permission, on tool calls; the loop breaker on
  *    model requests; a turn with thinking and no answer asked once more for it; the model's
  *    commands given the environment without its credentials;
- * 2. the user's file, the project's (the folder the CLI runs in) and the local one, those
- *    `--setting-sources` names (all, unless it says);
+ * 2. the user's file, and the project's (the folder the CLI runs in) and the local one when
+ *    `--setting-sources` names them: a folder's files are not read unless asked for, as a cloned
+ *    one's could turn off permission or pass the model's commands credentials. Named, they are read,
+ *    and still may not name extensions or MCP servers (they are not trusted);
  * 3. `--settings`: JSON, or a file of JSON or YAML;
  * 4. with `--strict-mcp-config`, no MCP servers but those `--mcp-config` names;
  * 5. `--mcp-config`, each one JSON or a file of it, as Claude Code's `.mcp.json`
@@ -62,9 +64,13 @@ const givenLayer = (flag: string, given: string): Effect.Effect<LayerSource, Con
     return { name: given, value: yield* json(text, given), trusted: true };
   });
 
-/** The file layers `--setting-sources` names: all, unless it says. */
+/**
+ * The file layers `--setting-sources` names: the user's alone, unless it says. A project's file and
+ * the local one come with the folder the CLI runs in, and could change what runs without asking or
+ * what a command is given, so they are read only when named, until a folder can be trusted.
+ */
 const sourcesOf = (given: string | undefined): Effect.Effect<ReadonlyArray<FileSource>, ConfigInvalid> => {
-  if (given === undefined) return Effect.succeed(fileSources);
+  if (given === undefined) return Effect.succeed(["user"]);
   const named = given.split(",").map((each) => each.trim()).filter((each) => each !== "");
   const unknown = named.find((each) => !fileSources.includes(each as FileSource));
   return unknown === undefined

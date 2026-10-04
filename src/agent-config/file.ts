@@ -268,9 +268,11 @@ export const fileLayer = (file: string, trusted: boolean): Effect.Effect<LayerSo
   });
 
 /**
- * The layers of `policyFiles`, those of `sources` (all, unless said), in order: the user's file, which
- * is trusted, then the project's and the local one, which are in the project's folder, and are not. A
- * file that is not there is left out.
+ * The layers of `policyFiles`, those of `sources` (the user's alone, unless said), in order: the
+ * user's file, which is trusted, then the project's and the local one, which are in the project's
+ * folder, and are not. A folder's files are read only when named: one that comes with a cloned
+ * project could turn off permission or give the model's commands credentials, until a folder can be
+ * trusted. A file that is not there is left out.
  */
 export const policyLayers = (
   project: string,
@@ -278,7 +280,7 @@ export const policyLayers = (
 ): Effect.Effect<ReadonlyArray<LayerSource>, ConfigInvalid, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const files = policyFiles(project, options);
-    const read = fileSources.filter((source) => (options.sources ?? fileSources).includes(source));
+    const read = fileSources.filter((source) => (options.sources ?? ["user"]).includes(source));
     const layers = yield* Effect.forEach(read, (source) => fileLayer(files[source], source === "user"));
     return layers.filter((layer): layer is LayerSource => layer !== undefined);
   });

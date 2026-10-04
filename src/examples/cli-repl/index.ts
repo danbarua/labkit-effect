@@ -16,7 +16,8 @@
  *
  * Its policies, turn-end hooks and MCP servers are its configuration (`configuration.ts`): its own
  * defaults, the user's file (`~/.config/labkit/policies.yml`), the project's and the local one (in
- * `.labkit/` in the folder it runs in), `--settings`, `--mcp-config`, then the flags
+ * `.labkit/` in the folder it runs in) when `--setting-sources` names them, `--settings`,
+ * `--mcp-config`, then the flags
  * (`--permission-mode`, `--max-turns`, `--max-budget-usd`), the last write winning. What it resolved
  * to, and which layer said each value, is written to the session's folder as
  * `effective-settings.json`.
@@ -81,7 +82,7 @@ const flags = {
   mcpConfig: Flag.String("mcp-config").pipe(Flag.atLeast(0), Flag.withDescription("MCP servers, as JSON or a file of it, as Claude Code's .mcp.json; the flag may be given again")),
   strictMcpConfig: toggle("strict-mcp-config", "Use only the MCP servers --mcp-config names"),
   settings: text("settings", "Settings: JSON, or a file of JSON or YAML, over the files"),
-  settingSources: text("setting-sources", "Which settings files to read, comma-separated: user, project, local (all when not given)"),
+  settingSources: text("setting-sources", "Which settings files to read, comma-separated: user, project, local (only user when not given)"),
   // Not built yet:
   // name: text("name", "Session display name", "n"),
   // forkSession: toggle("fork-session", "Fork the continued or resumed session"),
