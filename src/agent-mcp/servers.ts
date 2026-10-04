@@ -19,7 +19,7 @@ import type { NoticeProvider } from "../agent-context/assemble.ts";
 import { FailureText, McpServerName, ToolName } from "../agent-machine/names.ts";
 import type { Observation } from "../agent-machine/observation.ts";
 import type { ToolSource } from "../agent-session/tool-sources.ts";
-import type { McpServerStdio, Root } from "./client.ts";
+import type { ClientInfo, McpServerStdio, Root } from "./client.ts";
 import { logKeys } from "./log-keys.ts";
 import { describe, type McpServerState } from "./server-machine.ts";
 import { type McpServer, startMcpServer } from "./server.ts";
@@ -69,12 +69,12 @@ const recorded = (name: string, state: McpServerState, offered: (state: Extract<
 export const startMcpServers = (
   given: ReadonlyArray<GivenServer>,
   roots: ReadonlyArray<Root>,
-  options: { readonly connectTimeout?: Duration.Input | undefined } = {},
+  options: { readonly connectTimeout?: Duration.Input | undefined; readonly clientInfo?: ClientInfo | undefined } = {},
 ): Effect.Effect<McpServers, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const started = yield* Effect.forEach(
       given.flatMap((each) => (each._tag === "Stdio" ? [each] : [])),
-      (each) => startMcpServer(each.server, roots, { connectTimeout: each.connectTimeout ?? options.connectTimeout }),
+      (each) => startMcpServer(each.server, roots, { connectTimeout: each.connectTimeout ?? options.connectTimeout, clientInfo: options.clientInfo }),
       { concurrency: "unbounded" },
     );
     const unsupported = given.flatMap((each) =>

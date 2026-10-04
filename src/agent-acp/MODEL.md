@@ -69,7 +69,9 @@ the core; a launcher runs it with `Agent.run` or `Agent.runStdio`, giving it the
 to start sessions with (else the catalog's first, `defaultModel`); `services`, what a session runs
 with given its world's runner (`HostSessionServices`: `SessionServices` with `retryIncomplete(1)`
 as its turn-end hook, held at most once, agent-host H15); `pageSize`, the most sessions a page of `session/list` gives (50).
-`hostOptionsFrom(env)` reads `LABKIT_ACP_MODEL` and `LABKIT_ACP_LOCAL_TOOLS=1`. It advertises
+`brand`, what it goes by (agent-host H18; labkit's when left out). `hostOptionsFrom(env, brand)`
+reads `<PREFIX>ACP_MODEL`, `ACP_LOCAL_TOOLS=1`, `ACP_PERMISSION_MODE`, `ACP_RETRIES` and
+`ACP_STRICT_TOOL_INPUT=1`, the brand's prefix before each (`LABKIT_` for labkit's). It advertises
 `loadSession`, the session methods `close`, `list` and `resume`, and no prompt content but text and
 resource links; no fork and no auth methods.
 
@@ -103,9 +105,10 @@ twice.
 - `main.ts`: the launcher, `bun src/agent-acp/main.ts`: `launch(env)` runs `makeHost` on this
   process's stdin and stdout (`Agent.runStdio`) with the model catalog of the providers whose key is
   set and the local server (`KeyedAndLocalCatalog`) and the log file of `agent-host/launcher-logs.ts`.
-  From the environment: `LABKIT_ACP_MODEL`, `LABKIT_ACP_LOCAL_TOOLS`, `LABKIT_ACP_SESSIONS_DIR`
-  (`sessionsDirectoryFrom`; default `~/.labkit/sessions`), the `LABKIT_ACP_LOG_*` variables, and the
-  providers' keys.
+  It runs as the brand it is given, else the one the environment names (agent-host H18). From the
+  environment, after the brand's prefix: `ACP_MODEL`, `ACP_LOCAL_TOOLS`, `ACP_PERMISSION_MODE`,
+  `ACP_RETRIES`, `ACP_STRICT_TOOL_INPUT`, `ACP_SESSIONS_DIR` (`sessionsDirectoryFrom`; default
+  `~/.<brand>/sessions`) and the `ACP_LOG_*` variables; and the providers' keys.
 
 ## What is not built
 
@@ -230,7 +233,7 @@ twice.
   (a client may draw its controls from updates alone). A value the option does not offer, or an
   option no session has, is -32602, and sends nothing.
 - AG6. `/export`, alone in a prompt, writes the session's transcript (`markdownOf`) to
-  `<cwd>/.labkit/exports/<sessionId>.md`, says where in an `agent_message_chunk` and answers
+  `<cwd>/.<brand>/exports/<sessionId>.md` (AG24), says where in an `agent_message_chunk` and answers
   `end_turn` without asking the model; on a draft it says there is nothing to export.
 - AG7. A prompt to a session with a prompt running is -32000 "already has an active prompt"; a
   request naming a session the connection does not hold is -32002; a `cwd` that is not absolute is
@@ -256,8 +259,9 @@ twice.
   `cancelled`), and closes the session's scope; a later request naming it is -32002.
 - AG14. The launcher serves the host on stdin and stdout, and puts nothing but protocol on stdout.
   Its log is a file, named once on stderr, that holds no secret of the environment, and it exits 0
-  when stdin closes.
-- AG15. Sessions are kept in `LABKIT_ACP_SESSIONS_DIR` when it is set, else in `~/.labkit/sessions`.
+  when stdin closes. It calls itself by its brand's name and version (`agentInfo`).
+- AG15. Sessions are kept in `<PREFIX>ACP_SESSIONS_DIR` when it is set, else in
+  `~/.<brand>/sessions` (`LABKIT_ACP_SESSIONS_DIR` and `~/.labkit/sessions` for labkit's).
 - AG16. By default a turn whose response had thinking but no answer (`Incomplete`) is asked once
   more for its answer (agent-host H15): an answer then reaches the client as `agent_message_chunk`
   and the prompt ends `end_turn`, with no warning logged; with none again the turn ends
@@ -292,6 +296,11 @@ twice.
   the commands the host advertises. A server at a URL is refused (-32602) by `effective-acp`, as the
   host does not offer MCP over HTTP or SSE. Two servers whose tools would be offered under one name
   are -32602, and nothing is started.
+- AG24. The host goes by its brand (`brand`, labkit's when left out): `/export` writes to
+  `<cwd>/.<name>/exports`, the MCP servers it starts are told its name and version (`clientInfo`),
+  and what it says of the model a session starts with names the brand's variable
+  (`<PREFIX>ACP_MODEL`). The launcher's options are the brand's variables (`<PREFIX>ACP_*`), and no
+  other brand's.
 - AG17. `editorWorld` offers `edit_file` to a client that advertised both `fs` methods, and
   `run_command` to one that advertised `terminal`. `edit_file` reads the file through the editor
   and writes it back with one occurrence of `old_text` replaced; `old_text` that occurs never or

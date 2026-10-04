@@ -16,7 +16,7 @@
  *   services, `SessionOpened`; then `session_info_update` with the title) and runs the turn with
  *   `Session.prompt`. The session's feed (`feed.ts`) sends the turn's updates and asks permission;
  *   once it has taken the turn's end the host sends `usage_update` and answers with the turn's stop
- *   (`stopOf`). `/export` alone writes the transcript to `<cwd>/.labkit/exports/<sessionId>.md`
+ *   (`stopOf`). `/export` alone writes the transcript to `<cwd>/.<brand>/exports/<sessionId>.md`
  *   without asking the model, and opens no draft.
  * - `session/load` starts a stored session on this connection: its facts file, with the world
  *   opened for the `cwd` and MCP servers asked. A turn its facts left running is ended, not gone
@@ -32,6 +32,7 @@
  * The connection's end closes every session's scope.
  */
 
+import { type Brand, defaultBrand, envPrefixOf, brandFrom, folderOf } from "../agent-host/brand.ts";
 import { basename, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ChildProcessSpawner } from "effect/process";
@@ -115,6 +116,8 @@ export interface HostOptions<R = never> {
   readonly services?: ((runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>) | undefined;
   /** The most sessions one page of `session/list` gives; 50 when left out. */
   readonly pageSize?: number | undefined;
+  /** The name the agent goes by (`agent-host/brand.ts`): where `/export` writes, and what it calls itself to MCP servers. */
+  readonly brand?: Brand | undefined;
 }
 
 /**
@@ -127,25 +130,31 @@ export const HostSessionServices =
     Layer.mergeAll(SessionServices(runner), Layer.succeed(TurnEndHooks, [retryIncomplete(retries)]), Layer.succeed(MaxHolds, retries));
 
 /**
- * The options a launcher takes from the environment: `LABKIT_ACP_MODEL`, `LABKIT_ACP_LOCAL_TOOLS`,
- * `LABKIT_ACP_PERMISSION_MODE`, `LABKIT_ACP_RETRIES` and `LABKIT_ACP_STRICT_TOOL_INPUT=1` (a value
- * that is not a mode, or not a whole
- * number of 0 or more, is left out; `launch` says so).
+ * The options a launcher takes from the environment, the brand's prefix and `ACP_` before each
+ * (`LABKIT_ACP_` for labkit's): `MODEL`, `LOCAL_TOOLS`, `PERMISSION_MODE`, `RETRIES` and
+ * `STRICT_TOOL_INPUT=1` (a value that is not a mode, or not a whole number of 0 or more, is left out;
+ * `launch` says so).
  */
-export const hostOptionsFrom = (env: Readonly<Record<string, string | undefined>>): Pick<HostOptions, "model" | "world" | "permissionMode" | "retries" | "strictToolInput"> => {
-  const mode = env["LABKIT_ACP_PERMISSION_MODE"];
-  const retries = env["LABKIT_ACP_RETRIES"];
+export const hostOptionsFrom = (
+  env: Readonly<Record<string, string | undefined>>,
+  brand: Brand = brandFrom(env),
+): Pick<HostOptions, "model" | "world" | "permissionMode" | "retries" | "strictToolInput" | "brand"> => {
+  const prefix = `${envPrefixOf(brand)}ACP_`;
+  const mode = env[`${prefix}PERMISSION_MODE`];
+  const retries = env[`${prefix}RETRIES`];
+  const model = env[`${prefix}MODEL`];
   return {
-    model: env["LABKIT_ACP_MODEL"] === "" ? undefined : env["LABKIT_ACP_MODEL"],
-    world: env["LABKIT_ACP_LOCAL_TOOLS"] === "1" ? "local" : "editor",
+    model: model === "" ? undefined : model,
+    world: env[`${prefix}LOCAL_TOOLS`] === "1" ? "local" : "editor",
     permissionMode: Schema.is(PermissionMode)(mode) ? mode : undefined,
     retries: retries !== undefined && /^\d+$/.test(retries) ? Number(retries) : undefined,
-    strictToolInput: env["LABKIT_ACP_STRICT_TOOL_INPUT"] === "1",
+    strictToolInput: env[`${prefix}STRICT_TOOL_INPUT`] === "1",
+    brand,
   };
 };
 
 /** The command the host runs itself, without the model. */
-const exportCommand = { name: "export", description: "Write this session's transcript as Markdown to .labkit/exports/<session>.md in the working folder." };
+const exportCommandOf = (brand: Brand) => ({ name: "export", description: `Write this session's transcript as Markdown to ${folderOf(brand)}/exports/<session>.md in the working folder.` });
 
 /** The command that says how the session's MCP servers are, and starts one again. */
 const mcpCommand = { name: "mcp", description: "Say how this session's MCP servers are; `reconnect <server>` starts one again.", input: { hint: "reconnect <server>" } };
@@ -252,8 +261,12 @@ const promptInput = (prompt: ReadonlyArray<ContentBlock>) =>
     return { text: InputText.make(promptText(prompt)), ...(attachments.length === 0 ? {} : { attachments }) };
   });
 
+/** The variable that names the model sessions start with, as `brand`'s launcher reads it. */
+const modelVariableOf = (brand: Brand): string => `${envPrefixOf(brand)}ACP_MODEL`;
+
 /** What `session/new` says when no model can be asked. */
-const noModel = `No model to ask: set ${Object.values(keyVariables).join(", ")} for a provider's models, or start the local server at ${localServer}, or name one with LABKIT_ACP_MODEL as provider/model.`;
+const noModelOf = (brand: Brand) =>
+  `No model to ask: set ${Object.values(keyVariables).join(", ")} for a provider's models, or start the local server at ${localServer}, or name one with ${modelVariableOf(brand)} as provider/model.`;
 
 /**
  * The ACP host as an implementation of protocol v1. It needs the model catalog (`ModelCatalog`),
@@ -263,6 +276,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
   const world: World<R> | World<FileSystem.FileSystem> =
     options.world === undefined || options.world === "editor" ? editorWorld : options.world === "local" ? workspaceWorld : options.world;
   const services = options.services ?? HostSessionServices(options.retries);
+  const brand = options.brand ?? defaultBrand;
   return Agent.implement<Protocol.V1Version, ModelCatalog | FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner | Scope.Scope | R>(Protocol.v1, {
     capabilities: {
       promptCapabilities: { image: true, audio: false, embeddedContext: true },
@@ -320,7 +334,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   : { _tag: "Stdio", server: { name: server.name, command: server.command, args: server.args, env: Object.fromEntries(server.env.map((each) => [each.name, each.value])), cwd } },
             );
             const scope = yield* Scope.fork(connectionScope);
-            const mcp = yield* startMcpServers(given, [{ uri: pathToFileURL(cwd).href, name: basename(cwd) }], { connectTimeout: options.mcpConnectTimeout }).pipe(
+            const mcp = yield* startMcpServers(given, [{ uri: pathToFileURL(cwd).href, name: basename(cwd) }], {
+              connectTimeout: options.mcpConnectTimeout,
+              clientInfo: { name: brand.name, version: brand.version },
+            }).pipe(
               Scope.provide(scope),
             );
             const { catalog } = yield* toolsOf(mcp.sources);
@@ -384,19 +401,19 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
         /** The model `session/new` starts with, or why there is none. */
         const startingModel: Effect.Effect<Asked, JsonRpcErrorObject, ModelCatalog> =
           options.model === undefined
-            ? Effect.filterOrFail(defaultModel, (model): model is Asked => model !== undefined, () => rpcError(ErrorCode.InternalError, noModel))
+            ? Effect.filterOrFail(defaultModel, (model): model is Asked => model !== undefined, () => rpcError(ErrorCode.InternalError, noModelOf(brand)))
             : targetOf(options.model).pipe(
                 Effect.mapError((error) => {
                   switch (error._tag) {
                     case "ModelNotFound":
                       return rpcError(
                         ErrorCode.InternalError,
-                        `LABKIT_ACP_MODEL names ${error.name}, which no source has${error.close.length === 0 ? "" : `; close: ${error.close.join(", ")}`}.`,
+                        `${modelVariableOf(brand)} names ${error.name}, which no source has${error.close.length === 0 ? "" : `; close: ${error.close.join(", ")}`}.`,
                       );
                     case "KeyNotSet":
-                      return rpcError(ErrorCode.InternalError, `LABKIT_ACP_MODEL names a model of ${error.provider}: set ${error.variable}.`);
+                      return rpcError(ErrorCode.InternalError, `${modelVariableOf(brand)} names a model of ${error.provider}: set ${error.variable}.`);
                     case "SourceNotAnswering":
-                      return rpcError(ErrorCode.InternalError, `LABKIT_ACP_MODEL names a model of ${error.provider}, whose server at ${error.at ?? "?"} does not answer.`);
+                      return rpcError(ErrorCode.InternalError, `${modelVariableOf(brand)} names a model of ${error.provider}, whose server at ${error.at ?? "?"} does not answer.`);
                   }
                 }),
               );
@@ -496,7 +513,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             return opened satisfies Opened;
           });
 
-        /** `/export`: the transcript to `<cwd>/.labkit/exports/<id>.md`, said in a message. */
+        /** `/export`: the transcript to `<cwd>/.<brand>/exports/<id>.md`, said in a message. */
         const exportOf = (entry: Entry) =>
           Effect.gen(function* () {
             const say = (text: string) => send(entry.id, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
@@ -504,10 +521,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               yield* say("Nothing to export: this session has had no turn yet.");
               return { stopReason: "end_turn" as const };
             }
-            const path = join(entry.cwd, ".labkit", "exports", `${entry.id}.md`);
+            const path = join(entry.cwd, folderOf(brand), "exports", `${entry.id}.md`);
             const markdown = markdownOf(yield* entry.state.opened.session.facts);
             const fs = yield* FileSystem.FileSystem;
-            yield* fs.makeDirectory(join(entry.cwd, ".labkit", "exports"), { recursive: true }).pipe(
+            yield* fs.makeDirectory(join(entry.cwd, folderOf(brand), "exports"), { recursive: true }).pipe(
               Effect.andThen(fs.writeFileString(path, markdown)),
               Effect.catch((error) =>
                 Effect.logError(logKeys.export.failed, { path, doing: "writing the transcript", cause: error.message }).pipe(
@@ -598,7 +615,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
         /** What the host sends of a session started from its facts once the client knows it: the commands, its title and last write, and its usage. */
         const announce = (entry: Entry, opened: Opened) =>
           Effect.gen(function* () {
-            yield* send(entry.id, { sessionUpdate: "available_commands_update", availableCommands: [exportCommand, mcpCommand] });
+            yield* send(entry.id, { sessionUpdate: "available_commands_update", availableCommands: [exportCommandOf(brand), mcpCommand] });
             const title = yield* recordedTitle(entry.id);
             const fs = yield* FileSystem.FileSystem;
             const written = yield* fs.stat(storeFileOf(options.directory, entry.id)).pipe(
@@ -758,7 +775,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 const self = yield* Effect.fiber;
                 yield* Effect.forkIn(
                   Fiber.await(self).pipe(
-                    Effect.andThen(send(id, { sessionUpdate: "available_commands_update", availableCommands: [exportCommand, mcpCommand] })),
+                    Effect.andThen(send(id, { sessionUpdate: "available_commands_update", availableCommands: [exportCommandOf(brand), mcpCommand] })),
                     Effect.annotateLogs({ session: id }),
                   ),
                   connectionScope,

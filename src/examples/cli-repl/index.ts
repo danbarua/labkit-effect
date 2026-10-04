@@ -15,8 +15,8 @@
  * fact is printed as it is recorded, then the result.
  *
  * Its policies, turn-end hooks and MCP servers are its configuration (`configuration.ts`): its own
- * defaults, the user's file (`~/.config/labkit/policies.yml`), the project's and the local one (in
- * `.labkit/` in the folder it runs in) when `--setting-sources` names them, `--settings`,
+ * defaults, the user's file (`~/.config/<brand>/policies.yml`), the project's and the local one (in
+ * `.<brand>/` in the folder it runs in) when `--setting-sources` names them, `--settings`,
  * `--mcp-config`, then the flags
  * (`--permission-mode`, `--max-turns`, `--max-budget-usd`), the last write winning. What it resolved
  * to, and which layer said each value, is written to the session's folder as
@@ -25,6 +25,9 @@
  * Each session's facts and log are kept in `logs/cli/<session>/` (`agent-host/directory.ts`); `--continue` goes on from the
  * one written to last, `--resume <session>` from the one named (with no id, one picked from a list), so `bun run cli:watch --continue` restarts on a change to the code and
  * keeps the conversation.
+ *
+ * It runs as the brand `main` is given, else the one the environment names (`LABKIT_BRAND`), else
+ * labkit (`agent-host/brand.ts`): the brand names its command and its folders.
  *
  * Calling it from an agent's shell tool, use `-p` with the prompt as an argument: without `-p` the
  * REPL waits for input, and without a prompt `-p` reads it from stdin to its end. `bun --silent
@@ -40,6 +43,7 @@ import { modelOf } from "../../agent-session/configuration/session-setup.ts";
 import { KeyedAndLocalCatalog, keyOf, keyVariables, known, ModelCatalog } from "../../agent-host/catalog.ts";
 import { latestSession, readSession, storedSessions, summaryOf } from "../../agent-host/directory.ts";
 import { LogsToFile, LogsToStderr } from "../../agent-host/logs.ts";
+import { Brand, brandFrom } from "../../agent-host/brand.ts";
 import { invalid } from "./invalid.ts";
 import { targetOf } from "./models.ts";
 import { printOnce } from "./print.ts";
@@ -146,6 +150,7 @@ const resumed = (named: string, interactive: boolean) =>
  */
 const configOf = (options: Options, interactive: boolean) =>
   Effect.gen(function* () {
+    const brand = yield* Brand;
     const configuration = yield* cliConfiguration(process.cwd(), {
       settingSources: options.settingSources,
       settings: options.settings,
@@ -154,7 +159,7 @@ const configOf = (options: Options, interactive: boolean) =>
       permissionMode: options.permissionMode === "manual" ? "default" : options.permissionMode,
       maxTurns: options.maxTurns,
       maxBudgetUsd: options.maxBudgetUsd,
-    });
+    }, { name: brand.name });
     const permissions = {
       configuration,
       canAsk: interactive && !options.print,
@@ -187,50 +192,52 @@ const configOf = (options: Options, interactive: boolean) =>
     }),
   );
 
-export const cli = Command.make(
-  "cli",
-  { prompt: arg("prompt"), ...flags },
-  Effect.fnUntraced(function* (options) {
-    const stdio = yield* Stdio.Stdio;
-    const interactive = yield* stdio.stdinIsTerminal;
-    const config = yield* configOf(options, interactive);
-    if (!options.print)
-      return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), interactive ? Terminal : Headless, (session, mcp) => repl(session, config, options.prompt, interactive, mcp));
-    // Piped input is read only when no prompt was given: a shell that leaves stdin open would
-    // otherwise keep a prompted run waiting for an end of input that never comes.
-    const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));
-    // Said before the session opens, so a run with nothing to ask leaves no session behind.
-    if (prompt === "") return yield* invalid("No prompt: pass one, or pipe it in.");
-    yield* withSession(config, LogsToStderr, Headless, (session) => printOnce(session, config, prompt, options.outputFormat ?? "text", options.verbose));
-  }),
-).pipe(
-  Command.withDescription("An agent at the command line: a REPL, or -p to ask once."),
-  Command.withExamples([
-    { command: 'cli -p "Hello" --model claude-sonnet-5-5', description: "Ask once and print the answer" },
-    { command: 'cli -p "Hello" --model gpt-5.5 --output-format json', description: "The answer with the session's figures" },
-    { command: "cli --model localhost/mlx-community/Qwen3.5-9B-8bit", description: "A REPL with a local model" },
-    { command: "cli models", description: "The known models, which providers have a key set, and the local server's models" },
-  ]),
-  Command.withSubcommands([
-    Command.make("models", {}, () =>
-      Effect.gen(function* () {
-        yield* Effect.forEach(
-          Object.entries(known),
-          ([provider, listed]) => Console.log(`${provider} (${keyOf(provider) === undefined ? `no ${keyVariables[provider] ?? "key"}` : "key set"}): ${Object.keys(listed).join(", ")}`),
-          { discard: true },
-        );
-        const sources = yield* (yield* ModelCatalog).sources;
-        yield* Effect.forEach(
-          sources.filter(({ provider }) => !(provider in known)),
-          ({ provider, models, at }) =>
-            Console.log(`${provider}${at === undefined ? "" : ` (${at})`}: ${models === undefined ? "not answering" : models.length === 0 ? "no models" : models.join(", ")}`),
-          { discard: true },
-        );
-        yield* Console.log("Name a model with --model or /model as it is listed here, or as provider/model: openai/gpt-5.5, localhost/<a local model>.");
-      }),
-    ).pipe(Command.withDescription("The known models, which providers have a key set, and the local server's models")),
-  ]),
-);
+/** The CLI, called by `brand`'s name. */
+export const cliOf = (brand: Brand) =>
+  Command.make(
+    brand.name,
+    { prompt: arg("prompt"), ...flags },
+    Effect.fnUntraced(function* (options) {
+      const stdio = yield* Stdio.Stdio;
+      const interactive = yield* stdio.stdinIsTerminal;
+      const config = yield* configOf(options, interactive);
+      if (!options.print)
+        return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), interactive ? Terminal : Headless, (session, mcp) => repl(session, config, options.prompt, interactive, mcp));
+      // Piped input is read only when no prompt was given: a shell that leaves stdin open would
+      // otherwise keep a prompted run waiting for an end of input that never comes.
+      const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));
+      // Said before the session opens, so a run with nothing to ask leaves no session behind.
+      if (prompt === "") return yield* invalid("No prompt: pass one, or pipe it in.");
+      yield* withSession(config, LogsToStderr, Headless, (session) => printOnce(session, config, prompt, options.outputFormat ?? "text", options.verbose));
+    }),
+  ).pipe(
+    Command.withDescription("An agent at the command line: a REPL, or -p to ask once."),
+    Command.withExamples([
+      { command: `${brand.name} -p "Hello" --model claude-sonnet-5-5`, description: "Ask once and print the answer" },
+      { command: `${brand.name} -p "Hello" --model gpt-5.5 --output-format json`, description: "The answer with the session's figures" },
+      { command: `${brand.name} --model localhost/mlx-community/Qwen3.5-9B-8bit`, description: "A REPL with a local model" },
+      { command: `${brand.name} models`, description: "The known models, which providers have a key set, and the local server's models" },
+    ]),
+    Command.withSubcommands([
+      Command.make("models", {}, () =>
+        Effect.gen(function* () {
+          yield* Effect.forEach(
+            Object.entries(known),
+            ([provider, listed]) => Console.log(`${provider} (${keyOf(provider) === undefined ? `no ${keyVariables[provider] ?? "key"}` : "key set"}): ${Object.keys(listed).join(", ")}`),
+            { discard: true },
+          );
+          const sources = yield* (yield* ModelCatalog).sources;
+          yield* Effect.forEach(
+            sources.filter(({ provider }) => !(provider in known)),
+            ({ provider, models, at }) =>
+              Console.log(`${provider}${at === undefined ? "" : ` (${at})`}: ${models === undefined ? "not answering" : models.length === 0 ? "no models" : models.join(", ")}`),
+            { discard: true },
+          );
+          yield* Console.log("Name a model with --model or /model as it is listed here, or as provider/model: openai/gpt-5.5, localhost/<a local model>.");
+        }),
+      ).pipe(Command.withDescription("The known models, which providers have a key set, and the local server's models")),
+    ]),
+  );
 
 /**
  * `args` with an empty value after `--resume` (`-r`) where none was given, so that the flag alone
@@ -242,8 +249,15 @@ export const withResumeValue = (args: ReadonlyArray<string>): ReadonlyArray<stri
     return (arg === "--resume" || arg === "-r") && (next === undefined || next.startsWith("-")) ? [arg, ""] : [arg];
   });
 
-/** Runs the CLI with `args`; the model catalog is the well-known models whose provider has a key set, and the local server's. */
-export const run = (args: ReadonlyArray<string>) => Command.runWith(cli, { version: "0.1.0" })(withResumeValue(args)).pipe(Effect.provide(KeyedAndLocalCatalog));
-export const main = () => run(process.argv.slice(2)).pipe(Effect.provide(BunServices.layer), BunRuntime.runMain);
+/**
+ * Runs the CLI with `args`, as `brand` (the one the environment names, else the default, when not
+ * given); the model catalog is the well-known models whose provider has a key set, and the local
+ * server's.
+ */
+export const run = (args: ReadonlyArray<string>, brand: Brand = brandFrom(process.env)) =>
+  Command.runWith(cliOf(brand), { version: brand.version })(withResumeValue(args)).pipe(Effect.provide(KeyedAndLocalCatalog), Effect.provideService(Brand, brand));
+
+/** Runs the CLI with this process's arguments, as `brand`: a package's bin gives its own. */
+export const main = (brand: Brand = brandFrom(process.env)) => run(process.argv.slice(2), brand).pipe(Effect.provide(BunServices.layer), BunRuntime.runMain);
 
 if (import.meta.main) main();

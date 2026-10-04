@@ -96,7 +96,11 @@ const flagLayer = (flags: ConfigFlags, before: ReadonlyArray<LayerSource>): Laye
 };
 
 /** The CLI's layers, in order, for a CLI run in `project`. */
-export const cliLayers = (project: string, flags: ConfigFlags, options: { readonly home?: string } = {}): Effect.Effect<ReadonlyArray<LayerSource>, ConfigInvalid, FileSystem.FileSystem> =>
+export const cliLayers = (
+  project: string,
+  flags: ConfigFlags,
+  options: { readonly home?: string; readonly name?: string } = {},
+): Effect.Effect<ReadonlyArray<LayerSource>, ConfigInvalid, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const files = yield* policyLayers(project, { ...options, sources: yield* sourcesOf(flags.settingSources) });
     const settings = flags.settings === undefined ? [] : [yield* givenLayer("--settings", flags.settings)];
@@ -112,6 +116,6 @@ export const cliLayers = (project: string, flags: ConfigFlags, options: { readon
 export const cliConfiguration = (
   project: string,
   flags: ConfigFlags,
-  options: { readonly home?: string } = {},
+  options: { readonly home?: string; readonly name?: string } = {},
 ): Effect.Effect<Configuration & { readonly layers: ReadonlyArray<LayerSource> }, ConfigInvalid, FileSystem.FileSystem> =>
   Effect.flatMap(cliLayers(project, flags, options), (layers) => Effect.map(loadConfiguration(layers), (configuration) => ({ ...configuration, layers })));

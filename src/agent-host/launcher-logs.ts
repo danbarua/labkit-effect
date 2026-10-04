@@ -5,6 +5,7 @@
  * go to stderr: the launcher does not die for its log.
  */
 
+import { type Brand, brandFrom, envPrefixOf, folderOf } from "./brand.ts";
 import { appendFileSync, existsSync, renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -64,16 +65,17 @@ const wholeNumber = (value: string | undefined, least: number): number | undefin
 };
 
 /**
- * The options the environment gives: `LABKIT_ACP_LOG_DIR` (`~/.labkit/logs`), `LABKIT_ACP_LOG_LEVEL`
- * (`debug`; one of trace, debug, info, warning, error, fatal), `LABKIT_ACP_LOG_MAX_BYTES` (10 MiB),
- * `LABKIT_ACP_LOG_BACKUPS` (4). A value that does not read falls back to the default. The secrets are
- * the non-empty values of the variables whose names hold API_KEY, TOKEN, SECRET, PASSWORD or
- * CREDENTIAL; the launch id is minted.
+ * The options the environment gives, the brand's prefix before each (`LABKIT_` for labkit's):
+ * `ACP_LOG_DIR` (`~/.<brand>/logs`), `ACP_LOG_LEVEL` (`debug`; one of trace, debug, info, warning,
+ * error, fatal), `ACP_LOG_MAX_BYTES` (10 MiB), `ACP_LOG_BACKUPS` (4). A value that does not read falls
+ * back to the default. The secrets are the non-empty values of the variables whose names hold
+ * API_KEY, TOKEN, SECRET, PASSWORD or CREDENTIAL; the launch id is minted.
  */
-export const launcherLogOptionsFrom = (env: Readonly<Record<string, string | undefined>>): LauncherLogOptions => {
-  const { LABKIT_ACP_LOG_DIR: dir, LABKIT_ACP_LOG_LEVEL: levelName = "", LABKIT_ACP_LOG_MAX_BYTES: maxBytes, LABKIT_ACP_LOG_BACKUPS: backups } = env;
+export const launcherLogOptionsFrom = (env: Readonly<Record<string, string | undefined>>, brand: Brand = brandFrom(env)): LauncherLogOptions => {
+  const prefix = `${envPrefixOf(brand)}ACP_LOG_`;
+  const [dir, levelName = "", maxBytes, backups] = [env[`${prefix}DIR`], env[`${prefix}LEVEL`], env[`${prefix}MAX_BYTES`], env[`${prefix}BACKUPS`]];
   return {
-    dir: dir ? resolve(dir) : join(homedir(), ".labkit", "logs"),
+    dir: dir ? resolve(dir) : join(homedir(), folderOf(brand), "logs"),
     // `Object.hasOwn` keeps out names like `constructor`, which every object has.
     level: Object.hasOwn(levelsByName, levelName.toLowerCase()) ? levelsByName[levelName.toLowerCase()]! : "Debug",
     maxBytes: wholeNumber(maxBytes, 1) ?? 10 * 1024 * 1024,

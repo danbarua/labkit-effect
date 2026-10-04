@@ -14,7 +14,7 @@ import type { ChildProcessSpawner } from "effect/process";
 import type { Scope } from "effect";
 import type { ProcessState } from "../agent-process/machine.ts";
 import { makeProcessGroup } from "../agent-process/process-group.ts";
-import { connect, McpFailed, type McpConnection, type McpServerStdio, type Root, type ToolResult } from "./client.ts";
+import { type ClientInfo, connect, McpFailed, type McpConnection, type McpServerStdio, type Root, type ToolResult } from "./client.ts";
 import { logKeys } from "./log-keys.ts";
 import { describe, initialMcpServerState, type McpServerEvent, type McpServerState, stepMcpServer } from "./server-machine.ts";
 
@@ -41,7 +41,7 @@ export interface McpServer {
 export const startMcpServer = (
   server: McpServerStdio,
   roots: ReadonlyArray<Root>,
-  options: { readonly connectTimeout?: Duration.Input | undefined } = {},
+  options: { readonly connectTimeout?: Duration.Input | undefined; readonly clientInfo?: ClientInfo | undefined } = {},
 ): Effect.Effect<McpServer, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const timeout = options.connectTimeout ?? defaultConnectTimeout;
@@ -69,7 +69,7 @@ export const startMcpServer = (
 
     const group = yield* makeProcessGroup({ name: `mcp ${server.name}`, command: server.command, args: server.args, env: server.env, cwd: server.cwd }, (run, handle) =>
       Effect.gen(function* () {
-        const connection = yield* connect(server.name, handle, roots);
+        const connection = yield* connect(server.name, handle, roots, options.clientInfo);
         return { connection, tools: yield* connection.tools };
       }).pipe(
         Effect.timeoutOrElse({

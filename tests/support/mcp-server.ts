@@ -6,7 +6,8 @@
  * (`notifications/cancelled`) the server logs "cancelled <id>" (`notifications/message`); an
  * unknown tool is the error -32602; `exit` ends the server's process with exit code 7, and is
  * listed only when `MCP_FAKE_EXIT=1`. With `MCP_FAKE_NO_LIST=1` it never answers `tools/list`.
- * After `notifications/initialized` it logs "initialized".
+ * After `notifications/initialized` it logs "initialized by <name> <version>", the `clientInfo` the
+ * client gave `initialize`.
  */
 
 const write = (message: unknown) => process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -17,6 +18,8 @@ const tools = {
   exit: { name: "exit", description: "Ends the server's process.", inputSchema: { type: "object" } },
 };
 const listed = process.env["MCP_FAKE_EXIT"] === "1" ? [tools.roots, tools.slow, tools.exit] : [tools.roots, tools.slow];
+/** What the client called itself in `initialize`. */
+let client = { name: "", version: "" };
 /** Calls waiting for the client's answer to the server's own request, by that request's id. */
 const asked = new Map<string, number | string>();
 let next = 0;
@@ -31,13 +34,18 @@ const handle = (message: { id?: number | string; method?: string; params?: Recor
   const params = message.params ?? {};
   switch (message.method) {
     case "initialize":
+      client = (params["clientInfo"] ?? client) as typeof client;
       return write({
         jsonrpc: "2.0",
         id: message.id,
-        result: { protocolVersion: params["protocolVersion"], capabilities: { tools: { listChanged: true }, logging: {} }, serverInfo: { name: "fake", version: "1.0.0" } },
+        result: {
+          protocolVersion: params["protocolVersion"],
+          capabilities: { tools: { listChanged: true }, logging: {} },
+          serverInfo: { name: "fake", version: "1.0.0" },
+        },
       });
     case "notifications/initialized":
-      return write({ jsonrpc: "2.0", method: "notifications/message", params: { level: "info", data: "initialized" } });
+      return write({ jsonrpc: "2.0", method: "notifications/message", params: { level: "info", data: `initialized by ${client.name} ${client.version}` } });
     case "notifications/cancelled":
       return write({ jsonrpc: "2.0", method: "notifications/message", params: { level: "info", data: `cancelled ${String(params["requestId"])}` } });
     case "tools/list":

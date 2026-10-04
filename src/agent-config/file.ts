@@ -33,12 +33,13 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Data, Duration, Effect, FileSystem, Schema } from "effect";
 import { Yaml } from "effect/encoding";
+import { defaultBrand } from "../agent-host/brand.ts";
 import { builtins } from "./builtins.ts";
 import { merged } from "./merge.ts";
 import { type AnyPlugin, type Seam, seams } from "./plugin.ts";
 
-/** The name of the configuration's folders, until the product has one. */
-export const configName = "labkit";
+/** The name of the configuration's folders unless a caller says another: the default brand's (`agent-host/brand.ts`). */
+export const configName = defaultBrand.name;
 
 /** Where a configuration file is: the user's, the project's (kept with it), or the user's own for the project (`local`, kept out of its history). */
 export type FileSource = "user" | "project" | "local";

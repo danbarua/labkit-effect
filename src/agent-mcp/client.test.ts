@@ -5,20 +5,20 @@ import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Logger } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
-import { connectStdio, McpFailed, protocolVersion, type ToolResult } from "./client.ts";
+import { type ClientInfo, connectStdio, McpFailed, protocolVersion, type ToolResult } from "./client.ts";
 import { logKeys } from "./log-keys.ts";
 
 const fake = { name: "fake", command: process.execPath, args: [new URL("../../tests/support/mcp-server.ts", import.meta.url).pathname], env: {} };
 const roots = [{ uri: "file:///work", name: "work" }];
 
 /** Runs `use` with a connection to the test server; what it gives, and the server's log messages. */
-const connected = <A, E>(use: (connection: Effect.Success<ReturnType<typeof connectStdio>>) => Effect.Effect<A, E>) => {
+const connected = <A, E>(use: (connection: Effect.Success<ReturnType<typeof connectStdio>>) => Effect.Effect<A, E>, clientInfo?: ClientInfo) => {
   const logged: Array<unknown> = [];
   const capture = Logger.make((options) => {
     logged.push(options.message);
   });
   return runTest(
-    connectStdio(fake, roots).pipe(
+    connectStdio(fake, roots, clientInfo).pipe(
       Effect.flatMap(use),
       Effect.provide(Layer.mergeAll(BunServices.layer, Logger.layer([capture], { mergeWithExisting: true }))),
     ),
@@ -29,6 +29,17 @@ const textOf = (result: ToolResult) =>
   (Array.isArray(result["content"]) ? result["content"] : [])
     .flatMap((block) => (typeof block === "object" && block !== null && !Array.isArray(block) && typeof block["text"] === "string" ? [block["text"]] : []))
     .join("");
+
+/** What the server logged, as text. */
+const saidIn = (logged: ReadonlyArray<unknown>) =>
+  logged.filter((each): each is { data: string } => typeof each === "object" && each !== null && "data" in each).map((each) => each.data);
+
+test("MC1: the client calls itself what its host says (clientInfo); when it says nothing, the default brand", async () => {
+  // The server logs the clientInfo it was given once it is told initialization was done; a request after it waits for that line.
+  const listed = (connection: Effect.Success<ReturnType<typeof connectStdio>>) => connection.tools;
+  expect(saidIn((await connected(listed, { name: "acme", version: "2.0.0" })).logged)).toContain("initialized by acme 2.0.0");
+  expect(saidIn((await connected(listed)).logged)).toContain("initialized by labkit 0.1.0");
+});
 
 test("MC1 MC5: initialize offers this client's version and the server's answer is kept; its tools are listed across pages; a call gives the tool's result", async () => {
   const { value, logged } = await connected((connection) =>
@@ -56,8 +67,7 @@ test("MC3: a call interrupted is cancelled at the server (notifications/cancelle
       yield* Effect.sleep("200 millis");
     }),
   );
-  const said = logged.filter((each): each is { data: string } => typeof each === "object" && each !== null && "data" in each).map((each) => each.data);
-  expect(said.some((data) => /^cancelled \d+$/.test(data))).toBe(true);
+  expect(saidIn(logged).some((data) => /^cancelled \d+$/.test(data))).toBe(true);
 });
 
 test("MC4: a request the server answers with an error fails with McpFailed, naming the server and the request", async () => {

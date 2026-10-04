@@ -54,7 +54,7 @@ test("AG14: the launcher serves the host on stdin and stdout and nothing else on
   // Bounded by the test's timeout: the launcher must end the process on its own.
   expect(await child.exited).toBe(0);
 
-  expect(seen.initialized.agentInfo?.name).toBe("labkit-effect");
+  expect(seen.initialized.agentInfo).toMatchObject({ name: "labkit", version: "0.1.0" });
   expect(seen.initialized.agentCapabilities?.sessionCapabilities?.close).toBeDefined();
   const current = (options: ReadonlyArray<acp.SessionConfigOption> | null | undefined, id: string) => {
     const option = options?.find((each) => each.id === id);
@@ -88,8 +88,20 @@ test("AG16: LABKIT_ACP_RETRIES is how many times a turn with thinking and no ans
   expect(hostOptionsFrom({}).retries).toBeUndefined();
 });
 
-test("AG15: sessions are kept in LABKIT_ACP_SESSIONS_DIR, else in ~/.labkit/sessions", () => {
+test("AG15: sessions are kept in LABKIT_ACP_SESSIONS_DIR, else in ~/.labkit/sessions; for another brand, its variable and folder", () => {
   expect(sessionsDirectoryFrom({})).toBe(join(homedir(), ".labkit", "sessions"));
   expect(sessionsDirectoryFrom({ LABKIT_ACP_SESSIONS_DIR: "" })).toBe(join(homedir(), ".labkit", "sessions"));
   expect(sessionsDirectoryFrom({ LABKIT_ACP_SESSIONS_DIR: "/tmp/elsewhere" })).toBe("/tmp/elsewhere");
+  const acme = { name: "acme", version: "1.0.0" };
+  expect(sessionsDirectoryFrom({ LABKIT_ACP_SESSIONS_DIR: "/tmp/elsewhere" }, acme)).toBe(join(homedir(), ".acme", "sessions"));
+  expect(sessionsDirectoryFrom({ ACME_ACP_SESSIONS_DIR: "/tmp/acme" }, acme)).toBe("/tmp/acme");
+  expect(sessionsDirectoryFrom({ LABKIT_BRAND: "acme", ACME_ACP_SESSIONS_DIR: "/tmp/acme" })).toBe("/tmp/acme");
+});
+
+test("AG24: the launcher's options are the brand's variables, and no other brand's", () => {
+  const acme = { name: "acme", version: "1.0.0" };
+  const env = { ACME_ACP_MODEL: "openai/gpt-5.5", ACME_ACP_RETRIES: "3", ACME_ACP_PERMISSION_MODE: "acceptEdits", ACME_ACP_LOCAL_TOOLS: "1", LABKIT_ACP_RETRIES: "9" };
+  expect(hostOptionsFrom(env, acme)).toEqual({ model: "openai/gpt-5.5", world: "local", permissionMode: "acceptEdits", retries: 3, strictToolInput: false, brand: acme });
+  expect(hostOptionsFrom(env)).toMatchObject({ model: undefined, world: "editor", permissionMode: undefined, retries: 9 });
+  expect(hostOptionsFrom({ ...env, LABKIT_BRAND: "acme" })).toMatchObject({ model: "openai/gpt-5.5", retries: 3, brand: { name: "acme" } });
 });

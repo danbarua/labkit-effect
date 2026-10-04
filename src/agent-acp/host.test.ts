@@ -14,6 +14,7 @@ import { BunServices } from "@effect/platform-bun";
 import { Deferred, Effect, Fiber, Layer, Logger, References } from "effect";
 import * as Agent from "effective-acp/agent";
 import { fromWebStreams } from "effective-acp/stdio";
+import type { Brand } from "../agent-host/brand.ts";
 import { type CatalogSource, ModelCatalog } from "../agent-host/catalog.ts";
 import { storeFileOf } from "../agent-host/directory.ts";
 import { answerNow } from "../agent-host/incomplete.ts";
@@ -28,6 +29,7 @@ import type { Services } from "../agent-session/loop.ts";
 import { ModelStream, ModelStreamInterval } from "../agent-session/model-stream.ts";
 import { receivedJson, receivedText } from "../agent-session/received.ts";
 import type { SessionStore } from "../agent-session/session-store.ts";
+import { logKeys as mcpLogKeys } from "../agent-mcp/log-keys.ts";
 import { test, testFolder } from "../../tests/support/test.ts";
 import { HostSessionServices, makeHost } from "./host.ts";
 import { logKeys } from "./log-keys.ts";
@@ -161,6 +163,7 @@ function startHost(
     readonly services?: (runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>;
     readonly pageSize?: number;
     readonly maxTurnRequests?: number;
+    readonly brand?: Brand;
   } = {},
 ): HostRun {
   const script = [...(options.script ?? [])];
@@ -198,6 +201,7 @@ function startHost(
     ...(options.world === undefined ? {} : { world: options.world }),
     ...(options.pageSize === undefined ? {} : { pageSize: options.pageSize }),
     ...(options.maxTurnRequests === undefined ? {} : { maxTurnRequests: options.maxTurnRequests }),
+    ...(options.brand === undefined ? {} : { brand: options.brand }),
     services: (runner) => Layer.mergeAll((options.services ?? SessionServices)(runner), scripted, Layer.succeed(ModelStreamInterval, Millis.make(0))),
   });
   const capture = Logger.make((log) => {
@@ -907,6 +911,35 @@ test("AG22: the MCP servers a client names are started; their tools are offered 
     [{ _tag: "Harness", part: "mcp servers" }, { _tag: "McpServerChanged", server: "fake", state: { _tag: "Ready", tools: ["mcp__fake__echo", "mcp__fake__roots", "mcp__fake__slow"] } }],
   ]);
   expect(facts[0]).toMatchObject({ observation: { _tag: "SessionOpened" } });
+});
+
+test("AG24: the host goes by its brand: /export writes to .acme/exports, an MCP server is told its name, and with no model to ask it names ACME_ACP_MODEL", async () => {
+  const acme = { name: "acme", version: "1.0.0" };
+  const host = startHost({ brand: acme, script: [answer({ _tag: "Text", text: "Hello there." })] });
+  const { app, log } = sdkClient();
+  mkdirSync(host.cwd, { recursive: true });
+  const sessionId = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [fakeMcp("fake")] });
+    await ctx.request("session/prompt", say(sessionId, "Hello"));
+    await ctx.request("session/prompt", say(sessionId, "/export"));
+    return sessionId;
+  });
+  await host.stop();
+  const path = join(host.cwd, ".acme", "exports", `${sessionId}.md`);
+  const said = log.updates.flatMap((update) => (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text" ? [update.content.text] : []));
+  expect(said.at(-1)).toBe(`Exported this session to ${path}`);
+  expect(existsSync(path)).toBe(true);
+  const serverSaid = host.logged.filter((each) => each.key === mcpLogKeys.server.logged).map((each) => (each.details as { readonly data?: unknown }).data);
+  expect(serverSaid).toContain("initialized by acme 1.0.0");
+
+  const empty = startHost({ brand: acme, sources: [{ provider: ProviderName.make("localhost"), models: undefined }] });
+  const none = await sdkClient().app.connectWith(empty.stream, async (ctx) => {
+    await initialize(ctx);
+    return failure(ctx.request("session/new", { cwd: empty.cwd, mcpServers: [] }));
+  });
+  await empty.stop();
+  expect(none?.message).toContain("name one with ACME_ACP_MODEL as provider/model");
 });
 
 test("AG23: a server that cannot be started leaves the session running: the model is told it is not running and the session records it failed; /mcp says how each server is; a server at a URL is refused, as the host does not offer HTTP; two servers whose tools would share a name are -32602", async () => {

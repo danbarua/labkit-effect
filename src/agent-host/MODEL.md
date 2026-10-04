@@ -102,10 +102,10 @@ warning, error and fatal records alone.
   (trace, debug, info, warning, error, fatal), its log annotations (where the connection, request,
   session, turn and call ids ride), its message and, when there is one, its cause as text with its
   stack and nested causes. The layer also makes the level the lowest logged. The file's path is said
-  on stderr once, at start. The environment gives the folder (`LABKIT_ACP_LOG_DIR`,
-  `~/.labkit/logs`), the level (`LABKIT_ACP_LOG_LEVEL`, debug), the size a file is rotated at
-  (`LABKIT_ACP_LOG_MAX_BYTES`, 10 MiB) and the backups kept (`LABKIT_ACP_LOG_BACKUPS`, 4); a value
-  that does not read is the default. Each launch has an id of its own, and the 20 newest stopped
+  on stderr once, at start. The environment gives, each after the brand's prefix (H18; `LABKIT_`
+  for labkit's), the folder (`ACP_LOG_DIR`, `~/.<brand>/logs`), the level (`ACP_LOG_LEVEL`, debug),
+  the size a file is rotated at (`ACP_LOG_MAX_BYTES`, 10 MiB) and the backups kept
+  (`ACP_LOG_BACKUPS`, 4); a value that does not read is the default. Each launch has an id of its own, and the 20 newest stopped
   launches are kept.
 - H13. A record that would take the file past `maxBytes` first rotates it: `.jsonl` becomes
   `.jsonl.1`, each backup moves one on, and none past `backups` is kept. A record whose line is past
@@ -154,6 +154,19 @@ module stores it as JSON and returns it as JSON and does not read it.
   A record that does not read is logged as `host_record.unreadable` (session, file, cause), a
   warning, and its session is listed without it. A folder with a record and no facts file is no
   session.
+
+`Brand` (`brand.ts`) is the name the agent goes by, and what is named after it. A package that
+ships the agent gives its own at its entry point; the CLI's `main(brand)` and the ACP launcher's
+`launch(env, brand)` take it.
+
+- H18. A brand's environment variables' prefix is its name in capitals, every character but a
+  letter or a digit `_`, then `_` (`labkit`: `LABKIT_`; `whitelabel-agent`: `WHITELABEL_AGENT_`); its
+  folder, in a home or a project, is `.<name>`. The brand is the one a program gives; else the one
+  `LABKIT_BRAND` names (the default brand's prefix, then `BRAND`; blank names none); else labkit.
+  Named after it: the configuration's folders (`~/.config/<name>/`, `<project>/.<name>/`), the
+  launcher's sessions and logs (`~/.<name>/sessions`, `~/.<name>/logs`) and variables
+  (`<PREFIX>ACP_*`), where `/export` writes (`.<name>/exports`), what the ACP host calls itself to a
+  client (`agentInfo`) and the MCP client to a server (`clientInfo`), and the CLI's command.
 
 ## What is not built
 

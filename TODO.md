@@ -145,9 +145,9 @@ model.
       agent-config CF7, CF10); once a folder is trusted, its layers may.
 - [ ] Turn-end hooks by name, as policies are: a hold recorded from the hook that made it, so
       `retryIncomplete` counts its own holds, not every hook's.
-- [ ] The product's name (Dan is thinking of `whitelabel-agent`), as one definition a host can brand:
-      the configuration's folders (`agent-config` `configName`, `labkit`) and the environment
-      variables' prefix (`LABKIT_ACP_`).
+- [ ] The product's name (Dan is thinking of `whitelabel-agent`): the default brand
+      (`agent-host/brand.ts`, agent-host H18) is still `labkit`, and with it the meta variable
+      (`LABKIT_BRAND`).
 
 - [ ] Plug-ins and `policies.yml`. Dan's decisions (2026-10-03):
       - A plug-in declares a Schema for its settings, with a default for each, and the entries it

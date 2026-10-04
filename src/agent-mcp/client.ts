@@ -15,6 +15,7 @@
  * take the defaults MCP states (`destructiveHint: true`, and so on).
  */
 
+import { defaultBrand } from "../agent-host/brand.ts";
 import { Data, Effect, Queue, Schema, type Scope, type Sink, Stream } from "effect";
 import { McpSchema } from "effect/ai";
 import { type Wire, WireError, WireInput } from "effective-acp/json-rpc";
@@ -130,6 +131,7 @@ export interface ServerPipes {
 export const connectStdio = (
   server: McpServerStdio,
   roots: ReadonlyArray<Root>,
+  clientInfo: ClientInfo = defaultClientInfo,
 ): Effect.Effect<McpConnection, McpFailed, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const handle = yield* ChildProcess.make(server.command, [...server.args], {
@@ -137,14 +139,24 @@ export const connectStdio = (
       extendEnv: false,
       ...(server.cwd === undefined ? {} : { cwd: server.cwd }),
     }).pipe(Effect.mapError((cause) => new McpFailed({ server: server.name, reason: `${server.command} could not be started`, cause })));
-    return yield* connect(server.name, handle, roots);
+    return yield* connect(server.name, handle, roots, clientInfo);
   });
 
+/** What a client calls itself to a server (`clientInfo`): its host's brand. */
+export interface ClientInfo {
+  readonly name: string;
+  readonly version: string;
+}
+
+/** What a client calls itself unless its host says: the default brand. */
+export const defaultClientInfo: ClientInfo = { name: defaultBrand.name, version: defaultBrand.version };
+
 /**
- * Connects to the server named `name` over `pipes`, in the scope given: `initialize`, then
- * `notifications/initialized`. `roots` are what it is told when it asks (`roots/list`).
+ * Connects to the server named `name` over `pipes`, in the scope given: `initialize`, with
+ * `clientInfo`, then `notifications/initialized`. `roots` are what it is told when it asks
+ * (`roots/list`).
  */
-export const connect = (name: string, pipes: ServerPipes, roots: ReadonlyArray<Root>): Effect.Effect<McpConnection, McpFailed, Scope.Scope> =>
+export const connect = (name: string, pipes: ServerPipes, roots: ReadonlyArray<Root>, clientInfo: ClientInfo = defaultClientInfo): Effect.Effect<McpConnection, McpFailed, Scope.Scope> =>
   Effect.gen(function* () {
     const server = { name };
     const failed = (reason: string) => (cause: unknown) => new McpFailed({ server: name, reason, cause });
@@ -182,7 +194,7 @@ export const connect = (name: string, pipes: ServerPipes, roots: ReadonlyArray<R
         }),
     });
     const initialized = yield* peer.client
-      .initialize({ protocolVersion, capabilities: { roots: { listChanged: false } }, clientInfo: { name: "labkit-effect", version: "0.0.0" } })
+      .initialize({ protocolVersion, capabilities: { roots: { listChanged: false } }, clientInfo: { name: clientInfo.name, version: clientInfo.version } })
       .pipe(Effect.mapError(failed("initialize failed")));
     yield* Effect.logInfo(logKeys.server.initialized, {
       server: server.name,

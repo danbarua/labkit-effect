@@ -4,6 +4,7 @@ import { expect } from "bun:test";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
+import { Brand, defaultBrand } from "../../agent-host/brand.ts";
 import { KeyedAndLocalCatalog } from "../../agent-host/catalog.ts";
 import { BoringContextAssembler } from "../../../tests/support/boring.ts";
 import { runTest } from "../../../tests/support/run.ts";
@@ -19,8 +20,11 @@ import { CountingTurns } from "../../agent-session/turns.ts";
 import { command, completions, inForce, offered } from "./commands.ts";
 import { ask } from "./session.ts";
 
-/** Runs `lines` in order (a command, or input to the model) and returns what each command printed and what the model was asked with. */
-const session = (lines: ReadonlyArray<string>) => {
+/**
+ * Runs `lines` in order (a command, or input to the model), as `brand` (the default when left out),
+ * and returns what each command printed and what the model was asked with.
+ */
+const session = (lines: ReadonlyArray<string>, brand: Brand = defaultBrand) => {
   const asked: Array<Target> = [];
   const recording = Layer.succeed(ModelClient, {
     respond: (target, _context, turn) =>
@@ -59,6 +63,7 @@ const session = (lines: ReadonlyArray<string>) => {
     }).pipe(
       // No command here prompts; the terminal is there because `/model` and `/settings` alone would.
       Effect.orDie,
+      Effect.provideService(Brand, brand),
       Effect.provide(
         Layer.mergeAll(
           BunServices.layer,
@@ -100,6 +105,13 @@ test("/export writes the session's transcript as Markdown to .labkit/exports/<se
   const written = await Bun.file(path).text();
   expect(written).toContain("# Session `s1`");
   expect(written).toContain("hello");
+});
+
+test("/export writes to the brand's folder: .acme/exports for acme's", async () => {
+  const { printed } = await session(["hello", "/export"], { name: "acme", version: "1.0.0" });
+  const path = join(testFolder(), ".acme", "exports", "s1.md");
+  expect(printed).toEqual([`Exported this session to ${path}`]);
+  expect(await Bun.file(path).exists()).toBe(true);
 });
 
 test("/tools shows the tools the session opened with: here, none", async () => {

@@ -31,8 +31,9 @@ tried first (TODO.md, the MCP servers entry): it drops what a server sends unask
 
 ## Rules
 
-- MC1. The client offers `initialize` its latest version (`protocolVersion`) and keeps what the
-  server answers; then it sends `notifications/initialized`. `tools` lists every page, by
+- MC1. The client offers `initialize` its latest version (`protocolVersion`) and calls itself what
+  its host says (`clientInfo`: the host's brand; the default brand when it says nothing), and keeps
+  what the server answers; then it sends `notifications/initialized`. `tools` lists every page, by
   `nextCursor`. A call gives the tool's result as the server sent it, decoded with `McpSchema`; a
   tool's own failure is a result with `isError`.
 - MC2. The client answers the server's requests during a call: `ping`, and `roots/list` with the

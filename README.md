@@ -83,3 +83,8 @@ the local server at `http://localhost:8000/v1`, `LABKIT_ACP_SESSIONS_DIR` (defau
 `~/.labkit/sessions`), `LABKIT_ACP_LOCAL_TOOLS=1` (tools on the local disk instead of through the
 editor: a stopgap), `LABKIT_ACP_STRICT_TOOL_INPUT=1` (refuse a tool call whose input has
 properties its tool does not take; without it, the call runs without them, and its result says so), and `LABKIT_ACP_LOG_DIR`, `_LEVEL`, `_MAX_BYTES`, `_BACKUPS`.
+
+These are labkit's names. The agent goes by a brand (`src/agent-host/brand.ts`): the one its entry
+point gives (`main(brand)`, `launch(env, brand)`), else the one `LABKIT_BRAND` names, else labkit.
+As `acme` it reads `ACME_ACP_*`, keeps its sessions and logs in `~/.acme/`, its configuration in
+`~/.config/acme/` and `.acme/`, and calls itself `acme` to an ACP client and an MCP server.

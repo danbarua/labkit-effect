@@ -11,7 +11,8 @@
  * - `/tools` shows the tools every request offers the model: the session's, as it opened with them
  *   (ImmutableToolCatalog).
  * - `/export` writes the session's transcript (`markdownOf`) to
- *   `.labkit/exports/<session>.md` in the folder the CLI runs in, as the ACP host's `/export` does.
+ *   `.<brand>/exports/<session>.md` in the folder the CLI runs in (`.labkit/` for labkit's), as the
+ *   ACP host's `/export` does.
  * - `/mcp` says how the session's MCP servers are; `/mcp reconnect <server>` starts one again, as
  *   the ACP host's `/mcp` does (`agent-mcp` `command.ts`).
  *
@@ -22,6 +23,7 @@
  * turns; what a model does not allow is adjusted, and recorded, when it is next asked.
  */
 
+import { Brand, folderOf } from "../../agent-host/brand.ts";
 import { join } from "node:path";
 import { Effect, FileSystem, Schema } from "effect";
 import { markdownOf } from "../../agent-host/export.ts";
@@ -42,7 +44,7 @@ export const commands: ReadonlyArray<readonly [string, string]> = [
   ["/model [name]", "Ask another model; with no name, pick one"],
   ["/settings [name=value …]", "Change the settings named; with none, show them and pick one to change"],
   ["/tools", "Show the tools the model is offered"],
-  ["/export", "Write this session's transcript as Markdown to .labkit/exports/<session>.md"],
+  ["/export", "Write this session's transcript as Markdown to .<brand>/exports/<session>.md"],
   ["/mcp [reconnect <server>]", "Say how the MCP servers are; start one again"],
   ["/help", "Show these commands"],
   ["/exit", "Quit (also /quit)"],
@@ -188,7 +190,7 @@ export const command = (session: Session, line: string, folder: string = process
         const facts = yield* session.facts;
         const opened = facts[0];
         const id = opened?._tag === "Observed" && opened.observation._tag === "SessionOpened" ? opened.observation.session : "session";
-        const exports = join(folder, ".labkit", "exports");
+        const exports = join(folder, folderOf(yield* Brand), "exports");
         const path = join(exports, `${id}.md`);
         const fs = yield* FileSystem.FileSystem;
         yield* fs.makeDirectory(exports, { recursive: true }).pipe(Effect.andThen(fs.writeFileString(path, markdownOf(facts))), Effect.mapError((error) => invalid(`The transcript could not be written to ${path}: ${error.message}`)));
