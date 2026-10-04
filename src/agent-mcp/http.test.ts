@@ -2,7 +2,7 @@
 
 import { expect } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, Layer, Logger, type Scope, Stream } from "effect";
+import { Effect, Fiber, Layer, Logger, type Scope, Stream } from "effect";
 import type { ChildProcessSpawner } from "effect/process";
 import { type FakeHttpOptions, type FakeHttpServer, startFakeHttpServer } from "../../tests/support/mcp-http-server.ts";
 import { runTest } from "../../tests/support/run.ts";
@@ -173,6 +173,21 @@ test("MS6: a remote server that no longer has the session is given a new one, an
   expect(value).toEqual({ ready: "Ready", echoed: "after", now: "Ready" });
   expect(logged).toContain(logKeys.server.sessionRenewed);
   expect(fake.requests.filter((request) => request.carried.includes("initialize"))).toHaveLength(2);
+});
+
+test("MS6: a request whose response stream ends before its answer fails, saying so, and is not made again", async () => {
+  const { value, fake } = await withFake({ transport: "http" }, (fake) =>
+    Effect.gen(function* () {
+      const connection = yield* connectRemote(remoteOf(fake, "http"), roots);
+      const pending = yield* Effect.forkChild(Effect.flip(connection.call("slow", {})));
+      yield* until(() => fake.requests.some((request) => request.carried.includes("tools/call")));
+      fake.endRequestStreams();
+      return yield* Fiber.join(pending);
+    }),
+  );
+  expect(value.message).toBe("fake: tools/call slow failed");
+  expect(value.cause).toMatchObject({ code: -32002, message: "The server's response ended before its answer" });
+  expect(fake.requests.filter((request) => request.carried.includes("tools/call"))).toHaveLength(1);
 });
 
 test("MS6: an HTTP+SSE server whose stream ends between requests is connected anew; a call after it is answered", async () => {

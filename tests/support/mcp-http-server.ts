@@ -48,6 +48,8 @@ export interface FakeHttpServer {
   readonly dropStreams: () => void;
   /** The token `auth` takes from now on: the one a client has is revoked. */
   readonly setToken: (token: string) => void;
+  /** Ends the response stream of every request not answered yet, without an answer. */
+  readonly endRequestStreams: () => void;
   readonly stop: () => void;
 }
 
@@ -218,6 +220,12 @@ export const startFakeHttpServer = (options: FakeHttpOptions): FakeHttpServer =>
     expire: () => sessions.clear(),
     setToken: (next) => {
       token = next;
+    },
+    endRequestStreams: () => {
+      for (const session of sessions.values()) {
+        for (const stream of new Set(session.streams.values())) stream.close();
+        session.streams.clear();
+      }
     },
     dropStreams: () => {
       for (const [id, session] of sessions) {
