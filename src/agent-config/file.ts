@@ -35,7 +35,7 @@ import type { McpServerRemote } from "../agent-mcp/http.ts";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { Data, Duration, Effect, FileSystem, Schema } from "effect";
+import { Array as Arr, Data, Duration, Effect, FileSystem, Schema } from "effect";
 import { Yaml } from "effect/encoding";
 import { defaultBrand } from "../agent-host/brand.ts";
 import { builtins } from "./builtins.ts";
@@ -138,17 +138,21 @@ export const McpServerSchema = Schema.Union([StdioServer, RemoteServer]);
 /** `${VAR}` or `${VAR:-default}`. */
 const variable = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
 
-/** `text` with each `${VAR}` the environment's value, or its default; the first variable it lacks when one is not set and has no default. */
+/** The value `${name}` or `${name:-fallback}` expands to: the variable's value when it is set and not empty, else the fallback. */
+const expansionOf = (env: Readonly<Record<string, string | undefined>>, name: string, fallback: string | undefined): string | undefined => {
+  const set = env[name];
+  return set !== undefined && set !== "" ? set : fallback;
+};
+
+/**
+ * Expands every `${VAR}` and `${VAR:-default}` in `text`. Returns the expanded text, or the name of
+ * the first variable that is not set and has no default.
+ */
 const expandedIn = (text: string, env: Readonly<Record<string, string | undefined>>): { readonly value: string } | { readonly missing: string } => {
-  let missing: string | undefined;
-  const value = text.replaceAll(variable, (whole, name: string, fallback: string | undefined) => {
-    const set = env[name];
-    if (set !== undefined && set !== "") return set;
-    if (fallback !== undefined) return fallback;
-    missing ??= name;
-    return whole;
-  });
-  return missing === undefined ? { value } : { missing };
+  const missing = [...text.matchAll(variable)].find(([, name = "", fallback]) => expansionOf(env, name, fallback) === undefined)?.[1];
+  if (missing !== undefined) return { missing };
+  // Every variable has a value here: the first check returned when one did not.
+  return { value: text.replaceAll(variable, (whole, name: string, fallback: string | undefined) => expansionOf(env, name, fallback) ?? whole) };
 };
 
 /** The problem a Schema found, on one line. */
@@ -159,11 +163,11 @@ const at = (value: unknown, path: ReadonlyArray<string>): unknown => path.reduce
 
 /** The layer that last wrote `path`, or the deepest part of it that one wrote: what an error at `path` names. */
 const writerOf = (layers: ReadonlyArray<LayerSource>, path: ReadonlyArray<string>): string => {
-  for (let length = path.length; length > 0; length--) {
-    const writer = [...layers].reverse().find((layer) => at(layer.value, path.slice(0, length)) !== undefined);
-    if (writer !== undefined) return writer.name;
-  }
-  return layers.at(-1)?.name ?? "the configuration";
+  const newestFirst = Arr.reverse(layers);
+  // `path` itself first, then each shorter prefix of it.
+  const prefixes = Arr.makeBy(path.length, (shorter) => path.slice(0, path.length - shorter));
+  const writer = prefixes.map((prefix) => newestFirst.find((layer) => at(layer.value, prefix) !== undefined)).find((found) => found !== undefined);
+  return writer?.name ?? layers.at(-1)?.name ?? "the configuration";
 };
 
 /** The plug-ins configured in `plugins`, by name, with their settings decoded; each mistake named for the layer that wrote it. */
@@ -180,15 +184,18 @@ const pluginsOf = (layers: ReadonlyArray<LayerSource>, value: unknown, registry:
         if (typeof use !== "string") return yield* invalid([...path, "use"], "Expected the name of a plug-in");
         const plugin = registry.find((each) => each.use === use);
         if (plugin === undefined) return yield* invalid(configured !== null && "use" in configured ? [...path, "use"] : path, `${JSON.stringify(use)} is not a plug-in; those are: ${registry.map((each) => each.use).join(", ")}`);
-        // Each setting decoded alone first, so that a mistake names the layer that wrote it.
-        for (const [key, setting] of Object.entries(settings)) {
-          const field = plugin.settings.fields[key];
-          if (field === undefined) return yield* invalid([...path, key], `${use} has no setting ${key}; its settings are: ${Object.keys(plugin.settings.fields).join(", ")}`);
-          // A plug-in's settings decode with no services (`AnyPlugin`), and so does each of them.
-          const alone = Schema.Struct({ [key]: field }) as unknown as Schema.Codec<unknown, unknown>;
-          const one = yield* Effect.result(Schema.decodeEffect(alone)({ [key]: setting }));
-          if (one._tag === "Failure") return yield* invalid([...path, key], problemOf(one.failure));
-        }
+        // Each setting is decoded alone first, in order, so that a mistake names the layer that wrote it.
+        yield* Effect.forEach(
+          Object.entries(settings),
+          ([key, setting]) => {
+            const field = plugin.settings.fields[key];
+            if (field === undefined) return Effect.fail(invalid([...path, key], `${use} has no setting ${key}; its settings are: ${Object.keys(plugin.settings.fields).join(", ")}`));
+            // A plug-in's settings decode with no services (`AnyPlugin`), and so does each of them.
+            const alone = Schema.Struct({ [key]: field }) as unknown as Schema.Codec<unknown, unknown>;
+            return Schema.decodeEffect(alone)({ [key]: setting }).pipe(Effect.mapError((error) => invalid([...path, key], problemOf(error))));
+          },
+          { discard: true },
+        );
         const decoded = yield* Schema.decodeEffect(plugin.settings)(settings, { onExcessProperty: "error" }).pipe(Effect.mapError((error) => invalid(path, problemOf(error))));
         return [name, { name, plugin, settings: decoded } satisfies Entry] as const;
       }),
@@ -271,6 +278,20 @@ const mcpServersOf = (layers: ReadonlyArray<LayerSource>, value: unknown, env: R
     );
   });
 
+/** Fails with the first problem in `layer` taken alone: not a mapping, an unknown key, or extensions or MCP servers in an untrusted layer. */
+const checkedLayer = (layer: LayerSource): Effect.Effect<void, ConfigInvalid> => {
+  if (layer.value === undefined || layer.value === null) return Effect.void;
+  if (!isMapping(layer.value)) return Effect.fail(new ConfigInvalid({ file: layer.name, path: "", problem: "Expected a mapping" }));
+  const unknown = Object.keys(layer.value).find((key) => !topKeys.includes(key));
+  if (unknown !== undefined) return Effect.fail(new ConfigInvalid({ file: layer.name, path: unknown, problem: `Not a key of the configuration; those are: ${topKeys.join(", ")}` }));
+  if (!layer.trusted && layer.value["extensions"] !== undefined)
+    return Effect.fail(new ConfigInvalid({ file: layer.name, path: "extensions", problem: "Extensions are loaded only from the user's own configuration: a project's does not run code" }));
+  // A server is a command the session runs: a project's layer that names or changes one would run code that came with the project.
+  if (!layer.trusted && layer.value["mcpServers"] !== undefined)
+    return Effect.fail(new ConfigInvalid({ file: layer.name, path: "mcpServers", problem: "MCP servers are started only from the user's own configuration: a project's does not run commands" }));
+  return Effect.void;
+};
+
 /** `layers`, merged and decoded against `registry`. */
 export const decodeLayers = (
   layers: ReadonlyArray<LayerSource>,
@@ -278,17 +299,7 @@ export const decodeLayers = (
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): Effect.Effect<Configuration, ConfigInvalid> =>
   Effect.gen(function* () {
-    for (const layer of layers) {
-      if (layer.value === undefined || layer.value === null) continue;
-      if (!isMapping(layer.value)) return yield* new ConfigInvalid({ file: layer.name, path: "", problem: "Expected a mapping" });
-      const unknown = Object.keys(layer.value).find((key) => !topKeys.includes(key));
-      if (unknown !== undefined) return yield* new ConfigInvalid({ file: layer.name, path: unknown, problem: `Not a key of the configuration; those are: ${topKeys.join(", ")}` });
-      if (!layer.trusted && layer.value["extensions"] !== undefined)
-        return yield* new ConfigInvalid({ file: layer.name, path: "extensions", problem: "Extensions are loaded only from the user's own configuration: a project's does not run code" });
-      // A server is a command the session runs: a project's layer that names or changes one would run code that came with the project.
-      if (!layer.trusted && layer.value["mcpServers"] !== undefined)
-        return yield* new ConfigInvalid({ file: layer.name, path: "mcpServers", problem: "MCP servers are started only from the user's own configuration: a project's does not run commands" });
-    }
+    yield* Effect.forEach(layers, checkedLayer, { discard: true });
     const value = merged(layers.map((layer) => layer.value ?? {}));
     const all = isMapping(value) ? value : {};
     const configured = yield* pluginsOf(layers, all["plugins"], registry);

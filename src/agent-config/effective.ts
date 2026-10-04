@@ -8,7 +8,7 @@
  * value), and the value of an argument whose flag names a credential is left out (`redactedArgs`).
  */
 
-import { Duration, Effect, FileSystem, type PlatformError, type Schema } from "effect";
+import { Array as Arr, Duration, Effect, FileSystem, type PlatformError, type Schema } from "effect";
 import { redactedArgs } from "../agent-process/environment.ts";
 import type { Configuration, LayerSource } from "./file.ts";
 import { merged } from "./merge.ts";
@@ -16,8 +16,11 @@ import { merged } from "./merge.ts";
 const isMapping = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** Every path of `value` to a value that is not a mapping, written as `a.b.c`. */
-const leaves = (value: unknown, path: ReadonlyArray<string> = []): ReadonlyArray<ReadonlyArray<string>> =>
-  isMapping(value) ? Object.entries(value).flatMap(([key, inner]) => leaves(inner, [...path, key])) : path.length === 0 ? [] : [path];
+const leaves = (value: unknown, path: ReadonlyArray<string> = []): ReadonlyArray<ReadonlyArray<string>> => {
+  if (isMapping(value)) return Object.entries(value).flatMap(([key, inner]) => leaves(inner, [...path, key]));
+  // A value that is not a mapping is a leaf, unless it is the whole value.
+  return path.length === 0 ? [] : [path];
+};
 
 const at = (value: unknown, path: ReadonlyArray<string>): unknown => path.reduce<unknown>((inner, key) => (isMapping(inner) ? inner[key] : undefined), value);
 
@@ -26,7 +29,7 @@ export const sourcesOf = (layers: ReadonlyArray<LayerSource>): Readonly<Record<s
   Object.fromEntries(
     leaves(merged(layers.map((layer) => layer.value ?? {}))).map((path) => [
       path.join("."),
-      [...layers].reverse().find((layer) => at(layer.value, path) !== undefined)?.name ?? "",
+      Arr.reverse(layers).find((layer) => at(layer.value, path) !== undefined)?.name ?? "",
     ]),
   );
 
