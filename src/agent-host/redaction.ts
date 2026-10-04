@@ -12,7 +12,7 @@
  * found only when they are one of these values.
  */
 
-import { Effect, Layer, Logger } from "effect";
+import { Array as Arr, Effect, Layer, Logger, Order } from "effect";
 import { shouldRedact } from "../agent-process/environment.ts";
 
 /** The fewest characters a credential's value has to be looked for. */
@@ -43,39 +43,43 @@ const secretField =
 
 /** Replaces each of `values` in a text, the longest first so a secret holding another goes whole. */
 export const redactorOf = (values: ReadonlyArray<string>) => {
-  const ordered = [...new Set(values.filter((value) => value !== ""))].sort((a, b) => b.length - a.length);
+  const ordered = Arr.sort(
+    Arr.dedupe(values.filter((value) => value !== "")),
+    Order.mapInput(Order.flip(Order.Number), (value: string) => value.length),
+  );
   return (text: string): string => ordered.reduce((redacted, secret) => redacted.replaceAll(secret, "[redacted]"), text);
 };
 
 /**
  * `value` as JSON holds it, `redact` applied to each text in it and a credential field's value
- * `[redacted]`: errors with their name, message, stack and causes; circular references named.
+ * `[redacted]`: errors with their name, message, stack and causes. `enclosing` is the objects
+ * `value` is nested in: a reference to one of them is a cycle, written `[Circular]`. An object
+ * referenced twice without a cycle is written in full both times.
  */
-export const redactedValue = (value: unknown, redact: (text: string) => string, seen = new WeakSet<object>()): unknown => {
+export const redactedValue = (value: unknown, redact: (text: string) => string, enclosing: ReadonlyArray<object> = []): unknown => {
   if (typeof value === "string") return redact(value);
   if (typeof value === "bigint") return value.toString();
   if (typeof value !== "object" || value === null) return value;
-  if (seen.has(value)) return "[Circular]";
-  seen.add(value);
-  try {
-    if (value instanceof Date) return Number.isNaN(value.getTime()) ? String(value) : value.toISOString();
-    if (Array.isArray(value)) return value.map((item) => redactedValue(item, redact, seen));
-    if (value instanceof Map || value instanceof Set) return [...value].map((item) => redactedValue(item, redact, seen));
-    if (!(value instanceof Error) && "toJSON" in value && typeof value.toJSON === "function") return redactedValue(value.toJSON(), redact, seen);
-    const out: Record<string, unknown> =
-      value instanceof Error
-        ? {
-            name: redact(value.name),
-            message: redact(value.message),
-            ...(value.stack === undefined ? {} : { stack: redact(value.stack) }),
-            ...(value.cause === undefined ? {} : { cause: redactedValue(value.cause, redact, seen) }),
-          }
-        : {};
-    for (const [key, item] of Object.entries(value)) out[redact(key)] = secretField.test(key) ? "[redacted]" : redactedValue(item, redact, seen);
-    return out;
-  } finally {
-    seen.delete(value);
-  }
+  if (enclosing.includes(value)) return "[Circular]";
+  const within = [...enclosing, value];
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? String(value) : value.toISOString();
+  if (Array.isArray(value)) return value.map((item) => redactedValue(item, redact, within));
+  if (value instanceof Map || value instanceof Set) return [...value].map((item) => redactedValue(item, redact, within));
+  if (!(value instanceof Error) && "toJSON" in value && typeof value.toJSON === "function") return redactedValue(value.toJSON(), redact, within);
+  const ofError =
+    value instanceof Error
+      ? {
+          name: redact(value.name),
+          message: redact(value.message),
+          ...(value.stack === undefined ? {} : { stack: redact(value.stack) }),
+          ...(value.cause === undefined ? {} : { cause: redactedValue(value.cause, redact, within) }),
+        }
+      : {};
+  // An error's own enumerable fields come after its name, message, stack and cause, and win over them.
+  return {
+    ...ofError,
+    ...Object.fromEntries(Object.entries(value).map(([key, item]) => [redact(key), secretField.test(key) ? "[redacted]" : redactedValue(item, redact, within)])),
+  };
 };
 
 /** `formatter`, given each record's message redacted (`redactedValue`), its line then rid of the secrets wherever they are. */

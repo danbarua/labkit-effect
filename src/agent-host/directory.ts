@@ -5,7 +5,7 @@
  * or going on from one.
  */
 
-import { Data, Effect, FileSystem, Option } from "effect";
+import { Array as Arr, Data, Effect, FileSystem, Option, Order } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 import { modelOf } from "../agent-session/configuration/session-setup.ts";
 import { readFacts } from "../agent-session/file-session-store.ts";
@@ -34,7 +34,8 @@ export const storedSessions = (root: string) =>
     const dated = yield* Effect.forEach(kept, (sessionId) =>
       fs.stat(storeFileOf(root, sessionId)).pipe(Effect.map((info) => ({ sessionId, at: Option.getOrUndefined(info.mtime) }))),
     );
-    return dated.sort((a, b) => (b.at?.getTime() ?? 0) - (a.at?.getTime() ?? 0));
+    // The one written to last first; a session whose time cannot be read sorts as the oldest.
+    return Arr.sort(dated, Order.mapInput(Order.flip(Order.Number), (each: (typeof dated)[number]) => each.at?.getTime() ?? 0));
   }).pipe(Effect.catchTag("PlatformError", (error) => Effect.fail(new DirectoryUnreadable({ message: error.message }))));
 
 /** The facts of the session `sessionId` in `root`. A facts file that does not read fails as the store says (`SessionStoreFailed`). */

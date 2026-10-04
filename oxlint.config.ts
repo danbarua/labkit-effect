@@ -41,13 +41,16 @@ const functional = {
 } as const;
 
 /** The modules under `src/` held to `functional`, besides the abstract layers. */
-const functionalModules = ["agent-process", "agent-config", "agent-tools"] as const;
+const functionalModules = ["agent-process", "agent-config", "agent-tools", "agent-host"] as const;
 
 /**
  * Files that are glue to an imperative API, where mutable state or loops are needed. Each entry
  * names the API it adapts.
  */
-const imperativeBoundaries: ReadonlyArray<string> = [];
+const imperativeBoundaries: ReadonlyArray<string> = [
+  // Synchronous appends and renames, for a logger, which Effect calls synchronously (node:fs).
+  "src/agent-host/log-file.ts",
+];
 
 export default defineConfig({
   ignorePatterns: ["repos/**"],

@@ -15,41 +15,28 @@ import { xAiClient, xAiRequests } from "../agent-session/providers/xai-client.ts
 import { keyOf } from "./catalog.ts";
 import { localServer } from "./local-server.ts";
 
+const http = FetchHttpClient.layer;
+
+/** The providers reached with a key: each one's request, made with the key it is given. */
+const keyed: ReadonlyArray<{ readonly provider: string; readonly requestsWith: (key: Redacted.Redacted) => Effect.Effect<ProviderRequest> }> = [
+  { provider: "anthropic", requestsWith: (key) => anthropicRequests().pipe(Effect.provide(AnthropicClient.layer({ apiKey: key }).pipe(Layer.provide(http)))) },
+  { provider: "openai", requestsWith: (key) => openAiRequests().pipe(Effect.provide(OpenAiClient.layer({ apiKey: key }).pipe(Layer.provide(http)))) },
+  { provider: "xai", requestsWith: (key) => xAiRequests().pipe(Effect.provide(xAiClient(key).pipe(Layer.provide(http)))) },
+];
+
+/** The local server's request: it needs no key. */
+const local = openAiCompatRequests().pipe(Effect.provide(OpenAiCompatClient.layer({ apiUrl: localServer, apiKey: Redacted.make("none") }).pipe(Layer.provide(http))));
+
 /** One model client reaching every provider with a key set, and the local server. The keys are read when the layer is built. */
 export const Clients = Layer.unwrap(
   Effect.suspend(() => {
-    const http = FetchHttpClient.layer;
-    const requests: Array<Effect.Effect<readonly [ProviderName, ProviderRequest]>> = [];
-    const anthropic = keyOf("anthropic");
-    if (anthropic !== undefined)
-      requests.push(
-        anthropicRequests().pipe(
-          Effect.map((request) => [ProviderName.make("anthropic"), request] as const),
-          Effect.provide(AnthropicClient.layer({ apiKey: anthropic }).pipe(Layer.provide(http))),
-        ),
-      );
-    const openai = keyOf("openai");
-    if (openai !== undefined)
-      requests.push(
-        openAiRequests().pipe(
-          Effect.map((request) => [ProviderName.make("openai"), request] as const),
-          Effect.provide(OpenAiClient.layer({ apiKey: openai }).pipe(Layer.provide(http))),
-        ),
-      );
-    const xai = keyOf("xai");
-    if (xai !== undefined)
-      requests.push(
-        xAiRequests().pipe(
-          Effect.map((request) => [ProviderName.make("xai"), request] as const),
-          Effect.provide(xAiClient(xai).pipe(Layer.provide(http))),
-        ),
-      );
-    requests.push(
-      openAiCompatRequests().pipe(
-        Effect.map((request) => [ProviderName.make("localhost"), request] as const),
-        Effect.provide(OpenAiCompatClient.layer({ apiUrl: localServer, apiKey: Redacted.make("none") }).pipe(Layer.provide(http))),
-      ),
-    );
+    const requests: ReadonlyArray<Effect.Effect<readonly [ProviderName, ProviderRequest]>> = [
+      ...keyed.flatMap(({ provider, requestsWith }) => {
+        const key = keyOf(provider);
+        return key === undefined ? [] : [Effect.map(requestsWith(key), (request) => [ProviderName.make(provider), request] as const)];
+      }),
+      Effect.map(local, (request) => [ProviderName.make("localhost"), request] as const),
+    ];
     return Effect.all(requests).pipe(Effect.map((each) => FallbackModelClient({ requests: new Map(each), fallbacks: [] })));
   }),
 );

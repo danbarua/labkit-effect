@@ -10,9 +10,9 @@
  * whole) shows where it arrived (`ToolCallArrived`).
  */
 
-import { Schema } from "effect";
+import { Array as Arr, Schema } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
-import type { Ending } from "../agent-machine/decision.ts";
+import type { Decision, Ending } from "../agent-machine/decision.ts";
 import type { CallId, ModelName, ProviderName, Seq, ToolName } from "../agent-machine/names.ts";
 import type { InputSource, Observation, ToolFailure, ToolOutcome } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
@@ -39,6 +39,12 @@ const fenced = (text: string, language = ""): string => {
 
 const languageOf = (received: Received): string => (received.mediaType === "application/json" ? "json" : "");
 
+/** Whether `byte` is a UTF-8 continuation byte (10xxxxxx): one inside a character, not its first. */
+const continues = (byte: number): boolean => (byte & 0xc0) === 0x80;
+
+/** The position `at`, or the nearest position before it that is not inside a character: a cut there splits no character. */
+const cutBefore = (bytes: Uint8Array, at: number): number => (at > 0 && continues(bytes[at] ?? 0) ? cutBefore(bytes, at - 1) : at);
+
 /**
  * A tool's output or error as Markdown: text fenced, cut at `shownOutputBytes` (never inside a
  * character) with a line saying how many bytes were left out; bytes named, and not read.
@@ -47,9 +53,7 @@ const toolContent = (received: Received): string => {
   if (received.body._tag !== "Text") return asText(received);
   const bytes = encoder.encode(received.body.text);
   if (bytes.length <= shownOutputBytes) return fenced(received.body.text, languageOf(received));
-  let cut = shownOutputBytes;
-  // A byte 10xxxxxx continues a character: cut before the byte that starts it.
-  while (cut > 0 && ((bytes[cut] ?? 0) & 0xc0) === 0x80) cut -= 1;
+  const cut = cutBefore(bytes, shownOutputBytes);
   const left = bytes.length - cut;
   return `${fenced(decoder.decode(bytes.subarray(0, cut)), languageOf(received))}\n\n_Cut at 8 KiB: ${left} bytes more were left out._`;
 };
@@ -232,6 +236,95 @@ const footer = (facts: ReadonlyArray<Fact>, models: ReadonlyArray<{ readonly pro
   ];
 };
 
+/** The inputs recorded at `inputs`, as the transcript shows them. */
+const inputsAt = (index: Index, inputs: ReadonlyArray<Seq>): ReadonlyArray<string> =>
+  inputs.flatMap((seq) => {
+    const arrived = index.inputs.get(seq);
+    return arrived === undefined ? [`_No input is recorded at ${seq}._`] : input(arrived);
+  });
+
+/** Where the walk over the facts is: how many turns have started, and whether the last one has no ending yet. */
+interface Walk {
+  readonly turns: number;
+  readonly running: boolean;
+}
+
+const leftRunningNote = "_The turn was left running: no ending is recorded._";
+
+/** The blocks a decision adds to the transcript, and the walk after it. */
+const decided = (index: Index, walk: Walk, decision: Decision): readonly [Walk, ReadonlyArray<string>] => {
+  switch (decision._tag) {
+    case "InputDelivered":
+      return [walk, inputsAt(index, decision.inputs)];
+    case "InputDropped":
+      return [walk, ["_Input given while the turn ran was dropped, as the turn did not end in an answer:_", ...inputsAt(index, decision.inputs)]];
+    case "ModelChangeTaken": {
+      const change = index.changes.get(decision.change);
+      return [walk, change === undefined ? [] : [`_From here the session asks ${named(change.provider, change.model)}._`]];
+    }
+    case "TurnEnded":
+      return [{ ...walk, running: false }, ending(decision.ending)];
+    // These decide what the core does next; the transcript shows what came of them.
+    case "TurnCompleted":
+    case "TurnIncomplete":
+    case "AskModel":
+    case "TellModel":
+    case "WindowOpened":
+    case "ObservationNotExpected":
+    case "ObservationUndelivered":
+      return [walk, []];
+    default:
+      return decision satisfies never;
+  }
+};
+
+/** The blocks an observation adds to the transcript, and the walk after it. */
+const observed = (
+  index: Index,
+  models: ReadonlyArray<{ readonly provider: ProviderName; readonly model: ModelName }>,
+  walk: Walk,
+  observation: Observation,
+): readonly [Walk, ReadonlyArray<string>] => {
+  switch (observation._tag) {
+    case "SessionOpened":
+      return [
+        walk,
+        [`# Session \`${observation.session}\``, `${models.length > 1 ? "Models" : "Model"}: ${models.map(({ provider, model }) => named(provider, model)).join(", then ")}`],
+      ];
+    case "TurnStarted":
+      // A turn that started before this one and has no ending was left running.
+      return [{ turns: walk.turns + 1, running: true }, [...(walk.running ? [leftRunningNote] : []), `## Turn ${walk.turns + 1}`]];
+    case "ModelResponded":
+      return [walk, response(index, observation)];
+    case "ToolCallArrived":
+      // A call whose response was recorded is shown with the response.
+      return [walk, index.responded.has(observation.call) ? [] : ["### Assistant", ...toolCall(index, observation)]];
+    // Inputs are shown where they are delivered, permission and outcomes with their call, the model changes where they are taken.
+    case "InputArrived":
+    case "ModelChangeArrived":
+    case "PermissionAsked":
+    case "PermissionAnswered":
+    case "ToolEnded":
+    // These are not part of the conversation.
+    case "CompactionWindow":
+    case "InputCancelled":
+    case "McpServerChanged":
+    case "ModelRequestDispatched":
+    case "ModelFailed":
+    case "ModelAttemptFailed":
+    case "NoticeInserted":
+    case "SettingAdjusted":
+    case "ModelVetoed":
+    case "ToolCallDispatched":
+    case "TurnEndReviewed":
+    case "TurnHoldsExhausted":
+    case "TurnInterrupted":
+      return [walk, []];
+    default:
+      return observation satisfies never;
+  }
+};
+
 /**
  * The transcript of the session `facts` hold, as Markdown: a heading with the session and the models
  * it asked; each turn in order, with its inputs, the model's answer text, its thinking in a collapsed
@@ -241,69 +334,8 @@ const footer = (facts: ReadonlyArray<Fact>, models: ReadonlyArray<{ readonly pro
 export function markdownOf(facts: ReadonlyArray<Fact>): string {
   const index = indexOf(facts);
   const models = modelsOf(facts, index);
-  const blocks: Array<string> = [];
-  let running = false;
-  let turns = 0;
-  const leftRunning = () => {
-    if (running) blocks.push("_The turn was left running: no ending is recorded._");
-  };
-  const inputsAt = (inputs: ReadonlyArray<Seq>) =>
-    inputs.flatMap((seq) => {
-      const arrived = index.inputs.get(seq);
-      return arrived === undefined ? [`_No input is recorded at ${seq}._`] : input(arrived);
-    });
-  for (const fact of facts) {
-    if (fact._tag === "Decided") {
-      const decision = fact.decision;
-      switch (decision._tag) {
-        case "InputDelivered":
-          blocks.push(...inputsAt(decision.inputs));
-          break;
-        case "InputDropped":
-          blocks.push(
-            "_Input given while the turn ran was dropped, as the turn did not end in an answer:_",
-            ...inputsAt(decision.inputs),
-          );
-          break;
-        case "ModelChangeTaken": {
-          const change = index.changes.get(decision.change);
-          if (change !== undefined) blocks.push(`_From here the session asks ${named(change.provider, change.model)}._`);
-          break;
-        }
-        case "TurnEnded":
-          blocks.push(...ending(decision.ending));
-          running = false;
-          break;
-        default:
-          break;
-      }
-      continue;
-    }
-    const observation = fact.observation;
-    switch (observation._tag) {
-      case "SessionOpened":
-        blocks.push(
-          `# Session \`${observation.session}\``,
-          `${models.length > 1 ? "Models" : "Model"}: ${models.map(({ provider, model }) => named(provider, model)).join(", then ")}`,
-        );
-        break;
-      case "TurnStarted":
-        leftRunning();
-        turns += 1;
-        running = true;
-        blocks.push(`## Turn ${turns}`);
-        break;
-      case "ModelResponded":
-        blocks.push(...response(index, observation));
-        break;
-      case "ToolCallArrived":
-        if (!index.responded.has(observation.call)) blocks.push("### Assistant", ...toolCall(index, observation));
-        break;
-      default:
-        break;
-    }
-  }
-  leftRunning();
-  blocks.push(...footer(facts, models));
-  return `${blocks.join("\n\n")}\n`;
+  const [walk, blocks] = Arr.mapAccum(facts, { turns: 0, running: false } satisfies Walk as Walk, (current, fact) =>
+    fact._tag === "Decided" ? decided(index, current, fact.decision) : observed(index, models, current, fact.observation),
+  );
+  return `${[...blocks.flat(), ...(walk.running ? [leftRunningNote] : []), ...footer(facts, models)].join("\n\n")}\n`;
 }

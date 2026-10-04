@@ -7,10 +7,10 @@
 
 import { type Brand, brandFrom, envPrefixOf, folderOf } from "./brand.ts";
 import { redactedValue, redactorOf, type Secrets, sayingTooShort, secretsOf } from "./redaction.ts";
-import { appendFileSync, existsSync, renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { Cause, Console, Effect, FileSystem, Layer, Logger, type LogLevel, Option, Path, References } from "effect";
+import { Array as Arr, Cause, Console, Effect, FileSystem, Layer, Logger, type LogLevel, Option, Order, Path, References } from "effect";
+import { logFile } from "./log-file.ts";
 
 export interface LauncherLogOptions {
   /** The folder the launch's file goes in, made when missing. */
@@ -82,8 +82,16 @@ export const launcherLogOptionsFrom = (env: Readonly<Record<string, string | und
   };
 };
 
-/** The UTF-8 bytes of the code point `point`. */
-const utf8Bytes = (point: number): number => (point < 0x80 ? 1 : point < 0x800 ? 2 : point < 0x10000 ? 3 : 4);
+/** How many bytes the code point `point` takes in UTF-8. */
+const utf8Bytes = (point: number): number => {
+  if (point < 0x80) return 1;
+  if (point < 0x800) return 2;
+  if (point < 0x10000) return 3;
+  return 4;
+};
+
+/** How many bytes `character` takes inside a JSON string: a quote or a backslash is escaped, two bytes; any other character its UTF-8 bytes. */
+const escapedBytes = (character: string): number => (character === '"' || character === "\\" ? 2 : utf8Bytes(character.codePointAt(0) ?? 0));
 
 /**
  * `line` as it is when it fits in `recordLimit`; else a record of its time and level, the line's
@@ -95,19 +103,12 @@ const withinLimit = (line: string, time: string, level: string): string => {
   // `omittedBytes` is at most `size`, so the frame written with `size` is as long as the final one can be.
   const frame = Buffer.byteLength(JSON.stringify({ time, level, omittedBytes: size, record: "" }));
   const budget = recordLimit - frame;
-  let cost = 0;
-  let kept = 0;
-  let end = 0;
-  for (const character of line) {
-    const bytes = utf8Bytes(character.codePointAt(0) ?? 0);
-    // Embedded in a string, the line's quotes and backslashes are escaped: two bytes each.
-    const escaped = character === '"' || character === "\\" ? 2 : bytes;
-    if (cost + escaped > budget) break;
-    cost += escaped;
-    kept += bytes;
-    end += character.length;
-  }
-  return JSON.stringify({ time, level, omittedBytes: size - kept, record: line.slice(0, end) });
+  const characters = Array.from(line);
+  // The bytes the line's start takes, escaped, after each character; the line is kept up to the first that exceeds the budget.
+  const [, costs] = Arr.mapAccum(characters, 0, (cost, character) => [cost + escapedBytes(character), cost + escapedBytes(character)] as const);
+  const over = costs.findIndex((cost) => cost > budget);
+  const kept = characters.slice(0, over === -1 ? characters.length : over).join("");
+  return JSON.stringify({ time, level, omittedBytes: size - Buffer.byteLength(kept), record: kept });
 };
 
 /** The line a log record is: its time, level, annotations, message and, when there is one, its cause as text. */
@@ -123,18 +124,6 @@ const lineOf = (log: Logger.Options<unknown>, redact: (text: string) => string):
     ...(log.cause.reasons.length > 0 ? { cause: redact(Cause.pretty(log.cause)) } : {}),
   };
   return withinLimit(JSON.stringify(record), time, level);
-};
-
-/** Shifts `file` to `.1` and each backup one on, the one past `backups` overwritten. */
-const rotate = (file: string, backups: number): void => {
-  if (backups === 0) {
-    rmSync(file, { force: true });
-    return;
-  }
-  for (let index = backups; index >= 1; index--) {
-    const from = index === 1 ? file : `${file}.${index - 1}`;
-    if (existsSync(from)) renameSync(from, `${file}.${index}`);
-  }
 };
 
 /** Whether a process `pid` runs. Only "no such process" says it does not: one of another user's runs. */
@@ -155,22 +144,32 @@ const removeOldLaunches = (dir: string, keep: number) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const launches = new Map<string, { readonly pid: number; readonly files: Array<string>; time: number }>();
-    for (const name of yield* fs.readDirectory(dir)) {
+    const named = (yield* fs.readDirectory(dir)).flatMap((name) => {
       const found = launchFile.exec(name);
-      if (found === null) continue;
-      // A file another launcher removed since the listing is no longer there to keep or remove.
-      const info = yield* fs.stat(path.join(dir, name)).pipe(Effect.option);
-      if (Option.isNone(info)) continue;
-      const launch = launches.get(found[1]!) ?? { pid: Number(found[2]), files: [], time: 0 };
-      launch.files.push(name);
-      launch.time = Math.max(launch.time, Option.match(info.value.mtime, { onNone: () => 0, onSome: (date) => date.getTime() }));
-      launches.set(found[1]!, launch);
-    }
-    const stopped = [...launches.values()].filter((launch) => !isRunning(launch.pid)).sort((a, b) => b.time - a.time);
-    for (const launch of stopped.slice(keep)) {
-      for (const name of launch.files) yield* fs.remove(path.join(dir, name), { force: true });
-    }
+      return found === null ? [] : [{ name, launch: found[1] ?? name, pid: Number(found[2]) }];
+    });
+    // A file another launcher removed since the listing is no longer there to keep or remove.
+    const dated = yield* Effect.forEach(named, (file) =>
+      fs.stat(path.join(dir, file.name)).pipe(
+        Effect.option,
+        Effect.map(Option.map((info) => ({ ...file, time: Option.match(info.mtime, { onNone: () => 0, onSome: (date) => date.getTime() }) }))),
+      ),
+    );
+    // Each launch: its pid, its files, and the time the newest of them was written.
+    const launches = Object.values(Arr.groupBy(dated.flatMap(Option.toArray), (file) => file.launch)).map((files) => ({
+      pid: files[0].pid,
+      files: files.map((file) => file.name),
+      time: Math.max(...files.map((file) => file.time)),
+    }));
+    const stopped = Arr.sort(
+      launches.filter((launch) => !isRunning(launch.pid)),
+      Order.mapInput(Order.flip(Order.Number), (launch: (typeof launches)[number]) => launch.time),
+    );
+    yield* Effect.forEach(
+      stopped.slice(keep).flatMap((launch) => launch.files),
+      (name) => fs.remove(path.join(dir, name), { force: true }),
+      { discard: true },
+    );
   });
 
 /**
@@ -201,27 +200,25 @@ export const LauncherLogs = (options: LauncherLogOptions): Layer.Layer<never, ne
         Effect.map((info) => Number(info.size)),
         Effect.catch((error) => Console.error(cannotWrite(error)).pipe(Effect.as(undefined))),
       );
-      let failed = made === undefined;
-      let size = made ?? 0;
+      const written = logFile(file, made, options);
       const logger = Logger.make((log) => {
         const line = lineOf(log, redact);
         const console = log.fiber.getRef(Console.Console);
-        if (!failed) {
-          try {
-            const bytes = Buffer.byteLength(line) + 1;
-            if (size > 0 && size + bytes > options.maxBytes) {
-              rotate(file, options.backups);
-              size = 0;
-            }
-            appendFileSync(file, `${line}\n`, { mode: 0o600 });
-            size += bytes;
+        const appended = written.append(line);
+        switch (appended._tag) {
+          case "Written":
             return;
-          } catch (error) {
-            failed = true;
-            console.error(cannotWrite(error));
-          }
+          // The first failure is said once, and this line and every line after it go to stderr.
+          case "FirstFailure":
+            console.error(cannotWrite(appended.error));
+            console.error(line);
+            return;
+          case "FailedEarlier":
+            console.error(line);
+            return;
+          default:
+            return appended satisfies never;
         }
-        console.error(line);
       });
       const logs = Layer.mergeAll(Logger.layer([logger]), Layer.succeed(References.MinimumLogLevel, options.level));
       return sayingTooShort(options.secrets, logs);
