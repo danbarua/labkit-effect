@@ -1,18 +1,20 @@
 /**
- * Checks that every schema declared in the abstract layers (src/agent-machine, src/agent-policy)
- * decodes to a type with no unbranded `string` in it, however the schema is built. It asks the
+ * Checks that every schema declared in the abstract layers (`abstract-layers.ts`) decodes to a type
+ * with no unbranded `string` in it, however the schema is built. It asks the
  * TypeScript 7 checker through its API, which runs the compiler as a separate process.
  *
  * A schema is a declaration whose type has a `Type` property. A branded string is an intersection
  * (`string & Brand<...>`); string literals are not the `string` type.
  *
- * Prints the files and declarations examined, so a run over nothing is visible.
+ * Prints how many schemas it examined in each layer, and fails when a layer contributed none: a
+ * layer that is renamed or emptied makes the check fail instead of passing over fewer files.
  *
  * retire-when: a lint rule with type information can check the same thing.
  */
 
 import { API, type Type, TypeFlags, type UnionOrIntersectionType } from "typescript/unstable/async";
 import { SyntaxKind } from "typescript/unstable/ast";
+import { type AbstractLayer, abstractLayers } from "./abstract-layers.ts";
 
 const root = process.cwd();
 const api = new API({ cwd: root });
@@ -51,9 +53,13 @@ async function unbranded(type: Type | undefined, path: string, seen: ReadonlySet
   return undefined;
 }
 
-const files = (await program.getSourceFileNames()).filter((file) => /\/src\/agent-(core|policy)\//.test(file));
+/** The abstract layer a source file belongs to, if it belongs to one. */
+const layerOf = (file: string): AbstractLayer | undefined => abstractLayers.find((layer) => file.startsWith(`${root}/src/${layer}/`));
+
+const files = (await program.getSourceFileNames()).filter((file) => layerOf(file) !== undefined && !file.endsWith(".test.ts"));
 const problems: Array<string> = [];
-let schemas = 0;
+/** How many schemas each layer's files declare. A layer with none means the check missed it. */
+const schemasIn = new Map<AbstractLayer, number>(abstractLayers.map((layer) => [layer, 0]));
 
 for (const file of files) {
   const source = await program.getSourceFile(file);
@@ -68,7 +74,8 @@ for (const file of files) {
     const type = await checker.getTypeAtLocation(declaration.name as never);
     const decoded = type && (await checker.getPropertyOfType(type, "Type"));
     if (decoded === undefined) continue;
-    schemas += 1;
+    const layer = layerOf(file);
+    if (layer !== undefined) schemasIn.set(layer, (schemasIn.get(layer) ?? 0) + 1);
     const found = await unbranded(await checker.getTypeOfSymbol(decoded), "", new Set());
     if (found !== undefined)
       problems.push(`${file.replace(`${root}/`, "")}: ${declaration.name.getText(source)} decodes to a plain string at Type${found}`);
@@ -76,9 +83,10 @@ for (const file of files) {
 }
 
 await api.close();
-console.log(`check:brands examined ${schemas} schemas in ${files.length} files`);
-if (files.length === 0 || schemas === 0) {
-  console.error("check:brands: examined nothing");
+for (const [layer, count] of schemasIn) console.log(`check:brands examined ${count} schemas in src/${layer}`);
+const missed = [...schemasIn].filter(([, count]) => count === 0).map(([layer]) => layer);
+if (missed.length > 0) {
+  console.error(`check:brands: no schema was examined in ${missed.map((layer) => `src/${layer}`).join(", ")}`);
   process.exit(1);
 }
 if (problems.length > 0) {
