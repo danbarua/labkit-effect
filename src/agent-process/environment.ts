@@ -7,6 +7,8 @@
  * included: that is how a server is given the one it needs.
  */
 
+import { Array as Arr, Order } from "effect";
+
 export const KNOWN_KEY_PATTERNS = [
   // URLs with credentials
   /(\S{1,1024}):\/\/[^:\s]{1,1024}:[^@\s]{1,1024}@/i,
@@ -74,7 +76,10 @@ export const withoutCredentials = (
   const entries = Object.entries(environment).flatMap(([name, value]) => (value === undefined ? [] : [[name, value] as const]));
   return {
     env: Object.fromEntries(entries.filter(([name]) => !shouldRedact(name))),
-    left: entries.flatMap(([name]) => (shouldRedact(name) ? [name] : [])).sort(),
+    left: Arr.sort(
+      entries.flatMap(([name]) => (shouldRedact(name) ? [name] : [])),
+      Order.String,
+    ),
   };
 };
 

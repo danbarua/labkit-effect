@@ -15,7 +15,7 @@
  * set, never their values.
  */
 
-import { Effect, Exit, Fiber, Scope, Semaphore, Stream, SubscriptionRef } from "effect";
+import { Effect, Exit, Fiber, HashMap, Option, Ref, Scope, Semaphore, Stream, SubscriptionRef } from "effect";
 import { ChildProcess, type ChildProcessSpawner } from "effect/process";
 import { redactedArgs, withoutCredentials } from "./environment.ts";
 import { logKeys } from "./log-keys.ts";
@@ -60,19 +60,19 @@ export const makeProcessGroup = (
     const context = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
     const state = yield* SubscriptionRef.make<ProcessState>(initialProcessState);
     const lock = yield* Semaphore.make(1);
-    const runs = new Map<number, Scope.Closeable>();
+    // Each live run's scope, by run number.
+    const runs = yield* Ref.make(HashMap.empty<number, Scope.Closeable>());
 
+    /** Removes `run` from the live runs and closes its scope, if it is live. */
     const ended = (run: number) =>
-      Effect.suspend(() => {
-        const runScope = runs.get(run);
-        runs.delete(run);
-        return runScope === undefined ? Effect.void : Scope.close(runScope, Exit.void);
-      });
+      Ref.modify(runs, (live) => [HashMap.get(live, run), HashMap.remove(live, run)] as const).pipe(
+        Effect.flatMap(Option.match({ onNone: () => Effect.void, onSome: (runScope) => Scope.close(runScope, Exit.void) })),
+      );
 
     const spawn = (run: number): Effect.Effect<void> =>
       Effect.gen(function* () {
         const runScope = yield* Scope.fork(scope);
-        runs.set(run, runScope);
+        yield* Ref.update(runs, HashMap.set(run, runScope));
         // This process's environment without its credentials, then the command's own, as said.
         const inherited = withoutCredentials(process.env);
         yield* Effect.logInfo(logKeys.process.environment, { name: command.name, run, leftOut: inherited.left, set: Object.keys(command.env) });
@@ -95,7 +95,16 @@ export const makeProcessGroup = (
         yield* ended(run);
       }).pipe(Effect.forkIn(scope), Effect.asVoid);
 
-    const perform = (effect: ProcessEffect): Effect.Effect<void> => (effect._tag === "Spawn" ? spawn(effect.run) : ended(effect.run));
+    const perform = (effect: ProcessEffect): Effect.Effect<void> => {
+      switch (effect._tag) {
+        case "Spawn":
+          return spawn(effect.run);
+        case "Kill":
+          return ended(effect.run);
+        default:
+          return effect satisfies never;
+      }
+    };
 
     const dispatch = (event: ProcessEvent): Effect.Effect<void> =>
       lock

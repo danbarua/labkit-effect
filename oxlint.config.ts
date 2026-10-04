@@ -1,5 +1,5 @@
 import { recommended } from "@effect/tsgo/oxlint-presets";
-import { defineConfig } from "oxlint";
+import { defineConfig, type OxlintOverride } from "oxlint";
 import { type AbstractLayer, abstractLayers } from "./scripts/abstract-layers.ts";
 
 /** What the abstract layers are held to, beyond the Effect preset. */
@@ -10,6 +10,7 @@ const abstractLayer = {
   "abstract/no-string-keyword": "error",
   "abstract/branded-schema-string": "error",
   "no-plusplus": "error",
+  "typescript/switch-exhaustiveness-check": "error",
 } as const;
 
 /** The only thing an abstract layer takes from `effect`. */
@@ -24,16 +25,49 @@ const importsAllowed: Record<AbstractLayer, { readonly group: ReadonlyArray<stri
   },
 };
 
+/**
+ * What every module that has been refactored to functional code is held to: no mutable bindings,
+ * no loop statements, no in-place changes, and no nested conditional expressions. A module joins
+ * `functionalModules` when its refactor is done.
+ */
+const functional = {
+  "abstract/no-let": "error",
+  "abstract/no-loop": "error",
+  "abstract/no-in-place-change": "error",
+  "no-plusplus": "error",
+  "no-nested-ternary": "error",
+  // A `switch` over a union names every member, or has a default: a new member is a decision the compiler asks for.
+  "typescript/switch-exhaustiveness-check": "error",
+} as const;
+
+/** The modules under `src/` held to `functional`, besides the abstract layers. */
+const functionalModules = ["agent-process"] as const;
+
+/**
+ * Files that are glue to an imperative API, where mutable state or loops are needed. Each entry
+ * names the API it adapts.
+ */
+const imperativeBoundaries: ReadonlyArray<string> = [];
+
 export default defineConfig({
   ignorePatterns: ["repos/**"],
   extends: [recommended],
   jsPlugins: ["./scripts/oxlint/abstract-layers.js"],
-  overrides: abstractLayers.map((layer) => ({
-    files: [`src/${layer}/**`],
-    excludeFiles: ["**/*.test.ts"],
-    rules: {
-      ...abstractLayer,
-      "no-restricted-imports": ["error", { paths: [effectSchemaOnly], patterns: [{ group: [...importsAllowed[layer].group], message: importsAllowed[layer].message }] }],
+  overrides: [
+    {
+      files: functionalModules.map((module) => `src/${module}/**`),
+      excludeFiles: ["**/*.test.ts", ...imperativeBoundaries],
+      rules: functional,
     },
-  })),
+    ...abstractLayers.map(
+      (layer): OxlintOverride => ({
+        files: [`src/${layer}/**`],
+        excludeFiles: ["**/*.test.ts"],
+        rules: {
+          ...abstractLayer,
+          "no-restricted-imports": ["error", { paths: [effectSchemaOnly], patterns: [{ group: [...importsAllowed[layer].group], message: importsAllowed[layer].message }] }],
+        },
+      }),
+    ),
+  ],
 });

@@ -37,7 +37,20 @@ export interface ProcessStep {
 
 export const initialProcessState: ProcessState = { _tag: "Idle", run: 0 };
 
-const live = (state: ProcessState): boolean => state._tag === "Starting" || state._tag === "Running";
+/** Whether a run is live: starting or running. A new state must be classified here. */
+const live = (state: ProcessState): boolean => {
+  switch (state._tag) {
+    case "Starting":
+    case "Running":
+      return true;
+    case "Idle":
+    case "Exited":
+    case "Failed":
+      return false;
+    default:
+      return state satisfies never;
+  }
+};
 
 const stay = (state: ProcessState): ProcessStep => ({ state, effects: [] });
 
