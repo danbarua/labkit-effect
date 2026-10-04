@@ -47,9 +47,15 @@ const observed = facts.flatMap((fact) => (fact.observation === undefined ? [] : 
 const called = observed.find((each) => each._tag === "ToolCallArrived" && each["tool"] === "mcp__fake__echo");
 const ended = observed.find((each) => each._tag === "ToolEnded" && each["call"] === called?.["call"]) as { readonly outcome?: { readonly _tag: string; readonly output?: { readonly mediaType: string; readonly body: { readonly text: string } } } } | undefined;
 
+/** The tools the test server lists, as the session offers them. */
+const offered = ["mcp__fake__echo", "mcp__fake__roots", "mcp__fake__slow"];
+const ready = observed.find((each) => each._tag === "McpServerChanged" && (each["state"] as { readonly _tag: string })._tag === "Ready")?.["state"] as
+  | { readonly tools?: ReadonlyArray<string> }
+  | undefined;
+
 const checks: ReadonlyArray<readonly [string, boolean]> = [
   ["the CLI exited 0", code === 0],
-  ["the server was recorded ready, with its tools", observed.some((each) => each._tag === "McpServerChanged" && (each["state"] as { readonly _tag: string })._tag === "Ready")],
+  [`the server was recorded ready, offering ${offered.join(", ")}`, JSON.stringify(ready?.tools) === JSON.stringify(offered)],
   ["the model called mcp__fake__echo", called !== undefined],
   ["its result was recorded as the server sent it", ended?.outcome?._tag === "Succeeded" && ended.outcome.output?.mediaType === "application/vnd.modelcontextprotocol.call-tool-result+json" && ended.outcome.output.body.text.includes("labkit says hi")],
   ["the answer says what the tool returned", result.subtype === "Completed" && (result.result ?? "").includes("labkit says hi")],
