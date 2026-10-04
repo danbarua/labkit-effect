@@ -122,7 +122,7 @@ test("a mistake in a command is said and changes nothing; a line that names no c
 test("a line that starts with / completes to a command, a model, a setting not yet named, and a value the model takes", async () => {
   const { printed } = await session(["(offered)", "/model grok-4.7", "/model claude-sonnet-5-5", "(offered)"]);
   const complete = completions(JSON.parse(printed[0] ?? "") as Parameters<typeof completions>[0]);
-  expect(complete("/")).toEqual(["/model ", "/settings ", "/tools", "/export", "/help", "/exit", "/quit"]);
+  expect(complete("/")).toEqual(["/model ", "/settings ", "/tools", "/export", "/mcp ", "/help", "/exit", "/quit"]);
   expect(complete("/se")).toEqual(["/settings "]);
   expect(complete("/model openai/gpt-6-s")).toEqual(["/model openai/gpt-6-sol"]);
   expect(complete("/model xai/")).toEqual([]);
@@ -139,4 +139,13 @@ test("a line that starts with / completes to a command, a model, a setting not y
   const later = completions(JSON.parse(printed[3] ?? "") as Parameters<typeof completions>[0]);
   expect(later("/settings effort=m")).toEqual(["/settings effort=medium", "/settings effort=max"]);
   expect(later("/settings cache=")).toEqual(["off", "5m", "1h"].map((each) => `/settings cache=${each}`));
+});
+
+test("/mcp says how the MCP servers are, and completes to reconnect and then a server's name", async () => {
+  const { printed } = await session(["/mcp"]);
+  expect(printed).toEqual(["This session has no MCP servers."]);
+  const complete = completions({ models: [], settings: [], servers: ["github", "files"] });
+  expect(complete("/mcp ")).toEqual(["/mcp reconnect "]);
+  expect(complete("/mcp reconnect ")).toEqual(["/mcp reconnect github", "/mcp reconnect files"]);
+  expect(complete("/mcp reconnect g")).toEqual(["/mcp reconnect github"]);
 });

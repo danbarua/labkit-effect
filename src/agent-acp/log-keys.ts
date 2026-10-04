@@ -55,8 +55,6 @@ export const logKeys = {
   mcp: {
     /** A change of an MCP server's state could not be recorded in the session's facts: the server, its state, and why. */
     notRecorded: "acp_host.mcp.not_recorded",
-    /** `/mcp reconnect` started a server again: its name, and its state once settled. */
-    reconnected: "acp_host.mcp.reconnected",
   },
   prompt: {
     /** `session/prompt` arrived: the blocks it carries. */

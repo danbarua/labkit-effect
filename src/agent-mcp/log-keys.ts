@@ -33,6 +33,8 @@ export const logKeys = {
     toolsChanged: "mcp.server.tools_changed",
     /** A server's tool is not offered: its name, once made one providers take, is too long or the same as another's. */
     toolLeftOut: "mcp.server.tool_left_out",
+    /** `/mcp reconnect` started a server again: its name, and its state once settled. */
+    reconnected: "mcp.server.reconnected",
     /** The server's input closed: nothing more can be sent to it. */
     stdinClosed: "mcp.server.stdin_closed",
   },

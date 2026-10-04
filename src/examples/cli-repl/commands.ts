@@ -12,6 +12,8 @@
  *   (ImmutableToolCatalog).
  * - `/export` writes the session's transcript (`markdownOf`) to
  *   `.labkit/exports/<session>.md` in the folder the CLI runs in, as the ACP host's `/export` does.
+ * - `/mcp` says how the session's MCP servers are; `/mcp reconnect <server>` starts one again, as
+ *   the ACP host's `/mcp` does (`agent-mcp` `command.ts`).
  *
  * `completions` gives the prompt what a line that starts with `/` could become: a command, then a
  * model's name or a setting and its values.
@@ -30,6 +32,8 @@ import { knownCapabilities } from "../../agent-session/configuration/well-known-
 import { immutableToolCatalogOf, modelOf } from "../../agent-session/configuration/session-setup.ts";
 import { optionsOf, type SettingOption } from "../../agent-session/configuration/options.ts";
 import { askable } from "../../agent-host/catalog.ts";
+import { mcpCommand } from "../../agent-mcp/command.ts";
+import type { McpServers } from "../../agent-mcp/servers.ts";
 import { invalid } from "./invalid.ts";
 import { targetOf } from "./models.ts";
 
@@ -39,6 +43,7 @@ export const commands: ReadonlyArray<readonly [string, string]> = [
   ["/settings [name=value …]", "Change the settings named; with none, show them and pick one to change"],
   ["/tools", "Show the tools the model is offered"],
   ["/export", "Write this session's transcript as Markdown to .labkit/exports/<session>.md"],
+  ["/mcp [reconnect <server>]", "Say how the MCP servers are; start one again"],
   ["/help", "Show these commands"],
   ["/exit", "Quit (also /quit)"],
 ];
@@ -98,11 +103,13 @@ const pickable = Effect.map(askable, (models) => models.map(({ provider, model }
 export interface Offered {
   readonly models: ReadonlyArray<string>;
   readonly settings: ReadonlyArray<SettingOption>;
+  /** The session's MCP servers, by name. */
+  readonly servers: ReadonlyArray<string>;
 }
 
-export const offered = (session: Session) =>
+export const offered = (session: Session, mcp?: McpServers) =>
   Effect.gen(function* () {
-    const result: Offered = { models: (yield* pickable).map((each) => each.value), settings: (yield* optionsOf(yield* session.facts)).offered };
+    const result: Offered = { models: (yield* pickable).map((each) => each.value), settings: (yield* optionsOf(yield* session.facts)).offered, servers: mcp?.names ?? [] };
     return result;
   });
 
@@ -111,8 +118,8 @@ const typedAs = [...commands.map(([usage]) => (usage.includes(" ") ? `${usage.sl
 
 /**
  * The lines that `text` could become, when it starts with `/`: its last word completed to a command,
- * to a model after `/model`, or after `/settings` to a setting not yet named on the line and then to
- * one of its values.
+ * to a model after `/model`, to `reconnect` and then a server after `/mcp`, or after `/settings` to a
+ * setting not yet named on the line and then to one of its values.
  */
 export const completions =
   (from: Offered) =>
@@ -124,6 +131,7 @@ export const completions =
     const candidates = (): ReadonlyArray<string> => {
       if (words.length === 1) return typedAs;
       if (words[0] === "/model") return words.length === 2 ? from.models : [];
+      if (words[0] === "/mcp") return words.length === 2 ? ["reconnect "] : words.length === 3 && words[1] === "reconnect" ? from.servers : [];
       if (words[0] !== "/settings") return [];
       const equals = last.indexOf("=");
       if (equals >= 0) {
@@ -161,12 +169,17 @@ const picked = (session: Session) =>
  * Runs the command `line` names, and returns what to print; undefined when `line` is not one of
  * these commands. `/export` writes under `folder`, the folder the CLI runs in.
  */
-export const command = (session: Session, line: string, folder: string = process.cwd()) =>
+export const command = (session: Session, line: string, folder: string = process.cwd(), mcp?: McpServers) =>
   Effect.gen(function* () {
     const [name, ...words] = line.trim().split(/\s+/);
     switch (name) {
       case "/help":
         return help();
+      case "/mcp": {
+        if (mcp === undefined) return "This session has no MCP servers.";
+        const tools = yield* immutableToolCatalogOf(yield* session.facts);
+        return yield* mcpCommand(mcp, words, tools.map((tool) => tool.name));
+      }
       case "/tools": {
         const tools = yield* immutableToolCatalogOf(yield* session.facts);
         return tools.length === 0 ? "No tools: the model is offered none." : tools.map((tool) => `${tool.name}: ${tool.description}`).join("\n");

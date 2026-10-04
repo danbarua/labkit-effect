@@ -182,7 +182,7 @@ export const withSession = <A, E, R, L, H>(
   config: Config,
   logs: Layer.Layer<never, never, L>,
   host: Host<H>,
-  use: (session: Session) => Effect.Effect<A, E, R>,
+  use: (session: Session, mcp: McpServers) => Effect.Effect<A, E, R>,
 ) => {
   const workspace = workspaceOf(config);
   const store = config.persist ? FileBackedSessionStore(storeFileOf(storeFolder, config.sessionId)) : ephemeralSessionStore(config.continues ?? []);
@@ -215,7 +215,7 @@ export const withSession = <A, E, R, L, H>(
       Effect.forkScoped,
     );
     yield* session.idle;
-    return yield* use(session).pipe(Effect.onInterrupt(() => interrupted(session)));
+    return yield* use(session, mcp).pipe(Effect.onInterrupt(() => interrupted(session)));
   });
   return Effect.gen(function* () {
     yield* written(config, workspace.environment);

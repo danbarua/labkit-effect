@@ -63,7 +63,7 @@ import type { SessionStore, SessionStoreFailed } from "../agent-session/session-
 import { harnessParts, reportedBy } from "../agent-session/origin.ts";
 import { outcomeAsSent } from "../agent-session/tool-output.ts";
 import { Notices } from "../agent-context/assemble.ts";
-import { describe } from "../agent-mcp/server-machine.ts";
+import { mcpCommand as mcpSaid } from "../agent-mcp/command.ts";
 import { type GivenServer, type McpServers, startMcpServers } from "../agent-mcp/servers.ts";
 import { namespaceOf } from "../agent-mcp/source.ts";
 import { modelOf } from "../agent-session/configuration/session-setup.ts";
@@ -341,20 +341,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
         const mcpOf = (entry: Entry, words: ReadonlyArray<string>) =>
           Effect.gen(function* () {
             const say = (text: string) => send(entry.id, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
-            if (words[0] === "reconnect" && words[1] !== undefined) {
-              const name = words.slice(1).join(" ");
-              const state = yield* entry.mcp.reconnect(name);
-              yield* Effect.logInfo(logKeys.mcp.reconnected, { server: name, state: state === undefined ? "no such server" : state._tag });
-              const offered = (yield* toolsOf(entry.world.sources)).catalog.some((tool) => tool.name.startsWith(`${namespaceOf(name)}__`));
-              yield* say(
-                state === undefined
-                  ? `No MCP server of this session is named ${name}.`
-                  : `${name}: ${describe(state)}. ${offered ? "Its tools are the ones it offered when this session started." : "It offered no tools when this session started, so none of its tools can be called in it."}`,
-              );
-              return { stopReason: "end_turn" as const };
-            }
-            const states = yield* entry.mcp.states;
-            yield* say(states.length === 0 ? "This session has no MCP servers." : states.map(({ name, state }) => `${name}: ${describe(state)}`).join("\n"));
+            const offered = (yield* toolsOf(entry.world.sources)).catalog.map((tool) => tool.name as string);
+            yield* say(yield* mcpSaid(entry.mcp, words, offered));
             return { stopReason: "end_turn" as const };
           });
 

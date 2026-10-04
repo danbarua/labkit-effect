@@ -115,8 +115,9 @@ model.
       running, records their states (`McpServerChanged`), and serves `/mcp` and
       `/mcp reconnect <server>`; the CLI starts the servers its configuration names (its files,
       `--mcp-config`), and one marked `required: true` that does not connect keeps the session from
-      opening. To do: the ACP host reading the configuration (its servers, and `required`); `/mcp`
-      in the REPL, its completions and hints from a machine of the command line's state; MCP
+      opening; `/mcp` in the REPL, with completions. To do: the ACP host reading the configuration
+      (its servers, and `required`); the REPL's completions and hints from a machine of the command
+      line's state; MCP
       servers reached at a URL, which are not supported at all today: a client for the Streamable
       HTTP transport (and the deprecated HTTP+SSE one), then the ACP host advertising
       `mcpCapabilities.http` and `.sse`; tools a server offers

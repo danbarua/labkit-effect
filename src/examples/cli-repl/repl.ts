@@ -14,6 +14,7 @@
  * interrupts it, and other keys are dropped (`turn-keys.ts`).
  */
 
+import type { McpServers } from "../../agent-mcp/servers.ts";
 import { Console, Deferred, Effect, PubSub } from "effect";
 import { Prompt } from "effect/cli";
 import type { Fact } from "../../agent-machine/fact.ts";
@@ -225,19 +226,19 @@ export const Terminal: Host<Prompt.Environment | Services> = {
   wentOn: printReply,
 };
 
-export const repl = (session: Session, config: Config, first: string | undefined, interactive: boolean) =>
+export const repl = (session: Session, config: Config, first: string | undefined, interactive: boolean, mcp?: McpServers) =>
   Effect.scoped(Effect.gen(function* () {
     yield* Console.log(`${config.target.provider}/${config.target.model} · /help for commands, /exit to quit. Log: ${logFileOf(config.sessionId)}`);
     if (first !== undefined) yield* turn(session, first);
     if (!interactive) return;
     yield* bracketedPaste;
     while (true) {
-      const input = yield* Multiline(completions(yield* offered(session)));
+      const input = yield* Multiline(completions(yield* offered(session, mcp)));
       if (input === "/exit" || input === "/quit") break;
       if (input.trim() === "") continue;
       if (input.startsWith("/")) {
         // A mistake in a command is said, and the REPL goes on.
-        const said = yield* command(session, input).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(String(error.userMessage))));
+        const said = yield* command(session, input, process.cwd(), mcp).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(String(error.userMessage))));
         yield* Console.log(said ?? `No command ${input.split(/\s+/)[0] ?? input}. /help lists them.`);
         continue;
       }

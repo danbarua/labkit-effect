@@ -194,7 +194,7 @@ export const cli = Command.make(
     const interactive = yield* stdio.stdinIsTerminal;
     const config = yield* configOf(options, interactive);
     if (!options.print)
-      return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), interactive ? Terminal : Headless, (session) => repl(session, config, options.prompt, interactive));
+      return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), interactive ? Terminal : Headless, (session, mcp) => repl(session, config, options.prompt, interactive, mcp));
     // Piped input is read only when no prompt was given: a shell that leaves stdin open would
     // otherwise keep a prompted run waiting for an end of input that never comes.
     const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));
