@@ -36,4 +36,6 @@ nothing of what a process is for.
   `AUTH`, `SECRET`, `PASSWORD` and the like.
 - PE2. A run is given this process's environment without the variables that hold credentials, and
   the command's own `env` over it, as it says. The names left out and set are logged, never their
-  values. The workspace's `run_command` and the MCP client's own `connectStdio` leave them out too.
+  values. The MCP client's own `connectStdio` leaves them out too. The workspace's `run_command` is
+  given the environment its host composes (`agent-config` CF13), by default this process's when its
+  tools were made, without the variables that hold credentials.

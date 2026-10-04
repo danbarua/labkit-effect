@@ -21,6 +21,8 @@ export interface SeamLists {
   readonly knownModels?: ReadonlyArray<ModelKnowledge>;
   readonly settling?: ReadonlyArray<SettlingSource>;
   readonly toolSources?: ReadonlyArray<Entries["toolSources"]>;
+  /** Not a context seam: the host gives the commands it runs what they compose (`environmentOf`). */
+  readonly commandEnvironment?: ReadonlyArray<Entries["commandEnvironment"]>;
   readonly maxHolds?: number;
 }
 
@@ -42,6 +44,7 @@ export const seamListsOf = (configuration: Configuration, host: HostSays): SeamL
     knownModels: listOf(configuration, "knownModels", host),
     settling: listOf(configuration, "settling", host),
     toolSources: listOf(configuration, "toolSources", host),
+    commandEnvironment: listOf(configuration, "commandEnvironment", host),
     maxHolds: configuration.maxHolds,
   };
   return Object.fromEntries(Object.entries(lists).filter(([, value]) => value !== undefined));

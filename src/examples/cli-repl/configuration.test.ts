@@ -44,6 +44,7 @@ test("with no file and no flag, the CLI's defaults: the loop breaker then permis
     ],
     modelRequests: [["loopBreaker", { nudgeAt: 3, stopAt: 5, key: "toolAndInput" }]],
     turnEnd: [["retryIncomplete", { retries: 1 }]],
+    commandEnvironment: [["credentials", { pass: [] }]],
   });
   expect(configuration.maxHolds).toBe(1);
   expect(configuration.mcpServers).toEqual([]);

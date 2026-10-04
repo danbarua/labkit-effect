@@ -44,6 +44,8 @@ To move to another version, install it, then:
 - `logs/tests/<test file>/<test name>/`: a test's log lines (`log.jsonl`) and the files it makes
   (`testFolder()`), emptied when the test starts.
 - `logs/probes/<probe>/<run>/`: a live probe's transcript, facts and telemetry.
+- `logs/e2e/<script>/<run>/`: a live end-to-end run of `scripts/e2e/<script>.ts`: what it printed,
+  and the facts and log of the sessions it ran, each script checking them and exiting 1 on a failure.
 - `logs/cli/<session>/`: a CLI session's facts (its session store) and log.
 - `logs/commands/`: the output of commands run by hand, such as `bun run check`.
 

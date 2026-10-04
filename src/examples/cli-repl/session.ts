@@ -17,6 +17,7 @@ import { Notices } from "../../agent-context/assemble.ts";
 import type { Configuration } from "../../agent-config/file.ts";
 import { seamLayer, seamListsOf } from "../../agent-config/seams.ts";
 import { describe } from "../../agent-mcp/server-machine.ts";
+import { credentialsLeftOut, environmentOf } from "../../agent-process/environment.ts";
 import { type GivenServer, type McpServers, startMcpServers } from "../../agent-mcp/servers.ts";
 import type { Asked } from "../../agent-host/catalog.ts";
 import { sessionFolderOf, storeFileOf } from "../../agent-host/directory.ts";
@@ -71,8 +72,15 @@ export const storeFolder = "logs/cli";
 /** Where a session's log lines go when they go to a file: beside its facts. */
 export const logFileOf = (sessionId: string): string => `${sessionFolderOf(storeFolder, sessionId)}/cli.log`;
 
-/** The tools a session is offered: the workspace's, the folder the CLI runs in. */
-const workspaceOf = (config: Config) => workspaceTools(process.cwd(), { strictInput: config.strictToolInput });
+/**
+ * The tools a session is offered: the workspace's, the folder the CLI runs in, its commands given the
+ * environment the configuration composes (`commandEnvironment`).
+ */
+const workspaceOf = (config: Config) =>
+  workspaceTools(process.cwd(), {
+    strictInput: config.strictToolInput,
+    environment: environmentOf(seamListsOf(config.configuration, { canAsk: config.canAsk }).commandEnvironment ?? [credentialsLeftOut()]),
+  });
 
 /**
  * What the loop needs, for a CLI session: its tool sources, the workspace's then the MCP servers';
@@ -81,7 +89,7 @@ const workspaceOf = (config: Config) => workspaceTools(process.cwd(), { strictIn
  */
 const servicesOf = (config: Config, sources: ReadonlyArray<ToolSource>, mcp: McpServers) => {
   // The configuration's tool sources are not offered by the CLI: its own are the workspace's and the MCP servers'.
-  const { toolSources: _, ...lists } = seamListsOf(config.configuration, { canAsk: config.canAsk });
+  const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(config.configuration, { canAsk: config.canAsk });
   return Layer.mergeAll(SessionServices(SourcedToolRunner).pipe(Layer.provide(Layer.succeed(Notices, [mcp.notices]))), seamLayer(lists)).pipe(
     Layer.provideMerge(Layer.succeed(ToolSources, sources)),
   );

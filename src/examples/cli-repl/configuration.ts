@@ -2,7 +2,8 @@
  * The CLI's configuration, in layers merged in order (`agent-config`), the last write winning:
  *
  * 1. the CLI's own defaults: the loop breaker, then permission, on tool calls; the loop breaker on
- *    model requests; a turn with thinking and no answer asked once more for it;
+ *    model requests; a turn with thinking and no answer asked once more for it; the model's
+ *    commands given the environment without its credentials;
  * 2. the user's file, the project's (the folder the CLI runs in) and the local one, those
  *    `--setting-sources` names (all, unless it says);
  * 3. `--settings`: JSON, or a file of JSON or YAML;
@@ -25,7 +26,7 @@ import type { PermissionMode } from "../../agent-policy/permissions.ts";
 export const cliDefaults: LayerSource = {
   name: "the CLI's defaults",
   trusted: true,
-  value: { toolCalls: ["loopBreaker", "permissions"], modelRequests: ["loopBreaker"], turnEnd: ["retryIncomplete"], maxHolds: 1 },
+  value: { toolCalls: ["loopBreaker", "permissions"], modelRequests: ["loopBreaker"], turnEnd: ["retryIncomplete"], maxHolds: 1, commandEnvironment: ["credentials"] },
 };
 
 /** The flags that make the CLI's layers. */

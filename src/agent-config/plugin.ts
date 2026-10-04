@@ -8,6 +8,7 @@
  * are applied for a provider, and the tool sources. A plug-in on two seams is listed in each.
  */
 
+import type { EnvironmentTransform } from "../agent-process/environment.ts";
 import type { Effect, Schema, Scope } from "effect";
 import type { SettlingSource } from "../agent-session/configuration/options.ts";
 import type { ModelKnowledge } from "../agent-session/configuration/well-known-models.ts";
@@ -23,12 +24,14 @@ export interface Entries {
   readonly settling: SettlingSource;
   /** A source started in the session's scope (an MCP server's, say). */
   readonly toolSources: Effect.Effect<ToolSource, never, Scope.Scope>;
+  /** What a command the model runs is given of the environment (`agent-process` `EnvironmentTransform`). */
+  readonly commandEnvironment: EnvironmentTransform;
 }
 
 export type Seam = keyof Entries;
 
 /** The seams, in the order a file lists them. */
-export const seams: ReadonlyArray<Seam> = ["toolCalls", "modelRequests", "turnEnd", "knownModels", "settling", "toolSources"];
+export const seams: ReadonlyArray<Seam> = ["toolCalls", "modelRequests", "turnEnd", "knownModels", "settling", "toolSources", "commandEnvironment"];
 
 /** What the host says, that a file does not: whether anyone is there to answer a question before a call runs. */
 export interface HostSays {

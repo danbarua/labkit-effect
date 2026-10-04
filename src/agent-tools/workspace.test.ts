@@ -133,3 +133,21 @@ test("write_file creates or replaces a file inside the workspace, whose folder e
   expect(await call("write_file", { path: "../escape.txt", text: "x" })).toStartWith("rejected: ../escape.txt is not inside the workspace");
   expect(await call("write_file", { path: "nowhere/c.txt", text: "x" })).toStartWith("reported: nowhere/c.txt:");
 });
+
+test("run_command is given the environment its host composed; by default this process's when the tools were made, without the variables that hold credentials", async () => {
+  process.env["WORKSPACE_TEST_TOKEN"] = "secret";
+  process.env["WORKSPACE_TEST_PLAIN"] = "plain";
+  const envOf = (tools: ReturnType<typeof workspaceTools>) =>
+    runTest(
+      Effect.gen(function* () {
+        const outcome = yield* (yield* ToolRunner).run(ToolName.make("run_command"), receivedJson({ command: "env" }), CallId.make("call-1"));
+        return outcome._tag === "Succeeded" ? asText(outcome.output) : outcome._tag;
+      }).pipe(Effect.provide(Layer.effect(ToolRunner, tools.source).pipe(Layer.provide(BunServices.layer)))),
+    );
+  const printed = await envOf(workspaceTools(root));
+  expect(printed).toContain("WORKSPACE_TEST_PLAIN=plain");
+  expect(printed).not.toContain("WORKSPACE_TEST_TOKEN");
+  const given = await envOf(workspaceTools(root, { environment: { PATH: process.env["PATH"] ?? "", ONLY: "this" } }));
+  expect(given).toContain("ONLY=this");
+  expect(given).not.toContain("WORKSPACE_TEST_PLAIN");
+});

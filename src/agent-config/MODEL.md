@@ -48,7 +48,7 @@ mcpServers:
 ## Rules
 
 - CF1. A layer is a mapping of `plugins`, a list for each seam (`toolCalls`, `modelRequests`,
-  `turnEnd`, `knownModels`, `settling`, `toolSources`), `maxHolds`, `mcpServers` and `extensions`.
+  `turnEnd`, `knownModels`, `settling`, `toolSources`, `commandEnvironment`), `maxHolds`, `mcpServers` and `extensions`.
   `plugins` maps a name to a plug-in's settings, a setting not given taking its default; the plug-in
   is the one the name names unless `use` says another. Each seam lists names, in order, each one in
   `plugins` or a plug-in's own name (its defaults), the plug-in being on that seam. The entries
@@ -90,3 +90,8 @@ mcpServers:
 - CF12. The file layers are the user's (`~/.config/<name>/policies.yml`, trusted), the project's
   (`<project>/.<name>/policies.yml`) and the user's own for the project
   (`<project>/.<name>/policies.local.yml`), in that order; a host may read only some of them.
+- CF13. What a command the model runs is given of the environment is a seam of its own
+  (`commandEnvironment`): transforms, in order, the first given this process's environment, which a
+  host gives the commands it runs. `credentials` leaves out the variables that hold credentials
+  (`agent-process` PE1), but those it passes (`pass`: `SSH_AUTH_SOCK`, for `git push` over SSH).
+
