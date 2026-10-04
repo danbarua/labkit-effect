@@ -46,7 +46,7 @@ test("H12: a record is a line of JSON in acp-<pid>-<launch id>.jsonl: its time, 
   const dir = `${testFolder()}/not/yet/made`;
   const stderr = await launched(
     { dir },
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       yield* Effect.logInfo("session.opened", { model: "m" }).pipe(Effect.annotateLogs({ sessionId: "s1", turn: 2 }));
       yield* Effect.logError("turn.failed", Cause.fail(new Error("refused", { cause: new Error("socket closed") }))).pipe(Effect.annotateLogs({ callId: "c9" }));
     }),
@@ -218,7 +218,7 @@ test("H14: a file that stops being writable is said once on stderr, and the reco
   mkdirSync(dir);
   const stderr = await launched(
     { dir },
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       yield* Effect.logInfo("to the file");
       yield* Effect.sync(() => rmSync(dir, { recursive: true }));
       yield* Effect.logInfo("to stderr");

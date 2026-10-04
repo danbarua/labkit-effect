@@ -8,54 +8,52 @@
  */
 
 export const KNOWN_KEY_PATTERNS = [
-    // URLs with credentials
-    /(\S{1,1024}):\/\/[^:\s]{1,1024}:[^@\s]{1,1024}@/i,
-    // GitHub tokens
-    /(ghp|gho|ghu|ghs|ghr|github_pat)_[a-zA-Z0-9_]{36,}/i,
-    // Google API keys
-    /AIzaSy[a-zA-Z0-9_\\-]{33}/i,
-    // Amazon AWS
-    /AKIA[A-Z0-9]{16}/i,
-    // Cryptography Certs and Keys
-    /-----BEGIN CERTIFICATE-----/i,
-    /-----BEGIN (RSA|OPENSSH|EC|PGP) PRIVATE KEY-----/i,
-]
+  // URLs with credentials
+  /(\S{1,1024}):\/\/[^:\s]{1,1024}:[^@\s]{1,1024}@/i,
+  // GitHub tokens
+  /(ghp|gho|ghu|ghs|ghr|github_pat)_[a-zA-Z0-9_]{36,}/i,
+  // Google API keys
+  /AIzaSy[a-zA-Z0-9_\\-]{33}/i,
+  // Amazon AWS
+  /AKIA[A-Z0-9]{16}/i,
+  // Cryptography Certs and Keys
+  /-----BEGIN CERTIFICATE-----/i,
+  /-----BEGIN (RSA|OPENSSH|EC|PGP) PRIVATE KEY-----/i,
+];
 
 // A word starts after a separator or at a lower-case to upper-case transition, and ends at a separator or the name's end.
 const credentialWord = (word: string): RegExp => {
-  const letters = [...word].map((letter) => `[${letter.toLowerCase()}${letter.toUpperCase()}]`).join("");
+  const letters = word.split("").map((letter) => `[${letter.toLowerCase()}${letter.toUpperCase()}]`).join("");
   return new RegExp(`(?:^|[_\\-.]|(?<=[a-z]))${letters}(?=$|[_\\-.])`);
 };
 
-export const COMMON_CREDENTIAL_PATTERNS : ReadonlyArray<RegExp> = [
-    credentialWord("TOKEN"),
-    credentialWord("KEY"),
-    credentialWord("APIKEY"),
-    credentialWord("AUTH"),
-    credentialWord("SECRET"),
-    credentialWord("PASS"),
-    credentialWord("PASSWD"),
-    credentialWord("PASSWORD"),
-    credentialWord("CRED"),
-    credentialWord("COOKIE"),
-    credentialWord("PAT"),
-    credentialWord("CERT"),
-    credentialWord("CERTIFICATE")
-]
+export const COMMON_CREDENTIAL_PATTERNS: ReadonlyArray<RegExp> = [
+  credentialWord("TOKEN"),
+  credentialWord("KEY"),
+  credentialWord("APIKEY"),
+  credentialWord("AUTH"),
+  credentialWord("SECRET"),
+  credentialWord("PASS"),
+  credentialWord("PASSWD"),
+  credentialWord("PASSWORD"),
+  credentialWord("CRED"),
+  credentialWord("COOKIE"),
+  credentialWord("PAT"),
+  credentialWord("CERT"),
+  credentialWord("CERTIFICATE"),
+];
 
 /** Whether a variable name or other text content matches known secret patterns. */
 export const shouldRedact = (name: string): boolean =>
-    COMMON_CREDENTIAL_PATTERNS.some(pattern => pattern.test(name))
-    || KNOWN_KEY_PATTERNS.some(pattern => pattern.test(name));
-
+  COMMON_CREDENTIAL_PATTERNS.some((pattern) => pattern.test(name)) || KNOWN_KEY_PATTERNS.some((pattern) => pattern.test(name));
 
 /** A fancy word for a dictionary of strings. */
 export type Environment = Readonly<Record<string, string>>;
 
-/** Applies a transformation to a dictionary of strings (environment). **/
+/** Applies a transformation to a dictionary of strings (environment). */
 export type EnvironmentTransform = (environment: Environment) => Environment;
 
- /** Filters an environment for credential-shaped variables unless asked not to. */
+/** Filters an environment for credential-shaped variables unless asked not to. */
 export const credentialsLeftOut =
   (allowList: ReadonlyArray<string> = []): EnvironmentTransform =>
   (environment) =>
@@ -75,7 +73,7 @@ export const withoutCredentials = (
 ): { readonly env: Readonly<Record<string, string>>; readonly left: ReadonlyArray<string> } => {
   const entries = Object.entries(environment).flatMap(([name, value]) => (value === undefined ? [] : [[name, value] as const]));
   return {
-    env: Object.fromEntries(entries.filter(([name]) =>  !shouldRedact(name))),
+    env: Object.fromEntries(entries.filter(([name]) => !shouldRedact(name))),
     left: entries.flatMap(([name]) => (shouldRedact(name) ? [name] : [])).sort(),
   };
 };

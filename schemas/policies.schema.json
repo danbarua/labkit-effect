@@ -68,19 +68,8 @@
           "type": "object",
           "properties": {
             "usd": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "Infinity",
-                    "-Infinity",
-                    "NaN"
-                  ]
-                }
-              ]
+              "type": "number",
+              "exclusiveMinimum": 0
             }
           },
           "required": [
@@ -208,19 +197,8 @@
                 ]
               },
               "usd": {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "string",
-                    "enum": [
-                      "Infinity",
-                      "-Infinity",
-                      "NaN"
-                    ]
-                  }
-                ]
+                "type": "number",
+                "exclusiveMinimum": 0
               }
             },
             "required": [

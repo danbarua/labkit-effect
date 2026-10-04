@@ -8,16 +8,16 @@ import { test } from "../../tests/support/test.ts";
 import { shouldRedact, redactedArgs, withoutCredentials } from "./environment.ts";
 import { makeProcessGroup } from "./process-group.ts";
 
-test("PE1: a variable holds a credential if its name includes known words ", () => {
+test("PE1: a variable holds a credential if its name includes known words", () => {
   const held = ["ANTHROPIC_API_KEY", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "SSH_AUTH_SOCK", "npm_config__authToken", "DB_PASSWORD", "GH_PAT", "my.secret", "OPENAI_APIKEY"];
   for (const h of held) {
-        expect(shouldRedact(h), `"${h} should be redacted`).toBeTrue();
-    }
+    expect(shouldRedact(h), `"${h} should be redacted`).toBeTrue();
+  }
 
   const kept = ["PATH", "HOME", "GIT_AUTHOR_NAME", "KEYBOARD_LAYOUT", "MONKEY", "PATTERN", "LANG", "MAX_TOKENS"];
-    for (const k of kept) {
-        expect(shouldRedact(k), `"${k}" should not be redacted`).toBeFalse();
-    }
+  for (const k of kept) {
+    expect(shouldRedact(k), `"${k}" should not be redacted`).toBeFalse();
+  }
 
   expect(withoutCredentials({ PATH: "/bin", GITHUB_TOKEN: "t", AWS_SECRET_ACCESS_KEY: "s", EMPTY: undefined })).toEqual({ env: { PATH: "/bin" }, left: ["AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"] });
 });

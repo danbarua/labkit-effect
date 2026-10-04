@@ -59,7 +59,7 @@ export const retryIncomplete = plugin("retryIncomplete", Schema.Struct({ retries
   turnEnd: retryIncompleteHook(retries),
 }));
 
-export const maxBudget = plugin("maxBudget", Schema.Struct({ usd: Schema.Number.check(Schema.isGreaterThan(0)) }), ["modelRequests"], ({ usd }) => ({
+export const maxBudget = plugin("maxBudget", Schema.Struct({ usd: Schema.Finite.check(Schema.isGreaterThan(0)) }), ["modelRequests"], ({ usd }) => ({
   modelRequests: budgetLimit(usd),
 }));
 

@@ -32,13 +32,13 @@ nothing of what a process is for.
 - PG3. A command that cannot be started is `Failed`, with the reason.
 - PG4. Stopping a run ends its whole group, what it started in the background included.
 - PG5. Closing the scope a group was made in ends its group.
-- PE1. A variable holds a credential if its name includes one of these words (separated by `_`, `-`, 
-  or capital letters): `TOKEN`, `KEY`, `AUTH`, `SECRET`, `PASSWORD`, and similar. When you log a 
-  command or write its arguments, omit credential flag values (for example, --token=<omitted>). 
+- PE1. A variable holds a credential if its name includes one of these words (separated by `_`, `-`,
+  or capital letters): `TOKEN`, `KEY`, `AUTH`, `SECRET`, `PASSWORD`, and similar. When you log a
+  command or write its arguments, omit credential flag values (for example, --token=<omitted>).
   Run the command with the actual values.
-- PE2. A run receives this process's environment minus credential variables, plus any environment 
+- PE2. A run receives this process's environment minus credential variables, plus any environment
   settings the command specifies. Log the names of credential variables you removed and environment
-  variables you set. Do not log their values. The MCP client's connectStdio removes credential 
-  variables the same way. The workspace's run_command gets its environment from the host (see 
-  agent-config CF13). By default, it uses this process's environment from when the tools were made, 
+  variables you set. Do not log their values. The MCP client's connectStdio removes credential
+  variables the same way. The workspace's run_command gets its environment from the host (see
+  agent-config CF13). By default, it uses this process's environment from when the tools were made,
   minus credential variables.

@@ -85,7 +85,7 @@ export const KnownWithLocalServer = Layer.effect(
         ),
       ),
     );
-    const localModels: ModelKnowledge = (provider, model) => (provider === "localhost" ? Effect.map(local, (models) => models.get(model)) : Effect.succeed(undefined));
+    const localModels: ModelKnowledge = (provider, model) => (provider === "localhost" ? Effect.map(local, (models) => models.get(model)) : Effect.undefined);
     return [localModels, wellKnown];
   }),
 );

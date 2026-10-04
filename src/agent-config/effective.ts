@@ -8,7 +8,7 @@
  * value), and the value of an argument whose flag names a credential is left out (`redactedArgs`).
  */
 
-import { Effect, FileSystem, type PlatformError, type Schema } from "effect";
+import { Duration, Effect, FileSystem, type PlatformError, type Schema } from "effect";
 import { redactedArgs } from "../agent-process/environment.ts";
 import type { Configuration, LayerSource } from "./file.ts";
 import { merged } from "./merge.ts";
@@ -75,7 +75,7 @@ export const effectiveSettings = (layers: ReadonlyArray<LayerSource>, configurat
             ...(server.cwd === undefined ? {} : { cwd: server.cwd }),
           }),
       required: server.required,
-      ...(server.connectTimeout === undefined ? {} : { connectTimeout: String(server.connectTimeout) }),
+      ...(server.connectTimeout === undefined ? {} : { connectTimeout: Duration.format(Duration.fromInputUnsafe(server.connectTimeout)) }),
     };
   }),
   from: sourcesOf(layers),

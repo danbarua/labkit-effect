@@ -186,10 +186,10 @@ const pluginsOf = (layers: ReadonlyArray<LayerSource>, value: unknown, registry:
           if (field === undefined) return yield* invalid([...path, key], `${use} has no setting ${key}; its settings are: ${Object.keys(plugin.settings.fields).join(", ")}`);
           // A plug-in's settings decode with no services (`AnyPlugin`), and so does each of them.
           const alone = Schema.Struct({ [key]: field }) as unknown as Schema.Codec<unknown, unknown>;
-          const one = yield* Effect.result(Schema.decodeUnknownEffect(alone)({ [key]: setting }));
+          const one = yield* Effect.result(Schema.decodeEffect(alone)({ [key]: setting }));
           if (one._tag === "Failure") return yield* invalid([...path, key], problemOf(one.failure));
         }
-        const decoded = yield* Schema.decodeUnknownEffect(plugin.settings)(settings, { onExcessProperty: "error" }).pipe(Effect.mapError((error) => invalid(path, problemOf(error))));
+        const decoded = yield* Schema.decodeEffect(plugin.settings)(settings, { onExcessProperty: "error" }).pipe(Effect.mapError((error) => invalid(path, problemOf(error))));
         return [name, { name, plugin, settings: decoded } satisfies Entry] as const;
       }),
     );
@@ -214,7 +214,7 @@ const listOf = (
         configured.get(name) ??
         (own === undefined
           ? undefined
-          : { name, plugin: own, settings: yield* Schema.decodeUnknownEffect(own.settings)({}).pipe(Effect.mapError((error) => invalid(problemOf(error), index))) });
+          : { name, plugin: own, settings: yield* Schema.decodeEffect(own.settings)({}).pipe(Effect.mapError((error) => invalid(problemOf(error), index))) });
       if (entry === undefined)
         return yield* invalid(`${JSON.stringify(name)} is neither in plugins nor a plug-in; the plug-ins are: ${registry.map((each) => each.use).join(", ")}`, index);
       if (!entry.plugin.on.includes(seam))

@@ -417,7 +417,7 @@ export const make: <Serve extends Methods.Any, Call extends Methods.Any, Notify 
                 Effect.as(none),
               );
         // Params left out are none: the JSON codec reads none as `null`.
-        return Schema.decodeUnknownEffect(json(method.params))(message.params ?? null).pipe(
+        return Schema.decodeEffect(json(method.params))(message.params ?? null).pipe(
           Effect.matchEffect({
             onFailure: (error) =>
               isRequest
