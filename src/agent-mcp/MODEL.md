@@ -77,7 +77,8 @@ tried first (TODO.md, the MCP servers entry): it drops what a server sends unask
   does not do; with credentials given, it has failed: they were refused.
 - MH1. Streamable HTTP: each message is a POST to the server's URL, accepting JSON and SSE. The
   server answers 202 (a notification or a response), one JSON message, or an SSE stream: what it
-  asks during the request, then its answer. Once it has answered `initialize`, each message carries
+  asks during the request, then its answer; an event with no data (a stream's priming) carries no
+  message. Once it has answered `initialize`, each message carries
   its session (`Mcp-Session-Id`) and the version agreed (`MCP-Protocol-Version`). A GET stream with
   them carries what the server sends unasked, unless it answers 405; it is opened again a second
   after it ends. When the connection's scope closes, the session is ended (DELETE).

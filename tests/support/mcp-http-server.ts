@@ -4,7 +4,8 @@
  * - `http`: Streamable HTTP at `/mcp`. `initialize` starts a session (`Mcp-Session-Id`); any other
  *   message without one is 400, with one the server does not have 404. A request is answered on an
  *   SSE stream of its own (what the server asks during it, then its answer), or as one JSON message
- *   (`respond: "json"`). A notification or a response is 202. GET opens the session's stream, for
+ *   (`respond: "json"`), each stream primed with an event of an id and no data. A notification or a
+ *   response is 202. GET opens the session's stream, for
  *   what the server sends unasked (kept until one is open), unless `getStream: false` (405). DELETE
  *   ends the session.
  * - `sse`: HTTP+SSE at `/sse`: the stream's first event is the endpoint (`endpoint`) messages are
@@ -167,6 +168,7 @@ export const startFakeHttpServer = (options: FakeHttpOptions): FakeHttpServer =>
         const stream = open(
           (controller) => {
             session.stream = controller;
+            controller.enqueue(encoder.encode(`id: prime-${next++}\ndata:\n\n`));
             for (const message of session.kept.splice(0)) controller.enqueue(event(message));
           },
           () => {
@@ -193,6 +195,8 @@ export const startFakeHttpServer = (options: FakeHttpOptions): FakeHttpServer =>
     }
     const stream = open(
       (controller) => {
+        // A stream is primed with an event of an id and no data, as the 2025-11-25 spec says a server should.
+        controller.enqueue(encoder.encode(`id: prime-${next++}\ndata:\n\n`));
         for (const message of asking) session.streams.set(String(message.id), controller);
         for (const message of messages) session.handle(message);
       },

@@ -99,8 +99,16 @@ const parsed = (text: string): WireInput => {
   }
 };
 
-/** The data of each event of an SSE stream. */
-const eventsOf = <E>(stream: Stream.Stream<Uint8Array, E>) => stream.pipe(Stream.decodeText(), Stream.pipeThroughChannel(Sse.decode()));
+/**
+ * The events of an SSE stream that carry data. A server primes a stream with an event of an id and
+ * no data (so that a client can resume it): it carries no message.
+ */
+const eventsOf = <E>(stream: Stream.Stream<Uint8Array, E>) =>
+  stream.pipe(
+    Stream.decodeText(),
+    Stream.pipeThroughChannel(Sse.decode()),
+    Stream.filter((event) => event.data !== ""),
+  );
 
 /** The parts both transports share: the inbox `read` gives, and how a message the endpoint took or refused is answered. */
 const makeInbox = (server: McpServerRemote) =>

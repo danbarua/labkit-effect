@@ -68,6 +68,8 @@ test.each([...transports])("MC1 MC4 MH1: over $name, the client initializes, lis
   );
   expect(value).toEqual({ server: "fake", tools: ["echo", "roots", "slow"], echoed: "hi", unknown: "fake: tools/call no_such_tool failed" });
   expect(saidIn(logged)).toContain("initialized by acme 2.0.0");
+  // A stream's priming event (an id, no data) is no message: nothing the client sent was refused.
+  expect(logged).not.toContain(logKeys.http.refused);
 });
 
 // Answered as JSON, a call cannot carry the server's own request: those are over the transports that stream.
