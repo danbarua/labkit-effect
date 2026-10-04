@@ -9,17 +9,9 @@
 import { Schema } from "effect";
 import { jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { builtins } from "./builtins.ts";
+import { McpServerSchema } from "./file.ts";
 import { type AnyPlugin, seams } from "./plugin.ts";
 
-const serverSchema = Schema.Struct({
-  type: Schema.optionalKey(Schema.Literal("stdio")),
-  command: Schema.NonEmptyString,
-  args: Schema.optionalKey(Schema.Array(Schema.String)),
-  env: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
-  cwd: Schema.optionalKey(Schema.String),
-  required: Schema.optionalKey(Schema.Boolean),
-  connectTimeout: Schema.optionalKey(Schema.String),
-});
 
 /**
  * The JSON Schema of a file whose plug-ins are `registry`'s (the built-ins when not given).
@@ -31,7 +23,7 @@ export const policiesJsonSchema = (registry: ReadonlyArray<AnyPlugin> = builtins
     Schema.Struct({
       extensions: Schema.optionalKey(Schema.Array(Schema.String)),
       maxHolds: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-      mcpServers: Schema.optionalKey(Schema.Record(Schema.String, serverSchema)),
+      mcpServers: Schema.optionalKey(Schema.Record(Schema.String, McpServerSchema)),
       ...Object.fromEntries(seams.map((seam) => [seam, Schema.optionalKey(Schema.Array(Schema.String))])),
     }),
   ) as { readonly properties: Readonly<Record<string, Schema.Json>> };

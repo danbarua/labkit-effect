@@ -37,5 +37,23 @@ export const logKeys = {
     reconnected: "mcp.server.reconnected",
     /** The server's input closed: nothing more can be sent to it. */
     stdinClosed: "mcp.server.stdin_closed",
+    /** A remote server no longer had the session: a new one was made, and the request it refused is made again once. */
+    sessionRenewed: "mcp.server.session_renewed",
+    /** A remote server's connection ended between requests: a new one is made. */
+    connectionLost: "mcp.server.connection_lost",
+  },
+  http: {
+    /** The endpoint refused a message, or was not reached: the methods it carried, the status, what the server said, and whether the session had ended. */
+    refused: "mcp.http.refused",
+    /** The server gave a session (`Mcp-Session-Id`), in answer to `initialize`. */
+    session: "mcp.http.session",
+    /** The server offers no GET stream (`405`): what it sends unasked comes only with answers. */
+    noStream: "mcp.http.no_stream",
+    /** The server refused the GET stream: the status, and what it said. */
+    streamRefused: "mcp.http.stream_refused",
+    /** The server's stream ended. */
+    streamEnded: "mcp.http.stream_ended",
+    /** The server's stream could not be read on: why. */
+    streamBroke: "mcp.http.stream_broke",
   },
 } as const;

@@ -15,8 +15,10 @@
  *   A plug-in's settings are said once, in `plugins`, however many lists it is on.
  * - `maxHolds`: how many times the turn-end hooks may hold one turn open, which the layers must say
  *   when `turnEnd` lists hooks.
- * - `mcpServers`: the MCP servers a session starts, by name, each its `command`, `args`, `env`, `cwd`,
- *   whether the session needs it (`required`), and how long it has to connect (`connectTimeout`).
+ * - `mcpServers`: the MCP servers a session starts, by name: a command it runs (`command`, `args`,
+ *   `env`, `cwd`), or a server at a URL (`type: http` or `sse`, `url`, `headers`); whether the
+ *   session needs it (`required`), and how long it has to connect (`connectTimeout`). `${VAR}` and
+ *   `${VAR:-default}` in `command`, `args`, `env`, `url` and `headers` are the environment's.
  * - `extensions`: modules to load, each exporting by default a plug-in or a list of them, a path
  *   relative to its file's folder.
  *
@@ -28,6 +30,8 @@
  * property it does not have.
  */
 
+import type { McpServerStdio } from "../agent-mcp/client.ts";
+import type { McpServerRemote } from "../agent-mcp/http.ts";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -84,17 +88,12 @@ export interface Entry {
   readonly settings: unknown;
 }
 
-/** An MCP server the configuration starts. */
-export interface McpServerConfig {
-  readonly name: string;
-  readonly command: string;
-  readonly args: ReadonlyArray<string>;
-  readonly env: Readonly<Record<string, string>>;
-  readonly cwd?: string | undefined;
+/** An MCP server the configuration starts: one it runs, or one at a URL; its variables expanded. */
+export type McpServerConfig = (McpServerStdio | McpServerRemote) & {
   /** Whether a session that cannot connect to it is not to open. */
   readonly required: boolean;
   readonly connectTimeout?: Duration.Input | undefined;
-}
+};
 
 /** The configuration decoded: each seam the layers list, in order; `maxHolds` when they say it; the MCP servers. A seam no layer lists is left out. */
 export interface Configuration {
@@ -109,17 +108,48 @@ const topKeys: ReadonlyArray<string> = ["plugins", ...seams, "maxHolds", "mcpSer
 
 const MaxHolds = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
-const McpServer = Schema.Struct({
-  /** Claude Code's `.mcp.json` says it; only `stdio` is started. */
+const serverTiming = {
+  required: Schema.optionalKey(Schema.Boolean),
+  /** A duration: `30 seconds`, `500 millis`. */
+  connectTimeout: Schema.optionalKey(Schema.String),
+};
+
+/** An MCP server the session runs: Claude Code's `.mcp.json` may say `type: stdio`. */
+const StdioServer = Schema.Struct({
   type: Schema.optionalKey(Schema.Literal("stdio")),
   command: Schema.NonEmptyString,
   args: Schema.optionalKey(Schema.Array(Schema.String)),
   env: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   cwd: Schema.optionalKey(Schema.String),
-  required: Schema.optionalKey(Schema.Boolean),
-  /** A duration: `30 seconds`, `500 millis`. */
-  connectTimeout: Schema.optionalKey(Schema.String),
+  ...serverTiming,
 });
+
+/** An MCP server at a URL: Streamable HTTP (`http`), or HTTP+SSE (`sse`). */
+const RemoteServer = Schema.Struct({
+  type: Schema.Literals(["http", "sse"]),
+  url: Schema.NonEmptyString,
+  headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  ...serverTiming,
+});
+
+/** An MCP server as a layer writes it: what the file's JSON Schema is made from too. */
+export const McpServerSchema = Schema.Union([StdioServer, RemoteServer]);
+
+/** `${VAR}` or `${VAR:-default}`. */
+const variable = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
+
+/** `text` with each `${VAR}` the environment's value, or its default; the first variable it lacks when one is not set and has no default. */
+const expandedIn = (text: string, env: Readonly<Record<string, string | undefined>>): { readonly value: string } | { readonly missing: string } => {
+  let missing: string | undefined;
+  const value = text.replaceAll(variable, (whole, name: string, fallback: string | undefined) => {
+    const set = env[name];
+    if (set !== undefined && set !== "") return set;
+    if (fallback !== undefined) return fallback;
+    missing ??= name;
+    return whole;
+  });
+  return missing === undefined ? { value } : { missing };
+};
 
 /** The problem a Schema found, on one line. */
 const problemOf = (error: Schema.SchemaError): string => error.message.replaceAll(/\s*\n\s*/g, " ");
@@ -194,8 +224,8 @@ const listOf = (
   );
 };
 
-/** The MCP servers in `mcpServers`, by name. */
-const mcpServersOf = (layers: ReadonlyArray<LayerSource>, value: unknown): Effect.Effect<ReadonlyArray<McpServerConfig>, ConfigInvalid> =>
+/** The MCP servers in `mcpServers`, by name, their variables `env`'s. */
+const mcpServersOf = (layers: ReadonlyArray<LayerSource>, value: unknown, env: Readonly<Record<string, string | undefined>>): Effect.Effect<ReadonlyArray<McpServerConfig>, ConfigInvalid> =>
   Effect.gen(function* () {
     // `null` is no servers: a later layer that writes it takes away those of the layers before it.
     if (value === undefined || value === null) return [];
@@ -204,24 +234,49 @@ const mcpServersOf = (layers: ReadonlyArray<LayerSource>, value: unknown): Effec
     return yield* Effect.forEach(Object.entries(value), ([name, configured]) =>
       Effect.gen(function* () {
         const path = ["mcpServers", name];
-        const server = yield* Schema.decodeUnknownEffect(McpServer)(configured, { onExcessProperty: "error" }).pipe(Effect.mapError((error) => invalid(path, problemOf(error))));
+        const remote = isMapping(configured) && (configured["type"] === "http" || configured["type"] === "sse");
+        const server = yield* Schema.decodeUnknownEffect(remote ? RemoteServer : StdioServer)(configured, { onExcessProperty: "error" }).pipe(
+          Effect.mapError((error) => invalid(path, problemOf(error))),
+        );
         const timeout = server.connectTimeout === undefined ? undefined : Duration.fromInput(server.connectTimeout as Duration.Input);
         if (timeout !== undefined && timeout._tag === "None") return yield* invalid([...path, "connectTimeout"], `${JSON.stringify(server.connectTimeout)} is not a duration, such as "30 seconds"`);
+        /** `text` at `at`, its variables the environment's. */
+        const expand = (text: string, at: ReadonlyArray<string>) => {
+          const done = expandedIn(text, env);
+          return "value" in done ? Effect.succeed(done.value) : Effect.fail(invalid([...path, ...at], `\${${done.missing}} is not set, and has no default (\${${done.missing}:-default})`));
+        };
+        const expandAll = (record: Readonly<Record<string, string>> | undefined, key: string) =>
+          Effect.map(
+            Effect.forEach(Object.entries(record ?? {}), ([each, text]) => Effect.map(expand(text, [key, each]), (value) => [each, value] as const)),
+            Object.fromEntries,
+          );
+        const timing = { required: server.required ?? false, ...(timeout?._tag === "Some" ? { connectTimeout: timeout.value } : {}) };
+        if ("url" in server)
+          return {
+            name,
+            transport: server.type,
+            url: yield* expand(server.url, ["url"]),
+            headers: yield* expandAll(server.headers, "headers"),
+            ...timing,
+          } satisfies McpServerConfig;
         return {
           name,
-          command: server.command,
-          args: server.args ?? [],
-          env: server.env ?? {},
+          command: yield* expand(server.command, ["command"]),
+          args: yield* Effect.forEach(server.args ?? [], (arg, index) => expand(arg, ["args", String(index)])),
+          env: yield* expandAll(server.env, "env"),
           ...(server.cwd === undefined ? {} : { cwd: server.cwd }),
-          required: server.required ?? false,
-          ...(timeout?._tag === "Some" ? { connectTimeout: timeout.value } : {}),
-        };
+          ...timing,
+        } satisfies McpServerConfig;
       }),
     );
   });
 
 /** `layers`, merged and decoded against `registry`. */
-export const decodeLayers = (layers: ReadonlyArray<LayerSource>, registry: ReadonlyArray<AnyPlugin>): Effect.Effect<Configuration, ConfigInvalid> =>
+export const decodeLayers = (
+  layers: ReadonlyArray<LayerSource>,
+  registry: ReadonlyArray<AnyPlugin>,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): Effect.Effect<Configuration, ConfigInvalid> =>
   Effect.gen(function* () {
     for (const layer of layers) {
       if (layer.value === undefined || layer.value === null) continue;
@@ -250,7 +305,7 @@ export const decodeLayers = (layers: ReadonlyArray<LayerSource>, registry: Reado
     const lists: Configuration["lists"] = Object.fromEntries(listed);
     if ((lists.turnEnd?.length ?? 0) > 0 && maxHolds === undefined)
       return yield* new ConfigInvalid({ file: writerOf(layers, ["turnEnd"]), path: "maxHolds", problem: "Required when turnEnd lists hooks: how many times they may hold one turn open" });
-    return { lists, ...(maxHolds === undefined ? {} : { maxHolds }), mcpServers: yield* mcpServersOf(layers, all["mcpServers"]) };
+    return { lists, ...(maxHolds === undefined ? {} : { maxHolds }), mcpServers: yield* mcpServersOf(layers, all["mcpServers"], env) };
   });
 
 /** The layer in `file`, parsed, its extensions' paths made absolute; undefined when the file is not there. */
@@ -312,9 +367,13 @@ const loadExtension = (module: string, file: string): Effect.Effect<ReadonlyArra
 /**
  * The configuration in `layers`, in order, the last write winning, against `registry` (the built-in
  * plug-ins when not given) and the plug-ins the trusted layers' extensions export, each module
- * loaded once. A plug-in's name used twice is refused.
+ * loaded once. A plug-in's name used twice is refused. The MCP servers' variables are `env`'s.
  */
-export const loadConfiguration = (layers: ReadonlyArray<LayerSource>, registry: ReadonlyArray<AnyPlugin> = builtins): Effect.Effect<Configuration, ConfigInvalid> =>
+export const loadConfiguration = (
+  layers: ReadonlyArray<LayerSource>,
+  registry: ReadonlyArray<AnyPlugin> = builtins,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): Effect.Effect<Configuration, ConfigInvalid> =>
   Effect.gen(function* () {
     const modules = layers.flatMap((layer) => {
       const listed = layer.trusted && isMapping(layer.value) && Array.isArray(layer.value["extensions"]) ? layer.value["extensions"] : [];
@@ -325,5 +384,5 @@ export const loadConfiguration = (layers: ReadonlyArray<LayerSource>, registry: 
     const all = [...registry, ...extended];
     const twice = all.find((each, index) => all.findIndex((other) => other.use === each.use) !== index);
     if (twice !== undefined) return yield* new ConfigInvalid({ file: layers.map((layer) => layer.name).join(", "), path: "extensions", problem: `Two plug-ins are named ${twice.use}` });
-    return yield* decodeLayers(layers, all);
+    return yield* decodeLayers(layers, all, env);
   });

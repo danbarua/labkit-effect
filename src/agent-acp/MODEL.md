@@ -300,9 +300,13 @@ twice.
   is told it is not running (`agent-mcp` MK2), and its tools are not offered. `/mcp`, alone in a
   prompt, says how each server is; `/mcp reconnect <server>` starts one again and says how it went
   and whether its tools are offered in the session. Both are answered without the model, and are in
-  the commands the host advertises. A server at a URL is refused (-32602) by `effective-acp`, as the
-  host does not offer MCP over HTTP or SSE. Two servers whose tools would be offered under one name
-  are -32602, and nothing is started.
+  the commands the host advertises. A server over ACP (`type: acp`) is refused (-32602) by
+  `effective-acp`, as the host does not offer it. Two servers whose tools would be offered under
+  one name are -32602, and nothing is started.
+- AG28. The host offers MCP over HTTP (`mcpCapabilities`: `http`, `sse`): a server at a URL the
+  client names, or the configuration does, is connected over Streamable HTTP or HTTP+SSE (`agent-mcp`
+  MH1, MH2), with the headers given; its tools are offered as a stdio server's are, and closing the
+  session ends its session at the server.
 - AG24. The host goes by its brand (`brand`, labkit's when left out): `/export` writes to
   `<cwd>/.<name>/exports`, the MCP servers it starts are told its name and version (`clientInfo`),
   and what it says of the model a session starts with names the brand's variable

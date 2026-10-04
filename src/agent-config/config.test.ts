@@ -356,6 +356,45 @@ test("CF10: mcpServers are servers by name, merged key by key, so a later layer 
   );
 });
 
+test("CF10: a server at a URL is `type: http` or `sse`, with its `url` and `headers`; one with neither a command nor a URL is refused", async () => {
+  const configuration = await load([write("home/remote.yml", "mcpServers:\n  web:\n    type: http\n    url: https://mcp.example.com/mcp\n    headers:\n      X-Trace: t-1\n  old:\n    type: sse\n    url: https://old.example.com/sse\n")]);
+  expect(configuration.mcpServers).toEqual([
+    { name: "web", transport: "http", url: "https://mcp.example.com/mcp", headers: { "X-Trace": "t-1" }, required: false },
+    { name: "old", transport: "sse", url: "https://old.example.com/sse", headers: {}, required: false },
+  ]);
+  expect(await refusal([write("home/bad.yml", "mcpServers:\n  web:\n    type: http\n")])).toContain("mcpServers.web: Missing key");
+  expect(await refusal([write("home/worse.yml", "mcpServers:\n  web:\n    type: http\n    url: https://x\n    command: x\n")])).toContain("mcpServers.web:");
+});
+
+test("CF15: `${VAR}` and `${VAR:-default}` in a server's command, args, env, url and headers are the environment's; one not set and with no default is refused, naming where", async () => {
+  const layers = [
+    {
+      name: "user",
+      trusted: true,
+      value: {
+        mcpServers: {
+          web: { type: "http", url: "https://${HOST:-mcp.example.com}/mcp", headers: { Authorization: "Bearer ${MCP_TOKEN}" } },
+          gh: { command: "${GH_BIN}", args: ["--token", "${GH_TOKEN}"], env: { REGION: "${REGION:-eu}" } },
+        },
+      },
+    },
+  ];
+  const env = { MCP_TOKEN: "tok-0123456789", GH_BIN: "/usr/local/bin/gh-mcp", GH_TOKEN: "ghp-0123456789" };
+  const configuration = await runTest(loadConfiguration(layers, undefined, env));
+  expect(configuration.mcpServers).toEqual([
+    { name: "web", transport: "http", url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer tok-0123456789" }, required: false },
+    { name: "gh", command: "/usr/local/bin/gh-mcp", args: ["--token", "ghp-0123456789"], env: { REGION: "eu" }, required: false },
+  ]);
+  const refused = await runTest(loadConfiguration(layers, undefined, { GH_BIN: "gh", GH_TOKEN: "x" }).pipe(Effect.flip, Effect.map((error) => error.message)));
+  expect(refused).toBe("user: mcpServers.web.headers.Authorization: ${MCP_TOKEN} is not set, and has no default (${MCP_TOKEN:-default})");
+  // What it resolved to says each value that may hold a credential as written, and headers and env by their names.
+  const written = effectiveSettings(layers, configuration) as { readonly mcpServers: ReadonlyArray<unknown> };
+  expect(written.mcpServers).toEqual([
+    { name: "web", type: "http", url: "https://${HOST:-mcp.example.com}/mcp", headers: ["Authorization"], required: false },
+    { name: "gh", command: "${GH_BIN}", args: ["--token", "<left out>"], env: ["REGION"], required: false },
+  ]);
+});
+
 test("CF11: maxBudget vetoes a model request once the session has cost its usd or more; it has no default, so a list naming it needs it in plugins", async () => {
   const session = open();
   observe(session, opened);

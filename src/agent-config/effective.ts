@@ -3,8 +3,9 @@
  * did (`effective-settings.json`): the layers, in order; each seam's entries, by name, with their
  * plug-in and every setting as resolved, defaults included; `maxHolds`; the MCP servers; for every
  * value the layers wrote, the layer that wrote it last (`from`); and what the host says beside the
- * layers (`host`). An MCP server's environment is given by its variables' names, never their values,
- * and the value of an argument whose flag names a credential is left out (`redactedArgs`).
+ * layers (`host`). An MCP server's environment and headers are given by their names, never their
+ * values; its command, arguments and URL as the layers wrote them (`${VAR}`, not the variable's
+ * value), and the value of an argument whose flag names a credential is left out (`redactedArgs`).
  */
 
 import { Effect, FileSystem, type PlatformError, type Schema } from "effect";
@@ -48,21 +49,36 @@ export const writeEffectiveSettings = (
   });
 
 /** The configuration as resolved from `layers`, with what the host says (`host`). */
-export const effectiveSettings = (layers: ReadonlyArray<LayerSource>, configuration: Configuration, host: Readonly<Record<string, Schema.Json>> = {}): Schema.Json => ({
+export const effectiveSettings = (layers: ReadonlyArray<LayerSource>, configuration: Configuration, host: Readonly<Record<string, Schema.Json>> = {}): Schema.Json => {
+  const all = merged(layers.map((layer) => layer.value ?? {}));
+  return {
   layers: layers.map((layer) => ({ name: layer.name, trusted: layer.trusted })),
   lists: Object.fromEntries(
     Object.entries(configuration.lists).map(([seam, entries]) => [seam, entries.map((entry) => ({ name: entry.name, use: entry.plugin.use, settings: entry.settings as Schema.Json }))]),
   ),
   ...(configuration.maxHolds === undefined ? {} : { maxHolds: configuration.maxHolds }),
-  mcpServers: configuration.mcpServers.map((server) => ({
-    name: server.name,
-    command: server.command,
-    args: [...redactedArgs(server.args)],
-    env: Object.keys(server.env),
-    ...(server.cwd === undefined ? {} : { cwd: server.cwd }),
-    required: server.required,
-    ...(server.connectTimeout === undefined ? {} : { connectTimeout: String(server.connectTimeout) }),
-  })),
+  mcpServers: configuration.mcpServers.map((server) => {
+    // A value that may hold a credential is shown as the layers wrote it: `${VAR}`, not the variable's value.
+    const written = (key: string, value: string): string => {
+      const said = at(all, ["mcpServers", server.name, key]);
+      return typeof said === "string" ? said : value;
+    };
+    const writtenArgs = at(all, ["mcpServers", server.name, "args"]);
+    return {
+      name: server.name,
+      ...("url" in server
+        ? { type: server.transport, url: written("url", server.url), headers: Object.keys(server.headers) }
+        : {
+            command: written("command", server.command),
+            args: [...redactedArgs(Array.isArray(writtenArgs) && writtenArgs.every((arg) => typeof arg === "string") ? (writtenArgs as ReadonlyArray<string>) : server.args)],
+            env: Object.keys(server.env),
+            ...(server.cwd === undefined ? {} : { cwd: server.cwd }),
+          }),
+      required: server.required,
+      ...(server.connectTimeout === undefined ? {} : { connectTimeout: String(server.connectTimeout) }),
+    };
+  }),
   from: sourcesOf(layers),
   host,
-});
+  };
+};

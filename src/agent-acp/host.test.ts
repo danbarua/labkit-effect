@@ -18,6 +18,7 @@ import type { Brand } from "../agent-host/brand.ts";
 import type { ConfigFlags } from "../agent-host/launch.ts";
 import { type CatalogSource, ModelCatalog } from "../agent-host/catalog.ts";
 import { sessionFolderOf, storeFileOf } from "../agent-host/directory.ts";
+import { startFakeHttpServer } from "../../tests/support/mcp-http-server.ts";
 import { answerNow } from "../agent-host/incomplete.ts";
 import { SessionServices } from "../agent-host/services.ts";
 import { CallId, FailureText, Millis, ModelName, ModelText, ProviderName, ThinkingText, TokenCount, ToolName, type TurnId } from "../agent-machine/names.ts";
@@ -921,6 +922,48 @@ test("AG22: the MCP servers a client names are started; their tools are offered 
   expect(facts[0]).toMatchObject({ observation: { _tag: "SessionOpened" } });
 });
 
+test("AG28: a server at a URL the client names is connected over Streamable HTTP or HTTP+SSE: its tools are offered, a call runs on it, and closing the session ends its session", async () => {
+  const web = startFakeHttpServer({ transport: "http" });
+  const legacy = startFakeHttpServer({ transport: "sse" });
+  const host = startHost({
+    world: echoWorld,
+    script: [answer({ _tag: "ToolCall", call: "w-1", tool: "mcp__web__echo", input: { message: "over http" } }), answer({ _tag: "Text", text: "Done." })],
+  });
+  const { app, log } = sdkClient();
+  try {
+    const result = await app.connectWith(host.stream, async (ctx) => {
+      await initialize(ctx, {});
+      const { sessionId } = await ctx.request("session/new", {
+        cwd: host.cwd,
+        mcpServers: [
+          { type: "http", name: "web", url: web.url, headers: [{ name: "X-Trace", value: "t-1" }] },
+          { type: "sse", name: "legacy", url: legacy.url, headers: [] },
+        ],
+      });
+      const prompted = await ctx.request("session/prompt", say(sessionId, "Echo over http."));
+      await ctx.request("session/close", { sessionId });
+      return { prompted };
+    });
+    await host.stop();
+    expect(result.prompted.stopReason).toBe("end_turn");
+    expect(host.contexts[0]?.tools.map((tool) => tool.name as string)).toEqual([
+      "echo",
+      "mcp__web__echo",
+      "mcp__web__roots",
+      "mcp__web__slow",
+      "mcp__legacy__echo",
+      "mcp__legacy__roots",
+      "mcp__legacy__slow",
+    ]);
+    const completed = log.updates.find((update) => update.sessionUpdate === "tool_call_update" && update.status === "completed");
+    expect(completed).toMatchObject({ toolCallId: "w-1", content: [{ type: "content", content: { type: "text", text: "over http" } }] });
+    expect(web.deleted).toHaveLength(1);
+  } finally {
+    web.stop();
+    legacy.stop();
+  }
+});
+
 test("AG24: the host goes by its brand: /export writes to .acme/exports, an MCP server is told its name, and with no model to ask it names ACME_ACP_MODEL", async () => {
   const acme = { name: "acme", version: "1.0.0" };
   const host = startHost({ brand: acme, script: [answer({ _tag: "Text", text: "Hello there." })] });
@@ -1028,18 +1071,18 @@ test("AG26: a server the configuration says is required that does not connect re
   }
 });
 
-test("AG23: a server that cannot be started leaves the session running: the model is told it is not running and the session records it failed; /mcp says how each server is; a server at a URL is refused, as the host does not offer HTTP; two servers whose tools would share a name are -32602", async () => {
+test("AG23: a server that cannot be started leaves the session running: the model is told it is not running and the session records it failed; /mcp says how each server is; a server over ACP is refused, as the host does not offer it; two servers whose tools would share a name are -32602", async () => {
   const host = startHost({ script: [answer({ _tag: "Text", text: "Hello." })] });
   const { app, log } = sdkClient();
   const result = await app.connectWith(host.stream, async (ctx) => {
     await initialize(ctx, {});
     const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [{ name: "missing", command: "/no/such/server", args: [], env: [] }] });
-    const remote = await failure(ctx.request("session/new", { cwd: host.cwd, mcpServers: [{ type: "http", name: "remote", url: "http://localhost:1/mcp", headers: [] }] }));
+    const proxied = await failure(ctx.request("session/new", { cwd: host.cwd, mcpServers: [{ type: "acp", name: "proxied", serverId: "s-1" }] }));
     await ctx.request("session/prompt", say(sessionId, "Hi."));
     await ctx.request("session/prompt", say(sessionId, "/mcp"));
     await ctx.request("session/prompt", say(sessionId, "/mcp reconnect nobody"));
     const clashing = await failure(ctx.request("session/new", { cwd: host.cwd, mcpServers: [fakeMcp("a.b"), fakeMcp("a_b")] }));
-    return { sessionId, clashing, remote };
+    return { sessionId, clashing, proxied };
   });
   await host.stop();
   const notice = host.contexts[0]?.messages.at(-1);
@@ -1054,7 +1097,7 @@ test("AG23: a server that cannot be started leaves the session running: the mode
   expect(observed(facts).filter((fact) => fact.observation._tag === "McpServerChanged").map((fact) => fact.observation)).toMatchObject([
     { server: "missing", state: { _tag: "Failed" } },
   ]);
-  expect(result.remote).toMatchObject({ code: -32602, data: { capability: "agentCapabilities.mcpCapabilities.http" } });
+  expect(result.proxied).toMatchObject({ code: -32602, data: { capability: "agentCapabilities.mcpCapabilities.acp" } });
   expect(result.clashing).toMatchObject({ code: -32602, message: "The MCP servers a.b and a_b would offer their tools under one name, mcp__a_b" });
 });
 

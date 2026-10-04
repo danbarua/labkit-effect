@@ -85,13 +85,19 @@ mcpServers:
   property; each seam's list takes names. A file an editor checks against it is taken or refused as
   the loader takes or refuses it, for the mistakes a schema can see.
 - CF9. Two of one plug-in, with different settings, are two names in `plugins`, each with `use`.
-- CF10. `mcpServers` maps a name to a server: its `command`, `args`, `env`, `cwd`, whether a
-  session needs it (`required`, false unless said) and how long it has to connect
-  (`connectTimeout`, a duration); `type: stdio` may be said, as Claude Code's `.mcp.json` does. They
+- CF10. `mcpServers` maps a name to a server: one the session runs (`command`, `args`, `env`, `cwd`;
+  `type: stdio` may be said, as Claude Code's `.mcp.json` does), or one at a URL (`type: http` or
+  `sse`, `url`, `headers`); whether a session needs it (`required`, false unless said) and how long
+  it has to connect (`connectTimeout`, a duration). They
   merge key by key, so a later layer of the user's can add a server or change one; a layer that
   writes `mcpServers: null` takes away those of the layers before it. A server is a command the
   session runs, so only a trusted layer may name one: a project's layer that does is refused, until
   a folder can be trusted (TODO.md).
+- CF15. `${VAR}` and `${VAR:-default}` in a server's `command`, `args`, `env`, `url` and `headers` are
+  the environment's (a variable set empty is not set); one not set and with no default is refused,
+  naming the layer and where in it. What the configuration resolved to (CF14) says a server's
+  command, arguments and URL as the layers wrote them, and its environment and headers by their
+  names.
 - CF11. `maxBudget` vetoes a model request once the session has cost its `usd` or more (`costIn`:
   a model with no known price costs nothing). It has no default, so a list that names it needs it in
   `plugins`.

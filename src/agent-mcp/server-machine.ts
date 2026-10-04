@@ -1,32 +1,42 @@
 /**
- * The life of one MCP server a session keeps, over the life of its process group
- * (`agent-process`): connecting while its process starts and answers `initialize`, ready with the
- * tools it listed, failed (its process could not start, or did not connect), exited (its process
- * ended), stopped. Each state names the process's run it is about; what arrives about an earlier
- * run changes nothing. Pure: given its state and what happened, it gives the next state and what is
- * to be done.
+ * The life of one MCP server a session keeps, over its runs: a run is a process (stdio) or a
+ * session with a server at a URL (HTTP, SSE). Connecting while a run starts and the server answers
+ * `initialize`; ready with the tools it listed; failed (its run could not start, or it did not
+ * connect, or it refused the credentials given); needing authorization this client cannot give;
+ * exited (its run ended); stopped. Each state names the run it is about; what arrives about an
+ * earlier run changes nothing. Pure: given its state and what happened, it gives the next state and
+ * what is to be done.
  */
 
 import type { McpSchema } from "effect/ai";
-import type { ProcessState } from "../agent-process/machine.ts";
 
 export type McpServerState =
   | { readonly _tag: "Stopped"; readonly run: number }
   | { readonly _tag: "Connecting"; readonly run: number }
   | { readonly _tag: "Ready"; readonly run: number; readonly tools: ReadonlyArray<McpSchema.Tool> }
   | { readonly _tag: "Failed"; readonly run: number; readonly reason: string }
+  /** The server asks for authorization and none is configured, or it needs OAuth, which this client does not do. */
+  | { readonly _tag: "NeedsAuth"; readonly run: number; readonly reason: string }
   | { readonly _tag: "Exited"; readonly run: number; readonly reason: string };
 
 export type McpServerEvent =
-  /** The process group's state changed. */
-  | { readonly _tag: "Process"; readonly state: ProcessState }
+  /** A run started: its process is starting, or its connection is being made. */
+  | { readonly _tag: "RunStarted"; readonly run: number }
+  /** A run could not be started: why. */
+  | { readonly _tag: "RunFailed"; readonly run: number; readonly reason: string }
+  /** A run ended: why (its process ended; its session ended, and another could not be made). */
+  | { readonly _tag: "RunEnded"; readonly run: number; readonly reason: string }
+  /** The run was stopped, and none is left. */
+  | { readonly _tag: "RunStopped"; readonly run: number }
   /** The run's server answered `initialize` and listed its tools. */
   | { readonly _tag: "Connected"; readonly run: number; readonly tools: ReadonlyArray<McpSchema.Tool> }
-  /** The run's server did not connect: why. */
-  | { readonly _tag: "ConnectFailed"; readonly run: number; readonly reason: string };
+  /** The run's server did not connect, or refused the credentials given: why. */
+  | { readonly _tag: "ConnectFailed"; readonly run: number; readonly reason: string }
+  /** The run's server asks for authorization this client cannot give: why. */
+  | { readonly _tag: "AuthNeeded"; readonly run: number; readonly reason: string };
 
-/** What is to be done: stop the process, so that a server that did not connect leaves none behind. */
-export type McpServerEffect = { readonly _tag: "StopProcess" };
+/** What is to be done: stop the run, so that a server that did not connect leaves nothing behind. */
+export type McpServerEffect = { readonly _tag: "StopRun" };
 
 export interface McpServerStep {
   readonly state: McpServerState;
@@ -39,38 +49,25 @@ const stay = (state: McpServerState): McpServerStep => ({ state, effects: [] });
 
 const live = (state: McpServerState): boolean => state._tag === "Connecting" || state._tag === "Ready";
 
-const endedOf = (process: Extract<ProcessState, { _tag: "Exited" }>): string =>
-  process.code !== undefined ? `its process exited with code ${process.code}` : process.signal !== undefined ? `its process ended on ${process.signal}` : "its process ended";
-
 /** The next state, and what is to be done, once `event` happened in `state`. */
 export const stepMcpServer = (state: McpServerState, event: McpServerEvent): McpServerStep => {
+  if (event.run < state.run) return stay(state);
   switch (event._tag) {
-    case "Process": {
-      const process = event.state;
-      if (process.run < state.run) return stay(state);
-      switch (process._tag) {
-        case "Starting":
-          return process.run > state.run ? stay({ _tag: "Connecting", run: process.run }) : stay(state);
-        case "Running":
-          return process.run > state.run ? stay({ _tag: "Connecting", run: process.run }) : stay(state);
-        case "Failed":
-          return stay({ _tag: "Failed", run: process.run, reason: `its process could not be started: ${process.reason}` });
-        case "Exited":
-          return live(state) || process.run > state.run ? stay({ _tag: "Exited", run: process.run, reason: endedOf(process) }) : stay(state);
-        case "Idle":
-          return live(state) ? stay({ _tag: "Stopped", run: state.run }) : stay(state);
-        default:
-          return process satisfies never;
-      }
-    }
+    case "RunStarted":
+      return event.run > state.run ? stay({ _tag: "Connecting", run: event.run }) : stay(state);
+    case "RunFailed":
+      return stay({ _tag: "Failed", run: event.run, reason: event.reason });
+    case "RunEnded":
+      return live(state) || event.run > state.run ? stay({ _tag: "Exited", run: event.run, reason: event.reason }) : stay(state);
+    case "RunStopped":
+      return live(state) ? stay({ _tag: "Stopped", run: state.run }) : stay(state);
     case "Connected":
-      return event.run >= state.run && (state._tag === "Connecting" || state._tag === "Stopped" || event.run > state.run)
-        ? stay({ _tag: "Ready", run: event.run, tools: event.tools })
-        : stay(state);
+      return state._tag === "Connecting" || state._tag === "Stopped" || event.run > state.run ? stay({ _tag: "Ready", run: event.run, tools: event.tools }) : stay(state);
+    // A run that is connecting, or ready and making a new session, can fail or need authorization.
     case "ConnectFailed":
-      return event.run >= state.run && (state._tag === "Connecting" || event.run > state.run)
-        ? { state: { _tag: "Failed", run: event.run, reason: event.reason }, effects: [{ _tag: "StopProcess" }] }
-        : stay(state);
+      return live(state) || event.run > state.run ? { state: { _tag: "Failed", run: event.run, reason: event.reason }, effects: [{ _tag: "StopRun" }] } : stay(state);
+    case "AuthNeeded":
+      return live(state) || event.run > state.run ? { state: { _tag: "NeedsAuth", run: event.run, reason: event.reason }, effects: [{ _tag: "StopRun" }] } : stay(state);
     default:
       return event satisfies never;
   }
@@ -87,6 +84,8 @@ export const describe = (state: McpServerState): string => {
       return `it is running, with ${state.tools.length} tools`;
     case "Failed":
       return `it failed: ${state.reason}`;
+    case "NeedsAuth":
+      return `it needs authorization: ${state.reason}`;
     case "Exited":
       return `it stopped: ${state.reason}`;
     default:

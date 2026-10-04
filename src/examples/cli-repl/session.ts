@@ -98,11 +98,7 @@ const servicesOf = (config: Config, sources: ReadonlyArray<ToolSource>, mcp: Mcp
 
 /** The MCP servers the configuration names, as `startMcpServers` takes them. */
 const givenOf = (configuration: Configuration): ReadonlyArray<GivenServer> =>
-  configuration.mcpServers.map((server) => ({
-    _tag: "Stdio",
-    server: { name: server.name, command: server.command, args: server.args, env: server.env, cwd: server.cwd ?? process.cwd() },
-    connectTimeout: server.connectTimeout,
-  }));
+  configuration.mcpServers.map((server) => ({ server: "url" in server ? server : { ...server, cwd: server.cwd ?? process.cwd() }, connectTimeout: server.connectTimeout }));
 
 /**
  * Writes what the session's configuration resolved to (`effective-settings.json`, `agent-config`

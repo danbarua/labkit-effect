@@ -109,19 +109,22 @@ model.
       (interrupted, failed) shows what its finished requests sent and nothing of how it ended.
 - [ ] The ACP host in an editor: the launch command, and VS Code's behaviour with what it sends and
       draws (config options as selects, thinking, permission, tool call content). Then JetBrains.
-- [ ] MCP servers. Built (`src/agent-mcp`, on `src/agent-process`): the stdio client; each server a
-      machine over a session-scoped process group; the ACP host starts the servers a client names,
+- [ ] MCP servers. Built (`src/agent-mcp`, on `src/agent-process`): the client over stdio, Streamable
+      HTTP and HTTP+SSE (`type: http`, `sse`, with `url` and `headers`; `${VAR}` in a server's
+      configuration); each server a machine over its runs (a process, or a session at its URL, made
+      anew when the server drops it), `NeedsAuth` when it asks for credentials none are given or for
+      OAuth; the ACP host starts the servers a client names,
       offers their tools after the world's under `mcp__<server>`, tells the model of one not
       running, records their states (`McpServerChanged`), and serves `/mcp` and
       `/mcp reconnect <server>`; the CLI starts the servers its configuration names (its files,
       `--mcp-config`), and one marked `required: true` that does not connect keeps the session from
       opening; `/mcp` in the REPL, with completions; the ACP host reading each session's
       configuration, the client's servers over the configuration's by name, a required one that
-      does not connect refusing the session. To do: the REPL's completions and hints from a machine
-      of the command line's state; MCP
-      servers reached at a URL, which are not supported at all today: a client for the Streamable
-      HTTP transport (and the deprecated HTTP+SSE one), then the ACP host advertising
-      `mcpCapabilities.http` and `.sse`; tools a server offers
+      does not connect refusing the session; the ACP host advertising `mcpCapabilities.http` and
+      `.sse`. To do: OAuth for a server that asks for it (the authorization code flow with PKCE, the
+      token kept and refreshed), now `NeedsAuth`; resuming a Streamable HTTP stream that broke off
+      (`Last-Event-ID`); MCP over ACP (`mcpCapabilities.acp`); the REPL's completions and hints from
+      a machine of the command line's state; tools a server offers
       after the session opened (after a reconnect, or `notifications/tools/list_changed`), with
       per-turn tool lists; sampling and elicitation; a result's images and audio sent to the model
       as images and audio where its provider takes them in a tool's result (Anthropic's does), not

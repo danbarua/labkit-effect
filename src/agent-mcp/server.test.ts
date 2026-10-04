@@ -8,29 +8,31 @@ import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
 import type { ToolResult } from "./client.ts";
 import { initialMcpServerState, type McpServerState, stepMcpServer } from "./server-machine.ts";
-import { type McpServer, startMcpServer } from "./server.ts";
+import { type McpServer, runEventOf, startMcpServer } from "./server.ts";
 
 const fake = { name: "fake", command: process.execPath, args: [new URL("../../tests/support/mcp-server.ts", import.meta.url).pathname], env: {} };
 
 test("MS1: a server connects on each run of its process, is ready with its tools, fails or exits with its run; what arrives about an earlier run changes nothing", () => {
   const steps = (events: Parameters<typeof stepMcpServer>[1][]) => events.reduce((state, event) => stepMcpServer(state, event).state, initialMcpServerState);
   const tools = [{ name: "echo" }] as never;
-  expect(steps([{ _tag: "Process", state: { _tag: "Starting", run: 1 } }])).toEqual({ _tag: "Connecting", run: 1 });
-  expect(steps([{ _tag: "Process", state: { _tag: "Starting", run: 1 } }, { _tag: "Connected", run: 1, tools }])).toEqual({ _tag: "Ready", run: 1, tools });
-  // A server that does not connect has failed, and its process is to be stopped.
+  // A stdio server's run is its process.
+  expect(steps([runEventOf({ _tag: "Starting", run: 1 })])).toEqual({ _tag: "Connecting", run: 1 });
+  expect(steps([runEventOf({ _tag: "Starting", run: 1 }), { _tag: "Connected", run: 1, tools }])).toEqual({ _tag: "Ready", run: 1, tools });
+  // A server that does not connect has failed, and its run is to be stopped.
   expect(stepMcpServer({ _tag: "Connecting", run: 1 }, { _tag: "ConnectFailed", run: 1, reason: "no answer" })).toEqual({
     state: { _tag: "Failed", run: 1, reason: "no answer" },
-    effects: [{ _tag: "StopProcess" }],
+    effects: [{ _tag: "StopRun" }],
   });
-  // Stopping its process then leaves it Failed.
-  expect(stepMcpServer({ _tag: "Failed", run: 1, reason: "no answer" }, { _tag: "Process", state: { _tag: "Idle", run: 1 } }).state._tag).toBe("Failed");
-  expect(stepMcpServer({ _tag: "Ready", run: 1, tools }, { _tag: "Process", state: { _tag: "Exited", run: 1, code: 7, signal: undefined } }).state).toEqual({
+  // Stopping its run then leaves it Failed.
+  expect(stepMcpServer({ _tag: "Failed", run: 1, reason: "no answer" }, runEventOf({ _tag: "Idle", run: 1 })).state._tag).toBe("Failed");
+  expect(stepMcpServer({ _tag: "Ready", run: 1, tools }, runEventOf({ _tag: "Exited", run: 1, code: 7, signal: undefined })).state).toEqual({
     _tag: "Exited",
     run: 1,
     reason: "its process exited with code 7",
   });
   // Run 1's end, reported once run 2 is connecting, changes nothing.
-  expect(stepMcpServer({ _tag: "Connecting", run: 2 }, { _tag: "Process", state: { _tag: "Exited", run: 1, code: 143, signal: undefined } }).state).toEqual({ _tag: "Connecting", run: 2 });
+  expect(stepMcpServer({ _tag: "Connecting", run: 2 }, runEventOf({ _tag: "Exited", run: 1, code: 143, signal: undefined })).state).toEqual({ _tag: "Connecting", run: 2 });
+  expect(runEventOf({ _tag: "Failed", run: 1, reason: "ENOENT" })).toEqual({ _tag: "RunFailed", run: 1, reason: "its process could not be started: ENOENT" });
 });
 
 const textOf = (result: ToolResult) =>
@@ -86,14 +88,14 @@ test("MS3: a server whose process cannot be started has failed, and a call to it
   expect(seen.refused).toStartWith("missing: echo was not called: the server is not running (it failed: its process could not be started:");
 });
 
-test("MS5: a server that does not answer initialize, or does not list its tools, in time has failed, and its process is stopped", async () => {
+test("MS5: a server that does not answer initialize, or does not list its tools, in time has failed, and its run is stopped", async () => {
   const settle = (server: Parameters<typeof startMcpServer>[0]) =>
     Effect.gen(function* () {
       const started = yield* startMcpServer(server, [], { connectTimeout: "300 millis" });
       const settled = yield* started.settled;
       // Its process group was stopped (agent-process PG4: a stopped group's processes are ended).
       yield* Effect.sleep("50 millis");
-      return { settled, process: (yield* started.process)._tag };
+      return { settled, running: yield* started.running };
     });
   const seen = await runTest(
     Effect.gen(function* () {
@@ -104,23 +106,18 @@ test("MS5: a server that does not answer initialize, or does not list its tools,
     }).pipe(Effect.provide(BunServices.layer)),
   );
   const failed = { _tag: "Failed", run: 1, reason: "did not answer initialize and tools/list within 300ms" };
-  expect(seen as unknown).toEqual({ silent: { settled: failed, process: "Idle" }, unlisted: { settled: failed, process: "Idle" } });
+  expect(seen as unknown).toEqual({ silent: { settled: failed, running: false }, unlisted: { settled: failed, running: false } });
 });
 
 const run = fc.integer({ min: 0, max: 5 });
 const serverEvent = fc.oneof(
-  fc.record({
-    _tag: fc.constant("Process" as const),
-    state: fc.oneof(
-      fc.record({ _tag: fc.constant("Idle" as const), run }),
-      fc.record({ _tag: fc.constant("Starting" as const), run }),
-      fc.record({ _tag: fc.constant("Running" as const), run, pid: fc.constant(1) }),
-      fc.record({ _tag: fc.constant("Exited" as const), run, code: fc.constant(0), signal: fc.constant(undefined) }),
-      fc.record({ _tag: fc.constant("Failed" as const), run, reason: fc.constant("no") }),
-    ),
-  }),
+  fc.record({ _tag: fc.constant("RunStarted" as const), run }),
+  fc.record({ _tag: fc.constant("RunFailed" as const), run, reason: fc.constant("no") }),
+  fc.record({ _tag: fc.constant("RunEnded" as const), run, reason: fc.constant("no") }),
+  fc.record({ _tag: fc.constant("RunStopped" as const), run }),
   fc.record({ _tag: fc.constant("Connected" as const), run, tools: fc.constant([]) }),
   fc.record({ _tag: fc.constant("ConnectFailed" as const), run, reason: fc.constant("no") }),
+  fc.record({ _tag: fc.constant("AuthNeeded" as const), run, reason: fc.constant("no") }),
 );
 
 test("MS1: for any events, the run a server's state names never goes back, and what arrives about an earlier run changes nothing", () => {
@@ -129,8 +126,7 @@ test("MS1: for any events, the run a server's state names never goes back, and w
       events.reduce<McpServerState>((state, event) => {
         const step = stepMcpServer(state, event);
         expect(step.state.run).toBeGreaterThanOrEqual(state.run);
-        const about = event._tag === "Process" ? event.state.run : event.run;
-        if (about < state.run) expect(step).toEqual({ state, effects: [] });
+        if (event.run < state.run) expect(step).toEqual({ state, effects: [] });
         return step.state;
       }, initialMcpServerState);
     }),

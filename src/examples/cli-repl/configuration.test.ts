@@ -86,7 +86,7 @@ test("--settings is a layer over the files, JSON or a file of YAML or JSON; --se
 test("--mcp-config adds MCP servers, as Claude Code's .mcp.json; with --strict-mcp-config they are the only ones", async () => {
   write("home/.config/labkit/policies.yml", "mcpServers:\n  files:\n    command: files-mcp\n");
   const config = '{"mcpServers": {"github": {"type": "stdio", "command": "gh-mcp", "args": ["stdio"], "env": {"TOKEN": "x"}}}}';
-  const names = (configuration: Configuration) => configuration.mcpServers.map((server) => [server.name, server.command, server.args, server.env]);
+  const names = (configuration: Configuration) => configuration.mcpServers.map((server) => ("url" in server ? [server.name, server.url] : [server.name, server.command, server.args, server.env]));
   expect(names(await configured({ mcpConfig: [config] }))).toEqual([
     ["files", "files-mcp", [], {}],
     ["github", "gh-mcp", ["stdio"], { TOKEN: "x" }],

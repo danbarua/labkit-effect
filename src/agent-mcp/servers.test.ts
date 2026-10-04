@@ -9,12 +9,13 @@ import { startMcpServers } from "./servers.ts";
 
 const fake = { name: "fake", command: process.execPath, args: [new URL("../../tests/support/mcp-server.ts", import.meta.url).pathname], env: {} };
 const given = [
-  { _tag: "Stdio" as const, server: fake },
-  { _tag: "Stdio" as const, server: { name: "missing", command: "/no/such/server", args: [], env: {} } },
-  { _tag: "Unsupported" as const, name: "remote", transport: "http" },
+  { server: fake },
+  { server: { name: "missing", command: "/no/such/server", args: [], env: {} } },
+  // Nothing listens on port 1.
+  { server: { name: "remote", transport: "http" as const, url: "http://localhost:1/mcp", headers: {} } },
 ];
 
-test("MK1 MK2: every server is started at once; the tools of those ready are sources; one at a URL has failed, saying the transport is not supported; the model is told once of each server not running", async () => {
+test("MK1 MK2: every server is started at once, run or at its URL; the tools of those ready are sources; the model is told once of each server not running", async () => {
   const seen = await runTest(
     Effect.gen(function* () {
       const servers = yield* startMcpServers(given, []);
@@ -32,14 +33,14 @@ test("MK1 MK2: every server is started at once; the tools of those ready are sou
   expect(seen.sources).toEqual([["mcp__fake", ["echo", "roots", "slow"]]]);
   expect(seen.first).toHaveLength(2);
   expect(seen.first[0]).toStartWith("The MCP server missing is not running, so its tools cannot be called: it failed: its process could not be started:");
-  expect(seen.first[1]).toBe("The MCP server remote is not running, so its tools cannot be called: it failed: the http transport is not supported: only stdio is.");
+  expect(seen.first[1]).toStartWith("The MCP server remote is not running, so its tools cannot be called: it failed: the server could not be reached:");
   expect(seen.second).toEqual([]);
 });
 
 test("MK3: a server that stops is told of once, and once more when it is reconnected and runs again; its changes are recorded as McpServerChanged", async () => {
   const seen = await runTest(
     Effect.gen(function* () {
-      const servers = yield* startMcpServers([{ _tag: "Stdio", server: { ...fake, env: { MCP_FAKE_EXIT: "1" } } }], []);
+      const servers = yield* startMcpServers([{ server: { ...fake, env: { MCP_FAKE_EXIT: "1" } } }], []);
       const recorded = yield* servers.changes.pipe(Stream.take(1), Stream.runCollect);
       yield* servers.notices.notices;
       const source = servers.sources[0]!;

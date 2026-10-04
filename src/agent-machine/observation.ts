@@ -183,14 +183,16 @@ export const Observation = Schema.Union([
   Schema.TaggedStruct("InputCancelled", { input: Seq }),
   /**
    * An MCP server the session keeps changed state: ready, with the tools it offers by the names they
-   * are offered under; failed (it could not be started, or did not connect) or exited, and why;
-   * stopped. Recorded for the session's record and its host: no machine acts on it.
+   * are offered under; failed (it could not be started, did not connect, or refused the credentials
+   * given), needing authorization the client cannot give, or exited, and why; stopped. Recorded for
+   * the session's record and its host: no machine acts on it.
    */
   Schema.TaggedStruct("McpServerChanged", {
     server: McpServerName,
     state: Schema.Union([
       Schema.TaggedStruct("Ready", { tools: Schema.Array(ToolName) }),
       Schema.TaggedStruct("Failed", { reason: FailureText }),
+      Schema.TaggedStruct("NeedsAuth", { reason: FailureText }),
       Schema.TaggedStruct("Exited", { reason: FailureText }),
       Schema.TaggedStruct("Stopped", {}),
     ]),

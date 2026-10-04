@@ -1,7 +1,6 @@
 /**
- * The MCP servers one session keeps: each started as a process (`server.ts`), all at once, in the
- * scope given (the session's), and ended with it. A server reached at a URL (HTTP, SSE) is not
- * started: this client has only the stdio transport, so it has failed, saying so.
+ * The MCP servers one session keeps: each started (`server.ts`: as a process, or at its URL), all at
+ * once, in the scope given (the session's), and ended with it.
  *
  * Once every server has settled (ready, or failed: a server has `connectTimeout` to connect), the
  * tools of those that are ready are tool sources (`source.ts`), offered after the host's own: the
@@ -19,16 +18,17 @@ import type { NoticeProvider } from "../agent-context/assemble.ts";
 import { FailureText, McpServerName, ToolName } from "../agent-machine/names.ts";
 import type { Observation } from "../agent-machine/observation.ts";
 import type { ToolSource } from "../agent-session/tool-sources.ts";
-import type { ClientInfo, McpServerStdio, Root } from "./client.ts";
+import type { ClientInfo, Root } from "./client.ts";
 import { logKeys } from "./log-keys.ts";
 import { describe, type McpServerState } from "./server-machine.ts";
-import { type McpServer, startMcpServer } from "./server.ts";
+import { type McpServer, type McpServerConfig, startMcpServer } from "./server.ts";
 import { mcpToolSource, namespaceOf } from "./source.ts";
 
-/** A server a host was given: one to start as a process, or one at a URL, which is not started. */
-export type GivenServer =
-  | { readonly _tag: "Stdio"; readonly server: McpServerStdio; readonly connectTimeout?: Duration.Input | undefined }
-  | { readonly _tag: "Unsupported"; readonly name: string; readonly transport: string };
+/** A server a host was given, and how long it has to connect when not the host's default. */
+export interface GivenServer {
+  readonly server: McpServerConfig;
+  readonly connectTimeout?: Duration.Input | undefined;
+}
 
 type Change = Extract<Observation, { _tag: "McpServerChanged" }>;
 
@@ -56,6 +56,7 @@ const recorded = (name: string, state: McpServerState, offered: (state: Extract<
     case "Ready":
       return { _tag: "McpServerChanged", server, state: { _tag: "Ready", tools: offered(state).map((tool) => ToolName.make(tool)) } };
     case "Failed":
+    case "NeedsAuth":
     case "Exited":
       return { _tag: "McpServerChanged", server, state: { _tag: state._tag, reason: FailureText.make(state.reason) } };
     case "Stopped":
@@ -73,14 +74,10 @@ export const startMcpServers = (
 ): Effect.Effect<McpServers, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const started = yield* Effect.forEach(
-      given.flatMap((each) => (each._tag === "Stdio" ? [each] : [])),
+      given,
       (each) => startMcpServer(each.server, roots, { connectTimeout: each.connectTimeout ?? options.connectTimeout, clientInfo: options.clientInfo }),
       { concurrency: "unbounded" },
     );
-    const unsupported = given.flatMap((each) =>
-      each._tag === "Unsupported" ? [{ name: each.name, state: { _tag: "Failed", run: 0, reason: `the ${each.transport} transport is not supported: only stdio is` } as McpServerState }] : [],
-    );
-    for (const each of unsupported) yield* Effect.logWarning(logKeys.server.changed, { server: each.name, to: "Failed", said: describe(each.state) });
     const settled = yield* Effect.forEach(started, (server) => Effect.map(server.settled, (state) => ({ server, state })), { concurrency: "unbounded" });
 
     const sources = settled.flatMap(({ server, state }) => {
@@ -92,10 +89,7 @@ export const startMcpServers = (
     const offered = (server: McpServer) => (state: Extract<McpServerState, { _tag: "Ready" }>) =>
       mcpToolSource(server, state.tools).source.tools.map((tool) => `${namespaceOf(server.name)}__${tool.name}`);
 
-    const states: McpServers["states"] = Effect.map(
-      Effect.forEach(started, (server) => Effect.map(server.state, (state) => ({ name: server.name, state }))),
-      (now) => [...now, ...unsupported],
-    );
+    const states: McpServers["states"] = Effect.forEach(started, (server) => Effect.map(server.state, (state) => ({ name: server.name, state })));
 
     // What the model was last told of each server: a server ready when the session starts is taken as told so.
     const told = yield* Ref.make<ReadonlyMap<string, "running" | "not running">>(
@@ -124,20 +118,17 @@ export const startMcpServers = (
     };
 
     const changes = Stream.mergeAll(
-      [
-        ...started.map((server) =>
-          server.changes.pipe(
-            Stream.map((state) => recorded(server.name, state, offered(server))),
-            Stream.filter((change): change is Change => change !== undefined),
-          ),
+      started.map((server) =>
+        server.changes.pipe(
+          Stream.map((state) => recorded(server.name, state, offered(server))),
+          Stream.filter((change): change is Change => change !== undefined),
         ),
-        ...unsupported.map((each) => Stream.fromIterable([recorded(each.name, each.state, () => [])].filter((change): change is Change => change !== undefined))),
-      ],
+      ),
       { concurrency: "unbounded" },
     );
 
     return {
-      names: given.map((each) => (each._tag === "Stdio" ? each.server.name : each.name)),
+      names: given.map((each) => each.server.name),
       states,
       sources: sources.map(({ source }) => source),
       notices,
@@ -145,7 +136,7 @@ export const startMcpServers = (
       reconnect: (name) =>
         Effect.gen(function* () {
           const server = started.find((each) => each.name === name);
-          if (server === undefined) return unsupported.find((each) => each.name === name)?.state;
+          if (server === undefined) return undefined;
           const before = (yield* server.state).run;
           yield* server.reconnect;
           const after = yield* server.changes.pipe(

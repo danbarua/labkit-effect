@@ -161,28 +161,28 @@ export const acpDefaults = (options: { readonly retries?: number | undefined; re
   };
 };
 
-/** The client's MCP servers a configuration can hold: those it runs, not those at a URL. */
-const isStdio = (server: McpServer): server is Extract<McpServer, { readonly command: string }> => !("type" in server);
+/**
+ * One of the client's MCP servers as a layer writes it: run in the session's folder, or at its URL.
+ * MCP over ACP (`type: acp`) is not offered (`mcpCapabilities`): written as it is, the
+ * configuration refuses it.
+ */
+const writtenOf = (cwd: string, server: McpServer) => {
+  const pairs = (each: ReadonlyArray<{ readonly name: string; readonly value: string }>) => Object.fromEntries(each.map(({ name, value }) => [name, value]));
+  if ("command" in server) return { command: server.command, args: [...server.args], env: pairs(server.env), cwd };
+  if (server.type === "http" || server.type === "sse") return { type: server.type, url: server.url, headers: pairs(server.headers) };
+  return { type: server.type };
+};
 
 /**
  * The client's MCP servers for a session in `cwd`, as the last layers: the first takes out the
  * configuration's servers of the same names, so the client's replaces each whole.
  */
 const clientLayers = (cwd: string, servers: ReadonlyArray<McpServer>): ReadonlyArray<LayerSource> => {
-  const stdio = servers.filter(isStdio);
-  if (stdio.length === 0) return [];
+  if (servers.length === 0) return [];
   const name = "the client's MCP servers";
   return [
-    { name, trusted: true, value: { mcpServers: Object.fromEntries(stdio.map((server) => [server.name, null])) } },
-    {
-      name,
-      trusted: true,
-      value: {
-        mcpServers: Object.fromEntries(
-          stdio.map((server) => [server.name, { command: server.command, args: [...server.args], env: Object.fromEntries(server.env.map((each) => [each.name, each.value])), cwd }]),
-        ),
-      },
-    },
+    { name, trusted: true, value: { mcpServers: Object.fromEntries(servers.map((server) => [server.name, null])) } },
+    { name, trusted: true, value: { mcpServers: Object.fromEntries(servers.map((server) => [server.name, writtenOf(cwd, server)])) } },
   ];
 };
 
@@ -328,6 +328,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
       promptCapabilities: { image: true, audio: false, embeddedContext: true },
       loadSession: true,
       sessionCapabilities: { close: {}, list: {}, resume: {} },
+      mcpCapabilities: { http: true, sse: true },
     },
     handlers: (connection) =>
       Effect.gen(function* () {
@@ -399,19 +400,12 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
          * started. A server the configuration says is required that is not running once they have settled refuses the request,
          * and the servers are stopped (AG26).
          */
-        const withServers = (cwd: string, opened: WorldSession, configuration: Configured, servers: ReadonlyArray<McpServer>, doing: string) =>
+        const withServers = (cwd: string, opened: WorldSession, configuration: Configured, doing: string) =>
           Effect.gen(function* () {
-            const given: ReadonlyArray<GivenServer> = [
-              ...configuration.mcpServers.map(
-                (server): GivenServer => ({
-                  _tag: "Stdio",
-                  server: { name: server.name, command: server.command, args: server.args, env: server.env, cwd: server.cwd ?? cwd },
-                  connectTimeout: server.connectTimeout,
-                }),
-              ),
-              ...servers.flatMap((server): ReadonlyArray<GivenServer> => ("type" in server ? [{ _tag: "Unsupported", name: server.name, transport: server.type }] : [])),
-            ];
-            const names = given.map((server) => (server._tag === "Stdio" ? server.server.name : server.name));
+            const given = configuration.mcpServers.map(
+              (server): GivenServer => ({ server: "url" in server ? server : { ...server, cwd: server.cwd ?? cwd }, connectTimeout: server.connectTimeout }),
+            );
+            const names = given.map((each) => each.server.name);
             const namespaces = names.map(namespaceOf);
             const twice = namespaces.find((each, index) => namespaces.indexOf(each) !== index);
             if (twice !== undefined) {
@@ -776,7 +770,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 strictInput: options.strictToolInput ?? false,
                 environment: environmentFor(configuration),
               });
-              const { world: its, scope, mcp } = yield* withServers(cwd, own, configuration, mcpServers, method);
+              const { world: its, scope, mcp } = yield* withServers(cwd, own, configuration, method);
               return yield* Effect.gen(function* () {
               // The policy reads the entry's mode at each call; the entry exists once the session started, and until then the mode is the configuration's.
               const initialMode = startingModeOf(configuration);
@@ -864,7 +858,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   strictInput: options.strictToolInput ?? false,
                   environment: environmentFor(configuration),
                 });
-                const { world: opened, scope, mcp } = yield* withServers(cwd, own, configuration, mcpServers, "session/new");
+                const { world: opened, scope, mcp } = yield* withServers(cwd, own, configuration, "session/new");
                 return yield* Effect.gen(function* () {
                 const capabilities = yield* capabilitiesOf(model);
                 const { catalog } = yield* toolsOf(opened.sources);
