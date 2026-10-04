@@ -34,7 +34,9 @@ nothing of what a process is for.
 - PG5. Closing the scope a group was made in ends its group.
 - PE1. A variable holds a credential when a word of its name (what `_`, `-` and `.` separate, and
   where a lower-case letter meets a capital) is one of `credentialWords`, in any case: `TOKEN`, `KEY`,
-  `AUTH`, `SECRET`, `PASSWORD` and the like.
+  `AUTH`, `SECRET`, `PASSWORD` and the like. Where a command's arguments are logged or written down,
+  the value of a flag whose name holds a credential is left out (`--token=<left out>`); the command
+  is run with them as given.
 - PE2. A run is given this process's environment without the variables that hold credentials, and
   the command's own `env` over it, as it says. The names left out and set are logged, never their
   values. The MCP client's own `connectStdio` leaves them out too. The workspace's `run_command` is

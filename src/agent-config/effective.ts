@@ -3,10 +3,12 @@
  * did (`effective-settings.json`): the layers, in order; each seam's entries, by name, with their
  * plug-in and every setting as resolved, defaults included; `maxHolds`; the MCP servers; for every
  * value the layers wrote, the layer that wrote it last (`from`); and what the host says beside the
- * layers (`host`). An MCP server's environment is given by its variables' names, never their values.
+ * layers (`host`). An MCP server's environment is given by its variables' names, never their values,
+ * and the value of an argument whose flag names a credential is left out (`redactedArgs`).
  */
 
 import type { Schema } from "effect";
+import { redactedArgs } from "../agent-process/environment.ts";
 import type { Configuration, LayerSource } from "./file.ts";
 import { merged } from "./merge.ts";
 
@@ -37,7 +39,7 @@ export const effectiveSettings = (layers: ReadonlyArray<LayerSource>, configurat
   mcpServers: configuration.mcpServers.map((server) => ({
     name: server.name,
     command: server.command,
-    args: [...server.args],
+    args: [...redactedArgs(server.args)],
     env: Object.keys(server.env),
     ...(server.cwd === undefined ? {} : { cwd: server.cwd }),
     required: server.required,

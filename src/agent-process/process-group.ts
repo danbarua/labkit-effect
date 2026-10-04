@@ -17,7 +17,7 @@
 
 import { Effect, Exit, Fiber, Scope, Semaphore, Stream, SubscriptionRef } from "effect";
 import { ChildProcess, type ChildProcessSpawner } from "effect/process";
-import { withoutCredentials } from "./environment.ts";
+import { redactedArgs, withoutCredentials } from "./environment.ts";
 import { logKeys } from "./log-keys.ts";
 import { initialProcessState, type ProcessEffect, type ProcessEvent, type ProcessState, stepProcess } from "./machine.ts";
 
@@ -105,7 +105,7 @@ export const makeProcessGroup = (
             const step = stepProcess(before, event);
             if (step.state !== before) {
               yield* SubscriptionRef.set(state, step.state);
-              yield* Effect.logInfo(logKeys.process.changed, { name: command.name, command: command.command, args: command.args, event: event._tag, from: before, to: step.state });
+              yield* Effect.logInfo(logKeys.process.changed, { name: command.name, command: command.command, args: redactedArgs(command.args), event: event._tag, from: before, to: step.state });
             }
             return step.effects;
           }),

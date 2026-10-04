@@ -74,3 +74,21 @@ export const withoutCredentials = (
     left: entries.flatMap(([name]) => (isCredential(name) ? [name] : [])).sort(),
   };
 };
+
+/** What a value left out is written as. */
+export const leftOut = "<left out>";
+
+/**
+ * `args` as they may be logged or written down: the value of a flag whose name holds a credential is
+ * left out, given with the flag (`--token=<left out>`) or as the argument after it (`--api-key`
+ * `<left out>`). They are run as given.
+ */
+export const redactedArgs = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
+  args.map((arg, index) => {
+    const joined = /^--?([^=]+)=/.exec(arg);
+    if (joined?.[1] !== undefined) return isCredential(joined[1]) ? `${arg.slice(0, arg.indexOf("=") + 1)}${leftOut}` : arg;
+    const before = args[index - 1];
+    const flag = before === undefined ? undefined : /^--?([^=]+)$/.exec(before)?.[1];
+    return flag !== undefined && isCredential(flag) && !arg.startsWith("-") ? leftOut : arg;
+  });
+

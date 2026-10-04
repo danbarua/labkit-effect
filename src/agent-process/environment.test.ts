@@ -5,7 +5,7 @@ import { BunServices } from "@effect/platform-bun";
 import { Deferred, Effect, Stream } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
-import { isCredential, withoutCredentials } from "./environment.ts";
+import { isCredential, redactedArgs, withoutCredentials } from "./environment.ts";
 import { makeProcessGroup } from "./process-group.ts";
 
 test("PE1: a variable holds a credential when a word of its name is one of the credential words, in any case", () => {
@@ -14,6 +14,20 @@ test("PE1: a variable holds a credential when a word of its name is one of the c
   expect(held.filter((name) => !isCredential(name))).toEqual([]);
   expect(kept.filter(isCredential)).toEqual([]);
   expect(withoutCredentials({ PATH: "/bin", GITHUB_TOKEN: "t", AWS_SECRET_ACCESS_KEY: "s", EMPTY: undefined })).toEqual({ env: { PATH: "/bin" }, left: ["AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"] });
+});
+
+test("PE1: the value of a flag whose name holds a credential is left out of arguments as they are logged", () => {
+  expect(redactedArgs(["stdio", "--token=ghp_x", "--api-key", "sk-y", "--read-only", "--port", "8080", "--auth-token", "--verbose"])).toEqual([
+    "stdio",
+    "--token=<left out>",
+    "--api-key",
+    "<left out>",
+    "--read-only",
+    "--port",
+    "8080",
+    "--auth-token",
+    "--verbose",
+  ]);
 });
 
 test("PE2: a run is given this process's environment without its credentials, and the command's own env as it says, credentials included", async () => {

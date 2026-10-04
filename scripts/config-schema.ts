@@ -7,7 +7,7 @@
  *
  * A path relative to the file works from a checkout; once the repository is published, its raw URL
  * (`https://raw.githubusercontent.com/<owner>/<repository>/main/schemas/policies.schema.json`) works
- * from anywhere. A user whose extensions add plug-ins writes their own with `[path]`.
+ * from anywhere. It has the built-in plug-ins: an extension's are not in it.
  *
  * Run: `bun scripts/config-schema.ts [path]` writes it; `bun scripts/config-schema.ts --check` fails
  * when the file kept differs from what the plug-ins make (`bun run check` runs it).
