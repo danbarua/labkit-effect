@@ -66,6 +66,25 @@ const recorded = (name: string, state: McpServerState, offered: (state: Extract<
   }
 };
 
+type Running = "running" | "not running";
+
+/** Whether a server in `state` is running, as the model is told; one still connecting is as it was told before (`before`). */
+const runningOf = (state: McpServerState, before: Running | undefined): Running | undefined => {
+  switch (state._tag) {
+    case "Ready":
+      return "running";
+    case "Connecting":
+      return before;
+    case "Stopped":
+    case "Failed":
+    case "NeedsAuth":
+    case "Exited":
+      return "not running";
+    default:
+      return state satisfies never;
+  }
+};
+
 /** Starts the servers given, in the scope given; `roots` are what each is told when it asks. */
 export const startMcpServers = (
   given: ReadonlyArray<GivenServer>,
@@ -85,22 +104,26 @@ export const startMcpServers = (
       const { source, left } = mcpToolSource(server, state.tools);
       return [{ source, left, server: server.name }];
     });
-    for (const { server, left } of sources) for (const each of left) yield* Effect.logWarning(logKeys.server.toolLeftOut, { server, tool: each.tool, reason: each.reason });
+    yield* Effect.forEach(
+      sources.flatMap(({ server, left }) => left.map(({ tool, reason }) => ({ server, tool, reason }))),
+      (each) => Effect.logWarning(logKeys.server.toolLeftOut, each),
+      { discard: true },
+    );
     const offered = (server: McpServer) => (state: Extract<McpServerState, { _tag: "Ready" }>) =>
       mcpToolSource(server, state.tools).source.tools.map((tool) => `${namespaceOf(server.name)}__${tool.name}`);
 
     const states: McpServers["states"] = Effect.forEach(started, (server) => Effect.map(server.state, (state) => ({ name: server.name, state })));
 
     // What the model was last told of each server: a server ready when the session starts is taken as told so.
-    const told = yield* Ref.make<ReadonlyMap<string, "running" | "not running">>(
+    const told = yield* Ref.make<ReadonlyMap<string, Running>>(
       new Map(settled.flatMap(({ server, state }) => (state._tag === "Ready" ? [[server.name, "running"] as const] : []))),
     );
     const notices: NoticeProvider = {
       notices: Effect.gen(function* () {
         const now = yield* states;
         const before = yield* Ref.get(told);
-        const said = now.flatMap(({ name, state }): ReadonlyArray<readonly [string, "running" | "not running", string]> => {
-          const running = state._tag === "Ready" ? "running" : state._tag === "Connecting" ? before.get(name) : "not running";
+        const said = now.flatMap(({ name, state }): ReadonlyArray<readonly [string, Running, string]> => {
+          const running = runningOf(state, before.get(name));
           if (running === undefined || running === before.get(name)) return [];
           return [
             [

@@ -21,7 +21,7 @@
  * request, and are never logged.
  */
 
-import { Data, Deferred, Effect, Queue, Scope, Stream } from "effect";
+import { Array as Arr, Data, Deferred, Effect, HashSet, Queue, Ref, Scope, Stream } from "effect";
 import type { Cause } from "effect";
 import type { McpSchema } from "effect/ai";
 import * as Sse from "effect/encoding/Sse";
@@ -88,6 +88,18 @@ const methodsOf = (message: JsonRpcMessage | ReadonlyArray<JsonRpcMessage>): Rea
 const answeredBy = (value: unknown): JsonRpcId | undefined =>
   typeof value === "object" && value !== null && !("method" in value) && "id" in value ? (value.id as JsonRpcId) : undefined;
 
+/** The ids the responses in `input` answer. */
+const answeredIn = (input: WireInput): HashSet.HashSet<JsonRpcId> => {
+  if (input._tag !== "Json") return HashSet.empty();
+  const values: ReadonlyArray<unknown> = Array.isArray(input.value) ? input.value : [input.value];
+  return HashSet.fromIterable(
+    values.flatMap((each) => {
+      const id = answeredBy(each);
+      return id === undefined ? [] : [id];
+    }),
+  );
+};
+
 /** A URL as the log says it: its origin and path, without a query, which may hold a credential. */
 export const whereOf = (url: string): string => {
   try {
@@ -131,27 +143,35 @@ const makeInbox = (server: McpServerRemote) =>
       Effect.gen(function* () {
         yield* Effect.logWarning(logKeys.http.refused, { server: server.name, url: whereOf(server.url), methods: methodsOf(message), ...rejection });
         const text = rejection.status === 0 ? rejection.said : `HTTP ${rejection.status}${rejection.sessionExpired ? " (the session has ended)" : ""}: ${rejection.said}`;
-        for (const id of requestIdsOf(message)) yield* deliver(WireInput.Json({ value: { jsonrpc: "2.0", id, error: { code: refusedCode, message: text, data: { http: rejection } } } }));
+        yield* Effect.forEach(
+          requestIdsOf(message),
+          (id) => deliver(WireInput.Json({ value: { jsonrpc: "2.0", id, error: { code: refusedCode, message: text, data: { http: rejection } } } })),
+          { discard: true },
+        );
       });
     /** Delivers each message of a response; a request it carried that is not answered by its end is answered with an error. */
     const answers = (message: JsonRpcMessage | ReadonlyArray<JsonRpcMessage>, messages: Stream.Stream<string, unknown>) =>
       Effect.gen(function* () {
-        const waiting = new Set(requestIdsOf(message));
+        const answered = yield* Ref.make(HashSet.empty<JsonRpcId>());
         const ended = yield* messages.pipe(
           Stream.runForEach((text) => {
             const input = parsed(text);
-            if (input._tag === "Json") for (const each of Array.isArray(input.value) ? input.value : [input.value]) waiting.delete(answeredBy(each) as JsonRpcId);
-            return deliver(input);
+            return Ref.update(answered, HashSet.union(answeredIn(input))).pipe(Effect.andThen(deliver(input)));
           }),
           Effect.as("ended"),
           Effect.catch((error) => Effect.succeed(textOf(error))),
         );
-        for (const id of waiting)
-          yield* deliver(
-            WireInput.Json({
-              value: { jsonrpc: "2.0", id, error: { code: unansweredCode, message: ended === "ended" ? "The server's response ended before its answer" : `The server's response broke off before its answer: ${ended}` } },
-            }),
-          );
+        const waiting = yield* Effect.map(Ref.get(answered), (ids) => Arr.dedupe(requestIdsOf(message)).filter((id) => !HashSet.has(ids, id)));
+        yield* Effect.forEach(
+          waiting,
+          (id) =>
+            deliver(
+              WireInput.Json({
+                value: { jsonrpc: "2.0", id, error: { code: unansweredCode, message: ended === "ended" ? "The server's response ended before its answer" : `The server's response broke off before its answer: ${ended}` } },
+              }),
+            ),
+          { discard: true },
+        );
       });
     return { inbox, deliver, refused, answers };
   });
@@ -183,30 +203,30 @@ const streamableHttp = (server: McpServerRemote): Effect.Effect<RemoteWire, neve
     // A request lives as long as the wire: its stream is cut when the wire's scope closes.
     const execute = (request: HttpClientRequest.HttpClientRequest) => HttpClient.withScope(http).execute(request).pipe(Scope.provide(scope));
     const { inbox, deliver, refused, answers } = yield* makeInbox(server);
-    let session: string | undefined;
-    let version: string | undefined;
-    const headersOf = (accept: string) => ({
-      ...server.headers,
-      accept,
-      ...(session === undefined ? {} : { "mcp-session-id": session }),
-      ...(version === undefined ? {} : { "mcp-protocol-version": version }),
-    });
+    const session = yield* Ref.make<string | undefined>(undefined);
+    const version = yield* Ref.make<string | undefined>(undefined);
+    const headersOf = (accept: string): Effect.Effect<Readonly<Record<string, string>>> =>
+      Effect.map(Effect.all([Ref.get(session), Ref.get(version)]), ([session, version]) => ({
+        ...server.headers,
+        accept,
+        ...(session === undefined ? {} : { "mcp-session-id": session }),
+        ...(version === undefined ? {} : { "mcp-protocol-version": version }),
+      }));
 
     const post = (message: JsonRpcMessage | ReadonlyArray<JsonRpcMessage>) =>
       Effect.gen(function* () {
-        const withSession = session !== undefined;
+        const headers = yield* headersOf("application/json, text/event-stream");
+        const withSession = "mcp-session-id" in headers;
         const response = yield* execute(
           HttpClientRequest.post(server.url).pipe(
-            HttpClientRequest.setHeaders(headersOf("application/json, text/event-stream")),
+            HttpClientRequest.setHeaders(headers),
             HttpClientRequest.bodyText(JSON.stringify(message), "application/json"),
           ),
         );
         // The session is the one the server gave in answer to `initialize`.
         const given = response.headers["mcp-session-id"];
-        if (given !== undefined && given !== session) {
-          session = given;
-          yield* Effect.logInfo(logKeys.http.session, { server: server.name, url: whereOf(server.url) });
-        }
+        const changed = yield* Ref.modify(session, (current) => (given !== undefined && given !== current ? [true, given] : [false, current]));
+        if (changed) yield* Effect.logInfo(logKeys.http.session, { server: server.name, url: whereOf(server.url) });
         if (response.status >= 400) return yield* refused(message, yield* rejectionFrom(response, withSession));
         if (response.status === 202 || response.status === 204) return;
         // An SSE stream may run long: it is read in the background, so the next message need not wait.
@@ -215,7 +235,7 @@ const streamableHttp = (server: McpServerRemote): Effect.Effect<RemoteWire, neve
 
     /** Reads the GET stream until it ends; whether to open it again. */
     const listen = Effect.gen(function* () {
-      const response = yield* execute(HttpClientRequest.get(server.url).pipe(HttpClientRequest.setHeaders(headersOf("text/event-stream"))));
+      const response = yield* execute(HttpClientRequest.get(server.url).pipe(HttpClientRequest.setHeaders(yield* headersOf("text/event-stream"))));
       if (response.status === 405) {
         yield* Effect.logInfo(logKeys.http.noStream, { server: server.name, url: whereOf(server.url) });
         return false;
@@ -230,17 +250,17 @@ const streamableHttp = (server: McpServerRemote): Effect.Effect<RemoteWire, neve
     }).pipe(Effect.catch((error) => Effect.logWarning(logKeys.http.streamBroke, { server: server.name, url: whereOf(server.url), cause: textOf(error) }).pipe(Effect.as(false))));
 
     yield* Effect.addFinalizer(() =>
-      session === undefined
-        ? Effect.void
-        : http
-            .execute(HttpClientRequest.make("DELETE")(server.url).pipe(HttpClientRequest.setHeaders(headersOf("application/json"))))
-            .pipe(
+      Effect.flatMap(headersOf("application/json"), (headers) =>
+        "mcp-session-id" in headers
+          ? http.execute(HttpClientRequest.make("DELETE")(server.url).pipe(HttpClientRequest.setHeaders(headers))).pipe(
               Effect.timeout("2 seconds"),
               Effect.flatMap((response) =>
                 response.status < 400 ? Effect.void : Effect.logWarning(logKeys.http.notEnded, { server: server.name, url: whereOf(server.url), status: response.status }),
               ),
               Effect.catch((error) => Effect.logWarning(logKeys.http.notEnded, { server: server.name, url: whereOf(server.url), cause: textOf(error) })),
-            ),
+            )
+          : Effect.void,
+      ),
     );
 
     const wire: Wire = {
@@ -252,7 +272,7 @@ const streamableHttp = (server: McpServerRemote): Effect.Effect<RemoteWire, neve
       wire,
       initialized: (result) =>
         Effect.gen(function* () {
-          version = result.protocolVersion;
+          yield* Ref.set(version, result.protocolVersion);
           yield* listen.pipe(
             Effect.flatMap((again) => (again ? Effect.sleep("1 second").pipe(Effect.as(true)) : Effect.succeed(false))),
             Effect.repeat({ while: (again) => again }),

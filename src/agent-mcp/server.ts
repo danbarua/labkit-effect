@@ -17,7 +17,7 @@
  * fails with what is known of the server. Every change of state is logged.
  */
 
-import { Duration, Effect, Exit, Scope, Semaphore, Stream, SubscriptionRef } from "effect";
+import { Duration, Effect, Exit, HashMap, Option, Ref, Scope, Semaphore, Stream, SubscriptionRef } from "effect";
 import type { ChildProcessSpawner } from "effect/process";
 import type { ProcessState } from "../agent-process/machine.ts";
 import { shouldRedact } from "../agent-process/environment.ts";
@@ -51,8 +51,11 @@ export interface McpServer {
   readonly stop: Effect.Effect<void>;
 }
 
-const endedOf = (process: Extract<ProcessState, { _tag: "Exited" }>): string =>
-  process.code !== undefined ? `its process exited with code ${process.code}` : process.signal !== undefined ? `its process ended on ${process.signal}` : "its process ended";
+const endedOf = (process: Extract<ProcessState, { _tag: "Exited" }>): string => {
+  if (process.code !== undefined) return `its process exited with code ${process.code}`;
+  if (process.signal !== undefined) return `its process ended on ${process.signal}`;
+  return "its process ended";
+};
 
 /** A process group's state as the event it is to its server's machine: a run is a process. */
 export const runEventOf = (process: ProcessState): McpServerEvent => {
@@ -122,8 +125,11 @@ export const startMcpServer = (
     const timeout = options.connectTimeout ?? defaultConnectTimeout;
     const state = yield* SubscriptionRef.make<McpServerState>(initialMcpServerState);
     const lock = yield* Semaphore.make(1);
-    const connections = new Map<number, McpConnection>();
-    let stopRun: Effect.Effect<void> = Effect.void;
+    // The connection of each run that has connected, by run.
+    const connections = yield* Ref.make(HashMap.empty<number, McpConnection>());
+    // How the machine stops a run (`StopRun`): set once the runs are made, which need `dispatch`.
+    const stopRunRef = yield* Ref.make<Effect.Effect<void>>(Effect.void);
+    const stopRun = Effect.flatten(Ref.get(stopRunRef));
 
     const dispatch = (event: McpServerEvent): Effect.Effect<void> =>
       lock
@@ -133,7 +139,7 @@ export const startMcpServer = (
             const step = stepMcpServer(before, event);
             if (step.state !== before) {
               yield* SubscriptionRef.set(state, step.state);
-              if (step.state.run !== before.run || (step.state._tag !== "Ready" && step.state._tag !== "Connecting")) connections.delete(before.run);
+              if (step.state.run !== before.run || (step.state._tag !== "Ready" && step.state._tag !== "Connecting")) yield* Ref.update(connections, HashMap.remove(before.run));
               const tools = step.state._tag === "Ready" ? step.state.tools.map((tool) => tool.name) : undefined;
               yield* Effect.logInfo(logKeys.server.changed, { server: server.name, event: event._tag, from: before._tag, to: step.state._tag, run: step.state.run, said: describe(step.state), ...(tools === undefined ? {} : { tools }) });
             }
@@ -153,10 +159,7 @@ export const startMcpServer = (
           orElse: () => Effect.fail(new McpFailed({ server: server.name, reason: `did not answer initialize and tools/list within ${Duration.format(Duration.fromInputUnsafe(timeout))}` })),
         }),
         Effect.flatMap(({ connection, tools }) =>
-          Effect.gen(function* () {
-            connections.set(run, connection);
-            yield* dispatch({ _tag: "Connected", run, tools });
-          }),
+          Ref.update(connections, HashMap.set(run, connection)).pipe(Effect.andThen(dispatch({ _tag: "Connected", run, tools }))),
         ),
         Effect.catch((error) => dispatch(verdictOf(server, run, error))),
       );
@@ -164,10 +167,10 @@ export const startMcpServer = (
     const runs: Runs = isRemote(server)
       ? yield* remoteRuns(dispatch, (run, scope) =>
           // A run that ended is stopped too: nothing is left of it.
-          connectOn(run, remoteConnection(server, roots, options.clientInfo, timeout, (event) => dispatch(event({ run })).pipe(Effect.andThen(Effect.suspend(() => stopRun))), scope)),
+          connectOn(run, remoteConnection(server, roots, options.clientInfo, timeout, (event) => dispatch(event({ run })).pipe(Effect.andThen(stopRun)), scope)),
         )
       : yield* stdioRuns(server, dispatch, (run, handle) => connectOn(run, connect(server.name, handle, roots, options.clientInfo)));
-    stopRun = runs.stopRun;
+    yield* Ref.set(stopRunRef, runs.stopRun);
     yield* runs.start;
 
     return {
@@ -183,9 +186,9 @@ export const startMcpServer = (
       call: (tool, args) =>
         Effect.gen(function* () {
           const now = yield* SubscriptionRef.get(state);
-          const connection = now._tag === "Ready" ? connections.get(now.run) : undefined;
-          if (connection === undefined) return yield* new McpFailed({ server: server.name, reason: `${tool} was not called: the server is not running (${describe(now)})` });
-          return yield* connection.call(tool, args);
+          const connection = now._tag === "Ready" ? HashMap.get(yield* Ref.get(connections), now.run) : Option.none();
+          if (Option.isNone(connection)) return yield* new McpFailed({ server: server.name, reason: `${tool} was not called: the server is not running (${describe(now)})` });
+          return yield* connection.value.call(tool, args);
         }),
       reconnect: runs.restart,
       stop: runs.stop,
@@ -221,24 +224,25 @@ const remoteRuns = (
   Effect.gen(function* () {
     const parent = yield* Scope.Scope;
     const lock = yield* Semaphore.make(1);
-    let run = 0;
-    let current: Scope.Closeable | undefined;
+    // The latest run, and the scope of the run that is live, if one is.
+    const latest = yield* Ref.make<{ readonly run: number; readonly live: Scope.Closeable | undefined }>({ run: 0, live: undefined });
     const start = lock.withPermit(
       Effect.gen(function* () {
-        if (current !== undefined) return;
-        run += 1;
+        const { run: last, live } = yield* Ref.get(latest);
+        if (live !== undefined) return;
+        const run = last + 1;
         const scope = yield* Scope.fork(parent);
-        current = scope;
+        yield* Ref.set(latest, { run, live: scope });
         yield* dispatch({ _tag: "RunStarted", run });
         yield* Effect.forkIn(onRun(run, scope), scope);
       }),
     );
     const stop = lock.withPermit(
       Effect.gen(function* () {
-        if (current === undefined) return;
-        const scope = current;
-        current = undefined;
-        yield* Scope.close(scope, Exit.void);
+        const { run, live } = yield* Ref.get(latest);
+        if (live === undefined) return;
+        yield* Ref.set(latest, { run, live: undefined });
+        yield* Scope.close(live, Exit.void);
         yield* dispatch({ _tag: "RunStopped", run });
       }),
     );
@@ -248,7 +252,7 @@ const remoteRuns = (
       stop,
       // The machine asks from within the run, whose scope stopping it closes: it is stopped from outside it.
       stopRun: Effect.asVoid(Effect.forkIn(stop, parent)),
-      running: Effect.sync(() => current !== undefined),
+      running: Effect.map(Ref.get(latest), ({ live }) => live !== undefined),
     };
   });
 
@@ -275,25 +279,23 @@ const remoteConnection = (
         Effect.onError(() => Scope.close(scope, Exit.void)),
       );
     });
-    let current = yield* open;
+    const first = yield* open;
+    const current = yield* Ref.make(first);
     const lock = yield* Semaphore.make(1);
 
     /** A new connection in place of `lost`, unless one was made already; a run that cannot make one has ended. */
-    const renew = (lost: typeof current) =>
+    const renew = (lost: typeof first) =>
       lock.withPermit(
         Effect.gen(function* () {
-          if (current !== lost) return current;
+          const now = yield* Ref.get(current);
+          if (now !== lost) return now;
           yield* Scope.close(lost.scope, Exit.void);
           return yield* open.pipe(
             Effect.timeoutOrElse({
               duration: timeout,
               orElse: () => Effect.fail(new McpFailed({ server: server.name, reason: `did not answer initialize within ${Duration.format(Duration.fromInputUnsafe(timeout))}` })),
             }),
-            Effect.tap((made) =>
-              Effect.sync(() => {
-                current = made;
-              }),
-            ),
+            Effect.tap((made) => Ref.set(current, made)),
             // Credentials refused, or asked for: the run needs authorization or has failed. Anything else ends it.
             Effect.tapError((error) =>
               ended(({ run }) => {
@@ -306,16 +308,18 @@ const remoteConnection = (
         }),
       );
 
-    // A connection whose stream ends between requests is made anew; one closed in its place is not.
-    yield* Effect.gen(function* () {
-      while (true) {
-        const watched = current;
-        yield* watched.connection.closed;
-        if (current !== watched) continue;
-        yield* Effect.logWarning(logKeys.server.connectionLost, { server: server.name, url: whereOf(server.url) });
-        if ((yield* Effect.result(renew(watched)))._tag === "Failure") return;
-      }
-    }).pipe(Effect.forkIn(runScope));
+    /**
+     * Waits for the connection there is to close. One whose stream ends between requests is made
+     * anew; one closed in its place is not. Whether to wait again: not once a new one could not be made.
+     */
+    const watch = Effect.gen(function* () {
+      const watched = yield* Ref.get(current);
+      yield* watched.connection.closed;
+      if ((yield* Ref.get(current)) !== watched) return true;
+      yield* Effect.logWarning(logKeys.server.connectionLost, { server: server.name, url: whereOf(server.url) });
+      return (yield* Effect.result(renew(watched)))._tag === "Success";
+    });
+    yield* watch.pipe(Effect.repeat({ while: (again) => again }), Effect.forkIn(runScope));
 
     /** Whether HTTP refused a request for its credentials. */
     const credentialsRefused = (error: McpFailed) => {
@@ -326,7 +330,7 @@ const remoteConnection = (
     const call: McpConnection["call"] = (tool, args) =>
       Effect.gen(function* () {
         // A connection being made anew is waited for.
-        const used = yield* lock.withPermit(Effect.sync(() => current));
+        const used = yield* lock.withPermit(Ref.get(current));
         return yield* used.connection.call(tool, args).pipe(
           // Credentials refused mid-session (a key revoked): the run has failed or needs authorization, and the call fails.
           Effect.tapError((error) => (credentialsRefused(error) ? ended(({ run }) => refusalOf(server, run, rejectionOf(error)!)) : Effect.void)),
@@ -343,8 +347,8 @@ const remoteConnection = (
       });
 
     return {
-      initialized: current.connection.initialized,
-      tools: Effect.suspend(() => current.connection.tools),
+      initialized: first.connection.initialized,
+      tools: Effect.flatMap(Ref.get(current), (made) => made.connection.tools),
       call,
       // The run ends by `ended`, not by one connection closing.
       closed: Effect.never,

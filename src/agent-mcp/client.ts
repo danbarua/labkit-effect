@@ -221,16 +221,15 @@ export const connectOver = (
     yield* initialized(answered);
     yield* peer.notify("notifications/initialized", undefined);
 
-    const tools: McpConnection["tools"] = Effect.gen(function* () {
-      const listed: Array<McpSchema.Tool> = [];
-      let cursor: string | undefined;
-      do {
-        const page = yield* peer.client["tools/list"](cursor === undefined ? undefined : { cursor }).pipe(Effect.mapError(failed("tools/list failed")));
-        listed.push(...page.tools);
-        cursor = page.nextCursor;
-      } while (cursor !== undefined);
-      return listed;
-    });
+    /** The tools of the page at `cursor` and of every page after it, by `nextCursor`. */
+    const toolsFrom = (cursor: string | undefined): McpConnection["tools"] =>
+      peer.client["tools/list"](cursor === undefined ? undefined : { cursor }).pipe(
+        Effect.mapError(failed("tools/list failed")),
+        Effect.flatMap((page) =>
+          page.nextCursor === undefined ? Effect.succeed(page.tools) : Effect.map(toolsFrom(page.nextCursor), (rest) => [...page.tools, ...rest]),
+        ),
+      );
+    const tools = toolsFrom(undefined);
     const call: McpConnection["call"] = (name, args) =>
       peer.client["tools/call"]({ name, arguments: args }).pipe(Effect.mapError(failed(`tools/call ${name} failed`)));
     return { initialized: answered, tools, call, closed: peer.closed };

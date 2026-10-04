@@ -45,8 +45,15 @@ const specOf = (name: string, tool: McpSchema.Tool): ToolSpec => {
     description: tool.description ?? tool.title ?? "",
     input: tool.inputSchema as unknown as Schema.Json,
     kind: hints?.readOnlyHint === true ? "read" : "other",
-    replay: hints?.readOnlyHint === true ? "safe" : hints?.idempotentHint === true ? "idempotent" : "unsafe",
+    replay: replayOf(hints),
   };
+};
+
+/** Whether a tool is safe to run again, by what the server says of it: that it only reads, or that it is idempotent. */
+const replayOf = (hints: McpSchema.Tool["annotations"]): ToolSpec["replay"] => {
+  if (hints?.readOnlyHint === true) return "safe";
+  if (hints?.idempotentHint === true) return "idempotent";
+  return "unsafe";
 };
 
 const isObject = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -55,13 +62,11 @@ const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
 export const mcpToolSource = (server: McpServer, tools: ReadonlyArray<McpSchema.Tool>): McpToolSource => {
   const namespace = namespaceOf(server.name);
   const named = tools.map((tool) => ({ tool, name: offerable(tool.name) }));
-  const left = named.flatMap(({ tool, name }, index) =>
-    `${namespace}__${name}`.length > maxToolName
-      ? [{ tool: tool.name, reason: `${namespace}__${name} is longer than ${maxToolName} characters` }]
-      : named.findIndex((other) => other.name === name) !== index
-        ? [{ tool: tool.name, reason: `${tool.name} is offered as ${name}, as another of the server's tools is` }]
-        : [],
-  );
+  const left = named.flatMap(({ tool, name }, index) => {
+    if (`${namespace}__${name}`.length > maxToolName) return [{ tool: tool.name, reason: `${namespace}__${name} is longer than ${maxToolName} characters` }];
+    if (named.findIndex((other) => other.name === name) !== index) return [{ tool: tool.name, reason: `${tool.name} is offered as ${name}, as another of the server's tools is` }];
+    return [];
+  });
   const kept = named.filter(({ tool }) => !left.some((each) => each.tool === tool.name));
   const own = new Map(kept.map(({ tool, name }) => [name, tool.name] as const));
   const reported = (text: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(text) } });
