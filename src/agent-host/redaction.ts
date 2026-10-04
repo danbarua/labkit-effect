@@ -13,7 +13,7 @@
  */
 
 import { Effect, Layer, Logger } from "effect";
-import { isCredential } from "../agent-process/environment.ts";
+import { shouldRedact } from "../agent-process/environment.ts";
 
 /** The fewest characters a credential's value has to be looked for. */
 export const shortest = 8;
@@ -30,7 +30,7 @@ export interface Secrets {
 
 /** The secrets of `env`: the non-empty values of its credentials' variables, those shorter than `shortest` set aside. */
 export const secretsOf = (env: Readonly<Record<string, string | undefined>>): Secrets => {
-  const credentials = Object.entries(env).flatMap(([name, value]) => (value !== undefined && value !== "" && isCredential(name) ? [{ name, value }] : []));
+  const credentials = Object.entries(env).flatMap(([name, value]) => (value !== undefined && value !== "" && shouldRedact(name) ? [{ name, value }] : []));
   return {
     values: credentials.flatMap(({ value }) => (value.length >= shortest ? [value] : [])),
     tooShort: credentials.flatMap(({ name, value }) => (value.length < shortest ? [{ name, length: value.length }] : [])),

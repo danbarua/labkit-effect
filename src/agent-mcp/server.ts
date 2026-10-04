@@ -20,7 +20,7 @@
 import { Duration, Effect, Exit, Scope, Semaphore, Stream, SubscriptionRef } from "effect";
 import type { ChildProcessSpawner } from "effect/process";
 import type { ProcessState } from "../agent-process/machine.ts";
-import { isCredential } from "../agent-process/environment.ts";
+import { shouldRedact } from "../agent-process/environment.ts";
 import { makeProcessGroup } from "../agent-process/process-group.ts";
 import { type ClientInfo, connect, McpFailed, type McpConnection, type McpServerStdio, type Root, type ToolResult } from "./client.ts";
 import { connectRemote, type HttpRejection, type McpServerRemote, rejectionOf, type RemoteRefused, whereOf } from "./http.ts";
@@ -72,7 +72,7 @@ export const runEventOf = (process: ProcessState): McpServerEvent => {
 };
 
 /** Whether `server` is given credentials: an `Authorization` header, or one named for a credential (`X-API-Key`). */
-const givesCredentials = (server: McpServerRemote): boolean => Object.keys(server.headers).some((name) => /^(?:proxy-)?authorization$/i.test(name) || isCredential(name));
+const givesCredentials = (server: McpServerRemote): boolean => Object.keys(server.headers).some((name) => /^(?:proxy-)?authorization$/i.test(name) || shouldRedact(name));
 
 /**
  * What a run of `server` that HTTP refused comes to: needing authorization when the server asks for

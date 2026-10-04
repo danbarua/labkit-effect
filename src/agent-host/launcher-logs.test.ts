@@ -9,6 +9,7 @@ import { Cause, Console, Effect, Layer } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test, testFolder } from "../../tests/support/test.ts";
 import { type LauncherLogOptions, LauncherLogs, launcherLogOptionsFrom, recordLimit } from "./launcher-logs.ts";
+import { secretsOf } from "./redaction.ts";
 
 /** A pid no process has: above the highest a system gives. */
 const stoppedPid = 99_999_999;
@@ -45,7 +46,7 @@ test("H12: a record is a line of JSON in acp-<pid>-<launch id>.jsonl: its time, 
   const dir = `${testFolder()}/not/yet/made`;
   const stderr = await launched(
     { dir },
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       yield* Effect.logInfo("session.opened", { model: "m" }).pipe(Effect.annotateLogs({ sessionId: "s1", turn: 2 }));
       yield* Effect.logError("turn.failed", Cause.fail(new Error("refused", { cause: new Error("socket closed") }))).pipe(Effect.annotateLogs({ callId: "c9" }));
     }),
@@ -71,7 +72,7 @@ test.each([
   expect((await linesOf(fileOf(dir))).map((line) => line.level)).toEqual([...written]);
 });
 
-test("H12 H14: the environment gives the folder, level, size and backups; unset, the defaults; the secrets are the values of the credentials' variables, those under 8 characters set aside", () => {
+test("H12 H14: launcherLogOptionsFrom reads the log folder, level, size limit and backup count from the environment, uses the defaults for unset variables, and collects credential values for redaction, listing credential values shorter than 8 characters separately", () => {
   expect(launcherLogOptionsFrom({})).toMatchObject({ dir: join(homedir(), ".labkit", "logs"), level: "Debug", maxBytes: 10 * 1024 * 1024, backups: 4, keep: 20, secrets: { values: [], tooShort: [] } });
   const options = launcherLogOptionsFrom({
     LABKIT_ACP_LOG_DIR: "/tmp/acp-logs",
@@ -81,7 +82,7 @@ test("H12 H14: the environment gives the folder, level, size and backups; unset,
     OPENAI_API_KEY: "sk-proj-0001",
     GITHUB_TOKEN: "ghp-00000002",
     GITHUB_PAT: "github_pat_0003",
-    MAX_TOKENS: "4096",
+    DEPLOY_KEY: "k-12",
     DB_PASSWORD: "",
     HOME_DIR: "/home/x",
   });
@@ -90,9 +91,15 @@ test("H12 H14: the environment gives the folder, level, size and backups; unset,
     level: "Warn",
     maxBytes: 2048,
     backups: 0,
-    secrets: { values: ["sk-proj-0001", "ghp-00000002", "github_pat_0003"], tooShort: [{ name: "MAX_TOKENS", length: 4 }] },
+    secrets: { values: ["sk-proj-0001", "ghp-00000002", "github_pat_0003"], tooShort: [{ name: "DEPLOY_KEY", length: 4 }] },
   });
   expect(options.launchId).not.toBe(launcherLogOptionsFrom({}).launchId);
+});
+
+test("H14: MAX_TOKENS is configuration, not a credential, so its value is added to neither the values to redact nor the list of values too short to redact", () => {
+  // A value of 8 characters or more would be redacted if MAX_TOKENS were a credential; a shorter value would be listed as too short.
+  for (const value of ["4096", "128000000"]) expect(secretsOf({ MAX_TOKENS: value })).toEqual({ values: [], tooShort: [] });
+  expect(launcherLogOptionsFrom({ MAX_TOKENS: "128000000" }).secrets).toEqual({ values: [], tooShort: [] });
 });
 
 test.each(["", "ten", "-5", "1.5", "0x", "1e400"])("H12: a size or backup count that does not read (%p) falls back to the default", (value) => {
@@ -211,7 +218,7 @@ test("H14: a file that stops being writable is said once on stderr, and the reco
   mkdirSync(dir);
   const stderr = await launched(
     { dir },
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       yield* Effect.logInfo("to the file");
       yield* Effect.sync(() => rmSync(dir, { recursive: true }));
       yield* Effect.logInfo("to stderr");

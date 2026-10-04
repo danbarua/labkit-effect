@@ -7,54 +7,59 @@
  * included: that is how a server is given the one it needs.
  */
 
-/** The words of a variable's name that say it holds a credential. */
-export const credentialWords: ReadonlyArray<string> = [
-  "TOKEN",
-  "TOKENS",
-  "KEY",
-  "KEYS",
-  "APIKEY",
-  "AUTH",
-  "SECRET",
-  "SECRETS",
-  "PASSWORD",
-  "PASSWORDS",
-  "PASSWD",
-  "PASS",
-  "PASSPHRASE",
-  "CREDENTIAL",
-  "CREDENTIALS",
-  "CREDS",
-  "COOKIE",
-  "COOKIES",
-  "PAT",
-];
+export const KNOWN_KEY_PATTERNS = [
+    // URLs with credentials
+    /(\S{1,1024}):\/\/[^:\s]{1,1024}:[^@\s]{1,1024}@/i,
+    // GitHub tokens
+    /(ghp|gho|ghu|ghs|ghr|github_pat)_[a-zA-Z0-9_]{36,}/i,
+    // Google API keys
+    /AIzaSy[a-zA-Z0-9_\\-]{33}/i,
+    // Amazon AWS
+    /AKIA[A-Z0-9]{16}/i,
+    // Cryptography Certs and Keys
+    /-----BEGIN CERTIFICATE-----/i,
+    /-----BEGIN (RSA|OPENSSH|EC|PGP) PRIVATE KEY-----/i,
+]
 
-/** The words of a name: what `_`, `-` and `.` separate, and a lower-case letter followed by a capital (`authToken`). */
-const wordsOf = (name: string): ReadonlyArray<string> =>
-  name
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .toUpperCase()
-    .split(/[_.-]/);
+// A word starts after a separator or at a lower-case to upper-case transition, and ends at a separator or the name's end.
+const credentialWord = (word: string): RegExp => {
+  const letters = [...word].map((letter) => `[${letter.toLowerCase()}${letter.toUpperCase()}]`).join("");
+  return new RegExp(`(?:^|[_\\-.]|(?<=[a-z]))${letters}(?=$|[_\\-.])`);
+};
 
-/** Whether the variable `name` holds a credential. */
-export const isCredential = (name: string): boolean => wordsOf(name).some((word) => credentialWords.includes(word));
+export const COMMON_CREDENTIAL_PATTERNS : ReadonlyArray<RegExp> = [
+    credentialWord("TOKEN"),
+    credentialWord("KEY"),
+    credentialWord("APIKEY"),
+    credentialWord("AUTH"),
+    credentialWord("SECRET"),
+    credentialWord("PASS"),
+    credentialWord("PASSWD"),
+    credentialWord("PASSWORD"),
+    credentialWord("CRED"),
+    credentialWord("COOKIE"),
+    credentialWord("PAT"),
+    credentialWord("CERT"),
+    credentialWord("CERTIFICATE")
+]
 
-/** An environment, as a process is given it. */
+/** Whether a variable name or other text content matches known secret patterns. */
+export const shouldRedact = (name: string): boolean =>
+    COMMON_CREDENTIAL_PATTERNS.some(pattern => pattern.test(name))
+    || KNOWN_KEY_PATTERNS.some(pattern => pattern.test(name));
+
+
+/** A fancy word for a dictionary of strings. */
 export type Environment = Readonly<Record<string, string>>;
 
-/**
- * What a command the model runs is given of the environment it would inherit: one transform of a
- * list a host composes (`commandEnvironment`), each given what the one before it gave, the first
- * given this process's environment.
- */
+/** Applies a transformation to a dictionary of strings (environment). **/
 export type EnvironmentTransform = (environment: Environment) => Environment;
 
-/** Leaves out the variables that hold credentials, but those named in `pass`. */
+ /** Filters an environment for credential-shaped variables unless asked not to. */
 export const credentialsLeftOut =
-  (pass: ReadonlyArray<string> = []): EnvironmentTransform =>
+  (allowList: ReadonlyArray<string> = []): EnvironmentTransform =>
   (environment) =>
-    Object.fromEntries(Object.entries(environment).filter(([name]) => pass.includes(name) || !isCredential(name)));
+    Object.fromEntries(Object.entries(environment).filter(([name]) => allowList.includes(name) || !shouldRedact(name)));
 
 /** `transforms` one after another over this process's environment; with none, it whole. */
 export const environmentOf = (transforms: ReadonlyArray<EnvironmentTransform>): Environment =>
@@ -70,8 +75,8 @@ export const withoutCredentials = (
 ): { readonly env: Readonly<Record<string, string>>; readonly left: ReadonlyArray<string> } => {
   const entries = Object.entries(environment).flatMap(([name, value]) => (value === undefined ? [] : [[name, value] as const]));
   return {
-    env: Object.fromEntries(entries.filter(([name]) => !isCredential(name))),
-    left: entries.flatMap(([name]) => (isCredential(name) ? [name] : [])).sort(),
+    env: Object.fromEntries(entries.filter(([name]) =>  !shouldRedact(name))),
+    left: entries.flatMap(([name]) => (shouldRedact(name) ? [name] : [])).sort(),
   };
 };
 
@@ -86,9 +91,8 @@ export const leftOut = "<left out>";
 export const redactedArgs = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
   args.map((arg, index) => {
     const joined = /^--?([^=]+)=/.exec(arg);
-    if (joined?.[1] !== undefined) return isCredential(joined[1]) ? `${arg.slice(0, arg.indexOf("=") + 1)}${leftOut}` : arg;
+    if (joined?.[1] !== undefined) return shouldRedact(joined[1]) ? `${arg.slice(0, arg.indexOf("=") + 1)}${leftOut}` : arg;
     const before = args[index - 1];
     const flag = before === undefined ? undefined : /^--?([^=]+)$/.exec(before)?.[1];
-    return flag !== undefined && isCredential(flag) && !arg.startsWith("-") ? leftOut : arg;
+    return flag !== undefined && shouldRedact(flag) && !arg.startsWith("-") ? leftOut : arg;
   });
-

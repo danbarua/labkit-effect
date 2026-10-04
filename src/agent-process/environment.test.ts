@@ -5,18 +5,24 @@ import { BunServices } from "@effect/platform-bun";
 import { Deferred, Effect, Stream } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
-import { isCredential, redactedArgs, withoutCredentials } from "./environment.ts";
+import { shouldRedact, redactedArgs, withoutCredentials } from "./environment.ts";
 import { makeProcessGroup } from "./process-group.ts";
 
-test("PE1: a variable holds a credential when a word of its name is one of the credential words, in any case", () => {
+test("PE1: a variable holds a credential if its name includes known words ", () => {
   const held = ["ANTHROPIC_API_KEY", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "SSH_AUTH_SOCK", "npm_config__authToken", "DB_PASSWORD", "GH_PAT", "my.secret", "OPENAI_APIKEY"];
-  const kept = ["PATH", "HOME", "GIT_AUTHOR_NAME", "KEYBOARD_LAYOUT", "MONKEY", "PATTERN", "LANG"];
-  expect(held.filter((name) => !isCredential(name))).toEqual([]);
-  expect(kept.filter(isCredential)).toEqual([]);
+  for (const h of held) {
+        expect(shouldRedact(h), `"${h} should be redacted`).toBeTrue();
+    }
+
+  const kept = ["PATH", "HOME", "GIT_AUTHOR_NAME", "KEYBOARD_LAYOUT", "MONKEY", "PATTERN", "LANG", "MAX_TOKENS"];
+    for (const k of kept) {
+        expect(shouldRedact(k), `"${k}" should not be redacted`).toBeFalse();
+    }
+
   expect(withoutCredentials({ PATH: "/bin", GITHUB_TOKEN: "t", AWS_SECRET_ACCESS_KEY: "s", EMPTY: undefined })).toEqual({ env: { PATH: "/bin" }, left: ["AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"] });
 });
 
-test("PE1: the value of a flag whose name holds a credential is left out of arguments as they are logged", () => {
+test("PE1: secret values in flags are not logged", () => {
   expect(redactedArgs(["stdio", "--token=ghp_x", "--api-key", "sk-y", "--read-only", "--port", "8080", "--auth-token", "--verbose"])).toEqual([
     "stdio",
     "--token=<left out>",
@@ -30,7 +36,7 @@ test("PE1: the value of a flag whose name holds a credential is left out of argu
   ]);
 });
 
-test("PE2: a run is given this process's environment without its credentials, and the command's own env as it says, credentials included", async () => {
+test("PE2: A run receives this process's environment minus credential variables plus specified kept variables", async () => {
   process.env["LABKIT_TEST_TOKEN"] = "inherited";
   process.env["LABKIT_TEST_PLAIN"] = "plain";
   const printed = await runTest(
