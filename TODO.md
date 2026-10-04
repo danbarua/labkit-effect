@@ -143,6 +143,8 @@ model.
 - [ ] Trusted folders (Dan, 2026-10-04): a project's configuration is not read until its folder is
       trusted. Until then a project's layer may not name extensions or MCP servers (both run code:
       agent-config CF7, CF10); once a folder is trusted, its layers may.
+- [ ] Turn-end hooks by name, as policies are: a hold recorded from the hook that made it, so
+      `retryIncomplete` counts its own holds, not every hook's.
 - [ ] The product's name (Dan is thinking of `whitelabel-agent`), as one definition a host can brand:
       the configuration's folders (`agent-config` `configName`, `labkit`) and the environment
       variables' prefix (`LABKIT_ACP_`).
