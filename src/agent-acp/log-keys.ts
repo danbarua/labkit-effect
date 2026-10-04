@@ -47,10 +47,16 @@ export const logKeys = {
     made: "acp_host.config.made",
     /** `session/set_config_option` was refused: why. */
     refused: "acp_host.config.refused",
-    /** `LABKIT_ACP_PERMISSION_MODE` names no permission mode: its value, and the mode used instead. */
-    permissionModeUnknown: "acp_host.config.permission_mode_unknown",
-    /** `LABKIT_ACP_RETRIES` is not a whole number of 0 or more: its value, and the number used instead. */
-    retriesUnknown: "acp_host.config.retries_unknown",
+  },
+  launch: {
+    /** The launcher did not start serving: what could not be used, and why. */
+    refused: "acp_host.launch.refused",
+  },
+  settings: {
+    /** What a session's configuration resolved to was written to its folder (`effective-settings.json`): the file. */
+    written: "acp_host.settings.written",
+    /** What a session's configuration resolved to could not be written: the folder, and why. The session goes on. */
+    notWritten: "acp_host.settings.not_written",
   },
   mcp: {
     /** A change of an MCP server's state could not be recorded in the session's facts: the server, its state, and why. */

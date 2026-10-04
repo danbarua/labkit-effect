@@ -12,9 +12,9 @@
 
 import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
-import { Effect, FileSystem, Layer, type Scope, Stream } from "effect";
+import { Effect, Layer, type Scope, Stream } from "effect";
 import { Notices } from "../../agent-context/assemble.ts";
-import { effectiveSettings } from "../../agent-config/effective.ts";
+import { writeEffectiveSettings } from "../../agent-config/effective.ts";
 import type { Configuration, LayerSource } from "../../agent-config/file.ts";
 import { seamLayer, seamListsOf } from "../../agent-config/seams.ts";
 import { describe } from "../../agent-mcp/server-machine.ts";
@@ -112,7 +112,6 @@ const givenOf = (configuration: Configuration): ReadonlyArray<GivenServer> =>
  */
 const written = (config: Config, environment: Readonly<Record<string, string>>) =>
   Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
     const folder = sessionFolderOf(storeFolder, config.sessionId);
     const host = {
       model: `${config.target.provider}/${config.target.model}`,
@@ -122,11 +121,9 @@ const written = (config: Config, environment: Readonly<Record<string, string>>) 
       persist: config.persist,
       commandEnvironment: { given: Object.keys(environment).sort(), leftOut: Object.keys(process.env).filter((name) => !(name in environment)).sort() },
     };
-    const path = `${folder}/effective-settings.json`;
-    yield* fs.makeDirectory(folder, { recursive: true }).pipe(
-      Effect.andThen(fs.writeFileString(path, `${JSON.stringify(effectiveSettings(config.configuration.layers, config.configuration, host), null, 2)}\n`)),
-      Effect.tap(() => Effect.logInfo("cli.settings.written", { path })),
-      Effect.catch((error) => Effect.logWarning("cli.settings.not_written", { path, cause: error.message })),
+    yield* writeEffectiveSettings(folder, config.configuration.layers, config.configuration, host).pipe(
+      Effect.tap((path) => Effect.logInfo("cli.settings.written", { path })),
+      Effect.catch((error) => Effect.logWarning("cli.settings.not_written", { folder, cause: error.message })),
     );
   });
 

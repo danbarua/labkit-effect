@@ -21,6 +21,7 @@
  * with a failure the model reads.
  */
 
+import type { Environment } from "../agent-process/environment.ts";
 import { isAbsolute, relative, resolve } from "node:path";
 import { Duration, Effect, FileSystem, Option, Schema } from "effect";
 import type { AgentConnection } from "effective-acp/agent";
@@ -48,6 +49,12 @@ export interface WorldOpening {
    * runs without them, and its result says which were ignored.
    */
   readonly strictInput: boolean;
+  /**
+   * What a command the model runs on the local disk is given of the environment (the
+   * configuration's `commandEnvironment`); this process's, without its credentials, when left out.
+   * A command run in the editor's terminal is given the editor's.
+   */
+  readonly environment?: Environment | undefined;
 }
 
 /** One session's world: fixed when the session is made, and the same for every turn of it. */
@@ -347,10 +354,10 @@ export const editorWorld: World = {
  * is not told of writes.
  */
 export const workspaceWorld: World<FileSystem.FileSystem> = {
-  open: ({ cwd, strictInput }) =>
+  open: ({ cwd, strictInput, environment }) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspace = workspaceTools(cwd, { strictInput });
+      const workspace = workspaceTools(cwd, { strictInput, ...(environment === undefined ? {} : { environment }) });
       return {
         system: `The working folder is ${cwd}.`,
         sources: [yield* workspace.source.pipe(Effect.provideService(FileSystem.FileSystem, fs))],

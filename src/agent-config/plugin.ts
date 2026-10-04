@@ -9,6 +9,7 @@
  */
 
 import type { EnvironmentTransform } from "../agent-process/environment.ts";
+import type { PermissionMode } from "../agent-policy/permissions.ts";
 import type { Effect, Schema, Scope } from "effect";
 import type { SettlingSource } from "../agent-session/configuration/options.ts";
 import type { ModelKnowledge } from "../agent-session/configuration/well-known-models.ts";
@@ -33,9 +34,14 @@ export type Seam = keyof Entries;
 /** The seams, in the order a file lists them. */
 export const seams: ReadonlyArray<Seam> = ["toolCalls", "modelRequests", "turnEnd", "knownModels", "settling", "toolSources", "commandEnvironment"];
 
-/** What the host says, that a file does not: whether anyone is there to answer a question before a call runs. */
+/**
+ * What the host says, that a file does not: whether anyone is there to answer a question before a
+ * call runs; and, where the user changes the permission mode during a session, the mode now.
+ */
 export interface HostSays {
   readonly canAsk: boolean;
+  /** The session's permission mode now, read at each call; the configured `mode` is the one it starts in. */
+  readonly permissionMode?: (() => PermissionMode) | undefined;
 }
 
 /** A plug-in's settings: a struct, each of its settings with a default (`Schema.withDecodingDefaultKey`). */

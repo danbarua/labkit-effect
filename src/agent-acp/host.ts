@@ -32,7 +32,13 @@
  * The connection's end closes every session's scope.
  */
 
-import { type Brand, defaultBrand, envPrefixOf, brandFrom, folderOf } from "../agent-host/brand.ts";
+import { type Brand, defaultBrand, envPrefixOf, folderOf } from "../agent-host/brand.ts";
+import { type ConfigFlags, launchLayers } from "../agent-host/launch.ts";
+import { writeEffectiveSettings } from "../agent-config/effective.ts";
+import { type Configuration, type LayerSource, loadConfiguration } from "../agent-config/file.ts";
+import { seamLayer, seamListsOf } from "../agent-config/seams.ts";
+import { credentialsLeftOut, environmentOf } from "../agent-process/environment.ts";
+import { describe } from "../agent-mcp/server-machine.ts";
 import { basename, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ChildProcessSpawner } from "effect/process";
@@ -50,13 +56,12 @@ import { Blobs, BlobsInFolder } from "../agent-session/blobs.ts";
 import { chooseModel, defaultModel, type Draft, draftOf, opening, optionsOfDraft, saySettings, withDefaults } from "../agent-host/draft.ts";
 import { markdownOf } from "../agent-host/export.ts";
 import { KnownWithLocalServer, localServer, SettlingWithLocalServer } from "../agent-host/local-server.ts";
-import { retryIncomplete } from "../agent-host/incomplete.ts";
 import { readRecord, RecordFailed, recordedSessions, recordFileOf, writeRecord } from "../agent-host/record.ts";
-import { permissionsFor, SessionServices, turnRequestLimit } from "../agent-host/services.ts";
+import { SessionServices } from "../agent-host/services.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { leftRunning } from "../agent-machine/left-running.ts";
 import { InputText, SessionId, type TurnId } from "../agent-machine/names.ts";
-import { MaxHolds, ModelRequestPolicies, type Target, ToolCallPolicies, type ToolRunner, TurnEndHooks } from "../agent-session/contracts.ts";
+import type { Target, ToolRunner } from "../agent-session/contracts.ts";
 import { SourcedToolRunner, ToolSources, toolsOf } from "../agent-session/tool-sources.ts";
 import { FileBackedSessionStore } from "../agent-session/file-session-store.ts";
 import { endTurnLeftRunning, openSession, type Services, type Session } from "../agent-session/loop.ts";
@@ -86,33 +91,45 @@ export interface HostOptions<R = never> {
   readonly directory: string;
   /**
    * Where the sessions' tools come from: `"editor"` (`editorWorld`, the default), `"local"`
-   * (`workspaceWorld`, a stopgap that bypasses the editor; `LABKIT_ACP_LOCAL_TOOLS=1`), or a world
-   * of the host's own.
+   * (`workspaceWorld`, a stopgap that bypasses the editor; the launcher's `--local-tools`), or a
+   * world of the host's own.
    */
   readonly world?: "editor" | "local" | World<R> | undefined;
-  /** The model sessions start with, as `provider/model` (`LABKIT_ACP_MODEL`); left out, the first the catalog lists. */
+  /** The model sessions start with, as `provider/model` (the launcher's `--model`); left out, the first the catalog lists. */
   readonly model?: string | undefined;
-  /** The permission mode sessions start in (`LABKIT_ACP_PERMISSION_MODE`); left out, `default`. The user can change it. */
-  readonly permissionMode?: PermissionMode | undefined;
   /**
-   * How many times a turn whose response had thinking but no answer is asked again for it
-   * (`LABKIT_ACP_RETRIES`; 0 asks never); 1 when left out. Used by the default `services`.
+   * The launcher's options that make each session's configuration (`agent-host/launch.ts`):
+   * `--permission-mode` (the mode sessions start in; the user can change it), `--max-turns`,
+   * `--max-budget-usd`, `--settings`, `--setting-sources`, `--mcp-config` and `--strict-mcp-config`.
+   */
+  readonly configFlags?: ConfigFlags | undefined;
+  /** The home whose `.config/<brand>/policies.yml` is the user's file; this process's when left out. */
+  readonly home?: string | undefined;
+  /**
+   * How many times a turn whose response had thinking but no answer is asked again for it (the
+   * launcher's `--retries`; 0 asks never); 1 when left out. The host's defaults list
+   * `retryIncomplete` with it.
    */
   readonly retries?: number | undefined;
   /**
-   * Whether a tool call whose input has properties its tool does not take is refused
-   * (`LABKIT_ACP_STRICT_TOOL_INPUT=1`); if not (the default), it runs without them, and its result
+   * Whether a tool call whose input has properties its tool does not take is refused (the
+   * launcher's `--strict-tool-input`); if not (the default), it runs without them, and its result
    * says which were ignored.
    */
   readonly strictToolInput?: boolean | undefined;
   /**
-   * The most model requests one turn makes: the request beyond it is vetoed, and the prompt ends
-   * with the stop reason `max_turn_requests` (`agent-policy/max-turn-requests.ts`); 1000 when left out.
+   * The most model requests one turn makes unless the configuration says (`--max-turns`): the
+   * request beyond it is vetoed, and the prompt ends with the stop reason `max_turn_requests`
+   * (`agent-policy/max-turn-requests.ts`); 1000 when left out. The host's defaults list
+   * `maxTurnRequests` with it.
    */
   readonly maxTurnRequests?: number | undefined;
   /** How long an MCP server a client names has to start and answer `initialize`; 30 seconds when left out. */
   readonly mcpConnectTimeout?: Duration.Input | undefined;
-  /** What a session runs with, given its world's tool runner, over the session's store; `HostSessionServices` when left out. */
+  /**
+   * What a session runs with, given its world's tool runner, over the session's store, before its
+   * configuration's seam lists; `SessionServices` when left out.
+   */
   readonly services?: ((runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>) | undefined;
   /** The most sessions one page of `session/list` gives; 50 when left out. */
   readonly pageSize?: number | undefined;
@@ -121,37 +138,62 @@ export interface HostOptions<R = never> {
 }
 
 /**
- * What a session runs with by default: `SessionServices`, with a turn whose last response had
- * thinking but no answer asked again for it, `retries` times (`retryIncomplete`, its only hook).
+ * The ACP host's defaults, the first of a session's layers (`agent-host/launch.ts`): permission on
+ * tool calls; the limit on a turn's model requests (`maxTurnRequests`, 1000 when not given); a turn
+ * with thinking and no answer asked again for it `retries` times (1 when not given; with 0, no
+ * turn-end hook); the model's commands given the environment without its credentials.
  */
-export const HostSessionServices =
-  (retries = 1) =>
-  (runner: Layer.Layer<ToolRunner>) =>
-    Layer.mergeAll(SessionServices(runner), Layer.succeed(TurnEndHooks, [retryIncomplete(retries)]), Layer.succeed(MaxHolds, retries));
-
-/**
- * The options a launcher takes from the environment, the brand's prefix and `ACP_` before each
- * (`LABKIT_ACP_` for labkit's): `MODEL`, `LOCAL_TOOLS`, `PERMISSION_MODE`, `RETRIES` and
- * `STRICT_TOOL_INPUT=1` (a value that is not a mode, or not a whole number of 0 or more, is left out;
- * `launch` says so).
- */
-export const hostOptionsFrom = (
-  env: Readonly<Record<string, string | undefined>>,
-  brand: Brand = brandFrom(env),
-): Pick<HostOptions, "model" | "world" | "permissionMode" | "retries" | "strictToolInput" | "brand"> => {
-  const prefix = `${envPrefixOf(brand)}ACP_`;
-  const mode = env[`${prefix}PERMISSION_MODE`];
-  const retries = env[`${prefix}RETRIES`];
-  const model = env[`${prefix}MODEL`];
+export const acpDefaults = (options: { readonly retries?: number | undefined; readonly maxTurnRequests?: number | undefined }): LayerSource => {
+  const retries = options.retries ?? 1;
   return {
-    model: model === "" ? undefined : model,
-    world: env[`${prefix}LOCAL_TOOLS`] === "1" ? "local" : "editor",
-    permissionMode: Schema.is(PermissionMode)(mode) ? mode : undefined,
-    retries: retries !== undefined && /^\d+$/.test(retries) ? Number(retries) : undefined,
-    strictToolInput: env[`${prefix}STRICT_TOOL_INPUT`] === "1",
-    brand,
+    name: "the ACP host's defaults",
+    trusted: true,
+    value: {
+      toolCalls: ["permissions"],
+      modelRequests: ["maxTurnRequests"],
+      commandEnvironment: ["credentials"],
+      ...(retries === 0 ? {} : { turnEnd: ["retryIncomplete"], maxHolds: retries }),
+      plugins: {
+        ...(options.maxTurnRequests === undefined ? {} : { maxTurnRequests: { limit: options.maxTurnRequests } }),
+        ...(retries === 0 ? {} : { retryIncomplete: { retries } }),
+      },
+    },
   };
 };
+
+/** The client's MCP servers a configuration can hold: those it runs, not those at a URL. */
+const isStdio = (server: McpServer): server is Extract<McpServer, { readonly command: string }> => !("type" in server);
+
+/**
+ * The client's MCP servers for a session in `cwd`, as the last layers: the first takes out the
+ * configuration's servers of the same names, so the client's replaces each whole.
+ */
+const clientLayers = (cwd: string, servers: ReadonlyArray<McpServer>): ReadonlyArray<LayerSource> => {
+  const stdio = servers.filter(isStdio);
+  if (stdio.length === 0) return [];
+  const name = "the client's MCP servers";
+  return [
+    { name, trusted: true, value: { mcpServers: Object.fromEntries(stdio.map((server) => [server.name, null])) } },
+    {
+      name,
+      trusted: true,
+      value: {
+        mcpServers: Object.fromEntries(
+          stdio.map((server) => [server.name, { command: server.command, args: [...server.args], env: Object.fromEntries(server.env.map((each) => [each.name, each.value])), cwd }]),
+        ),
+      },
+    },
+  ];
+};
+
+/** The mode a session starts in: the setting of the `permissions` its tool calls list; `default` when none. */
+const startingModeOf = (configuration: Configuration): PermissionMode => {
+  const mode = (configuration.lists.toolCalls?.find((entry) => entry.plugin.use === "permissions")?.settings as { readonly mode?: unknown } | undefined)?.mode;
+  return Schema.is(PermissionMode)(mode) ? mode : "default";
+};
+
+/** A session's configuration, and the layers it was made from. */
+type Configured = Configuration & { readonly layers: ReadonlyArray<LayerSource> };
 
 /** The command the host runs itself, without the model. */
 const exportCommandOf = (brand: Brand) => ({ name: "export", description: `Write this session's transcript as Markdown to ${folderOf(brand)}/exports/<session>.md in the working folder.` });
@@ -210,8 +252,10 @@ interface Entry {
   state: { readonly _tag: "Draft"; readonly draft: Draft } | { readonly _tag: "Open"; readonly opened: Opened };
   /** The prompt running, if one is. */
   prompt: Fiber.Fiber<unknown, unknown> | undefined;
-  /** How tool calls are allowed: the host's to keep, read at each call, changed by the user. */
+  /** How tool calls are allowed: the host's to keep, read at each call, changed by the user; it starts as the configuration says. */
   permissionMode: PermissionMode;
+  /** The session's configuration (AG25): its seam lists, and its MCP servers. */
+  readonly configuration: Configured;
 }
 
 /**
@@ -275,8 +319,10 @@ const noModelOf = (brand: Brand) =>
 export const makeHost = <R = never>(options: HostOptions<R>) => {
   const world: World<R> | World<FileSystem.FileSystem> =
     options.world === undefined || options.world === "editor" ? editorWorld : options.world === "local" ? workspaceWorld : options.world;
-  const services = options.services ?? HostSessionServices(options.retries);
+  const services = options.services ?? SessionServices;
   const brand = options.brand ?? defaultBrand;
+  const defaults = acpDefaults(options);
+  const worldKind = options.world === undefined ? "editor" : typeof options.world === "string" ? options.world : "the host's own";
   return Agent.implement<Protocol.V1Version, ModelCatalog | FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner | Scope.Scope | R>(Protocol.v1, {
     capabilities: {
       promptCapabilities: { image: true, audio: false, embeddedContext: true },
@@ -314,32 +360,86 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
 
         /** The configuration of the session as it will be from the next turn, with what a change is taken against. */
         /**
-         * The MCP servers a client named for a session in `cwd`, started at once in a scope of the entry's own, and the world with
-         * their tools after its own (agent-mcp MK1). Two servers whose tools would be offered under one name are -32602, before
-         * anything is started.
+         * The configuration of a session in `cwd` whose client names `servers` (AG25): the host's defaults, the launcher's
+         * layers with `cwd` as the project, then the client's servers. One that cannot be used refuses the request.
          */
-        const withServers = (cwd: string, opened: WorldSession, servers: ReadonlyArray<McpServer>) =>
+        const configurationFor = (cwd: string, servers: ReadonlyArray<McpServer>, doing: string): Effect.Effect<Configured, JsonRpcErrorObject, FileSystem.FileSystem> =>
           Effect.gen(function* () {
-            const namespaces = servers.map((server) => namespaceOf(server.name));
+            const flags = options.configFlags ?? { mcpConfig: [], strictMcpConfig: false };
+            const layers = [...(yield* launchLayers(cwd, defaults, flags, { name: brand.name, ...(options.home === undefined ? {} : { home: options.home }) })), ...clientLayers(cwd, servers)];
+            return { ...(yield* loadConfiguration(layers)), layers };
+          }).pipe(
+            Effect.catchTag("ConfigInvalid", (error) =>
+              Effect.logWarning(logKeys.session.refused, { doing, cwd, cause: "the configuration cannot be used", problem: error.message }).pipe(
+                Effect.andThen(Effect.fail(rpcError(ErrorCode.InternalError, `The configuration cannot be used: ${error.message}`))),
+              ),
+            ),
+          );
+
+        /** What a command the model runs on the local disk is given of the environment: what the configuration composes. */
+        const environmentFor = (configuration: Configured) => environmentOf(seamListsOf(configuration, { canAsk: true }).commandEnvironment ?? [credentialsLeftOut()]);
+
+        /** Writes what a session's configuration resolved to, with what the host says beside it, to the session's folder (AG25). */
+        const settingsWritten = (id: AcpSessionId, configuration: Configured, permissionMode: PermissionMode, model: string) =>
+          writeEffectiveSettings(sessionFolderOf(options.directory, id), configuration.layers, configuration, {
+            model,
+            permissionMode,
+            canAsk: true,
+            strictToolInput: options.strictToolInput ?? false,
+            world: worldKind,
+          }).pipe(
+            Effect.tap((path) => Effect.logInfo(logKeys.settings.written, { path })),
+            Effect.catch((error) => Effect.logWarning(logKeys.settings.notWritten, { folder: sessionFolderOf(options.directory, id), cause: error.message })),
+          );
+
+        /**
+         * The MCP servers of a session in `cwd`, started at once in a scope of the entry's own, and the world with their tools
+         * after its own (agent-mcp MK1): the configuration's, the client's among them (AG25), and those the client names at a URL,
+         * which are not supported. Two servers whose tools would be offered under one name are -32602, before anything is
+         * started. A server the configuration says is required that is not running once they have settled refuses the request,
+         * and the servers are stopped (AG26).
+         */
+        const withServers = (cwd: string, opened: WorldSession, configuration: Configured, servers: ReadonlyArray<McpServer>, doing: string) =>
+          Effect.gen(function* () {
+            const given: ReadonlyArray<GivenServer> = [
+              ...configuration.mcpServers.map(
+                (server): GivenServer => ({
+                  _tag: "Stdio",
+                  server: { name: server.name, command: server.command, args: server.args, env: server.env, cwd: server.cwd ?? cwd },
+                  connectTimeout: server.connectTimeout,
+                }),
+              ),
+              ...servers.flatMap((server): ReadonlyArray<GivenServer> => ("type" in server ? [{ _tag: "Unsupported", name: server.name, transport: server.type }] : [])),
+            ];
+            const names = given.map((server) => (server._tag === "Stdio" ? server.server.name : server.name));
+            const namespaces = names.map(namespaceOf);
             const twice = namespaces.find((each, index) => namespaces.indexOf(each) !== index);
             if (twice !== undefined) {
-              const named = servers.filter((server) => namespaceOf(server.name) === twice).map((server) => server.name);
-              yield* Effect.logWarning(logKeys.session.refused, { cwd, cause: "two MCP servers would offer their tools under one name", servers: named, namespace: twice });
+              const named = names.filter((name) => namespaceOf(name) === twice);
+              yield* Effect.logWarning(logKeys.session.refused, { doing, cwd, cause: "two MCP servers would offer their tools under one name", servers: named, namespace: twice });
               return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, `The MCP servers ${named.join(" and ")} would offer their tools under one name, ${twice}`, { servers: named }));
             }
-            const given = servers.map(
-              (server): GivenServer =>
-                "type" in server
-                  ? { _tag: "Unsupported", name: server.name, transport: server.type }
-                  : { _tag: "Stdio", server: { name: server.name, command: server.command, args: server.args, env: Object.fromEntries(server.env.map((each) => [each.name, each.value])), cwd } },
-            );
             const scope = yield* Scope.fork(connectionScope);
+            return yield* Effect.gen(function* () {
             const mcp = yield* startMcpServers(given, [{ uri: pathToFileURL(cwd).href, name: basename(cwd) }], {
               connectTimeout: options.mcpConnectTimeout,
               clientInfo: { name: brand.name, version: brand.version },
             }).pipe(
               Scope.provide(scope),
             );
+            const states = yield* mcp.states;
+            const missing = configuration.mcpServers.flatMap((server) => {
+              const state = states.find((each) => each.name === server.name)?.state;
+              return server.required && state !== undefined && state._tag !== "Ready" ? [{ name: server.name, said: describe(state) }] : [];
+            });
+            if (missing.length > 0) {
+              yield* Effect.logWarning(logKeys.session.refused, { doing, cwd, cause: "a required MCP server is not running", servers: missing });
+              return yield* Effect.fail(
+                rpcError(ErrorCode.InternalError, `The session needs MCP servers that are not running: ${missing.map((server) => `${server.name} (${server.said})`).join("; ")}.`, {
+                  servers: missing.map((server) => server.name),
+                }),
+              );
+            }
             const { catalog } = yield* toolsOf(mcp.sources);
             const mcpPresent = presentFrom(catalog);
             const world: WorldSession = {
@@ -352,6 +452,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               },
             };
             return { world, scope, mcp };
+            }).pipe(Effect.onError(() => Scope.close(scope, Exit.void)));
           });
 
         /** `/mcp`: each MCP server and its state; `/mcp reconnect <server>` starts it again and says how it went. Said in a message. */
@@ -427,7 +528,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           id: AcpSessionId,
           world: WorldSession,
           permissionMode: { readonly get: () => PermissionMode; readonly set: (mode: PermissionMode) => void },
-          parent: { readonly scope: Scope.Scope; readonly mcp: McpServers },
+          parent: { readonly scope: Scope.Scope; readonly mcp: McpServers; readonly configuration: Configured },
           go: (session: Session, context: Context.Context<Services>, follow: (initial: ProjectionState) => Effect.Effect<Feed>) => Effect.Effect<A, E, X>,
         ) =>
           Effect.gen(function* () {
@@ -436,14 +537,13 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const file = storeFileOf(options.directory, id);
               // The session's blobs (its inputs' images and files) are kept in its folder, so a session gone on from its facts has them.
               const blobs = BlobsInFolder(join(sessionFolderOf(options.directory, id), "blobs"));
-              const policies = Layer.mergeAll(
-                Layer.succeed(ToolCallPolicies, [{ name: "permissions", policy: permissionsFor(permissionMode.get, true) }]),
-                Layer.succeed(ModelRequestPolicies, [{ name: "maxTurnRequests", policy: turnRequestLimit(options.maxTurnRequests) }]),
-              );
+              // The configuration's seam lists, permission following the session's mode (agent-config CF2); its tool sources are not
+              // offered: the session's are the world's and its MCP servers'.
+              const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(parent.configuration, { canAsk: true, permissionMode: permissionMode.get });
               const runner = SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, world.sources)));
               // The model is told of the session's MCP servers that are not running (agent-mcp MK2).
               const notices = Layer.succeed(Notices, [parent.mcp.notices]);
-              const layer = Layer.mergeAll(services(runner).pipe(Layer.provide(notices)), policies, blobs).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
+              const layer = Layer.mergeAll(services(runner).pipe(Layer.provide(notices)), seamLayer(lists), blobs).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
               const context = yield* Layer.buildWithScope(layer, scope);
               const session = yield* openSession.pipe(Effect.provideContext(context), Scope.provide(scope));
 
@@ -499,7 +599,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 entry.permissionMode = next;
               },
             };
-            const opened = yield* startSession(entry.id, entry.world, mode, { scope: entry.scope, mcp: entry.mcp }, (session, context, follow) =>
+            yield* settingsWritten(entry.id, entry.configuration, entry.permissionMode, `${draft.model.provider}/${draft.model.model}`);
+            const opened = yield* startSession(entry.id, entry.world, mode, { scope: entry.scope, mcp: entry.mcp, configuration: entry.configuration }, (session, context, follow) =>
               Effect.gen(function* () {
                 // The feed first: the session has no facts yet, and it sends everything from the opening on, live.
                 const feed = yield* follow(start);
@@ -666,11 +767,19 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             }
             starting.add(sessionId);
             return yield* Effect.gen(function* () {
-              const own = yield* (world as World<R | FileSystem.FileSystem>).open({ sessionId, cwd, mcpServers, connection, strictInput: options.strictToolInput ?? false });
-              const { world: its, scope, mcp } = yield* withServers(cwd, own, mcpServers);
+              const configuration = yield* configurationFor(cwd, mcpServers, method);
+              const own = yield* (world as World<R | FileSystem.FileSystem>).open({
+                sessionId,
+                cwd,
+                mcpServers,
+                connection,
+                strictInput: options.strictToolInput ?? false,
+                environment: environmentFor(configuration),
+              });
+              const { world: its, scope, mcp } = yield* withServers(cwd, own, configuration, mcpServers, method);
               return yield* Effect.gen(function* () {
-              // The policy reads the entry's mode at each call; the entry exists once the session started, and until then the mode is the launcher's.
-              const initialMode = options.permissionMode ?? "default";
+              // The policy reads the entry's mode at each call; the entry exists once the session started, and until then the mode is the configuration's.
+              const initialMode = startingModeOf(configuration);
               let held: Entry | undefined;
               const mode = {
                 get: () => held?.permissionMode ?? initialMode,
@@ -678,7 +787,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   if (held !== undefined) held.permissionMode = next;
                 },
               };
-              const opened = yield* startSession(sessionId, its, mode, { scope, mcp }, (session, context, follow) =>
+              const opened = yield* startSession(sessionId, its, mode, { scope, mcp, configuration }, (session, context, follow) =>
                 Effect.gen(function* () {
                   const left = leftRunning(yield* session.facts);
                   if (left !== undefined) {
@@ -704,9 +813,12 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 state: { _tag: "Open", opened },
                 prompt: undefined,
                 permissionMode: initialMode,
+                configuration,
               };
               held = entry;
               entries.set(sessionId, entry);
+              const now = yield* configuredOf(yield* opened.session.facts);
+              yield* settingsWritten(sessionId, configuration, initialMode, `${now.provider}/${now.model}`);
               const { options: configured } = yield* configurationOf(entry);
               yield* Effect.logInfo(method === "session/load" ? logKeys.session.loaded : logKeys.session.resumed, {
                 cwd,
@@ -742,9 +854,17 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 const model = yield* startingModel.pipe(
                   Effect.tapError((error) => Effect.logWarning(logKeys.session.refused, { cwd, cause: error.message })),
                 );
+                const configuration = yield* configurationFor(cwd, mcpServers, "session/new");
                 const id = AcpSessionId.make(crypto.randomUUID());
-                const own = yield* (world as World<R | FileSystem.FileSystem>).open({ sessionId: id, cwd, mcpServers, connection, strictInput: options.strictToolInput ?? false });
-                const { world: opened, scope, mcp } = yield* withServers(cwd, own, mcpServers);
+                const own = yield* (world as World<R | FileSystem.FileSystem>).open({
+                  sessionId: id,
+                  cwd,
+                  mcpServers,
+                  connection,
+                  strictInput: options.strictToolInput ?? false,
+                  environment: environmentFor(configuration),
+                });
+                const { world: opened, scope, mcp } = yield* withServers(cwd, own, configuration, mcpServers, "session/new");
                 return yield* Effect.gen(function* () {
                 const capabilities = yield* capabilitiesOf(model);
                 const { catalog } = yield* toolsOf(opened.sources);
@@ -761,7 +881,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   lock: yield* Semaphore.make(1),
                   state: { _tag: "Draft", draft },
                   prompt: undefined,
-                  permissionMode: options.permissionMode ?? "default",
+                  permissionMode: startingModeOf(configuration),
+                  configuration,
                 };
                 entries.set(id, entry);
                 const { options: configured } = yield* configurationOf(entry);

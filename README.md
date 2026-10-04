@@ -79,14 +79,22 @@ left running (the editor closed mid-turn) is ended as interrupted when its sessi
 and nothing it had begun is run again. A session is open in one process at a time. `session/fork`
 waits for the core (`TODO.md`, Sessions).
 
-The environment: `LABKIT_ACP_MODEL` (the model new sessions start on, `provider/model`; else the
-first the catalog lists), a provider's key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`) or
-the local server at `http://localhost:8000/v1`, `LABKIT_ACP_SESSIONS_DIR` (default
-`~/.labkit/sessions`), `LABKIT_ACP_LOCAL_TOOLS=1` (tools on the local disk instead of through the
-editor: a stopgap), `LABKIT_ACP_STRICT_TOOL_INPUT=1` (refuse a tool call whose input has
-properties its tool does not take; without it, the call runs without them, and its result says so), and `LABKIT_ACP_LOG_DIR`, `_LEVEL`, `_MAX_BYTES`, `_BACKUPS`.
+Its options are flags (`bun src/agent-acp/main.ts --help`), each read from its variable when not
+given: `--model` (`LABKIT_ACP_MODEL`: the model new sessions start on, `provider/model`; else the
+first the catalog lists), `--sessions-dir` (`LABKIT_ACP_SESSIONS_DIR`, default
+`~/.labkit/sessions`), `--local-tools` (`LABKIT_ACP_LOCAL_TOOLS=1`: tools on the local disk instead
+of through the editor, a stopgap), `--strict-tool-input` (`LABKIT_ACP_STRICT_TOOL_INPUT=1`: refuse a
+tool call whose input has properties its tool does not take; without it, the call runs without
+them, and its result says so), `--permission-mode`, `--max-turns`, `--retries`, `--settings`,
+`--setting-sources`, `--mcp-config`, and so on. One that cannot be used stops the launch. A
+provider's key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`) or the local server at
+`http://localhost:8000/v1` gives the models; `LABKIT_ACP_LOG_DIR`, `_LEVEL`, `_MAX_BYTES`, `_BACKUPS`
+the log. Each session reads its configuration as the CLI does (`~/.config/labkit/policies.yml`,
+and the working folder's files when `--setting-sources` names them), with the MCP servers the
+editor names over those of the same name, and writes what it resolved to beside its facts
+(`effective-settings.json`).
 
 These are labkit's names. The agent goes by a brand (`src/agent-host/brand.ts`): the one its entry
-point gives (`main(brand)`, `launch(env, brand)`), else the one `LABKIT_BRAND` names, else labkit.
+point gives (`main(brand)`, `launch(args, env, brand)`), else the one `LABKIT_BRAND` names, else labkit.
 As `acme` it reads `ACME_ACP_*`, keeps its sessions and logs in `~/.acme/`, its configuration in
 `~/.config/acme/` and `.acme/`, and calls itself `acme` to an ACP client and an MCP server.

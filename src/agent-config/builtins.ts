@@ -5,7 +5,9 @@
  *   (3), `stopAt` (5), and `key`, what makes two calls identical, by name: `toolAndInput`, the same
  *   tool and the same input as received.
  * - `permissions` (`agent-policy/permissions.ts`), on `toolCalls`: `mode` (`default`). Whether
- *   anyone can be asked is the host's to say (`HostSays.canAsk`).
+ *   anyone can be asked is the host's to say (`HostSays.canAsk`); where the user changes the mode
+ *   during a session, the mode it follows is the host's too (`HostSays.permissionMode`), and `mode`
+ *   is the one the session starts in.
  * - `maxTurnRequests` (`agent-policy/max-turn-requests.ts`), on `modelRequests`: `limit` (1000).
  * - `retryIncomplete` (`agent-host/incomplete.ts`), on `turnEnd`: `retries` (1).
  * - `maxBudget` (`agent-host/services.ts`), on `modelRequests`: `usd`, which it has no default for:
@@ -46,7 +48,7 @@ export const loopBreaker = plugin(
 );
 
 export const permissions = plugin("permissions", Schema.Struct({ mode: defaulted(PermissionMode, "default") }), ["toolCalls"], ({ mode }, host) => ({
-  toolCalls: permissionsFor(mode, host.canAsk),
+  toolCalls: permissionsFor(host.permissionMode ?? mode, host.canAsk),
 }));
 
 export const maxTurnRequests = plugin("maxTurnRequests", Schema.Struct({ limit: defaulted(atLeast(1), defaultMaxTurnRequests) }), ["modelRequests"], ({ limit }) => ({

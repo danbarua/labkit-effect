@@ -59,7 +59,9 @@ mcpServers:
   become the session's lists, in the same order, each made by its plug-in from its settings, which
   are the same on every list it is on.
 - CF2. What a layer does not say, the host says: whether anyone is there to answer a question
-  before a call runs (`canAsk`), which `permissions` reads.
+  before a call runs (`canAsk`), which `permissions` reads; and, where the user changes the
+  permission mode during a session (the ACP host), the mode now (`permissionMode`), which
+  `permissions` follows in place of its `mode`, the mode the session starts in.
 - CF3. A configuration that cannot be used is refused, naming the layer that last wrote the value at
   fault, where in it, and what is wrong: a key that is not the configuration's, a seam that is not a
   list of names, a name neither in `plugins` nor a plug-in, a plug-in not on the seam that lists it,

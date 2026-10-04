@@ -7,7 +7,7 @@
  * and the value of an argument whose flag names a credential is left out (`redactedArgs`).
  */
 
-import type { Schema } from "effect";
+import { Effect, FileSystem, type PlatformError, type Schema } from "effect";
 import { redactedArgs } from "../agent-process/environment.ts";
 import type { Configuration, LayerSource } from "./file.ts";
 import { merged } from "./merge.ts";
@@ -28,6 +28,24 @@ export const sourcesOf = (layers: ReadonlyArray<LayerSource>): Readonly<Record<s
       [...layers].reverse().find((layer) => at(layer.value, path) !== undefined)?.name ?? "",
     ]),
   );
+
+/** The name of the file a session's folder keeps `effectiveSettings` in. */
+export const effectiveSettingsFile = "effective-settings.json";
+
+/** Writes `effectiveSettings` to `folder` (made when missing) as `effective-settings.json`; the file's path. */
+export const writeEffectiveSettings = (
+  folder: string,
+  layers: ReadonlyArray<LayerSource>,
+  configuration: Configuration,
+  host: Readonly<Record<string, Schema.Json>> = {},
+): Effect.Effect<string, PlatformError.PlatformError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = `${folder}/${effectiveSettingsFile}`;
+    yield* fs.makeDirectory(folder, { recursive: true });
+    yield* fs.writeFileString(path, `${JSON.stringify(effectiveSettings(layers, configuration, host), null, 2)}\n`);
+    return path;
+  });
 
 /** The configuration as resolved from `layers`, with what the host says (`host`). */
 export const effectiveSettings = (layers: ReadonlyArray<LayerSource>, configuration: Configuration, host: Readonly<Record<string, Schema.Json>> = {}): Schema.Json => ({

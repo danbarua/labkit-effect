@@ -15,8 +15,9 @@ import { Deferred, Effect, Fiber, Layer, Logger, References } from "effect";
 import * as Agent from "effective-acp/agent";
 import { fromWebStreams } from "effective-acp/stdio";
 import type { Brand } from "../agent-host/brand.ts";
+import type { ConfigFlags } from "../agent-host/launch.ts";
 import { type CatalogSource, ModelCatalog } from "../agent-host/catalog.ts";
-import { storeFileOf } from "../agent-host/directory.ts";
+import { sessionFolderOf, storeFileOf } from "../agent-host/directory.ts";
 import { answerNow } from "../agent-host/incomplete.ts";
 import { SessionServices } from "../agent-host/services.ts";
 import { CallId, FailureText, Millis, ModelName, ModelText, ProviderName, ThinkingText, TokenCount, ToolName, type TurnId } from "../agent-machine/names.ts";
@@ -31,7 +32,7 @@ import { receivedJson, receivedText } from "../agent-session/received.ts";
 import type { SessionStore } from "../agent-session/session-store.ts";
 import { logKeys as mcpLogKeys } from "../agent-mcp/log-keys.ts";
 import { test, testFolder } from "../../tests/support/test.ts";
-import { HostSessionServices, makeHost } from "./host.ts";
+import { makeHost } from "./host.ts";
 import { logKeys } from "./log-keys.ts";
 import { presentFrom, project } from "./projection.ts";
 import type { World } from "./world.ts";
@@ -164,6 +165,9 @@ function startHost(
     readonly pageSize?: number;
     readonly maxTurnRequests?: number;
     readonly brand?: Brand;
+    /** How many times a turn with thinking and no answer is asked again; 0 (no turn-end hook) when left out. */
+    readonly retries?: number;
+    readonly configFlags?: ConfigFlags;
   } = {},
 ): HostRun {
   const script = [...(options.script ?? [])];
@@ -202,6 +206,10 @@ function startHost(
     ...(options.pageSize === undefined ? {} : { pageSize: options.pageSize }),
     ...(options.maxTurnRequests === undefined ? {} : { maxTurnRequests: options.maxTurnRequests }),
     ...(options.brand === undefined ? {} : { brand: options.brand }),
+    ...(options.configFlags === undefined ? {} : { configFlags: options.configFlags }),
+    retries: options.retries ?? 0,
+    // The user's file is the test's own, not the machine's.
+    home: join(testFolder(), "home"),
     services: (runner) => Layer.mergeAll((options.services ?? SessionServices)(runner), scripted, Layer.succeed(ModelStreamInterval, Millis.make(0))),
   });
   const capture = Logger.make((log) => {
@@ -942,6 +950,84 @@ test("AG24: the host goes by its brand: /export writes to .acme/exports, an MCP 
   expect(none?.message).toContain("name one with ACME_ACP_MODEL as provider/model");
 });
 
+/** Writes the user's file of a test host (its home is the test's own). */
+const userFile = (text: string) => {
+  const folder = join(testFolder(), "home", ".config", "labkit");
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, "policies.yml"), text);
+};
+
+test("AG25: a session's configuration is read when it is made: the user's file's MCP servers start, the client's replace those of the same name whole, the launcher's mode is the one it starts in, and effective-settings.json is written at its first prompt", async () => {
+  const fake = new URL("../../tests/support/mcp-server.ts", import.meta.url).pathname;
+  userFile(`mcpServers:\n  fake:\n    command: /no/such/server\n    required: true\n  extra:\n    command: ${process.execPath}\n    args: [${fake}]\n`);
+  const host = startHost({
+    world: echoWorld,
+    script: [answer({ _tag: "Text", text: "Hello." })],
+    configFlags: { mcpConfig: [], strictMcpConfig: false, permissionMode: "acceptEdits" },
+  });
+  const { app } = sdkClient();
+  mkdirSync(host.cwd, { recursive: true });
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [fakeMcp("fake")] });
+    const draftWrote = existsSync(sessionFolderOf(host.directory, created.sessionId));
+    await ctx.request("session/prompt", say(created.sessionId, "Hi."));
+    return { created, draftWrote };
+  });
+  await host.stop();
+  const { sessionId } = result.created;
+  expect(result.created.configOptions?.find((option) => option.id === "permission_mode")).toMatchObject({ currentValue: "acceptEdits" });
+  expect(host.contexts[0]?.tools.map((tool) => tool.name as string)).toEqual([
+    "echo",
+    "mcp__fake__echo",
+    "mcp__fake__roots",
+    "mcp__fake__slow",
+    "mcp__extra__echo",
+    "mcp__extra__roots",
+    "mcp__extra__slow",
+  ]);
+  expect(result.draftWrote).toBe(false);
+  const written = JSON.parse(readFileSync(join(sessionFolderOf(host.directory, sessionId), "effective-settings.json"), "utf8"));
+  expect(written.layers.map((layer: { readonly name: string }) => layer.name)).toEqual([
+    "the ACP host's defaults",
+    join(testFolder(), "home", ".config", "labkit", "policies.yml"),
+    "the command line",
+    "the client's MCP servers",
+    "the client's MCP servers",
+  ]);
+  expect(written.mcpServers).toMatchObject([
+    { name: "fake", command: process.execPath, args: [fake], required: false, cwd: host.cwd },
+    { name: "extra", command: process.execPath, required: false },
+  ]);
+  expect(written.from["mcpServers.fake.command"]).toBe("the client's MCP servers");
+  expect(written.lists.toolCalls).toEqual([{ name: "permissions", use: "permissions", settings: { mode: "acceptEdits" } }]);
+  expect(written.host).toMatchObject({ permissionMode: "acceptEdits", canAsk: true, world: "the host's own" });
+});
+
+test("AG26: a server the configuration says is required that does not connect refuses session/new, session/load and session/resume, naming it, and leaves nothing open", async () => {
+  const host = startHost({ script: [answer({ _tag: "Text", text: "Hello." })] });
+  const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    // A session made before the configuration needed the server.
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(sessionId, "Hi."));
+    await ctx.request("session/close", { sessionId });
+    userFile("mcpServers:\n  needed:\n    command: /no/such/server\n    required: true\n");
+    return {
+      created: await failure(ctx.request("session/new", { cwd: host.cwd, mcpServers: [] })),
+      loaded: await failure(ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] })),
+      resumed: await failure(ctx.request("session/resume", { sessionId, cwd: host.cwd, mcpServers: [] })),
+      // Nothing was left of the refused load: loading again is refused for the server, not as already loaded.
+      again: await failure(ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] })),
+    };
+  });
+  await host.stop();
+  for (const refused of [result.created, result.loaded, result.resumed, result.again]) {
+    expect(refused).toMatchObject({ code: -32603, data: { servers: ["needed"] } });
+    expect(refused?.message).toStartWith("The session needs MCP servers that are not running: needed (it failed: its process could not be started:");
+  }
+});
+
 test("AG23: a server that cannot be started leaves the session running: the model is told it is not running and the session records it failed; /mcp says how each server is; a server at a URL is refused, as the host does not offer HTTP; two servers whose tools would share a name are -32602", async () => {
   const host = startHost({ script: [answer({ _tag: "Text", text: "Hello." })] });
   const { app, log } = sdkClient();
@@ -975,7 +1061,7 @@ test("AG23: a server that cannot be started leaves the session running: the mode
 test("AG16: by default a response after a tool call with thinking but no answer is asked again; the client gets the answer, not the feedback, and end_turn", async () => {
   const host = startHost({
     world: echoWorld,
-    services: HostSessionServices(),
+    retries: 1,
     script: [
       answer({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "4" } }),
       answer({ _tag: "Thinking", text: "The echo said 4, so the answer is 4." }),
@@ -1013,7 +1099,7 @@ test("AG16: by default a response after a tool call with thinking but no answer 
 test("AG16: a turn whose retry has no answer either ends end_turn after one retry, with no answer message", async () => {
   const host = startHost({
     world: echoWorld,
-    services: HostSessionServices(),
+    retries: 1,
     script: [
       answer({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "4" } }),
       answer({ _tag: "Thinking", text: "The answer is 4." }),

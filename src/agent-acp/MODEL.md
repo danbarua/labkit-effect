@@ -66,24 +66,26 @@ sends nothing for what was said).
 the core; a launcher runs it with `Agent.run` or `Agent.runStdio`, giving it the model catalog
 (`ModelCatalog`) and the file system. `HostOptions`: `directory`, the session directory's root;
 `world`, `"editor"` (the default), `"local"` or a world of the host's own; `model`, `provider/model`
-to start sessions with (else the catalog's first, `defaultModel`); `services`, what a session runs
-with given its world's runner (`HostSessionServices`: `SessionServices` with `retryIncomplete(1)`
-as its turn-end hook, held at most once, agent-host H15); `pageSize`, the most sessions a page of `session/list` gives (50).
-`brand`, what it goes by (agent-host H18; labkit's when left out). `hostOptionsFrom(env, brand)`
-reads `<PREFIX>ACP_MODEL`, `ACP_LOCAL_TOOLS=1`, `ACP_PERMISSION_MODE`, `ACP_RETRIES` and
-`ACP_STRICT_TOOL_INPUT=1`, the brand's prefix before each (`LABKIT_` for labkit's). It advertises
+to start sessions with (else the catalog's first, `defaultModel`); `configFlags`, the launcher's
+options that make each session's configuration (agent-host H19, H20); `home`, where the user's
+file is; `retries` and `maxTurnRequests`, which make its defaults (`acpDefaults`: permission on
+tool calls, `maxTurnRequests` on model requests, `retryIncomplete` on a turn's end unless retries
+are 0, and the model's commands given the environment without its credentials); `services`, what a
+session runs with given its world's runner, before its configuration's seam lists
+(`SessionServices`); `pageSize`, the most sessions a page of `session/list` gives (50); `brand`,
+what it goes by (agent-host H18; labkit's when left out). It advertises
 `loadSession`, the session methods `close`, `list` and `resume`, and no prompt content but text and
 resource links; no fork and no auth methods.
 
 A session is started, at turn zero or from its facts file by `session/load` or `session/resume`,
 the same way: in a scope of its own forked from the connection's, over `FileBackedSessionStore` of
-its facts file, with the services its world's runner gives and permission as its tool call policy,
-and with a feed. Turn zero starts the feed before the opening is observed. Load and resume start
+its facts file, with the services its world's runner gives and its configuration's seam lists
+(AG25), and with a feed. Turn zero starts the feed before the opening is observed. Load and resume start
 it from the state the stored facts leave in the projection, after the replay, so nothing is sent
 twice.
 
 - `world.ts`: the `World` is what the host does not know of a session. `open({ sessionId, cwd,
-  mcpServers, connection })` gives its system prompt, its tool sources (`ToolSource`: tools, and
+  mcpServers, connection, strictInput, environment })` gives its system prompt, its tool sources (`ToolSource`: tools, and
   what runs a call to one; the session's tools are theirs joined, `agent-session/tool-sources.ts`)
   and their presentation (`Present`). `editorWorld` (the default) goes through the
   editor: `read_file { path, line?, limit? }` (kind `read`) with `fs/read_text_file`, offered only
@@ -102,13 +104,15 @@ twice.
 - `log-keys.ts`: the events the host logs. Each carries the `connection` (minted per connection),
   `request` (set by the peer), `session`, `turn` and `call` it is about as log annotations, the
   names the loop uses.
-- `main.ts`: the launcher, `bun src/agent-acp/main.ts`: `launch(env)` runs `makeHost` on this
-  process's stdin and stdout (`Agent.runStdio`) with the model catalog of the providers whose key is
-  set and the local server (`KeyedAndLocalCatalog`) and the log file of `agent-host/launcher-logs.ts`.
-  It runs as the brand it is given, else the one the environment names (agent-host H18). From the
-  environment, after the brand's prefix: `ACP_MODEL`, `ACP_LOCAL_TOOLS`, `ACP_PERMISSION_MODE`,
-  `ACP_RETRIES`, `ACP_STRICT_TOOL_INPUT`, `ACP_SESSIONS_DIR` (`sessionsDirectoryFrom`; default
-  `~/.<brand>/sessions`) and the `ACP_LOG_*` variables; and the providers' keys.
+- `main.ts`: the launcher, `bun src/agent-acp/main.ts [flags]`: `launch(args, env, brand)` runs
+  `makeHost` on this process's stdin and stdout (`Agent.runStdio`) with the model catalog of the
+  providers whose key is set and the local server (`KeyedAndLocalCatalog`) and the log file of
+  `agent-host/launcher-logs.ts`. It runs as the brand it is given, else the one the environment
+  names (agent-host H18). Its options (`launcherFlags`) are those both hosts take (agent-host H19)
+  and its own: `--sessions-dir` (`sessionsDirectoryOf`; default `~/.<brand>/sessions`),
+  `--local-tools` and `--retries`; each not given is read from its variable, the brand's prefix and
+  `ACP_` before its name (`LABKIT_ACP_MODEL`). `hostOptionsOf` gives the host's options from them.
+  The log's variables are `<PREFIX>ACP_LOG_*`; the providers' keys are their own.
 
 ## What is not built
 
@@ -260,18 +264,21 @@ twice.
 - AG14. The launcher serves the host on stdin and stdout, and puts nothing but protocol on stdout.
   Its log is a file, named once on stderr, that holds no secret of the environment, and it exits 0
   when stdin closes. It calls itself by its brand's name and version (`agentInfo`).
-- AG15. Sessions are kept in `<PREFIX>ACP_SESSIONS_DIR` when it is set, else in
+- AG15. Sessions are kept in `--sessions-dir` (`<PREFIX>ACP_SESSIONS_DIR`) when it is given, else in
   `~/.<brand>/sessions` (`LABKIT_ACP_SESSIONS_DIR` and `~/.labkit/sessions` for labkit's).
 - AG16. By default a turn whose response had thinking but no answer (`Incomplete`) is asked once
   more for its answer (agent-host H15): an answer then reaches the client as `agent_message_chunk`
   and the prompt ends `end_turn`, with no warning logged; with none again the turn ends
   `Incomplete` after that one retry, `end_turn` with no answer message. The feedback is not sent to
-  the client (PJ1). `LABKIT_ACP_RETRIES` sets how many times it is asked (0: never); a value that is
-  not a whole number of 0 or more is logged, and 1 is used.
-- AG18. Each session has a permission mode, which the host keeps: it starts as the launcher says
-  (`LABKIT_ACP_PERMISSION_MODE`, else `default`) and is the option `permission_mode` (category
-  `mode`); a change goes through the gate as a change of model does (AG5): at once between turns,
-  and while a turn runs when it ends. A value that is not a mode is -32602.
+  the client (PJ1). `--retries` (`LABKIT_ACP_RETRIES`) sets how many times it is asked (0: never);
+  a value that is not a whole number of 0 or more ends the launch (AG27).
+- AG18. Each session has a permission mode, which the host keeps: it starts as the session's
+  configuration says (the `mode` of the `permissions` its tool calls list, which the launcher's
+  `--permission-mode` sets; else `default`) and is the option `permission_mode` (category `mode`);
+  a change goes through the gate as a change of model does (AG5): at once between turns, and while
+  a turn runs when it ends. The configured `permissions` follows it (agent-config CF2); every other
+  tool call policy the configuration lists still decides with it. A value that is not a mode is
+  -32602.
 - AG19. The host takes images and embedded resources in a prompt (`promptCapabilities.image`,
   `embeddedContext`): each is put in the session's blob store, kept in its folder (`blobs/`), and
   attached to the input by reference, with its media type and the name its URI ends in; a
@@ -280,10 +287,10 @@ twice.
   plan as a `plan` update (an entry's priority `medium` unless given), and succeeds with the count
   of steps by status. It is of kind `think`: it runs in every permission mode without asking.
 - AG21. A turn makes at most `maxTurnRequests` model requests (1000 when the launcher does not
-  say): the request beyond it is vetoed (`agent-policy` P11), and the prompt ends with the stop
-  reason `max_turn_requests`.
-- AG22. The MCP servers a client names in `session/new`, `session/load` or `session/resume` are
-  started at once (`agent-mcp` MK1), in the entry's scope, which `session/close` closes: their
+  say, `--max-turns` when it does, or what the configuration says): the request beyond it is
+  vetoed (`agent-policy` P11), and the prompt ends with the stop reason `max_turn_requests`.
+- AG22. A session's MCP servers (its configuration's, the client's among them: AG25) are started
+  when `session/new`, `session/load` or `session/resume` makes it, at once (`agent-mcp` MK1), in the entry's scope, which `session/close` closes: their
   processes end with it. A server has `mcpConnectTimeout` (30 seconds unless the launcher says) to
   connect. The tools of those ready are offered after the world's, under `mcp__<server>`; a call is
   shown with its result as the model is sent it (`agent-session` TO1). Once the session opens it
@@ -301,6 +308,25 @@ twice.
   and what it says of the model a session starts with names the brand's variable
   (`<PREFIX>ACP_MODEL`). The launcher's options are the brand's variables (`<PREFIX>ACP_*`), and no
   other brand's.
+- AG25. A session's configuration is read when `session/new`, `session/load` or `session/resume`
+  makes it, in layers (agent-host H20): the host's defaults (`acpDefaults`), the user's file, the
+  session's working folder's files when `--setting-sources` names them, the launcher's
+  `--settings`, `--mcp-config` and flags, then the MCP servers the client names: each replaces the
+  configuration's server of its name whole. A configuration that cannot be used refuses the request
+  (-32603), naming the layer at fault. Its seam lists are the session's (its tool sources aside:
+  the session's are the world's and its MCP servers'); its `commandEnvironment` is what a command
+  run on the local disk is given. What it resolved to is written to the session's folder as
+  `effective-settings.json` (agent-config CF14) at the session's first prompt, or when it is loaded
+  or resumed, with what the host says beside it (the model, the permission mode, the world); a
+  draft writes nothing.
+- AG26. A server the configuration says is required (`required: true`) that is not running once the
+  servers have settled refuses `session/new`, `session/load` and `session/resume` (-32603), naming
+  it and saying how it is; its servers are stopped, and nothing of the session is left open.
+- AG27. Before it serves, the launcher loads what of a session's configuration no session's folder
+  changes (the host's defaults, the user's file, `--settings`, `--mcp-config` and the flags): an
+  option the launcher does not take (`LABKIT_ACP_PERMISSION_MODE=yolo`), or a configuration that
+  cannot be used (`LABKIT_ACP_MAX_TURNS=0`), ends it with exit code 1, said on stderr, with nothing
+  on stdout.
 - AG17. `editorWorld` offers `edit_file` to a client that advertised both `fs` methods, and
   `run_command` to one that advertised `terminal`. `edit_file` reads the file through the editor
   and writes it back with one occurrence of `old_text` replaced; `old_text` that occurs never or
@@ -310,7 +336,7 @@ twice.
   running. Exit code 0 succeeds; any other end fails, its output and how it ended for the model to
   read. Both ask permission in the default mode. A call whose input has properties its tool does
   not take runs without them, its result naming them, unless the launcher says strict
-  (`LABKIT_ACP_STRICT_TOOL_INPUT=1`), when it is refused. A call's title names its command or its path
+  (`--strict-tool-input`, `LABKIT_ACP_STRICT_TOOL_INPUT=1`), when it is refused. A call's title names its command or its path
   (`run_command: ls`, `edit_file: a.txt`), so a permission question says what it asks about. An
   edit's call shows its change as a `diff`, from
   when permission is asked; a command's call shows its `terminal` from when it has one, and when

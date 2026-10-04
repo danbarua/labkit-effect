@@ -14,6 +14,7 @@ import { test, testFolder, testOrigin } from "../../tests/support/test.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { CallId, Seq, type ToolKind, ToolName, TurnId } from "../agent-machine/names.ts";
 import type { EffectRequest } from "../agent-machine/request.ts";
+import type { PermissionMode } from "../agent-policy/permissions.ts";
 import { every, type Policy } from "../agent-policy/policy.ts";
 import { MaxHolds, ModelRequestPolicies, ToolCallPolicies, type ToolSpec, TurnEndHooks } from "../agent-session/contracts.ts";
 import { asText, receivedJson } from "../agent-session/received.ts";
@@ -149,6 +150,22 @@ test("CF2: what the host says, that no file does: whether anyone can be asked, w
     );
   expect(await verdict(true)).toBe("asks");
   expect(await verdict(false)).toStartWith("vetoed: ");
+});
+
+test("CF2: where the host says the session's permission mode, permissions follows it at each call in place of its configured mode", async () => {
+  const configuration = await load([write("user/policies.yml", "toolCalls: [permissions]\nplugins:\n  permissions:\n    mode: dontAsk\n")]);
+  let now: PermissionMode = "default";
+  const verdict = runTest(
+    Effect.gen(function* () {
+      const policies = yield* ToolCallPolicies;
+      // Each call's policies are made from the facts then, as the loop makes them.
+      const decide = Effect.map(Effect.forEach(policies, (entry) => entry.policy(facts())), (made) => verdictOf(every(made), run("c3", "change")));
+      const asked = yield* decide;
+      now = "bypassPermissions";
+      return [asked, yield* decide];
+    }).pipe(Effect.provide(seamLayer(seamListsOf(configuration, { canAsk: true, permissionMode: () => now })))),
+  );
+  expect(await verdict).toEqual(["asks", "runs"]);
 });
 
 test("CF3: a mistake is refused naming the layer that wrote it, where in it, and what is wrong", async () => {

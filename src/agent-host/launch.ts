@@ -37,16 +37,26 @@ import { type Brand, envPrefixOf } from "./brand.ts";
 const keyOf = (flag: string): string => flag.replace(/-([a-z0-9])/g, (_, letter: string) => letter.toUpperCase());
 
 const optional = <A>(flag: Flag.Flag<A>) => flag.pipe(Flag.optional, Flag.map(Option.getOrUndefined));
-const text = (name: string, description: string) => optional(Flag.String(name).pipe(Flag.withDescription(description), Flag.withFallbackConfig(Config.String(keyOf(name)))));
-const toggle = (name: string, description: string) =>
+
+/** A flag of text, read from its variable when not given; undefined when neither says. */
+export const textFlag = (name: string, description: string) =>
+  optional(Flag.String(name).pipe(Flag.withDescription(description), Flag.withFallbackConfig(Config.String(keyOf(name)))));
+
+/** A flag that is on or off, read from its variable when not given (`1`, `true`, `yes`, `on`); off when neither says. */
+export const toggleFlag = (name: string, description: string) =>
   Flag.Boolean(name).pipe(Flag.withDescription(description), Flag.withFallbackConfig(Config.Boolean(keyOf(name))), Flag.withDefault(false));
+
+/** A flag of a whole number, read from its variable when not given; undefined when neither says. */
+export const intFlag = (name: string, description: string) =>
+  optional(Flag.Int(name).pipe(Flag.withDescription(description), Flag.withFallbackConfig(Config.Int(keyOf(name)))));
+
 
 /** The permission modes a host is launched in: `manual` is `default`. */
 const permissionModes = ["default", "manual", "acceptEdits", "dontAsk", "bypassPermissions"] as const;
 
 /** The options both hosts take, each with its variable as its twin. */
 export const launchFlags = {
-  model: text("model", "A well-known model, or provider/model"),
+  model: textFlag("model", "A well-known model, or provider/model"),
   // `plan` and `auto` are not built.
   permissionMode: optional(
     Flag.Literals("permission-mode", permissionModes).pipe(
@@ -56,8 +66,8 @@ export const launchFlags = {
       Flag.withFallbackConfig(Config.Literals(permissionModes, keyOf("permission-mode"))),
     ),
   ),
-  strictToolInput: toggle("strict-tool-input", "Refuse a tool call whose input has properties its tool does not take, rather than run it without them"),
-  maxTurns: optional(Flag.Int("max-turns").pipe(Flag.withDescription("The most model requests one turn makes; the next ends it"), Flag.withFallbackConfig(Config.Int(keyOf("max-turns"))))),
+  strictToolInput: toggleFlag("strict-tool-input", "Refuse a tool call whose input has properties its tool does not take, rather than run it without them"),
+  maxTurns: intFlag("max-turns", "The most model requests one turn makes; the next ends it"),
   maxBudgetUsd: optional(
     Flag.Finite("max-budget-usd").pipe(
       Flag.withDescription("The session's budget in US dollars: once it has cost that much, its next model request ends its turn"),
@@ -72,9 +82,9 @@ export const launchFlags = {
     Flag.optional,
     Flag.map(Option.getOrElse((): ReadonlyArray<string> => [])),
   ),
-  strictMcpConfig: toggle("strict-mcp-config", "Use only the MCP servers --mcp-config names"),
-  settings: text("settings", "Settings: JSON, or a file of JSON or YAML, over the files"),
-  settingSources: text("setting-sources", "Which settings files to read, comma-separated: user, project, local (only user when not given)"),
+  strictMcpConfig: toggleFlag("strict-mcp-config", "Use only the MCP servers --mcp-config names"),
+  settings: textFlag("settings", "Settings: JSON, or a file of JSON or YAML, over the files"),
+  settingSources: textFlag("setting-sources", "Which settings files to read, comma-separated: user, project, local (only user when not given)"),
 };
 
 /** The options a host was launched with. */
@@ -160,15 +170,19 @@ const flagLayer = (flags: ConfigFlags, before: ReadonlyArray<LayerSource>): Laye
   };
 };
 
-/** The layers, in order, for a host run in `project` whose own defaults are `defaults`. */
+/**
+ * The layers, in order, for a host run in `project` whose own defaults are `defaults`. With no
+ * project (a launcher before any session has one), the user's file is the only file read.
+ */
 export const launchLayers = (
-  project: string,
+  project: string | undefined,
   defaults: LayerSource,
   flags: ConfigFlags,
   options: { readonly home?: string; readonly name?: string } = {},
 ): Effect.Effect<ReadonlyArray<LayerSource>, ConfigInvalid, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    const files = yield* policyLayers(project, { ...options, sources: yield* sourcesOf(flags.settingSources) });
+    const sources = yield* sourcesOf(flags.settingSources);
+    const files = yield* policyLayers(project ?? "", { ...options, sources: project === undefined ? sources.filter((source) => source === "user") : sources });
     const settings = flags.settings === undefined ? [] : [yield* givenLayer("--settings", flags.settings)];
     const strict: ReadonlyArray<LayerSource> = flags.strictMcpConfig ? [{ name: "--strict-mcp-config", trusted: true, value: { mcpServers: null } }] : [];
     const mcp = yield* Effect.forEach(flags.mcpConfig, (given) =>
@@ -178,9 +192,9 @@ export const launchLayers = (
     return [...before, flagLayer(flags, before)];
   });
 
-/** The configuration for a host run in `project` whose own defaults are `defaults`, and the layers it was made from. */
+/** The configuration for a host run in `project` (none: H20's) whose own defaults are `defaults`, and the layers it was made from. */
 export const launchConfiguration = (
-  project: string,
+  project: string | undefined,
   defaults: LayerSource,
   flags: ConfigFlags,
   options: { readonly home?: string; readonly name?: string } = {},

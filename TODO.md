@@ -115,9 +115,10 @@ model.
       running, records their states (`McpServerChanged`), and serves `/mcp` and
       `/mcp reconnect <server>`; the CLI starts the servers its configuration names (its files,
       `--mcp-config`), and one marked `required: true` that does not connect keeps the session from
-      opening; `/mcp` in the REPL, with completions. To do: the ACP host reading the configuration
-      (its servers, and `required`); the REPL's completions and hints from a machine of the command
-      line's state; MCP
+      opening; `/mcp` in the REPL, with completions; the ACP host reading each session's
+      configuration, the client's servers over the configuration's by name, a required one that
+      does not connect refusing the session. To do: the REPL's completions and hints from a machine
+      of the command line's state; MCP
       servers reached at a URL, which are not supported at all today: a client for the Streamable
       HTTP transport (and the deprecated HTTP+SSE one), then the ACP host advertising
       `mcpCapabilities.http` and `.sse`; tools a server offers
@@ -142,7 +143,11 @@ model.
 
 - [ ] Trusted folders (Dan, 2026-10-04): a project's configuration is not read until its folder is
       trusted. Until then a project's layer may not name extensions or MCP servers (both run code:
-      agent-config CF7, CF10); once a folder is trusted, its layers may.
+      agent-config CF7, CF10); once a folder is trusted, its layers may. A folder's `.env` is the
+      folder's too: Bun reads it by itself where the agent runs, and the options' variables
+      (agent-host H19: `LABKIT_PERMISSION_MODE`, `LABKIT_SETTING_SOURCES`, `LABKIT_MCP_CONFIG`) can
+      loosen permission or start MCP servers; until the folder is trusted they are not to be read
+      from it.
 - [ ] Turn-end hooks by name, as policies are: a hold recorded from the hook that made it, so
       `retryIncomplete` counts its own holds, not every hook's.
 - [ ] The product's name (Dan is thinking of `whitelabel-agent`): the default brand
