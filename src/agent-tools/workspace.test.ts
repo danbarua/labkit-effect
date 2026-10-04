@@ -108,6 +108,16 @@ test("run_command keeps the last 256 KiB of a long output, read as it comes", as
   expect(Buffer.byteLength(output)).toBeLessThan(256 * 1024 + 200);
 });
 
+test("run_command cuts a long output at a character boundary: a cut that would split a multi-byte character starts after it", async () => {
+  // 140,000 two-byte characters and a newline: 280,001 bytes. Keeping the last 262,144 bytes would start
+  // inside a character, so the kept text starts at the next character instead.
+  const output = await call("run_command", { command: `awk 'BEGIN { for (i = 0; i < 140000; i++) printf "é"; print "" }'` });
+  const kept = output.slice("[The output's beginning was cut: its last 256 KiB follow.]\n".length);
+  expect(output).toStartWith("[The output's beginning was cut: its last 256 KiB follow.]\n");
+  expect(kept).toStartWith("éé");
+  expect(output).not.toContain("\uFFFD");
+});
+
 test("list_dir lists one folder, a folder's name ending with /", async () => {
   expect(await call("list_dir", { path: "." })).toBe("big.txt\nsrc/");
   expect(await call("list_dir", { path: "src" })).toBe("a.txt");
