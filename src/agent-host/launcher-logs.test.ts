@@ -36,7 +36,7 @@ const linesOf = async (file: string): Promise<Array<Line>> =>
 const launched = async (options: Partial<LauncherLogOptions> & { readonly dir: string }, program: Effect.Effect<unknown>): Promise<Array<string>> => {
   const stderr: Array<string> = [];
   const console = { ...globalThis.console, error: (...args: ReadonlyArray<unknown>) => void stderr.push(args.map(String).join(" ")) };
-  const layer = LauncherLogs({ level: "Debug", maxBytes: 1024 * 1024, backups: 2, launchId: "test", keep: 20, secrets: [], ...options });
+  const layer = LauncherLogs({ level: "Debug", maxBytes: 1024 * 1024, backups: 2, launchId: "test", keep: 20, secrets: { values: [], tooShort: [] }, ...options });
   await runTest(program.pipe(Effect.provide(layer.pipe(Layer.provide(BunServices.layer))), Effect.provideService(Console.Console, console)));
   return stderr;
 };
@@ -71,19 +71,27 @@ test.each([
   expect((await linesOf(fileOf(dir))).map((line) => line.level)).toEqual([...written]);
 });
 
-test("H12: the environment gives the folder, level, size and backups; unset, the defaults; the secrets are the values of the variables named for them", () => {
-  expect(launcherLogOptionsFrom({})).toMatchObject({ dir: join(homedir(), ".labkit", "logs"), level: "Debug", maxBytes: 10 * 1024 * 1024, backups: 4, keep: 20, secrets: [] });
+test("H12 H14: the environment gives the folder, level, size and backups; unset, the defaults; the secrets are the values of the credentials' variables, those under 8 characters set aside", () => {
+  expect(launcherLogOptionsFrom({})).toMatchObject({ dir: join(homedir(), ".labkit", "logs"), level: "Debug", maxBytes: 10 * 1024 * 1024, backups: 4, keep: 20, secrets: { values: [], tooShort: [] } });
   const options = launcherLogOptionsFrom({
     LABKIT_ACP_LOG_DIR: "/tmp/acp-logs",
     LABKIT_ACP_LOG_LEVEL: "WARNING",
     LABKIT_ACP_LOG_MAX_BYTES: "2048",
     LABKIT_ACP_LOG_BACKUPS: "0",
-    OPENAI_API_KEY: "sk-1",
-    GITHUB_TOKEN: "gh-2",
+    OPENAI_API_KEY: "sk-proj-0001",
+    GITHUB_TOKEN: "ghp-00000002",
+    GITHUB_PAT: "github_pat_0003",
+    MAX_TOKENS: "4096",
     DB_PASSWORD: "",
     HOME_DIR: "/home/x",
   });
-  expect(options).toMatchObject({ dir: "/tmp/acp-logs", level: "Warn", maxBytes: 2048, backups: 0, secrets: ["sk-1", "gh-2"] });
+  expect(options).toMatchObject({
+    dir: "/tmp/acp-logs",
+    level: "Warn",
+    maxBytes: 2048,
+    backups: 0,
+    secrets: { values: ["sk-proj-0001", "ghp-00000002", "github_pat_0003"], tooShort: [{ name: "MAX_TOKENS", length: 4 }] },
+  });
   expect(options.launchId).not.toBe(launcherLogOptionsFrom({}).launchId);
 });
 
@@ -162,7 +170,7 @@ test("H13: at start the newest `keep` stopped launches' files stay, their backup
 test("H14: an environment secret is redacted in the message, an annotation and a cause, and a credential field whatever its value; the error's text stays", async () => {
   const dir = `${testFolder()}/logs`;
   await launched(
-    { dir, secrets: ["tok-4", "sk-secret-123"] },
+    { dir, secrets: { values: ["tok-4", "sk-secret-123"], tooShort: [] } },
     Effect.logWarning(
       "calling with sk-secret-123",
       { headers: { authorization: "Bearer plain-credential", inputTokens: 5 } },
@@ -178,6 +186,14 @@ test("H14: an environment secret is redacted in the message, an annotation and a
   });
   expect(record!.cause).toContain("Error: refused [redacted]56");
   expect(record!.cause).toContain("[cause]: Error: inner [redacted]");
+});
+
+test("H14: the secrets not looked for are said once at start, by name and length, never their value", async () => {
+  const dir = `${testFolder()}/logs`;
+  await launched({ dir, secrets: { values: [], tooShort: [{ name: "MAX_TOKENS", length: 4 }] } }, Effect.logInfo("started"));
+  const [said, started] = await linesOf(fileOf(dir));
+  expect(said).toMatchObject({ level: "warning", message: ["host_logs.secrets_not_looked_for", { variables: [{ name: "MAX_TOKENS", length: 4 }], shortest: 8 }] });
+  expect(started).toMatchObject({ level: "info", message: "started" });
 });
 
 test("H14: a folder that cannot be made is said once on stderr, and every record goes to stderr; nothing throws", async () => {

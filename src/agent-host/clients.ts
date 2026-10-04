@@ -25,7 +25,7 @@ export const Clients = Layer.unwrap(
       requests.push(
         anthropicRequests().pipe(
           Effect.map((request) => [ProviderName.make("anthropic"), request] as const),
-          Effect.provide(AnthropicClient.layer({ apiKey: Redacted.make(anthropic) }).pipe(Layer.provide(http))),
+          Effect.provide(AnthropicClient.layer({ apiKey: anthropic }).pipe(Layer.provide(http))),
         ),
       );
     const openai = keyOf("openai");
@@ -33,7 +33,7 @@ export const Clients = Layer.unwrap(
       requests.push(
         openAiRequests().pipe(
           Effect.map((request) => [ProviderName.make("openai"), request] as const),
-          Effect.provide(OpenAiClient.layer({ apiKey: Redacted.make(openai) }).pipe(Layer.provide(http))),
+          Effect.provide(OpenAiClient.layer({ apiKey: openai }).pipe(Layer.provide(http))),
         ),
       );
     const xai = keyOf("xai");
@@ -41,7 +41,7 @@ export const Clients = Layer.unwrap(
       requests.push(
         xAiRequests().pipe(
           Effect.map((request) => [ProviderName.make("xai"), request] as const),
-          Effect.provide(xAiClient(Redacted.make(xai)).pipe(Layer.provide(http))),
+          Effect.provide(xAiClient(xai).pipe(Layer.provide(http))),
         ),
       );
     requests.push(

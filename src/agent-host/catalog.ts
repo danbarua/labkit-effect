@@ -4,7 +4,7 @@
  * added beside these; `KeyedAndLocalCatalog` has the two there are.
  */
 
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer, Redacted } from "effect";
 import { ModelName, ProviderName } from "../agent-machine/names.ts";
 import { wellKnownModels } from "../agent-session/configuration/well-known-models.gen.ts";
 import { localModels, localServer } from "./local-server.ts";
@@ -15,11 +15,11 @@ export const known: Readonly<Record<string, Readonly<Record<string, unknown>>>> 
 /** The environment variable that holds each provider's key; a local server needs none. */
 export const keyVariables: Readonly<Record<string, string>> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", xai: "XAI_API_KEY" };
 
-/** The key the environment holds for `provider`; an empty one is none. */
-export const keyOf = (provider: string): string | undefined => {
+/** The key the environment holds for `provider`, as `Redacted`: a log or a string of it says `<redacted>`. An empty one is none. */
+export const keyOf = (provider: string): Redacted.Redacted | undefined => {
   const variable = keyVariables[provider];
   const key = variable === undefined ? undefined : process.env[variable];
-  return key === undefined || key === "" ? undefined : key;
+  return key === undefined || key === "" ? undefined : Redacted.make(key);
 };
 
 /** A model to ask, by its provider and its name. */

@@ -113,10 +113,15 @@ warning, error and fatal records alone.
   the bytes left out (`omittedBytes`). At start, the files of the stopped launches past the newest
   `keep`, by the time their files were last written, are removed with their backups; a launch whose
   pid runs keeps its files and does not count.
-- H14. The non-empty values of the environment variables whose names hold API_KEY, TOKEN, SECRET,
-  PASSWORD or CREDENTIAL are `[redacted]` wherever they occur in a record, its cause included, and so
-  is the value of a credential field (`authorization`, `apiKey`, `password`, an access token, a
-  cookie); the rest of an error's text stays. A folder or file that cannot be written is said once
+- H14. Every log a host writes (the launcher's; the CLI's, to a file or stderr; a test's) leaves out
+  the environment's secrets (`redaction.ts`): the values of the variables whose names are
+  credentials' (agent-process PE1: `OPENAI_API_KEY`, `GITHUB_PAT`) are `[redacted]` wherever they
+  occur in a record, its annotations and cause included, and so is the value of a credential field
+  (`authorization`, `apiKey`, `password`, an access token, a cookie); the rest of an error's text
+  stays. A value under 8 characters is not looked for, as replacing it would cut ordinary text;
+  those are said once when the log is made, a warning (`host_logs.secrets_not_looked_for`) naming
+  each variable and its length, never its value. A provider's key is held as `Redacted` from the
+  environment to its client (`keyOf`): a log or a string of it says `<redacted>`. A folder or file that cannot be written is said once
   on stderr, and that record and every one after go to stderr: the launcher does not die for its log.
 
 ## Turn ends

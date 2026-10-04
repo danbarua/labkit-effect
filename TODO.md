@@ -333,6 +333,13 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 
 ## Later: worth doing, not core
 
+- [ ] Secrets in data the host does not hold (Dan, 2026-10-04): a provider's error body, an MCP
+      server's stderr, a command's or a tool's output. Built: every log leaves out the values of
+      the environment's credentials and of credential fields (agent-host H14). To do: secrets that
+      are not the environment's values (keys and tokens found by their patterns, as a secret
+      scanner finds them); the session's facts and what the model is sent, which are not redacted;
+      and credentials' values under 8 characters, which the logs do not look for.
+
 - [ ] Caching, tuned with compaction. Built: the `cache` setting (off, 5m, 1h); Anthropic reads
       nearly every request from the cache with it (FizzBuzz, 20 turns: 27,556 of 29,032 input
       tokens). To do: OpenAI reported 0 cached tokens in every FizzBuzz run; the runs' input token counts

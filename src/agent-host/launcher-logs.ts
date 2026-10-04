@@ -6,6 +6,7 @@
  */
 
 import { type Brand, brandFrom, envPrefixOf, folderOf } from "./brand.ts";
+import { redactedValue, redactorOf, type Secrets, sayingTooShort, secretsOf } from "./redaction.ts";
 import { appendFileSync, existsSync, renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -24,8 +25,8 @@ export interface LauncherLogOptions {
   readonly launchId: string;
   /** How many stopped launches' files are kept at start, the newest by modification time. */
   readonly keep: number;
-  /** Values replaced by `[redacted]` wherever they occur in a record. */
-  readonly secrets: ReadonlyArray<string>;
+  /** What a record leaves out (`redaction.ts`); those not looked for are said at start. */
+  readonly secrets: Secrets;
 }
 
 /** A record's line is cut past this many bytes of UTF-8. */
@@ -51,11 +52,6 @@ const levelNames: Record<LogLevel.LogLevel, string> = {
   None: "none",
 };
 
-const secretVariable = /API_?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i;
-
-/** Fields whose value is a credential whatever it is. Anchored: `inputTokens` is not one. */
-const secretField =
-  /^(?:api[-_]?key|x[-_]api[-_]key|authorization|proxy[-_]authorization|password|client[-_]?secret|access[-_]?token|refresh[-_]?token|id[-_]?token|cookie|set-cookie)$/i;
 
 /** A whole number at least `least`, or undefined for anything else (an empty string is not 0). */
 const wholeNumber = (value: string | undefined, least: number): number | undefined => {
@@ -68,8 +64,8 @@ const wholeNumber = (value: string | undefined, least: number): number | undefin
  * The options the environment gives, the brand's prefix before each (`LABKIT_` for labkit's):
  * `ACP_LOG_DIR` (`~/.<brand>/logs`), `ACP_LOG_LEVEL` (`debug`; one of trace, debug, info, warning,
  * error, fatal), `ACP_LOG_MAX_BYTES` (10 MiB), `ACP_LOG_BACKUPS` (4). A value that does not read falls
- * back to the default. The secrets are the non-empty values of the variables whose names hold
- * API_KEY, TOKEN, SECRET, PASSWORD or CREDENTIAL; the launch id is minted.
+ * back to the default. The secrets are the environment's (`redaction.ts` `secretsOf`); the launch id
+ * is minted.
  */
 export const launcherLogOptionsFrom = (env: Readonly<Record<string, string | undefined>>, brand: Brand = brandFrom(env)): LauncherLogOptions => {
   const prefix = `${envPrefixOf(brand)}ACP_LOG_`;
@@ -82,42 +78,8 @@ export const launcherLogOptionsFrom = (env: Readonly<Record<string, string | und
     backups: wholeNumber(backups, 0) ?? 4,
     launchId: crypto.randomUUID(),
     keep: 20,
-    secrets: Object.entries(env).flatMap(([name, value]) => (value && secretVariable.test(name) ? [value] : [])),
+    secrets: secretsOf(env),
   };
-};
-
-/** Replaces each secret in a text, the longest first so a secret holding another goes whole. */
-const redactorOf = (secrets: ReadonlyArray<string>) => {
-  const ordered = [...new Set(secrets.filter((secret) => secret !== ""))].sort((a, b) => b.length - a.length);
-  return (text: string): string => ordered.reduce((redacted, secret) => redacted.replaceAll(secret, "[redacted]"), text);
-};
-
-/** A value as JSON holds it, redacted: errors with their stack and causes, circular references named. */
-const plain = (value: unknown, redact: (text: string) => string, seen = new WeakSet<object>()): unknown => {
-  if (typeof value === "string") return redact(value);
-  if (typeof value === "bigint") return value.toString();
-  if (typeof value !== "object" || value === null) return value;
-  if (seen.has(value)) return "[Circular]";
-  seen.add(value);
-  try {
-    if (value instanceof Date) return Number.isNaN(value.getTime()) ? String(value) : value.toISOString();
-    if (Array.isArray(value)) return value.map((item) => plain(item, redact, seen));
-    if (value instanceof Map || value instanceof Set) return [...value].map((item) => plain(item, redact, seen));
-    if (!(value instanceof Error) && "toJSON" in value && typeof value.toJSON === "function") return plain(value.toJSON(), redact, seen);
-    const out: Record<string, unknown> =
-      value instanceof Error
-        ? {
-            name: redact(value.name),
-            message: redact(value.message),
-            ...(value.stack === undefined ? {} : { stack: redact(value.stack) }),
-            ...(value.cause === undefined ? {} : { cause: plain(value.cause, redact, seen) }),
-          }
-        : {};
-    for (const [key, item] of Object.entries(value)) out[redact(key)] = secretField.test(key) ? "[redacted]" : plain(item, redact, seen);
-    return out;
-  } finally {
-    seen.delete(value);
-  }
 };
 
 /** The UTF-8 bytes of the code point `point`. */
@@ -156,8 +118,8 @@ const lineOf = (log: Logger.Options<unknown>, redact: (text: string) => string):
   const record = {
     time,
     level,
-    annotations: plain(log.fiber.getRef(References.CurrentLogAnnotations), redact),
-    message: plain(parts.length === 1 ? parts[0] : parts, redact),
+    annotations: redactedValue(log.fiber.getRef(References.CurrentLogAnnotations), redact),
+    message: redactedValue(parts.length === 1 ? parts[0] : parts, redact),
     ...(log.cause.reasons.length > 0 ? { cause: redact(Cause.pretty(log.cause)) } : {}),
   };
   return withinLimit(JSON.stringify(record), time, level);
@@ -214,7 +176,8 @@ const removeOldLaunches = (dir: string, keep: number) =>
 /**
  * A logger writing each record at `options.level` and above as a line of
  * `<dir>/acp-<pid>-<launchId>.jsonl`, and that level as the lowest logged. At start it says the
- * file's path on stderr, and removes old launches' files. A write is a synchronous append, so a
+ * file's path on stderr, removes old launches' files, and logs the secrets it does not look for
+ * (`redaction.ts`). A write is a synchronous append, so a
  * crash keeps the lines before it. A record that would take the file past `maxBytes` rotates it
  * first. The first failure to write is said on stderr; that line and every one after go to stderr.
  */
@@ -223,7 +186,7 @@ export const LauncherLogs = (options: LauncherLogOptions): Layer.Layer<never, ne
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const redact = redactorOf(options.secrets);
+      const redact = redactorOf(options.secrets.values);
       const file = path.join(options.dir, `acp-${process.pid}-${options.launchId}.jsonl`);
       const cannotWrite = (error: unknown) => redact(`ACP log: cannot write ${file} (${String(error)}); logging to stderr`);
       yield* Console.error(`ACP log: ${file}`);
@@ -260,6 +223,7 @@ export const LauncherLogs = (options: LauncherLogOptions): Layer.Layer<never, ne
         }
         console.error(line);
       });
-      return Layer.mergeAll(Logger.layer([logger]), Layer.succeed(References.MinimumLogLevel, options.level));
+      const logs = Layer.mergeAll(Logger.layer([logger]), Layer.succeed(References.MinimumLogLevel, options.level));
+      return sayingTooShort(options.secrets, logs);
     }),
   );
