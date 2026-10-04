@@ -158,24 +158,40 @@ export const defaultClientInfo: ClientInfo = { name: defaultBrand.name, version:
  */
 export const connect = (name: string, pipes: ServerPipes, roots: ReadonlyArray<Root>, clientInfo: ClientInfo = defaultClientInfo): Effect.Effect<McpConnection, McpFailed, Scope.Scope> =>
   Effect.gen(function* () {
-    const server = { name };
-    const failed = (reason: string) => (cause: unknown) => new McpFailed({ server: name, reason, cause });
-    const handle = pipes;
     const stdin = yield* Queue.unbounded<Uint8Array>();
     yield* Stream.fromQueue(stdin).pipe(
-      Stream.run(handle.stdin),
-      Effect.catch((cause) => Effect.logWarning(logKeys.server.stdinClosed, { server: server.name, cause: String(cause) })),
+      Stream.run(pipes.stdin),
+      Effect.catch((cause) => Effect.logWarning(logKeys.server.stdinClosed, { server: name, cause: String(cause) })),
       Effect.forkScoped,
     );
-    yield* handle.stderr.pipe(
+    yield* pipes.stderr.pipe(
       Stream.decodeText,
       Stream.splitLines,
-      Stream.runForEach((line) => Effect.logInfo(logKeys.server.stderr, { server: server.name, line })),
+      Stream.runForEach((line) => Effect.logInfo(logKeys.server.stderr, { server: name, line })),
       Effect.ignore,
       Effect.forkScoped,
     );
+    return yield* connectOver(name, wireOf(pipes.stdout, stdin), roots, clientInfo);
+  });
+
+/**
+ * Connects to the server named `name` over `wire`, whatever carries it, in the scope given:
+ * `initialize`, with `clientInfo`, then `notifications/initialized`. `initialized` is given what the
+ * server answered to `initialize` before anything more is sent: a transport that sends the version
+ * agreed with every request learns it there.
+ */
+export const connectOver = (
+  name: string,
+  wire: Wire,
+  roots: ReadonlyArray<Root>,
+  clientInfo: ClientInfo = defaultClientInfo,
+  initialized: (result: McpSchema.InitializeResult) => Effect.Effect<void> = () => Effect.void,
+): Effect.Effect<McpConnection, McpFailed, Scope.Scope> =>
+  Effect.gen(function* () {
+    const server = { name };
+    const failed = (reason: string) => (cause: unknown) => new McpFailed({ server: name, reason, cause });
     const peer = yield* Peer.make({
-      wire: wireOf(handle.stdout, stdin),
+      wire,
       serve: serves,
       call: calls,
       notify: tells,
@@ -193,15 +209,16 @@ export const connect = (name: string, pipes: ServerPipes, roots: ReadonlyArray<R
           "notifications/progress": (params) => Effect.logInfo(logKeys.server.progress, { server: server.name, ...params }),
         }),
     });
-    const initialized = yield* peer.client
+    const answered = yield* peer.client
       .initialize({ protocolVersion, capabilities: { roots: { listChanged: false } }, clientInfo: { name: clientInfo.name, version: clientInfo.version } })
       .pipe(Effect.mapError(failed("initialize failed")));
     yield* Effect.logInfo(logKeys.server.initialized, {
       server: server.name,
       offered: protocolVersion,
-      answered: initialized.protocolVersion,
-      serverInfo: initialized.serverInfo,
+      answered: answered.protocolVersion,
+      serverInfo: answered.serverInfo,
     });
+    yield* initialized(answered);
     yield* peer.notify("notifications/initialized", undefined);
 
     const tools: McpConnection["tools"] = Effect.gen(function* () {
@@ -216,5 +233,5 @@ export const connect = (name: string, pipes: ServerPipes, roots: ReadonlyArray<R
     });
     const call: McpConnection["call"] = (name, args) =>
       peer.client["tools/call"]({ name, arguments: args }).pipe(Effect.mapError(failed(`tools/call ${name} failed`)));
-    return { initialized, tools, call, closed: peer.closed };
+    return { initialized: answered, tools, call, closed: peer.closed };
   });
