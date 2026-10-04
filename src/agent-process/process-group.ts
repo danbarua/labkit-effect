@@ -6,17 +6,23 @@
  * session's scope all end it that way. What a consumer does with a run's input and output (`onRun`)
  * runs in the run's scope, and ends with it.
  *
+ * A run that ends by itself is `Exited` at once; what it wrote is read to its end (`onRun` finishes,
+ * for `consumerGrace` at most) before its scope closes, which ends what it left running.
+ *
  * A run is given this process's environment without the variables that hold credentials
  * (`environment.ts`), and the command's own `env` over it. Every change of state is logged, with the
  * group's name and everything the state says, and each run's environment by the names left out and
  * set, never their values.
  */
 
-import { Effect, Exit, Scope, Semaphore, Stream, SubscriptionRef } from "effect";
+import { Effect, Exit, Fiber, Scope, Semaphore, Stream, SubscriptionRef } from "effect";
 import { ChildProcess, type ChildProcessSpawner } from "effect/process";
 import { withoutCredentials } from "./environment.ts";
 import { logKeys } from "./log-keys.ts";
 import { initialProcessState, type ProcessEffect, type ProcessEvent, type ProcessState, stepProcess } from "./machine.ts";
+
+/** How long, once a run has ended by itself, what it gave `onRun` may go on before its scope closes. */
+export const consumerGrace = "2 seconds";
 
 export interface ProcessCommand {
   /** What the group is called in the log. */
@@ -81,9 +87,11 @@ export const makeProcessGroup = (
         }
         const handle = started.success;
         yield* dispatch({ _tag: "Started", run, pid: handle.pid });
-        yield* Effect.forkIn(onRun(run, handle).pipe(Scope.provide(runScope)), runScope);
+        const consumer = yield* Effect.forkIn(onRun(run, handle).pipe(Scope.provide(runScope)), runScope);
         const exit = yield* Effect.result(handle.exitCode);
         yield* dispatch({ _tag: "Ended", run, code: exit._tag === "Success" ? exit.success : undefined, signal: undefined });
+        // What the run wrote before it ended is read to its end before the run's scope closes, for a while at most.
+        yield* Fiber.await(consumer).pipe(Effect.timeoutOption(consumerGrace));
         yield* ended(run);
       }).pipe(Effect.forkIn(scope), Effect.asVoid);
 

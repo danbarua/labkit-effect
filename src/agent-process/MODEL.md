@@ -27,7 +27,8 @@ nothing of what a process is for.
   one changes nothing. Asked to start while a run is starting or running, nothing changes; asked to
   start again, the run there is is ended and another started; asked to stop, the run there is is
   ended and the group is `Idle`.
-- PG2. A run that ends by itself is `Exited`, with its exit code.
+- PG2. A run that ends by itself is `Exited`, with its exit code. What it wrote is read to its end
+  (`onRun` finishes, for two seconds at most) before its scope closes.
 - PG3. A command that cannot be started is `Failed`, with the reason.
 - PG4. Stopping a run ends its whole group, what it started in the background included.
 - PG5. Closing the scope a group was made in ends its group.
