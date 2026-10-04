@@ -22,7 +22,7 @@
  * and never written again.
  */
 
-import { Context, DateTime, Effect, Layer, Ref } from "effect";
+import { Array as Arr, Context, DateTime, Effect, Layer, Option, Ref } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { PolicyName, ProviderName, SessionId, Seq } from "../agent-machine/names.ts";
 import { WindowId } from "../agent-machine/names.ts";
@@ -200,11 +200,7 @@ export const summaryMessage = (summaries: ReadonlyArray<WindowSummary>): Context
 
 /** The position in `facts` of the last fact that `is`, or -1. */
 function lastAt(facts: ReadonlyArray<Fact>, is: (fact: Fact) => boolean): number {
-  for (let at = facts.length - 1; at >= 0; at--) {
-    const fact = facts[at];
-    if (fact !== undefined && is(fact)) return at;
-  }
-  return -1;
+  return Option.getOrElse(Arr.findLastIndex(facts, is), () => -1);
 }
 
 export const CompactedConversation = Layer.effect(

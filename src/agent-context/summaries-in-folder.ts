@@ -10,7 +10,7 @@
  * a defect: the record of summaries cannot be kept.
  */
 
-import { DateTime, Effect, FileSystem, Layer, Path } from "effect";
+import { Array as Arr, DateTime, Effect, FileSystem, Layer, Order, Path } from "effect";
 import { ProviderName, SessionId, WindowId } from "../agent-machine/names.ts";
 import { asText, receivedJsonText, receivedText } from "../agent-session/received.ts";
 import { Summaries } from "./compaction.ts";
@@ -24,6 +24,12 @@ const extensions = new Map([
 /** A time as it goes in a file name: ISO 8601 with the colons as hyphens. */
 const stamped = (time: DateTime.Utc): string => DateTime.formatIso(time).replaceAll(":", "-");
 const unstamped = (stamp: string): string => stamp.replace(/T(\d\d)-(\d\d)-(\d\d)/, "T$1:$2:$3");
+
+/** Summaries by the time they were written, then by their number within their kind. */
+const writtenOrder: Order.Order<readonly [number, WindowSummary]> = Order.combine(
+  Order.mapInput(DateTime.Order, ([, summary]) => summary.writtenAt),
+  Order.mapInput(Order.Number, ([number]) => number),
+);
 
 export const SummariesInFolder = (folder: string) =>
   Layer.effect(
@@ -60,16 +66,13 @@ export const SummariesInFolder = (folder: string) =>
             const kinds = yield* fs.readDirectory(path.join(folder, session));
             return (yield* Effect.forEach(kinds, (kind) =>
               fs.readDirectory(path.join(folder, session, kind)).pipe(
-                Effect.flatMap((names) => Effect.forEach([...names].sort(), (name) => read(session, kind, name))),
+                Effect.flatMap((names) => Effect.forEach(Arr.sort(names, Order.String), (name) => read(session, kind, name))),
               ),
             )).flat();
           }),
         );
         // In the order written: by time, then by number within a kind.
-        return all
-          .flat()
-          .sort(([a, first], [b, second]) => DateTime.toEpochMillis(first.writtenAt) - DateTime.toEpochMillis(second.writtenAt) || a - b)
-          .map(([, summary]) => summary);
+        return Arr.sort(all.flat(), writtenOrder).map(([, summary]) => summary);
       }).pipe(Effect.orDie);
 
       const record = (summary: WindowSummary) =>
