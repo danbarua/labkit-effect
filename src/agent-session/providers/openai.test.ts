@@ -3,7 +3,10 @@
 import { afterAll, expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
 import { Effect, Layer } from "effect";
+import { ModelName, ProviderName, TurnId } from "../../agent-machine/names.ts";
 import type { Observation } from "../../agent-machine/observation.ts";
+import { ModelClient } from "../contracts.ts";
+import { asText } from "../received.ts";
 import { BoringModelProvider } from "../../../tests/support/boring.ts";
 import { CountingTurns } from "../turns.ts";
 import { openSession } from "../loop.ts";
@@ -160,4 +163,30 @@ test("output items become parts: text, calls to any tool name, and everything el
   });
   const ended = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ToolEnded");
   expect(ended as unknown).toMatchObject({ observation: { call: "call_9", outcome: { _tag: "Failed", reason: { _tag: "NotFound" } } } });
+});
+
+/** A Responses stream of one event. */
+const streamOf = (event: Record<string, unknown>) => () =>
+  new Response(`event: ${String(event["type"])}\ndata: ${JSON.stringify(event)}\n\n`, { headers: { "content-type": "text/event-stream" } });
+
+test.each([
+  ["a response.failed rate_limit_exceeded", { type: "response.failed", response: { error: { code: "rate_limit_exceeded", message: "Slow down." } } }, "RateLimitError"],
+  ["a response.failed server_error", { type: "response.failed", response: { error: { code: "server_error", message: "Oops." } } }, "InternalProviderError"],
+  ["a response.failed of another code", { type: "response.failed", response: { error: { code: "invalid_prompt", message: "No." } } }, "UnknownError"],
+  ["an error event rate_limit_exceeded", { type: "error", code: "rate_limit_exceeded", message: "Slow down." }, "RateLimitError"],
+])("a failure the stream reports is the error its code stands for: %s", async (_, event, reason) => {
+  const provider = recordingServer([streamOf(event)]);
+  stops.push(provider.stop);
+  const responded = await runTest(
+    Effect.gen(function* () {
+      const client = yield* ModelClient;
+      return yield* client.respond(
+        { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") },
+        { system: undefined, tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "Hello" }] }] },
+        TurnId.make("turn-1"),
+      );
+    }).pipe(Effect.provide(OpenAiModelClient.pipe(Layer.provide(openAiAt(provider.url))))),
+  );
+  if (responded._tag !== "ModelFailed") throw new Error(`expected ModelFailed, got ${responded._tag}`);
+  expect((JSON.parse(asText(responded.error)) as { readonly reason: { readonly _tag: string } }).reason._tag).toBe(reason);
 });

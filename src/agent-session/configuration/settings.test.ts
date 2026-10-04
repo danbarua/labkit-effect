@@ -141,6 +141,11 @@ test("OpenAI: effort and a summary go into reasoning; off is effort none; when t
   });
 });
 
+test("OpenAI: the adjustments are the cache's, then thinking's, then effort's", () => {
+  const { adjusted } = openAiSettings({ cache: "off", thinking: "between_tools", effort: "max" }, ["low", "medium", "high"]);
+  expect(adjusted.map((each) => each.adjusted._tag)).toEqual(["Cache", "Thinking", "Effort"]);
+});
+
 test("the cache: Anthropic marks the request for five minutes or an hour, OpenAI keeps it 24 hours when asked for an hour and cannot turn it off", () => {
   expect(anthropic("claude-sonnet-5-5", { cache: "off" }).fields).toEqual({});
   expect(anthropic("claude-sonnet-5-5", { cache: "5m" }).fields).toEqual({ cache_control: { type: "ephemeral" } });

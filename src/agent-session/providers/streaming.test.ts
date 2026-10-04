@@ -91,6 +91,15 @@ test("a block still arriving when the stream ends is not part of the message", (
   expect(cut(state)).toEqual(["tool_use"]);
 });
 
+test("the blocks still arriving when the stream ends are named in the order of their index, not the order they started", () => {
+  const { state } = fold([
+    started,
+    { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "toolu_1", name: "add", input: {} } },
+    { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+  ]);
+  expect(cut(state)).toEqual(["text", "tool_use"]);
+});
+
 test("the stream's own error, and a delta of a type not known, are reported by the machine", () => {
   const { failed, notApplied, state } = fold([
     started,

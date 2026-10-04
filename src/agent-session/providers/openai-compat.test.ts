@@ -3,7 +3,8 @@
 import { afterAll, expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
 import { Effect, Layer, Logger } from "effect";
-import { ModelName, ProviderName, ThinkingText, TurnId } from "../../agent-machine/names.ts";
+import { CallId, ModelName, ProviderName, ThinkingText, ToolName, TurnId } from "../../agent-machine/names.ts";
+import { ModelStream, type Streamed } from "../model-stream.ts";
 import { ModelClient, type ModelContext } from "../contracts.ts";
 import { logKeys } from "../log-keys.ts";
 import { receivedJson } from "../received.ts";
@@ -328,4 +329,112 @@ test("a stream that ends with no finish_reason was cut short: the request fails,
   expect(facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelFailed") as unknown).toMatchObject({
     observation: { failure: expect.stringContaining("The stream ended with no finish_reason") },
   });
+});
+
+const boringTarget = { provider: ProviderName.make("boring"), model: ModelName.make("boring-1") };
+const hello: ModelContext = { system: undefined, tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "Hello" }] }] };
+const streamedChunk = (delta: unknown, finish_reason: string | null = null) => ({ id: "c1", choices: [{ index: 0, delta, finish_reason }] });
+const callDelta = (call: Record<string, unknown>) => ({ tool_calls: [call] });
+
+/** One request whose response is `chunks`: what the client passed on as it streamed, and the observation it made. */
+async function streamed(chunks: ReadonlyArray<unknown>) {
+  const provider = recordingServer([() => chatChunks(chunks)]);
+  stops.push(provider.stop);
+  const passed: Array<Streamed> = [];
+  const responded = await runTest(
+    Effect.gen(function* () {
+      const client = yield* ModelClient;
+      return yield* client.respond(boringTarget, hello, TurnId.make("turn-1"));
+    }).pipe(
+      Effect.provideService(ModelStream, (each) =>
+        Effect.sync(() => {
+          passed.push(each);
+        }),
+      ),
+      Effect.provide(OpenAiCompatModelClient.pipe(Layer.provide(openAiCompatAt(provider.url)))),
+    ),
+  );
+  if (responded._tag !== "ModelResponded") throw new Error(`expected ModelResponded, got ${responded._tag}`);
+  return {
+    parts: responded.parts,
+    passedCalls: passed.flatMap((each) => (each._tag === "Part" && each.part._tag === "ToolCall" ? [String(each.part.call)] : [])),
+  };
+}
+
+const add = (id: string, index: number | undefined, a: number) => ({
+  ...(index === undefined ? {} : { index }),
+  id,
+  type: "function",
+  function: { name: "add", arguments: JSON.stringify({ a, b: a }) },
+});
+
+test("calls are passed on once each: those a later call completes in the order they arrived, those left at the end in index order; the message holds them in index order", async () => {
+  const { parts, passedCalls } = await streamed([
+    streamedChunk({ role: "assistant", ...callDelta(add("call_b", 1, 2)) }),
+    streamedChunk(callDelta(add("call_a", 0, 1))),
+    streamedChunk(callDelta(add("call_d", 3, 4))),
+    streamedChunk(callDelta(add("call_c", 2, 3))),
+    streamedChunk({}, "tool_calls"),
+  ]);
+  expect(passedCalls).toEqual(["call_b", "call_a", "call_c", "call_d"]);
+  expect(parts.flatMap((part) => (part._tag === "ToolCall" ? [String(part.call)] : []))).toEqual(["call_a", "call_b", "call_c", "call_d"]);
+});
+
+test("a call's delta with no index is the call its id names; the call keeps its first id; arguments of null add nothing", async () => {
+  const { parts } = await streamed([
+    streamedChunk({ role: "assistant", ...callDelta({ index: 0, id: "call_1", type: "function", function: { name: "add", arguments: '{"a":2,' } }) }),
+    streamedChunk(callDelta({ id: "call_1", function: { arguments: '"b":3}' } })),
+    streamedChunk(callDelta({ index: 0, id: "call_2", function: { arguments: null } })),
+    streamedChunk({}, "tool_calls"),
+  ]);
+  expect(parts.filter((part) => part._tag === "ToolCall") as unknown).toMatchObject([{ _tag: "ToolCall", call: "call_1", tool: "add", input: json({ a: 2, b: 3 }) }]);
+});
+
+test("a field's delta of null adds nothing to it, and text before a list of chunks is the list's first text chunk", async () => {
+  const { parts } = await streamed([
+    streamedChunk({ role: "assistant", reasoning_content: "Add them.", content: "Hel" }),
+    streamedChunk({ reasoning_content: null, content: [{ type: "text", text: "lo." }] }),
+    streamedChunk({}, "stop"),
+  ]);
+  expect(parts as unknown).toMatchObject([
+    { _tag: "Thinking", text: "Add them." },
+    { _tag: "Text", text: "Hello." },
+  ]);
+});
+
+test("what a response held for a call not in its message is logged as left out, and not sent", async () => {
+  const logged: Array<unknown> = [];
+  const capture = Logger.make((options) => {
+    logged.push(options.message);
+  });
+  const provider = recordingServer([answers]);
+  stops.push(provider.stop);
+  const from = { _tag: "Response" as const, model: ModelName.make("boring-1"), turn: TurnId.make("turn-1") };
+  const context: ModelContext = {
+    system: undefined,
+    tools: [],
+    messages: [
+      { role: "user", parts: [{ _tag: "Text", text: "Hello" }] },
+      {
+        role: "assistant",
+        parts: [
+          { _tag: "ToolCall", call: CallId.make("call_1"), tool: ToolName.make("add"), input: receivedJson({ a: 2, b: 3 }) },
+          { _tag: "Unrecognised", provider: ProviderName.make("boring"), from, received: receivedJson({ tool_calls: [{ id: "call_9", extra_content: { google: { thought_signature: "c2ln" } } }] }) },
+        ],
+      },
+    ],
+  };
+  await runTest(
+    Effect.gen(function* () {
+      const client = yield* ModelClient;
+      yield* client.respond(boringTarget, context, TurnId.make("turn-2"));
+    }).pipe(Effect.provide(Layer.mergeAll(OpenAiCompatModelClient.pipe(Layer.provide(openAiCompatAt(provider.url))), Logger.layer([capture], { mergeWithExisting: true })))),
+  );
+  expect((provider.bodies[0] as { readonly messages: ReadonlyArray<unknown> }).messages[1]).toEqual({
+    role: "assistant",
+    content: null,
+    tool_calls: [{ id: "call_1", type: "function", function: { name: "add", arguments: '{"a":2,"b":3}' } }],
+  });
+  const lines = logged.filter((line) => Array.isArray(line) && line[0] === logKeys.provider.partLeftOut) as Array<[string, Record<string, unknown>]>;
+  expect(lines[0]?.[1]["parts"]).toMatchObject([{ part: "Unrecognised", reason: "its call is not in the message" }]);
 });
