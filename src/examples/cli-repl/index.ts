@@ -17,7 +17,9 @@
  * Its policies, turn-end hooks and MCP servers are its configuration (`configuration.ts`): its own
  * defaults, the user's file (`~/.config/labkit/policies.yml`), the project's and the local one (in
  * `.labkit/` in the folder it runs in), `--settings`, `--mcp-config`, then the flags
- * (`--permission-mode`, `--max-turns`, `--max-budget-usd`), the last write winning.
+ * (`--permission-mode`, `--max-turns`, `--max-budget-usd`), the last write winning. What it resolved
+ * to, and which layer said each value, is written to the session's folder as
+ * `effective-settings.json`.
  *
  * Each session's facts and log are kept in `logs/cli/<session>/` (`agent-host/directory.ts`); `--continue` goes on from the
  * one written to last, `--resume <session>` from the one named (with no id, one picked from a list), so `bun run cli:watch --continue` restarts on a change to the code and

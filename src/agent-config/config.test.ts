@@ -17,6 +17,7 @@ import type { EffectRequest } from "../agent-machine/request.ts";
 import { every, type Policy } from "../agent-policy/policy.ts";
 import { MaxHolds, ModelRequestPolicies, ToolCallPolicies, type ToolSpec, TurnEndHooks } from "../agent-session/contracts.ts";
 import { asText, receivedJson } from "../agent-session/received.ts";
+import { effectiveSettings } from "./effective.ts";
 import { type Configuration, fileLayer, type LayerSource, loadConfiguration, policyLayers } from "./file.ts";
 import { merged, over } from "./merge.ts";
 import { policiesJsonSchema } from "./schema.ts";
@@ -362,6 +363,33 @@ test("CF13: what a command the model runs is given of the environment is a list 
   const transforms = seamListsOf(configuration, { canAsk: true }).commandEnvironment ?? [];
   const given = transforms.reduce((environment, transform) => transform(environment), { PATH: "/bin", GITHUB_TOKEN: "t", SSH_AUTH_SOCK: "/tmp/agent" } as Readonly<Record<string, string>>);
   expect(given).toEqual({ PATH: "/bin", SSH_AUTH_SOCK: "/tmp/agent" });
+});
+
+test("CF14: what the configuration resolved to says each entry's settings, defaults included, the layer that wrote each value, and an MCP server's environment by its names only", async () => {
+  const layers: ReadonlyArray<LayerSource> = [
+    { name: "defaults", trusted: true, value: { toolCalls: ["loopBreaker", "permissions"] } },
+    { name: "user", trusted: true, value: { plugins: { loopBreaker: { nudgeAt: 4 } }, mcpServers: { gh: { command: "gh-mcp", env: { GITHUB_TOKEN: "ghp_secret" } } } } },
+    { name: "flags", trusted: true, value: { plugins: { permissions: { mode: "acceptEdits" } } } },
+  ];
+  const configuration = await runTest(loadConfiguration(layers));
+  const effective = effectiveSettings(layers, configuration, { model: "openai/gpt-5.5" });
+  expect(effective).toEqual({
+    layers: [
+      { name: "defaults", trusted: true },
+      { name: "user", trusted: true },
+      { name: "flags", trusted: true },
+    ],
+    lists: {
+      toolCalls: [
+        { name: "loopBreaker", use: "loopBreaker", settings: { nudgeAt: 4, stopAt: 5, key: "toolAndInput" } },
+        { name: "permissions", use: "permissions", settings: { mode: "acceptEdits" } },
+      ],
+    },
+    mcpServers: [{ name: "gh", command: "gh-mcp", args: [], env: ["GITHUB_TOKEN"], required: false }],
+    from: { toolCalls: "defaults", "plugins.loopBreaker.nudgeAt": "user", "plugins.permissions.mode": "flags", "mcpServers.gh.command": "user", "mcpServers.gh.env.GITHUB_TOKEN": "user" },
+    host: { model: "openai/gpt-5.5" },
+  });
+  expect(JSON.stringify(effective)).not.toContain("ghp_secret");
 });
 
 test("CF8: an editor checking files against the JSON Schema takes good ones and refuses mistakes, as the loader does", () => {

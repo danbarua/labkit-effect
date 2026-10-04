@@ -33,6 +33,7 @@ mcpServers:
   (`loadConfiguration`), with the MCP servers they name.
 - `merge.ts`: layers of parsed values merged, the last write winning.
 - `seams.ts`: the seam lists a configuration gives a session, and the layer that provides them.
+- `effective.ts`: what a configuration resolved to, and where each value came from.
 - `schema.ts`: the JSON Schema of a file, kept at `schemas/policies.schema.json`, which
   `scripts/config-schema.ts` writes and `bun run check` checks is current. A file names it at its
   top (`# yaml-language-server: $schema=<path or URL>`): by its path in a checkout, or by its raw URL
@@ -98,4 +99,9 @@ mcpServers:
   (`commandEnvironment`): transforms, in order, the first given this process's environment, which a
   host gives the commands it runs. `credentials` leaves out the variables that hold credentials
   (`agent-process` PE1), but those it passes (`pass`: `SSH_AUTH_SOCK`, for `git push` over SSH).
+- CF14. What a configuration resolved to (`effective.ts`, `effective-settings.json`) says its layers
+  in order; each seam's entries by name, with their plug-in and every setting as resolved, defaults
+  included; `maxHolds`; the MCP servers, each one's environment by its variables' names, never their
+  values; for every value the layers wrote, the layer that wrote it last (`from`); and what the host
+  says beside the layers (`host`).
 

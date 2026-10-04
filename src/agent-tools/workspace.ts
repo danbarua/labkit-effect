@@ -279,5 +279,5 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
     };
   });
 
-  return { catalog, source };
+  return { catalog, source, environment };
 }

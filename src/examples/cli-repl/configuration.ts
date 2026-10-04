@@ -102,6 +102,10 @@ export const cliLayers = (project: string, flags: ConfigFlags, options: { readon
     return [...before, flagLayer(flags, before)];
   });
 
-/** The CLI's configuration, for a CLI run in `project`. */
-export const cliConfiguration = (project: string, flags: ConfigFlags, options: { readonly home?: string } = {}): Effect.Effect<Configuration, ConfigInvalid, FileSystem.FileSystem> =>
-  Effect.flatMap(cliLayers(project, flags, options), (layers) => loadConfiguration(layers));
+/** The CLI's configuration, for a CLI run in `project`, and the layers it was made from. */
+export const cliConfiguration = (
+  project: string,
+  flags: ConfigFlags,
+  options: { readonly home?: string } = {},
+): Effect.Effect<Configuration & { readonly layers: ReadonlyArray<LayerSource> }, ConfigInvalid, FileSystem.FileSystem> =>
+  Effect.flatMap(cliLayers(project, flags, options), (layers) => Effect.map(loadConfiguration(layers), (configuration) => ({ ...configuration, layers })));

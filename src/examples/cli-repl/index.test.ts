@@ -4,6 +4,8 @@
  */
 
 import { expect } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test, testFolder } from "../../../tests/support/test.ts";
 import { withResumeValue } from "./index.ts";
 
@@ -68,6 +70,13 @@ test("an MCP server the configuration says is required, which does not start, ke
   const result = await invoke(["-p", "Hello", "--model", "gpt-5.5", "--mcp-config", servers], { OPENAI_API_KEY: "set" });
   expect(result.code).not.toBe(0);
   expect(result.stdout + result.stderr).toContain("The session needs MCP servers that are not running: missing (it failed: its process could not be started:");
+  // What its configuration resolved to was written to the session's folder first.
+  const sessions = join(testFolder(), "logs/cli");
+  const [session] = readdirSync(sessions);
+  const effective = JSON.parse(readFileSync(join(sessions, session ?? "", "effective-settings.json"), "utf8")) as { readonly layers: ReadonlyArray<{ readonly name: string }>; readonly host: { readonly model: string }; readonly mcpServers: ReadonlyArray<{ readonly required: boolean }> };
+  expect(effective.layers.map((layer) => layer.name)).toEqual(["the CLI's defaults", "--mcp-config", "the command line"]);
+  expect(effective.host.model).toBe("openai/gpt-5.5");
+  expect(effective.mcpServers.map((server) => server.required)).toEqual([true]);
 });
 
 test("--resume with no id is given an empty one, which asks for a session to be picked", () => {

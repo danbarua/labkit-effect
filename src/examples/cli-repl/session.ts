@@ -12,9 +12,10 @@
 
 import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
-import { Effect, Layer, type Scope, Stream } from "effect";
+import { Effect, FileSystem, Layer, type Scope, Stream } from "effect";
 import { Notices } from "../../agent-context/assemble.ts";
-import type { Configuration } from "../../agent-config/file.ts";
+import { effectiveSettings } from "../../agent-config/effective.ts";
+import type { Configuration, LayerSource } from "../../agent-config/file.ts";
 import { seamLayer, seamListsOf } from "../../agent-config/seams.ts";
 import { describe } from "../../agent-mcp/server-machine.ts";
 import { credentialsLeftOut, environmentOf } from "../../agent-process/environment.ts";
@@ -52,8 +53,8 @@ export interface Config {
    * memory (`--no-session-persistence`: the ephemeral store, starting from `continues`).
    */
   readonly persist: boolean;
-  /** The session's policies, turn-end hooks and MCP servers, from its layers (`configuration.ts`). */
-  readonly configuration: Configuration;
+  /** The session's policies, turn-end hooks and MCP servers, from its layers (`configuration.ts`), and the layers. */
+  readonly configuration: Configuration & { readonly layers: ReadonlyArray<LayerSource> };
   /** Whether anyone is there to answer a question before a call runs: the REPL at a terminal. */
   readonly canAsk: boolean;
   /**
@@ -102,6 +103,32 @@ const givenOf = (configuration: Configuration): ReadonlyArray<GivenServer> =>
     server: { name: server.name, command: server.command, args: server.args, env: server.env, cwd: server.cwd ?? process.cwd() },
     connectTimeout: server.connectTimeout,
   }));
+
+/**
+ * Writes what the session's configuration resolved to (`effective-settings.json`, `agent-config`
+ * `effective.ts`) to the session's folder, with what the CLI says beside its layers: the model and
+ * its settings, whether anyone can be asked, and the variables its commands are given and those left
+ * out, by name.
+ */
+const written = (config: Config, environment: Readonly<Record<string, string>>) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const folder = sessionFolderOf(storeFolder, config.sessionId);
+    const host = {
+      model: `${config.target.provider}/${config.target.model}`,
+      settings: config.settings as Readonly<Record<string, string>>,
+      canAsk: config.canAsk,
+      strictToolInput: config.strictToolInput,
+      persist: config.persist,
+      commandEnvironment: { given: Object.keys(environment).sort(), leftOut: Object.keys(process.env).filter((name) => !(name in environment)).sort() },
+    };
+    const path = `${folder}/effective-settings.json`;
+    yield* fs.makeDirectory(folder, { recursive: true }).pipe(
+      Effect.andThen(fs.writeFileString(path, `${JSON.stringify(effectiveSettings(config.configuration.layers, config.configuration, host), null, 2)}\n`)),
+      Effect.tap(() => Effect.logInfo("cli.settings.written", { path })),
+      Effect.catch((error) => Effect.logWarning("cli.settings.not_written", { path, cause: error.message })),
+    );
+  });
 
 /** Fails, saying why, when a server the configuration says is required is not running once the servers have settled. */
 const requiredRunning = (configuration: Configuration, mcp: McpServers) =>
@@ -191,6 +218,7 @@ export const withSession = <A, E, R, L, H>(
     return yield* use(session).pipe(Effect.onInterrupt(() => interrupted(session)));
   });
   return Effect.gen(function* () {
+    yield* written(config, workspace.environment);
     // The MCP servers start in the session's scope, before its services: their tools are among them.
     const mcp = yield* startMcpServers(givenOf(config.configuration), [{ uri: pathToFileURL(process.cwd()).href, name: basename(process.cwd()) }]);
     yield* requiredRunning(config.configuration, mcp);
