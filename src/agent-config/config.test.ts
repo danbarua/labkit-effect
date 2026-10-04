@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { DateTime, Duration, Effect } from "effect";
 import fc from "fast-check";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { boringOpening } from "../../tests/support/boring.ts";
 import { observe, open, opened } from "../../tests/support/drive.ts";
 import { runTest } from "../../tests/support/run.ts";
@@ -361,6 +362,27 @@ test("CF13: what a command the model runs is given of the environment is a list 
   const transforms = seamListsOf(configuration, { canAsk: true }).commandEnvironment ?? [];
   const given = transforms.reduce((environment, transform) => transform(environment), { PATH: "/bin", GITHUB_TOKEN: "t", SSH_AUTH_SOCK: "/tmp/agent" } as Readonly<Record<string, string>>);
   expect(given).toEqual({ PATH: "/bin", SSH_AUTH_SOCK: "/tmp/agent" });
+});
+
+test("CF8: an editor checking files against the JSON Schema takes good ones and refuses mistakes, as the loader does", () => {
+  const ajv = new Ajv2020({ strict: false });
+  const valid = ajv.compile(policiesJsonSchema() as object);
+  const good = [
+    { plugins: { loopBreaker: { nudgeAt: 3, stopAt: 5 }, strict: { use: "loopBreaker", stopAt: 3 }, permissions: { mode: "default" } }, toolCalls: ["loopBreaker", "permissions"], maxHolds: 1 },
+    { plugins: { maxBudget: { usd: 2 } }, modelRequests: ["maxBudget"], mcpServers: { github: { type: "stdio", command: "gh-mcp", args: ["stdio"], required: true, connectTimeout: "10 seconds" } } },
+    { plugins: { credentials: { pass: ["SSH_AUTH_SOCK"] } }, commandEnvironment: ["credentials"] },
+  ];
+  expect(good.map((file) => valid(file))).toEqual([true, true, true]);
+  const bad = [
+    { plugins: { loopBreaker: { nudgAt: 3 } } },
+    { plugins: { permissions: { mode: "yolo" } } },
+    { plugins: { mine: { stopAt: 3 } } },
+    { plugins: { mine: { use: "loopBraker" } } },
+    { toolcalls: ["permissions"] },
+    { toolCalls: [{ use: "permissions" }] },
+    { mcpServers: { github: { args: [] } } },
+  ];
+  expect(bad.map((file) => valid(file))).toEqual(bad.map(() => false));
 });
 
 test("CF8: the JSON Schema of a file takes, in plugins, each plug-in's settings under its own name and use with settings under another; each seam's list takes names", () => {

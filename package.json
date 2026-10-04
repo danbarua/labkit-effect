@@ -5,11 +5,12 @@
   "scripts": {
     "prepare": "effect-tsgo patch --oxlint",
     "typecheck": "tsc --noEmit -p .",
-    "check": "bun run vidaimock:install && bun run typecheck && bun run lint && bun run check:brands && bun run check:rules && bun test",
+    "check": "bun run vidaimock:install && bun run typecheck && bun run lint && bun run check:brands && bun run check:rules && bun run check:schemas && bun test",
     "vidaimock:install": "bun scripts/vidaimock.ts",
     "lint": "oxlint --type-aware --format default src tests scripts",
     "check:brands": "bun scripts/check-brands.ts",
     "check:rules": "bun scripts/check-rules.ts",
+    "check:schemas": "bun scripts/config-schema.ts --check",
     "acp:logs": "bun scripts/acp-logs.ts",
     "cli": "bun run src/examples/cli-repl/index.ts",
     "models:refresh": "bun scripts/models/refresh.ts",
@@ -22,6 +23,7 @@
     "@effect/platform-bun": "4.0.0",
     "@effect/tsgo": "^0.46.1",
     "@types/bun": "latest",
+    "ajv": "^8.20.0",
     "fast-check": "^4.10.2",
     "oxlint": "1.85.0",
     "oxlint-tsgolint": "7.0.2003"

@@ -1,0 +1,353 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "plugins": {
+      "type": "object",
+      "properties": {
+        "loopBreaker": {
+          "type": "object",
+          "properties": {
+            "nudgeAt": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "stopAt": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "key": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "toolAndInput"
+                  ]
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "permissions": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "default",
+                "acceptEdits",
+                "dontAsk",
+                "bypassPermissions"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "maxTurnRequests": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "retryIncomplete": {
+          "type": "object",
+          "properties": {
+            "retries": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "maxBudget": {
+          "type": "object",
+          "properties": {
+            "usd": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "usd"
+          ],
+          "additionalProperties": false
+        },
+        "credentials": {
+          "type": "object",
+          "properties": {
+            "pass": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "use": {
+                "type": "string",
+                "enum": [
+                  "loopBreaker"
+                ]
+              },
+              "nudgeAt": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "stopAt": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "key": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "toolAndInput"
+                    ]
+                  }
+                ]
+              }
+            },
+            "required": [
+              "use"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "use": {
+                "type": "string",
+                "enum": [
+                  "permissions"
+                ]
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "default",
+                  "acceptEdits",
+                  "dontAsk",
+                  "bypassPermissions"
+                ]
+              }
+            },
+            "required": [
+              "use"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "use": {
+                "type": "string",
+                "enum": [
+                  "maxTurnRequests"
+                ]
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "use"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "use": {
+                "type": "string",
+                "enum": [
+                  "retryIncomplete"
+                ]
+              },
+              "retries": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "use"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "use": {
+                "type": "string",
+                "enum": [
+                  "maxBudget"
+                ]
+              },
+              "usd": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "Infinity",
+                      "-Infinity",
+                      "NaN"
+                    ]
+                  }
+                ]
+              }
+            },
+            "required": [
+              "use",
+              "usd"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "use": {
+                "type": "string",
+                "enum": [
+                  "credentials"
+                ]
+              },
+              "pass": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "use"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "extensions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "maxHolds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "mcpServers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "stdio"
+            ]
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "connectTimeout": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "toolCalls": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "modelRequests": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "turnEnd": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "knownModels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "settling": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "toolSources": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "commandEnvironment": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

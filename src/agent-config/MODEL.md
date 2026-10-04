@@ -5,7 +5,7 @@ host adds (its command line). Plug-ins are configured once, by name, in `plugins
 session's logic plugs into (`agent-session`'s lists) lists names, in order.
 
 ```yaml
-# yaml-language-server: $schema=./policies.schema.json
+# yaml-language-server: $schema=../schemas/policies.schema.json
 extensions:            # the user's own file only
   - ./my-plugin.ts
 plugins:
@@ -33,7 +33,10 @@ mcpServers:
   (`loadConfiguration`), with the MCP servers they name.
 - `merge.ts`: layers of parsed values merged, the last write winning.
 - `seams.ts`: the seam lists a configuration gives a session, and the layer that provides them.
-- `schema.ts`: the JSON Schema of a file; `scripts/config-schema.ts` writes it.
+- `schema.ts`: the JSON Schema of a file, kept at `schemas/policies.schema.json`, which
+  `scripts/config-schema.ts` writes and `bun run check` checks is current. A file names it at its
+  top (`# yaml-language-server: $schema=<path or URL>`): by its path in a checkout, or by its raw URL
+  once the repository is published.
 
 ## What is not built
 
@@ -75,7 +78,8 @@ mcpServers:
   plug-ins with one name are refused.
 - CF8. The JSON Schema of a file is made from the plug-ins' Schemas: `plugins` takes a plug-in's
   settings under its own name, and `use` with that plug-in's settings under any other, and no other
-  property; each seam's list takes names.
+  property; each seam's list takes names. A file an editor checks against it is taken or refused as
+  the loader takes or refuses it, for the mistakes a schema can see.
 - CF9. Two of one plug-in, with different settings, are two names in `plugins`, each with `use`.
 - CF10. `mcpServers` maps a name to a server: its `command`, `args`, `env`, `cwd`, whether a
   session needs it (`required`, false unless said) and how long it has to connect
