@@ -276,9 +276,9 @@ twice.
   configuration says (the `mode` of the `permissions` its tool calls list, which the launcher's
   `--permission-mode` sets; else `default`) and is the option `permission_mode` (category `mode`);
   a change goes through the gate as a change of model does (AG5): at once between turns, and while
-  a turn runs when it ends. The configured `permissions` follows it (agent-config CF2); every other
-  tool call policy the configuration lists still decides with it. A value that is not a mode is
-  -32602.
+  a turn runs when it ends. Each `permissions` the configuration lists follows it (agent-config
+  CF2), a second one with a `mode` of its own included; every other tool call policy it lists still
+  decides with it. A value that is not a mode is -32602.
 - AG19. The host takes images and embedded resources in a prompt (`promptCapabilities.image`,
   `embeddedContext`): each is put in the session's blob store, kept in its folder (`blobs/`), and
   attached to the input by reference, with its media type and the name its URI ends in; a

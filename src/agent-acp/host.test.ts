@@ -1251,6 +1251,10 @@ test("AL3 AL8: session/load in a new process replays the stored turn in order be
   expect(sent).toContain("Echo ping");
   expect(sent).toContain("Echoed.");
   expect(endings(await factsOn(stored.file))).toEqual(["Completed", "Completed"]);
+  // What its configuration resolved to is written when it is loaded (AG25).
+  expect(JSON.parse(readFileSync(join(sessionFolderOf(host.directory, stored.sessionId), "effective-settings.json"), "utf8"))).toMatchObject({
+    host: { model: "openai/gpt-6-sol", permissionMode: "default" },
+  });
   expect(host.logged.filter((each) => each.level === "Warn" || each.level === "Error" || each.level === "Fatal")).toEqual([]);
   expect(host.logged.find((each) => each.key === logKeys.session.loaded)).toMatchObject({
     level: "Info",
@@ -1508,6 +1512,8 @@ test("AL5 AL8: session/resume starts the stored session and replays nothing, the
   expect(kinds(log.updates.slice(result.beforePrompt))).toEqual(["agent_message_chunk", "usage_update"]);
   expect(JSON.stringify(host.contexts[0]?.messages)).toContain("Echoed.");
   expect(JSON.parse(readFileSync(join(host.directory, stored.sessionId, "host.json"), "utf8"))).toEqual({ cwd: stored.cwd, title: "Echo ping" });
+  // What its configuration resolved to is written when it is resumed (AG25).
+  expect(existsSync(join(sessionFolderOf(host.directory, stored.sessionId), "effective-settings.json"))).toBe(true);
   expect(host.logged.find((each) => each.key === logKeys.session.resumed)).toMatchObject({
     level: "Info",
     annotations: { session: stored.sessionId },
