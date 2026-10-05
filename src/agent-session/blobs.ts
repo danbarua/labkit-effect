@@ -12,7 +12,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { Context, Effect, FileSystem, Layer, Path } from "effect";
+import { Context, Effect, FileSystem, HashMap, Layer, Option, Path, Ref } from "effect";
 import { BlobId, type BlobRef, FileName } from "../agent-machine/blob.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import type { MediaType } from "../agent-machine/received.ts";
@@ -35,18 +35,17 @@ const referenceTo = (bytes: Uint8Array, mediaType: MediaType, name: string | und
   ...(name === undefined ? {} : { name: FileName.make(name) }),
 });
 
-/** A store over a map it is given: what `BlobsInMemory` and the default hold. */
-const inMap = (held: Map<BlobId, Uint8Array>): BlobStore => ({
+/** A store over the map `held` holds: what `BlobsInMemory` and the default hold. */
+const inMap = (held: Ref.Ref<HashMap.HashMap<BlobId, Uint8Array>>): BlobStore => ({
   store: (bytes, mediaType, name) =>
-    Effect.sync(() => {
+    Effect.suspend(() => {
       const reference = referenceTo(bytes, mediaType, name);
-      held.set(reference.id, bytes);
-      return reference;
+      return Ref.update(held, HashMap.set(reference.id, bytes)).pipe(Effect.as(reference));
     }),
-  read: (id) => Effect.sync(() => held.get(id)),
+  read: (id) => Effect.map(Ref.get(held), (all) => Option.getOrUndefined(HashMap.get(all, id))),
 });
 
-export const Blobs = Context.Reference<BlobStore>("agent-session/Blobs", { defaultValue: () => inMap(new Map()) });
+export const Blobs = Context.Reference<BlobStore>("agent-session/Blobs", { defaultValue: () => inMap(Ref.makeUnsafe(HashMap.empty())) });
 
 /** `outcome`, with an output that arrived as bytes put in the store and held by reference. */
 export const keptOutcome = (outcome: ToolOutcome): Effect.Effect<ToolOutcome> =>
@@ -56,7 +55,7 @@ export const keptOutcome = (outcome: ToolOutcome): Effect.Effect<ToolOutcome> =>
     return { ...outcome, output: { mediaType: outcome.output.mediaType, body: { _tag: "Stored", id: stored.id, size: stored.size } } };
   });
 
-export const BlobsInMemory = Layer.sync(Blobs, () => inMap(new Map()));
+export const BlobsInMemory = Layer.effect(Blobs, Effect.map(Ref.make(HashMap.empty<BlobId, Uint8Array>()), inMap));
 
 /** A blob id as this store writes them: 64 lowercase hex digits, so it names a file in the folder and nothing else. */
 const isBlobId = (id: string): boolean => /^[0-9a-f]{64}$/.test(id);

@@ -13,6 +13,7 @@
  *   summarizer makes are not among the facts, so their cost is not in it.
  */
 
+import { Array as Arr, Option } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { Observation, Usage } from "../agent-machine/observation.ts";
 import { type Capabilities, capabilitiesOf, type Price } from "./configuration/well-known-models.ts";
@@ -60,7 +61,7 @@ export function costIn(facts: ReadonlyArray<Fact>): number {
 export function contextGauge(facts: ReadonlyArray<Fact>, provider: string, model: string, known?: Capabilities): ContextGauge | undefined {
   const size = (known ?? capabilitiesOf(provider, model))?.context;
   if (size === undefined) return undefined;
-  const last = [...responses(facts)].reverse().find((response) => response.usage !== undefined)?.usage;
+  const last = Option.getOrUndefined(Arr.findLast(responses(facts), (response) => response.usage !== undefined))?.usage;
   const used = last === undefined ? 0 : last.input + last.output - (last.thinking ?? 0);
   return { used, size, cost: { amount: costIn(facts), currency: "USD" } };
 }

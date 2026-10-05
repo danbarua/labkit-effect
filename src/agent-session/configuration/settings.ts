@@ -12,7 +12,7 @@
  * | xai       | none: it always caches               | always             | not sent     | not sent         | not sent             |
  */
 
-import { Effect } from "effect";
+import { Array as Arr, Effect, Order } from "effect";
 import { AdjustmentReason, TokenCount, type TurnId } from "../../agent-machine/names.ts";
 import { CacheFor, Effort, type Adjusted, type ModelSettings, Observe, ThinkingMode } from "../../agent-machine/settings.ts";
 import type { Target } from "../contracts.ts";
@@ -81,7 +81,9 @@ export function effortFor(
   if (wanted === undefined || accepted === undefined || accepted.includes(wanted)) return { sent: wanted, adjusted: set(wanted) };
   const at = efforts.indexOf(wanted);
   const distance = (effort: string) => Math.abs(efforts.indexOf(effort) - at);
-  const sent = [...accepted].sort((a, b) => distance(a) - distance(b) || efforts.indexOf(b) - efforts.indexOf(a))[0];
+  // The nearest first; of two as near, the higher.
+  const nearest = Order.combine(Order.mapInput(Order.Number, distance), Order.mapInput(Order.flip(Order.Number), (effort: string) => efforts.indexOf(effort)));
+  const sent = Arr.sort(accepted, nearest)[0];
   if (sent === undefined) return { sent: wanted, adjusted: [] };
   const reason = `this model's reasoning efforts are ${accepted.join(", ")}; it is sent ${sent}`;
   if (off) return { sent, adjusted: [{ adjusted: { _tag: "Thinking", asked: "off", used: "auto" }, reason }, ...set(sent)] };
