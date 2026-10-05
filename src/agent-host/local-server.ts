@@ -64,9 +64,11 @@ export function localCapabilities(listed: unknown): ReadonlyMap<string, Capabili
  * The models that the local server serves, by the names it accepts (`GET /v1/models`, `data[].id`),
  * or `undefined` when it does not answer within one second.
  */
-export const localModels: Effect.Effect<ReadonlyArray<string> | undefined> = Effect.tryPromise(() =>
-  fetch(`${localServer}/models`, { signal: AbortSignal.timeout(1000) }).then((response) => response.json() as Promise<unknown>),
+export const localModels: Effect.Effect<ReadonlyArray<string> | undefined> = Effect.tryPromise((signal) =>
+  fetch(`${localServer}/models`, { signal }).then((response) => response.json() as Promise<unknown>),
 ).pipe(
+  // Effect's timer, which a test clock can move: the timeout interrupts the request, which aborts the fetch.
+  Effect.timeout("1 second"),
   Effect.map((listed) => Option.match(ModelList(listed), { onNone: () => [], onSome: (each) => listedNames(each.data).map((model) => model.id) })),
   Effect.orElseSucceed(() => undefined),
 );

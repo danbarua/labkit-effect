@@ -1,7 +1,8 @@
 /** What the local server's model list says of its models. */
 
 import { expect } from "bun:test";
-import { Effect, Layer, Logger } from "effect";
+import { Effect, Fiber, Layer, Logger } from "effect";
+import { TestClock } from "effect/testing";
 import { test } from "../../tests/support/test.ts";
 import { ModelName, ProviderName } from "../agent-machine/names.ts";
 import { capabilitiesOf, knownCapabilities } from "../agent-session/configuration/well-known-models.ts";
@@ -50,12 +51,29 @@ const withFetch = async <A>(stub: (url: unknown, init?: RequestInit) => Promise<
   }
 };
 
-test("a local server that does not answer the model list within one second lists no models", async () => {
-  const hanging = (_url: unknown, init?: RequestInit) => new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))));
-  const started = Date.now();
-  const models = await withFetch(hanging, () => Effect.runPromise(localModels));
-  expect(models).toBeUndefined();
-  expect(Date.now() - started).toBeLessThan(3000);
+test("a local server that does not answer the model list within one second lists no models, and its request is aborted", async () => {
+  const aborted: Array<boolean> = [];
+  const hanging = (_url: unknown, init?: RequestInit) =>
+    new Promise<Response>((_, reject) =>
+      init?.signal?.addEventListener("abort", () => {
+        aborted.push(true);
+        reject(new Error("aborted"));
+      }),
+    );
+  const result = await withFetch(hanging, () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const listing = yield* Effect.forkChild(localModels);
+        yield* TestClock.adjust("999 millis");
+        const atLimit = listing.pollUnsafe();
+        yield* TestClock.adjust("1 millis");
+        return { waitingAt999ms: atLimit === undefined, models: yield* Fiber.join(listing) };
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+  expect(result.waitingAt999ms).toBe(true);
+  expect(result.models).toBeUndefined();
+  expect(aborted).toEqual([true]);
 });
 
 test("KnownWithLocalServer logs a warning when the local server does not answer, and then knows no localhost model", async () => {

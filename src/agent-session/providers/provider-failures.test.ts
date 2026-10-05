@@ -7,7 +7,8 @@
 import { afterAll, expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
 import { OpenAiClient as OpenAiCompatClient } from "@effect/ai-openai-compat";
-import { Effect, Layer, Logger, Redacted } from "effect";
+import { Effect, Fiber, Layer, Logger, Redacted } from "effect";
+import { TestClock } from "effect/testing";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { ModelName, ProviderName, TurnId } from "../../agent-machine/names.ts";
@@ -100,6 +101,91 @@ const asked = (client: Layer.Layer<ModelClient>, provider = "boring") => {
   }));
 };
 
+/**
+ * A Chat Completions client served in this process: the n-th request gets `responses[n]()`, or the
+ * last one. `requests` counts the requests made.
+ */
+const servedInProcess = (responses: ReadonlyArray<() => Response>) => {
+  let requests = 0;
+  const http = Layer.succeed(
+    HttpClient.HttpClient,
+    HttpClient.make((request) =>
+      Effect.sync(() => {
+        const respond = responses[Math.min(requests, responses.length - 1)];
+        requests += 1;
+        return HttpClientResponse.fromWeb(request, respond === undefined ? new Response(null, { status: 500 }) : respond());
+      }),
+    ),
+  );
+  return {
+    client: openAiCompatModelClient({ times: 2, firstWait: "1 millis" }).pipe(
+      Layer.provide(OpenAiCompatClient.layer({ apiUrl: "http://127.0.0.1", apiKey: Redacted.make("test-key") }).pipe(Layer.provide(http))),
+    ),
+    requests: () => requests,
+  };
+};
+
+/**
+ * A response body that the test writes. `written(text)` writes `text` and resolves once the reader
+ * has asked for more: the reader has taken `text`, so a test clock moved after it counts from then.
+ * `write(text)` writes `text` without waiting, for what the reader may not read past (`[DONE]`).
+ */
+const writtenBody = () => {
+  const encoder = new TextEncoder();
+  const waiting: Array<() => void> = [];
+  let reads = 0;
+  let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      start: (made) => {
+        controller = made;
+      },
+      pull: () => {
+        reads += 1;
+        for (const resolve of waiting.splice(0)) resolve();
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  const readAfter = (before: number): Promise<void> =>
+    reads > before ? Promise.resolve() : new Promise<void>((resolve) => waiting.push(resolve)).then(() => readAfter(before));
+  return {
+    response: () => new Response(stream, { headers: { "content-type": "text/event-stream" } }),
+    written: (text: string) =>
+      Effect.promise(() => {
+        const before = reads;
+        controller?.enqueue(encoder.encode(text));
+        return readAfter(before);
+      }),
+    write: (text: string) => Effect.sync(() => controller?.enqueue(encoder.encode(text))),
+    end: Effect.sync(() => controller?.close()),
+  };
+};
+
+/** Asks a model through `client` on a test clock while `script` runs: the script writes what is served and moves the clock. */
+const askedWhile = <E>(client: Layer.Layer<ModelClient>, script: (events: (key: string) => ReadonlyArray<unknown>) => Effect.Effect<void, E>) => {
+  const logged: Array<unknown> = [];
+  const events = (key: string) => logged.filter((message) => Array.isArray(message) && message[0] === key);
+  return runTest(
+    Effect.gen(function* () {
+      const asking = yield* Effect.forkChild(
+        (yield* ModelClient).respond(
+          { provider: ProviderName.make("boring"), model: ModelName.make("boring-1") },
+          { system: undefined, tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "hi" }] }] },
+          TurnId.make("turn-1"),
+        ),
+      );
+      yield* script(events);
+      return yield* Fiber.join(asking);
+    }).pipe(Effect.provide(Layer.mergeAll(client, TestClock.layer(), Logger.layer([Logger.make((options) => logged.push(options.message))], { mergeWithExisting: true })))),
+  ).then((observed) => ({ observed, events }));
+};
+
+/** Yields until `holds` is true, at most 1000 times. */
+const until = (holds: () => boolean) => Effect.gen(function* () {
+  for (let tries = 0; !holds() && tries < 1000; tries++) yield* Effect.yieldNow;
+});
+
 const answer = JSON.stringify({ id: "chatcmpl-1", choices: [{ index: 0, message: { role: "assistant", content: "hi" }, finish_reason: "stop" }] });
 const jsonWith = (body: string, length: number) =>
   `HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: ${length}\r\n\r\n${body}`;
@@ -117,12 +203,22 @@ test("a body that ends before its Content-Length fails the request, which is not
 });
 
 test("a rate limit is retried after the wait it says (Retry-After), not the doubled wait", async () => {
-  const limited = "HTTP/1.1 429 Too Many Requests\r\ncontent-type: application/json\r\nretry-after: 1\r\ncontent-length: 2\r\n\r\n{}";
-  const server = rawServer([limited, jsonWith(answer, answer.length)]);
-  const { observed, events } = await asked(
-    openAiCompatModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(server.url))),
+  const served = servedInProcess([
+    () => new Response("{}", { status: 429, headers: { "content-type": "application/json", "retry-after": "1" } }),
+    () => new Response(answer, { headers: { "content-type": "application/json" } }),
+  ]);
+  const requestsAt999ms: Array<number> = [];
+  const { observed, events } = await askedWhile(served.client, (events) =>
+    Effect.gen(function* () {
+      // The retry is logged before its wait.
+      yield* until(() => events(logKeys.provider.requestRetried).length === 1);
+      yield* TestClock.adjust("999 millis");
+      requestsAt999ms.push(served.requests());
+      yield* TestClock.adjust("1 millis");
+    }),
   );
-  server.stop();
+  expect(requestsAt999ms).toEqual([1]);
+  expect(served.requests()).toBe(2);
   expect(observed as unknown).toMatchObject({ _tag: "ModelResponded" });
   expect(events(logKeys.provider.requestRetried)).toMatchObject([[logKeys.provider.requestRetried, { reason: "RateLimitError", retry: 1, wait: "1s" }]]);
 });
@@ -230,46 +326,36 @@ test("a stream closed after a tool call of it was passed on is not made again: t
   expect(conversationOf(facts).flatMap((message) => message.parts.map((part) => part._tag))).toEqual(["Text"]);
 });
 
-/** A Chat Completions server that streams `chunks`, each after `wait` milliseconds, then ends. */
-const streaming = (parts: ReadonlyArray<{ readonly wait: number; readonly text: string }>) => {
-  const server = Bun.serve({
-    port: 0,
-    fetch: () =>
-      new Response(
-        new ReadableStream({
-          async start(controller) {
-            for (const part of parts) {
-              await Bun.sleep(part.wait);
-              controller.enqueue(new TextEncoder().encode(part.text));
-            }
-            controller.close();
-          },
-        }),
-        { headers: { "content-type": "text/event-stream" } },
-      ),
-  });
-  stops.push(() => server.stop(true));
-  return server.url;
-};
-
 const chunk = (delta: unknown, finish_reason: string | null = null) => `data: ${JSON.stringify({ id: "c1", choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
 
 test("a stream that sends nothing for ModelStreamIdle fails the request, which is not made again; keep-alive comments count as something", async () => {
-  const quiet = streaming([
-    { wait: 0, text: chunk({ role: "assistant", content: "Hal" }) },
-    { wait: 1000, text: chunk({}, "stop") },
-  ]);
-  const silent = await asked(Layer.mergeAll(openAiCompatModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(quiet))), Layer.succeed(ModelStreamIdle, "100 millis")));
+  const idle = Layer.succeed(ModelStreamIdle, "100 millis");
+  const quiet = writtenBody();
+  const silentServer = servedInProcess([quiet.response]);
+  const silent = await askedWhile(Layer.mergeAll(silentServer.client, idle), () =>
+    Effect.gen(function* () {
+      yield* quiet.written(chunk({ role: "assistant", content: "Hal" }));
+      yield* TestClock.adjust("100 millis");
+    }),
+  );
   expect(silent.observed as unknown).toMatchObject({ _tag: "ModelFailed", failure: expect.stringContaining("sent nothing for 100ms") });
   expect(silent.events(logKeys.provider.notRetried)).toHaveLength(1);
-  const kept = streaming([
-    { wait: 0, text: chunk({ role: "assistant", content: "Hal" }) },
-    ...[1, 2, 3, 4, 5, 6].map(() => ({ wait: 50, text: ": keepalive\n\n" })),
-    { wait: 50, text: chunk({ content: "lo" }) },
-    { wait: 0, text: chunk({}, "stop") },
-    { wait: 0, text: "data: [DONE]\n\n" },
-  ]);
-  const alive = await asked(Layer.mergeAll(openAiCompatModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(kept))), Layer.succeed(ModelStreamIdle, "100 millis")));
+  expect(silentServer.requests()).toBe(1);
+
+  // Keep-alive comments 60 ms apart for 420 ms: without them the stream would be quiet for longer than 100 ms.
+  const kept = writtenBody();
+  const keptServer = servedInProcess([kept.response]);
+  const alive = await askedWhile(Layer.mergeAll(keptServer.client, idle), () =>
+    Effect.gen(function* () {
+      yield* kept.written(chunk({ role: "assistant", content: "Hal" }));
+      yield* Effect.forEach([1, 2, 3, 4, 5, 6], () => TestClock.adjust("60 millis").pipe(Effect.andThen(kept.written(": keepalive\n\n"))), { discard: true });
+      yield* TestClock.adjust("60 millis");
+      yield* kept.written(chunk({ content: "lo" }));
+      yield* kept.write(chunk({}, "stop"));
+      yield* kept.write("data: [DONE]\n\n");
+      yield* kept.end;
+    }),
+  );
   expect(alive.observed as unknown).toMatchObject({ _tag: "ModelResponded", parts: [{ _tag: "Text", text: "Hallo" }] });
 });
 
