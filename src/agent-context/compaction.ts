@@ -113,15 +113,15 @@ export const compact = (session: Session, summarizer: Summarizer, decidedBy: Pol
     const previous = summariesFor(yield* summaries.recorded, facts, kind);
     const before = previous.at(-1);
     // The turn that the previous window kept was not summarised, so the span starts with it.
-    const window_ = before === undefined ? undefined : windowNamed(facts, before.window);
-    const from = window_ === undefined ? undefined : Math.min(window_.through + 1, ...window_.kept);
-    const span = from === undefined ? facts : facts.filter((fact) => fact.seq >= from);
+    const previousWindow = before === undefined ? undefined : windowNamed(facts, before.window);
+    const spanStart = previousWindow === undefined ? undefined : Math.min(previousWindow.through + 1, ...previousWindow.kept);
+    const span = spanStart === undefined ? facts : facts.filter((fact) => fact.seq >= spanStart);
     // The span's last turn is kept unsummarised, after the summary, when the span holds an earlier turn.
-    const lastTurn = lastAt(span, (fact) => fact._tag === "Observed" && fact.observation._tag === "TurnStarted");
+    const lastTurn = lastIndexWhere(span, (fact) => fact._tag === "Observed" && fact.observation._tag === "TurnStarted");
     const firstTurn = span.findIndex((fact) => fact._tag === "Observed" && fact.observation._tag === "TurnStarted");
-    const keeps = lastTurn > firstTurn;
-    const summarised = keeps ? span.slice(0, lastTurn) : span;
-    const kept = keeps ? span.slice(lastTurn).map((fact) => fact.seq) : [];
+    const keepsLastTurn = lastTurn > firstTurn;
+    const summarised = keepsLastTurn ? span.slice(0, lastTurn) : span;
+    const kept = keepsLastTurn ? span.slice(lastTurn).map((fact) => fact.seq) : [];
     const windows = windowsOf(facts);
     const window = WindowId.make(`window-${windows.length + 1}`);
     const summary = yield* summarizer.summarize(previous, conversationOf(summarised, facts), target, {
@@ -177,8 +177,8 @@ const summaryParts = (summary: WindowSummary): ReadonlyArray<ContextPart> => {
  * Returns the summaries that a request carries, in the order written, starting from the latest
  * provider compaction, which was made from the summaries before it.
  */
-const carried = (summaries: ReadonlyArray<WindowSummary>): ReadonlyArray<WindowSummary> =>
-  summaries.slice(summaries.reduce((from, summary, at) => (summary.summary.mediaType === "application/json" ? at : from), 0));
+const summariesCarried = (summaries: ReadonlyArray<WindowSummary>): ReadonlyArray<WindowSummary> =>
+  summaries.slice(summaries.reduce((start, summary, at) => (summary.summary.mediaType === "application/json" ? at : start), 0));
 
 /**
  * Returns the summaries as one instruction message. The instruction role marks the harness as the
@@ -186,11 +186,11 @@ const carried = (summaries: ReadonlyArray<WindowSummary>): ReadonlyArray<WindowS
  */
 export const summaryMessage = (summaries: ReadonlyArray<WindowSummary>): ContextMessage => ({
   role: "instruction",
-  parts: carried(summaries).flatMap(summaryParts),
+  parts: summariesCarried(summaries).flatMap(summaryParts),
 });
 
 /** Returns the index of the last fact in `facts` for which `is` returns true, or -1. */
-function lastAt(facts: ReadonlyArray<Fact>, is: (fact: Fact) => boolean): number {
+function lastIndexWhere(facts: ReadonlyArray<Fact>, is: (fact: Fact) => boolean): number {
   return Option.getOrElse(Arr.findLastIndex(facts, is), () => -1);
 }
 
@@ -203,21 +203,21 @@ export const CompactedConversation = Layer.effect(
       messages: (facts) =>
         Effect.gen(function* () {
           const kind = (yield* modelOf(facts)).provider;
-          const mine = summariesFor(yield* summaries.recorded, facts, kind);
-          const latest = mine.at(-1);
-          const lastRequest = lastAt(
+          const providerSummaries = summariesFor(yield* summaries.recorded, facts, kind);
+          const latest = providerSummaries.at(-1);
+          const lastRequest = lastIndexWhere(
             facts,
             (fact) => fact._tag === "Observed" && fact.observation._tag === "ModelRequestDispatched" && fact.observation.provider === kind,
           );
           const window = latest === undefined ? undefined : windowNamed(facts, latest.window);
-          const windowAt = window === undefined ? -1 : lastAt(facts, (fact) => fact.seq === window.through);
+          const windowAt = window === undefined ? -1 : lastIndexWhere(facts, (fact) => fact.seq === window.through);
           const request = facts[lastRequest];
           if (request?._tag === "Observed" && request.observation._tag === "ModelRequestDispatched" && lastRequest > windowAt)
             return merged([...sentIn(request.observation.sent).messages, ...conversationOf(facts.slice(lastRequest + 1), facts)]);
           if (window === undefined) return conversationOf(facts);
           const kept = new Set(window.kept);
           const after = facts.filter((fact) => kept.has(fact.seq) || fact.seq > window.through);
-          return merged([summaryMessage(mine), ...conversationOf(after, facts)]);
+          return merged([summaryMessage(providerSummaries), ...conversationOf(after, facts)]);
         }),
     };
   }),

@@ -75,7 +75,7 @@ export class ModelSelectors extends Context.Service<
   readonly [ModelSelector, ...ReadonlyArray<ModelSelector>]
 >()("agent-context/ModelSelectors") {}
 
-const appended = <A>(outputs: ReadonlyArray<Effect.Effect<ReadonlyArray<A>>>): Effect.Effect<ReadonlyArray<A>> =>
+const concatenated = <A>(outputs: ReadonlyArray<Effect.Effect<ReadonlyArray<A>>>): Effect.Effect<ReadonlyArray<A>> =>
   Effect.forEach(outputs, (output) => output).pipe(Effect.map((all) => all.flat()));
 
 /**
@@ -90,7 +90,7 @@ export const opening = (
   model: ModelTarget,
 ): Effect.Effect<Extract<Observation, { _tag: "SessionOpened" }>, never, SystemPrompts> =>
   Effect.gen(function* () {
-    const system = yield* appended((yield* SystemPrompts).map((provider) => provider.system));
+    const system = yield* concatenated((yield* SystemPrompts).map((provider) => provider.system));
     const tools = yield* offeredTools;
     return openedWith({ session, model, system: system.length === 0 ? undefined : system.join("\n\n"), tools });
   });
@@ -105,7 +105,7 @@ export const assembleContents = (
       system: system === undefined ? [] : [system],
       tools: yield* immutableToolCatalogOf(facts),
       messages: yield* (yield* Conversation).messages(facts),
-      notices: yield* appended((yield* Notices).map((provider) => provider.notices)),
+      notices: yield* concatenated((yield* Notices).map((provider) => provider.notices)),
     };
   });
 

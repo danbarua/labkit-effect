@@ -22,8 +22,8 @@ const extensions = new Map([
 ]);
 
 /** A time as it goes in a file name: ISO 8601 with the colons as hyphens. */
-const stamped = (time: DateTime.Utc): string => DateTime.formatIso(time).replaceAll(":", "-");
-const unstamped = (stamp: string): string => stamp.replace(/T(\d\d)-(\d\d)-(\d\d)/, "T$1:$2:$3");
+const fileStamp = (time: DateTime.Utc): string => DateTime.formatIso(time).replaceAll(":", "-");
+const isoFromFileStamp = (stamp: string): string => stamp.replace(/T(\d\d)-(\d\d)-(\d\d)/, "T$1:$2:$3");
 
 /** Summaries by the time they were written, then by their number within their kind. */
 const writtenOrder: Order.Order<readonly [number, WindowSummary]> = Order.combine(
@@ -44,7 +44,7 @@ export const SummariesInFolder = (folder: string) =>
           if (match === null) return yield* Effect.die(new Error(`${name} is not the name of a summary`));
           const [, number, stamp, writtenBy, window, extension] = match;
           const text = yield* fs.readFileString(path.join(folder, session, kind, name));
-          const writtenAt = DateTime.makeUnsafe(unstamped(stamp ?? ""));
+          const writtenAt = DateTime.makeUnsafe(isoFromFileStamp(stamp ?? ""));
           return [
             Number(number),
             {
@@ -82,7 +82,7 @@ export const SummariesInFolder = (folder: string) =>
           const directory = path.join(folder, summary.session, summary.kind);
           yield* fs.makeDirectory(directory, { recursive: true });
           const number = (yield* fs.readDirectory(directory)).length + 1;
-          const name = `${String(number).padStart(4, "0")}_${stamped(summary.writtenAt)}_${summary.writtenBy}_${summary.window}.${extension}`;
+          const name = `${String(number).padStart(4, "0")}_${fileStamp(summary.writtenAt)}_${summary.writtenBy}_${summary.window}.${extension}`;
           yield* fs.writeFileString(path.join(directory, name), asText(summary.summary));
         }).pipe(Effect.orDie);
 

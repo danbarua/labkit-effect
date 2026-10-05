@@ -39,24 +39,24 @@ export type ToolDigests = ReadonlyMap<string, ToolDigest>;
 const longText = 40;
 
 /** Returns `value` with every long text replaced by its length. */
-function sized(value: Json): Json {
+function withTextLengths(value: Json): Json {
   if (typeof value === "string") return value.length > longText ? `<${value.length} chars>` : value;
-  if (Array.isArray(value)) return value.map(sized);
-  if (isObject(value)) return Object.fromEntries(Object.entries(value).map(([key, each]) => [key, sized(each)]));
+  if (Array.isArray(value)) return value.map(withTextLengths);
+  if (isObject(value)) return Object.fromEntries(Object.entries(value).map(([key, each]) => [key, withTextLengths(each)]));
   return value;
 }
 
 /** Returns a call's input as it appears in a line: JSON with long texts replaced by their lengths. Input that is not JSON appears as its length when it is long. */
-function given(input: Received): string {
+function inputShown(input: Received): string {
   const parsed = parseJson(input);
-  if ("value" in parsed) return JSON.stringify(sized(parsed.value));
+  if ("value" in parsed) return JSON.stringify(withTextLengths(parsed.value));
   const text = asText(input);
   return text.length > longText ? `<${text.length} chars>` : text;
 }
 
 /** The line for a call whose tool has no digest: its input, followed by `(not ended)`, or by the failure reason when the call failed. */
 const defaultDigest: ToolDigest = (input, outcome) => {
-  const shown = given(input);
+  const shown = inputShown(input);
   if (outcome === undefined) return `${shown} (not ended)`;
   return outcome._tag === "Succeeded" ? shown : `${shown} (failed: ${outcome.reason._tag})`;
 };
