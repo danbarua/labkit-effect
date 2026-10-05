@@ -52,8 +52,10 @@ Dan: "something might execute a decision to continue, veto or delay an Effect." 
   call to a tool that changes things, or whose kind is not known: `default` asks; `acceptEdits` runs
   one that edits, deletes or moves files and asks for others; `dontAsk` vetoes; `bypassPermissions`
   runs. Allowing (once, or for the session) lets the asked call run; rejecting vetoes it.
-- P6. Allowing a tool for the session is an answer in the session's facts. A later call to that tool
-  runs without being asked, in any mode, in this process or one that goes on from the facts.
+- P6. Allowing or rejecting a tool for the session is an answer in the session's facts, which holds
+  in this process and in one that goes on from the facts. After the tool is allowed, a later call
+  to it runs without being asked, in any mode; after it is rejected, a later call to it is vetoed
+  without being asked, in any mode.
 - P7. Where no one can answer, what would be asked is vetoed. The veto's reason names the permission
   modes that let the call run: `acceptEdits` or `bypassPermissions` for a tool that edits files,
   `bypassPermissions` for any other tool.

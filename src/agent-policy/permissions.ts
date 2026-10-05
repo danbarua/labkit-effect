@@ -8,10 +8,17 @@
  * - `dontAsk`: is vetoed.
  * - `bypassPermissions`: runs.
  *
- * What is asked offers three options, by ACP's kinds: allow this call (`allow_once`), allow the tool
- * for the rest of the session (`allow_always`), or reject this call (`reject_once`). Allowing a tool
- * for the session is an answer in the session's facts: a later call to that tool runs without being
- * asked, in any mode, in this process or one that goes on from the facts.
+ * What is asked offers four options, by ACP's kinds:
+ *
+ * - `allow_once`: allow this call.
+ * - `allow_always`: allow the tool for the rest of the session.
+ * - `reject_once`: reject this call.
+ * - `reject_always`: reject the tool for the rest of the session.
+ *
+ * An answer for the session is an answer in the session's facts, which holds in this process and
+ * in one that goes on from the facts. After `allow_always`, a later call to that tool runs without
+ * being asked, in any mode. After `reject_always`, a later call to that tool is vetoed without being
+ * asked, in any mode.
  *
  * Where there is no one to answer (`canAsk` false: print mode), what would be asked is vetoed. The
  * veto's reason names the permission modes that let the call run: `acceptEdits` or
@@ -93,6 +100,7 @@ const optionsFor = (tool: ToolName): ReadonlyArray<PermissionOption> => [
   { optionId: OptionId.make("allow-once"), name: OptionName.make("Allow once"), kind: "allow_once" },
   { optionId: OptionId.make("allow-session"), name: OptionName.make(`Allow ${tool} for the rest of the session`), kind: "allow_always" },
   { optionId: OptionId.make("reject-once"), name: OptionName.make("Reject"), kind: "reject_once" },
+  { optionId: OptionId.make("reject-session"), name: OptionName.make(`Reject ${tool} for the rest of the session`), kind: "reject_always" },
 ];
 
 /** Whether an earlier answer in `facts` allowed `tool` for the session, or rejected it for the session. */
@@ -132,11 +140,13 @@ export function permissions(
     start: (request) => {
       if (request._tag !== "RunTool") return proceed;
       const kind = kindOf(request.tool) ?? "other";
-      if (onlyReads.includes(kind) || mode === "bypassPermissions") return proceed;
-      if (mode === "acceptEdits" && editsFiles.includes(kind)) return proceed;
+      if (onlyReads.includes(kind)) return proceed;
       const remembered = rememberedFor(facts, request.tool);
-      if (remembered === "allowed") return proceed;
+      // A rejection for the session holds in every mode.
       if (remembered === "rejected") return veto(FailureText.make(`${request.tool} was rejected for the rest of the session.`));
+      if (mode === "bypassPermissions") return proceed;
+      if (mode === "acceptEdits" && editsFiles.includes(kind)) return proceed;
+      if (remembered === "allowed") return proceed;
       if (mode === "dontAsk") return veto(FailureText.make(`${request.tool} needs permission, and the permission mode is dontAsk.`));
       if (!canAsk) {
         const letting = editsFiles.includes(kind) ? "acceptEdits or bypassPermissions" : "bypassPermissions";

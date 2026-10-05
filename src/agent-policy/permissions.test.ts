@@ -37,12 +37,18 @@ test("P5: the answer lets the call run, or vetoes it", () => {
   const asked = policy.start(call("write_file"));
   if (asked._tag !== "Waiting" || asked.asks === undefined) throw new Error("expected a question");
   const question = questionIn(asked.asks);
-  expect(question?.options.map((option) => option.kind)).toEqual(["allow_once", "allow_always", "reject_once"]);
+  expect(question?.options.map((option) => option.kind)).toEqual(["allow_once", "allow_always", "reject_once", "reject_always"]);
   const after = (option: string) => {
     const step = policy.receive(asked.state, { _tag: "Answered", answer: answerPicking(OptionId.make(option)) });
     return step._tag === "Decided" ? step.verdict._tag : step._tag;
   };
-  expect([after("allow-once"), after("allow-session"), after("reject-once"), after("no-such-option")]).toEqual(["Continue", "Continue", "Veto", "Veto"]);
+  expect([after("allow-once"), after("allow-session"), after("reject-once"), after("reject-session"), after("no-such-option")]).toEqual([
+    "Continue",
+    "Continue",
+    "Veto",
+    "Veto",
+    "Veto",
+  ]);
 });
 
 test("P6: a tool allowed for the session, by an answer in the facts, runs without asking", () => {
@@ -76,4 +82,16 @@ test("P7: where no one can answer, the veto of a tool that does not edit files n
     "run needs permission, and no one is there to answer. --permission-mode bypassPermissions lets it run.",
   );
   expect(verdict("acceptEdits", "run", [], false)).toBe("vetoed");
+});
+
+test("P6: a tool rejected for the session, by an answer in the facts, is vetoed without asking in every mode; other tools are judged as before", () => {
+  const asked = permissions("default", true, kindOf, []).start(call("write_file"));
+  if (asked._tag !== "Waiting" || asked.asks === undefined) throw new Error("expected a question");
+  const session = open();
+  observe(session, { _tag: "PermissionAsked", call: "c1", asks: asked.asks });
+  observe(session, { _tag: "PermissionAnswered", call: "c1", answer: answerPicking(OptionId.make("reject-session")) });
+  const modes: ReadonlyArray<PermissionMode> = ["default", "acceptEdits", "dontAsk", "bypassPermissions"];
+  expect(modes.map((mode) => verdict(mode, "write_file", session.journal))).toEqual(["vetoed", "vetoed", "vetoed", "vetoed"]);
+  expect(verdict("default", "run", session.journal)).toBe("asks");
+  expect(verdict("default", "read_file", session.journal)).toBe("runs");
 });

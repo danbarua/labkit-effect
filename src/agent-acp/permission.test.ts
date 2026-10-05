@@ -33,16 +33,13 @@ test("AA6: the request is the call as presented, pending, with its input, and ex
       { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
       { optionId: "allow-session", name: "Allow write_file for the rest of the session", kind: "allow_always" },
       { optionId: "reject-once", name: "Reject", kind: "reject_once" },
+      { optionId: "reject-session", name: "Reject write_file for the rest of the session", kind: "reject_always" },
     ],
   });
 });
 
-test("AA6: a question that offers rejecting for the session offers it to the client too; a presentation with no kind takes the question's", () => {
-  const always: PermissionQuestion = {
-    ...question,
-    options: [...question.options, { optionId: OptionId.make("reject-session"), name: OptionName.make("Never"), kind: "reject_always" }],
-  };
-  const request = requestOf(SessionId.make("s1"), call, always, { title: "write_file" });
+test("AA6: the policy's option that rejects for the session is offered to the client too; a presentation with no kind takes the question's", () => {
+  const request = requestOf(SessionId.make("s1"), call, question, { title: "write_file" });
   expect(request.options.map((option) => option.kind)).toEqual(["allow_once", "allow_always", "reject_once", "reject_always"]);
   expect(request.toolCall.kind).toBe("edit");
 });
