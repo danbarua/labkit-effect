@@ -1725,3 +1725,34 @@ test("AG17: a file read over 256 KiB is cut before a character, not inside it; a
   const announced = log.updates.find((update) => update.sessionUpdate === "tool_call" && update.toolCallId === "plan-1");
   expect(announced !== undefined && "title" in announced ? announced.title : undefined).toBe("update_plan: ls");
 });
+
+test("AG3: a call that ends while its permission request is out, its turn cancelled, has the request cancelled at the client", async () => {
+  const host = startHost({
+    script: [answer({ _tag: "ToolCall", call: "write-1", tool: "write_file", input: { path: "a.txt", content: "hi" } }), answer({ _tag: "Text", text: "Done." })],
+  });
+  const asked = Promise.withResolvers<void>();
+  const aborted = Promise.withResolvers<void>();
+  const app = acp
+    .client({ name: "an-sdk-client" })
+    .onRequest("session/request_permission", (ctx) => {
+      asked.resolve();
+      return new Promise<acp.RequestPermissionResponse>((resolve) =>
+        ctx.signal.addEventListener("abort", () => {
+          aborted.resolve();
+          resolve({ outcome: { outcome: "cancelled" } });
+        }),
+      );
+    })
+    .onNotification("session/update", () => {});
+  const cancelled = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    const prompt = ctx.request("session/prompt", say(sessionId, "Write it"));
+    await asked.promise;
+    await ctx.notify("session/cancel", { sessionId });
+    await prompt;
+    return Promise.race([aborted.promise.then(() => true), Bun.sleep(2000).then(() => false)]);
+  });
+  await host.stop();
+  expect(cancelled).toBe(true);
+});
