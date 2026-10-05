@@ -167,7 +167,7 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
 
     const take = (input: ProjectionInput) =>
       Effect.gen(function* () {
-        const step = next(yield* Ref.get(state), input, { mode: "live", present: options.present });
+        const step = yield* next(yield* Ref.get(state), input, { mode: "live", present: options.present });
         yield* Ref.set(state, step.state);
         yield* Effect.forEach(step.updates, send, { discard: true });
         if (input._tag === "Observed" || input._tag === "Decided") yield* act(input);

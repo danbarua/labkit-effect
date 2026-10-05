@@ -822,7 +822,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                       Effect.annotateLogs({ turn: left.turn }),
                     );
                   }
-                  const replayed = project(yield* session.facts, { mode: "replay", present: its.present });
+                  const replayed = yield* project(yield* session.facts, { mode: "replay", present: its.present });
                   if (method === "session/load") yield* Effect.forEach(replayed.updates, (update) => send(sessionId, update), { discard: true });
                   const feed = yield* follow(replayed.state);
                   if (left === undefined) yield* session.goOn.pipe(Effect.provideContext(context));

@@ -18,7 +18,7 @@
  * `config_option_update`, `current_mode_update`, `plan`, and `session/request_permission`.
  */
 
-import { Array as Arr, HashMap, HashSet, Option } from "effect";
+import { Effect, HashMap, HashSet, Option, Ref } from "effect";
 import type { ContentBlock, SessionUpdate, ToolCallContent, ToolCallLocation, ToolKind } from "effective-acp/schema/v1";
 import { ToolCallId } from "effective-acp/schema/v1";
 import type { Fact } from "../agent-machine/fact.ts";
@@ -47,7 +47,7 @@ export interface Presented {
 }
 
 /** The host's presentation of a tool call, without its outcome while it has none. */
-export type Present = (call: Call, outcome?: ToolOutcome) => Presented;
+export type Present = (call: Call, outcome?: ToolOutcome) => Effect.Effect<Presented>;
 
 export interface ProjectionContext {
   /** `replay` echoes each input as `user_message_chunk`; `live` does not. */
@@ -93,11 +93,11 @@ export const presentFrom =
   (call, outcome) => {
     const kind = catalog.find((tool) => tool.name === call.tool)?.kind;
     const shown = shownOf(call.tool, outcome);
-    return {
+    return Effect.succeed({
       title: call.tool,
       ...(kind === undefined ? {} : { kind }),
-      ...(shown === undefined ? {} : { content: [{ type: "content", content: text(shown) }] }),
-    };
+      ...(shown === undefined ? {} : { content: [{ type: "content" as const, content: text(shown) }] }),
+    });
   };
 
 
@@ -157,10 +157,9 @@ const chunkOf = (kind: TextKind, value: string): SessionUpdate =>
   kind === "Thinking" ? { sessionUpdate: "agent_thought_chunk", content: text(value) } : { sessionUpdate: "agent_message_chunk", content: text(value) };
 
 /** Announces `call` as `pending`, unless it was announced. */
-const announce = (state: ProjectionState, call: Call, context: ProjectionContext): Projected => {
-  if (state.calls.has(call.call)) return { state, updates: [] };
-  const shown = context.present(call);
-  return {
+const announce = (state: ProjectionState, call: Call, context: ProjectionContext): Effect.Effect<Projected> => {
+  if (state.calls.has(call.call)) return Effect.succeed({ state, updates: [] });
+  return Effect.map(context.present(call), (shown) => ({
     state: { ...state, calls: new Map([...state.calls, [call.call, { call, shown }]]) },
     updates: [
       {
@@ -173,7 +172,7 @@ const announce = (state: ProjectionState, call: Call, context: ProjectionContext
         ...(shown.content === undefined ? {} : { content: shown.content }),
       },
     ],
-  };
+  }));
 };
 
 const callOf = (part: Extract<ModelPart, { _tag: "ToolCall" }>): Call => ({ call: part.call, tool: part.tool, input: part.input });
@@ -183,23 +182,23 @@ const callOf = (part: Extract<ModelPart, { _tag: "ToolCall" }>): Call => ({ call
  * parts in order, so a part they covered gives nothing and the first they did not gives what of it
  * they did not send. A part the stream cut is not among `parts`: what was sent of it stays sent.
  */
-const answered = (state: ProjectionState, parts: ReadonlyArray<ModelPart>, sent: Sent, context: ProjectionContext): Projected => {
-  const { projected } = parts.reduce<{ readonly projected: Projected; readonly covered: Sent }>(
-    ({ projected, covered }, part) => {
-      if (part._tag === "ToolCall") {
-        const step = announce(projected.state, callOf(part), context);
-        return { projected: { state: step.state, updates: [...projected.updates, ...step.updates] }, covered };
-      }
-      if (part._tag !== "Text" && part._tag !== "Commentary" && part._tag !== "Thinking") return { projected, covered };
-      const kind = part._tag;
-      if (covered[kind] >= part.text.length) return { projected, covered: { ...covered, [kind]: covered[kind] - part.text.length } };
-      const rest = part.text.slice(covered[kind]);
-      return { projected: blank(rest) ? projected : { ...projected, updates: [...projected.updates, chunkOf(kind, rest)] }, covered: { ...covered, [kind]: 0 } };
-    },
-    { projected: nothing(state), covered: sent },
+const answered = (state: ProjectionState, parts: ReadonlyArray<ModelPart>, sent: Sent, context: ProjectionContext): Effect.Effect<Projected> =>
+  Effect.map(
+    Effect.reduce(
+      parts,
+      (): { readonly projected: Projected; readonly covered: Sent } => ({ projected: nothing(state), covered: sent }),
+      ({ projected, covered }, part) => {
+        if (part._tag === "ToolCall")
+          return Effect.map(announce(projected.state, callOf(part), context), (step) => ({ projected: { state: step.state, updates: [...projected.updates, ...step.updates] }, covered }));
+        if (part._tag !== "Text" && part._tag !== "Commentary" && part._tag !== "Thinking") return Effect.succeed({ projected, covered });
+        const kind = part._tag;
+        if (covered[kind] >= part.text.length) return Effect.succeed({ projected, covered: { ...covered, [kind]: covered[kind] - part.text.length } });
+        const rest = part.text.slice(covered[kind]);
+        return Effect.succeed({ projected: blank(rest) ? projected : { ...projected, updates: [...projected.updates, chunkOf(kind, rest)] }, covered: { ...covered, [kind]: 0 } });
+      },
+    ),
+    ({ projected }) => projected,
   );
-  return projected;
-};
 
 const nothing = (state: ProjectionState): Projected => ({ state, updates: [] });
 
@@ -222,49 +221,54 @@ const status = (call: CallId, value: "pending" | "in_progress"): SessionUpdate =
 });
 
 /** The updates `input` gives, and the state to take the next input from. */
-export function next(state: ProjectionState, input: ProjectionInput, context: ProjectionContext): Projected {
+export function next(state: ProjectionState, input: ProjectionInput, context: ProjectionContext): Effect.Effect<Projected> {
   switch (input._tag) {
     case "ModelStreamed":
-      return nothing(state);
+      return Effect.succeed(nothing(state));
     case "ModelDelta": {
-      if (state.ended.has(input.turn)) return nothing(state);
+      if (state.ended.has(input.turn)) return Effect.succeed(nothing(state));
       const now = textOf(state, input.turn);
       // Its request was answered already, and `ModelResponded` sent its text.
-      if (now.ahead > 0 || input.text === "") return nothing(state);
+      if (now.ahead > 0 || input.text === "") return Effect.succeed(nothing(state));
       const streaming = { ...now.streaming, [input.kind]: now.streaming[input.kind] + input.text.length };
       const held = (now.held[input.kind] ?? "") + input.text;
-      if (blank(held)) return nothing(withText(state, input.turn, { ...now, streaming, held: { ...now.held, [input.kind]: held } }));
-      return { state: withText(state, input.turn, { ...now, streaming, held: { ...now.held, [input.kind]: "" } }), updates: [chunkOf(input.kind, held)] };
+      if (blank(held)) return Effect.succeed(nothing(withText(state, input.turn, { ...now, streaming, held: { ...now.held, [input.kind]: held } })));
+      return Effect.succeed({ state: withText(state, input.turn, { ...now, streaming, held: { ...now.held, [input.kind]: "" } }), updates: [chunkOf(input.kind, held)] });
     }
     case "ModelPartArrived": {
-      if (input.part._tag !== "ToolCall") return nothing(state);
+      if (input.part._tag !== "ToolCall") return Effect.succeed(nothing(state));
       const now = state.texts.get(input.turn);
       const dropped = now === undefined ? state : withText(state, input.turn, { ...now, held: {} });
       return announce(dropped, callOf(input.part), context);
     }
     case "ModelResponseEnded": {
-      if (state.ended.has(input.turn)) return nothing(state);
+      if (state.ended.has(input.turn)) return Effect.succeed(nothing(state));
       const now = textOf(state, input.turn);
-      return nothing(
-        withText(
-          state,
-          input.turn,
-          now.ahead > 0 ? { ...now, ahead: now.ahead - 1 } : { ...now, awaiting: [...now.awaiting, now.streaming], streaming: none, held: {} },
+      return Effect.succeed(
+        nothing(
+          withText(
+            state,
+            input.turn,
+            now.ahead > 0 ? { ...now, ahead: now.ahead - 1 } : { ...now, awaiting: [...now.awaiting, now.streaming], streaming: none, held: {} },
+          ),
         ),
       );
     }
     case "Decided": {
       const decision = input.decision;
-      if (decision._tag !== "TurnEnded") return nothing(state);
+      if (decision._tag !== "TurnEnded") return Effect.succeed(nothing(state));
       const texts = new Map([...state.texts].filter(([turn]) => turn !== decision.turn));
-      return nothing({ ...state, texts, ended: new Set([...state.ended, decision.turn]) });
+      return Effect.succeed(nothing({ ...state, texts, ended: new Set([...state.ended, decision.turn]) }));
     }
     case "Observed": {
       const observation = input.observation;
       switch (observation._tag) {
         case "InputArrived":
           // Only what the user said is echoed: the feedback of a turn-end hook is the system's, another agent's is its own.
-          return { state, updates: context.mode === "replay" && observation.from._tag === "User" ? [{ sessionUpdate: "user_message_chunk", content: text(observation.text) }] : [] };
+          return Effect.succeed({
+            state,
+            updates: context.mode === "replay" && observation.from._tag === "User" ? [{ sessionUpdate: "user_message_chunk", content: text(observation.text) }] : [],
+          });
         case "ModelResponded": {
           const now = textOf(state, observation.turn);
           const [sent, after] = sentFor(now, context.mode);
@@ -273,14 +277,13 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
         case "ToolCallArrived":
           return announce(state, { call: observation.call, tool: observation.tool, input: observation.input }, context);
         case "PermissionAsked":
-          return { state, updates: [status(observation.call, "pending")] };
+          return Effect.succeed({ state, updates: [status(observation.call, "pending")] });
         case "ToolCallDispatched":
-          return { state, updates: [status(observation.call, "in_progress")] };
+          return Effect.succeed({ state, updates: [status(observation.call, "in_progress")] });
         case "ToolEnded": {
           const known = state.calls.get(observation.call);
           const outcome = observation.outcome;
-          const shown = known === undefined ? undefined : context.present(known.call, outcome);
-          return {
+          const ended = (shown: Presented | undefined): Projected => ({
             state,
             updates: [
               {
@@ -293,7 +296,8 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
                 ...(shown?.content === undefined ? {} : { content: shown.content }),
               },
             ],
-          };
+          });
+          return known === undefined ? Effect.succeed(ended(undefined)) : Effect.map(context.present(known.call, outcome), ended);
         }
         case "SessionOpened":
         case "InputCancelled":
@@ -311,7 +315,7 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
         case "NoticeInserted":
         case "CompactionWindow":
         case "McpServerChanged":
-          return nothing(state);
+          return Effect.succeed(nothing(state));
         default:
           return observation satisfies never;
       }
@@ -390,10 +394,16 @@ function inLiveOrder(inputs: ReadonlyArray<ProjectionInput>): ReadonlyArray<Proj
  * The updates `inputs` give, in order, from `from`; and the state after them. On replay, each
  * request's response is taken before its first tool call, as live sent them (`inLiveOrder`).
  */
-export function project(inputs: ReadonlyArray<ProjectionInput>, context: ProjectionContext, from: ProjectionState = start): Projected {
-  const [state, updates] = Arr.mapAccum(context.mode === "replay" ? inLiveOrder(inputs) : inputs, from, (state, input) => {
-    const step = next(state, input, context);
-    return [step.state, step.updates] as const;
+export function project(inputs: ReadonlyArray<ProjectionInput>, context: ProjectionContext, from: ProjectionState = start): Effect.Effect<Projected> {
+  return Effect.gen(function* () {
+    const state = yield* Ref.make(from);
+    const updates = yield* Effect.forEach(context.mode === "replay" ? inLiveOrder(inputs) : inputs, (input) =>
+      Ref.get(state).pipe(
+        Effect.flatMap((now) => next(now, input, context)),
+        Effect.tap((step) => Ref.set(state, step.state)),
+        Effect.map((step) => step.updates),
+      ),
+    );
+    return { state: yield* Ref.get(state), updates: updates.flat() };
   });
-  return { state, updates: updates.flat() };
 }

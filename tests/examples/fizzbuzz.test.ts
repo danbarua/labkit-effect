@@ -234,6 +234,7 @@ test("the summary is dated with the last fact it summarises, so the same facts g
 test("the scripted model keeps every context it is sent, in order", async () => {
   const model = scriptedFizzBuzzModel();
   const { seen } = await runTest(play(countingUser(3), { ...basic, model: { target: { provider: ProviderName.make("scripted"), model: ModelName.make("fizzbuzz-1") }, client: model.layer } }));
-  expect(model.seen.map((context) => context.messages.length)).toEqual(seen.map((context) => context.messages.length));
-  expect(model.seen.length).toBeGreaterThan(0);
+  const kept = Effect.runSync(model.seen);
+  expect(kept.map((context) => context.messages.length)).toEqual(seen.map((context) => context.messages.length));
+  expect(kept.length).toBeGreaterThan(0);
 });

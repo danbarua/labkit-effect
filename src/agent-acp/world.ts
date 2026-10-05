@@ -35,7 +35,7 @@ import { decoderOf, ignoredNote, jsonSchemaOf } from "../agent-session/tool-inpu
 import { logKeys } from "../agent-session/log-keys.ts";
 import { asText, parseJson, receivedText } from "../agent-session/received.ts";
 import { workspaceTools } from "../agent-tools/workspace.ts";
-import { type Present, presentFrom } from "./projection.ts";
+import { type Present, type Presented, presentFrom } from "./projection.ts";
 
 /** What a world is given for one session, at `session/new`. */
 export interface WorldOpening {
@@ -166,7 +166,7 @@ const editorFailure = (method: string, path: string, error: { readonly _tag?: st
  */
 export const editorWorld: World = {
   open: ({ sessionId, cwd, connection, strictInput }) =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
       const fs = connection.profile.client.capabilities.fs;
       const scope = ` Relative paths are inside the working folder, ${cwd}.`;
       const tools: ReadonlyArray<ToolSpec> = [
@@ -258,7 +258,7 @@ export const editorWorld: World = {
       };
 
       // The terminal each command ran in, by call: shown in the call as it runs, and when it has ended.
-      const terminals = Ref.makeUnsafe(HashMap.empty<CallId, TerminalId>());
+      const terminals = yield* Ref.make(HashMap.empty<CallId, TerminalId>());
 
       // The terminal is released however the call ends, which stops a command still running.
       const runCommand = (call: CallId) => (input: typeof RunCommand.Type) => {
@@ -335,22 +335,22 @@ export const editorWorld: World = {
       // The title names what the call is about, its command or its path, so a permission prompt
       // says what it asks about; a file's path is its location; an edit's change is a diff, before
       // it runs (when permission is asked) and once it succeeded; a command's terminal, once it has one.
-      const present: Present = (call, outcome) => {
-        const parsed = parseJson(call.input);
-        const input = "value" in parsed && typeof parsed.value === "object" && parsed.value !== null ? (parsed.value as Record<string, unknown>) : {};
-        const about = aboutOf(input);
-        const shown = { ...plain(call, outcome), ...(about === undefined ? {} : { title: `${call.tool}: ${oneLine(about)}` }) };
-        // `present` is called synchronously, so the terminals are read outside an Effect.
-        const terminalId = Option.getOrUndefined(HashMap.get(Ref.getUnsafe(terminals), call.call));
-        if (call.tool === "run_command" && terminalId !== undefined) return { ...shown, content: [{ type: "terminal", terminalId }] };
-        const at = typeof input["path"] === "string" ? inside(cwd, input["path"]) : undefined;
-        if (at === undefined || "problem" in at) return shown;
-        const located = { ...shown, locations: [{ path: at.full }] };
-        const edited = call.tool === "edit_file" && typeof input["old_text"] === "string" && typeof input["new_text"] === "string";
-        return edited && (outcome === undefined || outcome._tag === "Succeeded")
-          ? { ...located, content: [{ type: "diff", path: at.full, oldText: input["old_text"] as string, newText: input["new_text"] as string }] }
-          : located;
-      };
+      const present: Present = (call, outcome) =>
+        Effect.gen(function* () {
+          const parsed = parseJson(call.input);
+          const input = "value" in parsed && typeof parsed.value === "object" && parsed.value !== null ? (parsed.value as Record<string, unknown>) : {};
+          const about = aboutOf(input);
+          const shown: Presented = { ...(yield* plain(call, outcome)), ...(about === undefined ? {} : { title: `${call.tool}: ${oneLine(about)}` }) };
+          const terminalId = Option.getOrUndefined(HashMap.get(yield* Ref.get(terminals), call.call));
+          if (call.tool === "run_command" && terminalId !== undefined) return { ...shown, content: [{ type: "terminal", terminalId }] } satisfies Presented;
+          const at = typeof input["path"] === "string" ? inside(cwd, input["path"]) : undefined;
+          if (at === undefined || "problem" in at) return shown;
+          const located: Presented = { ...shown, locations: [{ path: at.full }] };
+          const edited = call.tool === "edit_file" && typeof input["old_text"] === "string" && typeof input["new_text"] === "string";
+          return edited && (outcome === undefined || outcome._tag === "Succeeded")
+            ? ({ ...located, content: [{ type: "diff", path: at.full, oldText: input["old_text"] as string, newText: input["new_text"] as string }] } satisfies Presented)
+            : located;
+        });
 
       return { system: `The working folder is ${cwd}.`, sources: [source], present };
     }),

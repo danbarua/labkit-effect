@@ -82,7 +82,7 @@ function judged(text: string, returned: number | undefined): Judged {
 
 export function scriptedFizzBuzzModel(): {
   readonly layer: Layer.Layer<ModelClient>;
-  readonly seen: ReadonlyArray<ModelContext>;
+  readonly seen: Effect.Effect<ReadonlyArray<ModelContext>>;
 } {
   const seen = Ref.makeUnsafe<ReadonlyArray<ModelContext>>([]);
   const calls = { count: 0 };
@@ -151,8 +151,6 @@ export function scriptedFizzBuzzModel(): {
     );
   return {
     layer: Layer.succeed(ModelClient, modelClientOf(request)),
-    get seen() {
-      return Ref.getUnsafe(seen);
-    },
+    seen: Ref.get(seen),
   };
 }

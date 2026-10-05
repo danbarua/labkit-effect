@@ -1,7 +1,7 @@
 /** The projection of a session's facts and streamed items to ACP's `session/update`, live and on load. */
 
 import { expect } from "bun:test";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { boringOpening } from "../../tests/support/boring.ts";
 import { observe, open } from "../../tests/support/drive.ts";
 import { json } from "../../tests/support/received.ts";
@@ -11,7 +11,11 @@ import type { Fact } from "../agent-machine/fact.ts";
 import { ToolName } from "../agent-machine/names.ts";
 import { CapturedObservation } from "../agent-machine/observation.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
-import { next, type Present, presentFrom, type ProjectionContext, type ProjectionInput, type ProjectionState, project, start } from "./projection.ts";
+import { next as nextIn, type Present, presentFrom, type ProjectionContext, type ProjectionInput, type ProjectionState, project as projectIn, start } from "./projection.ts";
+
+/** `project` and `next`, run: the presentations here read nothing. */
+const project = (...given: Parameters<typeof projectIn>) => Effect.runSync(projectIn(...given));
+const next = (...given: Parameters<typeof nextIn>) => Effect.runSync(nextIn(...given));
 
 const tools: ReadonlyArray<ToolSpec> = [
   { name: ToolName.make("ls"), description: "Lists files.", input: { type: "object" }, kind: "read", replay: "safe" },
@@ -405,12 +409,13 @@ test("PJ4: a call announced by ToolCallArrived is not announced again by its par
 });
 
 test("PJ6: a host's presentation is shown in place of the default: title, kind and locations when announced, its content and what changed when ended", () => {
-  const present: Present = (call, outcome) => ({
-    title: outcome === undefined ? `List ${call.tool}` : "Listed",
-    kind: "search",
-    locations: [{ path: "/work" }],
-    ...(outcome === undefined ? {} : { content: output("1 file") as never }),
-  });
+  const present: Present = (call, outcome) =>
+    Effect.succeed({
+      title: outcome === undefined ? `List ${call.tool}` : "Listed",
+      kind: "search",
+      locations: [{ path: "/work" }],
+      ...(outcome === undefined ? {} : { content: output("1 file") as never }),
+    });
   const { inputs } = listing();
   expect(project(inputs, { mode: "live", present }).updates.slice(0, 3)).toEqual([
     { ...announced("c1", "List ls", "search"), locations: [{ path: "/work" }] },

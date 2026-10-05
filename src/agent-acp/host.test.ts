@@ -1184,7 +1184,7 @@ const runsWorld = (runs: Array<string>, hold?: Deferred.Deferred<void>): World =
 
 /** What `session/load` replays of `facts` with `echoWorld`'s presentation, as JSON carries it. */
 const replayOf = (facts: ReadonlyArray<Fact>): Array<Update> =>
-  JSON.parse(JSON.stringify(project(facts, { mode: "replay", present: presentFrom([echoTool]) }).updates)) as Array<Update>;
+  JSON.parse(JSON.stringify(Effect.runSync(project(facts, { mode: "replay", present: presentFrom([echoTool]) })).updates)) as Array<Update>;
 
 /** A `session/update` notification as the agent wrote it to the wire. */
 const isUpdateNotification = (
