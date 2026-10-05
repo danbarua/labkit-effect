@@ -1,20 +1,20 @@
 /**
- * One MCP server a session keeps, over its runs, with the machine in `server-machine.ts` saying where
- * it is. Started in the scope it is given (a session's), it ends with it. `reconnect` ends the run
- * there is and starts another; `stop` ends it.
+ * One MCP server that a session keeps, over its runs; the machine in `server-machine.ts` holds its
+ * state. The server starts in the current scope (a session's) and ends with it. `reconnect` ends the
+ * current run and starts another; `stop` ends it.
  *
- * - A stdio server's run is its process (`agent-process`): connected over the process's pipes
- *   (`client.ts` `connect`); it ends when the process does.
+ * - A stdio server's run is its process (`agent-process`), connected over the process's pipes
+ *   (`client.ts` `connect`). The run ends when the process does.
  * - A remote server's run is a connection to its URL (`http.ts`). When the server no longer has the
- *   session (a 404 to a request that carried it), a new session is made, and the request it refused
- *   is made again, once; a connection whose stream ends between requests (HTTP+SSE) is made anew.
- *   The run ends when a new one cannot be made. A server that asks for credentials when none are
- *   given in its headers, or for OAuth, needs authorization (`NeedsAuth`); one that refuses the
+ *   session (a 404 to a request that carried it), a new session is made and the refused request is
+ *   made again, once. A connection whose stream ends between requests (HTTP+SSE) is made anew. The
+ *   run ends when a new connection cannot be made. A server that asks for credentials when its
+ *   headers give none, or for OAuth, needs authorization (`NeedsAuth`); a server that refuses the
  *   credentials given has failed.
  *
  * A run that does not answer `initialize` and list its tools within `connectTimeout` has failed, and
- * is stopped, so nothing is left behind. A call is made on the run that is ready; while none is, it
- * fails with what is known of the server. Every change of state is logged.
+ * is stopped, so nothing is left running. A call is made on the run that is ready; while no run is,
+ * the call fails with the server's state. Every change of state is logged.
  */
 
 import { Duration, Effect, Exit, HashMap, Option, Ref, Scope, Semaphore, Stream, SubscriptionRef } from "effect";
@@ -27,10 +27,10 @@ import { connectRemote, type HttpRejection, type McpServerRemote, rejectionOf, t
 import { logKeys } from "./log-keys.ts";
 import { describe, initialMcpServerState, type McpServerEvent, type McpServerState, stepMcpServer } from "./server-machine.ts";
 
-/** How long a server has to answer `initialize` and list its tools once its run starts, unless a host says otherwise. */
+/** How long a server has to answer `initialize` and list its tools once its run starts, unless the host sets another value. */
 export const defaultConnectTimeout: Duration.Input = "30 seconds";
 
-/** A server a session keeps: one run as a process, or one reached at a URL. */
+/** A server that a session keeps: run as a process, or reached at a URL. */
 export type McpServerConfig = McpServerStdio | McpServerRemote;
 
 export const isRemote = (server: McpServerConfig): server is McpServerRemote => "url" in server;
@@ -38,15 +38,15 @@ export const isRemote = (server: McpServerConfig): server is McpServerRemote => 
 export interface McpServer {
   readonly name: string;
   readonly state: Effect.Effect<McpServerState>;
-  /** Whether a run is live: a process, or a connection. */
+  /** Whether a run is live: a running process, or an open connection. */
   readonly running: Effect.Effect<boolean>;
-  /** The state now, then each change of it. */
+  /** Emits the current state, then each new state. */
   readonly changes: Stream.Stream<McpServerState>;
-  /** The state once the server is no longer connecting: ready, failed, needing authorization, exited or stopped. */
+  /** Waits until the server is no longer connecting, and returns its state: ready, failed, needing authorization, exited or stopped. */
   readonly settled: Effect.Effect<McpServerState>;
-  /** Calls a tool of the run that is ready, giving its result as the server sent it. */
+  /** Calls a tool on the run that is ready, and returns its result as the server sent it. */
   readonly call: (tool: string, args: Readonly<Record<string, unknown>>) => Effect.Effect<ToolResult, McpFailed>;
-  /** Ends the server's run, if there is one, and starts another. */
+  /** Ends the server's current run, if there is one, and starts another. */
   readonly reconnect: Effect.Effect<void>;
   readonly stop: Effect.Effect<void>;
 }
@@ -57,7 +57,7 @@ const endedOf = (process: Extract<ProcessState, { _tag: "Exited" }>): string => 
   return "its process ended";
 };
 
-/** A process group's state as the event it is to its server's machine: a run is a process. */
+/** Returns the server machine's event for a process group's state, since a stdio server's run is a process. */
 export const runEventOf = (process: ProcessState): McpServerEvent => {
   switch (process._tag) {
     case "Starting":
@@ -74,13 +74,13 @@ export const runEventOf = (process: ProcessState): McpServerEvent => {
   }
 };
 
-/** Whether `server` is given credentials: an `Authorization` header, or one named for a credential (`X-API-Key`). */
+/** Whether `server`'s headers give credentials: an `Authorization` header, or a header whose name is a credential name (`X-API-Key`). */
 const givesCredentials = (server: McpServerRemote): boolean => Object.keys(server.headers).some((name) => /^(?:proxy-)?authorization$/i.test(name) || isCredentialName(name));
 
 /**
- * What a run of `server` that HTTP refused comes to: needing authorization when the server asks for
- * credentials and none are given, or for OAuth; failed when it refuses the credentials given, or
- * anything else.
+ * Returns the event for a run of `server` that HTTP refused: `AuthNeeded` when the server asks for
+ * credentials and none are given, or asks for OAuth; `ConnectFailed` when it refuses the credentials
+ * given, or for any other refusal.
  */
 type Verdict = Extract<McpServerEvent, { readonly _tag: "ConnectFailed" | "AuthNeeded" }>;
 
@@ -98,7 +98,7 @@ export const refusalOf = (server: McpServerRemote, run: number, rejection: HttpR
   };
 };
 
-/** What a run that did not connect comes to: needing authorization, or failed. */
+/** Returns the event for a run that did not connect: `AuthNeeded` or `ConnectFailed`. */
 const verdictOf = (server: McpServerConfig, run: number, error: McpFailed | RemoteRefused): Verdict => {
   const rejection = error._tag === "RemoteRefused" ? error.rejection : rejectionOf(error);
   if (isRemote(server) && rejection !== undefined) return refusalOf(server, run, rejection);
@@ -115,7 +115,7 @@ interface Runs {
   readonly running: Effect.Effect<boolean>;
 }
 
-/** Starts `server` in the scope given, and connects to it; `roots` are what it is told when it asks. */
+/** Starts `server` in the current scope and connects to it. `roots` are returned to the server when it asks. */
 export const startMcpServer = (
   server: McpServerConfig,
   roots: ReadonlyArray<Root>,
@@ -127,7 +127,7 @@ export const startMcpServer = (
     const lock = yield* Semaphore.make(1);
     // The connection of each run that has connected, by run.
     const connections = yield* Ref.make(HashMap.empty<number, McpConnection>());
-    // How the machine stops a run (`StopRun`): set once the runs are made, which need `dispatch`.
+    // How the machine stops a run (`StopRun`): set once the runs are made, because making them needs `dispatch`.
     const stopRunRef = yield* Ref.make<Effect.Effect<void>>(Effect.void);
     const stopRun = Effect.flatten(Ref.get(stopRunRef));
 
@@ -148,7 +148,7 @@ export const startMcpServer = (
         )
         .pipe(Effect.flatMap((effects) => Effect.forEach(effects, () => stopRun, { discard: true })));
 
-    /** The connection `open` makes on `run`, ready once it has listed its tools within the time given; else failed, or needing authorization. */
+    /** Connects `run` with `open`. The run is ready once the server has listed its tools within the timeout; otherwise it has failed or needs authorization. */
     const connectOn = <R>(run: number, open: Effect.Effect<McpConnection, McpFailed | RemoteRefused, R>): Effect.Effect<void, never, R> =>
       Effect.gen(function* () {
         const connection = yield* open;
@@ -166,7 +166,7 @@ export const startMcpServer = (
 
     const runs: Runs = isRemote(server)
       ? yield* remoteRuns(dispatch, (run, scope) =>
-          // A run that ended is stopped too: nothing is left of it.
+          // A run that ended is stopped too, so nothing of it is left running.
           connectOn(run, remoteConnection(server, roots, options.clientInfo, timeout, (event) => dispatch(event({ run })).pipe(Effect.andThen(stopRun)), scope)),
         )
       : yield* stdioRuns(server, dispatch, (run, handle) => connectOn(run, connect(server.name, handle, roots, options.clientInfo)));
@@ -195,7 +195,7 @@ export const startMcpServer = (
     };
   });
 
-/** A stdio server's runs: its process group's, each connected over the process's pipes. */
+/** A stdio server's runs: its process group's runs, each connected over the process's pipes. */
 const stdioRuns = (
   server: McpServerStdio,
   dispatch: (event: McpServerEvent) => Effect.Effect<void>,
@@ -224,7 +224,7 @@ const remoteRuns = (
   Effect.gen(function* () {
     const parent = yield* Scope.Scope;
     const lock = yield* Semaphore.make(1);
-    // The latest run, and the scope of the run that is live, if one is.
+    // The latest run number, and the scope of the live run, if there is one.
     const latest = yield* Ref.make<{ readonly run: number; readonly live: Scope.Closeable | undefined }>({ run: 0, live: undefined });
     const start = lock.withPermit(
       Effect.gen(function* () {
@@ -250,16 +250,16 @@ const remoteRuns = (
       start,
       restart: Effect.andThen(stop, start),
       stop,
-      // The machine asks from within the run, whose scope stopping it closes: it is stopped from outside it.
+      // The machine asks for the stop from within the run, and stopping closes the run's scope, so the stop runs outside it.
       stopRun: Effect.asVoid(Effect.forkIn(stop, parent)),
       running: Effect.map(Ref.get(latest), ({ live }) => live !== undefined),
     };
   });
 
 /**
- * The connection of one run of a remote server, in `runScope`: made anew when the server no longer
- * has the session (the request it refused made again once) and when its stream ends between
- * requests. When a new one cannot be made, `ended` says what the run comes to.
+ * The connection of one run of a remote server, in `runScope`. It is made anew when the server no
+ * longer has the session (the refused request is then made again once), and when its stream ends
+ * between requests. When a new connection cannot be made, `ended` receives the event for the run.
  */
 const remoteConnection = (
   server: McpServerRemote,
@@ -283,7 +283,7 @@ const remoteConnection = (
     const current = yield* Ref.make(first);
     const lock = yield* Semaphore.make(1);
 
-    /** A new connection in place of `lost`, unless one was made already; a run that cannot make one has ended. */
+    /** Makes a new connection in place of `lost`, unless one was made already. A run that cannot make one has ended. */
     const renew = (lost: typeof first) =>
       lock.withPermit(
         Effect.gen(function* () {
@@ -296,7 +296,7 @@ const remoteConnection = (
               orElse: () => Effect.fail(new McpFailed({ server: server.name, reason: `did not answer initialize within ${Duration.format(Duration.fromInputUnsafe(timeout))}` })),
             }),
             Effect.tap((made) => Ref.set(current, made)),
-            // Credentials refused, or asked for: the run needs authorization or has failed. Anything else ends it.
+            // Credentials refused or asked for: the run needs authorization or has failed. Any other failure ends the run.
             Effect.tapError((error) =>
               ended(({ run }) => {
                 const verdict = verdictOf(server, run, error);
@@ -309,8 +309,9 @@ const remoteConnection = (
       );
 
     /**
-     * Waits for the connection there is to close. One whose stream ends between requests is made
-     * anew; one closed in its place is not. Whether to wait again: not once a new one could not be made.
+     * Waits for the current connection to close. A connection whose stream ends between requests is
+     * made anew; a connection replaced by a new one is not. Returns whether to wait again: false once
+     * a new connection could not be made.
      */
     const watch = Effect.gen(function* () {
       const watched = yield* Ref.get(current);
@@ -321,7 +322,7 @@ const remoteConnection = (
     });
     yield* watch.pipe(Effect.repeat({ while: (again) => again }), Effect.forkIn(runScope));
 
-    /** Whether HTTP refused a request for its credentials. */
+    /** Whether HTTP refused a request because of its credentials. */
     const credentialsRefused = (error: McpFailed) => {
       const status = rejectionOf(error)?.status;
       return status === 401 || status === 403;
@@ -329,10 +330,10 @@ const remoteConnection = (
 
     const call: McpConnection["call"] = (tool, args) =>
       Effect.gen(function* () {
-        // A connection being made anew is waited for.
+        // A connection that is being made anew is waited for.
         const used = yield* lock.withPermit(Ref.get(current));
         return yield* used.connection.call(tool, args).pipe(
-          // Credentials refused mid-session (a key revoked): the run has failed or needs authorization, and the call fails.
+          // Credentials refused mid-session (a revoked key): the run has failed or needs authorization, and the call fails.
           Effect.tapError((error) => (credentialsRefused(error) ? ended(({ run }) => refusalOf(server, run, rejectionOf(error)!)) : Effect.void)),
           Effect.catchIf(
             (error) => rejectionOf(error)?.sessionExpired === true,
@@ -350,7 +351,7 @@ const remoteConnection = (
       initialized: first.connection.initialized,
       tools: Effect.flatMap(Ref.get(current), (made) => made.connection.tools),
       call,
-      // The run ends by `ended`, not by one connection closing.
+      // The run ends through `ended`, not when one connection closes.
       closed: Effect.never,
     };
   });

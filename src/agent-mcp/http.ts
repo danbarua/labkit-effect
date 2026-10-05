@@ -1,24 +1,27 @@
 /**
  * The wire to an MCP server reached at a URL (`McpServerRemote`).
  *
- * Streamable HTTP (`http`): each message is a POST to the server's URL. The server answers `202`
- * (a notification or a response, taken), one JSON message, or an SSE stream of messages: its own
- * requests and notifications, then its answer. Once the server has answered `initialize`, every
- * message carries the session it gave (`Mcp-Session-Id`) and the version agreed
- * (`MCP-Protocol-Version`). A GET stream carries what the server sends unasked, when it offers one
- * (`405`: it does not); it is opened again a second after it ends. When the wire's scope closes,
- * the session is ended (DELETE).
+ * Streamable HTTP (`http`):
+ * - Each message is a POST to the server's URL. The server answers `202` (it accepted a notification
+ *   or a response), one JSON message, or an SSE stream of messages: its own requests and
+ *   notifications, then its answer.
+ * - After the server has answered `initialize`, every message carries the session it returned
+ *   (`Mcp-Session-Id`) and the agreed version (`MCP-Protocol-Version`).
+ * - A GET stream carries what the server sends unasked, when the server offers one (`405` means it
+ *   does not). The stream is opened again one second after it ends.
+ * - When the wire's scope closes, the session is ended with a DELETE.
  *
- * HTTP+SSE (`sse`, protocol 2024-11-05): a GET stream whose `endpoint` event gives the URL messages
- * are posted to; every message from the server comes on the stream. The wire ends when the stream
- * does.
+ * HTTP+SSE (`sse`, protocol 2024-11-05): a GET stream whose `endpoint` event gives the URL that
+ * messages are posted to. Every message from the server arrives on the stream, and the wire ends when
+ * the stream does.
  *
- * `write` sends a request and returns: the answer comes on `read`. A notification or a response is
- * written once the server has taken it, so the messages the client sends arrive in order. A request
- * the endpoint refuses (an HTTP error, or the server not reached) is answered on `read` with a
- * JSON-RPC error carrying what HTTP said (`HttpRejection`, `rejectionOf`); one whose stream ends
- * before the answer is answered with an error saying so. The headers configured go with every
- * request, and are never logged.
+ * Both transports:
+ * - `write` sends a request and returns; the answer arrives on `read`. A notification or a response
+ *   is written once the server has accepted it, so the client's messages arrive in order.
+ * - A request that the endpoint refuses (an HTTP error, or the server not reached) is answered on
+ *   `read` with a JSON-RPC error carrying the HTTP details (`HttpRejection`, `rejectionOf`). A
+ *   request whose stream ends before the answer is answered with an error saying so.
+ * - The configured headers go with every request and are never logged.
  */
 
 import { Array as Arr, Data, Deferred, Effect, HashSet, Queue, Ref, Scope, Stream } from "effect";
@@ -38,35 +41,35 @@ export interface McpServerRemote {
   readonly name: string;
   readonly transport: "http" | "sse";
   readonly url: string;
-  /** Sent with every request: a credential among them, as a rule. Never logged. */
+  /** Sent with every request; they usually include a credential. Never logged. */
   readonly headers: Readonly<Record<string, string>>;
 }
 
-/** What HTTP said of a request the endpoint refused. */
+/** The HTTP details of a request that the endpoint refused. */
 export interface HttpRejection {
   /** The response's status; 0 when the server was not reached. */
   readonly status: number;
-  /** The `WWW-Authenticate` header the server answered with, if any. */
+  /** The `WWW-Authenticate` header that the server answered with, if any. */
   readonly authenticate?: string | undefined;
-  /** A 404 to a message that carried a session: the server no longer has the session. */
+  /** True for a 404 to a message that carried a session: the server no longer has the session. */
   readonly sessionExpired: boolean;
-  /** The start of the response's body, or why the server was not reached. */
+  /** The start of the response's body, or the reason the server was not reached. */
   readonly said: string;
 }
 
-/** The JSON-RPC error code of a request the endpoint refused (`HttpRejection` in its data). */
+/** The JSON-RPC error code of a request that the endpoint refused (`HttpRejection` in its data). */
 const refusedCode = -32001;
 /** The JSON-RPC error code of a request whose response stream ended before its answer. */
 const unansweredCode = -32002;
 
-/** What HTTP said of a request that failed because the endpoint refused it, if that is why. */
+/** Returns the HTTP details of a request that failed because the endpoint refused it; undefined for any other failure. */
 export const rejectionOf = (error: unknown): HttpRejection | undefined => {
   const cause = error instanceof McpFailed ? error.cause : error;
   if (!(cause instanceof JsonRpcError) || cause.code !== refusedCode) return undefined;
   return (cause.data as { readonly http?: HttpRejection } | undefined)?.http;
 };
 
-/** The wire to a remote server, and what it is to be told once the server has answered `initialize`. */
+/** The wire to a remote server, and the callback that receives the server's answer to `initialize`. */
 export interface RemoteWire {
   readonly wire: Wire;
   readonly initialized: (result: McpSchema.InitializeResult) => Effect.Effect<void>;
@@ -75,7 +78,7 @@ export interface RemoteWire {
 /** The connection could not be made before `initialize`: the HTTP+SSE stream was refused or did not give its endpoint. */
 export class RemoteRefused extends Data.TaggedError("RemoteRefused")<{ readonly rejection: HttpRejection }> {}
 
-/** How many characters of a refusing response's body are kept. */
+/** The number of characters of a refusing response's body that are kept. */
 const saidLimit = 2000;
 
 const requestIdsOf = (message: JsonRpcMessage | ReadonlyArray<JsonRpcMessage>): ReadonlyArray<JsonRpcId> =>
@@ -84,11 +87,11 @@ const requestIdsOf = (message: JsonRpcMessage | ReadonlyArray<JsonRpcMessage>): 
 const methodsOf = (message: JsonRpcMessage | ReadonlyArray<JsonRpcMessage>): ReadonlyArray<string> =>
   (Array.isArray(message) ? message : [message]).map((each) => ("method" in each ? each.method : "response"));
 
-/** The id a message from the server answers, if it is a response. */
+/** Returns the id that a message from the server answers, if it is a response. */
 const answeredBy = (value: unknown): JsonRpcId | undefined =>
   typeof value === "object" && value !== null && !("method" in value) && "id" in value ? (value.id as JsonRpcId) : undefined;
 
-/** The ids the responses in `input` answer. */
+/** Returns the ids that the responses in `input` answer. */
 const answeredIn = (input: WireInput): HashSet.HashSet<JsonRpcId> => {
   if (input._tag !== "Json") return HashSet.empty();
   const values: ReadonlyArray<unknown> = Array.isArray(input.value) ? input.value : [input.value];
@@ -100,7 +103,7 @@ const answeredIn = (input: WireInput): HashSet.HashSet<JsonRpcId> => {
   );
 };
 
-/** A URL as the log says it: its origin and path, without a query, which may hold a credential. */
+/** Returns a URL as it is logged: its origin and path, without the query, which may hold a credential. */
 export const whereOf = (url: string): string => {
   try {
     const parsed = new URL(url);
@@ -110,7 +113,7 @@ export const whereOf = (url: string): string => {
   }
 };
 
-/** What an error says: its message, or itself as JSON. */
+/** Returns an error's message, or the error as JSON when it has none. */
 const textOf = (error: unknown): string => (error instanceof Error ? error.message : JSON.stringify(error));
 
 const parsed = (text: string): WireInput => {
@@ -122,8 +125,8 @@ const parsed = (text: string): WireInput => {
 };
 
 /**
- * The events of an SSE stream that carry data. A server primes a stream with an event of an id and
- * no data (so that a client can resume it): it carries no message.
+ * Returns the events of an SSE stream that carry data. A server primes a stream with an event that
+ * has an id and no data (so that a client can resume it); that event carries no message.
  */
 const eventsOf = <E>(stream: Stream.Stream<Uint8Array, E>) =>
   stream.pipe(
@@ -132,7 +135,7 @@ const eventsOf = <E>(stream: Stream.Stream<Uint8Array, E>) =>
     Stream.filter((event) => event.data !== ""),
   );
 
-/** The parts both transports share: the inbox `read` gives, and how a message the endpoint took or refused is answered. */
+/** The parts that both transports share: the inbox that `read` returns, and how a message that the endpoint accepted or refused is answered. */
 const makeInbox = (server: McpServerRemote) =>
   Effect.gen(function* () {
     const inbox = yield* Queue.unbounded<WireInput, Cause.Done>();
@@ -149,7 +152,7 @@ const makeInbox = (server: McpServerRemote) =>
           { discard: true },
         );
       });
-    /** Delivers each message of a response; a request it carried that is not answered by its end is answered with an error. */
+    /** Delivers each message of a response; a request that the response leaves unanswered at its end is answered with an error. */
     const answers = (message: JsonRpcMessage | ReadonlyArray<JsonRpcMessage>, messages: Stream.Stream<string, unknown>) =>
       Effect.gen(function* () {
         const answered = yield* Ref.make(HashSet.empty<JsonRpcId>());
@@ -176,7 +179,7 @@ const makeInbox = (server: McpServerRemote) =>
     return { inbox, deliver, refused, answers };
   });
 
-/** What a refusing response says, read from it. */
+/** Reads the HTTP details from a refusing response. */
 const rejectionFrom = (response: HttpClientResponse.HttpClientResponse, withSession: boolean): Effect.Effect<HttpRejection> =>
   Effect.map(
     Effect.catch(response.text, (error) => Effect.succeed(`(its body could not be read: ${error.message})`)),
@@ -190,7 +193,7 @@ const rejectionFrom = (response: HttpClientResponse.HttpClientResponse, withSess
 
 const unreached = (error: { readonly message: string }): HttpRejection => ({ status: 0, sessionExpired: false, said: `the server could not be reached: ${error.message}` });
 
-/** The messages a response carries: an SSE stream's events, or one JSON message. */
+/** Returns the messages that a response carries: an SSE stream's events, or one JSON message. */
 const messagesOf = (response: HttpClientResponse.HttpClientResponse): Stream.Stream<string, unknown> =>
   (response.headers["content-type"] ?? "").startsWith("text/event-stream")
     ? eventsOf(response.stream).pipe(Stream.map((event) => event.data))
@@ -200,12 +203,12 @@ const streamableHttp = (server: McpServerRemote): Effect.Effect<RemoteWire, neve
   Effect.gen(function* () {
     const scope = yield* Scope.Scope;
     const http = yield* HttpClient.HttpClient;
-    // A request lives as long as the wire: its stream is cut when the wire's scope closes.
+    // A request lives as long as the wire: its stream is closed when the wire's scope closes.
     const execute = (request: HttpClientRequest.HttpClientRequest) => HttpClient.withScope(http).execute(request).pipe(Scope.provide(scope));
     const { inbox, deliver, refused, answers } = yield* makeInbox(server);
     const session = yield* Ref.make<string | undefined>(undefined);
     const version = yield* Ref.make<string | undefined>(undefined);
-    /** The headers a message carries, and the session among them, if there is one. */
+    /** Returns the headers that a message carries, and the session id among them, if there is one. */
     const headersOf = (accept: string): Effect.Effect<{ readonly headers: Readonly<Record<string, string>>; readonly session: string | undefined }> =>
       Effect.map(Effect.all([Ref.get(session), Ref.get(version)]), ([session, version]) => ({
         session,
@@ -227,7 +230,7 @@ const streamableHttp = (server: McpServerRemote): Effect.Effect<RemoteWire, neve
             HttpClientRequest.bodyText(JSON.stringify(message), "application/json"),
           ),
         );
-        // The session is the one the server gave in answer to `initialize`.
+        // The session is the one that the server returned in answer to `initialize`.
         const given = response.headers["mcp-session-id"];
         const changed = yield* Ref.modify(session, (current) => (given !== undefined && given !== current ? [true, given] : [false, current]));
         if (changed) yield* Effect.logInfo(logKeys.http.session, { server: server.name, url: whereOf(server.url) });
@@ -237,7 +240,7 @@ const streamableHttp = (server: McpServerRemote): Effect.Effect<RemoteWire, neve
         yield* Effect.forkIn(answers(message, messagesOf(response)), scope);
       }).pipe(Effect.catch((error) => refused(message, unreached(error))));
 
-    /** Reads the GET stream until it ends; whether to open it again. */
+    /** Reads the GET stream until it ends; returns whether to open it again. */
     const listen = Effect.gen(function* () {
       const response = yield* execute(HttpClientRequest.get(server.url).pipe(HttpClientRequest.setHeaders((yield* headersOf("text/event-stream")).headers)));
       if (response.status === 405) {
@@ -269,7 +272,7 @@ const streamableHttp = (server: McpServerRemote): Effect.Effect<RemoteWire, neve
 
     const wire: Wire = {
       read: Stream.fromQueue(inbox),
-      // A request is sent in the background; a notification or a response once the server has taken it, so the next follows it.
+      // A request is sent in the background; a notification or a response is written once the server has accepted it, so the next message follows it.
       write: (message) => (requestIdsOf(message).length > 0 ? Effect.asVoid(Effect.forkIn(post(message), scope)) : post(message)),
     };
     return {
@@ -316,7 +319,7 @@ const httpSse = (server: McpServerRemote): Effect.Effect<RemoteWire, RemoteRefus
         const response = yield* execute(
           HttpClientRequest.post(posted).pipe(HttpClientRequest.setHeaders(headersOf("application/json")), HttpClientRequest.bodyText(JSON.stringify(message), "application/json")),
         );
-        // The endpoint's URL carries the session: a 404 there is the session ended.
+        // The endpoint's URL carries the session, so a 404 there means the session ended.
         if (response.status >= 400) return yield* refused(message, yield* rejectionFrom(response, true));
         // The answers come on the stream; a body, if the server sends one, is read as messages too.
         if (response.status !== 202 && response.status !== 204) yield* Effect.forkIn(answers([], messagesOf(response).pipe(Stream.filter((text) => text.trim() !== ""))), scope);
@@ -331,10 +334,10 @@ const httpSse = (server: McpServerRemote): Effect.Effect<RemoteWire, RemoteRefus
     };
   });
 
-/** The wire to `server`, in the scope given: it lives as long as the scope. */
+/** Returns the wire to `server`, which lives as long as the current scope. */
 export const remoteWire = (server: McpServerRemote): Effect.Effect<RemoteWire, RemoteRefused, Scope.Scope> =>
   (server.transport === "http" ? streamableHttp(server) : httpSse(server)).pipe(Effect.provide(FetchHttpClient.layer));
 
-/** Connects to `server` over its wire, in the scope given (`client.ts` `connectOver`); `roots` are what it is told when it asks. */
+/** Connects to `server` over its wire, in the current scope (`client.ts` `connectOver`). `roots` are returned to the server when it asks. */
 export const connectRemote = (server: McpServerRemote, roots: ReadonlyArray<Root>, clientInfo?: ClientInfo): Effect.Effect<McpConnection, McpFailed | RemoteRefused, Scope.Scope> =>
   Effect.flatMap(remoteWire(server), (remote) => connectOver(server.name, remote.wire, roots, clientInfo, remote.initialized));

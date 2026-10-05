@@ -1,15 +1,17 @@
 /**
- * An MCP server's tools as a tool source (`agent-session/tool-sources.ts`): offered under the
- * namespace `mcp__<server>`, so `mcp__github__search`. Providers take tool names of letters, digits,
- * `_` and `-`, at most 64 characters: every other character of a server's or a tool's name is
- * offered as `_`, and a tool whose name is still too long, or the same as another's once its
- * characters are replaced, is left out, with the reason (`left`).
- *
- * A tool is of kind `read` and safe to run again when the server says it only reads
- * (`readOnlyHint`); idempotent when it says so (`idempotentHint`); otherwise of kind `other` and
- * unsafe to run again. A call's input must be a JSON object. Its result is recorded as the server
- * sent it (`mcpToolResult`); a result with `isError: true` is the tool's failure, `Reported`. A call
- * the server does not answer (it is not running, or the request failed) fails `Reported`, saying why.
+ * An MCP server's tools as a tool source (`agent-session/tool-sources.ts`), offered under the
+ * namespace `mcp__<server>`, so `mcp__github__search`.
+ * - Providers accept tool names of letters, digits, `_` and `-`, at most 64 characters. Every other
+ *   character of a server's or a tool's name is replaced by `_`. A tool whose name is still too long,
+ *   or the same as another's after replacement, is not offered, and the reason is returned
+ *   (`left`).
+ * - A tool is of kind `read` and safe to run again when the server says it only reads
+ *   (`readOnlyHint`); idempotent when the server says so (`idempotentHint`); otherwise of kind
+ *   `other` and unsafe to run again.
+ * - A call's input must be a JSON object. The result is recorded as the server sent it
+ *   (`mcpToolResult`); a result with `isError: true` is the tool's failure, `Reported`. A call that
+ *   the server does not answer (it is not running, or the request failed) fails `Reported`, with the
+ *   reason.
  */
 
 import { Effect, type Schema } from "effect";
@@ -23,18 +25,18 @@ import { mcpToolResult } from "../agent-session/tool-output.ts";
 import type { ToolSource } from "../agent-session/tool-sources.ts";
 import type { McpServer } from "./server.ts";
 
-/** The most characters of a tool's name, as providers take it. */
+/** The maximum length of a tool name that providers accept. */
 export const maxToolName = 64;
 
-/** A name with every character providers do not take in a tool's name offered as `_`. */
+/** Returns `name` with every character that providers do not accept in a tool name replaced by `_`. */
 const offerable = (name: string): string => name.replace(/[^A-Za-z0-9_-]/g, "_");
 
-/** The namespace a server's tools are offered under. */
+/** Returns the namespace that a server's tools are offered under. */
 export const namespaceOf = (server: string): string => `mcp__${offerable(server)}`;
 
 export interface McpToolSource {
   readonly source: ToolSource;
-  /** The tools left out, and why. */
+  /** The tools not offered, each with the reason. */
   readonly left: ReadonlyArray<{ readonly tool: string; readonly reason: string }>;
 }
 
@@ -49,7 +51,7 @@ const specOf = (name: string, tool: McpSchema.Tool): ToolSpec => {
   };
 };
 
-/** Whether a tool is safe to run again, by what the server says of it: that it only reads, or that it is idempotent. */
+/** Returns whether a tool is safe to run again, from what the server says of it: that it only reads, or that it is idempotent. */
 const replayOf = (hints: McpSchema.Tool["annotations"]): ToolSpec["replay"] => {
   if (hints?.readOnlyHint === true) return "safe";
   if (hints?.idempotentHint === true) return "idempotent";
@@ -58,7 +60,7 @@ const replayOf = (hints: McpSchema.Tool["annotations"]): ToolSpec["replay"] => {
 
 const isObject = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** `server`'s `tools` (those it listed when it was ready) as a tool source. */
+/** Returns `server`'s `tools` (those it listed when it was ready) as a tool source. */
 export const mcpToolSource = (server: McpServer, tools: ReadonlyArray<McpSchema.Tool>): McpToolSource => {
   const namespace = namespaceOf(server.name);
   const named = tools.map((tool) => ({ tool, name: offerable(tool.name) }));

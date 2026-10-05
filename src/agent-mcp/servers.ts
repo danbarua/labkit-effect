@@ -1,14 +1,12 @@
 /**
- * The MCP servers one session keeps: each started (`server.ts`: as a process, or at its URL), all at
- * once, in the scope given (the session's), and ended with it.
- *
- * Once every server has settled (ready, or failed: a server has `connectTimeout` to connect), the
- * tools of those that are ready are tool sources (`source.ts`), offered after the host's own: the
- * session's tools are fixed when it opens, so a server that becomes ready later, reconnected, offers
- * none it did not offer then. The notices (`notices`) tell the model when a server is not running,
- * and when it runs again, once each; a server that is ready when the session starts is not
- * mentioned. `changes` is each change of a server's state, as the session records it
- * (`McpServerChanged`).
+ * The MCP servers that one session keeps. All start at once (`server.ts`: as processes, or at their
+ * URLs), in the current scope (the session's), and end with it.
+ * - Once every server has settled (ready, or failed: each has `connectTimeout` to connect), the ready
+ *   servers' tools become tool sources (`source.ts`), offered after the host's own. The session's
+ *   tools are fixed when it opens, so a server that becomes ready later offers no tools in it.
+ * - `notices` tells the model once when a server is not running, and once when it runs again. A
+ *   server that is ready when the session starts is not mentioned.
+ * - `changes` is each change of a server's state, as the session records it (`McpServerChanged`).
  */
 
 import { Effect, Ref, Stream } from "effect";
@@ -24,7 +22,7 @@ import { describe, type McpServerState } from "./server-machine.ts";
 import { type McpServer, type McpServerConfig, startMcpServer } from "./server.ts";
 import { mcpToolSource, namespaceOf } from "./source.ts";
 
-/** A server a host was given, and how long it has to connect when not the host's default. */
+/** A server that a host was given, and its connect timeout when it differs from the host's default. */
 export interface GivenServer {
   readonly server: McpServerConfig;
   readonly connectTimeout?: Duration.Input | undefined;
@@ -39,15 +37,15 @@ export interface McpServers {
   readonly states: Effect.Effect<ReadonlyArray<{ readonly name: string; readonly state: McpServerState }>>;
   /** The tool sources of the servers that were ready once all settled, in order. */
   readonly sources: ReadonlyArray<ToolSource>;
-  /** What tells the model when a server is not running, and when it runs again. */
+  /** The notice provider that tells the model when a server is not running, and when it runs again. */
   readonly notices: NoticeProvider;
-  /** Each server's state as the session records it: the state now (a server still connecting is not), then each change. */
+  /** Each server's state as the session records it: the current state, then each change. A server that is connecting is not recorded. */
   readonly changes: Stream.Stream<Change>;
-  /** Starts the server named again and connects to it anew; its state once settled, or `undefined` when no server has the name. */
+  /** Starts the named server again, connects to it, and returns its state once settled; `undefined` when no server has the name. */
   readonly reconnect: (name: string) => Effect.Effect<McpServerState | undefined>;
 }
 
-/** A state as the session records it; a server still connecting is not recorded. */
+/** Returns `state` as the session records it, or undefined for a server that is connecting. */
 const recorded = (name: string, state: McpServerState, offered: (state: Extract<McpServerState, { _tag: "Ready" }>) => ReadonlyArray<string>): Change | undefined => {
   const server = McpServerName.make(name);
   switch (state._tag) {
@@ -68,7 +66,7 @@ const recorded = (name: string, state: McpServerState, offered: (state: Extract<
 
 type Running = "running" | "not running";
 
-/** Whether a server in `state` is running, as the model is told; one still connecting is as it was told before (`before`). */
+/** Returns whether a server in `state` is running, as the model is told. A server that is connecting keeps the status the model was last told (`before`). */
 const runningOf = (state: McpServerState, before: Running | undefined): Running | undefined => {
   switch (state._tag) {
     case "Ready":
@@ -85,7 +83,7 @@ const runningOf = (state: McpServerState, before: Running | undefined): Running 
   }
 };
 
-/** Starts the servers given, in the scope given; `roots` are what each is told when it asks. */
+/** Starts the given servers in the current scope. `roots` are returned to each server when it asks. */
 export const startMcpServers = (
   given: ReadonlyArray<GivenServer>,
   roots: ReadonlyArray<Root>,
@@ -114,7 +112,7 @@ export const startMcpServers = (
 
     const states: McpServers["states"] = Effect.forEach(started, (server) => Effect.map(server.state, (state) => ({ name: server.name, state })));
 
-    // What the model was last told of each server: a server ready when the session starts is taken as told so.
+    // The status that the model was last told for each server. A server that is ready when the session starts counts as already reported as running.
     const told = yield* Ref.make<ReadonlyMap<string, Running>>(
       new Map(settled.flatMap(({ server, state }) => (state._tag === "Ready" ? [[server.name, "running"] as const] : []))),
     );

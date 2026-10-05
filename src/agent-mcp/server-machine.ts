@@ -1,11 +1,8 @@
 /**
- * The life of one MCP server a session keeps, over its runs: a run is a process (stdio) or a
- * session with a server at a URL (HTTP, SSE). Connecting while a run starts and the server answers
- * `initialize`; ready with the tools it listed; failed (its run could not start, or it did not
- * connect, or it refused the credentials given); needing authorization this client cannot give;
- * exited (its run ended); stopped. Each state names the run it is about; what arrives about an
- * earlier run changes nothing. Pure: given its state and what happened, it gives the next state and
- * what is to be done.
+ * A pure state machine for one MCP server that a session keeps, over its runs. A run is a process
+ * (stdio) or a session with a server at a URL (HTTP, SSE). `stepMcpServer` returns the next state and
+ * the effects to perform. Each state names the run it is about, and an event about an earlier run
+ * changes nothing. `docs/agent-mcp.md` lists the states.
  */
 
 import type { McpSchema } from "effect/ai";
@@ -15,27 +12,27 @@ export type McpServerState =
   | { readonly _tag: "Connecting"; readonly run: number }
   | { readonly _tag: "Ready"; readonly run: number; readonly tools: ReadonlyArray<McpSchema.Tool> }
   | { readonly _tag: "Failed"; readonly run: number; readonly reason: string }
-  /** The server asks for authorization and none is configured, or it needs OAuth, which this client does not do. */
+  /** The server asks for authorization and none is configured, or it asks for OAuth, which this client does not support. */
   | { readonly _tag: "NeedsAuth"; readonly run: number; readonly reason: string }
   | { readonly _tag: "Exited"; readonly run: number; readonly reason: string };
 
 export type McpServerEvent =
   /** A run started: its process is starting, or its connection is being made. */
   | { readonly _tag: "RunStarted"; readonly run: number }
-  /** A run could not be started: why. */
+  /** A run could not be started, for `reason`. */
   | { readonly _tag: "RunFailed"; readonly run: number; readonly reason: string }
-  /** A run ended: why (its process ended; its session ended, and another could not be made). */
+  /** A run ended, for `reason` (its process ended; or its session ended and a new one could not be made). */
   | { readonly _tag: "RunEnded"; readonly run: number; readonly reason: string }
-  /** The run was stopped, and none is left. */
+  /** The run was stopped, and no run is left. */
   | { readonly _tag: "RunStopped"; readonly run: number }
   /** The run's server answered `initialize` and listed its tools. */
   | { readonly _tag: "Connected"; readonly run: number; readonly tools: ReadonlyArray<McpSchema.Tool> }
-  /** The run's server did not connect, or refused the credentials given: why. */
+  /** The run's server did not connect, or refused the credentials given, for `reason`. */
   | { readonly _tag: "ConnectFailed"; readonly run: number; readonly reason: string }
-  /** The run's server asks for authorization this client cannot give: why. */
+  /** The run's server asks for authorization that this client cannot give, for `reason`. */
   | { readonly _tag: "AuthNeeded"; readonly run: number; readonly reason: string };
 
-/** What is to be done: stop the run, so that a server that did not connect leaves nothing behind. */
+/** An effect to perform: stop the run, so that a server that did not connect leaves nothing running. */
 export type McpServerEffect = { readonly _tag: "StopRun" };
 
 export interface McpServerStep {
@@ -49,7 +46,7 @@ const stay = (state: McpServerState): McpServerStep => ({ state, effects: [] });
 
 const live = (state: McpServerState): boolean => state._tag === "Connecting" || state._tag === "Ready";
 
-/** The next state, and what is to be done, once `event` happened in `state`. */
+/** Returns the next state and the effects to perform after `event` in `state`. */
 export const stepMcpServer = (state: McpServerState, event: McpServerEvent): McpServerStep => {
   if (event.run < state.run) return stay(state);
   switch (event._tag) {
@@ -73,7 +70,7 @@ export const stepMcpServer = (state: McpServerState, event: McpServerEvent): Mcp
   }
 };
 
-/** What a state says of the server, in a sentence. */
+/** Returns a sentence describing the server in `state`, for notices and the `/mcp` command. */
 export const describe = (state: McpServerState): string => {
   switch (state._tag) {
     case "Stopped":

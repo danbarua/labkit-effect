@@ -1,8 +1,9 @@
 /**
- * The `/mcp` command a host answers without the model: alone, how each of the session's MCP servers
- * is; `/mcp reconnect <server>`, the server started again, how it went, and whether its tools are
- * offered in the session (a session's tools are fixed when it opens: a server that offered none
- * then offers none in it).
+ * The `/mcp` command, which a host answers without the model:
+ * - `/mcp` returns each of the session's MCP servers with its state.
+ * - `/mcp reconnect <server>` starts the server again, and returns its state and whether its tools
+ *   are offered in the session. A session's tools are fixed when it opens, so a server that offered
+ *   no tools then offers none in that session.
  */
 
 import { Effect } from "effect";
@@ -11,7 +12,7 @@ import { describe } from "./server-machine.ts";
 import type { McpServers } from "./servers.ts";
 import { namespaceOf } from "./source.ts";
 
-/** What `/mcp <words>` says, for a session whose servers are `mcp` and whose tools are named `offered`. */
+/** Returns the answer to `/mcp <words>`, for a session whose servers are `mcp` and whose tools are named `offered`. */
 export const mcpCommand = (mcp: McpServers, words: ReadonlyArray<string>, offered: ReadonlyArray<string>): Effect.Effect<string> =>
   Effect.gen(function* () {
     if (words[0] === "reconnect" && words[1] !== undefined) {

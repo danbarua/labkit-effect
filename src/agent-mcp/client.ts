@@ -1,18 +1,18 @@
 /**
- * An MCP client: one connection to one MCP server, over the server's stdio (a child process),
- * newline-delimited JSON-RPC, as MCP's stdio transport says. Built on `peer.ts` and MCP's messages
- * as Effect declares them (`effect/ai` `McpSchema`).
+ * An MCP client: one connection to one MCP server, built on `peer.ts` and on MCP's messages as
+ * Effect declares them (`effect/ai` `McpSchema`).
  *
- * `connectStdio` starts the server, and in the scope it is given: it offers `initialize` (this
- * client's latest version, its roots), sends `notifications/initialized`, and gives the connection.
- * The server's process ends with the scope. The client serves the server's `ping` and `roots/list`
- * (the roots it was given); it does not offer sampling or elicitation. What the server logs
- * (`notifications/message`), the progress it reports, a change of its tool list and every line it
- * writes to stderr are logged.
- *
- * A tool's result is kept as the server sent it (`ToolResult`). The rest is decoded with
- * `McpSchema`'s schemas: a field they do not have is left out, and a tool's annotations not given
- * take the defaults MCP states (`destructiveHint: true`, and so on).
+ * - `connectOver` connects over any wire; `connect` over a running process's pipes (newline-delimited
+ *   JSON-RPC, MCP's stdio transport); `connectStdio` starts a process and connects to it, and only
+ *   tests use it. Each sends `initialize` (this client's latest version, its roots capability), then
+ *   `notifications/initialized`, and returns the connection.
+ * - The client answers the server's `ping` and `roots/list` (with the roots it was given). It does
+ *   not offer sampling or elicitation.
+ * - It logs what the server logs (`notifications/message`), the progress it reports, a change of its
+ *   tool list, and every line it writes to stderr.
+ * - A tool's result is kept as the server sent it (`ToolResult`). Everything else is decoded with
+ *   `McpSchema`'s schemas: a field they do not have is dropped, and a tool's missing annotations take
+ *   the defaults that MCP states (`destructiveHint: true`, and so on).
  */
 
 import { defaultBrand } from "../agent-host/brand.ts";
@@ -28,23 +28,23 @@ import * as Peer from "./peer.ts";
 /** The protocol version this client offers. */
 export const protocolVersion = "2025-11-25";
 
-/** A server started as a process: its name (what its tools are offered under), the command, its arguments and environment. */
+/** A server started as a process: its name (which its tools are offered under), the command, its arguments and its environment. */
 export interface McpServerStdio {
   readonly name: string;
   readonly command: string;
   readonly args: ReadonlyArray<string>;
   readonly env: Readonly<Record<string, string>>;
-  /** The folder it runs in; this process's when left out. */
+  /** The working directory. When undefined, the server uses this process's working directory. */
   readonly cwd?: string | undefined;
 }
 
-/** A root the server is told of (`roots/list`): a `file://` URI, and a name. */
+/** A root that the client reports to the server (`roots/list`): a `file://` URI, and a name. */
 export interface Root {
   readonly uri: string;
   readonly name?: string | undefined;
 }
 
-/** The connection could not be made, or a request to the server failed: why, and what the server or the transport said. */
+/** The connection could not be made, or a request to the server failed: the reason, and the server's or the transport's error as the cause. */
 export class McpFailed extends Data.TaggedError("McpFailed")<{
   readonly server: string;
   readonly reason: string;
@@ -60,7 +60,7 @@ export interface McpConnection {
   readonly initialized: McpSchema.InitializeResult;
   /** The server's tools, every page of them. */
   readonly tools: Effect.Effect<ReadonlyArray<McpSchema.Tool>, McpFailed>;
-  /** Calls a tool, giving its result as the server sent it. A tool's own failure is a result with `isError: true`; `McpFailed` is the request's. */
+  /** Calls a tool and returns its result as the server sent it. A tool's own failure is a result with `isError: true`; `McpFailed` is a failure of the request. */
   readonly call: (name: string, args: Readonly<Record<string, unknown>>) => Effect.Effect<ToolResult, McpFailed>;
   /** Completes when the connection ends: the server's output closed, or the scope closed. */
   readonly closed: Effect.Effect<void>;
@@ -78,16 +78,16 @@ const notification = <Name extends string, P extends Schema.Top>(rpc: { readonly
 export const ToolResult = Schema.Record(Schema.String, Schema.Json);
 export type ToolResult = typeof ToolResult.Type;
 
-/** What this client asks of a server. */
+/** The requests that this client makes of a server. */
 const calls = Methods.make(
   request(McpSchema.Initialize),
   request(McpSchema.Ping),
   request(McpSchema.ListTools),
   Methods.request(McpSchema.CallTool._tag, McpSchema.CallTool.payloadSchema, ToolResult),
 );
-/** What this client tells a server. */
+/** The notifications that this client sends a server. */
 const tells = Methods.make(notification(McpSchema.InitializedNotification));
-/** What this client serves. */
+/** The requests and notifications that this client handles. */
 const serves = Methods.make(
   request(McpSchema.Ping),
   request(McpSchema.ListRoots),
@@ -117,7 +117,7 @@ const wireOf = (stdout: Stream.Stream<Uint8Array, unknown>, stdin: Queue.Queue<U
   };
 };
 
-/** A running server's input, output and error output: a run's handle (`agent-process`), or a child's. */
+/** A running server's stdin, stdout and stderr: a run's handle (`agent-process`), or a child process's. */
 export interface ServerPipes {
   readonly stdin: Sink.Sink<void, Uint8Array, never, unknown>;
   readonly stdout: Stream.Stream<Uint8Array, unknown>;
@@ -125,8 +125,9 @@ export interface ServerPipes {
 }
 
 /**
- * Starts `server` and connects to it, in the scope given; its process ends with the scope. `roots`
- * are what it is told when it asks (`roots/list`).
+ * Starts `server` as a process and connects to it, in the current scope; the process ends with the
+ * scope. `roots` are returned to the server when it asks (`roots/list`). Only tests use it: a session
+ * starts its servers through `server.ts`.
  */
 export const connectStdio = (
   server: McpServerStdio,
@@ -142,18 +143,18 @@ export const connectStdio = (
     return yield* connect(server.name, handle, roots, clientInfo);
   });
 
-/** What a client calls itself to a server (`clientInfo`): its host's brand. */
+/** The name and version that a client gives a server (`clientInfo`): its host's brand. */
 export interface ClientInfo {
   readonly name: string;
   readonly version: string;
 }
 
-/** What a client calls itself unless its host says: the default brand. */
+/** The `clientInfo` used when the host gives none: the default brand. */
 export const defaultClientInfo: ClientInfo = { name: defaultBrand.name, version: defaultBrand.version };
 
 /**
- * Connects to the server named `name` over `pipes`, in the scope given: `initialize`, with
- * `clientInfo`, then `notifications/initialized`. `roots` are what it is told when it asks
+ * Connects to the server named `name` over `pipes`, in the current scope: `initialize`, with
+ * `clientInfo`, then `notifications/initialized`. `roots` are returned to the server when it asks
  * (`roots/list`).
  */
 export const connect = (name: string, pipes: ServerPipes, roots: ReadonlyArray<Root>, clientInfo: ClientInfo = defaultClientInfo): Effect.Effect<McpConnection, McpFailed, Scope.Scope> =>
@@ -175,10 +176,10 @@ export const connect = (name: string, pipes: ServerPipes, roots: ReadonlyArray<R
   });
 
 /**
- * Connects to the server named `name` over `wire`, whatever carries it, in the scope given:
- * `initialize`, with `clientInfo`, then `notifications/initialized`. `initialized` is given what the
- * server answered to `initialize` before anything more is sent: a transport that sends the version
- * agreed with every request learns it there.
+ * Connects to the server named `name` over `wire`, whatever transport carries it, in the current
+ * scope: `initialize`, with `clientInfo`, then `notifications/initialized`. `initialized` receives
+ * the server's answer to `initialize` before anything more is sent, so a transport that sends the
+ * agreed version with every request learns it there.
  */
 export const connectOver = (
   name: string,
@@ -221,7 +222,7 @@ export const connectOver = (
     yield* initialized(answered);
     yield* peer.notify("notifications/initialized", undefined);
 
-    /** The tools of the page at `cursor` and of every page after it, by `nextCursor`. */
+    /** Returns the tools of the page at `cursor` and of every page after it, following `nextCursor`. */
     const toolsFrom = (cursor: string | undefined): McpConnection["tools"] =>
       peer.client["tools/list"](cursor === undefined ? undefined : { cursor }).pipe(
         Effect.mapError(failed("tools/list failed")),

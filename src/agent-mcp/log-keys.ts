@@ -1,7 +1,4 @@
-/**
- * Every event the MCP client logs, by the area that logs it. The key is the event's name in the log:
- * `<area>.<subject>.<what happened>`.
- */
+/** The log events that the MCP client writes, by area. Each key has the form `<area>.<subject>.<event>`. */
 
 export const logKeys = {
   peer: {
@@ -13,15 +10,15 @@ export const logKeys = {
     handlerFailed: "mcp.peer.handler_failed",
     /** A response arrived whose id matches no pending call, and was ignored. */
     responseIgnored: "mcp.peer.response_ignored",
-    /** A message could not be written to the server; the details say why. */
+    /** A message could not be written to the server; the details give the reason. */
     notWritten: "mcp.peer.not_written",
-    /** The connection to the server could not be read; the details say why. */
+    /** The connection to the server could not be read; the details give the reason. */
     notRead: "mcp.peer.not_read",
   },
   server: {
-    /** A server's state changed: what happened, the state before and after, its run, what it says, and its tools once ready. */
+    /** A server's state changed. Details: the event, the states before and after, the run, the state's description, and the tools once ready. */
     changed: "mcp.server.changed",
-    /** The server answered `initialize`: the version offered and the one it answered, and what it says of itself. */
+    /** The server answered `initialize`. Details: the version offered, the version it answered, and its `serverInfo`. */
     initialized: "mcp.server.initialized",
     /** The server wrote a line to stderr. */
     stderr: "mcp.server.stderr",
@@ -29,9 +26,9 @@ export const logKeys = {
     logged: "mcp.server.logged",
     /** The server reported progress (`notifications/progress`). */
     progress: "mcp.server.progress",
-    /** The server said its tool list changed (`notifications/tools/list_changed`). */
+    /** The server reported that its tool list changed (`notifications/tools/list_changed`). */
     toolsChanged: "mcp.server.tools_changed",
-    /** A server's tool is not offered: its name, once made one providers take, is too long or the same as another's. */
+    /** Warning: a server's tool is not offered, because its offered name is too long or the same as another's. */
     toolLeftOut: "mcp.server.tool_left_out",
     /** `/mcp reconnect` started a server again: its name, and its state once settled. */
     reconnected: "mcp.server.reconnected",
@@ -43,19 +40,19 @@ export const logKeys = {
     connectionLost: "mcp.server.connection_lost",
   },
   http: {
-    /** The endpoint refused a message, or was not reached: the methods it carried, the status, what the server said, and whether the session had ended. */
+    /** Warning: the endpoint refused a message, or was not reached. Details: the methods it carried, the status, the server's response text, and whether the session had ended. */
     refused: "mcp.http.refused",
-    /** The server gave a session (`Mcp-Session-Id`), in answer to `initialize`. */
+    /** The server returned a session id (`Mcp-Session-Id`) in answer to `initialize`. */
     session: "mcp.http.session",
-    /** The server offers no GET stream (`405`): what it sends unasked comes only with answers. */
+    /** The server offers no GET stream (`405`), so messages it sends unasked arrive only with answers. */
     noStream: "mcp.http.no_stream",
-    /** The server refused the GET stream: the status, and what it said. */
+    /** Warning: the server refused the GET stream. Details: the status and the server's response text. */
     streamRefused: "mcp.http.stream_refused",
     /** The server's stream ended. */
     streamEnded: "mcp.http.stream_ended",
-    /** The server's stream could not be read on: why. */
+    /** Warning: the server's stream could not be read further; the details give the reason. */
     streamBroke: "mcp.http.stream_broke",
-    /** The session could not be ended (DELETE) as the connection closed: the status, or why. */
+    /** Warning: the session could not be ended (DELETE) when the connection closed; the details give the status or the reason. */
     notEnded: "mcp.http.not_ended",
   },
 } as const;
