@@ -32,8 +32,10 @@ nothing of what a process is for.
 - PG3. A command that cannot be started is `Failed`, with the reason.
 - PG4. Stopping a run ends its whole group, what it started in the background included.
 - PG5. Closing the scope a group was made in ends its group.
-- PE1. A variable holds a credential if its name includes one of these words (separated by `_`, `-`,
-  or capital letters): `TOKEN`, `KEY`, `AUTH`, `SECRET`, `PASSWORD`, and similar. When you log a
+- PE1. A variable holds a credential if its name includes one of these words, in any case: `TOKEN`,
+  `KEY`, `AUTH`, `SECRET`, `PASSWORD`, and similar. The words of a name are separated by `_`, `-`,
+  `.`, and by a capital that follows a lower-case letter: `apiKeyId` holds `Key`; `monkey` holds no
+  credential word. When you log a
   command or write its arguments, omit credential flag values (for example, --token=<omitted>).
   Run the command with the actual values.
 - PE2. A run receives this process's environment minus credential variables, plus any environment

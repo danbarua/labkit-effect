@@ -1,8 +1,10 @@
 /**
  * The environment a spawned process is given: this process's, without the variables that hold
- * credentials. A variable holds one when a word of its name, its words being what `_`, `-` and `.`
- * separate and where a lower-case letter meets a capital, is one of `credentialWords` (any case): `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`,
- * `AWS_SECRET_ACCESS_KEY` and `SSH_AUTH_SOCK` are left out; `GIT_AUTHOR_NAME` and `PATH` are kept.
+ * credentials. A variable holds one when a word of its name is one of the credential words in
+ * `COMMON_CREDENTIAL_PATTERNS` (any case). The words of a name are separated by `_`, `-` and `.`, and
+ * by a capital that follows a lower-case letter (`credentialWord`): `ANTHROPIC_API_KEY`,
+ * `GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`, `SSH_AUTH_SOCK` and `apiKeyId` are left out;
+ * `GIT_AUTHOR_NAME`, `PATH` and `monkey` are kept.
  * What a command's own configuration sets (an MCP server's `env`) is given as it says, credentials
  * included: that is how a server is given the one it needs.
  */
@@ -23,10 +25,15 @@ export const KNOWN_KEY_PATTERNS = [
   /-----BEGIN (RSA|OPENSSH|EC|PGP) PRIVATE KEY-----/i,
 ];
 
-// A word starts after a separator or at a lower-case to upper-case transition, and ends at a separator or the name's end.
+/**
+ * A word of a name, in any case. A word starts at the name's start, after a separator (`_`, `-`,
+ * `.`), or at a capital that follows a lower-case letter; it ends at the name's end, before a
+ * separator, or before a capital that follows a lower-case letter. So `apiKeyId` holds `Key`, and
+ * `monkey` does not hold `key`.
+ */
 const credentialWord = (word: string): RegExp => {
   const letters = word.split("").map((letter) => `[${letter.toLowerCase()}${letter.toUpperCase()}]`).join("");
-  return new RegExp(`(?:^|[_\\-.]|(?<=[a-z]))${letters}(?=$|[_\\-.])`);
+  return new RegExp(`(?:^|[_\\-.]|(?<=[a-z])(?=[A-Z]))${letters}(?=$|[_\\-.]|(?<=[a-z])[A-Z])`);
 };
 
 export const COMMON_CREDENTIAL_PATTERNS: ReadonlyArray<RegExp> = [
