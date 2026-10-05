@@ -74,7 +74,7 @@ const verdictOf = <S>(policy: Policy<S>, request: EffectRequest): string => {
 const listed = (configuration: Configuration) =>
   Object.fromEntries(Object.entries(configuration.lists).map(([seam, entries]) => [seam, entries.map((entry) => [entry.name, entry.plugin.use, entry.settings])]));
 
-test("CF1: plug-ins are configured once, by name, in plugins; each seam lists names in order, a plug-in's own name taking its defaults; they become the session's seam lists", async () => {
+test("plug-ins are configured once, by name, in plugins; each seam lists names in order, a plug-in's own name taking its defaults; they become the session's seam lists", async () => {
   const file = write(
     "user/policies.yml",
     `# yaml-language-server: $schema=./policies.schema.json
@@ -122,7 +122,7 @@ maxHolds: 2
   expect({ modelRequests: provided.modelRequests, turnEnd: provided.turnEnd, maxHolds: provided.maxHolds }).toEqual({ modelRequests: 2, turnEnd: 1, maxHolds: 2 });
 });
 
-test("CF4: a later layer that writes a plug-in empty ({}) changes none of its settings; one that writes it null puts it back to its defaults", async () => {
+test("a later layer that writes a plug-in empty ({}) changes none of its settings; one that writes it null puts it back to its defaults", async () => {
   const user = write("home/policies.yml", "plugins:\n  loopBreaker:\n    nudgeAt: 4\ntoolCalls: [loopBreaker]\n");
   const empty = write("project/empty.yml", "plugins:\n  loopBreaker: {}\n");
   const reset = write("project/reset.yml", "plugins:\n  loopBreaker:\n");
@@ -130,7 +130,7 @@ test("CF4: a later layer that writes a plug-in empty ({}) changes none of its se
   expect(listed(await load([user, [reset, false]]))["toolCalls"]).toEqual([["loopBreaker", "loopBreaker", { nudgeAt: 3, stopAt: 5, key: "toolAndInput" }]]);
 });
 
-test("CF9: two of one plug-in, with different settings, are two names in plugins, each saying which plug-in it is (use)", async () => {
+test("two of one plug-in, with different settings, are two names in plugins, each saying which plug-in it is (use)", async () => {
   const file = write("user/policies.yml", "plugins:\n  strict:\n    use: loopBreaker\n    stopAt: 3\n  loopBreaker:\ntoolCalls: [strict]\nmodelRequests: [loopBreaker]\n");
   expect(listed(await load([file]))).toEqual({
     toolCalls: [["strict", "loopBreaker", { nudgeAt: 3, stopAt: 3, key: "toolAndInput" }]],
@@ -138,7 +138,7 @@ test("CF9: two of one plug-in, with different settings, are two names in plugins
   });
 });
 
-test("CF2: what the host says, that no file does: whether anyone can be asked, which permissions reads", async () => {
+test("the host, not a file, says whether anyone can answer a question, and permissions reads it", async () => {
   const file = write("user/policies.yml", "toolCalls: [permissions]\n");
   const configuration = await load([file]);
   const verdict = (canAsk: boolean) =>
@@ -152,7 +152,7 @@ test("CF2: what the host says, that no file does: whether anyone can be asked, w
   expect(await verdict(false)).toStartWith("vetoed: ");
 });
 
-test("CF2: where the host says the session's permission mode, permissions follows it at each call in place of its configured mode", async () => {
+test("where the host gives the session's permission mode, permissions follows it at each call in place of its configured mode", async () => {
   const configuration = await load([write("user/policies.yml", "toolCalls: [permissions]\nplugins:\n  permissions:\n    mode: dontAsk\n")]);
   let now: PermissionMode = "default";
   const verdict = runTest(
@@ -168,7 +168,7 @@ test("CF2: where the host says the session's permission mode, permissions follow
   expect(await verdict).toEqual(["asks", "runs"]);
 });
 
-test("CF3: a mistake is refused naming the layer that wrote it, where in it, and what is wrong", async () => {
+test("a mistake is refused with an error naming the layer that wrote it, the path in it, and the problem", async () => {
   const at = (text: string) => write("user/policies.yml", text);
   expect(await refusal([at("toolCalls: [loopBraker]\n")])).toEndWith(
     'user/policies.yml: toolCalls[0]: "loopBraker" is neither in plugins nor a plug-in; the plug-ins are: loopBreaker, permissions, maxTurnRequests, retryIncomplete, maxBudget, credentials',
@@ -185,7 +185,7 @@ test("CF3: a mistake is refused naming the layer that wrote it, where in it, and
   expect(await refusal([at("toolCalls:\n  use: permissions\n")])).toEndWith("toolCalls: Expected a list of names, each one in plugins or a plug-in's own");
 });
 
-test("CF3: across layers, a mistake names the layer that wrote the value at fault, not the last one read", async () => {
+test("across layers, a mistake names the layer that wrote the value at fault, not the last one read", async () => {
   const user = write("home/policies.yml", "plugins:\n  strict:\n    use: loopBreaker\ntoolCalls: [strict, permissions]\n");
   const project = write("project/policies.yml", "plugins:\n  strict:\n    stopAt: 0\n");
   // The project sets one setting of the user's plug-in: it is the project's mistake.
@@ -195,7 +195,7 @@ test("CF3: across layers, a mistake names the layer that wrote the value at faul
   expect(await refusal([user2, [project2, false]])).toContain("home/two.yml: toolCalls[0]");
 });
 
-test("CF4 CF12: layers merge in order, the last write winning: mappings key by key, deeply; any other value, a list included, replaced whole; the user's file, the project's, then the local one", async () => {
+test("layers merge in order, the last write winning: mappings key by key, deeply; any other value, a list included, replaced whole; the user's file, the project's, then the local one", async () => {
   expect(merged([{ a: { b: 1, c: [1, 2] }, d: "x" }, { a: { c: [3] }, e: true }, { d: "y" }])).toEqual({ a: { b: 1, c: [3] }, d: "y", e: true });
   const layers = await runTest(policyLayers(join(testFolder(), "project"), { home: join(testFolder(), "home"), sources: ["user", "project", "local"] }).pipe(Effect.provide(BunServices.layer)));
   expect(layers).toEqual([]);
@@ -221,7 +221,7 @@ test("CF4 CF12: layers merge in order, the last write winning: mappings key by k
   expect(listed(both)["toolCalls"]).toEqual([["loopBreaker", "loopBreaker", { nudgeAt: 4, stopAt: 8, key: "toolAndInput" }]]);
 });
 
-test("CF4: an overlay changes part of a base, key by key: a base enabling every provider and an overlay disabling some give the rest", () => {
+test("an overlay changes part of a base, key by key: a base enabling every provider and an overlay disabling some give the rest", () => {
   const base = { providers: { anthropic: { enabled: true, models: ["opus", "sonnet"] }, openai: { enabled: true }, xai: { enabled: true } } };
   const anthropicOnly = { providers: { openai: { enabled: false }, xai: { enabled: false } } };
   expect(merged([base, anthropicOnly])).toEqual({ providers: { anthropic: { enabled: true, models: ["opus", "sonnet"] }, openai: { enabled: false }, xai: { enabled: false } } });
@@ -232,7 +232,7 @@ test("CF4: an overlay changes part of a base, key by key: a base enabling every 
   expect(merged([{ a: [1, 2] }, { a: undefined }])).toEqual({ a: [1, 2] });
 });
 
-test("CF4: a value that is not a mapping cuts off what an earlier layer had under it: layers are merged in order, and the order matters", () => {
+test("a value that is not a mapping cuts off what an earlier layer had under it: layers are merged in order, and the order matters", () => {
   const a = { k: { x: 1 } };
   const b = { k: 5 };
   const c = { k: { y: 2 } };
@@ -263,7 +263,7 @@ const at = (value: unknown, path: ReadonlyArray<string>): unknown => path.reduce
 const leaves = (value: unknown, path: ReadonlyArray<string> = []): ReadonlyArray<ReadonlyArray<string>> =>
   isMapping(value) ? Object.entries(value).flatMap(([key, inner]) => leaves(inner, [...path, key])) : path.length === 0 ? [] : [path];
 
-test("CF4: for any layers, each leaf of the merge is the last layer's write to its path, and no later layer replaced anything above it; every leaf of the last layer is in the merge", () => {
+test("for any layers, each leaf of the merge is the last layer's write to its path, and no later layer replaced anything above it; every leaf of the last layer is in the merge", () => {
   fc.assert(
     fc.property(fc.array(layers, { minLength: 1, maxLength: 5 }), (written) => {
       const result = merged(written);
@@ -284,7 +284,7 @@ test("CF4: for any layers, each leaf of the merge is the last layer's write to i
   );
 });
 
-test("CF4: merging is a fold in order: a layer that writes nothing changes nothing, and merging the merge of some layers with the rest is merging them all", () => {
+test("merging is a fold in order: a layer that writes nothing changes nothing, and merging the merge of some layers with the rest is merging them all", () => {
   fc.assert(
     fc.property(fc.array(layers, { maxLength: 5 }), fc.array(layers, { maxLength: 5 }), (before, after) => {
       expect(merged([...before, {}])).toEqual(merged(before));
@@ -294,7 +294,7 @@ test("CF4: merging is a fold in order: a layer that writes nothing changes nothi
   );
 });
 
-test("CF5: a file that is not there is an empty layer; a seam no layer lists is not provided, so the host's own list or the default stands", async () => {
+test("a file that is not there is an empty layer; a seam no layer lists is not provided, so the host's own list or the default stands", async () => {
   const configuration = await load([join(testFolder(), "nowhere.yml")]);
   expect(configuration).toEqual({ lists: {}, mcpServers: [] });
   const lists = seamListsOf(configuration, { canAsk: true });
@@ -305,14 +305,14 @@ test("CF5: a file that is not there is an empty layer; a seam no layer lists is 
   expect(await runTest(provided.pipe(Effect.provide(seamLayer(lists))))).toBe(0);
 });
 
-test("CF6: turn-end hooks need maxHolds, in some layer", async () => {
+test("turn-end hooks need maxHolds, in some layer", async () => {
   const hooks = write("user/policies.yml", "turnEnd: [retryIncomplete]\n");
   expect(await refusal([hooks])).toEndWith("maxHolds: Required when turnEnd lists hooks: how many times they may hold one turn open");
   const holds = write("project/policies.yml", "maxHolds: 1\n");
   expect((await load([hooks, [holds, false]])).maxHolds).toBe(1);
 });
 
-test("CF7: an extension a trusted layer names, relative to its folder, registers the plug-ins it exports; a project's layer may not name one; a name used twice is refused", async () => {
+test("an extension a trusted layer names, relative to its folder, registers the plug-ins it exports; a project's layer may not name one; a name used twice is refused", async () => {
   const extension = new URL("../../tests/support/config-extension.ts", import.meta.url).pathname;
   const file = write("user/policies.yml", `extensions:\n  - ${extension}\nplugins:\n  denyTools:\n    tools: [change]\n  permissions:\n    mode: bypassPermissions\ntoolCalls: [denyTools, permissions]\n`);
   const configuration = await load([file]);
@@ -339,7 +339,7 @@ test("CF7: an extension a trusted layer names, relative to its folder, registers
   expect(await refusal([twice, clash])).toEndWith("extensions: Two plug-ins are named denyTools");
 });
 
-test("CF10: mcpServers are servers by name, merged key by key, so a later layer of the user's can add one or change one; a project's layer may not name them, as they run commands", async () => {
+test("mcpServers are servers by name, merged key by key, so a later layer of the user's can add one or change one; a project's layer may not name them, as they run commands", async () => {
   const user = write("home/policies.yml", "mcpServers:\n  github:\n    command: gh-mcp\n    args: [--read-only]\n  files:\n    command: files-mcp\n");
   const later = write("home/later.yml", "mcpServers:\n  github:\n    required: true\n    connectTimeout: 10 seconds\n  db:\n    command: db-mcp\n    env:\n      DB: local\n");
   const configuration = await load([user, later]);
@@ -356,7 +356,7 @@ test("CF10: mcpServers are servers by name, merged key by key, so a later layer 
   );
 });
 
-test("CF10: a server at a URL is `type: http` or `sse`, with its `url` and `headers`; one with neither a command nor a URL is refused", async () => {
+test("a server at a URL is `type: http` or `sse`, with its `url` and `headers`; one with neither a command nor a URL is refused", async () => {
   const configuration = await load([write("home/remote.yml", "mcpServers:\n  web:\n    type: http\n    url: https://mcp.example.com/mcp\n    headers:\n      X-Trace: t-1\n  old:\n    type: sse\n    url: https://old.example.com/sse\n")]);
   expect(configuration.mcpServers).toEqual([
     { name: "web", transport: "http", url: "https://mcp.example.com/mcp", headers: { "X-Trace": "t-1" }, required: false },
@@ -366,7 +366,7 @@ test("CF10: a server at a URL is `type: http` or `sse`, with its `url` and `head
   expect(await refusal([write("home/worse.yml", "mcpServers:\n  web:\n    type: http\n    url: https://x\n    command: x\n")])).toContain("mcpServers.web:");
 });
 
-test("CF15: `${VAR}` and `${VAR:-default}` in a server's command, args, env, url and headers are the environment's; one not set and with no default is refused, naming where", async () => {
+test("`${VAR}` and `${VAR:-default}` in a server's command, args, env, url and headers are the environment's; one not set and with no default is refused with an error naming the layer and the path", async () => {
   const layers = [
     {
       name: "user",
@@ -395,7 +395,7 @@ test("CF15: `${VAR}` and `${VAR:-default}` in a server's command, args, env, url
   ]);
 });
 
-test("CF11: maxBudget vetoes a model request once the session has cost its usd or more; it has no default, so a list naming it needs it in plugins", async () => {
+test("maxBudget vetoes a model request once the session has cost its usd or more; it has no default, so a list naming it needs it in plugins", async () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "go" });
@@ -414,14 +414,14 @@ test("CF11: maxBudget vetoes a model request once the session has cost its usd o
   expect(await refusal([write("user/budget.yml", "modelRequests: [maxBudget]\n")])).toContain('modelRequests[0]: Missing key at ["usd"]');
 });
 
-test("CF13: what a command the model runs is given of the environment is a list of transforms; credentials leaves out the variables that hold credentials, but those it passes", async () => {
+test("the environment of the model's commands is a list of transforms; credentials removes the credential variables except those named in pass", async () => {
   const configuration = await load([write("user/env.yml", "plugins:\n  credentials:\n    pass: [SSH_AUTH_SOCK]\ncommandEnvironment: [credentials]\n")]);
   const transforms = seamListsOf(configuration, { canAsk: true }).commandEnvironment ?? [];
   const given = transforms.reduce((environment, transform) => transform(environment), { PATH: "/bin", GITHUB_TOKEN: "t", SSH_AUTH_SOCK: "/tmp/agent" } as Readonly<Record<string, string>>);
   expect(given).toEqual({ PATH: "/bin", SSH_AUTH_SOCK: "/tmp/agent" });
 });
 
-test("CF14: what the configuration resolved to says each entry's settings, defaults included, the layer that wrote each value, and an MCP server's environment by its names only", async () => {
+test("the resolved configuration lists each entry's settings, defaults included, the layer that wrote each value, and an MCP server's environment by variable names only", async () => {
   const layers: ReadonlyArray<LayerSource> = [
     { name: "defaults", trusted: true, value: { toolCalls: ["loopBreaker", "permissions"] } },
     { name: "user", trusted: true, value: { plugins: { loopBreaker: { nudgeAt: 4 } }, mcpServers: { gh: { command: "gh-mcp", env: { GITHUB_TOKEN: "ghp_secret" } } } } },
@@ -448,7 +448,7 @@ test("CF14: what the configuration resolved to says each entry's settings, defau
   expect(JSON.stringify(effective)).not.toContain("ghp_secret");
 });
 
-test("CF8: an editor checking files against the JSON Schema takes good ones and refuses mistakes, as the loader does", () => {
+test("the JSON Schema accepts valid files and refuses mistakes, as the loader does", () => {
   const ajv = new Ajv2020({ strict: false });
   const valid = ajv.compile(policiesJsonSchema() as object);
   const good = [
@@ -469,7 +469,7 @@ test("CF8: an editor checking files against the JSON Schema takes good ones and 
   expect(bad.map((file) => valid(file))).toEqual(bad.map(() => false));
 });
 
-test("CF8: under a plug-in's own name, the JSON Schema and the loader both take null (its defaults, CF4) and both refuse use", async () => {
+test("under a plug-in's own name, the JSON Schema and the loader both accept null (the plug-in's defaults) and both refuse use", async () => {
   const valid = new Ajv2020({ strict: false }).compile(policiesJsonSchema() as object);
   expect(valid({ plugins: { loopBreaker: null }, toolCalls: ["loopBreaker"] })).toBe(true);
   expect(valid({ plugins: { permissions: { use: "permissions", mode: "default" } } })).toBe(false);
@@ -485,7 +485,7 @@ test("CF8: under a plug-in's own name, the JSON Schema and the loader both take 
   );
 });
 
-test("CF8: the JSON Schema of a file takes, in plugins, each plug-in's settings under its own name and use with settings under another; each seam's list takes names", () => {
+test("the JSON Schema of a file accepts, in plugins, each plug-in's settings under its own name, and use with settings under another name; each seam's list accepts names", () => {
   const schema = policiesJsonSchema() as {
     readonly properties: Readonly<
       Record<

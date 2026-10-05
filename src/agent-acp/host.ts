@@ -581,7 +581,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const file = storeFileOf(options.directory, id);
               // The session's blobs (its inputs' images and files) are kept in its folder, so a session gone on from its facts has them.
               const blobs = BlobsInFolder(join(sessionFolderOf(options.directory, id), "blobs"));
-              // The configuration's seam lists, permission following the session's mode (agent-config CF2); its tool sources are not
+              // The configuration's seam lists, permission following the session's mode (`HostSays.permissionMode`); its tool sources are not
               // offered: the session's are the world's and its MCP servers'.
               const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(parent.configuration, { canAsk: true, permissionMode: Ref.get(permissionMode) });
               const runner = SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, world.sources)));

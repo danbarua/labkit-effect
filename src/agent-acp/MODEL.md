@@ -276,8 +276,8 @@ twice.
   configuration says (the `mode` of the `permissions` its tool calls list, which the launcher's
   `--permission-mode` sets; else `default`) and is the option `permission_mode` (category `mode`);
   a change goes through the gate as a change of model does (AG5): at once between turns, and while
-  a turn runs when it ends. Each `permissions` the configuration lists follows it (agent-config
-  CF2), a second one with a `mode` of its own included; every other tool call policy it lists still
+  a turn runs when it ends. Each `permissions` the configuration lists follows it (`HostSays.permissionMode`
+  in agent-config), a second one with a `mode` of its own included; every other tool call policy it lists still
   decides with it. A value that is not a mode is -32602.
 - AG19. The host takes images and embedded resources in a prompt (`promptCapabilities.image`,
   `embeddedContext`): each is put in the session's blob store, kept in its folder (`blobs/`), and
@@ -320,7 +320,7 @@ twice.
   (-32603), naming the layer at fault. Its seam lists are the session's (its tool sources aside:
   the session's are the world's and its MCP servers'); its `commandEnvironment` is what a command
   run on the local disk is given. What it resolved to is written to the session's folder as
-  `effective-settings.json` (agent-config CF14) at the session's first prompt, or when it is loaded
+  `effective-settings.json` (`docs/agent-config.md`) at the session's first prompt, or when it is loaded
   or resumed, with what the host says beside it (the model, the permission mode, the world); a
   draft writes nothing.
 - AG26. A server the configuration says is required (`required: true`) that is not running once the

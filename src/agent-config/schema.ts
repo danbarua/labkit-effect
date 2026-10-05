@@ -26,14 +26,14 @@ export const policiesJsonSchema = (registry: ReadonlyArray<AnyPlugin> = builtins
     Schema.Struct({
       extensions: Schema.optionalKey(Schema.Array(Schema.String)),
       maxHolds: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-      // `null` takes away the servers of the layers before (CF10).
+      // `null` removes the servers of the layers before it.
       mcpServers: Schema.optionalKey(Schema.NullOr(Schema.Record(Schema.String, McpServerSchema))),
       ...Object.fromEntries(seams.map((seam) => [seam, Schema.optionalKey(Schema.Array(Schema.String))])),
     }),
   ) as { readonly properties: Readonly<Record<string, Schema.Json>> };
   const plugins: Schema.Json = {
     type: "object",
-    // `null` under a plug-in's own name is the plug-in with its defaults (CF4).
+    // `null` under a plug-in's own name is the plug-in with its defaults, as the merge treats it.
     properties: Object.fromEntries(registry.map((plugin) => [plugin.use, jsonSchemaOf(Schema.NullOr(Schema.Struct(plugin.settings.fields)))])),
     additionalProperties: { anyOf: registry.map((plugin) => jsonSchemaOf(Schema.Struct({ use: Schema.Literal(plugin.use), ...plugin.settings.fields }))) },
   };

@@ -145,8 +145,8 @@ model.
 ### Configuration
 
 - [ ] Trusted folders (Dan, 2026-10-04): a project's configuration is not read until its folder is
-      trusted. Until then a project's layer may not name extensions or MCP servers (both run code:
-      agent-config CF7, CF10); once a folder is trusted, its layers may. A folder's `.env` is the
+      trusted. Until then a project's layer may not name extensions or MCP servers (both run code;
+      see `docs/agent-config.md`); once a folder is trusted, its layers may. A folder's `.env` is the
       folder's too: Bun reads it by itself where the agent runs, and the options' variables
       (agent-host H19: `LABKIT_PERMISSION_MODE`, `LABKIT_SETTING_SOURCES`, `LABKIT_MCP_CONFIG`) can
       loosen permission or start MCP servers; until the folder is trusted they are not to be read

@@ -186,7 +186,7 @@ flag not given is read from (`launchVariables`), and the configuration's layers 
   not take is the flag's error. A variable that is no flag's twin is read as it is named
   (`OTEL_EXPORTER_OTLP_ENDPOINT`), after the one with the brand's prefix and the host's part.
 - H20. The layers, merged in order, the last write winning: the host's defaults; the user's file,
-  and the project's and the local one when `--setting-sources` names them (agent-config CF12:
+  and the project's and the local one when `--setting-sources` names them (`docs/agent-config.md`:
   named, they still may not name extensions or MCP servers); `--settings` (JSON, or a file of JSON
   or YAML); with `--strict-mcp-config`, no MCP servers but those `--mcp-config` names; each
   `--mcp-config` (JSON or a file of it, as Claude Code's `.mcp.json`); then the flags:

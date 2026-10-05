@@ -182,7 +182,7 @@ const pluginsOf = (layers: ReadonlyArray<LayerSource>, value: unknown, registry:
         if (configured !== null && !isMapping(configured)) return yield* invalid(path, "Expected a mapping of settings");
         const { use = name, ...settings } = configured ?? {};
         if (typeof use !== "string") return yield* invalid([...path, "use"], "Expected the name of a plug-in");
-        // A plug-in's own name takes that plug-in's settings, without `use` (CF8).
+        // A plug-in's own name takes that plug-in's settings without `use`, as the JSON Schema says.
         if (configured !== null && "use" in configured && registry.some((each) => each.use === name))
           return yield* invalid(
             [...path, "use"],
