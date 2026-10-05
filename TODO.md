@@ -341,7 +341,11 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       the environment's credentials and of credential fields (agent-host H14). To do: secrets that
       are not the environment's values (keys and tokens found by their patterns, as a secret
       scanner finds them); the session's facts and what the model is sent, which are not redacted;
-      and credentials' values under 8 characters, which the logs do not look for.
+      credentials' values under 8 characters, which the logs do not look for; and which variable
+      names hold credentials (agent-process PE1). A name's words are separated by `_`, `-`, `.`
+      and camel-case transitions, so these names hold no credential word: an all-lower-case name
+      that joins words (`githubtoken`, `dbpassword`, `myapikey`), and a name whose credential word
+      follows a capital with no separator (`PGPASSWORD`), or is not one of the words (`MYSQL_PWD`).
 
 - [ ] Caching, tuned with compaction. Built: the `cache` setting (off, 5m, 1h); Anthropic reads
       nearly every request from the cache with it (FizzBuzz, 20 turns: 27,556 of 29,032 input
