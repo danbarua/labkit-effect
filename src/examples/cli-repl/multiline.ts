@@ -73,9 +73,9 @@ const nothing: Complete = () => [];
 /** What every one of `texts` begins with. */
 const sharedStart = (texts: ReadonlyArray<string>): string =>
   texts.reduce((shared, text) => {
-    let length = 0;
-    while (length < shared.length && shared[length] === text[length]) length++;
-    return shared.slice(0, length);
+    // By UTF-16 code unit, as the text is indexed.
+    const differs = Array.from({ length: shared.length }, (_, at) => at).find((at) => shared[at] !== text[at]);
+    return differs === undefined ? shared : shared.slice(0, differs);
   });
 
 /**
@@ -125,14 +125,18 @@ const drawn = (text: string, complete: Complete) =>
   });
 
 /** What is drawn for `action`. During a paste nothing is drawn: the frame from before it stays, and the whole paste is drawn when it ends. */
-export const rendered = (state: Typed, action: Prompt.Action<Typed, string>, complete: Complete) =>
-  action._tag === "Submit"
-    ? Effect.map(painted(action.value, true), (line) => `${line}\n`)
-    : action._tag === "Beep"
-      ? Effect.succeed("\x07")
-      : state.pasting
-        ? Effect.succeed("")
-        : drawn(state.text, complete);
+export const rendered = (state: Typed, action: Prompt.Action<Typed, string>, complete: Complete) => {
+  switch (action._tag) {
+    case "Submit":
+      return Effect.map(painted(action.value, true), (line) => `${line}\n`);
+    case "Beep":
+      return Effect.succeed("\x07");
+    case "NextFrame":
+      return state.pasting ? Effect.succeed("") : drawn(state.text, complete);
+    default:
+      return action satisfies never;
+  }
+};
 
 export const Multiline = (complete: Complete = nothing): Prompt.Prompt<string> =>
   Prompt.Custom<Typed, string>(

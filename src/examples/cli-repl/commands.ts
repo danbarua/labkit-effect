@@ -60,6 +60,12 @@ export const help = (): string => {
  * were said and that this model was not sent, with the adapter's reason, so they are not taken for
  * never said.
  */
+/** The settings said after the model's name: those sent; when none are, saying so unless some were not sent to this model. */
+const settingsSaid = (sent: ReadonlyArray<string>, notSent: number): string => {
+  if (sent.length > 0) return ` ${sent.join(" ")}`;
+  return notSent === 0 ? " (no settings said)" : "";
+};
+
 export const inForce = (session: Session) =>
   Effect.gen(function* () {
     const facts = yield* session.facts;
@@ -77,7 +83,7 @@ export const inForce = (session: Session) =>
     );
     const known = yield* knownCapabilities(target.provider, target.model);
     return [
-      `${target.provider}/${target.model}${sent.length === 0 ? (notSent.size === 0 ? " (no settings said)" : "") : ` ${sent.join(" ")}`}`,
+      `${target.provider}/${target.model}${settingsSaid(sent, notSent.size)}`,
       ...(notSent.size === 0 ? [] : [`not sent to this model: ${[...notSent.values()].join(", ")}`]),
       ...(known?.efforts === undefined ? [] : [`this model takes effort: ${known.efforts.join(", ")}`]),
     ].join("\n");
@@ -123,6 +129,12 @@ const typedAs = [...commands.map(([usage]) => (usage.includes(" ") ? `${usage.sl
  * to a model after `/model`, to `reconnect` and then a server after `/mcp`, or after `/settings` to a
  * setting not yet named on the line and then to one of its values.
  */
+/** What `/mcp` completes to: `reconnect`, then a server's name. */
+const mcpCompletions = (words: ReadonlyArray<string>, servers: ReadonlyArray<string>): ReadonlyArray<string> => {
+  if (words.length === 2) return ["reconnect "];
+  return words.length === 3 && words[1] === "reconnect" ? servers : [];
+};
+
 export const completions =
   (from: Offered) =>
   (text: string): ReadonlyArray<string> => {
@@ -133,7 +145,7 @@ export const completions =
     const candidates = (): ReadonlyArray<string> => {
       if (words.length === 1) return typedAs;
       if (words[0] === "/model") return words.length === 2 ? from.models : [];
-      if (words[0] === "/mcp") return words.length === 2 ? ["reconnect "] : words.length === 3 && words[1] === "reconnect" ? from.servers : [];
+      if (words[0] === "/mcp") return mcpCompletions(words, from.servers);
       if (words[0] !== "/settings") return [];
       const equals = last.indexOf("=");
       if (equals >= 0) {
@@ -173,7 +185,7 @@ const picked = (session: Session) =>
  */
 export const command = (session: Session, line: string, folder: string = process.cwd(), mcp?: McpServers) =>
   Effect.gen(function* () {
-    const [name, ...words] = line.trim().split(/\s+/);
+    const [name = "", ...words] = line.trim().split(/\s+/);
     switch (name) {
       case "/help":
         return help();

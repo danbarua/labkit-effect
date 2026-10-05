@@ -22,12 +22,12 @@ export const askPerson: Policy<unknown> = {
     request._tag === "RunTool"
       ? { _tag: "Waiting", state: request.call, asks: receivedJson({ question: "run?", tool: request.tool }) }
       : { _tag: "Decided", verdict: { _tag: "Continue" } },
-  receive: (_state, message) =>
-    message._tag === "Answered" && asText(message.answer) === "yes"
+  receive: (state, message) => {
+    if (message._tag !== "Answered") return { _tag: "Waiting", state, asks: undefined };
+    return asText(message.answer) === "yes"
       ? { _tag: "Decided", verdict: { _tag: "Continue" } }
-      : message._tag === "Answered"
-        ? { _tag: "Decided", verdict: { _tag: "Veto", reason: receivedJson({ person: asText(message.answer) }) } }
-        : { _tag: "Waiting", state: _state, asks: undefined },
+      : { _tag: "Decided", verdict: { _tag: "Veto", reason: receivedJson({ person: asText(message.answer) }) } };
+  },
 };
 
 /** Holds every model request until the clock reaches `at`: a rate limit, a budget window. */

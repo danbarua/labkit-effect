@@ -175,6 +175,12 @@ const configOf = (options: Options, interactive: boolean) =>
     }),
   );
 
+/** A provider's models as the list says them: not answering, none, or their names. */
+const modelsSaid = (models: ReadonlyArray<string> | undefined): string => {
+  if (models === undefined) return "not answering";
+  return models.length === 0 ? "no models" : models.join(", ");
+};
+
 /** The CLI, called by `brand`'s name. */
 export const cliOf = (brand: Brand) =>
   Command.make(
@@ -213,7 +219,7 @@ export const cliOf = (brand: Brand) =>
           yield* Effect.forEach(
             sources.filter(({ provider }) => !(provider in known)),
             ({ provider, models, at }) =>
-              Console.log(`${provider}${at === undefined ? "" : ` (${at})`}: ${models === undefined ? "not answering" : models.length === 0 ? "no models" : models.join(", ")}`),
+              Console.log(`${provider}${at === undefined ? "" : ` (${at})`}: ${modelsSaid(models)}`),
             { discard: true },
           );
           yield* Console.log("Name a model with --model or /model as it is listed here, or as provider/model: openai/gpt-5.5, localhost/<a local model>.");

@@ -12,7 +12,7 @@
 
 import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
-import { Effect, Layer, type Scope, Stream } from "effect";
+import { Array as Arr, Effect, Layer, Order, type Scope, Stream } from "effect";
 import { Notices } from "../../agent-context/assemble.ts";
 import { writeEffectiveSettings } from "../../agent-config/effective.ts";
 import type { Configuration, LayerSource } from "../../agent-config/file.ts";
@@ -115,7 +115,13 @@ const written = (config: Config, environment: Readonly<Record<string, string>>) 
       canAsk: config.canAsk,
       strictToolInput: config.strictToolInput,
       persist: config.persist,
-      commandEnvironment: { given: Object.keys(environment).sort(), leftOut: Object.keys(process.env).filter((name) => !(name in environment)).sort() },
+      commandEnvironment: {
+        given: Arr.sort(Object.keys(environment), Order.String),
+        leftOut: Arr.sort(
+          Object.keys(process.env).filter((name) => !(name in environment)),
+          Order.String,
+        ),
+      },
     };
     yield* writeEffectiveSettings(folder, config.configuration.layers, config.configuration, host).pipe(
       Effect.tap((path) => Effect.logInfo("cli.settings.written", { path })),

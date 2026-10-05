@@ -16,7 +16,7 @@
  * Every context it is sent is kept, in order, in `seen`.
  */
 
-import { Effect, Layer } from "effect";
+import { Array as Arr, Effect, Layer, Option, Ref } from "effect";
 import * as AiError from "effect/ai/AiError";
 import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agent-machine/names.ts";
 import type { ModelPart, Observation } from "../../agent-machine/observation.ts";
@@ -52,15 +52,12 @@ const summaryLine = /The last number you returned to the user was: (-?\d+)/;
  * can share one message with that input, so texts are read one by one, not message by message.
  */
 function lastReturned(messages: ReadonlyArray<ContextMessage>): number | undefined {
-  const found = messages
-    .flatMap((message) => texts(message).map((text) => ({ role: message.role, text })))
-    .slice(0, -1)
-    .reverse()
-    .flatMap(({ role, text }) => {
-      if (role === "assistant" && /^-?\d+$/.test(text)) return [Number(text)];
-      const line = summaryLine.exec(text);
-      return role === "user" && line !== null ? [Number(line[1])] : [];
-    });
+  const read = messages.flatMap((message) => texts(message).map((text) => ({ role: message.role, text })));
+  const found = Arr.reverse(read.slice(0, -1)).flatMap(({ role, text }) => {
+    if (role === "assistant" && /^-?\d+$/.test(text)) return [Number(text)];
+    const line = summaryLine.exec(text);
+    return role === "user" && line !== null ? [Number(line[1])] : [];
+  });
   return found[0];
 }
 
@@ -87,7 +84,7 @@ export function scriptedFizzBuzzModel(): {
   readonly layer: Layer.Layer<ModelClient>;
   readonly seen: ReadonlyArray<ModelContext>;
 } {
-  const seen: Array<ModelContext> = [];
+  const seen = Ref.makeUnsafe<ReadonlyArray<ModelContext>>([]);
   const calls = { count: 0 };
 
   const responded = (target: Target, turn: TurnId, parts: ReadonlyArray<ModelPart>): Responded =>
@@ -110,7 +107,6 @@ export function scriptedFizzBuzzModel(): {
   };
 
   function respond(target: Target, context: ModelContext, turn: TurnId): Responded {
-    seen.push(context);
     const last = context.messages.at(-1);
     if (last === undefined || last.role !== "user")
       return failed(new AiError.InvalidRequestError({ description: "the scripted FizzBuzz model needs a user message last" }));
@@ -127,7 +123,7 @@ export function scriptedFizzBuzzModel(): {
         const code = isObject(value) ? value["error_code"] : undefined;
         return responded(target, turn, [say(typeof code === "string" ? code : JSON.stringify(code ?? null))]);
       }
-      const question = [...context.messages].reverse().find((message) => message.role === "user" && texts(message).length > 0);
+      const question = Option.getOrUndefined(Arr.findLast(context.messages, (message) => message.role === "user" && texts(message).length > 0));
       const n = question === undefined ? Number.NaN : Number(texts(question).at(-1));
       return responded(target, turn, [say(String(n + 1))]);
     }
@@ -149,8 +145,14 @@ export function scriptedFizzBuzzModel(): {
 
   // What this model is given is the context itself, so a failure records that as the request.
   const request: ProviderRequest = (target, context, turn) =>
-    Effect.suspend(() => respond(target, context, turn)).pipe(
+    Ref.update(seen, Arr.append(context)).pipe(
+      Effect.andThen(Effect.suspend(() => respond(target, context, turn))),
       Effect.mapError((error) => new RequestFailed({ error, request: sentAs(context) })),
     );
-  return { layer: Layer.succeed(ModelClient, modelClientOf(request)), seen };
+  return {
+    layer: Layer.succeed(ModelClient, modelClientOf(request)),
+    get seen() {
+      return Ref.getUnsafe(seen);
+    },
+  };
 }

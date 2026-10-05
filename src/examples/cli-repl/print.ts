@@ -52,6 +52,20 @@ const printingFacts = (session: Session) =>
     return { finish: Fiber.interrupt(follower).pipe(Effect.andThen(printRest)) };
   });
 
+/** The result as `format` prints it: JSON, indented; one line of JSON; or the answer's text. */
+const printedAs = (format: OutputFormat, result: { readonly result: string }): string => {
+  switch (format) {
+    case "json":
+      return JSON.stringify(result, null, 2);
+    case "stream-json":
+      return JSON.stringify(result);
+    case "text":
+      return result.result;
+    default:
+      return format satisfies never;
+  }
+};
+
 export const printOnce = (session: Session, config: Config, prompt: string, format: OutputFormat, facts: boolean) =>
   Effect.gen(function* () {
     const started = Date.now();
@@ -60,6 +74,6 @@ export const printOnce = (session: Session, config: Config, prompt: string, form
     if (printer !== undefined) yield* printer.finish;
     const known = yield* knownCapabilities(config.target.provider, config.target.model);
     const result = resultOf(yield* session.facts, config, started, known);
-    yield* Console.log(format === "json" ? JSON.stringify(result, null, 2) : format === "stream-json" ? JSON.stringify(result) : result.result);
+    yield* Console.log(printedAs(format, result));
     if (result.is_error) return yield* invalid(`The turn ended ${result.subtype}.`);
   });

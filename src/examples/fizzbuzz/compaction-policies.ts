@@ -8,6 +8,7 @@
  */
 
 import type { CompactionPolicy, Summarizer } from "../../agent-context/compaction.ts";
+import { Array as Arr, Option } from "effect";
 import type { Fact } from "../../agent-machine/fact.ts";
 import { PolicyName } from "../../agent-machine/names.ts";
 import { parseJson } from "../../agent-session/received.ts";
@@ -15,11 +16,7 @@ import { isObject } from "../../agent-session/shaping.ts";
 
 /** The position of the last fact that `is`, or -1. */
 function lastAt(facts: ReadonlyArray<Fact>, is: (fact: Fact, at: number) => boolean): number {
-  for (let at = facts.length - 1; at >= 0; at--) {
-    const fact = facts[at];
-    if (fact !== undefined && is(fact, at)) return at;
-  }
-  return -1;
+  return Option.getOrElse(Arr.findLastIndex(facts, is), () => -1);
 }
 
 /** The facts of the last turn that ended: from its start to its end. */
