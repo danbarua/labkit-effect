@@ -1,8 +1,8 @@
 /**
  * What a model request passes on while its response streams: each event as the provider sent it,
- * the text each event adds to a part, and each part of the response once it is complete. Nothing passed on is recorded; the response
- * is recorded whole when the stream ends. The loop sets `ModelStream` around each model request;
- * outside one, what is passed on goes nowhere.
+ * the text each event adds to a part, and each part of the response once it is complete. Nothing
+ * passed on is recorded; the response is recorded whole when the stream ends. The loop sets
+ * `ModelStream` around each model request; outside one, what is passed on is discarded.
  */
 
 import { Context, Effect } from "effect";
@@ -14,8 +14,9 @@ export type Streamed =
   /** One event of the stream, as received. */
   | { readonly _tag: "Chunk"; readonly chunk: Received }
   /**
-   * Text the event added to a part while it arrives: the answer's, commentary's, or the readable
-   * text of thinking. A part's deltas, joined, are its text, and are passed on before the part.
+   * Text that the event added to a part while it arrives: the answer's, commentary's, or the
+   * readable text of thinking. A part's deltas, joined, are its text, and are passed on before the
+   * part.
    */
   | { readonly _tag: "Delta"; readonly kind: "Text" | "Commentary" | "Thinking"; readonly text: string }
   /** A part of the response, complete. */
@@ -26,8 +27,9 @@ export const ModelStream = Context.Reference<(streamed: Streamed) => Effect.Effe
 });
 
 /**
- * How often, at most, stream events are passed on to those following the session: they are held and
- * released in batches. A completed part, and the end of the response, release what is held at once.
+ * The shortest interval between batches of stream events passed to the session's followers. Events
+ * are held and released in batches. A completed part, and the end of the response, release what is
+ * held at once.
  */
 export const ModelStreamInterval = Context.Reference<Millis>("agent-session/ModelStreamInterval", {
   defaultValue: () => Millis.make(100),

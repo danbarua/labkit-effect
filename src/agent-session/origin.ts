@@ -1,10 +1,10 @@
 /**
- * Who is reporting the observations a program gives a session. Whoever calls `session.observe` sets
- * it around the call with `reportedBy`; the loop records each observation with it. An observation
- * given with none set has no origin to be recorded with, which is a defect.
+ * The origin of the observations that a program gives a session. A caller of `session.observe`
+ * sets it around the call with `reportedBy`, and the loop records each observation with it. An
+ * observation given with no origin set is a defect.
  *
- * What the loop observes itself (a request's outcome, a turn starting) it records with the origin
- * it knows: the provider, the tool, or the part of the harness.
+ * The loop records what it observes itself (a request's outcome, a turn starting) with the origin
+ * that it knows: the provider, the tool, or the part of the harness.
  */
 
 import { Context, Effect } from "effect";
@@ -24,9 +24,9 @@ export const reportedBy =
 const harness = (part: string): Extract<Origin, { _tag: "Harness" }> => ({ _tag: "Harness", part: HarnessPart.make(part) });
 
 /**
- * A policy of a list (`seam`: "tool call policy", which decides whether a tool call runs; "model
- * request policy", whether a model request is made), by its name in the list: what reports its veto,
- * its question, or the request it holds.
+ * The origin of a policy's veto, question or held request: the policy, by its name in its list.
+ * `seam` is "tool call policy" (whether a tool call runs) or "model request policy" (whether a
+ * model request is made).
  */
 export const policyPart = (seam: string, name: string): Extract<Origin, { _tag: "Harness" }> => harness(`${seam} ${name}`);
 
@@ -34,18 +34,18 @@ export const policyPart = (seam: string, name: string): Extract<Origin, { _tag: 
 export const harnessParts = {
   /** Starts turns. */
   loop: harness("loop"),
-  /** Runs what may hold a turn open before it ends. */
+  /** Runs the hooks that may hold a turn open before it ends. */
   turnEndHooks: harness("turn-end hooks"),
   /** Sends a request to the next provider when one cannot serve it. */
   fallbackChain: harness("fallback chain"),
   /** Builds what the model is sent. */
   contextAssembler: harness("context assembler"),
-  /** Goes on from a session's facts, and says what is known of the requests they leave under way. */
+  /** Continues a session from its facts, and records what is known of the requests they leave under way. */
   resume: harness("resume"),
   /** Hands each tool call to the tool that runs it. */
   toolRunner: harness("tool runner"),
-  /** Keeps the session's MCP servers: says when one is ready, failed, exited or stopped. */
+  /** Keeps the session's MCP servers, and records when one is ready, failed, exited or stopped. */
   mcpServers: harness("mcp servers"),
-  /** Puts a session's settings into a request a model accepts. */
+  /** Puts a session's settings into a request that the model accepts. */
   modelSettings: harness("model settings"),
 } as const;

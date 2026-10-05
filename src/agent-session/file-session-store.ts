@@ -1,22 +1,24 @@
 /**
  * A session's facts in a file, one JSON line per fact (`FileBackedSessionStore`). Facts are written
- * before `append` returns, and the file is read when the store is opened, so a store opened on a
- * file that holds facts is the session gone on from them.
+ * before `append` returns, and the file is read when the store is opened, so a session opened on a
+ * file that holds facts continues from them.
  *
- * - One process writes a file at a time: it holds `<file>.lock`, which holds its process id, for as
- *   long as the store is open. A lock whose process has ended (one that was killed) is taken over,
- *   and that is logged.
- * - A file is read as facts in order: the first fact 1, each the one after the one before; a file
- *   that is not is refused. A last line without its line break is a write the process did not
- *   finish: it is not read, and is cut off before the file is written to again, which is logged.
- * - Each `append` writes its facts and flushes them to the disk (`fsync`) before it returns, so
- *   what the session does after writing a fact down (a tool it runs) follows the fact being on the
- *   disk, a power cut included. A new file's folder is flushed too, so the file is found after one.
- * - A write that fails is said, with the file and the facts it did not write, and nothing is
- *   written after it.
+ * - **Lock.** One process writes a file at a time. While the store is open, the process holds
+ *   `<file>.lock`, which contains its process id. A lock whose process has ended (a killed process,
+ *   say) is taken over, and the takeover is logged as a warning.
+ * - **Reading.** A file is read as facts 1 to n, in order; a file that is not is refused. A last
+ *   line without its line break is a write that the process did not finish: it is not read, and it
+ *   is cut off before the file is written to again. The cut is logged as a warning.
+ * - **Flushing.** Each `append` writes its facts and flushes them to the disk (`fsync`) before it
+ *   returns, so whatever the session does after writing a fact (running a tool, say) happens after
+ *   the fact is on the disk, through a power cut as well. The folder of a new file is flushed too,
+ *   so the file is found after a power cut.
+ * - **Failure.** A write that fails returns an error naming the file and the facts that were not
+ *   written, and nothing is written after it.
  *
- * The format is the facts' schema as it is today; a file written before the schema changed may not
- * read back, and is deleted rather than converted.
+ * The format is the facts' schema as it is today. A file written before the schema changed may not
+ * read back; the store refuses it, and the error tells the user to delete the file. Old files are
+ * not converted.
  */
 
 import { Effect, FileSystem, Layer, Ref, Schema } from "effect";
@@ -28,18 +30,18 @@ const FactLine = Schema.fromJsonString(Fact);
 const encodeLine = Schema.encodeSync(FactLine);
 const decodeLine = Schema.decodeUnknownEffect(FactLine);
 
-/** A session's file as read: its facts, and what follows its last complete line, if anything. */
+/** A session's file as read: its facts, and the text after its last complete line, if any. */
 export interface StoredFile {
   readonly facts: ReadonlyArray<Fact>;
-  /** The bytes the complete lines take. */
+  /** The number of bytes that the complete lines take. */
   readonly bytes: number;
-  /** What follows the last line break: the start of a line whose write did not finish. */
+  /** The text after the last line break: the start of a line whose write did not finish. */
   readonly torn: string;
 }
 
 const failed = (message: string) => new SessionStoreFailed({ message });
 
-/** The facts in `file`, in order; a file whose lines are not one session's facts in order is refused. */
+/** Reads the facts in `file`, in order. Fails when the lines are not one session's facts in order. */
 export const readFacts = (file: string) =>
   Effect.gen(function* () {
     const text = yield* (yield* FileSystem.FileSystem).readFileString(file);
@@ -67,8 +69,9 @@ const running = (pid: number): boolean => {
 };
 
 /**
- * Holds `file`'s lock for as long as the scope lasts. A lock held by a running process is not
- * taken; one whose process has ended is taken over, and that is logged.
+ * Takes `file`'s lock and holds it until the scope closes. Fails when a running process holds the
+ * lock. A lock whose process has ended, or whose file names no process, is taken over, and the
+ * takeover is logged as a warning.
  */
 const locked = (file: string) =>
   Effect.gen(function* () {
@@ -100,8 +103,9 @@ const locked = (file: string) =>
   }).pipe(Effect.catchTag("PlatformError", (error) => Effect.fail(failed(`${file}.lock could not be taken: ${error.message}`))));
 
 /**
- * Flushes the folder `file` is in to the disk, so that a file just made there is found after a power
- * cut. A file system that cannot flush a folder is logged, and the store goes on.
+ * Flushes the folder that contains `file` to the disk, so that a file just created there is found
+ * after a power cut. When the file system cannot flush the folder, that is logged as a warning and
+ * the store opens anyway.
  */
 const folderSynced = (file: string) =>
   Effect.gen(function* () {
@@ -114,8 +118,8 @@ const folderSynced = (file: string) =>
   );
 
 /**
- * The session store kept in `file`, open for as long as the layer is: its lock taken, its facts
- * read, a line whose write did not finish cut off, and the file held open to append to.
+ * The session store kept in `file`, open for as long as the layer lasts. Opening it takes the lock,
+ * reads the facts, cuts off a line whose write did not finish, and opens the file for appending.
  */
 export const FileBackedSessionStore = (file: string) =>
   Layer.effect(
@@ -132,14 +136,15 @@ export const FileBackedSessionStore = (file: string) =>
         yield* fs.truncate(file, stored.bytes).pipe(Effect.mapError((error) => failed(`${file} could not be cut to its last complete line: ${error.message}`)));
       }
       const created = !(yield* fs.exists(file).pipe(Effect.orElseSucceed(() => false)));
-      // Open for appending for as long as the store is; a file made here is made now.
+      // The file stays open for appending while the store is open; opening it creates a new file.
       const opened = yield* fs.open(file, { flag: "a" }).pipe(Effect.mapError((error) => failed(`${file} could not be opened: ${error.message}`)));
       if (created) yield* folderSynced(file);
       const kept = yield* Ref.make<ReadonlyArray<Fact>>(stored.facts);
       return {
         facts: Ref.get(kept),
-        // The write, its flush to the disk, and what is kept go together: a write that landed is
-        // never left uncounted, and the facts count as written only once they are on the disk.
+        // The write, the flush and the update of the kept facts are uninterruptible together, so a
+        // write that reached the file is always counted, and facts count as written only once they
+        // are on the disk.
         append: (more) =>
           Effect.uninterruptible(
             Effect.gen(function* () {

@@ -1,18 +1,18 @@
 /**
- * Where a session's facts are kept. The loop needs one to run (`openSession`): it writes each fact
- * down before it acts on it, and reads the facts back from it. There are two:
+ * Where a session's facts are kept. The loop requires a store (`openSession`): it writes each fact
+ * to the store before it acts on the fact, and reads the facts back from it. There are two stores:
  *
- * - `EphemeralSessionStore`: the facts in memory, gone when the process ends.
+ * - `EphemeralSessionStore`: the facts in memory, lost when the process ends.
  * - `FileBackedSessionStore` (`file-session-store.ts`): the facts in a file, one JSON line each,
  *   written before `append` returns, and read back when the store is opened.
  *
- * A store opened on facts already kept is a session gone on from them: the loop starts from them.
+ * A session opened on a store that already holds facts continues from them.
  */
 
 import { Context, Data, Effect, Layer, Ref } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 
-/** Writing facts down failed, for the reason given. Nothing after it is written. */
+/** Writing facts to the store failed, for the reason in `message`. Nothing after it is written. */
 export class SessionStoreFailed extends Data.TaggedError("SessionStoreFailed")<{ readonly message: string }> {}
 
 export class SessionStore extends Context.Service<
@@ -20,12 +20,12 @@ export class SessionStore extends Context.Service<
   {
     /** The session's facts, in order. */
     readonly facts: Effect.Effect<ReadonlyArray<Fact>>;
-    /** Writes `facts` down after those already kept, and returns once they are written. */
+    /** Appends `facts` after those already kept, and returns once they are written. */
     readonly append: (facts: ReadonlyArray<Fact>) => Effect.Effect<void, SessionStoreFailed>;
   }
 >()("agent-session/SessionStore") {}
 
-/** A session's facts in memory, starting from `facts`: gone when the process ends. */
+/** A store that keeps a session's facts in memory, starting from `facts`. The facts are lost when the process ends. */
 export const ephemeralSessionStore = (facts: ReadonlyArray<Fact> = []) =>
   Layer.effect(
     SessionStore,
@@ -38,5 +38,5 @@ export const ephemeralSessionStore = (facts: ReadonlyArray<Fact> = []) =>
     }),
   );
 
-/** A new session's facts in memory: gone when the process ends. */
+/** A store that keeps a new session's facts in memory. The facts are lost when the process ends. */
 export const EphemeralSessionStore = ephemeralSessionStore();

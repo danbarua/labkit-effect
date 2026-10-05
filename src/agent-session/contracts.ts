@@ -1,6 +1,4 @@
-/**
- * What the loop needs from the outside world, one service per job. Each adapter implements one.
- */
+/** The services that the loop needs from outside, one per job. Each adapter implements one. */
 
 import type { Capabilities } from "./configuration/well-known-models.ts";
 import { BlobRef } from "../agent-machine/blob.ts";
@@ -14,14 +12,14 @@ import type { ModelSettings } from "../agent-machine/settings.ts";
 import type { RequestFailed } from "./provider-call.ts";
 
 /**
- * Which model a request goes to, and how it is to process the request, where that was said. Where
- * the provider is reached is its client's configuration.
+ * The model that a request goes to, and the settings for the request, where they were given. The
+ * provider's address is part of its client's configuration, not of the target.
  */
 export interface Target {
   readonly provider: ProviderName;
   readonly model: ModelName;
   readonly settings?: ModelSettings;
-  /** What is known of the model, which the request is shaped to; the well-known models' when absent. */
+  /** What is known of the model, which the adapter shapes the request to; when absent, the well-known models' entry is used. */
   readonly capabilities?: Capabilities;
 }
 
@@ -50,11 +48,11 @@ export const PartSource = Schema.Union([
 export type PartSource = typeof PartSource.Type;
 
 /**
- * One part of a message the model is sent. `Commentary` is what a model wrote for whoever is
- * watching, which is not its answer. `Thinking` and `Unrecognised` are parts of a response that
- * only where it came from reads: an adapter sends them back unchanged, in their place, to where
- * they came from; elsewhere thinking goes as its text, and anything else is left out
- * (`sentBack`). Each says where it came from (`PartSource`).
+ * One part of a message that the model is sent. `Commentary` is what a model wrote for whoever is
+ * watching, which is not its answer. `Thinking` and `Unrecognised` are parts of a response that only
+ * their source provider reads: an adapter sends them back unchanged, in their place, to that
+ * provider. To any other provider, thinking is sent as its text and any other part is omitted
+ * (`sentBack`). Each part records its source (`PartSource`).
  */
 export const ContextPart = Schema.Union([
   Schema.TaggedStruct("Text", { text: Schema.String }),
@@ -69,9 +67,9 @@ export const ContextPart = Schema.Union([
 export type ContextPart = typeof ContextPart.Type;
 
 /**
- * One message of what the model is sent. An `instruction` is the harness speaking to the model in
- * the middle of the conversation (a notice, a changed rule); each provider adapter sends it as its
- * provider takes such messages.
+ * One message that the model is sent. An `instruction` is the harness speaking to the model in the
+ * middle of the conversation (a notice, a changed rule); each provider adapter sends it in the form
+ * that its provider accepts.
  */
 export const ContextMessage = Schema.Struct({
   role: Schema.Literals(["user", "assistant", "instruction"]),
@@ -112,9 +110,9 @@ export class ModelClient extends Context.Service<
 >()("agent-session/ModelClient") {}
 
 /**
- * One request to one provider, as its adapter makes it (retries included): the response, or the
- * `AiError` it failed with and the request as it was made (`RequestFailed`). A model client is built from one or more of these, and decides what a
- * failure becomes.
+ * One request to one provider, as its adapter makes it, retries included. It returns the response,
+ * or fails with the `AiError` and the request as it was made (`RequestFailed`). A model client is
+ * built from one or more of these and decides what a failure becomes.
  */
 export type ProviderRequest = (
   target: Target,
@@ -122,14 +120,14 @@ export type ProviderRequest = (
   turn: TurnId,
 ) => Effect.Effect<Extract<Observation, { _tag: "ModelResponded" }>, RequestFailed>;
 
-/** Starts a turn and chooses its identity. */
+/** Returns the identity of a turn that is starting. */
 export class Turns extends Context.Service<Turns, { readonly start: Effect.Effect<TurnId> }>()(
   "agent-session/Turns",
 ) {}
 
 /**
- * What runs before `turn` may end, as the session's facts stand: feedback for the model, which the
- * turn is given as input, holding it open. No feedback lets it end.
+ * Runs before `turn` may end, as the session's facts stand, and returns feedback for the model. The
+ * turn receives the feedback as input, which holds the turn open. No feedback lets the turn end.
  */
 export type TurnEndHook = (facts: ReadonlyArray<Fact>, turn: TurnId) => Effect.Effect<ReadonlyArray<string>>;
 
@@ -137,21 +135,21 @@ export type TurnEndHook = (facts: ReadonlyArray<Fact>, turn: TurnId) => Effect.E
 export const TurnEndHooks = Context.Reference<ReadonlyArray<TurnEndHook>>("agent-session/TurnEndHooks", { defaultValue: () => [] });
 
 /**
- * How many times the turn-end hooks may hold one turn open. After that, feedback they still give is
- * not given to it, and the turn ends. None by default: a host that runs hooks says how many.
+ * How many times the turn-end hooks may hold one turn open. After that, further feedback is not
+ * given to the turn, and the turn ends. 0 by default: a host that runs hooks sets it.
  */
 export const MaxHolds = Context.Reference<number>("agent-session/MaxHolds", { defaultValue: () => 0 });
 
-/** Runs one tool call (`call`, by which a host can show it as it runs) and reports how it ended. */
+/** Runs one tool call and returns how it ended. `call` lets a host show the call while it runs. */
 export class ToolRunner extends Context.Service<
   ToolRunner,
   { readonly run: (tool: ToolName, input: Received, call: CallId) => Effect.Effect<ToolOutcome> }
 >()("agent-session/ToolRunner") {}
 
-/** A policy as a session's facts stand when the request it reviews is to be carried out. */
+/** Returns a policy as the session's facts stand when the request that it reviews is about to be carried out. */
 export type PolicyOfFacts = (facts: ReadonlyArray<Fact>) => Effect.Effect<Policy<unknown>>;
 
-/** A policy of a list, by the name the list knows it by: what a veto or a question of its says came from it. */
+/** A policy in a list, with the name that the list gives it. Its vetoes and questions are recorded as coming from that name. */
 export interface NamedPolicy {
   readonly name: string;
   readonly policy: PolicyOfFacts;

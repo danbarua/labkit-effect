@@ -1,6 +1,4 @@
-/**
- * The simplest `Turns`: turn identities from a counter.
- */
+/** The simplest `Turns`: turn identities from a counter. */
 
 import { Effect, Layer, Ref } from "effect";
 import { TurnId } from "../agent-machine/names.ts";
@@ -8,8 +6,8 @@ import { Turns } from "./contracts.ts";
 import { SessionStore } from "./session-store.ts";
 
 /**
- * Turn identities `turn-1`, `turn-2`, … in the order turns start, counting on from `already`: the
- * number of turns a session that is gone on from has started, so none of its identities is used again.
+ * Turn identities `turn-1`, `turn-2`, … in the order turns start, counting on from `already`, the
+ * number of turns that the session had started before it continued, so no identity is used twice.
  */
 export const countingTurnsAfter = (already: number) =>
   Layer.effect(

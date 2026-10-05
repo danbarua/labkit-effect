@@ -1,7 +1,7 @@
 /**
  * What the loop is working on while it carries out a request: the session, the turn, and for a tool
- * run the call and the tool. The loop sets it around each request; any service the request calls
- * reads it with `yield* CurrentWork`, so none of them is passed these as arguments. Outside a
+ * run the call and the tool. The loop sets it around each request, and any service that the request
+ * calls reads it with `yield* CurrentWork`, so these values are not passed as arguments. Outside a
  * request it is empty.
  */
 
