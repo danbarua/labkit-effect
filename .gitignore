@@ -38,3 +38,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # VidaiMock, installed by scripts/vidaimock.ts
 /.tools/
+
+# An example project folder: a global ignore of .labkit/ would leave it out.
+!src/agent-config/fixtures/project/.labkit/

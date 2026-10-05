@@ -90,8 +90,8 @@ them, and its result says so), `--permission-mode`, `--max-turns`, `--retries`, 
 `--setting-sources`, `--mcp-config`, and so on. One that cannot be used stops the launch. A
 provider's key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`) or the local server at
 `http://localhost:8000/v1` gives the models; `LABKIT_ACP_LOG_DIR`, `_LEVEL`, `_MAX_BYTES`, `_BACKUPS`
-the log. Each session reads its configuration as the CLI does (`~/.config/labkit/policies.yml`,
-and the working folder's files when `--setting-sources` names them), with the MCP servers the
+the log. Each session reads its configuration as the CLI does (every `.yml` file in
+`~/.config/labkit/`, and the working folder's files when `--setting-sources` names them), with the MCP servers the
 editor names over those of the same name, and writes what it resolved to beside its facts
 (`effective-settings.json`).
 

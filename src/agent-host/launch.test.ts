@@ -1,6 +1,7 @@
 /** The options both hosts take, each a flag with its variable as its twin, and the layers they make. */
 
 import { expect } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { Config, ConfigProvider, Effect, Exit } from "effect";
@@ -39,6 +40,7 @@ const allTwins = {
   LABKIT_STRICT_MCP_CONFIG: "true",
   LABKIT_SETTINGS: '{"maxHolds": 2}',
   LABKIT_SETTING_SOURCES: "user,project",
+  LABKIT_CONFIG_DIR: "/etc/labkit",
 };
 
 test("a flag not given is read from its variable, the brand's prefix and the flag's name in capitals; a flag given wins", async () => {
@@ -52,6 +54,7 @@ test("a flag not given is read from its variable, the brand's prefix and the fla
     strictMcpConfig: true,
     settings: '{"maxHolds": 2}',
     settingSources: "user,project",
+    configDir: "/etc/labkit",
   });
   const given = await launched(["--model", "xai/grok-4.7", "--max-turns", "3", "--mcp-config", "a.json", "--mcp-config", "b.json"], allTwins);
   expect(given.seen?.options).toMatchObject({ model: "xai/grok-4.7", maxTurns: 3, mcpConfig: ["a.json", "b.json"], permissionMode: "acceptEdits" });
@@ -65,6 +68,7 @@ test("a flag not given is read from its variable, the brand's prefix and the fla
     strictMcpConfig: false,
     settings: undefined,
     settingSources: undefined,
+    configDir: undefined,
   });
 });
 
@@ -84,6 +88,22 @@ test("a variable value that the flag would not accept is the flag's error; a var
   expect(refused.seen).toBeUndefined();
   expect((await launched([], { LABKIT_PERMISSION_MODE: "yolo" })).seen).toBeUndefined();
   expect((await launched([], { OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel:4318" })).seen?.otel).toBe("http://otel:4318");
+});
+
+test("--config-dir, or its variable, names the user's configuration folder in place of ~/.config/<brand>", async () => {
+  const home = join(testFolder(), "home");
+  mkdirSync(join(home, ".config", "labkit"), { recursive: true });
+  writeFileSync(join(home, ".config", "labkit", "policies.yml"), "toolCalls: [permissions]\n");
+  mkdirSync(join(testFolder(), "elsewhere"), { recursive: true });
+  writeFileSync(join(testFolder(), "elsewhere", "10_mine.yml"), "toolCalls: [loopBreaker]\n");
+  const defaults: LayerSource = { name: "the host's defaults", trusted: true, value: {} };
+  const configuration = await runTest(
+    launchConfiguration(join(testFolder(), "project"), defaults, { mcpConfig: [], strictMcpConfig: false, configDir: join(testFolder(), "elsewhere") }, { home }).pipe(
+      Effect.provide(BunServices.layer),
+    ),
+  );
+  expect(configuration.layers.map((layer) => layer.name)).toEqual(["the host's defaults", join(testFolder(), "elsewhere", "10_mine.yml"), "the command line"]);
+  expect((await launched([], { LABKIT_CONFIG_DIR: "/etc/labkit" })).seen?.options.configDir).toBe("/etc/labkit");
 });
 
 test("the host's defaults are the first layer and the flags the last; manual is the default permission mode", async () => {

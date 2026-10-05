@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../../schemas/config.schema.json
+#
+# Plug-ins, and the seam lists that use them. A plug-in is configured once, under `plugins`, by
+# name; each seam lists the names it uses, in order. A name on a list that `plugins` does not
+# configure is that plug-in with its defaults (`maxTurnRequests` and `credentials` below).
+
+plugins:
+  loopBreaker:
+    nudgeAt: 3
+    stopAt: 5
+  # A second loop breaker, with settings of its own: `use` names the plug-in.
+  strictLoops:
+    use: loopBreaker
+    stopAt: 3
+  permissions:
+    mode: default
+  retryIncomplete:
+    retries: 1
+
+toolCalls: [loopBreaker, permissions]
+modelRequests: [strictLoops, maxTurnRequests]
+turnEnd: [retryIncomplete]
+# How many times the turn-end hooks may hold one turn open: required when turnEnd lists hooks.
+maxHolds: 1
+commandEnvironment: [credentials]

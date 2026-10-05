@@ -11,10 +11,11 @@
  * The layers, merged in order, the last write winning:
  *
  * 1. the host's own defaults;
- * 2. the user's file, and the project's and the local one when `--setting-sources` names them. A
- *    folder's files are read only when named, because a cloned folder's files could turn off
- *    permission or give the model's commands credentials. Named files are read but are not trusted,
- *    so they still may not name extensions or MCP servers;
+ * 2. the files of the user's configuration folder (`--config-dir`, else `~/.config/<brand>`), and
+ *    the project's files and the local ones when `--setting-sources` names them, each folder's files
+ *    in the order of their names. A project's files are read only when named, because a cloned
+ *    folder's files could turn off permission or give the model's commands credentials. Named files
+ *    are read but are not trusted, so they still may not name extensions or MCP servers;
  * 3. `--settings`: JSON, or a file of JSON or YAML;
  * 4. with `--strict-mcp-config`, a layer that removes every MCP server except those `--mcp-config`
  *    names;
@@ -24,12 +25,13 @@
  *    of model requests in a turn) and `--max-budget-usd` (the session's budget). A flag that sets a
  *    plug-in that the model requests list does not have adds it to the end of that list.
  *
- * Every layer except the project's file and the local one is the user's, so it may load extensions.
+ * Every layer except the project's files and the local ones is the user's, so it may load extensions.
  */
 
+import { resolve } from "node:path";
 import { Config, ConfigProvider, Effect, FileSystem, Option } from "effect";
 import { Command, Flag } from "effect/cli";
-import { ConfigInvalid, type Configuration, fileLayer, type FileSource, fileSources, type LayerSource, loadConfiguration, policyLayers } from "../agent-config/file.ts";
+import { ConfigInvalid, type Configuration, fileLayer, fileLayers, type FileSource, fileSources, type LayerSource, loadConfiguration } from "../agent-config/file.ts";
 import { merged } from "../agent-config/merge.ts";
 import type { PermissionMode } from "../agent-policy/permissions.ts";
 import { type Brand, envPrefixOf } from "./brand.ts";
@@ -85,6 +87,7 @@ export const launchFlags = {
   ),
   strictMcpConfig: toggleFlag("strict-mcp-config", "Use only the MCP servers --mcp-config names"),
   settings: textFlag("settings", "Settings: JSON, or a file of JSON or YAML, over the files"),
+  configDir: textFlag("config-dir", "The folder of configuration files, each .yml file read in the order of their names (~/.config/<brand> when not given)"),
   settingSources: textFlag("setting-sources", "Which settings files to read, comma-separated: user, project, local (only user when not given)"),
 };
 
@@ -108,6 +111,8 @@ export const launchVariables = (
 
 /** The flags that make the layers. */
 export interface ConfigFlags {
+  /** The user's configuration folder, in place of `~/.config/<brand>`. */
+  readonly configDir?: string | undefined;
   /** Which files to read: `user`, `project`, `local`, comma-separated. */
   readonly settingSources?: string | undefined;
   /** A layer: JSON, or a file of JSON or YAML. */
@@ -184,7 +189,11 @@ export const launchLayers = (
 ): Effect.Effect<ReadonlyArray<LayerSource>, ConfigInvalid, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const sources = yield* sourcesOf(flags.settingSources);
-    const files = yield* policyLayers(project ?? "", { ...options, sources: project === undefined ? sources.filter((source) => source === "user") : sources });
+    const files = yield* fileLayers(project ?? "", {
+      ...options,
+      ...(flags.configDir === undefined ? {} : { configDir: resolve(flags.configDir) }),
+      sources: project === undefined ? sources.filter((source) => source === "user") : sources,
+    });
     const settings = flags.settings === undefined ? [] : [yield* layerFromFlag("--settings", flags.settings)];
     const strict: ReadonlyArray<LayerSource> = flags.strictMcpConfig ? [{ name: "--strict-mcp-config", trusted: true, value: { mcpServers: null } }] : [];
     const mcp = yield* Effect.forEach(flags.mcpConfig, (given) =>

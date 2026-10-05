@@ -252,7 +252,7 @@ options make (`launchConfiguration`, over the host's own defaults).
 
 - The options are `--model`, `--permission-mode` (`manual` means `default`), `--strict-tool-input`,
   `--max-turns`, `--max-budget-usd`, `--mcp-config` (repeatable), `--strict-mcp-config`,
-  `--settings` and `--setting-sources`.
+  `--settings`, `--setting-sources` and `--config-dir` (the user's configuration folder).
 - An option that is not given is read from a variable named: the brand's prefix, the host's part
   (`ACP_` for the ACP launcher, none for the CLI), then the option's name in capitals with `_` for
   `-` (`LABKIT_MAX_TURNS`, `LABKIT_ACP_MAX_TURNS`). `--mcp-config` takes one value from its
@@ -262,8 +262,9 @@ options make (`launchConfiguration`, over the host's own defaults).
   name, after the name with the brand's prefix and the host's part.
 - The layers, merged in order, the last write winning (`docs/agent-config.md`):
   1. the host's defaults;
-  2. the user's file, and the project's and the local one when `--setting-sources` names them (they
-     still may not name extensions or MCP servers);
+  2. the files of the user's configuration folder (`--config-dir`, else `~/.config/<brand>/`), then
+     the project's files and the local ones when `--setting-sources` names them (they still may not
+     name extensions or MCP servers);
   3. `--settings` (JSON, or a file of JSON or YAML);
   4. with `--strict-mcp-config`, a layer that removes the MCP servers of the layers before it;
   5. each `--mcp-config` (JSON, or a file of it, as Claude Code's `.mcp.json`);

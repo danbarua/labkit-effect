@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../../schemas/config.schema.json
+#
+# An extension: a module that exports a plug-in, or a list of them, by default. A path is relative
+# to this file's folder. Only the user's own files may name extensions.
+
+extensions:
+  # Adds `denyTools`, on toolCalls: it vetoes a call to any tool named in `tools`.
+  - ../../../../tests/support/config-extension.ts
+
+plugins:
+  denyTools:
+    tools: [run_command]
+
+# A list replaces an earlier file's list whole, so toolCalls is restated with denyTools first.
+toolCalls: [denyTools, loopBreaker, permissions]

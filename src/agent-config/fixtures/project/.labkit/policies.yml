@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../../../../../schemas/config.schema.json
+#
+# A project's file, kept with the project. It is read only with --setting-sources project, and it is
+# not trusted, so it may not name extensions or MCP servers.
+
+plugins:
+  permissions:
+    mode: acceptEdits

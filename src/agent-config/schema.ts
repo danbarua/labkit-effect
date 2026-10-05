@@ -1,5 +1,5 @@
 /**
- * The JSON Schema of a policies file, made from the registered plug-ins' Schemas, so that an editor
+ * The JSON Schema of a configuration file, made from the registered plug-ins' Schemas, so that an editor
  * checks a file as it is typed (a `# yaml-language-server: $schema=<path>` comment at its top). The
  * schema accepts, in `plugins`:
  *
@@ -21,7 +21,7 @@ import { type AnyPlugin, seams } from "./plugin.ts";
  * `plugins` is written out here: the plug-ins' own names as `properties` and any other name as
  * `additionalProperties`, side by side, so that neither applies to the other's names.
  */
-export const policiesJsonSchema = (registry: ReadonlyArray<AnyPlugin> = builtins): Schema.Json => {
+export const configJsonSchema = (registry: ReadonlyArray<AnyPlugin> = builtins): Schema.Json => {
   const rest = jsonSchemaOf(
     Schema.Struct({
       extensions: Schema.optionalKey(Schema.Array(Schema.String)),

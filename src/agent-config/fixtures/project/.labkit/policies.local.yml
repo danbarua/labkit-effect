@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../../../../../schemas/config.schema.json
+#
+# The user's own file for this project (*.local.yml), kept out of the project's history. It is read
+# only with --setting-sources local.
+
+plugins:
+  maxTurnRequests:
+    limit: 50

@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../../schemas/config.schema.json
+#
+# MCP servers, by name. Only the user's own files may name them.
+
+mcpServers:
+  # A server that the session runs as a process.
+  files:
+    command: files-mcp
+    args: [--root, .]
+    # The session does not start when this server is not running.
+    required: true
+    connectTimeout: 10 seconds
+  # A server at a URL. ${VAR} is replaced by the environment's value, ${VAR:-default} by the default
+  # when the variable is not set.
+  docs:
+    type: http
+    url: https://mcp.example.com/mcp
+    headers:
+      Authorization: Bearer ${DOCS_TOKEN:-none}

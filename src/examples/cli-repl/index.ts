@@ -15,8 +15,9 @@
  * fact is printed as it is recorded, then the result.
  *
  * Its policies, turn-end hooks and MCP servers are its configuration (`configuration.ts`): its own
- * defaults, the user's file (`~/.config/<brand>/policies.yml`), the project's and the local one (in
- * `.<brand>/` in the folder it runs in) when `--setting-sources` names them, `--settings`,
+ * defaults, the files of the user's configuration folder (`~/.config/<brand>/`, or `--config-dir`),
+ * the project's and the local ones (in `.<brand>/` in the folder it runs in) when `--setting-sources`
+ * names them, `--settings`,
  * `--mcp-config`, then the flags
  * (`--permission-mode`, `--max-turns`, `--max-budget-usd`), the last write winning. What it resolved
  * to, and which layer said each value, is written to the session's folder as

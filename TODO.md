@@ -149,9 +149,9 @@ model.
       trusted. Until then a project's layer may not name extensions or MCP servers (both run code;
       see `docs/agent-config.md`); once a folder is trusted, its layers may. A folder's `.env` is the
       folder's too: Bun reads it by itself where the agent runs, and the options' variables
-      (the launch variables: `LABKIT_PERMISSION_MODE`, `LABKIT_SETTING_SOURCES`, `LABKIT_MCP_CONFIG`) can
-      loosen permission or start MCP servers; until the folder is trusted they are not to be read
-      from it.
+      (the launch variables: `LABKIT_PERMISSION_MODE`, `LABKIT_SETTING_SOURCES`, `LABKIT_MCP_CONFIG`,
+      and `LABKIT_CONFIG_DIR`, which names the folder whose files are trusted) can loosen permission or
+      start MCP servers; until the folder is trusted they are not to be read from it.
 - [ ] Turn-end hooks by name, as policies are: a hold recorded from the hook that made it, so
       `retryIncomplete` counts its own holds, not every hook's.
 - [ ] The product's name (Dan is thinking of `whitelabel-agent`): the default brand
@@ -178,7 +178,8 @@ model.
         who wants it sooner cancels the turn.
       - The name an entry is used by (`use`) says which entry vetoed (`every` reports it, into the
         origin and the log) and which turn-end hook held a turn, so a hook counts its own holds.
-      Not decided: where the file is kept.
+      Decided (Dan, 2026-10-05): every `.yml` file in the configuration folder, in name order
+      (`docs/agent-config-direction.md`); built.
 - [ ] Later (Dan, 2026-10-03): a change that tightens the permission mode taken between the steps
       of a turn, delivered through the inbox as steering is.
 - [ ] Parked (Dan, 2026-10-03): permission in headless mode (`-p`), where no one can answer a

@@ -2,7 +2,7 @@
 
 import { expect } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { DateTime, Duration, Effect } from "effect";
 import fc from "fast-check";
@@ -19,9 +19,9 @@ import { every, type Policy } from "../agent-policy/policy.ts";
 import { MaxHolds, ModelRequestPolicies, ToolCallPolicies, type ToolSpec, TurnEndHooks } from "../agent-session/contracts.ts";
 import { asText, receivedJson } from "../agent-session/received.ts";
 import { effectiveSettings } from "./effective.ts";
-import { type Configuration, fileLayer, type LayerSource, loadConfiguration, policyLayers } from "./file.ts";
+import { type Configuration, fileLayer, type LayerSource, loadConfiguration, fileLayers } from "./file.ts";
 import { merged, over } from "./merge.ts";
-import { policiesJsonSchema } from "./schema.ts";
+import { configJsonSchema } from "./schema.ts";
 import { seamLayer, seamListsOf } from "./seams.ts";
 
 /** Writes `text` to `path` under the test's folder, making its folders; gives the full path. */
@@ -197,14 +197,14 @@ test("across layers, a mistake names the layer that wrote the value at fault, no
 
 test("layers merge in order, the last write winning: mappings key by key, deeply; any other value, a list included, replaced whole; the user's file, the project's, then the local one", async () => {
   expect(merged([{ a: { b: 1, c: [1, 2] }, d: "x" }, { a: { c: [3] }, e: true }, { d: "y" }])).toEqual({ a: { b: 1, c: [3] }, d: "y", e: true });
-  const layers = await runTest(policyLayers(join(testFolder(), "project"), { home: join(testFolder(), "home"), sources: ["user", "project", "local"] }).pipe(Effect.provide(BunServices.layer)));
+  const layers = await runTest(fileLayers(join(testFolder(), "project"), { home: join(testFolder(), "home"), sources: ["user", "project", "local"] }).pipe(Effect.provide(BunServices.layer)));
   expect(layers).toEqual([]);
   // The user's own for the project comes last, and is not trusted; the sources read can be chosen.
   write("project/.labkit/policies.local.yml", "plugins:\n  maxTurnRequests:\n    limit: 20\n");
   write("home/.config/labkit/policies.yml", "plugins:\n  maxTurnRequests:\n    limit: 10\n  loopBreaker:\n    nudgeAt: 4\ntoolCalls: [loopBreaker, permissions]\nmodelRequests: [maxTurnRequests]\n");
   write("project/.labkit/policies.yml", "plugins:\n  loopBreaker:\n    stopAt: 8\ntoolCalls: [permissions]\n");
   const configuration = await runTest(
-    Effect.flatMap(policyLayers(join(testFolder(), "project"), { home: join(testFolder(), "home"), sources: ["user", "project", "local"] }), (each) => loadConfiguration(each)).pipe(Effect.provide(BunServices.layer)),
+    Effect.flatMap(fileLayers(join(testFolder(), "project"), { home: join(testFolder(), "home"), sources: ["user", "project", "local"] }), (each) => loadConfiguration(each)).pipe(Effect.provide(BunServices.layer)),
   );
   // The project's toolCalls replace the user's; the user's modelRequests stand, with the local file's limit.
   expect(listed(configuration)).toEqual({
@@ -212,7 +212,7 @@ test("layers merge in order, the last write winning: mappings key by key, deeply
     modelRequests: [["maxTurnRequests", "maxTurnRequests", { limit: 20 }]],
   });
   const userOnly = await runTest(
-    Effect.flatMap(policyLayers(join(testFolder(), "project"), { home: join(testFolder(), "home"), sources: ["user"] }), (each) => loadConfiguration(each)).pipe(
+    Effect.flatMap(fileLayers(join(testFolder(), "project"), { home: join(testFolder(), "home"), sources: ["user"] }), (each) => loadConfiguration(each)).pipe(
       Effect.provide(BunServices.layer),
     ),
   );
@@ -450,7 +450,7 @@ test("the resolved configuration lists each entry's settings, defaults included,
 
 test("the JSON Schema accepts valid files and refuses mistakes, as the loader does", () => {
   const ajv = new Ajv2020({ strict: false });
-  const valid = ajv.compile(policiesJsonSchema() as object);
+  const valid = ajv.compile(configJsonSchema() as object);
   const good = [
     { plugins: { loopBreaker: { nudgeAt: 3, stopAt: 5 }, strict: { use: "loopBreaker", stopAt: 3 }, permissions: { mode: "default" } }, toolCalls: ["loopBreaker", "permissions"], maxHolds: 1 },
     { plugins: { maxBudget: { usd: 2 } }, modelRequests: ["maxBudget"], mcpServers: { github: { type: "stdio", command: "gh-mcp", args: ["stdio"], required: true, connectTimeout: "10 seconds" } } },
@@ -470,7 +470,7 @@ test("the JSON Schema accepts valid files and refuses mistakes, as the loader do
 });
 
 test("under a plug-in's own name, the JSON Schema and the loader both accept null (the plug-in's defaults) and both refuse use", async () => {
-  const valid = new Ajv2020({ strict: false }).compile(policiesJsonSchema() as object);
+  const valid = new Ajv2020({ strict: false }).compile(configJsonSchema() as object);
   expect(valid({ plugins: { loopBreaker: null }, toolCalls: ["loopBreaker"] })).toBe(true);
   expect(valid({ plugins: { permissions: { use: "permissions", mode: "default" } } })).toBe(false);
   expect(valid({ plugins: { permissions: { use: "loopBreaker", stopAt: 3 } } })).toBe(false);
@@ -486,7 +486,7 @@ test("under a plug-in's own name, the JSON Schema and the loader both accept nul
 });
 
 test("the JSON Schema of a file accepts, in plugins, each plug-in's settings under its own name, and use with settings under another name; each seam's list accepts names", () => {
-  const schema = policiesJsonSchema() as {
+  const schema = configJsonSchema() as {
     readonly properties: Readonly<
       Record<
         string,
@@ -520,13 +520,71 @@ test("a seam's list gives the session its entries in the order the configuration
   ]);
 });
 
+test("a configuration folder's files are its .yml and .yaml files, in the order of their names, a later file overriding an earlier one; a name starting with . and other files are not read", async () => {
+  write("home/.config/labkit/20_later.yaml", "plugins:\n  loopBreaker:\n    stopAt: 9\n");
+  write("home/.config/labkit/10_first.yml", "plugins:\n  loopBreaker:\n    nudgeAt: 2\n    stopAt: 4\ntoolCalls: [loopBreaker]\n");
+  write("home/.config/labkit/.30_hidden.yml", "toolCalls: [permissions]\n");
+  write("home/.config/labkit/notes.md", "Not configuration.\n");
+  const layers = await runTest(fileLayers(join(testFolder(), "project"), { home: join(testFolder(), "home") }).pipe(Effect.provide(BunServices.layer)));
+  expect(layers.map((layer) => basename(layer.name))).toEqual(["10_first.yml", "20_later.yaml"]);
+  expect(listed(await runTest(loadConfiguration(layers)))["toolCalls"]).toEqual([["loopBreaker", "loopBreaker", { nudgeAt: 2, stopAt: 9, key: "toolAndInput" }]]);
+});
+
+test("a project's folder: its files, then the user's own files for it (*.local.yml), each read only when named, and neither trusted", async () => {
+  const project = join(testFolder(), "project");
+  write("project/.labkit/20_more.yml", "maxHolds: 2\n");
+  write("project/.labkit/policies.local.yml", "maxHolds: 3\n");
+  write("project/.labkit/10_team.yml", "maxHolds: 1\n");
+  const named = (sources: ReadonlyArray<"user" | "project" | "local">) =>
+    runTest(fileLayers(project, { home: join(testFolder(), "home"), sources }).pipe(Effect.provide(BunServices.layer))).then((layers) => layers.map((layer) => [basename(layer.name), layer.trusted]));
+  expect(await named(["user", "project", "local"])).toEqual([
+    ["10_team.yml", false],
+    ["20_more.yml", false],
+    ["policies.local.yml", false],
+  ]);
+  expect(await named(["user", "local"])).toEqual([["policies.local.yml", false]]);
+});
+
+test("the example configuration folders load: the user's files in the order of their names, then the project's file and the local one", async () => {
+  const fixtures = new URL("./fixtures", import.meta.url).pathname;
+  const layers = await runTest(
+    fileLayers(join(fixtures, "project"), { configDir: join(fixtures, "user"), sources: ["user", "project", "local"] }).pipe(Effect.provide(BunServices.layer)),
+  );
+  expect(layers.map((layer) => [basename(layer.name), layer.trusted])).toEqual([
+    ["10_policies.yml", true],
+    ["20_mcp.yml", true],
+    ["30_extensions.yml", true],
+    ["policies.yml", false],
+    ["policies.local.yml", false],
+  ]);
+  const configuration = await runTest(loadConfiguration(layers, undefined, {}));
+  expect(listed(configuration)).toEqual({
+    toolCalls: [
+      ["denyTools", "denyTools", { tools: ["run_command"] }],
+      ["loopBreaker", "loopBreaker", { nudgeAt: 3, stopAt: 5, key: "toolAndInput" }],
+      ["permissions", "permissions", { mode: "acceptEdits" }],
+    ],
+    modelRequests: [
+      ["strictLoops", "loopBreaker", { nudgeAt: 3, stopAt: 3, key: "toolAndInput" }],
+      ["maxTurnRequests", "maxTurnRequests", { limit: 50 }],
+    ],
+    turnEnd: [["retryIncomplete", "retryIncomplete", { retries: 1 }]],
+    commandEnvironment: [["credentials", "credentials", { pass: [] }]],
+  });
+  expect(configuration.maxHolds).toBe(1);
+  expect(configuration.mcpServers).toMatchObject([
+    { name: "files", command: "files-mcp", args: ["--root", "."], required: true },
+    { name: "docs", url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer none" } },
+  ]);
+});
+
 test("with no sources named, only the user's file is read: a project's file and the local file are not", async () => {
   const home = join(testFolder(), "home");
   const project = join(testFolder(), "project");
   write("home/.config/labkit/policies.yml", "toolCalls: [permissions]\n");
   write("project/.labkit/policies.yml", "toolCalls: [loopBreaker]\n");
   write("project/.labkit/policies.local.yml", "toolCalls: [loopBreaker]\n");
-  const layers = await runTest(policyLayers(project, { home }).pipe(Effect.provide(BunServices.layer)));
+  const layers = await runTest(fileLayers(project, { home }).pipe(Effect.provide(BunServices.layer)));
   expect(layers.map((layer) => [layer.name, layer.trusted])).toEqual([[join(home, ".config/labkit/policies.yml"), true]]);
 });
 

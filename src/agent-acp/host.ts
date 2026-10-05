@@ -103,7 +103,7 @@ export interface HostOptions<R = never> {
    * `--max-budget-usd`, `--settings`, `--setting-sources`, `--mcp-config` and `--strict-mcp-config`.
    */
   readonly configFlags?: ConfigFlags | undefined;
-  /** The home whose `.config/<brand>/policies.yml` is the user's file; this process's when left out. */
+  /** The home whose `.config/<brand>` is the user's configuration folder; this process's when left out. */
   readonly home?: string | undefined;
   /**
    * How many times a turn whose response had thinking but no answer is asked again for it (the

@@ -1,10 +1,16 @@
 /**
  * A session's configuration, read from layers merged in order, the last write winning (`merge.ts`):
- * the user's file (`~/.config/<name>/policies.yml`), the project's (`<project>/.<name>/policies.yml`),
- * the user's own for the project (`<project>/.<name>/policies.local.yml`), then what a host adds (a
- * settings file named on its command line, its flags). A file that does not exist is an empty layer.
- * `<name>` is `configName` unless the caller gives another. `docs/agent-config.md` lists what a layer
- * holds.
+ *
+ * 1. the user's configuration folder (`~/.config/<name>/`, unless the caller names another): each of
+ *    its files;
+ * 2. the project's folder (`<project>/.<name>/`): its files, then the user's own files for the project
+ *    (`*.local.yml`), each read only when named;
+ * 3. what a host adds: a settings file named on its command line, its flags.
+ *
+ * A folder's files are its `.yml` and `.yaml` files, read in the order of their names, so a name can
+ * start with a sorting prefix (`10_policies.yml`, `20_mcp.yml`). A name that starts with `.` is not
+ * read. A folder that does not exist adds no layer. `<name>` is `configName` unless the caller gives
+ * another. `docs/agent-config.md` lists what a layer holds.
  *
  * - Only a trusted layer, the user's own, may name extensions or MCP servers, because both run code
  *   and a project's file comes with the project.
@@ -18,7 +24,7 @@ import type { McpServerRemote } from "../agent-mcp/http.ts";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { Array as Arr, Data, Duration, Effect, FileSystem, Schema } from "effect";
+import { Array as Arr, Data, Duration, Effect, FileSystem, Order, Schema } from "effect";
 import { Yaml } from "effect/encoding";
 import { defaultBrand } from "../agent-host/brand.ts";
 import { builtins } from "./builtins.ts";
@@ -28,24 +34,31 @@ import { type AnyPlugin, type Seam, seams } from "./plugin.ts";
 /** The name of the configuration's folders unless a caller gives another: the default brand's (`agent-host/brand.ts`). */
 export const configName = defaultBrand.name;
 
-/** Which configuration file: the user's, the project's (kept with the project), or the user's own for the project (`local`, kept out of the project's history). */
+/** Which configuration files: the user's, the project's (kept with the project), or the user's own for the project (`local`, kept out of the project's history). */
 export type FileSource = "user" | "project" | "local";
 
 export const fileSources: ReadonlyArray<FileSource> = ["user", "project", "local"];
 
-/**
- * Returns the paths of the files that a session's policies are read from, in order:
- * `~/.config/<name>/policies.yml`, `<project>/.<name>/policies.yml`,
- * `<project>/.<name>/policies.local.yml`.
- */
-export const policyFiles = (project: string, options: { readonly name?: string; readonly home?: string } = {}): Readonly<Record<FileSource, string>> => {
+/** Where configuration files are read from: the user's folder (`configDir`, else `~/.config/<name>`), and the project's (`<project>/.<name>`). */
+export interface FolderOptions {
+  readonly name?: string;
+  /** The home whose `.config/<name>` is the user's folder; this process's when left out. */
+  readonly home?: string;
+  /** The user's folder, in place of `<home>/.config/<name>`. */
+  readonly configDir?: string;
+}
+
+/** Returns the folders that configuration files are read from: the user's, and the project's. */
+export const configFolders = (project: string, options: FolderOptions = {}): { readonly user: string; readonly project: string } => {
   const name = options.name ?? configName;
-  return {
-    user: join(options.home ?? homedir(), ".config", name, "policies.yml"),
-    project: join(project, `.${name}`, "policies.yml"),
-    local: join(project, `.${name}`, "policies.local.yml"),
-  };
+  return { user: options.configDir ?? join(options.home ?? homedir(), ".config", name), project: join(project, `.${name}`) };
 };
+
+/** Whether a file named `file` is a configuration file: its name ends `.yml` or `.yaml`, and does not start with `.`. */
+const isConfigFile = (file: string): boolean => !file.startsWith(".") && /\.ya?ml$/.test(file);
+
+/** Whether a file named `file` is one of the user's own files for a project (`*.local.yml`), which is kept out of the project's history. */
+const isLocal = (file: string): boolean => /\.local\.ya?ml$/.test(file);
 
 /** A configuration that cannot be used: the layer, the path in it, and the problem. */
 export class ConfigInvalid extends Data.TaggedError("ConfigInvalid")<{
@@ -324,22 +337,49 @@ export const fileLayer = (file: string, trusted: boolean): Effect.Effect<LayerSo
     return { name: file, value: { ...parsed, extensions: listed.map((path) => (isAbsolute(path) ? path : resolve(dirname(file), path))) }, trusted };
   });
 
+/** Returns the configuration files in `folder` that `wanted` selects, in the order of their names; none when the folder does not exist. */
+const filesIn = (folder: string, wanted: (file: string) => boolean): Effect.Effect<ReadonlyArray<string>, ConfigInvalid, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const unreadable = (cause: unknown) => new ConfigInvalid({ file: folder, path: "", problem: `Could not be read: ${String(cause)}` });
+    if (!(yield* fs.exists(folder).pipe(Effect.mapError(unreadable)))) return [];
+    const names = yield* fs.readDirectory(folder).pipe(Effect.mapError(unreadable));
+    return Arr.sort(
+      names.filter((file) => isConfigFile(file) && wanted(file)),
+      Order.String,
+    ).map((file) => join(folder, file));
+  });
+
 /**
- * Reads the layers of `policyFiles` named in `sources` (only the user's, unless given), in order: the
- * user's file, which is trusted, then the project's and the local one, which are in the project's
- * folder and are not trusted. A folder's files are read only when named, because a file that comes
- * with a cloned project could turn off permission or give the model's commands credentials. A file
- * that does not exist is omitted.
+ * Reads the layers of the folders' files that `sources` names (only the user's, unless given), in
+ * order: the user's folder's files, which are trusted, then the project's files and the local ones,
+ * which are in the project's folder and are not trusted. A project's files are read only when named,
+ * because a file that comes with a cloned project could turn off permission or give the model's
+ * commands credentials.
  */
-export const policyLayers = (
+export const fileLayers = (
   project: string,
-  options: { readonly name?: string; readonly home?: string; readonly sources?: ReadonlyArray<FileSource> } = {},
+  options: FolderOptions & { readonly sources?: ReadonlyArray<FileSource> } = {},
 ): Effect.Effect<ReadonlyArray<LayerSource>, ConfigInvalid, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    const files = policyFiles(project, options);
+    const folders = configFolders(project, options);
+    const filesOf = (source: FileSource) => {
+      switch (source) {
+        case "user":
+          return filesIn(folders.user, () => true);
+        case "project":
+          return filesIn(folders.project, (file) => !isLocal(file));
+        case "local":
+          return filesIn(folders.project, isLocal);
+        default:
+          return source satisfies never;
+      }
+    };
     const read = fileSources.filter((source) => (options.sources ?? ["user"]).includes(source));
-    const layers = yield* Effect.forEach(read, (source) => fileLayer(files[source], source === "user"));
-    return layers.filter((layer): layer is LayerSource => layer !== undefined);
+    const layers = yield* Effect.forEach(read, (source) =>
+      Effect.flatMap(filesOf(source), (files) => Effect.forEach(files, (file) => fileLayer(file, source === "user"))),
+    );
+    return layers.flat().filter((layer): layer is LayerSource => layer !== undefined);
   });
 
 const isPlugin = (value: unknown): value is AnyPlugin =>

@@ -4,11 +4,12 @@
 from, the lists ("seams") that each plug-in is placed on, and the MCP servers that a session starts.
 The configuration comes from layers, merged in order; the last write wins.
 
-Direction that is not built yet (the configuration folder, models and their settings, the CLI's
-model picking) is in [agent-config-direction.md](agent-config-direction.md).
+Direction that is not built yet (models and their settings, the CLI's model picking) is in
+[agent-config-direction.md](agent-config-direction.md). Example configuration folders, which a test
+loads, are in `src/agent-config/fixtures/`.
 
 ```yaml
-# yaml-language-server: $schema=../schemas/policies.schema.json
+# yaml-language-server: $schema=../schemas/config.schema.json
 extensions:            # the user's own file only
   - ./my-plugin.ts
 plugins:
@@ -29,11 +30,11 @@ mcpServers:
 | --- | --- |
 | `plugin.ts` | What a plug-in is, the seams, and `FromHost` (what the host provides that a file cannot). |
 | `builtins.ts` | The built-in plug-ins: `loopBreaker`, `permissions`, `maxTurnRequests`, `retryIncomplete`, `maxBudget`, `credentials`. |
-| `file.ts` | The file layers (`policyLayers`, `fileLayer`), decoding (`loadConfiguration`), and the MCP servers. |
+| `file.ts` | The configuration folders (`configFolders`), their files' layers (`fileLayers`, `fileLayer`), decoding (`loadConfiguration`), and the MCP servers. |
 | `merge.ts` | Merging layers of parsed values. |
 | `seams.ts` | `seamListsOf`: the lists that a configuration gives a session, and the layer that provides them. |
 | `effective.ts` | `effective-settings.json`: what a configuration resolved to, and which layer wrote each value. |
-| `schema.ts` | The JSON Schema of a file, kept at `schemas/policies.schema.json`. |
+| `schema.ts` | The JSON Schema of a configuration file, kept at `schemas/config.schema.json`. |
 
 ## Layers
 
@@ -41,16 +42,24 @@ A host builds the layers (`agent-host/launch.ts`): its own defaults, then the fi
 command line gives (`--settings`, `--mcp-config`, flags). Both hosts, the CLI and the ACP host,
 read layers.
 
-| File | Trusted | Read |
+| Files | Trusted | Read |
 | --- | --- | --- |
-| `~/.config/<name>/policies.yml` (the user's) | yes | always |
-| `<project>/.<name>/policies.yml` (the project's) | no | only when named |
-| `<project>/.<name>/policies.local.yml` (the user's own for the project) | no | only when named |
+| the user's configuration folder: `~/.config/<name>/`, or `--config-dir` | yes | always |
+| the project's folder, `<project>/.<name>/`: its files other than `*.local.yml` | no | with `--setting-sources project` |
+| the project's folder: the user's own files for the project, `*.local.yml` | no | with `--setting-sources local` |
 
-`<name>` is `configName` (`labkit`) unless the caller gives another. A file that does not exist is an
-empty layer. The project's files are read only when named, because a file that comes with a cloned
-project could turn off permission or give the model's commands credentials. A file that is named is
-still not trusted.
+- Each file is a layer. A folder's files are its `.yml` and `.yaml` files, read in the order of their
+  names (code-unit order), so a name can start with a sorting prefix: `10_policies.yml`,
+  `20_mcp.yml`. A sorting prefix needs the same number of digits in every name, because `100_` sorts
+  before `20_`.
+- A file whose name starts with `.` is not read, and nor is a file with another extension or a
+  folder's subfolders.
+- A folder that does not exist adds no layer. A folder that cannot be read refuses the configuration,
+  naming the folder.
+- `<name>` is `configName` (`labkit`) unless the caller gives another.
+- The project's files are read only when named, because a file that comes with a cloned project
+  could turn off permission or give the model's commands credentials. A file that is named is still
+  not trusted.
 
 Only a trusted layer may name `extensions` or `mcpServers`, because both run code. An untrusted layer
 that names either is refused.
@@ -153,7 +162,7 @@ with no known price costs nothing). It has no default, so a list that names it n
 ## The JSON Schema
 
 `schema.ts` makes the JSON Schema of a file from the plug-ins' Schemas. `scripts/config-schema.ts`
-writes it to `schemas/policies.schema.json`, and `bun run check` checks that it is current. A file
+writes it to `schemas/config.schema.json`, and `bun run check` checks that it is current. A file
 names it at its top (`# yaml-language-server: $schema=<path or URL>`). The schema accepts what the
 loader accepts, for the mistakes a schema can detect:
 
