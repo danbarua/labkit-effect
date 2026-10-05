@@ -141,6 +141,10 @@ test("OpenAI: effort and a summary go into reasoning; off is effort none; when t
   });
 });
 
+test("an effort the model does not take is sent as the nearest it takes, the higher of two as near", () => {
+  expect(openAiSettings({ effort: "medium" }, ["low", "high"]).fields).toEqual({ reasoning: { effort: "high" } });
+});
+
 test("OpenAI: the adjustments are the cache's, then thinking's, then effort's", () => {
   const { adjusted } = openAiSettings({ cache: "off", thinking: "between_tools", effort: "max" }, ["low", "medium", "high"]);
   expect(adjusted.map((each) => each.adjusted._tag)).toEqual(["Cache", "Thinking", "Effort"]);

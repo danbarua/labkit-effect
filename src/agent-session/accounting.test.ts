@@ -68,6 +68,16 @@ test("the context gauge: tokens in context after the last response, the model's 
   expect(contextGauge(session.journal, "anthropic", "claude-sonnet-5-5")?.cost.amount).toBe(before);
 });
 
+test("the context gauge counts the tokens of the last response that has usage: one without (interrupted, say) is passed over", () => {
+  const session = open();
+  observe(session, opened);
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
+  observe(session, responded({ input: 1200, output: 300 }));
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "and again" });
+  observe(session, responded(undefined));
+  expect(contextGauge(session.journal, "anthropic", "claude-sonnet-5-5")).toMatchObject({ used: 1500 });
+});
+
 test("a turn's requests are its steps", () => {
   const session = open();
   observe(session, opened);
