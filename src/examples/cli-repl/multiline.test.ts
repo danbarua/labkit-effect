@@ -1,9 +1,9 @@
 /** The REPL's input prompt: what each key does to the text typed so far. */
 
 import { expect } from "bun:test";
-import { Option, type Terminal } from "effect";
+import { Effect, Option, type Terminal } from "effect";
 import { test } from "../../../tests/support/test.ts";
-import { hinted, keyed, rowsOf, type Typed } from "./multiline.ts";
+import { hinted, keyed, rendered, rowsOf, type Typed } from "./multiline.ts";
 
 const key = (name: string, input?: string, modifiers: { meta?: boolean; ctrl?: boolean } = {}): Terminal.UserInput => ({
   input: input === undefined ? Option.none() : Option.some(input),
@@ -71,4 +71,10 @@ test("the hint is each completion's last word, cut to the room the row has", () 
   expect(hinted("hello", complete, 60)).toBe("");
   // A completion that adds only the space before the next word shows nothing.
   expect(hinted("/settings", () => ["/settings "], 60)).toBe("");
+});
+
+test("a beep is drawn as the bell; during a paste nothing is drawn", () => {
+  const typed: Typed = { text: "ab", pasting: false, drawn: "ab" };
+  expect(Effect.runSync(rendered(typed, { _tag: "Beep" }, () => []) as Effect.Effect<string>)).toBe("\x07");
+  expect(Effect.runSync(rendered({ ...typed, pasting: true }, { _tag: "NextFrame", state: { ...typed, pasting: true } }, () => []) as Effect.Effect<string>)).toBe("");
 });

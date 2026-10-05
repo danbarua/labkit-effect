@@ -24,7 +24,7 @@ import { ask } from "./session.ts";
  * Runs `lines` in order (a command, or input to the model), as `brand` (the default when left out),
  * and returns what each command printed and what the model was asked with.
  */
-const session = (lines: ReadonlyArray<string>, brand: Brand = defaultBrand) => {
+const session = (lines: ReadonlyArray<string>, brand: Brand = defaultBrand, settings: Readonly<Record<string, unknown>> = { effort: "low" }, after: ReadonlyArray<unknown> = []) => {
   const asked: Array<Target> = [];
   const recording = Layer.succeed(ModelClient, {
     respond: (target, _context, turn) =>
@@ -49,8 +49,9 @@ const session = (lines: ReadonlyArray<string>, brand: Brand = defaultBrand) => {
     Effect.gen(function* () {
       const opened = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* opened.observe(
-        openedWith({ session: SessionId.make("s1"), model: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5"), settings: { effort: "low" } }, system: undefined, tools: [] }),
+        openedWith({ session: SessionId.make("s1"), model: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5"), settings }, system: undefined, tools: [] } as Parameters<typeof openedWith>[0]),
       );
+      for (const observation of after) yield* opened.observe(observation as Parameters<typeof opened.observe>[0]);
       const printed: Array<string | undefined> = [];
       for (const line of lines) {
         // `/settings` alone asks at the terminal which setting to change; here it stands for what it shows first.
@@ -160,4 +161,23 @@ test("/mcp says how the MCP servers are, and completes to reconnect and then a s
   expect(complete("/mcp ")).toEqual(["/mcp reconnect "]);
   expect(complete("/mcp reconnect ")).toEqual(["/mcp reconnect github", "/mcp reconnect files"]);
   expect(complete("/mcp reconnect g")).toEqual(["/mcp reconnect github"]);
+});
+
+test("/settings with no settings said says so; with none sent but some not sent to this model, it names those", async () => {
+  const none = await session(["/settings"], defaultBrand, {});
+  expect(none.printed[0]).toStartWith("openai/gpt-5.5 (no settings said)");
+  const adjusted = {
+    _tag: "SettingAdjusted",
+    provider: "openai",
+    model: "gpt-5.5",
+    adjusted: { _tag: "Cache", asked: "1h" },
+    reason: "the adapter does not send this setting",
+  };
+  const notSent = await session(["/settings"], defaultBrand, {}, [adjusted]);
+  expect(notSent.printed[0]).toStartWith("openai/gpt-5.5\nnot sent to this model: cache=1h");
+});
+
+test("/mcp completes a server's name only after reconnect", () => {
+  const complete = completions({ models: [], settings: [], servers: ["github", "files"] });
+  expect(complete("/mcp other ")).toEqual([]);
 });

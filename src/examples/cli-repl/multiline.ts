@@ -124,19 +124,21 @@ const drawn = (text: string, complete: Complete) =>
     return hint === "" ? typed : `${typed}\x1b7\x1b[2m${hint}${reset}\x1b8`;
   });
 
+/** What is drawn for `action`. During a paste nothing is drawn: the frame from before it stays, and the whole paste is drawn when it ends. */
+export const rendered = (state: Typed, action: Prompt.Action<Typed, string>, complete: Complete) =>
+  action._tag === "Submit"
+    ? Effect.map(painted(action.value, true), (line) => `${line}\n`)
+    : action._tag === "Beep"
+      ? Effect.succeed("\x07")
+      : state.pasting
+        ? Effect.succeed("")
+        : drawn(state.text, complete);
+
 export const Multiline = (complete: Complete = nothing): Prompt.Prompt<string> =>
   Prompt.Custom<Typed, string>(
     { text: "", pasting: false, drawn: "" },
     {
-      // During a paste nothing is drawn: the frame from before it stays, and the whole paste is drawn when it ends.
-      render: (state, action) =>
-        action._tag === "Submit"
-          ? Effect.map(painted(action.value, true), (line) => `${line}\n`)
-          : action._tag === "Beep"
-            ? Effect.succeed("\x07")
-            : state.pasting
-              ? Effect.succeed("")
-              : drawn(state.text, complete),
+      render: (state, action) => rendered(state, action, complete),
       clear: (state, action) =>
         action._tag === "NextFrame" && action.state.pasting
           ? Effect.succeed("")

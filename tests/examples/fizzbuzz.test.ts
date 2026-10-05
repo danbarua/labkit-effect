@@ -11,6 +11,8 @@ import { conversationOf } from "../../src/agent-session/conversation.ts";
 import { asText, receivedJson } from "../../src/agent-session/received.ts";
 import { FizzBuzzCompaction } from "../../src/examples/fizzbuzz/compaction.ts";
 import { advanced, basic, countingUser, play } from "../../src/examples/fizzbuzz/scenario.ts";
+import { scriptedFizzBuzzModel } from "../../src/examples/fizzbuzz/model.ts";
+import { ModelName, ProviderName } from "../../src/agent-machine/names.ts";
 import { AdvancedFizzBuzzTools } from "../../src/examples/fizzbuzz/tools.ts";
 import { SourcedToolRunner, ToolSources } from "../../src/agent-session/tool-sources.ts";
 import { CountedToolRunner } from "../../src/instrumentation/tool-metrics.ts";
@@ -227,4 +229,11 @@ test("the summary is dated with the last fact it summarises, so the same facts g
   const [then, later] = [await view("2026-09-29T09:30:00.000Z"), await view("2027-01-01T00:00:00.000Z")];
   expect(later).toEqual(then);
   expect(transcript(later)[0]).toStartWith("user: System Date: 2026-09-29T09:30:00.000Z");
+});
+
+test("the scripted model keeps every context it is sent, in order", async () => {
+  const model = scriptedFizzBuzzModel();
+  const { seen } = await runTest(play(countingUser(3), { ...basic, model: { target: { provider: ProviderName.make("scripted"), model: ModelName.make("fizzbuzz-1") }, client: model.layer } }));
+  expect(model.seen.map((context) => context.messages.length)).toEqual(seen.map((context) => context.messages.length));
+  expect(model.seen.length).toBeGreaterThan(0);
 });
