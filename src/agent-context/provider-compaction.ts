@@ -1,12 +1,12 @@
 /**
- * A summarizer that asks the provider for its own compaction: the model the session is asking is
- * sent the session's system prompt and tools, the provider's earlier summaries (`summaryMessage`),
- * then the span's messages, as a request would carry them, and what it
- * returns (the items that stand in for them, such as a `compaction` item) is the summary, as JSON.
- * The Responses adapter's `openAiCompactions` does this for OpenAI and xAI.
+ * A summarizer that asks the provider for its own compaction. The request carries the session's
+ * system prompt and tools, the provider's earlier summaries (`summaryMessage`), and then the span's
+ * messages, as a request would carry them. The items that the provider returns (such as a
+ * `compaction` item) are the summary, as JSON. The Responses adapter's `openAiCompactions` does this
+ * for OpenAI and xAI.
  *
- * The request is not recorded with the session's facts. A compaction that fails, once its retries
- * are used up, is a defect: the session has no summary to go on with.
+ * The request is not recorded in the session's facts. A compaction that still fails after its
+ * retries is a defect, because the session has no summary to continue with.
  */
 
 import { Effect } from "effect";

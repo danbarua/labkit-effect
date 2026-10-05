@@ -1,12 +1,12 @@
 /**
- * The loop's context assembler: the system prompt and tools the session's facts record, the
- * conversation as the `Conversation` service views the facts, and the notices as one instruction
- * message at its end, after the latest input or tool result.
+ * The loop's context assembler. A request carries the system prompt and tools that the session's
+ * facts record, the conversation as the `Conversation` service gives it, and the notices as one
+ * instruction message at the end, after the latest input or tool result.
  *
- * Each notice is reported as `NoticeInserted` for the request's turn, so later requests carry it in
- * the same place: a provider that checks the prefix before a thinking block rejects a request that
- * leaves out a notice sent before it. The loop's `ModelProvider` chooses the model, so model
- * selectors are not used here.
+ * Each notice is recorded as `NoticeInserted` for the request's turn, so later requests carry it at
+ * the same place. A provider that checks the prefix before a thinking block rejects a request that
+ * omits a notice sent earlier. The loop's `ModelProvider` chooses the model, so model selectors are
+ * not used here.
  */
 
 import { Effect, Layer } from "effect";
@@ -20,7 +20,7 @@ import { assembleContents, Conversation } from "./assemble.ts";
 export const AgentContextAssembler = Layer.effect(
   ContextAssembler,
   Effect.gen(function* () {
-    // The notices given (`Notices`) are the ones in the context the layer is built in.
+    // The notice providers (`Notices`) are read from the context that the layer is built in.
     const services = yield* Effect.context<Conversation>();
     return {
       assemble: (facts, turn) =>
@@ -45,8 +45,8 @@ export const AgentContextAssembler = Layer.effect(
 );
 
 /**
- * The whole session's conversation, every turn of it: what the last request carried, as recorded,
- * and what the facts since add (`nextMessages`).
+ * The whole session's conversation (`nextMessages`): the messages that the last request carried, as
+ * recorded, followed by the messages of the facts since.
  */
 export const WholeConversation = Layer.succeed(Conversation, {
   messages: (facts) => Effect.succeed(nextMessages(facts)),

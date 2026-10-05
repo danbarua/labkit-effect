@@ -1,4 +1,4 @@
-/** Context assembly on its own: the services it needs, provided by test layers; an assembled context out. */
+/** Context assembly on its own, with test layers for the services that it needs. */
 
 import { expect } from "bun:test";
 import { test, testOrigin } from "../../tests/support/test.ts";

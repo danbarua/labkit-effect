@@ -1,11 +1,10 @@
 /**
- * Context assembly: produces what the model is sent next. The system prompt and tools are the ones
- * the session's facts record; the system prompt providers and tool catalogs supply them when the
- * session opens (`opening`). The conversation is a view of the facts, and notices come from their
- * providers, in order, for each request. The model is chosen last, because a selector may choose by
- * the size of what was assembled.
- *
- * Each of these is a service; layers supply them.
+ * Context assembly: the services that supply what the model is sent next. Layers provide them.
+ * - The system prompt and tools are read from the session's facts. The system prompt providers and
+ *   the tool sources supply them once, when the session opens (`opening`).
+ * - The conversation is a view of the facts (`Conversation`).
+ * - Notices come from their providers, in order, for each request (`Notices`).
+ * - `assemble` chooses the model last, because a selector may choose by the size of the contents.
  */
 
 import { Context, Effect } from "effect";
@@ -16,7 +15,7 @@ import type { ContextMessage, ToolSpec } from "../agent-session/contracts.ts";
 import { openedWith, immutableSystemPromptOf, immutableToolCatalogOf } from "../agent-session/configuration/session-setup.ts";
 import { offeredTools } from "../agent-session/tool-sources.ts";
 
-/** A model a request can go to, and how much context it takes. */
+/** A model that a request can go to, with its endpoint and context window. */
 export interface ModelChoice {
   readonly provider: ProviderName;
   readonly model: ModelName;
@@ -33,7 +32,7 @@ export interface Contents {
   readonly notices: ReadonlyArray<string>;
 }
 
-/** What assembly produces: the contents and the model they go to. */
+/** The assembled contents and the model chosen for them. */
 export interface AssembledContext extends Contents {
   readonly model: ModelChoice;
 }
@@ -47,14 +46,14 @@ export interface NoticeProvider {
 }
 
 /**
- * Chooses the model for the assembled contents. Selectors run in order; each is given the choice
- * so far (undefined for the first) and returns the choice it makes.
+ * Chooses the model for the assembled contents. Selectors run in order. Each receives the choice so
+ * far (undefined for the first selector) and returns its own choice.
  */
 export interface ModelSelector {
   readonly select: (contents: Contents, chosen: ModelChoice | undefined) => Effect.Effect<ModelChoice>;
 }
 
-/** The conversation the model is sent, as a view of the session's facts. */
+/** Returns the messages that a request carries, as a view of the session's facts. */
 export class Conversation extends Context.Service<
   Conversation,
   { readonly messages: (facts: ReadonlyArray<Fact>) => Effect.Effect<ReadonlyArray<ContextMessage>> }
@@ -65,13 +64,12 @@ export class SystemPrompts extends Context.Service<SystemPrompts, ReadonlyArray<
 ) {}
 
 /**
- * What gives the model notices before a request, in order (their notices are joined); none by
- * default. A host composes the list. A notice is recorded when it is inserted (`NoticeInserted`), so a
- * provider may read live state, not only the facts: what it said is in the facts once said.
+ * The notice providers, in order; none by default. A host composes the list. Each notice is recorded
+ * when it is inserted (`NoticeInserted`), so a provider may read live state, not only the facts.
  */
 export const Notices = Context.Reference<ReadonlyArray<NoticeProvider>>("agent-context/Notices", { defaultValue: () => [] });
 
-/** At least one, so there is always a model. */
+/** The model selectors, in order. The list holds at least one selector, so a model is always chosen. */
 export class ModelSelectors extends Context.Service<
   ModelSelectors,
   readonly [ModelSelector, ...ReadonlyArray<ModelSelector>]
@@ -81,10 +79,11 @@ const appended = <A>(outputs: ReadonlyArray<Effect.Effect<ReadonlyArray<A>>>): E
   Effect.forEach(outputs, (output) => output).pipe(Effect.map((all) => all.flat()));
 
 /**
- * The opening of a session that asks `model`: its system prompt is the system prompt providers'
- * outputs in order, joined by blank lines, and its tools those its tool sources offer, in order
- * (`ToolSources`). What they give is recorded, and every request is sent what was recorded, not
- * what they would give later.
+ * Returns the `SessionOpened` observation for a session that asks `model`.
+ * - The system prompt is the system prompt providers' outputs, in order, joined by blank lines.
+ * - The tools are those that the tool sources offer (`ToolSources`), in order.
+ *
+ * Every request is sent what this observation records, not what the providers would give later.
  */
 export const opening = (
   session: SessionId,
@@ -96,7 +95,7 @@ export const opening = (
     return openedWith({ session, model, system: system.length === 0 ? undefined : system.join("\n\n"), tools });
   });
 
-/** Everything but the model, for the session's `facts`: the system prompt and tools as recorded. */
+/** Returns the contents of the next request for the session's `facts`: the system prompt and tools as recorded, the conversation, and the notices. */
 export const assembleContents = (
   facts: ReadonlyArray<Fact>,
 ): Effect.Effect<Contents, never, Conversation> =>
@@ -110,7 +109,7 @@ export const assembleContents = (
     };
   });
 
-/** The contents for the session's `facts`, and the model they go to. */
+/** Returns the contents of the next request, and the model that the selectors choose for them. */
 export const assemble = (
   facts: ReadonlyArray<Fact>,
 ): Effect.Effect<AssembledContext, never, Conversation | ModelSelectors> =>

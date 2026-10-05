@@ -1,6 +1,6 @@
 /**
- * Providers and selectors for trying context assembly: the current time as a notice, a fixed
- * model, and a move to a larger model when the context is estimated not to fit.
+ * Example providers and selectors for context assembly: a notice of the current time, a fixed model,
+ * and a selector that moves to a larger model when the contents are estimated not to fit.
  */
 
 import { DateTime, Effect } from "effect";
@@ -13,7 +13,7 @@ export const SystemTimeNoticeProvider: NoticeProvider = {
   notices: DateTime.now.pipe(Effect.map((now) => [`The current time is ${DateTime.formatIso(now)}.`])),
 };
 
-/** Always the same model. */
+/** Always chooses `model`. */
 export const FixedModelSelector = (model: ModelChoice): ModelSelector => ({
   select: () => Effect.succeed(model),
 });

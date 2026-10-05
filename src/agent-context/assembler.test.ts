@@ -1,7 +1,7 @@
 /**
- * The loop's context assembler: the system prompt the session opened with, and notices last, as one
- * instruction message after the conversation; each notice recorded, and carried in its place by
- * the requests after it.
+ * The loop's context assembler: a request carries the system prompt that the session opened with,
+ * then the conversation, then the notices as one instruction message. Each notice is recorded, and
+ * later requests carry it at the same place.
  */
 
 import { afterAll, expect } from "bun:test";

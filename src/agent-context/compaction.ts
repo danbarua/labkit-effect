@@ -1,25 +1,15 @@
 /**
- * Compaction, and the conversation it gives each provider.
+ * Compaction, and the conversation that it gives each provider.
  *
- * `compact` is run between turns, by the user or by a `CompactionPolicy` (`compactIfDue`). It
- * compacts for the provider the session is asking: the span is every fact after that provider's
- * last summary (from the start of the session when it has none). The span's last turn is kept as it
- * was, to follow the summary, when the span holds a turn before it; a summarizer writes the summary
- * of the rest,
- * the summary is recorded in `Summaries`, and then the window is reported (`CompactionWindow`),
- * naming what decided it was due. The session's facts grow as if nothing were compacted; the
- * window says a summary should exist and nothing about which providers have one.
+ * `compact` runs between turns, for the provider that the session is asking. It summarises the
+ * facts after that provider's latest window, records the summary in `Summaries`, and then records
+ * the window (`CompactionWindow`). The session's facts grow as if nothing were compacted. A window
+ * does not record which providers have a summary of it.
  *
- * `CompactedConversation` is the view for a session with windows. A request goes to one provider
- * and carries that provider's summaries only. The first request to it after its latest summary
- * carries all of its summaries, in the order written, as one instruction message (consecutive
- * messages of one role are merged); a provider's own compaction was made from the summaries before
- * it, so it is carried in their place. Then come the messages of the facts that summary's window keeps and
- * of those after its span. A later request to it carries on from its last request (`nextMessages`), and so does
- * a request to a provider whose summaries predate its last request: after a switch back, it goes on
- * from where it was. So two providers in one session can be sent different conversations; what they
- * are both sent is the facts since the later of their summaries. A summary is read from the record
- * and never written again.
+ * `CompactedConversation` gives a request to a provider only that provider's summaries, followed by
+ * the facts after its latest window. A provider that was sent a request since its latest window
+ * continues from that request. Two providers in one session can therefore be sent different
+ * conversations; both are sent the facts since the later of their summaries.
  */
 
 import { Array as Arr, Context, DateTime, Effect, Layer, Option, Ref } from "effect";
@@ -36,17 +26,17 @@ import { modelOf, immutableSystemPromptOf, immutableToolCatalogOf } from "../age
 import { Conversation } from "./assemble.ts";
 import type { SummarizerName, WindowSummary } from "./forks.ts";
 
-/**
- * Writes the summary of a span, given the summaries already written for the same provider and the
- * model the session is asking. A summary is text, or JSON: a provider's own compaction, the items
- * it returned (`provider-compaction.ts`).
- */
 /** What every request of the session carries besides the conversation: its system prompt and tools. */
 export interface SessionOpening {
   readonly system: string | undefined;
   readonly tools: ReadonlyArray<ToolSpec>;
 }
 
+/**
+ * Writes the summary of a span. `summarize` receives the provider's earlier summaries, the span's
+ * messages, the model that the session is asking, and the session's system prompt and tools. A
+ * summary is text, or JSON: the items of a provider's own compaction (`provider-compaction.ts`).
+ */
 export interface Summarizer {
   readonly name: SummarizerName;
   readonly summarize: (
@@ -57,7 +47,7 @@ export interface Summarizer {
   ) => Effect.Effect<Received>;
 }
 
-/** The summaries written so far, in the order written. A summary once recorded is not changed. */
+/** The record of summaries: `record` adds one, and `recorded` returns all of them in the order written. A recorded summary is never changed. */
 export class Summaries extends Context.Service<
   Summaries,
   {
@@ -91,7 +81,7 @@ const sessionOf = (facts: ReadonlyArray<Fact>): SessionId => {
   return opened.observation.session;
 };
 
-/** The summaries of `kind` for the session `facts` open, in the order written. */
+/** Returns the summaries of provider `kind` for the session that `facts` open, in the order written. */
 const summariesFor = (recorded: ReadonlyArray<WindowSummary>, facts: ReadonlyArray<Fact>, kind: ProviderName) => {
   const session = sessionOf(facts);
   return recorded.filter((each) => each.session === session && each.kind === kind);
@@ -104,11 +94,13 @@ const windowNamed = (facts: ReadonlyArray<Fact>, window: WindowId): WindowFact["
 };
 
 /**
- * Compacts `session` for the provider it is asking, with `summarizer`, as `decidedBy` decided: the
- * span is every fact after that provider's last summary's window, the summarizer is given that
- * provider's summaries, the messages of the span, the model the session is asking and the session's
- * system prompt and tools, and the new window is `window-<n>` for the
- * session's n-th window. Run it between turns.
+ * Compacts `session` for the provider that it is asking, with `summarizer`, and records `decidedBy`
+ * as the policy that decided. Run it between turns.
+ * 1. The span is every fact after that provider's latest window, from the turn that the window
+ *    kept. With no earlier summary for the provider, the span starts at the session's beginning.
+ * 2. When the span holds more than one turn, its last turn is kept unsummarised.
+ * 3. The summary is recorded, then the window `window-<n>`, for the session's n-th window. A summary
+ *    that fails to record therefore leaves no window.
  */
 export const compact = (session: Session, summarizer: Summarizer, decidedBy: PolicyName) =>
   Effect.gen(function* () {
@@ -120,11 +112,11 @@ export const compact = (session: Session, summarizer: Summarizer, decidedBy: Pol
     const summaries = yield* Summaries;
     const previous = summariesFor(yield* summaries.recorded, facts, kind);
     const before = previous.at(-1);
-    // The span starts after the last summary's span; the turn that window kept was not summarised.
+    // The turn that the previous window kept was not summarised, so the span starts with it.
     const window_ = before === undefined ? undefined : windowNamed(facts, before.window);
     const from = window_ === undefined ? undefined : Math.min(window_.through + 1, ...window_.kept);
     const span = from === undefined ? facts : facts.filter((fact) => fact.seq >= from);
-    // The last turn is kept as it was, after the summary, when the span holds a turn before it.
+    // The span's last turn is kept unsummarised, after the summary, when the span holds an earlier turn.
     const lastTurn = lastAt(span, (fact) => fact._tag === "Observed" && fact.observation._tag === "TurnStarted");
     const firstTurn = span.findIndex((fact) => fact._tag === "Observed" && fact.observation._tag === "TurnStarted");
     const keeps = lastTurn > firstTurn;
@@ -157,22 +149,23 @@ export const compact = (session: Session, summarizer: Summarizer, decidedBy: Pol
   });
 
 /**
- * Decides, from the session's facts, whether to compact now and with which summarizer; undefined is
- * not now. Its name is recorded with each window it decides on.
+ * Decides from the session's facts whether to compact now, and with which summarizer. `decide`
+ * returns undefined when no compaction is due. The policy's name is recorded on each window that it
+ * decides.
  */
 export interface CompactionPolicy {
   readonly name: PolicyName;
   readonly decide: (facts: ReadonlyArray<Fact>) => Summarizer | undefined;
 }
 
-/** Compacts `session` if `policy` says to. Run it between turns. */
+/** Compacts `session` when `policy` says that a compaction is due. Run it between turns. */
 export const compactIfDue = (session: Session, policy: CompactionPolicy) =>
   Effect.gen(function* () {
     const summarizer = policy.decide(yield* session.facts);
     if (summarizer !== undefined) yield* compact(session, summarizer, policy.name);
   });
 
-/** The parts one summary becomes: its text, or each item of a provider's compaction, for that provider only. */
+/** Returns one summary's message parts: a `Text` part, or one `Unrecognised` part per item of a provider's compaction, which only that provider's adapter sends. */
 const summaryParts = (summary: WindowSummary): ReadonlyArray<ContextPart> => {
   if (summary.summary.mediaType !== "application/json") return [{ _tag: "Text", text: asText(summary.summary) }];
   const parsed = parseJson(summary.summary);
@@ -181,28 +174,27 @@ const summaryParts = (summary: WindowSummary): ReadonlyArray<ContextPart> => {
 };
 
 /**
- * The summaries a request carries: all of them, in the order written, or those from the latest
- * provider's compaction on, since it was made from the summaries before it.
+ * Returns the summaries that a request carries, in the order written, starting from the latest
+ * provider compaction, which was made from the summaries before it.
  */
 const carried = (summaries: ReadonlyArray<WindowSummary>): ReadonlyArray<WindowSummary> =>
   summaries.slice(summaries.reduce((from, summary, at) => (summary.summary.mediaType === "application/json" ? at : from), 0));
 
 /**
- * Summaries in an instruction message: the harness speaking, so the input that follows stays a
- * message of its own. A text summary is a `Text` part; a provider's compaction is its items, each an
- * `Unrecognised` part from the provider whose summary it is, which only that provider's adapter
- * sends, unchanged.
+ * Returns the summaries as one instruction message. The instruction role marks the harness as the
+ * speaker, so the input that follows stays a separate message.
  */
 export const summaryMessage = (summaries: ReadonlyArray<WindowSummary>): ContextMessage => ({
   role: "instruction",
   parts: carried(summaries).flatMap(summaryParts),
 });
 
-/** The position in `facts` of the last fact that `is`, or -1. */
+/** Returns the index of the last fact in `facts` for which `is` returns true, or -1. */
 function lastAt(facts: ReadonlyArray<Fact>, is: (fact: Fact) => boolean): number {
   return Option.getOrElse(Arr.findLastIndex(facts, is), () => -1);
 }
 
+/** The `Conversation` for a session with compaction windows, as the module comment describes. */
 export const CompactedConversation = Layer.effect(
   Conversation,
   Effect.gen(function* () {
