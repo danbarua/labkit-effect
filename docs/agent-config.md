@@ -4,6 +4,9 @@
 from, the lists ("seams") that each plug-in is placed on, and the MCP servers that a session starts.
 The configuration comes from layers, merged in order; the last write wins.
 
+Direction that is not built yet (the configuration folder, models and their settings, the CLI's
+model picking) is in [agent-config-direction.md](agent-config-direction.md).
+
 ```yaml
 # yaml-language-server: $schema=../schemas/policies.schema.json
 extensions:            # the user's own file only
