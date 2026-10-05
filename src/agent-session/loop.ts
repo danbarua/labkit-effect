@@ -42,7 +42,7 @@
  */
 
 import { keptOutcome } from "./blobs.ts";
-import { Clock, DateTime, Deferred, Effect, Exit, FiberSet, PubSub, Ref, type Scope, Semaphore, type Tracer } from "effect";
+import { Clock, DateTime, Deferred, Effect, Exit, FiberSet, Option, PubSub, Ref, type Scope, Semaphore, type Tracer } from "effect";
 import type { Decision, Ending } from "../agent-machine/decision.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { notObserved } from "../agent-machine/not-observed.ts";
@@ -54,7 +54,7 @@ import type { Origin } from "../agent-machine/origin.ts";
 import type { EffectRequest } from "../agent-machine/request.ts";
 import { emptyHeld, type Held as Throttled, throttle, type ThrottleInput } from "../agent-machine/throttle.ts";
 import { ContextAssembler, MaxHolds, ModelClient, ModelProvider, ModelRequestPolicies, type NamedPolicy, ToolCallPolicies, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
-import { every, type EveryState, type Policy, type Verdict } from "../agent-policy/policy.ts";
+import { every, type EveryState, type Policy, type PolicyStep, type Verdict } from "../agent-policy/policy.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { logKeys } from "./log-keys.ts";
 import { asText, receivedJson, receivedText } from "./received.ts";
@@ -128,6 +128,10 @@ interface Started {
   readonly request: EffectRequest;
   readonly work: Work;
 }
+
+/** The first fact taken from `facts` that `pick` gives a value for: that value. */
+const firstOf = <A>(facts: PubSub.Subscription<Fact>, pick: (fact: Fact) => Option.Option<A>): Effect.Effect<A> =>
+  Effect.flatMap(PubSub.take(facts), (fact) => Option.match(pick(fact), { onNone: () => firstOf(facts, pick), onSome: Effect.succeed }));
 
 /**
  * How many times the turn-end hooks have held `turn` open: the reviews of it in which they gave
@@ -410,18 +414,20 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
       Effect.gen(function* () {
         const { policy, nameAt } = yield* policiesNow(yield* ToolCallPolicies);
         const answers = yield* PubSub.subscribe(recorded);
-        let step = policy.start(request);
-        while (step._tag === "Waiting") {
-          if (step.asks === undefined) return yield* Effect.die(new Error(`A tool call policy waited on ${request.call} without asking anything`));
-          yield* (yield* Report)({ _tag: "PermissionAsked", call: request.call, asks: step.asks }, policyPart("tool call policy", nameAt(step.state.index)));
-          let answer: Received | undefined;
-          while (answer === undefined) {
-            const fact = yield* PubSub.take(answers);
-            if (fact._tag === "Observed" && fact.observation._tag === "PermissionAnswered" && fact.observation.call === request.call)
-              answer = fact.observation.answer;
-          }
-          step = policy.receive(step.state, { _tag: "Answered", answer });
-        }
+        const report = yield* Report;
+        const answer = firstOf(answers, (fact) =>
+          fact._tag === "Observed" && fact.observation._tag === "PermissionAnswered" && fact.observation.call === request.call ? Option.some(fact.observation.answer) : Option.none(),
+        );
+        /** The step `step` comes to once each question asked while waiting is recorded and answered. */
+        const decided = (step: PolicyStep<EveryState>): Effect.Effect<Extract<PolicyStep<EveryState>, { _tag: "Decided" }>> => {
+          if (step._tag === "Decided") return Effect.succeed(step);
+          if (step.asks === undefined) return Effect.die(new Error(`A tool call policy waited on ${request.call} without asking anything`));
+          return report({ _tag: "PermissionAsked", call: request.call, asks: step.asks }, policyPart("tool call policy", nameAt(step.state.index))).pipe(
+            Effect.andThen(answer),
+            Effect.flatMap((answered) => decided(policy.receive(step.state, { _tag: "Answered", answer: answered }))),
+          );
+        };
+        const step = yield* decided(policy.start(request));
         if (step.verdict._tag === "Veto")
           yield* Effect.logInfo(logKeys.loop.toolVetoed, { call: request.call, tool: request.tool, by: nameAt(step.by), reason: asText(step.verdict.reason) });
         return step.verdict._tag === "Veto" ? { ...step.verdict, by: nameAt(step.by) } : step.verdict;
@@ -724,14 +730,9 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
           }),
         );
         if (turn === undefined) return yield* Effect.die(new Error("No turn was under way or started for the input given to prompt"));
-        const ended = Effect.gen(function* () {
-          let ending: Ending | undefined;
-          while (ending === undefined) {
-            const fact = yield* PubSub.take(fromNow);
-            if (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" && fact.decision.turn === turn) ending = fact.decision.ending;
-          }
-          return ending;
-        });
+        const ended = firstOf(fromNow, (fact) =>
+          fact._tag === "Decided" && fact.decision._tag === "TurnEnded" && fact.decision.turn === turn ? Option.some(fact.decision.ending) : Option.none(),
+        );
         // A write that fails stops the session, and the turn's end is never recorded.
         return yield* ended.pipe(Effect.raceFirst(Deferred.await(broken)));
       }),
