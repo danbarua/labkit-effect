@@ -123,7 +123,7 @@ It holds the model to ask, the settings as given, the system prompt and the tool
 
 - `chooseModel` sets another model and keeps the settings as given, including one that the new
   model does not accept.
-- `saySettings` replaces the settings that it names, and keeps the others.
+- `withSettings` replaces the settings that it names, and keeps the others.
 - `optionsOfDraft` returns what a host shows (`optionsFor`): each setting with the value that the
   model will get, so an effort that the model does not accept shows as the nearest one it does.
 - `opening(draft, session)` returns the `SessionOpened` observation that opens `session` with the

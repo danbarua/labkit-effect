@@ -53,7 +53,7 @@ import { sessionFolderOf, storeFileOf } from "../agent-host/directory.ts";
 import type { BlobRef } from "../agent-machine/blob.ts";
 import { MediaType } from "../agent-machine/received.ts";
 import { Blobs, BlobsInFolder, type BlobStore } from "../agent-session/blobs.ts";
-import { chooseModel, defaultModel, type Draft, draftOf, opening, optionsOfDraft, saySettings, withDefaults } from "../agent-host/draft.ts";
+import { chooseModel, defaultModel, type Draft, draftOf, opening, optionsOfDraft, withSettings, withDefaults } from "../agent-host/draft.ts";
 import { markdownOf } from "../agent-host/export.ts";
 import { KnownWithLocalServer, localServer, SettlingWithLocalServer } from "../agent-host/local-server.ts";
 import { readRecord, RecordFailed, recordedSessions, recordFileOf, writeRecord } from "../agent-host/record.ts";
@@ -996,7 +996,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                         change.provider === draft.model.provider && change.model === draft.model.model
                           ? draft
                           : chooseModel(draft, { provider: change.provider, model: change.model });
-                      yield* Ref.set(entry.state, { _tag: "Draft", draft: change.settings === undefined ? moved : saySettings(moved, change.settings) });
+                      yield* Ref.set(entry.state, { _tag: "Draft", draft: change.settings === undefined ? moved : withSettings(moved, change.settings) });
                     }
                     const state = yield* Ref.get(entry.state);
                     const said = state._tag === "Draft" ? "draft" : yield* submitted(state.opened, { model: change }, configId);

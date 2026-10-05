@@ -16,7 +16,7 @@ import { openSession } from "../agent-session/loop.ts";
 import { EphemeralSessionStore } from "../agent-session/session-store.ts";
 import { CountingTurns } from "../agent-session/turns.ts";
 import { type Asked, type CatalogSource, ModelCatalog } from "./catalog.ts";
-import { chooseModel, defaultModel, draftOf, opening, optionsOfDraft, saySettings, withDefaults } from "./draft.ts";
+import { chooseModel, defaultModel, draftOf, opening, optionsOfDraft, withSettings, withDefaults } from "./draft.ts";
 
 const asked = (provider: string, model: string): Asked => ({ provider: ProviderName.make(provider), model: ModelName.make(model) });
 const option = (options: Options, name: keyof ModelSettings) => options.offered.find((each) => each.name === name);
@@ -34,7 +34,7 @@ test("choosing another model keeps the settings as given, and the options follow
 
 test("settings given anew replace the ones they name, and a setting not named keeps its value", () => {
   const draft = draftOf({ model: asked("anthropic", "claude-opus-5-5"), settings: { effort: "high", thinking: "auto" } });
-  expect(saySettings(draft, { effort: "low", cache: "5m" }).settings).toEqual({ effort: "low", thinking: "auto", cache: "5m" });
+  expect(withSettings(draft, { effort: "low", cache: "5m" }).settings).toEqual({ effort: "low", thinking: "auto", cache: "5m" });
   // A draft made with nothing but its model says no setting, and has no system prompt and no tools.
   expect(draftOf({ model: asked("anthropic", "claude-opus-5-5") })).toEqual({ model: asked("anthropic", "claude-opus-5-5"), settings: {}, system: undefined, tools: [] });
 });

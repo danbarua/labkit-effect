@@ -228,7 +228,7 @@ twice.
 - AG4. `session/cancel` is `Session.cancel`: the turn under way ends `Interrupted` and its prompt
   `cancelled`. A prompt request the client cancels (`$/cancel_request`) cancels its turn the same
   way. The session takes the next prompt.
-- AG5. `session/set_config_option` changes a draft (`chooseModel`, `saySettings`). On an open session
+- AG5. `session/set_config_option` changes a draft (`chooseModel`, `withSettings`). On an open session
   it goes through the session's configuration gate (`agent-session/configuration/gate.ts`): made at once between
   turns (`ModelChangeArrived` from the user through ACP), and while a turn runs held until it ends,
   so the model that started the turn completes it. The gate is settled when a prompt's turn ends

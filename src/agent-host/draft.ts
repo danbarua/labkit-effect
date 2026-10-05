@@ -38,7 +38,7 @@ export const draftOf = (draft: {
 export const chooseModel = (draft: Draft, model: Asked): Draft => ({ ...draft, model });
 
 /** Returns the draft with the settings named in `settings` replaced; a setting not named keeps its value. */
-export const saySettings = (draft: Draft, settings: ModelSettings): Draft => ({ ...draft, settings: { ...draft.settings, ...settings } });
+export const withSettings = (draft: Draft, settings: ModelSettings): Draft => ({ ...draft, settings: { ...draft.settings, ...settings } });
 
 /** Returns the model that the draft asks and its settings, in the form `optionsFor` and the loop accept. A draft with no settings has no `settings` field. */
 export const targetOfDraft = (draft: Draft): Target => ({
@@ -65,7 +65,7 @@ const defaultOutputLimit = 32768;
 export const withDefaults = (draft: Draft, capabilities: Capabilities | undefined): Draft =>
   draft.settings.maxOutputTokens !== undefined
     ? draft
-    : saySettings(draft, { maxOutputTokens: TokenCount.make(Math.min(defaultOutputLimit, capabilities?.output ?? defaultOutputLimit)) });
+    : withSettings(draft, { maxOutputTokens: TokenCount.make(Math.min(defaultOutputLimit, capabilities?.output ?? defaultOutputLimit)) });
 
 /** The model that a draft starts with: the first that the catalog lists, or none when it lists none, in which case a host has nothing to ask. */
 export const defaultModel: Effect.Effect<Asked | undefined, never, ModelCatalog> = Effect.map(askable, (models) => models[0]);

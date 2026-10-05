@@ -5,13 +5,13 @@
  */
 
 import { Effect, FileSystem, Layer, Logger, Path } from "effect";
-import { redacting, sayingTooShort, secretsOf } from "./redaction.ts";
+import { redacting, withTooShortWarning, secretsOf } from "./redaction.ts";
 
 /** Writes log lines to stderr, for a host whose stdout carries something else (an answer printed alone, a protocol). */
 export const LogsToStderr = Layer.unwrap(
   Effect.sync(() => {
     const secrets = secretsOf(process.env);
-    return sayingTooShort(secrets, Logger.layer([Logger.withConsoleError(redacting(secrets, Logger.formatLogFmt))]));
+    return withTooShortWarning(secrets, Logger.layer([Logger.withConsoleError(redacting(secrets, Logger.formatLogFmt))]));
   }),
 );
 
@@ -24,6 +24,6 @@ export const LogsToFile = (path: string, env: Readonly<Record<string, string | u
     Effect.gen(function* () {
       yield* (yield* FileSystem.FileSystem).makeDirectory((yield* Path.Path).dirname(path), { recursive: true });
       const secrets = secretsOf(env);
-      return sayingTooShort(secrets, Logger.layer([Logger.toFile(redacting(secrets, Logger.formatLogFmt), path, { batchWindow: "100 millis" })]));
+      return withTooShortWarning(secrets, Logger.layer([Logger.toFile(redacting(secrets, Logger.formatLogFmt), path, { batchWindow: "100 millis" })]));
     }),
   ).pipe(Layer.orDie);

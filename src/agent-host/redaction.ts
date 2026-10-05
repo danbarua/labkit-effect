@@ -89,9 +89,9 @@ export const redacting = (secrets: Secrets, formatter: Logger.Logger<unknown, st
 };
 
 /** Logs a warning naming the credential variables whose values are too short to search for, if any, by name and length. */
-export const saidTooShort = (secrets: Secrets): Effect.Effect<void> =>
+export const warnTooShort = (secrets: Secrets): Effect.Effect<void> =>
   secrets.tooShort.length === 0 ? Effect.void : Effect.logWarning(logKeys.logs.secretsNotLookedFor, { variables: secrets.tooShort, shortest });
 
 /** Returns `logs`, which first log a warning naming the secrets they do not search for. */
-export const sayingTooShort = <E, R>(secrets: Secrets, logs: Layer.Layer<never, E, R>): Layer.Layer<never, E, R> =>
-  Layer.merge(logs, Layer.effectDiscard(saidTooShort(secrets)).pipe(Layer.provide(logs)));
+export const withTooShortWarning = <E, R>(secrets: Secrets, logs: Layer.Layer<never, E, R>): Layer.Layer<never, E, R> =>
+  Layer.merge(logs, Layer.effectDiscard(warnTooShort(secrets)).pipe(Layer.provide(logs)));

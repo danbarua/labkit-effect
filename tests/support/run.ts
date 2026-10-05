@@ -9,13 +9,13 @@
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import { join } from "node:path";
 import { Effect, Layer, Logger, type Scope } from "effect";
-import { redacting, sayingTooShort, secretsOf } from "../../src/agent-host/redaction.ts";
+import { redacting, withTooShortWarning, secretsOf } from "../../src/agent-host/redaction.ts";
 import { reportedBy } from "../../src/agent-session/origin.ts";
 import { testFolder, testOrigin } from "./test.ts";
 
 const testLogs = (folder: string) => {
   const secrets = secretsOf(process.env);
-  return sayingTooShort(secrets, Logger.layer([Logger.toFile(redacting(secrets, Logger.formatJson), join(folder, "log.jsonl"))])).pipe(Layer.provide(BunFileSystem.layer));
+  return withTooShortWarning(secrets, Logger.layer([Logger.toFile(redacting(secrets, Logger.formatJson), join(folder, "log.jsonl"))])).pipe(Layer.provide(BunFileSystem.layer));
 };
 
 export const runTest = <A, E>(program: Effect.Effect<A, E, Scope.Scope>): Promise<A> =>

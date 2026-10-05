@@ -6,7 +6,7 @@
  */
 
 import { type Brand, brandFrom, envPrefixOf, folderOf } from "./brand.ts";
-import { redactedValue, redactorOf, type Secrets, sayingTooShort, secretsOf } from "./redaction.ts";
+import { redactedValue, redactorOf, type Secrets, withTooShortWarning, secretsOf } from "./redaction.ts";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { Array as Arr, Cause, Console, Effect, FileSystem, Layer, Logger, type LogLevel, Option, Order, Path, References } from "effect";
@@ -227,6 +227,6 @@ export const LauncherLogs = (options: LauncherLogOptions): Layer.Layer<never, ne
         }
       });
       const logs = Layer.mergeAll(Logger.layer([logger]), Layer.succeed(References.MinimumLogLevel, options.level));
-      return sayingTooShort(options.secrets, logs);
+      return withTooShortWarning(options.secrets, logs);
     }),
   );

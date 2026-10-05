@@ -123,20 +123,20 @@ export interface ConfigFlags {
 
 const isMapping = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Reads a layer from `given`: JSON when it starts with `{`; otherwise a file, read as JSON when its name ends `.json` and as YAML otherwise. */
-const givenLayer = (flag: string, given: string): Effect.Effect<LayerSource, ConfigInvalid, FileSystem.FileSystem> =>
+/** Reads a layer from `value`: JSON when it starts with `{`; otherwise a file, read as JSON when its name ends `.json` and as YAML otherwise. */
+const layerFromFlag = (flag: string, value: string): Effect.Effect<LayerSource, ConfigInvalid, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const json = (text: string, name: string) =>
       Effect.try({ try: (): unknown => JSON.parse(text), catch: (cause) => new ConfigInvalid({ file: name, path: "", problem: `Not JSON: ${String(cause)}` }) });
-    if (given.trim().startsWith("{")) return { name: flag, value: yield* json(given, flag), trusted: true };
-    if (!given.endsWith(".json")) {
-      const layer = yield* fileLayer(given, true);
-      if (layer === undefined) return yield* new ConfigInvalid({ file: given, path: "", problem: `No such file, named by ${flag}` });
+    if (value.trim().startsWith("{")) return { name: flag, value: yield* json(value, flag), trusted: true };
+    if (!value.endsWith(".json")) {
+      const layer = yield* fileLayer(value, true);
+      if (layer === undefined) return yield* new ConfigInvalid({ file: value, path: "", problem: `No such file, named by ${flag}` });
       return layer;
     }
     const fs = yield* FileSystem.FileSystem;
-    const text = yield* fs.readFileString(given).pipe(Effect.mapError((cause) => new ConfigInvalid({ file: given, path: "", problem: `Could not be read, named by ${flag}: ${String(cause)}` })));
-    return { name: given, value: yield* json(text, given), trusted: true };
+    const text = yield* fs.readFileString(value).pipe(Effect.mapError((cause) => new ConfigInvalid({ file: value, path: "", problem: `Could not be read, named by ${flag}: ${String(cause)}` })));
+    return { name: value, value: yield* json(text, value), trusted: true };
   });
 
 /**
@@ -185,10 +185,10 @@ export const launchLayers = (
   Effect.gen(function* () {
     const sources = yield* sourcesOf(flags.settingSources);
     const files = yield* policyLayers(project ?? "", { ...options, sources: project === undefined ? sources.filter((source) => source === "user") : sources });
-    const settings = flags.settings === undefined ? [] : [yield* givenLayer("--settings", flags.settings)];
+    const settings = flags.settings === undefined ? [] : [yield* layerFromFlag("--settings", flags.settings)];
     const strict: ReadonlyArray<LayerSource> = flags.strictMcpConfig ? [{ name: "--strict-mcp-config", trusted: true, value: { mcpServers: null } }] : [];
     const mcp = yield* Effect.forEach(flags.mcpConfig, (given) =>
-      Effect.map(givenLayer("--mcp-config", given), (layer): LayerSource => ({ ...layer, value: { mcpServers: isMapping(layer.value) ? (layer.value["mcpServers"] ?? {}) : layer.value } })),
+      Effect.map(layerFromFlag("--mcp-config", given), (layer): LayerSource => ({ ...layer, value: { mcpServers: isMapping(layer.value) ? (layer.value["mcpServers"] ?? {}) : layer.value } })),
     );
     const before = [defaults, ...files, ...settings, ...strict, ...mcp];
     return [...before, flagLayer(flags, before)];
