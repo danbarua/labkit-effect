@@ -649,7 +649,10 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
       // runs the session gets it back: a model request failed, a tool's end was not observed, a
       // turn-end review gave nothing more.
       Effect.catchDefect((defect) => {
-        const died = defect instanceof Error ? (defect.stack ?? defect.message) : String(defect);
+        // The defect's name and message, and its stack apart: how a stack is written (whether it starts with the message) is the runtime's.
+        const died = String(defect);
+        const stack = defect instanceof Error ? defect.stack : undefined;
+        const recorded = stack === undefined ? died : `${died}\n${stack}`;
         const outcome = ((): Observation | undefined => {
           switch (request._tag) {
             case "RequestModelResponse":
@@ -657,7 +660,7 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
                 _tag: "ModelFailed",
                 turn: request.turn,
                 failure: FailureText.make(`The request died: ${defect instanceof Error ? defect.message : String(defect)}`),
-                error: receivedText(died),
+                error: receivedText(recorded),
               };
             case "RunTool":
               return { _tag: "ToolEnded", call: request.call, outcome: { _tag: "Failed", reason: { _tag: "Indeterminate" } } };
@@ -669,7 +672,7 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
               return request satisfies never;
           }
         })();
-        return Effect.logError(logKeys.loop.requestDied, { request: request._tag, ...work, defect: died }).pipe(
+        return Effect.logError(logKeys.loop.requestDied, { request: request._tag, ...work, defect: died, ...(stack === undefined ? {} : { stack }) }).pipe(
           Effect.andThen(outcome === undefined ? Effect.void : record(harnessParts.loop, outcome)),
         );
       }),
