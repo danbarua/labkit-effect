@@ -1,9 +1,11 @@
 /**
- * What every provider adapter does around one model request: post JSON through the provider's
- * configured HTTP client, fail with Effect's `AiError` when the request does not produce a usable
- * response, retry the failures `AiError` marks retryable that come before a response begins, and
- * end as `ModelFailed` otherwise, carrying the error and the request as it was posted. The whole
- * error is logged where it is caught.
+ * What every provider adapter does around one model request:
+ * - post JSON through the provider's configured HTTP client;
+ * - fail with Effect's `AiError` when the request does not produce a usable response;
+ * - retry the failures that `AiError` marks retryable and that come before a response begins;
+ * - otherwise end as `ModelFailed`, carrying the error and the request as it was posted.
+ *
+ * The whole error is logged where it is caught.
  */
 
 import { Context, Data, Duration, Effect, Ref, Schedule, Schema, Stream } from "effect";
@@ -29,10 +31,10 @@ export interface Caller {
 }
 
 /**
- * How a request is retried: how many times at most; the first wait, which doubles each time; and the
- * longest a rate limit's wait may be for it to be waited out (1 minute unless given). A rate limit
- * that says to wait longer (a usage window that resets in hours) is not waited for: its failure goes
- * to the turn at once, with the wait it said.
+ * How a request is retried: the maximum number of retries; the first wait, which doubles each time;
+ * and the longest rate-limit wait that is waited out (1 minute unless given). A rate limit that asks
+ * for a longer wait (a usage window that resets in hours) is not waited for: its failure goes to the
+ * turn at once, with the wait it asked for.
  */
 export interface Retries {
   readonly times: number;
@@ -43,8 +45,8 @@ export interface Retries {
 export const defaultRetries: Retries = { times: 3, firstWait: "500 millis" };
 
 /**
- * A request as it is posted: the path, the headers the adapter sets, and the body. The client's own
- * headers (the key, the API version) are set by the configured client and are not among them.
+ * A request as it is posted: the path, the headers that the adapter sets, and the body. The client's
+ * own headers (the key, the API version) are set by the configured client and are not included.
  */
 export interface Post {
   readonly path: string;
@@ -52,11 +54,11 @@ export interface Post {
   readonly body: Json;
 }
 
-/** `post` as it is recorded with a failure. */
+/** Returns `post` as it is recorded with a failure. */
 export const postedAs = (post: Post): Received => receivedJson({ path: post.path, headers: post.headers, body: post.body });
 
 /**
- * A request that failed, once its retries are used up: the error, and the request as the model
+ * A request that failed after its retries were used up: the error, and the request as the model
  * client made it (`postedAs` for an adapter that posts over HTTP).
  */
 export class RequestFailed extends Data.TaggedError("RequestFailed")<{
@@ -64,7 +66,7 @@ export class RequestFailed extends Data.TaggedError("RequestFailed")<{
   readonly request: Received;
 }> {}
 
-/** Fails with `RequestFailed`, carrying `post`, where `request` fails with an `AiError`. */
+/** Runs `request`; when it fails with an `AiError`, fails with `RequestFailed`, carrying `post`. */
 export const failedPosting =
   (post: Post) =>
   <A, R>(request: Effect.Effect<A, AiError.AiError, R>): Effect.Effect<A, RequestFailed, R> =>
@@ -72,7 +74,7 @@ export const failedPosting =
 
 /**
  * Marks that the provider has begun to respond to the request being made: a 2xx status arrived.
- * `withRetries` gives each attempt its own; outside it, marking does nothing.
+ * `withRetries` gives each attempt its own mark; outside `withRetries`, marking does nothing.
  */
 export const ResponseBegan = Context.Reference<{ readonly mark: Effect.Effect<void> }>("agent-session/ResponseBegan", {
   defaultValue: () => ({ mark: Effect.void }),
@@ -82,10 +84,10 @@ const failure = (caller: Caller, reason: AiError.AiErrorReason): AiError.AiError
   AiError.make({ module: caller.module, method: caller.method, reason });
 
 /**
- * The response to `post`. A response that is not 2xx fails with the `AiError`
- * reason for its status, however it arrives: as a response, or, from a client that fails such
- * responses itself (Effect's OpenAI client does), inside a `StatusCodeError`. A 2xx response marks
- * the response as begun (`ResponseBegan`).
+ * Posts `post` and returns the response. A response that is not 2xx fails with the `AiError` reason
+ * for its status, whether it arrives as a response or, from a client that fails such responses
+ * itself (Effect's OpenAI client does), inside a `StatusCodeError`. A 2xx response marks the response
+ * as begun (`ResponseBegan`).
  */
 const send = (
   http: HttpClient.HttpClient,
@@ -121,8 +123,8 @@ const send = (
   );
 
 /**
- * The reason for a failed status: Effect's, with the wait a rate limit says (`Retry-After`, as
- * seconds or as a date), which `reasonFromHttpStatus` does not read.
+ * Returns the reason for a failed status: Effect's reason, with the wait that a rate limit asks for
+ * (`Retry-After`, as seconds or as a date), which `reasonFromHttpStatus` does not read.
  */
 const reasonOf = (status: number, retryAfter: string | undefined, description: string): AiError.AiErrorReason => {
   const reason = AiError.reasonFromHttpStatus({ status, description });
@@ -132,14 +134,14 @@ const reasonOf = (status: number, retryAfter: string | undefined, description: s
   return Number.isFinite(millis) && millis >= 0 ? new AiError.RateLimitError({ retryAfter: Duration.millis(millis) }) : reason;
 };
 
-/** A response whose body did not arrive whole, as a transport error. */
+/** Returns a transport error for a response whose body did not arrive whole. */
 const bodyCut = (caller: Caller, request: HttpClientRequest.HttpClientRequest, description: string, cause?: unknown): AiError.AiError =>
   failure(caller, AiError.NetworkError.fromRequestError(new HttpClientError.TransportError({ request, description, cause })));
 
 /**
- * `HttpClientError` as `AiError`. A body that could not be read to its end (`DecodeError`: the
- * connection closed before the `Content-Length` bytes, or before a chunked body's last chunk,
- * arrived) is a transport error.
+ * Converts an `HttpClientError` to an `AiError`. A body that could not be read to its end
+ * (`DecodeError`: the connection closed before the `Content-Length` bytes, or before a chunked
+ * body's last chunk, arrived) is a transport error.
  */
 const fromHttp =
   (caller: Caller) =>
@@ -167,9 +169,10 @@ const parsed = (caller: Caller, text: string): Effect.Effect<Json, AiError.AiErr
   });
 
 /**
- * The response's body as text. A body whose size is not the response's `Content-Length` fails as a
- * transport error. The header counts the bytes as sent, so it is compared only for a body sent
- * without a `Content-Encoding`: the client decompresses an encoded body before it is read here.
+ * Returns the response's body as text. A body whose size differs from the response's
+ * `Content-Length` fails as a transport error. The header counts the bytes as sent, so it is compared
+ * only for a body sent without a `Content-Encoding`: the client decompresses an encoded body before
+ * it is read here.
  */
 const bodyText = (caller: Caller, response: HttpClientResponse.HttpClientResponse): Effect.Effect<string, AiError.AiError> =>
   response.arrayBuffer.pipe(
@@ -185,24 +188,24 @@ const bodyText = (caller: Caller, response: HttpClientResponse.HttpClientRespons
     }),
   );
 
-/** The response to `post`, parsed as JSON. */
+/** Posts `post` and returns the response, parsed as JSON. */
 export const postJson = (http: HttpClient.HttpClient, caller: Caller, post: Post): Effect.Effect<Json, AiError.AiError> =>
   send(http, caller, post).pipe(
     Effect.flatMap((response) => bodyText(caller, response)),
     Effect.flatMap((text) => parsed(caller, text)),
   );
 
-/** A response's server-sent events: each event's data, parsed as JSON, as it arrives. */
 /**
- * How long a response's stream may send nothing, not a byte, before the request fails: the
- * connection has gone quiet. A server's keep-alive comments count as something.
+ * How long a response's stream may send no bytes before the request fails, because the connection
+ * has gone quiet. A server's keep-alive comments count as bytes.
  */
 export const ModelStreamIdle = Context.Reference<Duration.Input>("agent-session/ModelStreamIdle", { defaultValue: () => "10 minutes" });
 
+/** Returns a response's server-sent events: each event's data, parsed as JSON, as it arrives. */
 const eventsOf = (caller: Caller, response: HttpClientResponse.HttpClientResponse): Stream.Stream<Json, AiError.AiError> =>
   Stream.unwrap(Effect.map(ModelStreamIdle, (idle) => quietFails(caller, response, idle)));
 
-/** `response`'s events, failing if its bytes stop for `idle`. */
+/** Returns `response`'s events; the stream fails when no bytes arrive for `idle`. */
 const quietFails = (caller: Caller, response: HttpClientResponse.HttpClientResponse, idle: Duration.Input): Stream.Stream<Json, AiError.AiError> =>
   response.stream.pipe(
     Stream.timeoutOrElse({
@@ -231,9 +234,10 @@ const quietFails = (caller: Caller, response: HttpClientResponse.HttpClientRespo
   );
 
 /**
- * The response to `post`, as the server-sent events it streams: each event's data, parsed as JSON,
- * as it arrives. A stream is sent chunked, with no `Content-Length`; one closed before its last
- * chunk fails as a transport error. The response had begun, so it is not retried.
+ * Posts `post` and returns the server-sent events that the response streams: each event's data,
+ * parsed as JSON, as it arrives. A stream is sent chunked, with no `Content-Length`; a stream closed
+ * before its last chunk fails as a transport error, and is not retried, because the response had
+ * begun.
  */
 export const postEvents = (http: HttpClient.HttpClient, caller: Caller, post: Post): Stream.Stream<Json, AiError.AiError> =>
   send(http, caller, post).pipe(
@@ -242,8 +246,8 @@ export const postEvents = (http: HttpClient.HttpClient, caller: Caller, post: Po
   );
 
 /**
- * As `postEvents`, from a server that may answer a request to stream with the whole response
- * instead: a response that is not `text/event-stream` is read whole, as JSON, and is the one event.
+ * As `postEvents`, for a server that may answer a streaming request with the whole response instead:
+ * a response that is not `text/event-stream` is read whole, as JSON, and returned as the one event.
  */
 export const postEventsOrWhole = (http: HttpClient.HttpClient, caller: Caller, post: Post): Stream.Stream<Json, AiError.AiError> =>
   send(http, caller, post).pipe(
@@ -255,7 +259,7 @@ export const postEventsOrWhole = (http: HttpClient.HttpClient, caller: Caller, p
     Stream.unwrap,
   );
 
-/** Fails with the response's text, when a provider's response does not have the shape expected. */
+/** Returns an invalid-output error carrying `description`, for a provider response that does not have the expected shape. */
 export const invalidOutput = (caller: Caller, description: string): AiError.AiError =>
   failure(caller, new AiError.InvalidOutputError({ description }));
 
@@ -265,13 +269,7 @@ interface Attempted {
   readonly began: boolean;
 }
 
-/**
- * When a failed request is made again: while its failure is retryable, came before the provider
- * began to respond, and `retries.times` are not used up; after `firstWait`, doubled each time, or
- * what a rate limit says to wait when it says. Each retry is logged before its wait, and a retryable
- * failure that came after the response began is logged as not retried.
- */
-/** Why a retryable failure is not retried, if it is not: the provider had begun to respond, or a rate limit says to wait longer than `longest`. */
+/** Returns why a retryable failure is not retried, or undefined when it is: the provider had begun to respond, or a rate limit asks for a wait longer than `longest`. */
 const notRetriedBecause = (began: boolean, reason: AiError.AiErrorReason, longest: Duration.Duration): string | undefined => {
   if (began) return "the provider had begun to respond";
   if (reason._tag === "RateLimitError" && reason.retryAfter !== undefined && Duration.isGreaterThan(Duration.fromInputUnsafe(reason.retryAfter), longest))
@@ -279,6 +277,16 @@ const notRetriedBecause = (began: boolean, reason: AiError.AiErrorReason, longes
   return undefined;
 };
 
+/**
+ * The retry schedule. A failed request is made again while all of these hold:
+ * - its failure is retryable;
+ * - it came before the provider began to respond;
+ * - `retries.times` are not used up.
+ *
+ * The wait is `firstWait`, doubled each time, or the wait that a rate limit asks for. Each retry is
+ * logged as a warning before its wait. A retryable failure that is not retried is logged as a
+ * warning with the reason.
+ */
 const retrying = (retries: Retries) =>
   Schedule.exponential(retries.firstWait).pipe(
     Schedule.while(({ input, attempt }: Schedule.Metadata<Duration.Duration, Attempted>) =>
@@ -310,9 +318,9 @@ const retrying = (retries: Retries) =>
   );
 
 /**
- * Retries `request` as `retrying` says. A request whose response had begun is not made again: what
- * it passed on, and any tool call it started, belong to that response, and the provider would answer
- * a second request as a new one. Each attempt has its own mark of the response beginning
+ * Retries `request` on the `retrying` schedule. A request whose response had begun is not made again:
+ * what it passed on, and any tool call it started, belong to that response, and the provider would
+ * answer a second request as a new one. Each attempt has its own mark of the response beginning
  * (`ResponseBegan`).
  */
 export const withRetries =
@@ -329,7 +337,7 @@ export const withRetries =
       Effect.mapError(({ error }) => error),
     );
 
-/** A model client that makes `request`, and reports a failure as `ModelFailed`. */
+/** Returns a model client that makes `request` and reports a failure as `ModelFailed`. */
 export const modelClientOf = (request: ProviderRequest) =>
   ModelClient.of({
     respond: (target, context, turn) => request(target, context, turn).pipe(Effect.catch(failedAs(turn))),
@@ -337,10 +345,10 @@ export const modelClientOf = (request: ProviderRequest) =>
 
 const encodeAiError = Schema.encodeSync(Schema.toCodecJson(AiError.AiError));
 
-/** The error as JSON, in `AiError`'s own encoding, which decodes back to the same error. */
+/** Encodes the error as JSON, in `AiError`'s own encoding, which decodes back to the same error. */
 export const receivedAiError = (error: AiError.AiError): Received => receivedJson(encodeAiError(error) as Json);
 
-/** Ends as `ModelFailed` for `turn`, carrying the encoded error and the request, and logs the whole error. */
+/** Returns `ModelFailed` for `turn`, carrying the encoded error and the request, and logs the whole error. */
 export const failedAs =
   (turn: TurnId) =>
   ({ error, request }: RequestFailed): Effect.Effect<Extract<Observation, { _tag: "ModelFailed" }>> =>

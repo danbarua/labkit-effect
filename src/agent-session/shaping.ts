@@ -1,8 +1,8 @@
 /**
- * What every provider adapter needs to shape a context into its wire format: what each tool call
- * was, a tool's input as the JSON object the wire formats require, and a tool outcome as the text
- * the model is sent. Where an adapter supplies or replaces something the context does not say, it
- * records it as `Supplied`, and logs it.
+ * What every provider adapter needs to shape a context into its wire format: each tool call's tool
+ * and input, a tool's input as the JSON object that the wire formats require, and a tool outcome as
+ * the text that the model is sent. Where an adapter supplies or replaces something that the context
+ * does not contain, it records it as `Supplied` and logs it.
  */
 
 import { Effect, Ref, type Schema } from "effect";
@@ -17,20 +17,20 @@ import { asText, parseJson } from "./received.ts";
 
 export type Json = Schema.Json;
 
-/** Something an adapter supplied or changed to fit its wire format, and why. */
+/** Something that an adapter supplied or changed to fit its wire format, the log event, and the details. */
 export interface Supplied {
   readonly level: "info" | "warning";
   readonly event: string;
   readonly details: Record<string, unknown>;
 }
 
-/** Wire-format JSON, and what was supplied to make it. */
+/** Wire-format JSON, and what was supplied to produce it. */
 export interface Shaped {
   readonly json: Json;
   readonly supplied: ReadonlyArray<Supplied>;
 }
 
-/** A tool call, as the model made it. */
+/** A tool call's tool and input, as the model gave them. */
 export interface Called {
   readonly tool: ToolName;
   readonly input: Received;
@@ -45,7 +45,7 @@ export function isObject(value: Json): value is Schema.JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Where a provider's own part came from, for the log: the model and turn of a response, or the window of a compaction. */
+/** Returns the source of a provider's own part, for the log: the model and turn of a response, or the window of a compaction. */
 const sourceOf = (part: Extract<ContextPart, { _tag: "Thinking" | "Unrecognised" }>): Record<string, unknown> => {
   switch (part.from._tag) {
     case "Response":
@@ -58,9 +58,9 @@ const sourceOf = (part: Extract<ContextPart, { _tag: "Thinking" | "Unrecognised"
 };
 
 /**
- * What a part left out of a request held, for the log: its kind, and for a part of a response the
- * provider that produced it; the fields of a JSON part; its length in characters; and its first 120
- * characters.
+ * Returns a description of a part omitted from a request, for the log: its kind; for a part of a
+ * response, the provider that produced it; the fields of a JSON part; its length in characters; and
+ * its first 120 characters.
  */
 function describedPart(part: ContextPart): Record<string, unknown> {
   const text = (() => {
@@ -93,15 +93,15 @@ function describedPart(part: ContextPart): Record<string, unknown> {
 }
 
 /**
- * The parts left out that have been logged: for each, the part (its digest), the model it was left
- * out of a request to, and why. A part is logged the first time it is left out of a request to a
- * model for a reason; it is left out of every later request to that model, until compaction takes
- * it out of the conversation, and is not logged again. Asking another model, or a reason that
- * changed, logs it again.
+ * The omitted parts that have been logged: for each, the part (its digest), the model whose request
+ * omitted it, and the reason. A part is logged the first time it is omitted from a request to a
+ * model for a reason. It is omitted from every later request to that model, until compaction removes
+ * it from the conversation, and is not logged again. A request to another model, or a changed
+ * reason, logs it again.
  */
 export type LeftOutLogged = ReadonlySet<string>;
 
-/** Which of the parts left out of a request to `target` are logged for the first time, and the parts logged after it. */
+/** Returns the parts omitted from a request to `target` that are logged for the first time, and the updated set of logged parts. */
 export function firstLeftOut(
   logged: LeftOutLogged,
   target: Target,
@@ -112,7 +112,7 @@ export function firstLeftOut(
   return { logged: new Set([...logged, ...first.map(keyOf)]), first };
 }
 
-/** A part of an earlier response that is not sent, and why. */
+/** Returns a part of an earlier response that is not sent, with the reason, as an info-level `Supplied` entry. */
 export function leftOut(part: ContextPart, reason: string): Shaped {
   return {
     json: [],
@@ -120,22 +120,23 @@ export function leftOut(part: ContextPart, reason: string): Shaped {
   };
 }
 
-/** Where an earlier response's part may go back as it was received: to its provider, or to its provider's same model. */
+/** Where an earlier response's part may be sent back as received: to its provider, or only to its provider's same model. */
 export type SentBackTo = "Provider" | "Model";
 
-/**
- * The JSON an earlier response's thinking or other part is sent back as. To where it came from
- * (its provider, or with `"Model"` its provider's same model): what was received, unchanged.
- * Anywhere else, thinking with text goes as that text, in the adapter's form (`asText`); anything
- * else is left out, as only where it came from reads it.
- */
-/** Why a part produced by `provider`'s `model` does not go back to `target` as it was received, if it does not. */
+/** Returns why a part produced by `provider`'s `model` is not sent back to `target` as received, or undefined when it is. */
 const elsewhereOf = (provider: string, model: string | undefined, target: Target, to: SentBackTo): string | undefined => {
   if (provider !== target.provider) return `produced by ${provider}, not ${target.provider}`;
   if (to === "Model" && model !== undefined && model !== target.model) return `produced by ${provider}/${model}, not ${target.provider}/${target.model}`;
   return undefined;
 };
 
+/**
+ * Returns the JSON that an earlier response's thinking or other part is sent back as.
+ * - To its source (its provider, or with `"Model"` its provider's same model): what was received,
+ *   unchanged.
+ * - To anyone else: thinking with text is sent as that text, in the adapter's form (`asText`); any
+ *   other part is omitted, because only its source can read it.
+ */
 export function sentBack(
   part: Extract<ContextPart, { _tag: "Thinking" | "Unrecognised" }>,
   target: Target,
@@ -149,7 +150,7 @@ export function sentBack(
   return "value" in parsed ? { json: [parsed.value], supplied: [] } : leftOut(part, parsed.reason);
 }
 
-/** What the model called, by call: the tool's name and the input it gave. */
+/** Returns each call in `context`, by call id: the tool's name and the input that the model gave. */
 export function callsIn(context: ModelContext): ReadonlyMap<CallId, Called> {
   return new Map(
     context.messages.flatMap((message) =>
@@ -160,7 +161,7 @@ export function callsIn(context: ModelContext): ReadonlyMap<CallId, Called> {
   );
 }
 
-/** The input as a JSON object, or `{}` in its place, with the replacement recorded. */
+/** Returns the input as a JSON object, or `{}` in its place, with the replacement recorded and logged as a warning. */
 export function toolInputObject(call: CallId, input: Received): Shaped {
   const parsed = parseJson(input);
   if ("value" in parsed && isObject(parsed.value)) return { json: parsed.value, supplied: [] };
@@ -181,24 +182,24 @@ export function toolInputObject(call: CallId, input: Received): Shaped {
   };
 }
 
-/** What was given, as JSON when it parses and as text otherwise. */
+/** Returns the input as JSON when it parses, and as text otherwise. */
 function given(input: Received): Json {
   const parsed = parseJson(input);
   return "value" in parsed ? parsed.value : asText(input);
 }
 
-/** A tool outcome as the text the model is sent, and whether it reports a failure. */
+/** A tool outcome as the text that the model is sent, and whether it reports a failure. */
 export interface RenderedResult {
   readonly text: string;
   readonly isError: boolean;
-  /** The output's bytes, when they are in the blob store; `text` is then their pointer. */
+  /** The output's bytes, when they are in the blob store; `text` is then the bytes' pointer. */
   readonly file?: BlobRef;
 }
 
 /**
- * A tool outcome as the model is sent it. A failure says what to do next: for a tool that does not
- * exist, the tools that do; for input that does not fit, the tool's input schema and what was
- * given.
+ * Returns a tool outcome as the model is sent it. A failure tells the model what to do next: for a
+ * tool that does not exist, it lists the tools that do; for input that does not fit, it gives the
+ * tool's input schema and the input given.
  */
 export function renderToolResult(
   outcome: ToolOutcome,
@@ -262,9 +263,9 @@ export function renderToolResult(
 }
 
 /**
- * Logs what an adapter supplied to make a request to `target`, in `turn`. The parts left out are
- * logged in one line, each described with the model and turn it came from, and only those left out
- * for the first time (`firstLeftOut`, with what `logged` holds of the requests before).
+ * Logs what an adapter supplied to make a request to `target`, in `turn`. The omitted parts are
+ * logged in one line, each with the model and turn it came from, and only those omitted for the
+ * first time (`firstLeftOut`, given what `logged` holds of earlier requests).
  */
 export const logSupplied = (supplied: ReadonlyArray<Supplied>, target: Target, turn: TurnId | undefined, logged: Ref.Ref<LeftOutLogged>): Effect.Effect<void> =>
   Effect.gen(function* () {
@@ -297,13 +298,13 @@ export const logSupplied = (supplied: ReadonlyArray<Supplied>, target: Target, t
     );
   });
 
-/** The number at `path` in `json`, when there is one. */
+/** Returns the number at `path` in `json`, or undefined when there is none. */
 export function numberAt(json: Json | undefined, ...path: ReadonlyArray<string>): number | undefined {
   const found = path.reduce<Json | undefined>((at, key) => (at !== undefined && isObject(at) ? at[key] : undefined), json);
   return typeof found === "number" ? found : undefined;
 }
 
-/** A usage figure from the counts a provider reported; none without both input and output. */
+/** Returns a usage figure from the counts that a provider reported, or undefined when either input or output is missing. */
 export function usageOf(counts: {
   readonly input: number | undefined;
   readonly output: number | undefined;
@@ -327,14 +328,14 @@ export function usageOf(counts: {
   };
 }
 
-/** The blobs a part refers to: a file's, or the output a tool's result holds in the store. */
+/** Returns the blobs that a part refers to: a file, or a tool output held in the store. */
 const blobsOf = (part: ContextPart): ReadonlyArray<BlobId> => {
   if (part._tag === "File") return [part.blob.id];
   if (part._tag === "ToolResult" && part.outcome._tag === "Succeeded" && part.outcome.output.body._tag === "Stored") return [part.outcome.output.body.id];
   return [];
 };
 
-/** The bytes of every file `context` carries, read from the blob store; a file it does not hold is absent. */
+/** Returns the bytes of every file that `context` carries, read from the blob store; a file that the store does not hold is absent. */
 export const filesIn = (context: ModelContext): Effect.Effect<ReadonlyMap<BlobId, Uint8Array>> =>
   Effect.gen(function* () {
     const blobs = yield* Blobs;
@@ -349,25 +350,26 @@ export const filesIn = (context: ModelContext): Effect.Effect<ReadonlyMap<BlobId
     return new Map(read.flatMap(([id, bytes]) => (bytes === undefined ? [] : [[id, bytes] as const])));
   });
 
-/** A number of bytes as a pointer says it: in bytes under a KiB, in whole KiB under a MiB, else in MiB to one decimal. */
+/** Formats a number of bytes for a pointer: in bytes under 1 KiB, in whole KiB under 1 MiB, else in MiB to one decimal place. */
 const sizeOf = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KiB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 };
 
-/** A file as pointer text the model can quote or follow with a tool: `[image/png, 68 KiB, a.png: blob://<id>]`. */
+/** Returns a file as pointer text that the model can quote or follow with a tool: `[image/png, 68 KiB, a.png: blob://<id>]`. */
 export function blobPointer(blob: BlobRef): string {
   return `[${blob.mediaType}, ${sizeOf(blob.size)}${blob.name === undefined ? "" : `, ${blob.name}`}: blob://${blob.id}]`;
 }
 
-/** A file the model is not sent, as its pointer, saying so: `[not shown to you: image/png, 68 KiB, a.png: blob://<id>]`. */
+/** Returns the pointer for a file that the model is not sent, marked as not shown: `[not shown to you: image/png, 68 KiB, a.png: blob://<id>]`. */
 export const notShown = (blob: BlobRef): string => `[not shown to you: ${blobPointer(blob).slice(1)}`;
 
 /**
- * How a file goes to the model: its bytes, when the model takes its kind (`accepts`) and the store
- * holds them; a text file's text, after its pointer; otherwise its pointer saying it is not shown
- * (`notShown`), and why is logged.
+ * Returns how a file is sent to the model:
+ * - its bytes, when the model accepts its kind (`accepts`) and the store holds them;
+ * - for a text file, its text, after its pointer;
+ * - otherwise its pointer, marked as not shown (`notShown`), with the reason logged.
  */
 export type FileAs =
   | { readonly _tag: "Bytes"; readonly blob: BlobRef; readonly base64: string; readonly dataUrl: string }

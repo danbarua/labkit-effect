@@ -1,17 +1,17 @@
 /**
- * A model client that tries providers in order: the target the loop chose, then each fallback.
- * It moves to the next only after a failure that means the provider cannot serve the request now
- * (`fallsBackOn`), which reaches it after the adapter's own retries. Any other failure is a fault in
- * the request or the configuration (credentials, an invalid request, content policy, output the
- * adapter could not read); moving to another provider would hide it, so it fails the request as it
- * would with one provider. Each failure the chain moves on from is recorded as it happens
- * (`ModelAttemptFailed`, through `Report`) and logged; when the last target fails too, its failure
- * is the request's outcome, `ModelFailed`.
- *
- * When a fallback answers, the chain reports a change of model to it (`ModelChangeArrived`), so the
- * session asks it first from then on, with `ModelFromFacts`. Only an answer moves the session: when
- * every target fails, it stays where it was. A fallback that is the target already chosen is not
- * tried again. The session does not move back to an earlier target by itself.
+ * A model client that tries providers in order: the target that the loop chose, then each fallback.
+ * - It moves to the next target only after a failure that means the provider cannot serve the
+ *   request now (`fallsBackOn`), after the adapter's own retries.
+ * - Any other failure is a fault in the request or the configuration (credentials, an invalid
+ *   request, content policy, output that the adapter could not read). Moving to another provider
+ *   would hide it, so the request fails as it would with one provider.
+ * - Each failure that the chain moves on from is recorded as it happens (`ModelAttemptFailed`,
+ *   through `Report`) and logged. When the last target fails too, its failure is the request's
+ *   outcome, `ModelFailed`.
+ * - When a fallback answers, the chain reports a change of model to it (`ModelChangeArrived`), so
+ *   the session asks that model first from then on (`ModelFromFacts`). When every target fails, the
+ *   session's model does not change. The session never moves back to an earlier target by itself.
+ * - A fallback that is the same as the chosen target is not tried again.
  *
  * Each attempt runs in a span, `agent.model.attempt`, with its provider and model.
  */
@@ -35,13 +35,13 @@ export const fallsBackOn: ReadonlySet<AiError.AiErrorReason["_tag"]> = new Set([
 ]);
 
 export interface FallbackChain {
-  /** The request each provider is reached through. */
+  /** The request function through which each provider is reached. */
   readonly requests: ReadonlyMap<ProviderName, ProviderRequest>;
-  /** Where a request goes, in order, after the target the loop chose. */
+  /** The targets that a request goes to, in order, after the target that the loop chose. */
   readonly fallbacks: ReadonlyArray<Target>;
 }
 
-/** A target whose provider has no request is a configuration fault: a defect, not a failed request. */
+/** Returns the request function for `target`'s provider. A provider with no configured request is a configuration fault: a defect, not a failed request. */
 const requestFor = (chain: FallbackChain, target: Target): Effect.Effect<ProviderRequest> => {
   const request = chain.requests.get(target.provider);
   return request === undefined
@@ -51,7 +51,7 @@ const requestFor = (chain: FallbackChain, target: Target): Effect.Effect<Provide
 
 const sameTarget = (a: Target, b: Target): boolean => a.provider === b.provider && a.model === b.model;
 
-/** `targets` in order; `fellBack` when an earlier target has failed and this one is a fallback. */
+/** Tries `targets` in order. `fellBack` is true when an earlier target has failed and the first of `targets` is a fallback. */
 const attempt = (
   chain: FallbackChain,
   targets: readonly [Target, ...ReadonlyArray<Target>],
@@ -114,7 +114,7 @@ const attempt = (
   );
 };
 
-/** The fallbacks' providers are checked when the layer is built; the chosen target's, per request. */
+/** The model client over `chain`. The fallbacks' providers are checked when the layer is built; the chosen target's provider is checked per request. */
 export const FallbackModelClient = (chain: FallbackChain) =>
   Layer.effect(
     ModelClient,
