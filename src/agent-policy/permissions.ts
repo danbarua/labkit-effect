@@ -87,7 +87,7 @@ export const questionIn = (asks: Received): PermissionQuestion | undefined => fr
 export const answerPicking = (option: OptionId): Received => asJson(PermissionAnswer, { optionId: option });
 
 /** Returns the question's option that `answer` picks; undefined when the answer names no offered option. */
-const pickedIn = (question: PermissionQuestion, answer: Received): PermissionOption | undefined => {
+const optionPicked = (question: PermissionQuestion, answer: Received): PermissionOption | undefined => {
   const picked = fromJson(PermissionAnswer, answer);
   return picked === undefined ? undefined : question.options.find((option) => option.optionId === picked.optionId);
 };
@@ -103,19 +103,19 @@ const optionsFor = (tool: ToolName): ReadonlyArray<PermissionOption> => [
 ];
 
 /** Returns the latest session answer for `tool` in `facts`: allowed, rejected, or undefined when there is none. */
-function rememberedFor(facts: ReadonlyArray<Fact>, tool: ToolName): "allowed" | "rejected" | undefined {
+function sessionAnswerFor(facts: ReadonlyArray<Fact>, tool: ToolName): "allowed" | "rejected" | undefined {
   const asked = new Map(
     facts.flatMap((fact) =>
       fact._tag === "Observed" && fact.observation._tag === "PermissionAsked" ? [[fact.observation.call, fact.observation.asks] as const] : [],
     ),
   );
-  return facts.reduce<"allowed" | "rejected" | undefined>((remembered, fact) => {
-    if (fact._tag !== "Observed" || fact.observation._tag !== "PermissionAnswered") return remembered;
+  return facts.reduce<"allowed" | "rejected" | undefined>((sessionAnswer, fact) => {
+    if (fact._tag !== "Observed" || fact.observation._tag !== "PermissionAnswered") return sessionAnswer;
     const asks = asked.get(fact.observation.call);
     const question = asks === undefined ? undefined : questionIn(asks);
-    if (question === undefined || question.tool !== tool) return remembered;
-    const picked = pickedIn(question, fact.observation.answer);
-    return picked?.kind === "allow_always" ? "allowed" : picked?.kind === "reject_always" ? "rejected" : remembered;
+    if (question === undefined || question.tool !== tool) return sessionAnswer;
+    const picked = optionPicked(question, fact.observation.answer);
+    return picked?.kind === "allow_always" ? "allowed" : picked?.kind === "reject_always" ? "rejected" : sessionAnswer;
   }, undefined);
 }
 
@@ -141,23 +141,23 @@ export function permissions(
       if (request._tag !== "RunTool") return proceed;
       const kind = kindOf(request.tool) ?? "other";
       if (onlyReads.includes(kind)) return proceed;
-      const remembered = rememberedFor(facts, request.tool);
+      const sessionAnswer = sessionAnswerFor(facts, request.tool);
       // A session rejection applies in every mode, so it is checked before the mode.
-      if (remembered === "rejected") return veto(FailureText.make(`${request.tool} was rejected for the rest of the session.`));
+      if (sessionAnswer === "rejected") return veto(FailureText.make(`${request.tool} was rejected for the rest of the session.`));
       if (mode === "bypassPermissions") return proceed;
       if (mode === "acceptEdits" && editsFiles.includes(kind)) return proceed;
-      if (remembered === "allowed") return proceed;
+      if (sessionAnswer === "allowed") return proceed;
       if (mode === "dontAsk") return veto(FailureText.make(`${request.tool} needs permission, and the permission mode is dontAsk.`));
       if (!canAsk) {
-        const letting = editsFiles.includes(kind) ? "acceptEdits or bypassPermissions" : "bypassPermissions";
-        return veto(FailureText.make(`${request.tool} needs permission, and no one is there to answer. --permission-mode ${letting} lets it run.`));
+        const allowingModes = editsFiles.includes(kind) ? "acceptEdits or bypassPermissions" : "bypassPermissions";
+        return veto(FailureText.make(`${request.tool} needs permission, and no one is there to answer. --permission-mode ${allowingModes} lets it run.`));
       }
       const question: PermissionQuestion = { tool: request.tool, kind, options: optionsFor(request.tool) };
       return { _tag: "Waiting", state: question, asks: asJson(PermissionQuestion, question) };
     },
     receive: (question, message) => {
       if (message._tag !== "Answered") return { _tag: "Waiting", state: question, asks: undefined };
-      const picked = pickedIn(question, message.answer);
+      const picked = optionPicked(question, message.answer);
       if (picked === undefined) return veto(FailureText.make(`The answer named no option offered for ${question.tool}.`));
       return picked.kind === "allow_once" || picked.kind === "allow_always"
         ? proceed

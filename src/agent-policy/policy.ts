@@ -59,7 +59,7 @@ export interface EveryState {
 export function every(policies: ReadonlyArray<Policy<unknown>>): Policy<EveryState> {
   const decided: PolicyStep<EveryState> = { _tag: "Decided", verdict: { _tag: "Continue" } };
   /** Returns the combined step after the policy at `index` returned `step`. */
-  const from = (request: EffectRequest, index: number, step: PolicyStep<unknown>): PolicyStep<EveryState> => {
+  const combined = (request: EffectRequest, index: number, step: PolicyStep<unknown>): PolicyStep<EveryState> => {
     switch (step._tag) {
       case "Waiting":
         return { _tag: "Waiting", state: { request, index, state: step.state }, asks: step.asks };
@@ -69,7 +69,7 @@ export function every(policies: ReadonlyArray<Policy<unknown>>): Policy<EverySta
             return { ...step, by: index };
           case "Continue": {
             const next = policies[index + 1];
-            return next === undefined ? step : from(request, index + 1, next.start(request));
+            return next === undefined ? step : combined(request, index + 1, next.start(request));
           }
           default:
             return step.verdict satisfies never;
@@ -81,13 +81,13 @@ export function every(policies: ReadonlyArray<Policy<unknown>>): Policy<EverySta
   return {
     start: (request) => {
       const first = policies[0];
-      return first === undefined ? decided : from(request, 0, first.start(request));
+      return first === undefined ? decided : combined(request, 0, first.start(request));
     },
     receive: (held, message) => {
       const policy = policies[held.index];
       return policy === undefined
         ? decided
-        : from(held.request, held.index, policy.receive(held.state, message));
+        : combined(held.request, held.index, policy.receive(held.state, message));
     },
   };
 }
