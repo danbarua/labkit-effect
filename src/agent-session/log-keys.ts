@@ -13,7 +13,10 @@ export const logKeys = {
     notAsStored: "blobs.file.not_as_stored",
   },
   sessionStore: {
-    /** The file-backed store opened a session file whose lock names a process that is not running, and took the lock over. */
+    /**
+     * The file-backed store opened a session file whose lock names a process that is not running,
+     * or names no process, and took the lock over. The details carry what the lock file held.
+     */
     lockTakenOver: "session_store.lock_taken_over",
     /** The file-backed store could not flush the session file's folder to the disk after creating the file; the details carry the error. */
     folderNotFlushed: "session_store.folder_not_flushed",

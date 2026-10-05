@@ -291,3 +291,19 @@ test("J4: taking over a lock left by a process that ended, and cutting off a las
   expect(warned(logKeys.sessionStore.lockTakenOver)).toMatchObject([{ file, lock: `${file}.lock`, holder: 999999 }]);
   expect(warned(logKeys.sessionStore.tornLineCut)).toMatchObject([{ file, start: '{"_tag":"Observed","seq":1,"ti' }]);
 });
+
+test.each([["not a pid"], [""], ["0"], ["-1"]])("J4: a lock file that names no process (it holds %j) is taken over, logged with what the file held", async (held) => {
+  const file = fileIn();
+  const logged: Array<{ readonly level: string; readonly message: unknown }> = [];
+  const logging = Logger.layer([Logger.make((options) => logged.push({ level: options.logLevel, message: options.message }))], { mergeWithExisting: true });
+  writeFileSync(`${file}.lock`, held);
+  const opened = await runTest(
+    Effect.gen(function* () {
+      yield* Layer.build(FileBackedSessionStore(file));
+      return readFileSync(`${file}.lock`, "utf8");
+    }).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, logging))),
+  );
+  expect(opened).toBe(String(process.pid));
+  const warned = logged.filter((each) => each.level === "Warn" && Array.isArray(each.message) && each.message[0] === logKeys.sessionStore.lockTakenOver);
+  expect(warned.map((each) => (each.message as [string, unknown])[1])).toMatchObject([{ file, held, reason: "the lock file names no process" }]);
+});
