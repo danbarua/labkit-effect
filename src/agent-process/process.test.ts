@@ -57,6 +57,17 @@ test("PG2: a run that ends by itself is Exited, with its exit code", async () =>
   expect(exited).toEqual({ _tag: "Exited", run: 1, code: 3, signal: undefined });
 });
 
+test("PG2: a run that a signal ends is Exited, with the signal's name and no exit code", async () => {
+  const exited = await runTest(
+    Effect.gen(function* () {
+      const group = yield* makeProcessGroup(sh("kill -TERM $$"));
+      yield* group.start;
+      return yield* until(group, (state) => state._tag === "Exited");
+    }).pipe(Effect.provide(BunServices.layer)),
+  );
+  expect(exited).toEqual({ _tag: "Exited", run: 1, code: undefined, signal: "SIGTERM" });
+});
+
 test("PG3: a command that cannot be started is Failed, with the reason", async () => {
   const failed = await runTest(
     Effect.gen(function* () {

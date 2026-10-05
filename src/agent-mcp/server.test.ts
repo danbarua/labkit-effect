@@ -33,6 +33,8 @@ test("MS1: a server connects on each run of its process, is ready with its tools
   // Run 1's end, reported once run 2 is connecting, changes nothing.
   expect(stepMcpServer({ _tag: "Connecting", run: 2 }, runEventOf({ _tag: "Exited", run: 1, code: 143, signal: undefined })).state).toEqual({ _tag: "Connecting", run: 2 });
   expect(runEventOf({ _tag: "Failed", run: 1, reason: "ENOENT" })).toEqual({ _tag: "RunFailed", run: 1, reason: "its process could not be started: ENOENT" });
+  // A process a signal ended has no exit code; the reason names the signal.
+  expect(runEventOf({ _tag: "Exited", run: 1, code: undefined, signal: "SIGTERM" })).toEqual({ _tag: "RunEnded", run: 1, reason: "its process ended on SIGTERM" });
 });
 
 const textOf = (result: ToolResult) =>

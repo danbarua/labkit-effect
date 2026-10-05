@@ -15,7 +15,7 @@
  * set, never their values.
  */
 
-import { Effect, Exit, Fiber, HashMap, Option, Ref, Scope, Semaphore, Stream, SubscriptionRef } from "effect";
+import { Effect, Exit, Fiber, HashMap, Option, type PlatformError, Ref, Scope, Semaphore, Stream, SubscriptionRef } from "effect";
 import { ChildProcess, type ChildProcessSpawner } from "effect/process";
 import { redactedArgs, withoutCredentials } from "./environment.ts";
 import { logKeys } from "./log-keys.ts";
@@ -46,6 +46,16 @@ export interface ProcessGroup {
   /** Ends the run there is, if any. */
   readonly stop: Effect.Effect<void>;
 }
+
+/**
+ * The signal that ended a run, from the error Effect's spawner fails `exitCode` with when a signal
+ * ends the process: its cause is an `Error` whose message is "Process interrupted due to receipt of
+ * signal: '<name>'". Undefined when the error is not that one.
+ */
+const signalOf = (error: PlatformError.PlatformError): string | undefined => {
+  const cause = error.reason.cause;
+  return cause instanceof Error ? /receipt of signal: '([A-Z0-9]+)'/.exec(cause.message)?.[1] : undefined;
+};
 
 /**
  * The group for `command`, in the scope given; nothing runs until it is started. `onRun` is given
@@ -89,7 +99,10 @@ export const makeProcessGroup = (
         yield* dispatch({ _tag: "Started", run, pid: handle.pid });
         const consumer = yield* Effect.forkIn(onRun(run, handle).pipe(Scope.provide(runScope)), runScope);
         const exit = yield* Effect.result(handle.exitCode);
-        yield* dispatch({ _tag: "Ended", run, code: exit._tag === "Success" ? exit.success : undefined, signal: undefined });
+        const signal = exit._tag === "Failure" ? signalOf(exit.failure) : undefined;
+        if (exit._tag === "Failure" && signal === undefined)
+          yield* Effect.logWarning(logKeys.process.exitUnread, { name: command.name, run, error: exit.failure.message, cause: String(exit.failure.reason.cause) });
+        yield* dispatch({ _tag: "Ended", run, code: exit._tag === "Success" ? exit.success : undefined, signal });
         // What the run wrote before it ended is read to its end before the run's scope closes, for a while at most.
         yield* Fiber.await(consumer).pipe(Effect.timeoutOption(consumerGrace));
         yield* ended(run);
