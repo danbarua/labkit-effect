@@ -1,8 +1,9 @@
 /**
- * The draft a session is before turn zero: the model it will ask, its settings as said, its system
- * prompt and its tools. No session exists yet and nothing is recorded; a host holds the draft until
- * the first input, shows its options, changes it, then opens the session with it (`opening`) and
- * gives the session that input. A record and pure functions: a host keeps the draft where it likes.
+ * A draft: a session before its first turn. It holds the model to ask, the settings as given, the
+ * system prompt and the tools. No session exists yet and nothing is recorded. A host keeps the draft
+ * until the first input, shows its options, changes it, then opens the session with it (`opening`)
+ * and gives the session that input. The draft is a plain record with pure functions, so a host keeps
+ * it wherever it likes.
  */
 
 import { Effect } from "effect";
@@ -17,7 +18,7 @@ import { type Asked, askable, type ModelCatalog } from "./catalog.ts";
 
 export interface Draft {
   readonly model: Asked;
-  /** The settings as said. The adapter adjusts them on the request; the options show what each comes to. */
+  /** The settings as given. The adapter adjusts them on the request; the options show the value each setting takes. */
   readonly settings: ModelSettings;
   readonly system: string | undefined;
   readonly tools: ReadonlyArray<ToolSpec>;
@@ -31,40 +32,40 @@ export const draftOf = (draft: {
 }): Draft => ({ model: draft.model, settings: draft.settings ?? {}, system: draft.system, tools: draft.tools ?? [] });
 
 /**
- * The draft with another model. The settings stay as said, even one the new model does not take:
- * the adapter sends the nearest it takes, and the options show that value.
+ * Returns the draft with another model. The settings stay as given, even one that the new model does
+ * not accept: the adapter sends the nearest accepted value, and the options show that value.
  */
 export const chooseModel = (draft: Draft, model: Asked): Draft => ({ ...draft, model });
 
-/** The draft with the settings named in `settings` said anew; a setting not named stays as it was. */
+/** Returns the draft with the settings named in `settings` replaced; a setting not named keeps its value. */
 export const saySettings = (draft: Draft, settings: ModelSettings): Draft => ({ ...draft, settings: { ...draft.settings, ...settings } });
 
-/** The model the draft asks and its settings, as `optionsFor` and the loop take them. No settings said is none. */
+/** Returns the model that the draft asks and its settings, in the form `optionsFor` and the loop accept. A draft with no settings has no `settings` field. */
 export const targetOfDraft = (draft: Draft): Target => ({
   provider: draft.model.provider,
   model: draft.model.model,
   ...(Object.keys(draft.settings).length === 0 ? {} : { settings: draft.settings }),
 });
 
-/** What a host shows of the draft: its model, its settings, and each setting to offer with the value the model will get. */
+/** Returns what a host shows of the draft: its model, its settings, and each setting to offer with the value that the model will get. */
 export const optionsOfDraft = (draft: Draft): Effect.Effect<Options> => optionsFor(targetOfDraft(draft));
 
-/** The `SessionOpened` observation that opens `session` with the draft's model, settings, system prompt and tools. */
+/** Returns the `SessionOpened` observation that opens `session` with the draft's model, settings, system prompt and tools. */
 export const opening = (draft: Draft, session: SessionId): Observation =>
   openedWith({ session, model: targetOfDraft(draft), system: draft.system, tools: draft.tools });
 
-/** The output limit a draft that says none is given by `withDefaults`, where the model's own is not lower. */
+/** The output limit that `withDefaults` gives a draft with none, unless the model's own limit is lower. */
 const defaultOutputLimit = 32768;
 
 /**
- * The draft with an output limit when it says none: 32768 tokens, or the model's own limit
- * (`capabilities.output`) when that is known and lower. What was said stays as said. A host that
- * leaves the limit to the provider does not apply it.
+ * Returns the draft with an output limit when it has none: 32768 tokens, or the model's own limit
+ * (`capabilities.output`) when that is known and lower. A limit that was given stays. A host that
+ * leaves the limit to the provider does not call this.
  */
 export const withDefaults = (draft: Draft, capabilities: Capabilities | undefined): Draft =>
   draft.settings.maxOutputTokens !== undefined
     ? draft
     : saySettings(draft, { maxOutputTokens: TokenCount.make(Math.min(defaultOutputLimit, capabilities?.output ?? defaultOutputLimit)) });
 
-/** The model a draft starts with: the first the catalog lists, or none when it lists none, and a host has nothing to ask. */
+/** The model that a draft starts with: the first that the catalog lists, or none when it lists none, in which case a host has nothing to ask. */
 export const defaultModel: Effect.Effect<Asked | undefined, never, ModelCatalog> = Effect.map(askable, (models) => models[0]);

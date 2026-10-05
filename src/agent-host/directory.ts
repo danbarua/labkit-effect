@@ -1,8 +1,7 @@
 /**
- * A folder of sessions: each in a folder of its own, `<root>/<session>/`, its facts in
- * `facts.jsonl`, in the file-backed session store (`agent-session/file-session-store.ts`), which
- * writes each fact before the session acts on it. This module finds and reads them, for picking one
- * or going on from one.
+ * A folder of sessions: each session in its own folder, `<root>/<session>/`, with its facts in
+ * `facts.jsonl`, kept by the file-backed session store (`agent-session/file-session-store.ts`). This
+ * module lists and reads the sessions, so a host can offer them to pick from or continue one.
  */
 
 import { Array as Arr, Data, Effect, FileSystem, Option, Order } from "effect";
@@ -10,7 +9,7 @@ import type { Fact } from "../agent-machine/fact.ts";
 import { modelOf } from "../agent-session/configuration/session-setup.ts";
 import { readFacts } from "../agent-session/file-session-store.ts";
 
-/** The folder of sessions could not be read, for the reason given. */
+/** The folder of sessions could not be read, for the reason in `message`. */
 export class DirectoryUnreadable extends Data.TaggedError("DirectoryUnreadable")<{ readonly message: string }> {}
 
 /** `root` holds no session `sessionId`. */
@@ -19,13 +18,13 @@ export class SessionNotFound extends Data.TaggedError("SessionNotFound")<{ reado
 /** `root` holds no session at all. */
 export class NoSessionStored extends Data.TaggedError("NoSessionStored")<{ readonly root: string }> {}
 
-/** The folder a session's files are in. */
+/** Returns the folder that holds a session's files. */
 export const sessionFolderOf = (root: string, sessionId: string): string => `${root}/${sessionId}`;
 
-/** The file a session's facts are in. */
+/** Returns the file that holds a session's facts. */
 export const storeFileOf = (root: string, sessionId: string): string => `${sessionFolderOf(root, sessionId)}/facts.jsonl`;
 
-/** The sessions in `root`, the one written to last first, each with when it was last written to. A folder with no facts file is no session. */
+/** Lists the sessions in `root`, the one written to last first, each with its last write time. A folder with no facts file is not a session. */
 export const storedSessions = (root: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -38,7 +37,7 @@ export const storedSessions = (root: string) =>
     return Arr.sort(dated, Order.mapInput(Order.flip(Order.Number), (each: (typeof dated)[number]) => each.at?.getTime() ?? 0));
   }).pipe(Effect.catchTag("PlatformError", (error) => Effect.fail(new DirectoryUnreadable({ message: error.message }))));
 
-/** The facts of the session `sessionId` in `root`. A facts file that does not read fails as the store says (`SessionStoreFailed`). */
+/** Reads the facts of the session `sessionId` in `root`. A facts file that does not read fails with the store's error (`SessionStoreFailed`). */
 export const readSession = (root: string, sessionId: string) =>
   Effect.gen(function* () {
     const file = storeFileOf(root, sessionId);
@@ -47,7 +46,7 @@ export const readSession = (root: string, sessionId: string) =>
     return { sessionId, facts };
   }).pipe(Effect.catchTag("PlatformError", (error) => Effect.fail(new DirectoryUnreadable({ message: error.message }))));
 
-/** The facts of the session written to last in `root`. */
+/** Reads the facts of the session written to last in `root`. */
 export const latestSession = (root: string) =>
   Effect.gen(function* () {
     const latest = (yield* storedSessions(root))[0];
@@ -55,7 +54,7 @@ export const latestSession = (root: string) =>
     return yield* readSession(root, latest.sessionId);
   });
 
-/** What a session's facts say of it, for picking one: how many turns it started, and the model it asks now. */
+/** Returns a session's summary, for picking one: how many turns it started, and the model it asks now. */
 export const summaryOf = (facts: ReadonlyArray<Fact>) =>
   Effect.map(modelOf(facts), (model) => ({
     turns: facts.filter((fact) => fact._tag === "Observed" && fact.observation._tag === "TurnStarted").length,

@@ -1,12 +1,13 @@
 /**
- * Where a host's log lines go: to stderr, or to a file. Either leaves out the environment's secrets
- * (`redaction.ts`), read when the layer is made, and says first those it does not look for.
+ * Where a host's log lines go: to stderr, or to a file. Both redact the environment's secrets
+ * (`redaction.ts`), read when the layer is built, and first log a warning naming the secrets too
+ * short to search for.
  */
 
 import { Effect, FileSystem, Layer, Logger, Path } from "effect";
 import { redacting, sayingTooShort, secretsOf } from "./redaction.ts";
 
-/** Log lines to stderr: for a host whose stdout is for something else (an answer printed alone, a protocol). */
+/** Writes log lines to stderr, for a host whose stdout carries something else (an answer printed alone, a protocol). */
 export const LogsToStderr = Layer.unwrap(
   Effect.sync(() => {
     const secrets = secretsOf(process.env);
@@ -15,8 +16,8 @@ export const LogsToStderr = Layer.unwrap(
 );
 
 /**
- * Log lines to the file at `path`, its folder made when missing: for a host whose terminal holds the
- * conversation alone. The secrets are `env`'s.
+ * Writes log lines to the file at `path`, creating its folder when missing, for a host whose terminal
+ * shows only the conversation. The secrets are read from `env`.
  */
 export const LogsToFile = (path: string, env: Readonly<Record<string, string | undefined>> = process.env) =>
   Layer.unwrap(

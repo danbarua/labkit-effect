@@ -1,7 +1,7 @@
 /**
- * A turn-end hook that asks the model again for its answer when its last response held none: a
- * whole response with no tool calls and no answer text, only thinking or commentary
- * (`TurnIncomplete`, agent-machine I4). Some local models put the whole answer in their reasoning.
+ * A turn-end hook that asks the model again for its answer when its last response had none: a whole
+ * response with no tool calls and no answer text, only thinking or commentary (`TurnIncomplete`).
+ * Some local models put the whole answer in their reasoning.
  */
 
 import { Effect } from "effect";
@@ -10,14 +10,14 @@ import type { TurnId } from "../agent-machine/names.ts";
 import type { TurnEndHook } from "../agent-session/contracts.ts";
 import { harnessParts } from "../agent-session/origin.ts";
 
-/** What the model is told when its last response had thinking but no answer. */
+/** The input that the model receives when its last response had thinking but no answer. */
 export const answerNow = "Your last response had thinking but no answer. Give your answer now.";
 
-/** The latest decision the facts record about `turn`. */
+/** Returns the tag of the latest decision that the facts record about `turn`. */
 const latestDecision = (facts: ReadonlyArray<Fact>, turn: TurnId): string | undefined =>
   facts.flatMap((fact) => (fact._tag === "Decided" && "turn" in fact.decision && fact.decision.turn === turn ? [fact.decision._tag] : [])).at(-1);
 
-/** How many times the turn-end hooks have given `turn` feedback: their inputs since the turn started. */
+/** Returns how many times the turn-end hooks have given `turn` feedback: their inputs since the turn started. */
 const holdsIn = (facts: ReadonlyArray<Fact>, turn: TurnId): number =>
   facts.reduce((holds, fact) => {
     if (fact._tag !== "Observed") return holds;
@@ -27,13 +27,13 @@ const holdsIn = (facts: ReadonlyArray<Fact>, turn: TurnId): number =>
   }, 0);
 
 /**
- * The hook: `answerNow` when the latest decision about the turn is `TurnIncomplete` and the hooks
- * have not held the turn open `retries` times, nothing otherwise. A turn answered has
- * `TurnCompleted` there; a response cut short has neither, so the latest is the request that asked
- * for it. A turn still without an answer after its retries ends `Incomplete`.
+ * The hook: returns `answerNow` when the latest decision about the turn is `TurnIncomplete` and the
+ * hooks have not held the turn open `retries` times; returns nothing otherwise. An answered turn's
+ * latest decision is `TurnCompleted`; a response cut short has neither, so its latest decision is the
+ * request that asked for it. A turn still without an answer after its retries ends `Incomplete`.
  *
- * It counts the inputs the turn-end hooks have given the turn, whichever hook gave them: the facts
- * do not say which. With other hooks in the list, their holds count against its retries.
+ * The hook counts every input that the turn-end hooks gave the turn, because the facts do not record
+ * which hook gave it. With other hooks in the list, their holds count against its retries.
  */
 export const retryIncomplete =
   (retries = 1): TurnEndHook =>

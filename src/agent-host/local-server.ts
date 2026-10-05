@@ -1,9 +1,9 @@
 /**
  * A local Chat Completions server at http://localhost:8000/v1, asked as the provider `localhost`.
  *
- * What is known of a `localhost` model is what the server says of it (`GET /v1/models`): its context
- * window, whether it takes images, and the reasoning efforts it lists. Requests are shaped to that,
- * so an effort above the server's highest is sent as its highest.
+ * What is known of a `localhost` model is what the server's model list says of it (`GET /v1/models`):
+ * its context window, the kinds of input it accepts, and the reasoning efforts it lists. Requests are
+ * shaped to that, so an effort above the server's highest is sent as its highest.
  */
 
 import { Effect, Layer, Option, Schema } from "effect";
@@ -12,12 +12,13 @@ import { Settling, type SettlingSource, wellKnownSettling } from "../agent-sessi
 import { openAiCompatSettle } from "../agent-session/providers/openai-compat-settings.ts";
 import { logKeys } from "./log-keys.ts";
 
-/** Where the local server is. */
+/** The local server's address. */
 export const localServer = "http://localhost:8000/v1";
 
 /**
- * The items of `value` that `schema` decodes, in order; none when `value` is not a list. Each item
- * is decoded alone, so an entry the server writes some other way drops only itself.
+ * Returns the items of `value` that `schema` decodes, in order; none when `value` is not a list.
+ * Each item is decoded on its own, so an entry that the server writes in another form drops only
+ * itself.
  */
 const itemsOf = <S extends Schema.ConstraintDecoder<unknown>>(schema: S) => {
   const items = Schema.decodeUnknownOption(Schema.Array(Schema.Unknown));
@@ -25,7 +26,7 @@ const itemsOf = <S extends Schema.ConstraintDecoder<unknown>>(schema: S) => {
   return (value: unknown): ReadonlyArray<S["Type"]> => Option.match(items(value), { onNone: () => [], onSome: (each) => each.flatMap((one) => Option.toArray(item(one))) });
 };
 
-/** A model list as the server writes it: `data` for the names it takes, `models` for what it says of each. */
+/** A model list as the server writes it: `data` for the model names it accepts, `models` for what it reports of each. */
 const ModelList = Schema.decodeUnknownOption(Schema.Struct({ data: Schema.optionalKey(Schema.Unknown), models: Schema.optionalKey(Schema.Unknown) }));
 const listedNames = itemsOf(Schema.Struct({ id: Schema.String }));
 const listedModels = itemsOf(
@@ -40,8 +41,8 @@ const levels = itemsOf(Schema.Struct({ effort: Schema.String }));
 const strings = itemsOf(Schema.String);
 
 /**
- * What the local server's model list says of each model it serves, by the model's name: its
- * `models` entries give the context window, the kinds of input and the reasoning levels.
+ * Returns what the local server's model list says of each model it serves, by the model's name:
+ * the `models` entries give the context window, the kinds of input and the reasoning levels.
  */
 export function localCapabilities(listed: unknown): ReadonlyMap<string, Capabilities> {
   return new Map(
@@ -60,8 +61,8 @@ export function localCapabilities(listed: unknown): ReadonlyMap<string, Capabili
 }
 
 /**
- * The models the local server serves, by the names it takes (`GET /v1/models`, `data[].id`), or
- * `undefined` when it does not answer within a second.
+ * The models that the local server serves, by the names it accepts (`GET /v1/models`, `data[].id`),
+ * or `undefined` when it does not answer within one second.
  */
 export const localModels: Effect.Effect<ReadonlyArray<string> | undefined> = Effect.tryPromise(() =>
   fetch(`${localServer}/models`, { signal: AbortSignal.timeout(1000) }).then((response) => response.json() as Promise<unknown>),
@@ -72,8 +73,8 @@ export const localModels: Effect.Effect<ReadonlyArray<string> | undefined> = Eff
 
 /**
  * What is known of each model: for `localhost`, what the local server lists, asked once when first
- * needed; for the others, the well-known models. A server that does not answer leaves its models
- * unknown, and that is logged.
+ * needed; for other providers, the well-known models. When the server does not answer, its models
+ * stay unknown, and a warning is logged.
  */
 export const KnownWithLocalServer = Layer.effect(
   KnownModels,

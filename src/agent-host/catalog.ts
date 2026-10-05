@@ -1,7 +1,7 @@
 /**
- * The models a host can ask: the well-known models, each provider's key from the environment, and
- * the models of the local server (`local-server.ts`). The catalog is a service, so a source can be
- * added beside these; `KeyedAndLocalCatalog` has the two there are.
+ * The models that a host can ask: the well-known models of each provider whose key the environment
+ * holds, and the models of the local server (`local-server.ts`). The catalog is a service, so another
+ * source can be added; `KeyedAndLocalCatalog` provides these two.
  */
 
 import { Context, Data, Effect, Layer, Redacted } from "effect";
@@ -15,7 +15,7 @@ export const known: Readonly<Record<string, Readonly<Record<string, unknown>>>> 
 /** The environment variable that holds each provider's key; a local server needs none. */
 export const keyVariables: Readonly<Record<string, string>> = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", xai: "XAI_API_KEY" };
 
-/** The key the environment holds for `provider`, as `Redacted`: a log or a string of it says `<redacted>`. An empty one is none. */
+/** Returns the key that the environment holds for `provider`, as `Redacted`, so a log line or a string of it shows `<redacted>`. An empty key counts as none. */
 export const keyOf = (provider: string): Redacted.Redacted | undefined => {
   const variable = keyVariables[provider];
   const key = variable === undefined ? undefined : process.env[variable];
@@ -31,27 +31,28 @@ export interface Asked {
 /** One provider's models in the catalog. */
 export interface CatalogSource {
   readonly provider: ProviderName;
-  /** The models it lists, by the names it takes; undefined when it was asked for them and did not answer. */
+  /** The models the source lists, by the names it accepts; undefined when it was asked for them and did not answer. */
   readonly models: ReadonlyArray<ModelName> | undefined;
-  /** Where it is, when it is a server that is asked for its models. */
+  /** The source's address, when it is a server that is asked for its models. */
   readonly at?: string;
 }
 
 /**
- * The models that can be asked, by source. A well-known provider in it takes any model named as
- * `provider/model`; any other takes only the models it lists.
+ * The models that can be asked, by source. A well-known provider accepts any model named as
+ * `provider/model`; any other source accepts only the models it lists.
  */
 export class ModelCatalog extends Context.Service<
   ModelCatalog,
   {
-    /** Each source and its models, asked for anew each time: a server's may change while a host runs. */
+    /** Each source and its models, read anew each time, because a server's models may change while a host runs. */
     readonly sources: Effect.Effect<ReadonlyArray<CatalogSource>>;
   }
 >()("agent-host/ModelCatalog") {}
 
 /**
- * The well-known models of each provider whose key the environment holds, in the order `known` has
- * them, then the local server's. The keys are read when the layer is built.
+ * The catalog of the well-known models of each provider whose key the environment holds, in the
+ * order `known` lists them, then the local server's models. The keys are read when the layer is
+ * built.
  */
 export const KeyedAndLocalCatalog = Layer.effect(
   ModelCatalog,
@@ -69,47 +70,47 @@ export const KeyedAndLocalCatalog = Layer.effect(
   }),
 );
 
-/** The models the catalog lists, each source's in turn: the ones a host offers to pick. */
+/** The models that the catalog lists, source by source: the models a host offers to pick. */
 export const askable: Effect.Effect<ReadonlyArray<Asked>, never, ModelCatalog> = Effect.gen(function* () {
   const sources = yield* (yield* ModelCatalog).sources;
   return sources.flatMap(({ provider, models }) => (models ?? []).map((model) => ({ provider, model })));
 });
 
-/** No model has the name asked for; `close` are the names it is close to. */
+/** No model has the name asked for; `close` holds the names it is close to. */
 export class ModelNotFound extends Data.TaggedError("ModelNotFound")<{
   readonly name: string;
   readonly close: ReadonlyArray<string>;
 }> {}
 
-/** The model named is its source's, and the source (a server, at `at`) did not answer. */
+/** The named model belongs to a source (a server, at `at`) that did not answer. */
 export class SourceNotAnswering extends Data.TaggedError("SourceNotAnswering")<{
   readonly provider: ProviderName;
   readonly model: ModelName;
   readonly at: string | undefined;
 }> {}
 
-/** The model named is a well-known provider's, and the environment holds no key for it in `variable`. */
+/** The named model is a well-known provider's, and the environment holds no key for it in `variable`. */
 export class KeyNotSet extends Data.TaggedError("KeyNotSet")<{
   readonly provider: ProviderName;
   readonly variable: string;
 }> {}
 
-/** The names among `names` that `wanted` is close to: the same apart from case, or containing it. */
+/** Returns the names among `names` that `wanted` is close to: equal apart from case, or one containing the other. */
 const closeTo = (wanted: string, names: ReadonlyArray<string>): ReadonlyArray<string> => {
   const lower = wanted.toLowerCase();
   return names.filter((name) => name.toLowerCase() === lower || name.toLowerCase().includes(lower) || lower.includes(name.toLowerCase()));
 };
 
 /**
- * The provider and model a name gives:
+ * Returns the provider and model that a name refers to:
  *
  * - `<well-known provider>/…`: that provider's model, as named.
- * - `<other source>/…`: a model that source lists (`localhost/…`: the local server's).
- * - A name alone: the model of that name among the well-known ones, or else among the other
- *   sources'.
+ * - `<other source>/…`: a model that the source lists (`localhost/…`: the local server's).
+ * - A name alone: the well-known model of that name, or else another source's model of that name.
  *
- * A name not found fails with the names it is close to. A source that did not answer cannot be
- * asked; nor can a well-known provider whose key is not set, and the variable is named.
+ * Failures: a name that is not found fails with `ModelNotFound` and the names it is close to; a
+ * model of a source that did not answer fails with `SourceNotAnswering`; a model of a well-known
+ * provider whose key is not set fails with `KeyNotSet`, naming the variable.
  */
 export const targetOf = (name: string) =>
   Effect.gen(function* () {
@@ -122,7 +123,7 @@ export const targetOf = (name: string) =>
       if (prefix !== undefined && prefix in known) return { provider: prefix, model: name.slice(slash + 1) };
       if (named !== undefined) {
         const model = name.slice(slash + 1);
-        // A source that did not answer is found here, and said below not to answer.
+        // A source that did not answer is found here, and reported below as not answering.
         return named.models === undefined || named.models.some((each) => each === model) ? { provider: named.provider, model, source: named } : undefined;
       }
       const wellKnown = Object.keys(known).find((each) => name in (known[each] ?? {}));

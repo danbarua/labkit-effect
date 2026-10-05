@@ -17,17 +17,17 @@ import { localServer } from "./local-server.ts";
 
 const http = FetchHttpClient.layer;
 
-/** The providers reached with a key: each one's request, made with the key it is given. */
+/** The providers reached with a key: each provider's request function, made with its key. */
 const keyed: ReadonlyArray<{ readonly provider: string; readonly requestsWith: (key: Redacted.Redacted) => Effect.Effect<ProviderRequest> }> = [
   { provider: "anthropic", requestsWith: (key) => anthropicRequests().pipe(Effect.provide(AnthropicClient.layer({ apiKey: key }).pipe(Layer.provide(http)))) },
   { provider: "openai", requestsWith: (key) => openAiRequests().pipe(Effect.provide(OpenAiClient.layer({ apiKey: key }).pipe(Layer.provide(http)))) },
   { provider: "xai", requestsWith: (key) => xAiRequests().pipe(Effect.provide(xAiClient(key).pipe(Layer.provide(http)))) },
 ];
 
-/** The local server's request: it needs no key. */
+/** The local server's request function, which needs no key. */
 const local = openAiCompatRequests().pipe(Effect.provide(OpenAiCompatClient.layer({ apiUrl: localServer, apiKey: Redacted.make("none") }).pipe(Layer.provide(http))));
 
-/** One model client reaching every provider with a key set, and the local server. The keys are read when the layer is built. */
+/** One model client that reaches every provider with a key set, and the local server. The keys are read when the layer is built. */
 export const Clients = Layer.unwrap(
   Effect.suspend(() => {
     const requests: ReadonlyArray<Effect.Effect<readonly [ProviderName, ProviderRequest]>> = [
