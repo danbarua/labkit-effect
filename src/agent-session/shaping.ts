@@ -45,6 +45,18 @@ export function isObject(value: Json): value is Schema.JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Where a provider's own part came from, for the log: the model and turn of a response, or the window of a compaction. */
+const sourceOf = (part: Extract<ContextPart, { _tag: "Thinking" | "Unrecognised" }>): Record<string, unknown> => {
+  switch (part.from._tag) {
+    case "Response":
+      return { from: `${part.provider}/${part.from.model}`, turn: part.from.turn };
+    case "Compaction":
+      return { from: `${part.provider} compaction`, window: part.from.window };
+    default:
+      return part.from satisfies never;
+  }
+};
+
 /**
  * What a part left out of a request held, for the log: its kind, and for a part of a response the
  * provider that produced it; the fields of a JSON part; its length in characters; and its first 120
@@ -60,19 +72,19 @@ function describedPart(part: ContextPart): Record<string, unknown> {
         return part.text === "" ? asText(part.received) : part.text;
       case "Unrecognised":
         return asText(part.received);
-      default:
+      case "ToolCall":
+      case "ToolResult":
+      case "File":
         return JSON.stringify(part);
+      default:
+        return part satisfies never;
     }
   })();
   const parsed = part._tag === "Unrecognised" ? parseJson(part.received) : undefined;
   const fields = parsed !== undefined && "value" in parsed && isObject(parsed.value) ? Object.keys(parsed.value) : undefined;
   return {
     part: part._tag,
-    ...("provider" in part
-      ? part.from._tag === "Response"
-        ? { from: `${part.provider}/${part.from.model}`, turn: part.from.turn }
-        : { from: `${part.provider} compaction`, window: part.from.window }
-      : {}),
+    ...("provider" in part ? sourceOf(part) : {}),
     ...(fields === undefined ? {} : { fields }),
     chars: text.length,
     start: text.slice(0, 120),
@@ -117,6 +129,13 @@ export type SentBackTo = "Provider" | "Model";
  * Anywhere else, thinking with text goes as that text, in the adapter's form (`asText`); anything
  * else is left out, as only where it came from reads it.
  */
+/** Why a part produced by `provider`'s `model` does not go back to `target` as it was received, if it does not. */
+const elsewhereOf = (provider: string, model: string | undefined, target: Target, to: SentBackTo): string | undefined => {
+  if (provider !== target.provider) return `produced by ${provider}, not ${target.provider}`;
+  if (to === "Model" && model !== undefined && model !== target.model) return `produced by ${provider}/${model}, not ${target.provider}/${target.model}`;
+  return undefined;
+};
+
 export function sentBack(
   part: Extract<ContextPart, { _tag: "Thinking" | "Unrecognised" }>,
   target: Target,
@@ -124,12 +143,7 @@ export function sentBack(
   asText: (text: string) => Shaped,
 ): Shaped {
   const model = part.from._tag === "Response" ? part.from.model : undefined;
-  const elsewhere =
-    part.provider !== target.provider
-      ? `produced by ${part.provider}, not ${target.provider}`
-      : to === "Model" && model !== undefined && model !== target.model
-        ? `produced by ${part.provider}/${model}, not ${target.provider}/${target.model}`
-        : undefined;
+  const elsewhere = elsewhereOf(part.provider, model, target, to);
   if (elsewhere !== undefined) return part._tag === "Thinking" && part.text.length > 0 ? asText(part.text) : leftOut(part, elsewhere);
   const parsed = parseJson(part.received);
   return "value" in parsed ? { json: [parsed.value], supplied: [] } : leftOut(part, parsed.reason);
@@ -313,6 +327,13 @@ export function usageOf(counts: {
   };
 }
 
+/** The blobs a part refers to: a file's, or the output a tool's result holds in the store. */
+const blobsOf = (part: ContextPart): ReadonlyArray<BlobId> => {
+  if (part._tag === "File") return [part.blob.id];
+  if (part._tag === "ToolResult" && part.outcome._tag === "Succeeded" && part.outcome.output.body._tag === "Stored") return [part.outcome.output.body.id];
+  return [];
+};
+
 /** The bytes of every file `context` carries, read from the blob store; a file it does not hold is absent. */
 export const filesIn = (context: ModelContext): Effect.Effect<ReadonlyMap<BlobId, Uint8Array>> =>
   Effect.gen(function* () {
@@ -320,13 +341,7 @@ export const filesIn = (context: ModelContext): Effect.Effect<ReadonlyMap<BlobId
     const ids = [
       ...new Set(
         context.messages.flatMap((message) =>
-          message.parts.flatMap((part) =>
-            part._tag === "File"
-              ? [part.blob.id]
-              : part._tag === "ToolResult" && part.outcome._tag === "Succeeded" && part.outcome.output.body._tag === "Stored"
-                ? [part.outcome.output.body.id]
-                : [],
-          ),
+          message.parts.flatMap(blobsOf),
         ),
       ),
     ];
@@ -334,10 +349,16 @@ export const filesIn = (context: ModelContext): Effect.Effect<ReadonlyMap<BlobId
     return new Map(read.flatMap(([id, bytes]) => (bytes === undefined ? [] : [[id, bytes] as const])));
   });
 
+/** A number of bytes as a pointer says it: in bytes under a KiB, in whole KiB under a MiB, else in MiB to one decimal. */
+const sizeOf = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KiB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+};
+
 /** A file as pointer text the model can quote or follow with a tool: `[image/png, 68 KiB, a.png: blob://<id>]`. */
 export function blobPointer(blob: BlobRef): string {
-  const size = blob.size < 1024 ? `${blob.size} B` : blob.size < 1024 * 1024 ? `${Math.round(blob.size / 1024)} KiB` : `${(blob.size / 1024 / 1024).toFixed(1)} MiB`;
-  return `[${blob.mediaType}, ${size}${blob.name === undefined ? "" : `, ${blob.name}`}: blob://${blob.id}]`;
+  return `[${blob.mediaType}, ${sizeOf(blob.size)}${blob.name === undefined ? "" : `, ${blob.name}`}: blob://${blob.id}]`;
 }
 
 /** A file the model is not sent, as its pointer, saying so: `[not shown to you: image/png, 68 KiB, a.png: blob://<id>]`. */

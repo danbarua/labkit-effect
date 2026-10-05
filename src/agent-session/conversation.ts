@@ -8,11 +8,12 @@
  * with the provider that produced them; which provider reads them is its adapter's business.
  */
 
+import { Array as Arr, Option } from "effect";
 import { outcomeAsSent } from "./tool-output.ts";
 import type { BlobRef } from "../agent-machine/blob.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { CallId, NoticeText, Seq } from "../agent-machine/names.ts";
-import type { ToolOutcome } from "../agent-machine/observation.ts";
+import type { Observation, ToolOutcome } from "../agent-machine/observation.ts";
 import type { ContextMessage, ContextPart } from "./contracts.ts";
 import { sentIn } from "./sent.ts";
 
@@ -103,8 +104,29 @@ function messages(fact: Fact, texts: ReturnType<typeof inputTexts>, calls: Calls
       ];
     case "NoticeInserted":
       return [noticeMessage([observation.text])];
-    default:
+    case "SessionOpened":
+    case "InputArrived":
+    case "InputCancelled":
+    case "TurnStarted":
+    case "TurnInterrupted":
+    case "TurnEndReviewed":
+    case "TurnHoldsExhausted":
+    case "ModelRequestDispatched":
+    case "ModelAttemptFailed":
+    case "ModelFailed":
+    case "ModelVetoed":
+    case "ModelChangeArrived":
+    case "SettingAdjusted":
+    case "ToolCallArrived":
+    case "ToolCallDispatched":
+    case "ToolEnded":
+    case "PermissionAsked":
+    case "PermissionAnswered":
+    case "CompactionWindow":
+    case "McpServerChanged":
       return [];
+    default:
+      return observation satisfies never;
   }
 }
 
@@ -136,11 +158,12 @@ export function conversationOf(facts: ReadonlyArray<Fact>, all: ReadonlyArray<Fa
  * Input texts and how tool calls ended are looked up in `all`, as for `conversationOf`.
  */
 export function nextMessages(facts: ReadonlyArray<Fact>, all: ReadonlyArray<Fact> = facts): ReadonlyArray<ContextMessage> {
-  for (let at = facts.length - 1; at >= 0; at--) {
-    const fact = facts[at];
-    if (fact?._tag === "Observed" && fact.observation._tag === "ModelRequestDispatched") {
-      return merged([...sentIn(fact.observation.sent).messages, ...conversationOf(facts.slice(at + 1), all)]);
-    }
-  }
-  return conversationOf(facts, all);
+  const at = Option.getOrElse(Arr.findLastIndex(facts, isRequest), () => -1);
+  const request = facts[at];
+  if (request === undefined || !isRequest(request)) return conversationOf(facts, all);
+  return merged([...sentIn(request.observation.sent).messages, ...conversationOf(facts.slice(at + 1), all)]);
 }
+
+type Request = Extract<Fact, { _tag: "Observed" }> & { readonly observation: Extract<Observation, { _tag: "ModelRequestDispatched" }> };
+
+const isRequest = (fact: Fact): fact is Request => fact._tag === "Observed" && fact.observation._tag === "ModelRequestDispatched";

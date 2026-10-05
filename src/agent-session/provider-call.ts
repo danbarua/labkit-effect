@@ -152,8 +152,11 @@ const fromHttp =
         return failure(caller, AiError.NetworkError.fromRequestError(reason));
       case "DecodeError":
         return bodyCut(caller, reason.request, `The response body could not be read to its end: ${reason.cause instanceof Error ? reason.cause.message : reason.message}`, reason.cause);
-      default:
+      case "EmptyBodyError":
+      case "StatusCodeError":
         return failure(caller, new AiError.UnknownError({ description: reason.message }));
+      default:
+        return reason satisfies never;
     }
   };
 
@@ -216,8 +219,10 @@ const quietFails = (caller: Caller, response: HttpClientResponse.HttpClientRespo
           return failure(caller, new AiError.UnknownError({ description: "The event stream asked to be retried" }));
         case "SseError":
           return failure(caller, new AiError.InvalidOutputError({ description: `The event stream could not be read: ${error.message}` }));
-        default:
+        case "HttpClientError":
           return fromHttp(caller)(error);
+        default:
+          return error satisfies never;
       }
     }),
     // Chat Completions ends its stream with a `[DONE]` that is not JSON.
@@ -266,6 +271,14 @@ interface Attempted {
  * what a rate limit says to wait when it says. Each retry is logged before its wait, and a retryable
  * failure that came after the response began is logged as not retried.
  */
+/** Why a retryable failure is not retried, if it is not: the provider had begun to respond, or a rate limit says to wait longer than `longest`. */
+const notRetriedBecause = (began: boolean, reason: AiError.AiErrorReason, longest: Duration.Duration): string | undefined => {
+  if (began) return "the provider had begun to respond";
+  if (reason._tag === "RateLimitError" && reason.retryAfter !== undefined && Duration.isGreaterThan(Duration.fromInputUnsafe(reason.retryAfter), longest))
+    return `the rate limit's wait, ${Duration.format(Duration.fromInputUnsafe(reason.retryAfter))}, is longer than ${Duration.format(longest)}`;
+  return undefined;
+};
+
 const retrying = (retries: Retries) =>
   Schedule.exponential(retries.firstWait).pipe(
     Schedule.while(({ input, attempt }: Schedule.Metadata<Duration.Duration, Attempted>) =>
@@ -273,11 +286,7 @@ const retrying = (retries: Retries) =>
         const reason = input.error.reason;
         if (!reason.isRetryable || attempt > retries.times) return false;
         const longest = Duration.fromInputUnsafe(retries.longestWait ?? "1 minute");
-        const why = input.began
-          ? "the provider had begun to respond"
-          : reason._tag === "RateLimitError" && reason.retryAfter !== undefined && Duration.isGreaterThan(Duration.fromInputUnsafe(reason.retryAfter), longest)
-            ? `the rate limit's wait, ${Duration.format(Duration.fromInputUnsafe(reason.retryAfter))}, is longer than ${Duration.format(longest)}`
-            : undefined;
+        const why = notRetriedBecause(input.began, reason, longest);
         if (why === undefined) return true;
         yield* Effect.logWarning(logKeys.provider.notRetried, { reason: reason._tag, message: input.error.message, why });
         return false;
