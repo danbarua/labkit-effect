@@ -67,6 +67,13 @@ test("AA8: a turn whose last response the provider refused stops with refusal, w
   ]);
 });
 
+test("AA8: refusal is read from the turn's last response: one refused after a call stops with refusal", () => {
+  const call = { _tag: "ToolCall", call: "c1", tool: "ls", input: json({}) };
+  expect(
+    ended(responded([call], "Complete"), { _tag: "ToolCallDispatched", call: "c1" }, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json([]) } }, responded([], "Refused")),
+  ).toEqual([expect.any(String), { stopReason: "refusal" }]);
+});
+
 test("AA8: a turn that has not ended has no stop reason", () => {
   expect(ended()).toEqual([undefined, undefined]);
 });

@@ -29,14 +29,14 @@ import { immutableToolCatalogOf } from "../agent-session/configuration/session-s
 import { readFacts } from "../agent-session/file-session-store.ts";
 import type { Services } from "../agent-session/loop.ts";
 import { ModelStream, ModelStreamInterval } from "../agent-session/model-stream.ts";
-import { receivedJson, receivedText } from "../agent-session/received.ts";
+import { asText, receivedJson, receivedText } from "../agent-session/received.ts";
 import type { SessionStore } from "../agent-session/session-store.ts";
 import { logKeys as mcpLogKeys } from "../agent-mcp/log-keys.ts";
 import { test, testFolder } from "../../tests/support/test.ts";
 import { makeHost } from "./host.ts";
 import { logKeys } from "./log-keys.ts";
 import { presentFrom, project } from "./projection.ts";
-import type { World } from "./world.ts";
+import { maxFileBytes, type World } from "./world.ts";
 
 const info = { name: "labkit-effect-test", version: "0.0.0" };
 const clientInfo = { name: "an-sdk-client", version: "1.0.0" };
@@ -1682,4 +1682,46 @@ test("AL7 AL8: session/load of an unknown session is -32002, a relative cwd -326
     { doing: "session/resume", cause: expect.stringContaining("already loaded") },
   ]);
   expect(host.logged.filter((each) => each.key === logKeys.session.loaded)).toHaveLength(1);
+});
+
+test("AG17: an editor that writes files and does not read them is offered write_file, not edit_file", async () => {
+  const host = startHost({ script: [answer({ _tag: "Text", text: "Hi." })] });
+  const { app } = sdkClient();
+  const sessionId = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, { fs: { readTextFile: false, writeTextFile: true } });
+    const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "Hello"));
+    return created.sessionId;
+  });
+  await host.stop();
+  const facts = await factsOn(storeFileOf(host.directory, sessionId));
+  expect((await Effect.runPromise(immutableToolCatalogOf(facts))).map((tool): string => tool.name)).toEqual(["write_file", "update_plan"]);
+});
+
+test("AG17: a file read over 256 KiB is cut before a character, not inside it; a call's title names its command before its path", async () => {
+  const content = `${"a".repeat(maxFileBytes - 1)}é and more`;
+  const host = startHost({
+    script: [
+      answer(
+        { _tag: "ToolCall", call: "read-1", tool: "read_file", input: { path: "big.txt" } },
+        { _tag: "ToolCall", call: "plan-1", tool: "update_plan", input: { command: "ls", path: "a.txt" } },
+      ),
+      answer({ _tag: "Text", text: "Done." }),
+    ],
+  });
+  const { app, log } = sdkClient(undefined, { [join(testFolder(), "work", "big.txt")]: content });
+  const sessionId = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "Read it"));
+    return created.sessionId;
+  });
+  await host.stop();
+  const facts = await factsOn(storeFileOf(host.directory, sessionId));
+  const read = observed(facts).flatMap((fact) => (fact.observation._tag === "ToolEnded" && fact.observation.call === "read-1" ? [fact.observation.outcome] : []))[0];
+  if (read?._tag !== "Succeeded") throw new Error(`read_file did not succeed: ${JSON.stringify(read)}`);
+  const omitted = Buffer.byteLength(content) - (maxFileBytes - 1);
+  expect(asText(read.output)).toBe(`${"a".repeat(maxFileBytes - 1)}\n[Cut at 256 KiB: ${omitted} bytes left out. Read the rest with line and limit.]`);
+  const announced = log.updates.find((update) => update.sessionUpdate === "tool_call" && update.toolCallId === "plan-1");
+  expect(announced !== undefined && "title" in announced ? announced.title : undefined).toBe("update_plan: ls");
 });
