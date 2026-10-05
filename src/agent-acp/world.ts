@@ -23,7 +23,7 @@
 
 import type { Environment } from "../agent-process/environment.ts";
 import { isAbsolute, relative, resolve } from "node:path";
-import { Duration, Effect, FileSystem, Option, Schema } from "effect";
+import { Duration, Effect, FileSystem, HashMap, Option, Ref, Schema } from "effect";
 import type { AgentConnection } from "effective-acp/agent";
 import type { V1Version } from "effective-acp/protocol";
 import { type McpServer, type SessionId, type TerminalId, ToolCallId } from "effective-acp/schema/v1";
@@ -109,11 +109,15 @@ const inside = (root: string, path: string): { readonly full: string } | { reado
 const cut = (text: string, max: number): { readonly kept: string; readonly omitted: number } => {
   const bytes = Buffer.from(text, "utf8");
   if (bytes.length <= max) return { kept: text, omitted: 0 };
-  let end = max;
-  // A continuation byte (10xxxxxx) is inside a character: step back to the character's first byte.
-  while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) end--;
+  const end = characterStart(bytes, max);
   return { kept: bytes.subarray(0, end).toString("utf8"), omitted: bytes.length - end };
 };
+
+/** `at`, or, when the byte there is inside a character (a continuation byte, 10xxxxxx), the position of the character's first byte. */
+const characterStart = (bytes: Uint8Array, at: number): number => (at > 0 && ((bytes[at] ?? 0) & 0xc0) === 0x80 ? characterStart(bytes, at - 1) : at);
+
+/** `tool`, offered when `offered` holds. */
+const offeredIf = (offered: boolean, tool: ToolSpec): ReadonlyArray<ToolSpec> => (offered ? [tool] : []);
 
 /**
  * A command's outcome, for the model to read: its output, then how it ended. One that exited 0
@@ -146,6 +150,12 @@ const noted = (outcome: ToolOutcome, note: string): ToolOutcome => {
   return outcome.reason._tag === "Reported" ? reported(`${asText(outcome.reason.error)}${note}`) : outcome;
 };
 
+/** What a call is about, for its title: its command, else its path. */
+const aboutOf = (input: Readonly<Record<string, unknown>>): string | undefined => {
+  if (typeof input["command"] === "string") return input["command"];
+  return typeof input["path"] === "string" ? input["path"] : undefined;
+};
+
 /** What a failed call to the editor is, for the model to read. */
 const editorFailure = (method: string, path: string, error: { readonly _tag?: string; readonly message?: string; readonly reason?: string }): string =>
   `${method} ${path}: ${error._tag === "PeerClosed" ? `the editor's connection closed (${error.reason ?? ""})` : (error.message ?? error._tag ?? "the editor gave no reason")}`;
@@ -159,47 +169,44 @@ export const editorWorld: World = {
     Effect.sync(() => {
       const fs = connection.profile.client.capabilities.fs;
       const scope = ` Relative paths are inside the working folder, ${cwd}.`;
-      const tools: Array<ToolSpec> = [];
-      if (fs?.readTextFile === true)
-        tools.push({
+      const tools: ReadonlyArray<ToolSpec> = [
+        ...offeredIf(fs?.readTextFile === true, {
           name: ToolName.make("read_file"),
           kind: "read",
           replay: "safe",
           description: `Read a UTF-8 file as the editor has it, unsaved changes included, at most 256 KiB per result. Use line (1-based) and limit (a count of lines) to read a large file in parts, for example {"path": "src/a.ts", "line": 1, "limit": 100}.${scope}`,
           input: jsonSchemaOf(ReadFile),
-        });
-      if (fs?.writeTextFile === true)
-        tools.push({
+        }),
+        ...offeredIf(fs?.writeTextFile === true, {
           name: ToolName.make("write_file"),
           kind: "edit",
           replay: "idempotent",
           description: `Create a UTF-8 file, or replace one, with the content given, at most 256 KiB, through the editor.${scope}`,
           input: jsonSchemaOf(WriteFile),
-        });
-      if (fs?.readTextFile === true && fs.writeTextFile === true)
-        tools.push({
+        }),
+        ...offeredIf(fs?.readTextFile === true && fs.writeTextFile === true, {
           name: ToolName.make("edit_file"),
           kind: "edit",
           replay: "unsafe",
           description: `Replace one occurrence of old_text in a UTF-8 file with new_text, through the editor, its unsaved changes included. old_text must occur exactly once: include enough of the lines around it to make it so.${scope}`,
           input: jsonSchemaOf(EditFile),
-        });
-      tools.push({
-        name: ToolName.make("update_plan"),
-        kind: "think",
-        replay: "safe",
-        description:
-          "Record your plan for the task as a list of steps, each pending, in_progress or completed, with an optional priority (high, medium, low); the user sees it in the editor. Send the whole list each time it changes; keep one step in_progress while you work on it.",
-        input: jsonSchemaOf(UpdatePlan),
-      });
-      if (connection.profile.client.capabilities.terminal === true)
-        tools.push({
+        }),
+        {
+          name: ToolName.make("update_plan"),
+          kind: "think",
+          replay: "safe",
+          description:
+            "Record your plan for the task as a list of steps, each pending, in_progress or completed, with an optional priority (high, medium, low); the user sees it in the editor. Send the whole list each time it changes; keep one step in_progress while you work on it.",
+          input: jsonSchemaOf(UpdatePlan),
+        },
+        ...offeredIf(connection.profile.client.capabilities.terminal === true, {
           name: ToolName.make("run_command"),
           kind: "execute",
           replay: "unsafe",
           description: `Run a shell command (sh -c) in the editor's terminal, in the working folder, and get its output (the last 256 KiB) and how it exited. It is stopped after timeout_seconds (${commandSeconds} unless given; at most 600). Use it to list and search files (ls, find, grep), run tests and use git.${scope}`,
           input: jsonSchemaOf(RunCommand),
-        });
+        }),
+      ];
 
       const read = (input: typeof ReadFile.Type) => {
         const at = inside(cwd, input.path);
@@ -251,7 +258,7 @@ export const editorWorld: World = {
       };
 
       // The terminal each command ran in, by call: shown in the call as it runs, and when it has ended.
-      const terminals = new Map<CallId, TerminalId>();
+      const terminals = Ref.makeUnsafe(HashMap.empty<CallId, TerminalId>());
 
       // The terminal is released however the call ends, which stops a command still running.
       const runCommand = (call: CallId) => (input: typeof RunCommand.Type) => {
@@ -259,7 +266,7 @@ export const editorWorld: World = {
         return Effect.acquireUseRelease(
           connection.client["terminal/create"]({ sessionId, command: "/bin/sh", args: ["-c", input.command], cwd, outputByteLimit: maxFileBytes }),
           ({ terminalId }) =>
-            Effect.sync(() => terminals.set(call, terminalId)).pipe(
+            Ref.update(terminals, HashMap.set(call, terminalId)).pipe(
               Effect.andThen(
                 connection
                   .notify("session/update", { sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: ToolCallId.make(call), content: [{ type: "terminal", terminalId }] } })
@@ -331,9 +338,10 @@ export const editorWorld: World = {
       const present: Present = (call, outcome) => {
         const parsed = parseJson(call.input);
         const input = "value" in parsed && typeof parsed.value === "object" && parsed.value !== null ? (parsed.value as Record<string, unknown>) : {};
-        const about = typeof input["command"] === "string" ? input["command"] : typeof input["path"] === "string" ? input["path"] : undefined;
+        const about = aboutOf(input);
         const shown = { ...plain(call, outcome), ...(about === undefined ? {} : { title: `${call.tool}: ${oneLine(about)}` }) };
-        const terminalId = terminals.get(call.call);
+        // `present` is called synchronously, so the terminals are read outside an Effect.
+        const terminalId = Option.getOrUndefined(HashMap.get(Ref.getUnsafe(terminals), call.call));
         if (call.tool === "run_command" && terminalId !== undefined) return { ...shown, content: [{ type: "terminal", terminalId }] };
         const at = typeof input["path"] === "string" ? inside(cwd, input["path"]) : undefined;
         if (at === undefined || "problem" in at) return shown;

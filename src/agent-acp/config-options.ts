@@ -23,7 +23,7 @@
  * it is the value now changes nothing.
  */
 
-import { Data, Schema } from "effect";
+import { Array as Arr, Data, Order, Schema } from "effect";
 import type { SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption } from "effective-acp/schema/v1";
 import { SessionConfigId, SessionConfigValueId } from "effective-acp/schema/v1";
 import { TokenCount } from "../agent-machine/names.ts";
@@ -89,9 +89,7 @@ const modelsOffered = (options: Options, models: ReadonlyArray<Asked>): Readonly
 
 /** The output limits to offer: the presets up to `limit`, `limit`, and `now`, least first. */
 const outputLimits = (limit: number | undefined, now: number | undefined): ReadonlyArray<number> =>
-  [...new Set([...outputPresets.filter((tokens) => limit === undefined || tokens <= limit), ...(limit === undefined ? [] : [limit]), ...(now === undefined ? [] : [now])])].sort(
-    (a, b) => a - b,
-  );
+  Arr.sort(new Set([...outputPresets.filter((tokens) => limit === undefined || tokens <= limit), ...(limit === undefined ? [] : [limit]), ...(now === undefined ? [] : [now])]), Order.Number);
 
 /** The values of `setting` to offer, by id and name, and the one now; `not_sent` is among them when nothing is sent. */
 const valuesOf = (setting: SettingOption, limit: number | undefined): { readonly values: ReadonlyArray<SessionConfigSelectOption>; readonly now: string } => {

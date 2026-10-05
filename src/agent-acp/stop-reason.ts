@@ -13,7 +13,7 @@
  * | any, when the turn's last response was `Refused` | `refusal` |
  */
 
-import { Schema } from "effect";
+import { Array as Arr, Option, Schema } from "effect";
 import { ErrorCode, type JsonRpcErrorObject } from "effective-acp/json-rpc";
 import type { StopReason } from "effective-acp/schema/v1";
 import type { Ending } from "../agent-machine/decision.ts";
@@ -52,7 +52,7 @@ const stopFor = (ending: Ending): Stop => {
 export function stopOf(facts: ReadonlyArray<Fact>, turn: TurnId): Stop | undefined {
   const ended = facts.find((fact) => fact._tag === "Decided" && fact.decision._tag === "TurnEnded" && fact.decision.turn === turn);
   if (ended?._tag !== "Decided" || ended.decision._tag !== "TurnEnded") return undefined;
-  const last = [...facts].reverse().find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded" && fact.observation.turn === turn);
+  const last = Option.getOrUndefined(Arr.findLast(facts, (fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded" && fact.observation.turn === turn));
   const refused = last?._tag === "Observed" && last.observation._tag === "ModelResponded" && last.observation.ending._tag === "Refused";
   return refused ? { stopReason: "refusal" } : stopFor(ended.decision.ending);
 }

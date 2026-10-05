@@ -3,7 +3,7 @@
  * it was made for and its title; and `session/list` over the stored sessions, a page at a time.
  */
 
-import { Data, Option, Schema } from "effect";
+import { Array as Arr, Data, Option, Order, Schema } from "effect";
 import type { ListSessionsResponse, SessionInfo } from "effective-acp/schema/v1";
 import { SessionId } from "effective-acp/schema/v1";
 
@@ -56,6 +56,12 @@ const positionFrom = (cursor: string): readonly [number, string] | undefined => 
 };
 const cursorAt = (at: number, sessionId: string): string => Buffer.from(JSON.stringify([at, sessionId])).toString("base64url");
 
+/** Sessions by when they were last written, the latest first (one never written last), then by id. */
+const latestFirst: Order.Order<{ readonly sessionId: string; readonly at: Date | undefined }> = Order.combine(
+  Order.mapInput(Order.flip(Order.Number), (each) => each.at?.getTime() ?? 0),
+  Order.mapInput(Order.String, (each) => each.sessionId),
+);
+
 /**
  * One page of `session/list`. Only sessions whose record reads are listed, and only those made for
  * `request.cwd` when it is given. They are in the order of when they were last written, the latest
@@ -71,17 +77,15 @@ export const pageOf = (
 ): ListSessionsResponse | InvalidCursor => {
   const after = request.cursor === undefined || request.cursor === null ? undefined : positionFrom(request.cursor);
   if (request.cursor !== undefined && request.cursor !== null && after === undefined) return new InvalidCursor({ cursor: request.cursor });
-  const listed = stored
-    .flatMap((each) => {
-      const record = readSessionRecord(each.record);
-      return record === undefined || (typeof request.cwd === "string" && record.cwd !== request.cwd) ? [] : [{ sessionId: each.sessionId, at: each.at, record }];
-    })
-    .sort((a, b) => (b.at?.getTime() ?? 0) - (a.at?.getTime() ?? 0) || (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0))
-    .filter((each) => {
-      if (after === undefined) return true;
-      const time = each.at?.getTime() ?? 0;
-      return time < after[0] || (time === after[0] && each.sessionId > after[1]);
-    });
+  const readable = stored.flatMap((each) => {
+    const record = readSessionRecord(each.record);
+    return record === undefined || (typeof request.cwd === "string" && record.cwd !== request.cwd) ? [] : [{ sessionId: each.sessionId, at: each.at, record }];
+  });
+  const listed = Arr.sort(readable, latestFirst).filter((each) => {
+    if (after === undefined) return true;
+    const time = each.at?.getTime() ?? 0;
+    return time < after[0] || (time === after[0] && each.sessionId > after[1]);
+  });
   const page = listed.slice(0, Math.max(1, size));
   const last = page.at(-1);
   const sessions = page.map(
