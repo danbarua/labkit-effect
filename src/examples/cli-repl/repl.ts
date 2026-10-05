@@ -184,7 +184,10 @@ const following = (session: Session) =>
     const inbox = yield* Queue.unbounded<ProjectionInput>();
     const before = yield* session.facts;
     const present = presentFrom(yield* immutableToolCatalogOf(before));
-    const state = yield* Ref.make((yield* project(before, { mode: "replay", present })).state);
+    const replayed = (yield* project(before, { mode: "replay", present })).state;
+    const state = yield* Ref.make(replayed);
+    // The turns whose end the follower has taken, every update printed: those that ended before it followed, then each it takes.
+    const taken = yield* Ref.make<ReadonlySet<TurnId>>(replayed.ended);
     // What completes when each turn's end is taken, by the turn: made when first asked for.
     const ends = yield* Ref.make(HashMap.empty<TurnId, Deferred.Deferred<void>>());
     const endOf = (turn: TurnId): Effect.Effect<Deferred.Deferred<void>> =>
@@ -198,7 +201,8 @@ const following = (session: Session) =>
         }),
       );
     const keys = turnKeys();
-    yield* Ref.update(followers, HashMap.set(session, { keys, turnEnded: (turn: TurnId) => Effect.flatMap(endOf(turn), Deferred.await) }));
+    const turnEnded = (turn: TurnId) => Effect.flatMap(Ref.get(taken), (ended) => (ended.has(turn) ? Effect.void : Effect.flatMap(endOf(turn), Deferred.await)));
+    yield* Ref.update(followers, HashMap.set(session, { keys, turnEnded }));
     // The kind of text the line printed last holds, while it is not ended.
     const open = yield* Ref.make<"answer" | "thinking" | undefined>(undefined);
     const write = (text: string) => Effect.sync(() => void process.stdout.write(text));
@@ -239,10 +243,15 @@ const following = (session: Session) =>
         if (input._tag === "ModelResponseEnded") yield* endLine;
         if (input._tag === "Observed") yield* acted(input);
         if (input._tag === "Decided" && input.decision._tag === "TurnEnded") {
+          const turn = input.decision.turn;
           yield* endLine;
-          yield* Deferred.succeed(yield* endOf(input.decision.turn), undefined);
+          yield* Ref.update(taken, (ended) => new Set([...ended, turn]));
+          yield* Deferred.succeed(yield* endOf(turn), undefined);
         }
-      });
+      }).pipe(
+        // A defect in one input (a presentation or a write that throws) is logged; the follower goes on with the next.
+        Effect.catchDefect((defect) => Effect.logError("cli.follow.input_failed", { input: input._tag, cause: String(defect) })),
+      );
     const forward = <A extends ProjectionInput>(subscription: PubSub.Subscription<A>) =>
       Effect.forever(PubSub.take(subscription).pipe(Effect.flatMap((item) => Queue.offer(inbox, item))));
     yield* Effect.forkScoped(forward(recorded));

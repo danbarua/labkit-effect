@@ -20,7 +20,7 @@ import { CountingTurns } from "../../agent-session/turns.ts";
 import { BoringContextAssembler } from "../../../tests/support/boring.ts";
 import { runTest } from "../../../tests/support/run.ts";
 import { replyOf, repl, Terminal } from "./repl.ts";
-import type { Config } from "./session.ts";
+import { ask, type Config } from "./session.ts";
 
 /** What is printed after a turn whose one response said `text` and ended `ending`; `printed`, whether it was printed as it arrived. */
 const replied = (text: string, ending: string, printed = false) => {
@@ -95,39 +95,45 @@ const thinkingThenOk = (streams: boolean) => {
   return { asked, layer };
 };
 
-/** The REPL, followed at a terminal, typed `lines` with `model`: what it wrote to stdout, and the lines it logged after its banner. */
-const typedTo = async (model: ReturnType<typeof thinkingThenOk>, lines: ReadonlyArray<string>) => {
+/** The services the REPL tests run with: `model`, no tools, and a console the test reads. */
+const services = (model: ReturnType<typeof thinkingThenOk>) =>
+  Layer.mergeAll(
+    BunServices.layer,
+    KeyedAndLocalCatalog,
+    ModelFromFacts,
+    BoringContextAssembler,
+    model.layer,
+    CountingTurns,
+    TestConsole.layer,
+    Layer.succeed(ToolRunner, { run: () => Effect.die("no tools") }),
+  );
+
+const opening = openedWith({ session: SessionId.make("s1"), model: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") }, system: undefined, tools: [] });
+
+/**
+ * The REPL, followed at a terminal, typed `lines` with `model`: what it wrote to stdout, and the
+ * lines it logged after its banner. With `failFirstWrite`, the first write to stdout throws.
+ */
+const typedTo = async (model: ReturnType<typeof thinkingThenOk>, lines: ReadonlyArray<string>, failFirstWrite = false) => {
   const written: Array<string> = [];
   const write = process.stdout.write.bind(process.stdout);
   process.stdout.write = ((chunk: string | Uint8Array) => {
+    if (failFirstWrite && written.length === 0) {
+      written.push("");
+      throw new Error("stdout is closed");
+    }
     written.push(String(chunk));
     return true;
   }) as typeof process.stdout.write;
   const logged = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
-      yield* session.observe(
-        openedWith({ session: SessionId.make("s1"), model: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") }, system: undefined, tools: [] }),
-      );
+      yield* session.observe(opening);
       yield* Terminal.follow(session);
       const config = { sessionId: "s1", target: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") } } as unknown as Config;
       yield* repl(session, config, undefined, true).pipe(Effect.provideService(EffectTerminal.Terminal, yield* typing(lines)));
       return yield* TestConsole.logLines;
-    }).pipe(
-      Effect.provide(
-        Layer.mergeAll(
-          BunServices.layer,
-          KeyedAndLocalCatalog,
-          ModelFromFacts,
-          BoringContextAssembler,
-          model.layer,
-          CountingTurns,
-          TestConsole.layer,
-          Layer.succeed(ToolRunner, { run: () => Effect.die("no tools") }),
-        ),
-      ),
-      Effect.provideService(ModelStreamInterval, Millis.make(0)),
-    ),
+    }).pipe(Effect.provide(services(model)), Effect.provideService(ModelStreamInterval, Millis.make(0))),
   ).finally(() => {
     process.stdout.write = write;
   });
@@ -145,5 +151,26 @@ test("the REPL: Enter on an empty line asks nothing, a line naming no command sa
 test("the REPL: an answer that did not stream is printed once, from the response, when it arrives", async () => {
   const { written, logged } = await typedTo(thinkingThenOk(false), ["hello", "/exit"]);
   expect(written).toBe("\x1b[2mthink\x1b[0m\nok\n");
+  expect(logged).toEqual([]);
+});
+
+test("the REPL: a write to the terminal that fails is logged, and later turns are followed and answered", async () => {
+  const model = thinkingThenOk(true);
+  const { written } = await typedTo(model, ["hello", "again", "/exit"], true);
+  expect(model.asked).toHaveLength(2);
+  expect(written).toContain("ok");
+});
+
+test("the REPL: after going on with a turn that ended before it followed the session, it does not wait for that turn's end", async () => {
+  const logged = await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
+      yield* session.observe(opening);
+      yield* ask(session, "hello");
+      yield* Terminal.follow(session);
+      yield* Terminal.wentOn(session).pipe(Effect.timeoutOrElse({ duration: "2 seconds", orElse: () => Effect.die(new Error("the REPL waited for a turn that had ended")) }));
+      return yield* TestConsole.logLines;
+    }).pipe(Effect.provide(services(thinkingThenOk(false)))),
+  );
   expect(logged).toEqual([]);
 });
