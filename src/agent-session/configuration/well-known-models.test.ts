@@ -2,7 +2,9 @@
 
 import { expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
-import type { SettingsFor } from "./well-known-models.ts";
+import { Effect } from "effect";
+import { ModelName, ProviderName } from "../../agent-machine/names.ts";
+import { capabilitiesOf, knownCapabilities, KnownModels, type SettingsFor, wellKnown, withOverrides } from "./well-known-models.ts";
 
 test("a well-known model's settings type takes the efforts it takes, and thinking off only with effort none", () => {
   // grok-4.7 takes low to xhigh, as models.dev lists it: no max, and no none, so thinking cannot be off.
@@ -24,4 +26,17 @@ test("a well-known model's settings type takes the efforts it takes, and thinkin
   // gpt-5.3-chat-latest does not reason: models.dev lists no efforts for it, so the type takes any.
   const chat: SettingsFor<"openai", "gpt-5.3-chat-latest"> = { effort: "low" };
   expect([grok, tooHigh, noOff, sol, pro, proLow, fable, fableOff, chat]).toHaveLength(9);
+});
+
+test("a user's override of a model replaces the fields it gives and keeps the rest; a model no source knows takes the override alone; other models are as known", async () => {
+  const overrides = new Map([
+    ["xai/grok-4.7", { efforts: ["minimal", "low", "medium", "high", "xhigh"] }],
+    ["localhost/qwen", { context: 32768, output: 8192 }],
+  ]);
+  const known = (provider: string, model: string) =>
+    Effect.runPromise(knownCapabilities(ProviderName.make(provider), ModelName.make(model)).pipe(Effect.provideService(KnownModels, withOverrides(overrides, [wellKnown]))));
+  expect((await known("xai", "grok-4.7")) as unknown).toEqual({ ...capabilitiesOf("xai", "grok-4.7"), efforts: ["minimal", "low", "medium", "high", "xhigh"] });
+  expect(await known("localhost", "qwen")).toEqual({ input: [], price: { input: 0, output: 0 }, context: 32768, output: 8192 });
+  expect(await known("xai", "grok-4.6")).toEqual(capabilitiesOf("xai", "grok-4.6"));
+  expect(await known("localhost", "other")).toBeUndefined();
 });

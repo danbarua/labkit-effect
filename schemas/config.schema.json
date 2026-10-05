@@ -411,6 +411,73 @@
       "items": {
         "type": "string"
       }
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "models": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "context": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "output": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "input": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "reasoning": {
+                    "type": "boolean"
+                  },
+                  "efforts": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "budget": {
+                    "type": "object",
+                    "properties": {
+                      "min": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "max": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "required": [
+                      "min"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "additionalProperties": false

@@ -73,6 +73,8 @@ that names either is refused.
 | `maxHolds` | How many times the turn-end hooks may hold one turn open. Required when `turnEnd` lists hooks. |
 | `mcpServers` | MCP servers by name. |
 | `extensions` | Module paths, absolute or relative to the file's folder. |
+| `model` | The model that a new session asks unless the command line names another, as `provider/model`. |
+| `models` | What is known of models, by `provider/model`, over models.dev's catalog (see Models). |
 
 - A seam's entries become the session's list for that seam, in the same order. Each entry is made by
   its plug-in from its settings, which are the same on every list the entry is on.
@@ -132,6 +134,36 @@ built-ins are, for every layer to use.
 - `${VAR}` and `${VAR:-default}` in `command`, `args`, `env`, `url` and `headers` are replaced by the
   environment's values. A variable set to the empty string counts as not set. A variable that is
   not set and has no default is refused, naming the layer and the path.
+
+## Models
+
+What a host knows of a well-known model (its context window, output limit, kinds of input,
+efforts, thinking budget, price) is generated from models.dev's catalog
+(`agent-session/configuration/well-known-models.ts`). A local server's models are known by what the
+server lists. `models` overrides either, for one model at a time:
+
+```yaml
+model: anthropic/claude-sonnet-5-5
+models:
+  xai/grok-4.7:
+    efforts: [minimal, low, medium, high, xhigh]
+  localhost/qwen3.5-9b-8bit:
+    context: 32768
+    output: 8192
+```
+
+- An override's fields are `context`, `output`, `input`, `reasoning`, `efforts` and `budget`
+  (`min`, `max`). Any other field is refused, and so is a name that is not `provider/model`.
+- A field given replaces what is known of it whole; a field not given stays as known. Across
+  layers, a model's overrides merge field by field, as any mapping does. `null` under a model removes
+  its override, and `models: null` removes every earlier override.
+- A model that nothing knows takes the override's fields alone. It accepts no files and costs nothing,
+  as a model of which nothing is known does.
+- The hosts apply the overrides to what each session knows (`ModelOverrides`): the model a request is
+  shaped to, the ACP host's config options, and its `usage_update`.
+- `model` is the model a new session asks when `--model` (or its variable) names none. In the CLI a
+  continued or resumed session keeps the model it asked. In the ACP host, with neither, a session
+  starts with the catalog's first model.
 
 ## Command environment
 

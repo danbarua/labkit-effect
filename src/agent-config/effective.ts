@@ -7,6 +7,8 @@
  * - the MCP servers. Environment and headers are shown by name, never by value. Command, arguments
  *   and URL are shown as the layers wrote them (`${VAR}`, not the variable's value), with credential
  *   flag values redacted (`redactedArgs`);
+ * - the model that sessions start with, when the layers name one, and the overrides of what is known
+ *   of models;
  * - for every value that the layers wrote, the layer that wrote it last (`from`);
  * - what the host provides beside the layers (`host`).
  */
@@ -84,6 +86,8 @@ export const effectiveSettings = (layers: ReadonlyArray<LayerSource>, configurat
       ...(server.connectTimeout === undefined ? {} : { connectTimeout: Duration.format(Duration.fromInputUnsafe(server.connectTimeout)) }),
     };
   }),
+  ...(configuration.model === undefined ? {} : { model: configuration.model }),
+  models: Object.fromEntries(configuration.models) as Schema.Json,
   from: sourcesOf(layers),
   host,
   };

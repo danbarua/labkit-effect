@@ -25,3 +25,4 @@ The user's folder here:
 | `10_policies.yml` | Plug-ins, and the seam lists that use them. |
 | `20_mcp.yml` | MCP servers. |
 | `30_extensions.yml` | An extension, the plug-in it adds, and a seam list restated to use it. |
+| `40_models.yml` | The model that a new session asks, and what is known of models over models.dev's catalog. |

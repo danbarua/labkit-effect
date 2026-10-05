@@ -8,7 +8,8 @@
  * `well-known-models.measured.json` names the models to include, by provider, and for each holds what
  * was measured against the provider and is not in the catalog: the kinds of input it took when sent
  * them, and the price of an hour-long cache write. What was measured wins. A measured difference in
- * reasoning is not kept here: a user's configuration overrides it (`docs/agent-config-direction.md`).
+ * reasoning is not kept here: a user's configuration overrides it (`models:`, as
+ * `src/agent-config/fixtures/user/40_models.yml` shows).
  *
  *   bun run models:refresh              # from models.dev
  *   bun run models:refresh <api.json>   # from a copy of the catalog

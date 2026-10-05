@@ -12,7 +12,8 @@
  * - Anthropic's hour-long cache writes, at twice the input price (the catalog has the five-minute rate).
  *
  * Where a provider takes efforts that the catalog does not list (xAI's models took `minimal` when
- * asked, 2026-10-01), a user's configuration is to override the catalog (`docs/agent-config-direction.md`).
+ * asked, 2026-10-01), a user's configuration overrides the catalog (`ModelOverrides`; the
+ * configuration's `models:`, as `src/agent-config/fixtures/user/40_models.yml` shows).
  *
  * Also measured: Anthropic refuses `max_tokens` above a model's output (Haiku 4.5: 64,000); OpenAI
  * accepts any `max_output_tokens`, so its limit cannot be read from a refusal.
@@ -22,7 +23,7 @@
  * not well-known (a local server's) is known by what its host provides (`KnownModels`), at run time.
  */
 
-import { Context, Effect } from "effect";
+import { Context, Effect, Schema } from "effect";
 import type { ModelName, ProviderName } from "../../agent-machine/names.ts";
 import type { Effort, ModelSettings, ThinkingMode } from "../../agent-machine/settings.ts";
 import { firstAnswer } from "../first-answer.ts";
@@ -83,6 +84,41 @@ export const wellKnown: ModelKnowledge = (provider, model) => Effect.succeed(cap
  * reports what its models accept) puts its own source first.
  */
 export const KnownModels = Context.Reference<ReadonlyArray<ModelKnowledge>>("agent-session/KnownModels", { defaultValue: () => [wellKnown] });
+
+const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
+
+/**
+ * What a user's configuration says of one model (`models:`, by `provider/model`), over what is known
+ * of it. Each field given replaces the known field whole; a field not given stays as known.
+ */
+export const ModelOverride = Schema.Struct({
+  context: Schema.optionalKey(Count),
+  output: Schema.optionalKey(Count),
+  input: Schema.optionalKey(Schema.Array(Schema.String)),
+  reasoning: Schema.optionalKey(Schema.Boolean),
+  efforts: Schema.optionalKey(Schema.Array(Schema.String)),
+  budget: Schema.optionalKey(Schema.Struct({ min: Count, max: Schema.optionalKey(Count) })),
+});
+export type ModelOverride = typeof ModelOverride.Type;
+
+/** The user's overrides, by `provider/model`; none unless a host provides them from its configuration. */
+export const ModelOverrides = Context.Reference<ReadonlyMap<string, ModelOverride>>("agent-session/ModelOverrides", { defaultValue: () => new Map() });
+
+/**
+ * Returns `sources` with `overrides` applied: a model that an override names has the first answer of
+ * `sources` with the override's fields over it. A model that no source knows takes the override's
+ * fields alone, accepting no files and costing nothing, as a model of which nothing is known does.
+ */
+export const withOverrides = (overrides: ReadonlyMap<string, ModelOverride>, sources: ReadonlyArray<ModelKnowledge>): ReadonlyArray<ModelKnowledge> =>
+  overrides.size === 0
+    ? sources
+    : [
+        (provider, model) =>
+          Effect.map(firstAnswer(sources.map((source) => source(provider, model))), (known) => {
+            const override = overrides.get(`${provider}/${model}`);
+            return override === undefined ? known : { ...(known ?? { input: [], price: { input: 0, output: 0 } }), ...override };
+          }),
+      ];
 
 /** Returns what is known of `model` of `provider`: the first answer of `KnownModels`. */
 export const knownCapabilities = (provider: ProviderName, model: ModelName): Effect.Effect<Capabilities | undefined> =>

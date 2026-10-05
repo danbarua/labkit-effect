@@ -5,7 +5,7 @@ import { Effect, Fiber, Layer, Logger } from "effect";
 import { TestClock } from "effect/testing";
 import { test } from "../../tests/support/test.ts";
 import { ModelName, ProviderName } from "../agent-machine/names.ts";
-import { capabilitiesOf, knownCapabilities } from "../agent-session/configuration/well-known-models.ts";
+import { capabilitiesOf, knownCapabilities, ModelOverrides } from "../agent-session/configuration/well-known-models.ts";
 import { logKeys } from "./log-keys.ts";
 import { KnownWithLocalServer, localCapabilities, localModels } from "./local-server.ts";
 
@@ -101,4 +101,23 @@ test("KnownWithLocalServer applies the local server's list to localhost models o
   );
   expect(known[0]?.context).toBe(999);
   expect(known[1]).toEqual(capabilitiesOf("openai", "gpt-5"));
+});
+
+test("KnownWithLocalServer applies the user's overrides over what the local server lists and the well-known models", async () => {
+  const listed = { models: [{ slug: "qwen", context_window: 999 }] };
+  const overrides = new Map([
+    ["localhost/qwen", { context: 32768 }],
+    ["xai/grok-4.7", { efforts: ["minimal", "low"] }],
+  ]);
+  const [local, grok] = await withFetch(
+    () => Promise.resolve(new Response(JSON.stringify(listed))),
+    () =>
+      Effect.runPromise(
+        Effect.all([knownCapabilities(ProviderName.make("localhost"), ModelName.make("qwen")), knownCapabilities(ProviderName.make("xai"), ModelName.make("grok-4.7"))]).pipe(
+          Effect.provide(KnownWithLocalServer.pipe(Layer.provide(Layer.succeed(ModelOverrides, overrides)))),
+        ),
+      ),
+  );
+  expect(local?.context).toBe(32768);
+  expect(grok as unknown).toEqual({ ...capabilitiesOf(ProviderName.make("xai"), ModelName.make("grok-4.7")), efforts: ["minimal", "low"] });
 });

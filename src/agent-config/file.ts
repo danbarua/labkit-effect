@@ -30,6 +30,7 @@ import { defaultBrand } from "../agent-host/brand.ts";
 import { builtins } from "./builtins.ts";
 import { merged } from "./merge.ts";
 import { type AnyPlugin, type Seam, seams } from "./plugin.ts";
+import { ModelOverride } from "../agent-session/configuration/well-known-models.ts";
 
 /** The name of the configuration's folders unless a caller gives another: the default brand's (`agent-host/brand.ts`). */
 export const configName = defaultBrand.name;
@@ -92,16 +93,22 @@ export type McpServerConfig = (McpServerStdio | McpServerRemote) & {
   readonly connectTimeout?: Duration.Input | undefined;
 };
 
-/** The decoded configuration: each seam that the layers list, in order; `maxHolds` when they give it; the MCP servers. A seam that no layer lists is absent. */
+/**
+ * The decoded configuration: each seam that the layers list, in order; `maxHolds` when they give it;
+ * the MCP servers; the model that sessions start with, when the layers name one; and the user's
+ * overrides of what is known of models, by `provider/model`. A seam that no layer lists is absent.
+ */
 export interface Configuration {
   readonly lists: Partial<Record<Seam, ReadonlyArray<Entry>>>;
   readonly maxHolds?: number;
   readonly mcpServers: ReadonlyArray<McpServerConfig>;
+  readonly model?: string;
+  readonly models: ReadonlyMap<string, ModelOverride>;
 }
 
 const isMapping = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-const topKeys: ReadonlyArray<string> = ["plugins", ...seams, "maxHolds", "mcpServers", "extensions"];
+const topKeys: ReadonlyArray<string> = ["plugins", ...seams, "maxHolds", "mcpServers", "extensions", "model", "models"];
 
 const MaxHolds = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
@@ -281,6 +288,28 @@ const mcpServersOf = (layers: ReadonlyArray<LayerSource>, value: unknown, env: R
     );
   });
 
+/**
+ * Returns the overrides of what is known of models, by `provider/model`. A model whose override a
+ * later layer writes as `null` has none, and `models: null` removes every earlier override.
+ */
+const modelsOf = (layers: ReadonlyArray<LayerSource>, value: unknown): Effect.Effect<ReadonlyMap<string, ModelOverride>, ConfigInvalid> =>
+  Effect.gen(function* () {
+    if (value === undefined || value === null) return new Map<string, ModelOverride>();
+    const invalid = (path: ReadonlyArray<string>, problem: string) => new ConfigInvalid({ file: layerThatWrote(layers, path), path: path.join("."), problem });
+    if (!isMapping(value)) return yield* invalid(["models"], "Expected a mapping of models, by provider/model, to what is known of each");
+    const entries = yield* Effect.forEach(
+      Object.entries(value).filter(([, override]) => override !== null),
+      ([name, override]) =>
+        Effect.gen(function* () {
+          const path = ["models", name];
+          if (!/^[^/]+\/./.test(name)) return yield* invalid(path, `${JSON.stringify(name)} is not a model named as provider/model`);
+          const decoded = yield* Schema.decodeUnknownEffect(ModelOverride)(override, { onExcessProperty: "error" }).pipe(Effect.mapError((error) => invalid(path, problemOf(error))));
+          return [name, decoded] as const;
+        }),
+    );
+    return new Map(entries);
+  });
+
 /** Fails with the first problem in `layer` on its own: not a mapping, an unknown key, or extensions or MCP servers in an untrusted layer. */
 const checkedLayer = (layer: LayerSource): Effect.Effect<void, ConfigInvalid> => {
   if (layer.value === undefined || layer.value === null) return Effect.void;
@@ -319,7 +348,19 @@ export const decodeLayers = (
     const lists: Configuration["lists"] = Object.fromEntries(listed);
     if ((lists.turnEnd?.length ?? 0) > 0 && maxHolds === undefined)
       return yield* new ConfigInvalid({ file: layerThatWrote(layers, ["turnEnd"]), path: "maxHolds", problem: "Required when turnEnd lists hooks: how many times they may hold one turn open" });
-    return { lists, ...(maxHolds === undefined ? {} : { maxHolds }), mcpServers: yield* mcpServersOf(layers, all["mcpServers"], env) };
+    const model =
+      all["model"] === undefined || all["model"] === null
+        ? undefined
+        : yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(all["model"]).pipe(
+            Effect.mapError((error) => new ConfigInvalid({ file: layerThatWrote(layers, ["model"]), path: "model", problem: problemOf(error) })),
+          );
+    return {
+      lists,
+      ...(maxHolds === undefined ? {} : { maxHolds }),
+      mcpServers: yield* mcpServersOf(layers, all["mcpServers"], env),
+      ...(model === undefined ? {} : { model }),
+      models: yield* modelsOf(layers, all["models"]),
+    };
   });
 
 /** Reads and parses the layer in `file`, with its extensions' paths made absolute; undefined when the file does not exist. */

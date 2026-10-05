@@ -7,7 +7,7 @@
  */
 
 import { Effect, Layer, Option, Schema } from "effect";
-import { type Capabilities, KnownModels, type ModelKnowledge, wellKnown } from "../agent-session/configuration/well-known-models.ts";
+import { type Capabilities, KnownModels, type ModelKnowledge, ModelOverrides, wellKnown, withOverrides } from "../agent-session/configuration/well-known-models.ts";
 import { Settling, type SettlingSource, wellKnownSettling } from "../agent-session/configuration/options.ts";
 import { openAiCompatSettle } from "../agent-session/providers/openai-compat-settings.ts";
 import { logKeys } from "./log-keys.ts";
@@ -75,8 +75,9 @@ export const localModels: Effect.Effect<ReadonlyArray<string> | undefined> = Eff
 
 /**
  * What is known of each model: for `localhost`, what the local server lists, asked once when first
- * needed; for other providers, the well-known models. When the server does not answer, its models
- * stay unknown, and a warning is logged.
+ * needed; for other providers, the well-known models; and over either, the user's overrides
+ * (`ModelOverrides`) of the model. When the server does not answer, its models stay unknown, and a
+ * warning is logged.
  */
 export const KnownWithLocalServer = Layer.effect(
   KnownModels,
@@ -90,7 +91,7 @@ export const KnownWithLocalServer = Layer.effect(
       ),
     );
     const localModels: ModelKnowledge = (provider, model) => (provider === "localhost" ? Effect.map(local, (models) => models.get(model)) : Effect.undefined);
-    return [localModels, wellKnown];
+    return withOverrides(yield* ModelOverrides, [localModels, wellKnown]);
   }),
 );
 

@@ -65,7 +65,8 @@ never gets a prompt leaves nothing on disk, so `session/list` lists only session
 
 - A `cwd` that is not absolute is refused (-32602).
 - With no model to ask, the request fails (-32603) and names the variables to set or the local server
-  to start. The model comes from `HostOptions.model` (`provider/model`), else the catalog's first.
+  to start. The model comes from `HostOptions.model` (`provider/model`), else the configuration's
+  `model`, else the catalog's first.
 - The session's configuration is read (see Configuration), the world is opened for `cwd`, and the
   MCP servers are started at once.
 - The draft holds the model, its settings, the system prompt and the tools. Its output limit is

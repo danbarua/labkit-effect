@@ -137,9 +137,10 @@ const resumed = (named: string, interactive: boolean) =>
   });
 
 /**
- * The session's configuration, as the flags give it. With `--continue`, the session written to
- * last, or with `--resume`, the one it names or the one picked, asking the model the flags name or
- * the one it asked; the settings are the ones the flags name, which change those it had.
+ * The session's configuration, as the flags give it. A new session asks the model that `--model`
+ * names, else the configuration's (`model:`). With `--continue`, the session written to last, or
+ * with `--resume`, the one it names or the one picked, asking the model `--model` names or the one it
+ * asked; the settings are the ones the flags name, which change those it had.
  */
 const configOf = (options: Options, interactive: boolean) =>
   Effect.gen(function* () {
@@ -158,7 +159,7 @@ const configOf = (options: Options, interactive: boolean) =>
     const system = yield* systemOf(options);
     if (options.continue && options.resume !== undefined) return yield* invalid("Pass --continue or --resume, not both.");
     if (!options.continue && options.resume === undefined) {
-      const config: Config = { sessionId: options.sessionId ?? crypto.randomUUID(), target: yield* targetOf(options.model), settings, system, ...permissions };
+      const config: Config = { sessionId: options.sessionId ?? crypto.randomUUID(), target: yield* targetOf(options.model ?? configuration.model), settings, system, ...permissions };
       return config;
     }
     if (options.sessionId !== undefined) return yield* invalid("--session-id names a new session: a continued or resumed one keeps its own.");

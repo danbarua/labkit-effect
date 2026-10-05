@@ -14,6 +14,7 @@ import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Array as Arr, Effect, Layer, Order, type Scope, Stream } from "effect";
 import { Notices } from "../../agent-context/assemble.ts";
+import { ModelOverrides } from "../../agent-session/configuration/well-known-models.ts";
 import { writeEffectiveSettings } from "../../agent-config/effective.ts";
 import type { Configuration, LayerSource } from "../../agent-config/file.ts";
 import { seamLayer, seamListsOf } from "../../agent-config/seams.ts";
@@ -92,7 +93,9 @@ const workspaceOf = (config: Config) =>
 const servicesOf = (config: Config, sources: ReadonlyArray<ToolSource>, mcp: McpServers) => {
   // The configuration's tool sources are not offered by the CLI: its own are the workspace's and the MCP servers'.
   const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(config.configuration, { canAsk: config.canAsk });
-  return Layer.mergeAll(SessionServices(SourcedToolRunner).pipe(Layer.provide(Layer.succeed(Notices, [mcp.notices]))), seamLayer(lists)).pipe(
+  // What is known of models is the catalog's, with the configuration's overrides (`models:`) over it.
+  const given = Layer.mergeAll(Layer.succeed(Notices, [mcp.notices]), Layer.succeed(ModelOverrides, config.configuration.models));
+  return Layer.mergeAll(SessionServices(SourcedToolRunner).pipe(Layer.provide(given)), seamLayer(lists)).pipe(
     Layer.provideMerge(Layer.succeed(ToolSources, sources)),
   );
 };

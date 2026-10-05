@@ -180,7 +180,7 @@ test("a mistake is refused with an error naming the layer that wrote it, the pat
   );
   expect(await refusal([at("plugins:\n  mine:\n    use: loopBraker\n")])).toEndWith('plugins.mine.use: "loopBraker" is not a plug-in; those are: loopBreaker, permissions, maxTurnRequests, retryIncomplete, maxBudget, credentials');
   expect(await refusal([at("toolcalls: [permissions]\n")])).toEndWith(
-    "toolcalls: Not a key of the configuration; those are: plugins, toolCalls, modelRequests, turnEnd, knownModels, settling, toolSources, commandEnvironment, maxHolds, mcpServers, extensions",
+    "toolcalls: Not a key of the configuration; those are: plugins, toolCalls, modelRequests, turnEnd, knownModels, settling, toolSources, commandEnvironment, maxHolds, mcpServers, extensions, model, models",
   );
   expect(await refusal([at("toolCalls:\n  use: permissions\n")])).toEndWith("toolCalls: Expected a list of names, each one in plugins or a plug-in's own");
 });
@@ -296,7 +296,7 @@ test("merging is a fold in order: a layer that writes nothing changes nothing, a
 
 test("a file that is not there is an empty layer; a seam no layer lists is not provided, so the host's own list or the default stands", async () => {
   const configuration = await load([join(testFolder(), "nowhere.yml")]);
-  expect(configuration).toEqual({ lists: {}, mcpServers: [] });
+  expect(configuration).toEqual({ lists: {}, mcpServers: [], models: new Map() });
   const lists = seamListsOf(configuration, { canAsk: true });
   expect(lists).toEqual({});
   const provided = Effect.gen(function* () {
@@ -442,6 +442,7 @@ test("the resolved configuration lists each entry's settings, defaults included,
       ],
     },
     mcpServers: [{ name: "gh", command: "gh-mcp", args: [], env: ["GITHUB_TOKEN"], required: false }],
+    models: {},
     from: { toolCalls: "defaults", "plugins.loopBreaker.nudgeAt": "user", "plugins.permissions.mode": "flags", "mcpServers.gh.command": "user", "mcpServers.gh.env.GITHUB_TOKEN": "user" },
     host: { model: "openai/gpt-5.5" },
   });
@@ -554,6 +555,7 @@ test("the example configuration folders load: the user's files in the order of t
     ["10_policies.yml", true],
     ["20_mcp.yml", true],
     ["30_extensions.yml", true],
+    ["40_models.yml", true],
     ["policies.yml", false],
     ["policies.local.yml", false],
   ]);
@@ -576,6 +578,32 @@ test("the example configuration folders load: the user's files in the order of t
     { name: "files", command: "files-mcp", args: ["--root", "."], required: true },
     { name: "docs", url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer none" } },
   ]);
+  expect(configuration.model).toBe("anthropic/claude-sonnet-5-5");
+  expect(Object.fromEntries(configuration.models)).toEqual({
+    "xai/grok-4.7": { efforts: ["minimal", "low", "medium", "high", "xhigh"] },
+    "xai/grok-4.6": { efforts: ["minimal", "low", "medium", "high", "xhigh"] },
+    "xai/grok-4.5": { efforts: ["minimal", "low", "medium", "high", "xhigh"] },
+    "localhost/qwen3.5-9b-8bit": { context: 32768, output: 8192 },
+  });
+});
+
+test("model names the model that sessions start with; models overrides what is known of a model, by provider/model, field by field across layers; null removes", async () => {
+  const configuration = await load([
+    write("user/10_a.yml", "model: openai/gpt-5.5\nmodels:\n  xai/grok-4.7:\n    efforts: [minimal, low]\n  openai/gpt-5:\n    output: 1000\n"),
+    write("user/20_b.yml", "models:\n  xai/grok-4.7:\n    context: 5000\n  openai/gpt-5: null\n"),
+  ]);
+  expect(configuration.model).toBe("openai/gpt-5.5");
+  expect(Object.fromEntries(configuration.models)).toEqual({ "xai/grok-4.7": { efforts: ["minimal", "low"], context: 5000 } });
+  const removed = await load([write("user/10_c.yml", "models:\n  xai/grok-4.7:\n    context: 5000\n"), write("user/20_d.yml", "models: null\n")]);
+  expect(removed.models.size).toBe(0);
+});
+
+test("a model override that is not named provider/model, or that has a field what is known of a model does not have, is refused, naming the layer and the path", async () => {
+  expect(await refusal([write("user/a.yml", "models:\n  grok-4.7:\n    context: 5000\n")])).toEndWith('user/a.yml: models.grok-4.7: "grok-4.7" is not a model named as provider/model');
+  const unknown = await refusal([write("user/b.yml", "models:\n  xai/grok-4.7:\n    window: 5000\n")]);
+  expect(unknown).toContain("user/b.yml: models.xai/grok-4.7:");
+  expect(unknown).toContain("window");
+  expect(await refusal([write("user/c.yml", "model: 5\n")])).toContain("user/c.yml: model:");
 });
 
 test("with no sources named, only the user's file is read: a project's file and the local file are not", async () => {

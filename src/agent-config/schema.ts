@@ -14,6 +14,7 @@ import { jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { builtins } from "./builtins.ts";
 import { McpServerSchema } from "./file.ts";
 import { type AnyPlugin, seams } from "./plugin.ts";
+import { ModelOverride } from "../agent-session/configuration/well-known-models.ts";
 
 
 /**
@@ -29,6 +30,10 @@ export const configJsonSchema = (registry: ReadonlyArray<AnyPlugin> = builtins):
       // `null` removes the servers of the layers before it.
       mcpServers: Schema.optionalKey(Schema.NullOr(Schema.Record(Schema.String, McpServerSchema))),
       ...Object.fromEntries(seams.map((seam) => [seam, Schema.optionalKey(Schema.Array(Schema.String))])),
+      // The model that sessions start with, as provider/model.
+      model: Schema.optionalKey(Schema.NonEmptyString),
+      // What is known of models, by provider/model, over the catalog; `null` removes the overrides of the layers before it.
+      models: Schema.optionalKey(Schema.NullOr(Schema.Record(Schema.String, Schema.NullOr(ModelOverride)))),
     }),
   ) as { readonly properties: Readonly<Record<string, Schema.Json>> };
   const plugins: Schema.Json = {

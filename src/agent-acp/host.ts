@@ -42,7 +42,7 @@ import { describe } from "../agent-mcp/server-machine.ts";
 import { basename, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ChildProcessSpawner } from "effect/process";
-import { Clock, type Context, type Duration, Effect, Exit, Fiber, FileSystem, HashMap, HashSet, Layer, Option, type Path, Ref, Schema, Scope, Semaphore, Stream } from "effect";
+import { Clock, Context, type Duration, Effect, Exit, Fiber, FileSystem, HashMap, HashSet, Layer, Option, type Path, Ref, Schema, Scope, Semaphore, Stream } from "effect";
 import * as Agent from "effective-acp/agent";
 import { ErrorCode, type JsonRpcErrorObject } from "effective-acp/json-rpc";
 import * as Protocol from "effective-acp/protocol";
@@ -75,7 +75,7 @@ import { namespaceOf } from "../agent-mcp/source.ts";
 import { modelOf } from "../agent-session/configuration/session-setup.ts";
 import { optionsFor, type Options } from "../agent-session/configuration/options.ts";
 import { type ConfigurationGate, makeConfigurationGate } from "../agent-session/configuration/gate.ts";
-import { knownCapabilities } from "../agent-session/configuration/well-known-models.ts";
+import { KnownModels, knownCapabilities, ModelOverrides, withOverrides } from "../agent-session/configuration/well-known-models.ts";
 import { type Change, changeOf, configOptions, InvalidChange, permissionId, permissionModeOf, permissionOption } from "./config-options.ts";
 import { PermissionMode } from "../agent-policy/permissions.ts";
 import { acpUser, type Feed, startFeed } from "./feed.ts";
@@ -410,8 +410,12 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             .notify("session/update", { sessionId, update })
             .pipe(Effect.catch((error) => Effect.logWarning(logKeys.update.notSent, { kind: update.sessionUpdate, cause: error.message })));
 
-        const capabilitiesOf = (target: { readonly provider: Asked["provider"]; readonly model: Asked["model"] }) =>
-          knownCapabilities(target.provider, target.model).pipe(Effect.provideContext(modelKnowledge));
+        /** What is known of models for a session configured as `configuration`: the connection's knowledge, with the configuration's overrides (`models:`) over it. */
+        const knowledgeOf = (configuration: Configured) =>
+          Context.add(modelKnowledge, KnownModels, withOverrides(configuration.models, Context.get(modelKnowledge, KnownModels)));
+
+        const capabilitiesOf = (target: { readonly provider: Asked["provider"]; readonly model: Asked["model"] }, configuration: Configured) =>
+          knownCapabilities(target.provider, target.model).pipe(Effect.provideContext(knowledgeOf(configuration)));
 
         /**
          * Returns the configuration of a session in `cwd` whose client names `servers`: the host's defaults, the
@@ -543,34 +547,36 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 ? yield* optionsOfDraft(state.draft)
                 : yield* optionsFor(withHeld(yield* Effect.flatMap(state.opened.session.facts, configuredOf), held));
             const models = yield* askable;
-            const limit = (yield* capabilitiesOf(configured))?.output;
+            const limit = (yield* capabilitiesOf(configured, entry.configuration))?.output;
             return {
               configured,
               models,
               limit,
               options: [...configOptions(configured, models, limit), permissionOption(held?.permissionMode ?? (yield* Ref.get(entry.permissionMode)))] as ReadonlyArray<SessionConfigOption>,
             };
-          }).pipe(Effect.provideContext(modelKnowledge));
+          }).pipe(Effect.provideContext(knowledgeOf(entry.configuration)));
 
-        /** The model that `session/new` starts with, or the error saying why there is none. */
-        const startingModel: Effect.Effect<Asked, JsonRpcErrorObject, ModelCatalog> =
-          options.model === undefined
-            ? Effect.filterOrFail(defaultModel, (model): model is Asked => model !== undefined, () => rpcError(ErrorCode.InternalError, noModelOf(brand)))
-            : targetOf(options.model).pipe(
-                Effect.mapError((error) => {
-                  switch (error._tag) {
-                    case "ModelNotFound":
-                      return rpcError(
-                        ErrorCode.InternalError,
-                        `${modelVariableOf(brand)} names ${error.name}, which no source has${error.close.length === 0 ? "" : `; close: ${error.close.join(", ")}`}.`,
-                      );
-                    case "KeyNotSet":
-                      return rpcError(ErrorCode.InternalError, `${modelVariableOf(brand)} names a model of ${error.provider}: set ${error.variable}.`);
-                    case "SourceNotAnswering":
-                      return rpcError(ErrorCode.InternalError, `${modelVariableOf(brand)} names a model of ${error.provider}, whose server at ${error.at ?? "?"} does not answer.`);
-                  }
-                }),
-              );
+        /**
+         * The model that `session/new` starts with: the one the launcher names (`--model`), else the one the session's
+         * configuration names (`model:`), else the catalog's first; or the error saying why there is none.
+         */
+        const startingModelOf = (configuration: Configured): Effect.Effect<Asked, JsonRpcErrorObject, ModelCatalog> => {
+          const named = options.model ?? configuration.model;
+          if (named === undefined) return Effect.filterOrFail(defaultModel, (model): model is Asked => model !== undefined, () => rpcError(ErrorCode.InternalError, noModelOf(brand)));
+          const namer = options.model === undefined ? "The configuration's model" : modelVariableOf(brand);
+          return targetOf(named).pipe(
+            Effect.mapError((error) => {
+              switch (error._tag) {
+                case "ModelNotFound":
+                  return rpcError(ErrorCode.InternalError, `${namer} names ${error.name}, which no source has${error.close.length === 0 ? "" : `; close: ${error.close.join(", ")}`}.`);
+                case "KeyNotSet":
+                  return rpcError(ErrorCode.InternalError, `${namer} names a model of ${error.provider}: set ${error.variable}.`);
+                case "SourceNotAnswering":
+                  return rpcError(ErrorCode.InternalError, `${namer} names a model of ${error.provider}, whose server at ${error.at ?? "?"} does not answer.`);
+              }
+            }),
+          );
+        };
 
         /**
          * Starts the session `id` over its facts file, in a scope of its own forked from the entry's: its services, the core's
@@ -595,7 +601,11 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(parent.configuration, { canAsk: true, permissionMode: Ref.get(permissionMode) });
               const runner = SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, world.sources)));
               // The model is told of the session's MCP servers that are not running (`McpServers.notices`).
-              const notices = Layer.succeed(Notices, [parent.mcp.notices]);
+              const notices = Layer.mergeAll(
+                Layer.succeed(Notices, [parent.mcp.notices]),
+                // What is known of models is the catalog's, with the configuration's overrides (`models:`) over it.
+                Layer.succeed(ModelOverrides, parent.configuration.models),
+              );
               const layer = Layer.mergeAll(services(runner).pipe(Layer.provide(notices)), seamLayer(lists), blobs).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
               const context = yield* Layer.buildWithScope(layer, scope);
               const session = yield* openSession.pipe(Effect.provideContext(context), Scope.provide(scope));
@@ -894,10 +904,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   yield* Effect.logWarning(logKeys.session.refused, { cwd, cause: "the working folder is not an absolute path" });
                   return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, `cwd must be an absolute path: ${cwd}`));
                 }
-                const model = yield* startingModel.pipe(
+                const configuration = yield* configurationFor(cwd, mcpServers, "session/new");
+                const model = yield* startingModelOf(configuration).pipe(
                   Effect.tapError((error) => Effect.logWarning(logKeys.session.refused, { cwd, cause: error.message })),
                 );
-                const configuration = yield* configurationFor(cwd, mcpServers, "session/new");
                 const id = AcpSessionId.make(crypto.randomUUID());
                 const worldAlone = yield* (world as World<R | FileSystem.FileSystem>).open({
                   sessionId: id,
@@ -909,7 +919,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 });
                 const { world: sessionWorld, scope, mcp } = yield* withServers(cwd, worldAlone, configuration, "session/new");
                 return yield* Effect.gen(function* () {
-                const capabilities = yield* capabilitiesOf(model);
+                const capabilities = yield* capabilitiesOf(model, configuration);
                 const { catalog } = yield* toolsOf(sessionWorld.sources);
                 const draft = withDefaults(
                   draftOf({ model, tools: catalog, ...(sessionWorld.system === undefined ? {} : { system: sessionWorld.system }) }),

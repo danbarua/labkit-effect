@@ -2075,3 +2075,24 @@ test("a call with properties its tool does not take runs without them and says w
   expect(JSON.stringify(strict.ended)).toContain("write_file does not take this input");
   expect(strict.files).toEqual([]);
 });
+
+test("session/new starts with the model the configuration names; its overrides decide the efforts offered, and what the session knows of the model", async () => {
+  const folder = join(testFolder(), "home", ".config", "labkit");
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, "models.yml"), "model: openai/gpt-6-luna\nmodels:\n  openai/gpt-6-luna:\n    efforts: [low, high]\n    context: 5000\n");
+  const host = startHost({ script: [answer({ _tag: "Text", text: "Hello." })] });
+  const { app, log } = sdkClient();
+  const created = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const made = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(made.sessionId, "Hi."));
+    return made;
+  });
+  await host.stop();
+  expect(created.configOptions?.find((option) => option.id === "model")).toMatchObject({ currentValue: "openai/gpt-6-luna" });
+  const effort = created.configOptions?.find((option) => option.id === "effort");
+  expect(effort?.type === "select" ? effort.options.flatMap((each) => ("value" in each ? [each.value] : [])) : []).toEqual(["not_sent", "low", "high"]);
+  expect(host.targets).toEqual(["openai/gpt-6-luna"]);
+  // The session's own knowledge of the model has the override: its context window is the override's.
+  expect(log.updates.find((update) => update.sessionUpdate === "usage_update")).toMatchObject({ size: 5000 });
+});

@@ -15,24 +15,16 @@ Text in quotation marks is Dan's, verbatim.
   budget. The adapters adjust values that a model does not take, and record some adjustments but not
   all of them. The adjustments were written before the typed catalog of models existed.
 
-## The configuration folder
+## Built
 
-- Configuration is every `.yml` file in the configuration folder, read in the order of their names.
-  A file name can start with a sorting prefix (`10_policies.yml`, `20_mcp.yml`) so that files compose
-  in a known order; later files override earlier ones.
-- The folder is `~/.config/<brand>/` unless the launcher names another.
-- Example files, in `src/agent-config/fixtures/`, show what each file can hold. A test loads them,
-  so an example that no longer loads fails the check.
+The configuration folder (every `.yml` file, in name order), the example files in
+`src/agent-config/fixtures/`, models.dev's reasoning data, and `model` and `models` overrides are
+built: see [agent-config.md](agent-config.md), Layers and Models.
 
-## Models and their capabilities
+## Offering only what a model takes
 
-- What each model takes (its efforts, its thinking budget, its output limit, its context window)
-  comes from models.dev's catalog, generated into typed data. The fields are `reasoning`,
-  `reasoning_options` and `limit`.
-- Values measured against a provider that differ from models.dev are overrides in the user's
-  `models.yml`, not in the code.
-- A host offers only the values that a model takes. A value that a model does not take is refused
-  when it is set; it is not adjusted when a request is made.
+A host offers only the values that a model takes. A value that a model does not take is refused when
+it is set; it is not adjusted when a request is made.
 
 ## Settings the user sees
 
@@ -87,8 +79,8 @@ Thinking is toggled with a key, as Claude Code does with Option+T and pi with Sh
 
 ## Order of work
 
-1. The configuration folder, and its example files.
-2. `models.yml`: models.dev's data as the defaults, and the user's overrides.
+1. The configuration folder, and its example files. Built.
+2. `models.yml`: models.dev's data as the defaults, and the user's overrides. Built.
 3. The REPL without a model; `bun cli models` and the error messages.
 4. The commands, and the thinking key.
 5. The adapters rebuilt on models.dev's reasoning data, offering and refusing values instead of

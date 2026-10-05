@@ -4,7 +4,7 @@
  */
 
 import { expect } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, testFolder } from "../../../tests/support/test.ts";
 import { withResumeValue } from "./index.ts";
@@ -39,6 +39,15 @@ test("with no model there is nothing to ask: it says so and fails", async () => 
   const result = await invoke(["-p", "Hello"]);
   expect(result.code).not.toBe(0);
   expect(result.stdout + result.stderr).toContain("No model given: pass --model. `bun cli models` lists the models you can use");
+});
+
+test("with no --model, a new session asks the model the configuration names", async () => {
+  mkdirSync(join(testFolder(), ".config", "labkit"), { recursive: true });
+  writeFileSync(join(testFolder(), ".config", "labkit", "models.yml"), "model: openai/gpt-5.5\n");
+  // No key is set, so the model is not asked: the message shows which model was chosen.
+  const result = await invoke(["-p", "Hello"]);
+  expect(result.code).not.toBe(0);
+  expect(result.stdout + result.stderr).toContain("Set OPENAI_API_KEY before calling openai/* models");
 });
 
 test("a name that is no model says how to name one, and the names it is close to", async () => {
