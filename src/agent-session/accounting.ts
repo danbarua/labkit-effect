@@ -1,16 +1,18 @@
 /**
- * What a session has used, read from its facts: what a host shows as the context gauge (ACP's
- * `usage_update`) and counts against its limits. Every count is a best guess: the tokenizer is the
- * provider's, and the counts are what it reported.
+ * What a session has used, read from its facts: the context gauge that a host shows (ACP's
+ * `usage_update`) and counts against its limits. Every count is the provider's figure, from the
+ * provider's tokenizer, as the provider reported it.
  *
- * - `contextGauge`: `used`, the visible tokens of the last request and its response: everything the
- *   request carried, and what the response returned less its thinking; `size`, the context window
- *   of the model the session asks now (the well-known models'); and `cost`, the session's cost so far in
- *   US dollars. There is no gauge when the model's window is not known. After a compaction `used`
- *   stays the last response's figure until the next response reports a new one. `cost` is the cost
- *   of the responses that reported their usage to a model with a price: one interrupted, or not
- *   observed, or from a model that is not well-known (a local model) adds nothing. The requests a
- *   summarizer makes are not among the facts, so their cost is not in it.
+ * `contextGauge` returns:
+ * - `used`: the visible tokens of the last request and its response: everything the request
+ *   carried, plus what the response returned without its thinking. After a compaction, `used` stays
+ *   at the last response's figure until the next response reports a new one.
+ * - `size`: the context window of the model that the session asks now (from the well-known models).
+ *   There is no gauge when the window is not known.
+ * - `cost`: the session's cost so far, in US dollars: the cost of the responses that reported usage,
+ *   from models with a price. An interrupted response, an unobserved one, or one from a model that
+ *   is not well known (a local model) adds nothing. A summarizer's requests are not in the facts, so
+ *   their cost is not included.
  */
 
 import { Array as Arr, Option } from "effect";
@@ -29,7 +31,7 @@ export interface ContextGauge {
 const responses = (facts: ReadonlyArray<Fact>): ReadonlyArray<Responded> =>
   facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "ModelResponded" ? [fact.observation] : []));
 
-/** What one response cost, in US dollars, at `price`: its input above `price.above.context` at the higher price. */
+/** Returns what one response cost, in US dollars, at `price`. When the input exceeds `price.above.context`, the whole request is priced at the higher tier. */
 export function costOf(usage: Usage, price: Capabilities["price"]): number {
   const at: Price = price.above !== undefined && usage.input > price.above.context ? price.above : price;
   const cacheRead = usage.cacheRead ?? 0;
@@ -46,7 +48,7 @@ export function costOf(usage: Usage, price: Capabilities["price"]): number {
   );
 }
 
-/** The session's cost so far, in US dollars: the responses with usage, to a model with a price. */
+/** Returns the session's cost so far, in US dollars: the responses that reported usage, from models with a price. */
 export function costIn(facts: ReadonlyArray<Fact>): number {
   return responses(facts).reduce((total, response) => {
     const limits = capabilitiesOf(response.provider, response.model);
@@ -55,8 +57,8 @@ export function costIn(facts: ReadonlyArray<Fact>): number {
 }
 
 /**
- * The context gauge for a session asking `model` of `provider`; undefined when the model's window is
- * not known. `known` is what is known of the model, when it is not a well-known one.
+ * Returns the context gauge for a session that asks `model` of `provider`, or undefined when the
+ * model's window is not known. `known` is what is known of the model when it is not a well-known one.
  */
 export function contextGauge(facts: ReadonlyArray<Fact>, provider: string, model: string, known?: Capabilities): ContextGauge | undefined {
   const size = (known ?? capabilitiesOf(provider, model))?.context;

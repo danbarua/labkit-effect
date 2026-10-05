@@ -1,6 +1,4 @@
-/**
- * Wrapping content from outside in `Received`, and parsing it back out, at the edge.
- */
+/** Wraps content from outside in `Received`, and parses it back out, at the edge. */
 
 import type { Schema } from "effect";
 import { MediaType, type Received, ReceivedText } from "../agent-machine/received.ts";
@@ -22,7 +20,7 @@ export function receivedText(text: string): Received {
   return { mediaType: MediaType.make("text/plain"), body: { _tag: "Text", text: ReceivedText.make(text) } };
 }
 
-/** The JSON value in `received`, or the reason there is none. */
+/** Parses the JSON value in `received`; returns the reason when it holds none. */
 export function parseJson(received: Received): { readonly value: Schema.Json } | { readonly reason: string } {
   if (received.body._tag === "Bytes")
     return { reason: `the content is ${received.body.bytes.length} bytes of ${received.mediaType}, not text` };
@@ -35,7 +33,7 @@ export function parseJson(received: Received): { readonly value: Schema.Json } |
   }
 }
 
-/** The content as text for a reader: the text itself, or a note of what the bytes are and, when stored, where. */
+/** Returns the content as text for a reader: the text itself, or a note of what the bytes are and, when stored, their reference. */
 export function asText(received: Received): string {
   switch (received.body._tag) {
     case "Text":

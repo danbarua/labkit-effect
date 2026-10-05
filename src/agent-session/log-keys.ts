@@ -1,7 +1,4 @@
-/**
- * Every event agent-session logs, by the area that logs it. The key is the event's name in the log:
- * `<area>.<subject>.<what happened>`.
- */
+/** The log events that agent-session writes, by area. Each key has the form `<area>.<subject>.<event>`. */
 
 export const logKeys = {
   tools: {

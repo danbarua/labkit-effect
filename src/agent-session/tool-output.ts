@@ -1,21 +1,26 @@
 /**
- * How a tool's output is sent to the model, when it is recorded in a form the model is not to be
- * sent as it is. An MCP server's result is recorded as the server sent it (`mcpToolResult`: a JSON
- * object with `content` blocks), and sent as plain text: each text block's text; an embedded text
- * resource's text; a resource link as a Markdown link; an image or audio block as a line naming it;
- * and `structuredContent`, as JSON, when no block gives text. Any other output is sent as recorded.
+ * How a tool's output is sent to the model when it is recorded in a form that the model must not be
+ * sent. An MCP server's result is recorded as the server sent it (`mcpToolResult`: a JSON object with
+ * `content` blocks), and sent as plain text, one line per block:
+ * - a text block: its text;
+ * - an embedded text resource: its text;
+ * - a resource link: a Markdown link;
+ * - an image or audio block: a line naming its type and media type.
+ *
+ * When no block gives text, `structuredContent` is sent as JSON. Any other output is sent as
+ * recorded.
  */
 
 import { MediaType, type Received } from "../agent-machine/received.ts";
 import { asText, parseJson, receivedText } from "./received.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 
-/** The media type an MCP server's tool result is recorded under. */
+/** The media type under which an MCP server's tool result is recorded. */
 export const mcpToolResult = MediaType.make("application/vnd.modelcontextprotocol.call-tool-result+json");
 
 const isObject = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** One content block, as text. */
+/** Returns one content block as lines of text. */
 const blockText = (block: unknown): ReadonlyArray<string> => {
   if (!isObject(block)) return [];
   switch (block["type"]) {
@@ -36,7 +41,7 @@ const blockText = (block: unknown): ReadonlyArray<string> => {
   }
 };
 
-/** An MCP server's result as plain text. */
+/** Returns an MCP server's result as plain text. */
 const mcpResultText = (output: Received): Received => {
   const parsed = parseJson(output);
   if (!("value" in parsed) || !isObject(parsed.value)) return receivedText(asText(output));
@@ -46,7 +51,7 @@ const mcpResultText = (output: Received): Received => {
   return receivedText(texts.length === 0 && structured !== undefined ? JSON.stringify(structured) : texts.join("\n"));
 };
 
-/** A tool call's outcome as the model is sent it. */
+/** Returns a tool call's outcome as the model is sent it. */
 export const outcomeAsSent = (outcome: ToolOutcome): ToolOutcome => {
   if (outcome._tag === "Succeeded") return outcome.output.mediaType === mcpToolResult ? { ...outcome, output: mcpResultText(outcome.output) } : outcome;
   const reason = outcome.reason;

@@ -1,11 +1,13 @@
 /**
- * The blob store: bytes held outside the facts, found by their id, the lowercase hex SHA-256 of
- * the bytes (`BlobRef`, agent-machine). Storing the same bytes twice gives the same reference. The
- * facts hold references; an adapter reads the bytes when it makes a request.
+ * The blob store: bytes kept outside the facts, found by their id, which is the lowercase hex
+ * SHA-256 of the bytes (`BlobRef`, agent-machine). Storing the same bytes twice returns the same
+ * reference. The facts hold references; an adapter reads the bytes when it makes a request.
  *
- * `Blobs` is a reference whose default holds bytes in memory for as long as the process runs, so a
- * session given no store still finds what it stored. `BlobsInMemory` holds bytes for as long as its
- * layer lasts; `BlobsInFolder(folder)` keeps each as a file named for its id, in that folder only.
+ * | Store | Keeps bytes |
+ * | --- | --- |
+ * | `Blobs` default | in memory, while the process runs, so a session given no store still finds what it stored |
+ * | `BlobsInMemory` | in memory, while its layer lasts |
+ * | `BlobsInFolder(folder)` | as files named for their ids, in `folder` only |
  *
  * `keptOutcome` puts a tool's output that arrived as bytes in the store, so the facts hold its
  * reference (`Received` body `Stored`).
@@ -25,7 +27,7 @@ export interface BlobStore {
   readonly read: (id: BlobId) => Effect.Effect<Uint8Array | undefined>;
 }
 
-/** The id of `bytes`: their lowercase hex SHA-256. */
+/** Returns the id of `bytes`: their lowercase hex SHA-256. */
 export const blobIdOf = (bytes: Uint8Array): BlobId => BlobId.make(createHash("sha256").update(bytes).digest("hex"));
 
 const referenceTo = (bytes: Uint8Array, mediaType: MediaType, name: string | undefined): BlobRef => ({
@@ -35,7 +37,7 @@ const referenceTo = (bytes: Uint8Array, mediaType: MediaType, name: string | und
   ...(name === undefined ? {} : { name: FileName.make(name) }),
 });
 
-/** A store over the map `held` holds: what `BlobsInMemory` and the default hold. */
+/** Returns a store over the map in `held`, as `BlobsInMemory` and the default use. */
 const inMap = (held: Ref.Ref<HashMap.HashMap<BlobId, Uint8Array>>): BlobStore => ({
   store: (bytes, mediaType, name) =>
     Effect.suspend(() => {
@@ -47,7 +49,7 @@ const inMap = (held: Ref.Ref<HashMap.HashMap<BlobId, Uint8Array>>): BlobStore =>
 
 export const Blobs = Context.Reference<BlobStore>("agent-session/Blobs", { defaultValue: () => inMap(Ref.makeUnsafe(HashMap.empty())) });
 
-/** `outcome`, with an output that arrived as bytes put in the store and held by reference. */
+/** Returns `outcome` with an output that arrived as bytes put in the store and replaced by its reference. */
 export const keptOutcome = (outcome: ToolOutcome): Effect.Effect<ToolOutcome> =>
   Effect.gen(function* () {
     if (outcome._tag !== "Succeeded" || outcome.output.body._tag !== "Bytes") return outcome;
@@ -61,17 +63,19 @@ export const BlobsInMemory = Layer.effect(Blobs, Effect.map(Ref.make(HashMap.emp
 const isBlobId = (id: string): boolean => /^[0-9a-f]{64}$/.test(id);
 
 /**
- * Blobs as files in `folder`, each named for its id; the store reads and writes nothing outside
- * it. The folder is made when the first blob is stored. Swap it in for the default by providing
- * the layer; it needs a `FileSystem` and a `Path` (`@effect/platform-bun` gives both).
+ * Blobs as files in `folder`, each named for its id; the store reads and writes nothing outside the
+ * folder. The folder is created when the first blob is stored. Provide the layer to use it in place
+ * of the default; it needs a `FileSystem` and a `Path` (`@effect/platform-bun` provides both).
  *
  * - A blob is written to a temporary file in the folder and renamed to its id, so a file named for
  *   an id holds the whole of its bytes; bytes already held are not written again.
  * - An id that is not 64 lowercase hex digits finds nothing, so no id read from the facts names a
  *   path outside the folder.
- * - A read hashes what it read: a file whose bytes no longer match its id is found to be nothing,
- *   and logged, so the model is sent the file's pointer rather than other bytes.
- * - A file that cannot be written or read is a defect: the bytes the facts refer to cannot be kept.
+ * - A read hashes the bytes it read: a file whose bytes no longer match its id is treated as
+ *   missing, and logged as a warning, so the model is sent the file's pointer rather than other
+ *   bytes.
+ * - A file that cannot be written or read is a defect, because the bytes that the facts refer to
+ *   cannot be kept.
  */
 export const BlobsInFolder = (folder: string) =>
   Layer.effect(

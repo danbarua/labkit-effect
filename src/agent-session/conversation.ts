@@ -1,11 +1,13 @@
 /**
- * The conversation as the model is sent it, projected from facts: each input given to a turn is a
- * user message, each response an assistant message with its text and tool calls, followed by a
- * user message with a result for every call it made (as `tool-output.ts` says it is sent), each
- * notice an instruction message where it was inserted. Consecutive messages from one role become one.
+ * The conversation as the model is sent it, projected from facts:
+ * - each input given to a turn is a user message;
+ * - each response is an assistant message with its text and tool calls, followed by a user message
+ *   with a result for every call it made (sent as `tool-output.ts` describes);
+ * - each notice is an instruction message, at the place where it was inserted.
  *
- * A response's thinking and the parts the harness does not recognise stay in their place, marked
- * with the provider that produced them; which provider reads them is its adapter's business.
+ * Consecutive messages from one role are merged into one. A response's thinking and the parts that
+ * the harness does not recognise stay in their place, marked with the provider that produced them;
+ * each provider's adapter decides what to send of them.
  */
 
 import { Array as Arr, Option } from "effect";
@@ -17,7 +19,7 @@ import type { Observation, ToolOutcome } from "../agent-machine/observation.ts";
 import type { ContextMessage, ContextPart } from "./contracts.ts";
 import { sentIn } from "./sent.ts";
 
-/** Each input's text and the files that came with it, by its position. */
+/** Returns each input's text and its attached files, by the input's sequence number. */
 export function inputTexts(facts: ReadonlyArray<Fact>): ReadonlyMap<Seq, { readonly text: string; readonly attachments: ReadonlyArray<BlobRef> }> {
   return new Map(
     facts.flatMap((fact) =>
@@ -28,12 +30,12 @@ export function inputTexts(facts: ReadonlyArray<Fact>): ReadonlyMap<Seq, { reado
   );
 }
 
-/** Notices, as the instruction message the model is sent them in. */
+/** Returns `notices` as the instruction message that carries them to the model. */
 export function noticeMessage(notices: ReadonlyArray<NoticeText>): ContextMessage {
   return { role: "instruction", parts: notices.map((text) => ({ _tag: "Text", text })) };
 }
 
-/** How each tool call ended, as far as the facts say, and which calls began to run. */
+/** Returns how each tool call ended, as far as the facts record, and which calls began to run. */
 interface Calls {
   readonly ended: ReadonlyMap<CallId, ToolOutcome>;
   readonly dispatched: ReadonlySet<CallId>;
@@ -48,16 +50,16 @@ function callsOf(facts: ReadonlyArray<Fact>): Calls {
 }
 
 /**
- * How a call ended, for the model. Every call a response made is given a result: the one recorded,
- * or, for a call with none (its turn was interrupted or failed), that how it ended was not observed
- * when it began to run, and that it was not run when it did not.
+ * Returns how a call ended, for the model. Every call that a response made gets a result: the one
+ * recorded, or, for a call with none (its turn was interrupted or failed), `Indeterminate` when the
+ * call began to run and `NotRun` when it did not.
  */
 function outcomeOf(call: CallId, calls: Calls): ToolOutcome {
   const ended = calls.ended.get(call);
   return ended === undefined ? { _tag: "Failed", reason: { _tag: calls.dispatched.has(call) ? "Indeterminate" : "NotRun" } } : outcomeAsSent(ended);
 }
 
-/** The messages a fact adds. */
+/** Returns the messages that one fact adds to the conversation. */
 function messages(fact: Fact, texts: ReturnType<typeof inputTexts>, calls: Calls): ReadonlyArray<ContextMessage> {
   // Each input is its text, then the files that came with it.
   const inputs = (seqs: ReadonlyArray<Seq>): ContextMessage => ({
@@ -93,8 +95,8 @@ function messages(fact: Fact, texts: ReturnType<typeof inputTexts>, calls: Calls
             }
           }),
         },
-        // The results follow the response that made the calls, in the order it made them, whenever
-        // each tool ended: a call run while its response was still arriving may end before it.
+        // The results follow the response that made the calls, in the order of the calls, whenever
+        // each tool ended: a call that ran while its response was still arriving can end before it.
         {
           role: "user",
           parts: observation.parts.flatMap((part): ReadonlyArray<ContextPart> =>
@@ -130,7 +132,7 @@ function messages(fact: Fact, texts: ReturnType<typeof inputTexts>, calls: Calls
   }
 }
 
-/** Consecutive messages from the same role become one. */
+/** Merges consecutive messages from the same role into one message. */
 export function merged(messages: ReadonlyArray<ContextMessage>): ReadonlyArray<ContextMessage> {
   return messages.reduce<ReadonlyArray<ContextMessage>>((done, next) => {
     const last = done.at(-1);
@@ -141,8 +143,8 @@ export function merged(messages: ReadonlyArray<ContextMessage>): ReadonlyArray<C
 }
 
 /**
- * The messages `facts` add, in order. Input texts and how tool calls ended are looked up in `all`,
- * which defaults to `facts`; pass the whole session when `facts` is part of it.
+ * Returns the messages that `facts` add, in order. Input texts and how tool calls ended are looked
+ * up in `all`, which defaults to `facts`; pass the whole session when `facts` is part of it.
  */
 export function conversationOf(facts: ReadonlyArray<Fact>, all: ReadonlyArray<Fact> = facts): ReadonlyArray<ContextMessage> {
   const texts = inputTexts(all);
@@ -151,11 +153,12 @@ export function conversationOf(facts: ReadonlyArray<Fact>, all: ReadonlyArray<Fa
 }
 
 /**
- * The messages the next request carries: the messages the last request in `facts` carried, as
- * recorded with it, followed by the messages of the facts recorded after it. Nothing before that
- * request is projected again, so a change to `conversationOf` changes what later requests add and
- * never what an earlier one carried. With no request in `facts`, the messages all of `facts` add.
- * Input texts and how tool calls ended are looked up in `all`, as for `conversationOf`.
+ * Returns the messages that the next request carries: the messages that the last request in `facts`
+ * carried, as recorded with it, followed by the messages of the facts recorded after it. Facts
+ * before that request are not projected again, so a change to `conversationOf` changes what later
+ * requests add and never what an earlier request carried. With no request in `facts`, returns the
+ * messages of all of `facts`. Input texts and how tool calls ended are looked up in `all`, as for
+ * `conversationOf`.
  */
 export function nextMessages(facts: ReadonlyArray<Fact>, all: ReadonlyArray<Fact> = facts): ReadonlyArray<ContextMessage> {
   const at = Option.getOrElse(Arr.findLastIndex(facts, isRequest), () => -1);
