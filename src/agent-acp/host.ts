@@ -9,7 +9,7 @@
  *   answer carries the config options; `available_commands_update` (`/export`) follows it, once the
  *   client knows the session.
  * - `session/set_config_option` changes the draft, or, once open, is `ModelChangeArrived` from the
- *   user through ACP, taken at the next turn (agent-machine M1). The answer is every option as the
+ *   user through ACP, taken at the next turn. The answer is every option as the
  *   configuration will be.
  * - `session/prompt` opens a draft (turn zero: the session's record, `host.json`, with its working
  *   folder and the first prompt's text as its title; its folder in the session directory, its

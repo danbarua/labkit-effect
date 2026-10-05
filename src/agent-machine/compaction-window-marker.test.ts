@@ -14,7 +14,7 @@ const tags = (session: DrivenMachines) =>
 
 const window = (through: number, kept: ReadonlyArray<number>) => ({ _tag: "CompactionWindow", window: "w1", decidedBy: "test", through, kept });
 
-test("S4: a compaction window while no turn runs is taken at once", () => {
+test("a compaction window while no turn runs is taken at once", () => {
   const session = open();
   observe(session, opened);
   const at = observe(session, window(1, []));
@@ -22,7 +22,7 @@ test("S4: a compaction window while no turn runs is taken at once", () => {
   expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "WindowOpened", compaction: at } });
 });
 
-test("S4: a compaction window during a step waits in the turn's mailbox and is taken before the next request", () => {
+test("a compaction window during a step waits in the turn's mailbox and is taken before the next request", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -52,7 +52,7 @@ test("S4: a compaction window during a step waits in the turn's mailbox and is t
   ]);
 });
 
-test("S4: a compaction window records the span only; a summary on it is not part of the fact", () => {
+test("a compaction window records the span only; a summary on it is not part of the fact", () => {
   const session = open();
   observe(session, opened);
   expect(() =>

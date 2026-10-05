@@ -86,7 +86,7 @@ const NoModel = Layer.succeed(ModelClient, {
 
 const tags = (facts: ReadonlyArray<Fact>) => facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
 
-test("X4: a model request was made and nothing came of it: no response was observed, the turn ends, and the session goes on", async () => {
+test("a model request was made and nothing came of it: no response was observed, the turn ends, and the session goes on", async () => {
   const session = asked();
   observe(session, dispatched);
   const { settled, after, seen } = await resumed(session.journal, "are you there?");
@@ -114,7 +114,7 @@ test("X4: a model request was made and nothing came of it: no response was obser
   ]);
 });
 
-test("X4: a tool was running: how it ended was not observed, and the model is told so with the next input", async () => {
+test("a tool was running: how it ended was not observed, and the model is told so with the next input", async () => {
   const session = asked();
   observe(session, {
     _tag: "ModelResponded",
@@ -144,7 +144,7 @@ test("X4: a tool was running: how it ended was not observed, and the model is to
   ]);
 });
 
-test("X4: a call had arrived while the response streamed: the response holds it, and the call has its result", async () => {
+test("a call had arrived while the response streamed: the response holds it, and the call has its result", async () => {
   const session = asked();
   observe(session, dispatched);
   observe(session, { _tag: "ToolCallArrived", turn: "turn-1", call: "c1", tool: "ls", input: json({ path: "." }) });
@@ -166,7 +166,7 @@ test("X4: a call had arrived while the response streamed: the response holds it,
   ]);
 });
 
-test("X4: facts that stop between turns are gone on from as they are; the next request carries the earlier turns", async () => {
+test("facts that stop between turns are gone on from as they are; the next request carries the earlier turns", async () => {
   const session = asked();
   observe(session, {
     _tag: "ModelResponded",
@@ -190,7 +190,7 @@ test("X4: facts that stop between turns are gone on from as they are; the next r
   ]);
 });
 
-test("X4: a session made from facts holds them as given; a turn they leave running stays so until it is ended", async () => {
+test("a session made from facts holds them as given; a turn they leave running stays so until it is ended", async () => {
   const driven = asked();
   observe(driven, dispatched);
   const { made, ended } = await runTest(
@@ -205,7 +205,7 @@ test("X4: a session made from facts holds them as given; a turn they leave runni
   expect(tags(ended)).toEqual(["TurnInterrupted", "ModelResponded", "TurnEnded"]);
 });
 
-test("X4: a turn left running is ended though earlier turns came before it; only that turn's facts bear on the machines", async () => {
+test("a turn left running is ended though earlier turns came before it; only that turn's facts bear on the machines", async () => {
   const driven = asked();
   observe(driven, {
     _tag: "ModelResponded",
@@ -228,7 +228,7 @@ test("X4: a turn left running is ended though earlier turns came before it; only
   ]);
 });
 
-test("X4: a call waiting for an answer when the process ended did not run, and is recorded as not run", async () => {
+test("a call waiting for an answer when the process ended did not run, and is recorded as not run", async () => {
   const session = asked();
   observe(session, {
     _tag: "ModelResponded",

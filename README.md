@@ -16,7 +16,7 @@ The domain core of a coding harness, and the layers around it.
 
 | Directory | What it is | May import |
 |---|---|---|
-| `src/agent-machine/` | Machines with mailboxes that pass messages (agent, conversation turn, turn step, call), the router, and the facts, decisions and effect requests they record. See its `MODEL.md`. | `Schema` from `effect` |
+| `src/agent-machine/` | Machines with mailboxes that pass messages (agent, conversation turn, turn step, call), the router, and the facts, decisions and effect requests they record. See `docs/agent-machine.md`. | `Schema` from `effect` |
 | `src/agent-policy/` | Whether an effect request continues, is vetoed, or waits. See `docs/agent-policy.md`. | `Schema` from `effect`, `agent-machine` |
 | `src/agent-process/` | Child process groups that a session keeps (stdio MCP servers), and the removal of credentials from their environment and from logged arguments. See `docs/agent-process.md`. | `effect` |
 | `src/agent-session/` | The layer around them: contracts as Effect services, adapters, the loop (which records every fact, and so owns the journal). See `docs/agent-session.md`. | anything |

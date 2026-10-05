@@ -64,7 +64,7 @@ afterAll(() => {
   for (const stop of stops) stop();
 });
 
-test("S5: a later request carries each earlier notice where it was sent, and a new one at the end", async () => {
+test("a later request carries each earlier notice where it was sent, and a new one at the end", async () => {
   const bodies: Array<{ messages: ReadonlyArray<unknown> }> = [];
   const responses = [
     { content: [{ type: "tool_use", id: "toolu_1", name: "add", input: { a: 2, b: 3 } }], stop_reason: "tool_use" },

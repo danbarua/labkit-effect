@@ -37,7 +37,7 @@ const answers = {
   metadata: json({}),
 };
 
-test("I1 I3: input from another agent while a tool runs is given to the turn when the batch settles", () => {
+test("input from another agent while a tool runs is given to the turn when the batch settles", () => {
   const session = started();
   observe(session, callsTool);
   const interjection = observe(session, {
@@ -54,7 +54,7 @@ test("I1 I3: input from another agent while a tool runs is given to the turn whe
   expect(session.journal.at(-2)).toMatchObject({ decision: { inputs: [interjection] } });
 });
 
-test("I3 I4: a final answer with input queued does not end the turn: the input is given and the model asked again", () => {
+test("a final answer with input queued does not end the turn: the input is given and the model asked again", () => {
   const session = started();
   const interjection = observe(session, { _tag: "InputArrived", from: { _tag: "System" }, text: "CI went red" });
   const answered = observe(session, answers);
@@ -70,7 +70,7 @@ test("I3 I4: a final answer with input queued does not end the turn: the input i
   expect(tags(session.journal.filter((fact) => fact.seq > second))).toEqual(["TurnCompleted", "TurnEndReviewed", "TurnEnded"]);
 });
 
-test("I5: queued input cancelled by its sender is not given to the turn", () => {
+test("queued input cancelled by its sender is not given to the turn", () => {
   const session = started();
   const queued = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "also update the docs" });
   observe(session, { _tag: "InputCancelled", input: queued });
@@ -84,7 +84,7 @@ test("I5: queued input cancelled by its sender is not given to the turn", () => 
   expect(given).not.toContain(queued);
 });
 
-test("I5: cancelling input already given to a turn changes nothing", () => {
+test("cancelling input already given to a turn changes nothing", () => {
   const session = started();
   const given = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "and b.ts" });
   observe(session, answers);
@@ -94,7 +94,7 @@ test("I5: cancelling input already given to a turn changes nothing", () => {
   expect(session.journal.at(-1)).toMatchObject({ seq: cancel, observation: { _tag: "InputCancelled" } });
 });
 
-test("I6: input queued when a turn fails is dropped, and no turn starts until the next input", () => {
+test("input queued when a turn fails is dropped, and no turn starts until the next input", () => {
   const session = started();
   const queued = observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "try again" });
   const failed = observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "overloaded", error: json({ reason: "overloaded" }) });
@@ -109,7 +109,7 @@ test("I6: input queued when a turn fails is dropped, and no turn starts until th
   ]);
 });
 
-test("R5: a tool result for a call no machine exists for is recorded as undelivered, and changes nothing", () => {
+test("a tool result for a call no machine exists for is recorded as undelivered, and changes nothing", () => {
   const session = started();
   const before = session.world;
   const stray = observe(session, { _tag: "ToolEnded", call: "c9", outcome: { _tag: "Failed", reason: { _tag: "Reported", error: json("?") } } });
@@ -117,7 +117,7 @@ test("R5: a tool result for a call no machine exists for is recorded as undelive
   expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "ObservationUndelivered", observation: stray } });
 });
 
-test("R3: a vetoed call settles the batch and the model is asked again", () => {
+test("a vetoed call settles the batch and the model is asked again", () => {
   const session = started();
   observe(session, callsTool);
   const vetoed = observe(session, {
@@ -133,7 +133,7 @@ test("R3: a vetoed call settles the batch and the model is asked again", () => {
   ]);
 });
 
-test("I2: input that arrives before a turn starts waits in the agent's mailbox, and the turn takes all of it", () => {
+test("input that arrives before a turn starts waits in the agent's mailbox, and the turn takes all of it", () => {
   const session = open();
   observe(session, opened);
   session.startsTurns = false;
@@ -149,14 +149,14 @@ test("I2: input that arrives before a turn starts waits in the agent's mailbox, 
   expect(session.world.agent).toMatchObject({ state: { _tag: "Running", turn: "wake-7" }, mailbox: [] });
 });
 
-test("R5: a turn reported while one is running is recorded as not expected", () => {
+test("a turn reported while one is running is recorded as not expected", () => {
   const session = started();
   const stray = observe(session, { _tag: "TurnStarted", turn: "turn-x" });
   expect(session.journal.at(-1)).toMatchObject({ decision: { _tag: "ObservationNotExpected", observation: stray } });
   expect(session.world.agent.state).toMatchObject({ _tag: "Running", turn: "turn-1" });
 });
 
-test("R5: a model response passed on to a step that is running tools is recorded as not expected", () => {
+test("a model response passed on to a step that is running tools is recorded as not expected", () => {
   const session = started();
   observe(session, callsTool);
   const stray = observe(session, answers);

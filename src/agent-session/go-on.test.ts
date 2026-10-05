@@ -115,7 +115,7 @@ const wentOn = (facts: ReadonlyArray<Fact>) => {
 const tags = (facts: ReadonlyArray<Fact>) => facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
 const ending = (facts: ReadonlyArray<Fact>) => facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? [fact.decision.ending._tag] : []));
 
-test("X5: a model request made and not answered is made again, and the turn goes on", async () => {
+test("a model request made and not answered is made again, and the turn goes on", async () => {
   const session = asked();
   expect(leftRunning(session.journal)?.requests.map((request) => request._tag)).toEqual(["RequestModelResponse"]);
   const { after, asked: times } = await wentOn(session.journal);
@@ -124,7 +124,7 @@ test("X5: a model request made and not answered is made again, and the turn goes
   expect(ending(after)).toEqual(["Completed"]);
 });
 
-test("X5: a call that began, to a tool safe to run again, runs again; the model is told how it ended", async () => {
+test("a call that began, to a tool safe to run again, runs again; the model is told how it ended", async () => {
   const session = asked();
   calls(session, "look");
   observe(session, { _tag: "ToolCallDispatched", call: "c1" });
@@ -138,7 +138,7 @@ test("X5: a call that began, to a tool safe to run again, runs again; the model 
   expect(ending(after)).toEqual(["Completed"]);
 });
 
-test.each([["launch"], ["write"]])("X5: a call that began, to a tool that changes things (%s), is not run again: how it ended was not observed", async (tool: string) => {
+test.each([["launch"], ["write"]])("a call that began, to a tool that changes things (%s), is not run again: how it ended was not observed", async (tool: string) => {
   const session = asked();
   calls(session, tool);
   observe(session, { _tag: "ToolCallDispatched", call: "c1" });
@@ -152,7 +152,7 @@ test.each([["launch"], ["write"]])("X5: a call that began, to a tool that change
   expect(ending(after)).toEqual(["Completed"]);
 });
 
-test("X5: a call to a safe tool that had not begun, waiting for an answer, is asked about again and runs once allowed", async () => {
+test("a call to a safe tool that had not begun, waiting for an answer, is asked about again and runs once allowed", async () => {
   const session = asked();
   calls(session, "check");
   observe(session, { _tag: "PermissionAsked", call: "c1", asks: json({ tool: "check" }) });
@@ -162,7 +162,7 @@ test("X5: a call to a safe tool that had not begun, waiting for an answer, is as
   expect(ending(after)).toEqual(["Completed"]);
 });
 
-test.each([["launch"], ["write"]])("X5: a call that had not begun, to a tool that changes things (%s), is not run: it ends not run", async (tool: string) => {
+test.each([["launch"], ["write"]])("a call that had not begun, to a tool that changes things (%s), is not run: it ends not run", async (tool: string) => {
   const session = asked();
   calls(session, tool);
   observe(session, { _tag: "PermissionAsked", call: "c1", asks: json({ tool }) });
@@ -176,7 +176,7 @@ test.each([["launch"], ["write"]])("X5: a call that had not begun, to a tool tha
   expect(ending(after)).toEqual(["Completed"]);
 });
 
-test("X5 X4: a turn that was being interrupted is given what is known of each request, and ends; nothing runs", async () => {
+test("a turn that was being interrupted is given what is known of each request, and ends; nothing runs", async () => {
   const session = asked();
   calls(session, "look");
   observe(session, { _tag: "ToolCallDispatched", call: "c1" });
@@ -189,7 +189,7 @@ test("X5 X4: a turn that was being interrupted is given what is known of each re
   expect(ending(after)).toEqual(["Interrupted"]);
 });
 
-test("X5: input that arrived with no turn started for it starts one", async () => {
+test("input that arrived with no turn started for it starts one", async () => {
   const session = open();
   session.startsTurns = false;
   observe(session, boringOpening(catalog));

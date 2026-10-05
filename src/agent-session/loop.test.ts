@@ -124,7 +124,7 @@ async function answeringTurn(hooks: ReadonlyArray<() => ReadonlyArray<string>>, 
   return { facts, tags, logged };
 }
 
-test("I4: a turn-end hook's feedback holds the turn open; the turn ends when the hooks have nothing more", async () => {
+test("a turn-end hook's feedback holds the turn open; the turn ends when the hooks have nothing more", async () => {
   const feedback = ["Write the session up before stopping."];
   const { facts, tags, logged } = await answeringTurn([() => feedback.splice(0)], 5);
   expect(tags).toEqual([

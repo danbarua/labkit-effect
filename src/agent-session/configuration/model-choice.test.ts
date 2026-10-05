@@ -18,7 +18,7 @@ const select = (facts: ReadonlyArray<Fact>) =>
     }).pipe(Effect.provide(ModelFromFacts)),
   );
 
-test("M1: a session's facts say which model it asks: the latest change taken, or the one it opened with", async () => {
+test("a session's facts say which model it asks: the latest change taken, or the one it opened with", async () => {
   const session = open();
   observe(session, opened);
   expect(await select(session.journal) as unknown).toEqual(Exit.succeed({ provider: "boring", model: "boring-1" }));

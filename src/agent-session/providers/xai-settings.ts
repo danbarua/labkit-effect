@@ -6,7 +6,7 @@
  *   `observe` other than `all` is returned as adjusted and nothing is sent for it.
  * - `max_output_tokens` limits the answer only: the reasoning is not counted against it, so a
  *   response can use more tokens than `maxOutputTokens`. The limit is sent as asked and not
- *   recorded as adjusted, because an adjusted value becomes the setting (agent-machine M3) and the
+ *   recorded as adjusted, because an adjusted value becomes the setting and the
  *   same number would then be adjusted again on every request.
  * - It caches every request for as long as the server keeps the entry, with no setting for how
  *   long. It accepts and ignores `prompt_cache_retention`, so that field is not sent.

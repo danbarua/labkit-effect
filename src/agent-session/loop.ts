@@ -164,8 +164,8 @@ export interface Session {
   /**
    * Records `input` as the user's (`InputArrived`, with the origin `CurrentOrigin` gives) and
    * returns how the turn that took it ended. With no turn under way the loop starts one for it.
-   * With one under way the input goes to that turn, which takes it between steps (agent-machine I3);
-   * if that turn ends other than by an answer the input is dropped (I6), and `prompt` returns that
+   * With one under way the input goes to that turn, which takes it between steps;
+   * if that turn ends other than by an answer the input is dropped, and `prompt` returns that
    * ending all the same. Two at once are recorded one after the other, and both go to the same turn
    * unless it ends between them. It fails if writing the session's facts fails, then or while it
    * waits.
@@ -174,7 +174,7 @@ export interface Session {
   /**
    * Records `TurnInterrupted` for the turn under way, with the origin `CurrentOrigin` gives, and
    * returns once it is recorded; the turn ends `Interrupted` once its requests have reported how
-   * far they got (agent-machine X1–X3). With no turn under way it records nothing.
+   * far they got. With no turn under way it records nothing.
    */
   readonly cancel: Effect.Effect<void, SessionStoreFailed, Services>;
   /** Waits until no request is being carried out; fails if writing the session's facts failed. */

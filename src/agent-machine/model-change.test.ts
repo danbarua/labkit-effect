@@ -19,7 +19,7 @@ const response = (parts: ReadonlyArray<unknown>) => ({
   metadata: json({}),
 });
 
-test("M1: a change of model while no turn runs is taken at once", () => {
+test("a change of model while no turn runs is taken at once", () => {
   const session = open();
   observe(session, opened);
   const change = observe(session, toOpenAi);
@@ -27,7 +27,7 @@ test("M1: a change of model while no turn runs is taken at once", () => {
   expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { _tag: "ModelChangeTaken", change } });
 });
 
-test("M1: a change of model during a step is taken between steps, before the next request", () => {
+test("a change of model during a step is taken between steps, before the next request", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -44,7 +44,7 @@ test("M1: a change of model during a step is taken between steps, before the nex
   ]);
 });
 
-test("M1: a change of model that arrives while the last step runs is taken once the step has answered", () => {
+test("a change of model that arrives while the last step runs is taken once the step has answered", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
@@ -60,7 +60,7 @@ test("M1: a change of model that arrives while the last step runs is taken once 
   ]);
 });
 
-test("M1: a change of model still waiting when the turn ends is taken, not dropped", () => {
+test("a change of model still waiting when the turn ends is taken, not dropped", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });

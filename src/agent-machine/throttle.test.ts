@@ -16,7 +16,7 @@ function run(interval: number, inputs: ReadonlyArray<ThrottleInput<number>>): Ar
 
 const at = (ms: number) => Millis.make(ms);
 
-test("V2: chunks are released at most once per interval, and the rest when the stream ends", () => {
+test("chunks are released at most once per interval, and the rest when the stream ends", () => {
   expect(
     run(100, [
       { _tag: "Captured", item: 1, at: at(0) },

@@ -260,7 +260,7 @@ test("Chat Completions: the effort is sent as reasoning_effort, none for thinkin
   });
 });
 
-test("M2: a session's settings are each as last said: by its opening, or by a change of model taken", async () => {
+test("a session's settings are each as last said: by its opening, or by a change of model taken", async () => {
   const session = open();
   observe(session, { ...opened, model: { ...opened.model, settings: { thinking: "auto", observe: "all" } } });
   expect(await Effect.runPromise(modelOf(session.journal))).toEqual({
@@ -277,7 +277,7 @@ test("M2: a session's settings are each as last said: by its opening, or by a ch
   } as never);
 });
 
-test("M3: what a model adjusted is its setting from then on; what was said stands for another model, and saying it again puts the adjustment aside", async () => {
+test("what a model adjusted is its setting from then on; what was said stands for another model, and saying it again puts the adjustment aside", async () => {
   const session = open();
   const settingsNow = async () => (await Effect.runPromise(modelOf(session.journal))).settings;
   observe(session, {
@@ -303,7 +303,7 @@ test("M3: what a model adjusted is its setting from then on; what was said stand
   expect(await settingsNow()).toEqual({ thinking: "off", effort: "high" } as never);
 });
 
-test("M3: a setting adjusted with nothing used in its place is no longer sent to that model", async () => {
+test("a setting adjusted with nothing used in its place is no longer sent to that model", async () => {
   const session = open();
   observe(session, { ...opened, model: { ...opened.model, settings: { thinking: "off", effort: "high" } } });
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "hello" });
@@ -323,7 +323,7 @@ afterAll(() => {
   for (const stop of stops) stop();
 });
 
-test("M3: a request carries the settings the model allows; what was adjusted is recorded before the first response, and once", async () => {
+test("a request carries the settings the model allows; what was adjusted is recorded before the first response, and once", async () => {
   const bodies: Array<Record<string, unknown>> = [];
   const server = Bun.serve({
     port: 0,

@@ -7,7 +7,7 @@ import { observe, open, opened } from "../../tests/support/drive.ts";
 import { json } from "../../tests/support/received.ts";
 import { test } from "../../tests/support/test.ts";
 
-test("R1: content from outside is recorded as it arrived, unparsed: text that is not JSON, and bytes", () => {
+test("content from outside the harness is recorded unparsed, as it arrived: text that is not JSON, and bytes", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "read the files" });
@@ -54,7 +54,7 @@ function unguardedSwitches(text: string): ReadonlyArray<number> {
   });
 }
 
-test("R4: every switch in the core ends in satisfies never", () => {
+test("every switch in the core ends in `satisfies never`", () => {
   const sources = ["src/agent-machine", "src/agent-policy"].flatMap((directory) =>
     readdirSync(directory)
       .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
@@ -67,7 +67,7 @@ test("R4: every switch in the core ends in satisfies never", () => {
   expect(texts.flatMap(([file, text]) => unguardedSwitches(text).map((line) => `${file}:${line}`))).toEqual([]);
 });
 
-test("TC4: a call that arrived in a response that then failed is recorded, with its dispatch and its end", () => {
+test("a call that arrived in a response that then failed is recorded, with its dispatch and its end", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });

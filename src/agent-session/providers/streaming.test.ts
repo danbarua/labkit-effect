@@ -250,7 +250,7 @@ test("OpenAI: an item still arriving when the response ended is not recorded", a
   expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "CutShort" } } });
 });
 
-test("V1: while a response arrives, its events and each completed part are passed on; none of it is recorded", async () => {
+test("while a response arrives, its events and each completed part are passed on; none of it is recorded", async () => {
   const url = serving((request) =>
     anthropicStream(
       request === 1
@@ -356,7 +356,7 @@ test("a completed part is passed on when it completes, with the events held befo
   expect(seen.flatMap((item) => (item._tag === "ModelDelta" ? [item.text as string] : []))).toEqual(["5."]);
 });
 
-test("TC2 TC3: a tool call is run as soon as it is complete in the stream, before the response has ended; its result follows the response", async () => {
+test("a tool call is run as soon as it is complete in the stream, before the response has ended; its result follows the response", async () => {
   const toolRan = Promise.withResolvers<void>();
   const bodies: Array<{ messages: ReadonlyArray<unknown> }> = [];
   const event = (data: Record<string, unknown>) => new TextEncoder().encode(`event: ${String(data["type"])}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -431,7 +431,7 @@ test("TC2 TC3: a tool call is run as soon as it is complete in the stream, befor
   ]);
 });
 
-test("X1: interrupted while a response streams and its tool runs: both are stopped and recorded as far as they got, and the conversation goes on", async () => {
+test("interrupted while a response streams and its tool runs: both are stopped and recorded as far as they got, and the conversation goes on", async () => {
   const toolBegan = Promise.withResolvers<void>();
   const bodies: Array<{ messages: ReadonlyArray<unknown> }> = [];
   const event = (data: Record<string, unknown>) => new TextEncoder().encode(`event: ${String(data["type"])}\ndata: ${JSON.stringify(data)}\n\n`);

@@ -185,7 +185,7 @@ test("a body handed over whole whose size is not its Content-Length fails as a t
   expect(encoded.observed).toMatchObject({ _tag: "ModelResponded" });
 });
 
-test("TC4: a stream closed after a tool call of it was passed on is not made again: the tool has run once, the turn fails, and the call is not sent to the model", async () => {
+test("a stream closed after a tool call of it was passed on is not made again: the tool has run once, the turn fails, and the call is not sent to the model", async () => {
   const call = { type: "function_call", call_id: "call_1", name: "add", arguments: '{"a":2,"b":3}', status: "completed" };
   const event = `data: ${JSON.stringify({ type: "response.output_item.done", output_index: 0, item: call })}\n\n`;
   const opened = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";

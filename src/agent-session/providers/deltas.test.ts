@@ -78,7 +78,7 @@ const paired = (passed: ReadonlyArray<CapturedObservation>) => {
 
 const tags = (passed: ReadonlyArray<CapturedObservation>): Array<string> => passed.map((item) => item._tag);
 
-test("V3 V4: Anthropic: the deltas of thinking and of the answer, joined, are each part's text; each request ends last", async () => {
+test("Anthropic: the deltas of thinking and of the answer, joined, are each part's text; each request ends last", async () => {
   const url = serving((request) =>
     anthropicStream(
       request === 1
@@ -105,7 +105,7 @@ test("V3 V4: Anthropic: the deltas of thinking and of the answer, joined, are ea
   expect(passed.filter((item) => item._tag === "ModelDelta").every((item) => item.text !== '{"a":2,"b":3}')).toBe(true);
 });
 
-test("V3: OpenAI Responses: commentary, a two-part reasoning summary, and the answer, each its deltas joined", async () => {
+test("OpenAI Responses: commentary, a two-part reasoning summary, and the answer, each its deltas joined", async () => {
   const url = serving(() =>
     openAiStream({
       status: "completed",
@@ -125,7 +125,7 @@ test("V3: OpenAI Responses: commentary, a two-part reasoning summary, and the an
   expect(tags(passed).at(-1)).toBe("ModelResponseEnded");
 });
 
-test("V3: Chat Completions: the thinking field and the content, each its deltas joined; a server that answers whole has none", async () => {
+test("Chat Completions: the thinking field and the content, each its deltas joined; a server that answers whole has none", async () => {
   const whole = { id: "c1", choices: [{ index: 0, message: { role: "assistant", reasoning_content: "Two and three.", content: "5." }, finish_reason: "stop" }] };
   const streaming = serving(() => chatStream(whole));
   const passed = await streamedIn(openAiCompatModelClient({ times: 0, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(streaming))));
@@ -139,7 +139,7 @@ test("V3: Chat Completions: the thinking field and the content, each its deltas 
   expect(tags(fromWhole).at(-1)).toBe("ModelResponseEnded");
 });
 
-test("V3: Chat Completions: Mistral's content, a list of chunks, then text: the thinking and the text, each its deltas joined", async () => {
+test("Chat Completions: Mistral's content, a list of chunks, then text: the thinking and the text, each its deltas joined", async () => {
   const chunk = (delta: unknown, finish_reason: string | null = null) => ({ id: "m1", choices: [{ index: 0, delta, finish_reason }] });
   const think = (text: string) => ({ type: "thinking", thinking: [{ type: "text", text }] });
   const url = serving(() =>
@@ -157,7 +157,7 @@ test("V3: Chat Completions: Mistral's content, a list of chunks, then text: the 
   ]);
 });
 
-test("V4: a request that fails ends with ModelResponseEnded too", async () => {
+test("a request that fails also ends with ModelResponseEnded", async () => {
   const url = serving(() => new Response(JSON.stringify({ error: { message: "bad request" } }), { status: 400, headers: { "content-type": "application/json" } }));
   const passed = await streamedIn(openAiCompatModelClient({ times: 0, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(url))));
   expect(tags(passed)).toEqual(["ModelResponseEnded"]);

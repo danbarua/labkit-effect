@@ -20,7 +20,7 @@ const responded = (parts: ReadonlyArray<unknown>, ending = "Complete") => ({
 
 const call = (id: string) => ({ _tag: "ToolCall", call: id, tool: "ls", input: json({}) });
 
-test("TC3: a call's result follows the response that made it, though the tool ended before the response did", () => {
+test("a call's result follows the response that made it, though the tool ended before the response did", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -34,7 +34,7 @@ test("TC3: a call's result follows the response that made it, though the tool en
   ]);
 });
 
-test("TC3: a call with no recorded end still has a result: not observed if it began to run, not run if it did not", () => {
+test("a call with no recorded end still has a result: not observed if it began to run, not run if it did not", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -49,7 +49,7 @@ test("TC3: a call with no recorded end still has a result: not observed if it be
   });
 });
 
-test("TC4: a call that arrived in a response that then failed is not sent to the model, nor is its result", () => {
+test("a call that arrived in a response that then failed is not sent to the model, nor is its result", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });

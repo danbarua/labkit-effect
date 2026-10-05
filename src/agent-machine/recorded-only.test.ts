@@ -4,7 +4,7 @@ import { expect } from "bun:test";
 import { observe, open, opened } from "../../tests/support/drive.ts";
 import { test } from "../../tests/support/test.ts";
 
-test("R7: McpServerChanged is recorded and nothing follows from it, between turns or during one", () => {
+test("McpServerChanged is recorded and nothing follows from it, between turns or during one", () => {
   const session = open();
   observe(session, opened);
   const between = session.journal.length;

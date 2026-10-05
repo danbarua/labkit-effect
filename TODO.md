@@ -38,7 +38,7 @@ model.
       In the log: the providers on offer are a model catalog (models.dev) filtered by which
       credentials are set, plus a local server; the user changes the model, thinking and output
       limit with ACP's `session/set_config_option`. Here: the opening is the configuration, a
-      change is `ModelChangeArrived` from `User { via: acp }`, taken between turns (M1–M3); the
+      change is `ModelChangeArrived` from `User { via: acp }`, taken between turns; the
       log's configuration versions are our host's numbering (labkit-agent), ours to change, as
       `Seq` is the session's.
       Built: ACP's config options, and `session/set_config_option` as the change it asks, served by
@@ -226,7 +226,7 @@ model.
 The proof of concept is shown. Before a session is run up to a compaction as a daily driver, it has
 to be pleasant to live with; this list is expected to grow.
 
-Built: the window marker, naming what decided it (agent-machine S4); compaction for the provider
+Built: the window marker, naming what decided it (`docs/agent-machine.md`); compaction for the provider
 being asked, summaries per provider kept in memory or as files, policies asked between turns, and
 the view that sends each provider its own summaries (`docs/agent-context.md`); a provider's own
 compaction as a summary, for OpenAI and xAI (`openai-compaction.ts`, `xai-compaction.ts`,

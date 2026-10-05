@@ -17,7 +17,7 @@ const stopped = (parts: ReadonlyArray<unknown> = []) => ({
   metadata: json({}),
 });
 
-test("X1 X3: an interruption during a step stops the turn's work; the turn ends when the request says how far it got, and input waiting is dropped", () => {
+test("an interruption during a step requests StopTurnWork; the turn ends when the model request reports how far it got, and the waiting input is dropped", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -43,7 +43,7 @@ test("X1 X3: an interruption during a step stops the turn's work; the turn ends 
   expect(session.world.agent.state._tag).toBe("Idle");
 });
 
-test("X1: interrupted while a tool runs: the turn ends when the tool's end is heard", () => {
+test("an interruption while a tool runs ends the turn when the tool's end is observed", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -58,7 +58,7 @@ test("X1: interrupted while a tool runs: the turn ends when the tool's end is he
   expect(session.requests.filter((request) => request._tag === "RunTool")).toHaveLength(1);
 });
 
-test("X2: an interruption between steps ends the turn at once, and stops what is being carried out for it", () => {
+test("an interruption between steps ends the turn at once and requests StopTurnWork", () => {
   const session = open();
   session.reviewsTurnEnds = false;
   observe(session, opened);
@@ -69,7 +69,7 @@ test("X2: an interruption between steps ends the turn at once, and stops what is
   expect(session.requests.map((request) => request._tag).slice(-2)).toEqual(["BeforeTurnEnded", "StopTurnWork"]);
 });
 
-test("R5: a response to a turn that has ended is not expected", () => {
+test("a response to a turn that has ended is recorded as ObservationNotExpected", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
