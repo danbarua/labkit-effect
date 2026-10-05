@@ -202,11 +202,11 @@ test("H14: an environment secret is redacted in the message, an annotation and a
   for (const secret of ["sk-secret-123", "tok-4", "plain-credential"]) expect(text).not.toContain(secret);
   const [record] = await linesOf(fileOf(dir));
   expect(record).toMatchObject({
-    annotations: { requestId: "r-[redacted]" },
-    message: ["calling with [redacted]", { headers: { authorization: "[redacted]", inputTokens: 5 } }],
+    annotations: { requestId: "r-<redacted>" },
+    message: ["calling with <redacted>", { headers: { authorization: "<redacted>", inputTokens: 5 } }],
   });
-  expect(record!.cause).toContain("Error: refused [redacted]56");
-  expect(record!.cause).toContain("[cause]: Error: inner [redacted]");
+  expect(record!.cause).toContain("Error: refused <redacted>56");
+  expect(record!.cause).toContain("[cause]: Error: inner <redacted>");
 });
 
 test("H14: the secrets not looked for are said once at start, by name and length, never their value", async () => {

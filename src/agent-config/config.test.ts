@@ -391,7 +391,7 @@ test("CF15: `${VAR}` and `${VAR:-default}` in a server's command, args, env, url
   const written = effectiveSettings(layers, configuration) as { readonly mcpServers: ReadonlyArray<unknown> };
   expect(written.mcpServers).toEqual([
     { name: "web", type: "http", url: "https://${HOST:-mcp.example.com}/mcp", headers: ["Authorization"], required: false },
-    { name: "gh", command: "${GH_BIN}", args: ["--token", "<left out>"], env: ["REGION"], required: false },
+    { name: "gh", command: "${GH_BIN}", args: ["--token", "<redacted>"], env: ["REGION"], required: false },
   ]);
 });
 

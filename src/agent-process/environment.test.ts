@@ -37,9 +37,9 @@ test("PE1: a credential word inside a camelCase name is bounded by a capital aft
 test("PE1: secret values in flags are not logged", () => {
   expect(redactedArgs(["stdio", "--token=ghp_x", "--api-key", "sk-y", "--read-only", "--port", "8080", "--auth-token", "--verbose"])).toEqual([
     "stdio",
-    "--token=<left out>",
+    "--token=<redacted>",
     "--api-key",
-    "<left out>",
+    "<redacted>",
     "--read-only",
     "--port",
     "8080",
@@ -88,7 +88,7 @@ test("a run's arguments are logged with each credential flag's value redacted, a
   expect(printed).toBe("--token=ghp_secret");
   const changes = details(logKeys.process.changed);
   expect(changes.length).toBeGreaterThan(0);
-  for (const change of changes) expect(change["args"]).toEqual(["-c", 'printf "%s" "$0"', "--token=<left out>"]);
+  for (const change of changes) expect(change["args"]).toEqual(["-c", 'printf "%s" "$0"', "--token=<redacted>"]);
 });
 
 test("a run's environment is logged by variable names only: the credential variables removed, and the variables the command sets", async () => {

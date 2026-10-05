@@ -5,7 +5,7 @@
  * `OPENAI_API_KEY`, `SSH_AUTH_SOCK`).
  *
  * A value shorter than `shortest` is not looked for: replaced wherever it occurs, it would cut
- * ordinary text (`OPENAI_API_KEY=set` would make `settings` `[redacted]tings`). Each one left out is
+ * ordinary text (`OPENAI_API_KEY=set` would make `settings` `<redacted>tings`). Each one left out is
  * said once, when the logs are made, by its variable's name and its length, never its value.
  *
  * Secrets in data the host does not hold (a provider's error echoing a key, a command's output) are
@@ -13,14 +13,14 @@
  */
 
 import { Array as Arr, Effect, Layer, Logger, Order } from "effect";
-import { shouldRedact } from "../agent-process/environment.ts";
+import { redactionPlaceholder, shouldRedact } from "../agent-process/environment.ts";
 import { logKeys } from "./log-keys.ts";
 
 /** The fewest characters a credential's value has to be looked for. */
 export const shortest = 8;
 
 export interface Secrets {
-  /** Replaced by `[redacted]` wherever they occur. */
+  /** Replaced by `<redacted>` wherever they occur. */
   readonly values: ReadonlyArray<string>;
   /** The credentials' variables whose values are too short to be looked for: their names and lengths. */
   readonly tooShort: ReadonlyArray<{ readonly name: string; readonly length: number }>;
@@ -45,12 +45,12 @@ export const redactorOf = (values: ReadonlyArray<string>) => {
     Arr.dedupe(values.filter((value) => value !== "")),
     Order.mapInput(Order.flip(Order.Number), (value: string) => value.length),
   );
-  return (text: string): string => ordered.reduce((redacted, secret) => redacted.replaceAll(secret, "[redacted]"), text);
+  return (text: string): string => ordered.reduce((redacted, secret) => redacted.replaceAll(secret, redactionPlaceholder), text);
 };
 
 /**
  * `value` as JSON holds it, `redact` applied to each text in it and a credential field's value
- * `[redacted]`: errors with their name, message, stack and causes. `enclosing` is the objects
+ * `<redacted>`: errors with their name, message, stack and causes. `enclosing` is the objects
  * `value` is nested in: a reference to one of them is a cycle, written `[Circular]`. An object
  * referenced twice without a cycle is written in full both times.
  */
@@ -76,7 +76,7 @@ export const redactedValue = (value: unknown, redact: (text: string) => string, 
   // An error's own enumerable fields come after its name, message, stack and cause, and win over them.
   return {
     ...ofError,
-    ...Object.fromEntries(Object.entries(value).map(([key, item]) => [redact(key), secretField.test(key) ? "[redacted]" : redactedValue(item, redact, within)])),
+    ...Object.fromEntries(Object.entries(value).map(([key, item]) => [redact(key), secretField.test(key) ? redactionPlaceholder : redactedValue(item, redact, within)])),
   };
 };
 

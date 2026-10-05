@@ -90,19 +90,19 @@ export const withoutCredentials = (
   };
 };
 
-/** What a value left out is written as. */
-export const leftOut = "<left out>";
+/** The text that replaces a redacted value in logs and in written configuration. */
+export const redactionPlaceholder = "<redacted>";
 
 /**
  * `args` as they may be logged or written down: the value of a flag whose name holds a credential is
- * left out, given with the flag (`--token=<left out>`) or as the argument after it (`--api-key`
- * `<left out>`). They are run as given.
+ * left out, given with the flag (`--token=<redacted>`) or as the argument after it (`--api-key`
+ * `<redacted>`). They are run as given.
  */
 export const redactedArgs = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
   args.map((arg, index) => {
     const joined = /^--?([^=]+)=/.exec(arg);
-    if (joined?.[1] !== undefined) return shouldRedact(joined[1]) ? `${arg.slice(0, arg.indexOf("=") + 1)}${leftOut}` : arg;
+    if (joined?.[1] !== undefined) return shouldRedact(joined[1]) ? `${arg.slice(0, arg.indexOf("=") + 1)}${redactionPlaceholder}` : arg;
     const before = args[index - 1];
     const flag = before === undefined ? undefined : /^--?([^=]+)$/.exec(before)?.[1];
-    return flag !== undefined && shouldRedact(flag) && !arg.startsWith("-") ? leftOut : arg;
+    return flag !== undefined && shouldRedact(flag) && !arg.startsWith("-") ? redactionPlaceholder : arg;
   });

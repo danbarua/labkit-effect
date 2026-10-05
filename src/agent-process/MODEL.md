@@ -38,7 +38,7 @@ nothing of what a process is for.
   `KEY`, `AUTH`, `SECRET`, `PASSWORD`, and similar. The words of a name are separated by `_`, `-`,
   `.`, and by a capital that follows a lower-case letter: `apiKeyId` holds `Key`; `monkey` holds no
   credential word. When you log a
-  command or write its arguments, omit credential flag values (for example, --token=<omitted>).
+  command or write its arguments, omit credential flag values (for example, --token=<redacted>).
   Run the command with the actual values.
 - PE2. A run receives this process's environment minus credential variables, plus any environment
   settings the command specifies. Log the names of credential variables you removed and environment

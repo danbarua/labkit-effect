@@ -29,11 +29,11 @@ test("H14: the CLI's log leaves out the environment's secrets wherever they are,
   expect(said).toContain("host_logs.secrets_not_looked_for");
   expect(said).toContain("OPENAI_API_KEY");
   expect(said).not.toContain('"set"');
-  expect(record).toContain("pushing with [redacted]");
+  expect(record).toContain("pushing with <redacted>");
   // logfmt quotes the message's JSON.
-  expect(record).toContain(String.raw`\"authorization\":\"[redacted]\"`);
+  expect(record).toContain(String.raw`\"authorization\":\"<redacted>\"`);
   expect(record).toContain(String.raw`\"settings\":\"set\"`);
-  expect(record).toContain("refused [redacted]");
-  expect(record).toContain("request=r-[redacted]");
+  expect(record).toContain("refused <redacted>");
+  expect(record).toContain("request=r-<redacted>");
 });
 

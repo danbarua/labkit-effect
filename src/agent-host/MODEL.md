@@ -115,7 +115,7 @@ warning, error and fatal records alone.
   pid runs keeps its files and does not count.
 - H14. Every log a host writes (the launcher's; the CLI's, to a file or stderr; a test's) leaves out
   the environment's secrets (`redaction.ts`): the values of the variables whose names are
-  credentials' (agent-process PE1: `OPENAI_API_KEY`, `GITHUB_PAT`) are `[redacted]` wherever they
+  credentials' (agent-process PE1: `OPENAI_API_KEY`, `GITHUB_PAT`) are `<redacted>` wherever they
   occur in a record, its annotations and cause included, and so is the value of a credential field
   (`authorization`, `apiKey`, `password`, an access token, a cookie); the rest of an error's text
   stays. A value under 8 characters is not looked for, as replacing it would cut ordinary text;
