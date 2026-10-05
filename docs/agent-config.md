@@ -24,7 +24,7 @@ mcpServers:
 
 | File | Responsibility |
 | --- | --- |
-| `plugin.ts` | What a plug-in is, the seams, and `HostSays` (what the host provides that a file cannot). |
+| `plugin.ts` | What a plug-in is, the seams, and `FromHost` (what the host provides that a file cannot). |
 | `builtins.ts` | The built-in plug-ins: `loopBreaker`, `permissions`, `maxTurnRequests`, `retryIncomplete`, `maxBudget`, `credentials`. |
 | `file.ts` | The file layers (`policyLayers`, `fileLayer`), decoding (`loadConfiguration`), and the MCP servers. |
 | `merge.ts` | Merging layers of parsed values. |
@@ -70,7 +70,7 @@ that names either is refused.
 
 ### What the host provides
 
-`HostSays` holds what a file cannot say:
+`FromHost` holds what a file cannot say:
 
 - `canAsk`: whether anyone can answer a question before a call runs. `permissions` reads it.
 - `permissionMode`: where the user changes the permission mode during a session (the ACP host), the

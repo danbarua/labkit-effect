@@ -11,7 +11,7 @@ import { KnownModels, type ModelKnowledge } from "../agent-session/configuration
 import { MaxHolds, ModelRequestPolicies, type NamedPolicy, ToolCallPolicies, type TurnEndHook, TurnEndHooks } from "../agent-session/contracts.ts";
 import { ToolSources } from "../agent-session/tool-sources.ts";
 import type { Configuration } from "./file.ts";
-import type { Entries, HostSays, Seam } from "./plugin.ts";
+import type { Entries, FromHost, Seam } from "./plugin.ts";
 
 /** Each seam that the configuration lists, as the session's list for it, and `maxHolds` when the configuration gives it. */
 export interface SeamLists {
@@ -27,7 +27,7 @@ export interface SeamLists {
 }
 
 /** Returns the entries of `seam` that the configuration lists, in order; undefined when it does not list the seam. */
-const listOf = <S extends Seam>(configuration: Configuration, seam: S, host: HostSays): ReadonlyArray<Entries[S]> | undefined =>
+const listOf = <S extends Seam>(configuration: Configuration, seam: S, host: FromHost): ReadonlyArray<Entries[S]> | undefined =>
   configuration.lists[seam]?.map((entry) => {
     const made = entry.plugin.entries(entry.settings as never, host)[seam];
     // A plug-in is registered on a seam only when it says so (`on`), and its entries are typed by it.
@@ -36,14 +36,14 @@ const listOf = <S extends Seam>(configuration: Configuration, seam: S, host: Hos
   });
 
 /** Returns the policies that `seam` lists, each under the name it is listed by. */
-const namedListOf = (configuration: Configuration, seam: "toolCalls" | "modelRequests", host: HostSays): ReadonlyArray<NamedPolicy> | undefined => {
+const namedListOf = (configuration: Configuration, seam: "toolCalls" | "modelRequests", host: FromHost): ReadonlyArray<NamedPolicy> | undefined => {
   const made = listOf(configuration, seam, host);
   const names = configuration.lists[seam] ?? [];
   return made?.map((policy, index) => ({ name: names[index]?.name ?? "", policy }));
 };
 
 /** Returns the seam lists of `configuration`, given what the host provides. */
-export const seamListsOf = (configuration: Configuration, host: HostSays): SeamLists => {
+export const seamListsOf = (configuration: Configuration, host: FromHost): SeamLists => {
   const lists = {
     toolCalls: namedListOf(configuration, "toolCalls", host),
     modelRequests: namedListOf(configuration, "modelRequests", host),

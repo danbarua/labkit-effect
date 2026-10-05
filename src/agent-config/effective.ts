@@ -66,8 +66,8 @@ export const effectiveSettings = (layers: ReadonlyArray<LayerSource>, configurat
   mcpServers: configuration.mcpServers.map((server) => {
     // A value that may hold a credential is shown as the layers wrote it: `${VAR}`, not the variable's value.
     const written = (key: string, value: string): string => {
-      const said = at(all, ["mcpServers", server.name, key]);
-      return typeof said === "string" ? said : value;
+      const asWritten = at(all, ["mcpServers", server.name, key]);
+      return typeof asWritten === "string" ? asWritten : value;
     };
     const writtenArgs = at(all, ["mcpServers", server.name, "args"]);
     return {

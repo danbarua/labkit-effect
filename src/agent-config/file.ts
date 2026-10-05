@@ -146,7 +146,7 @@ const problemOf = (error: Schema.SchemaError): string => error.message.replaceAl
 const at = (value: unknown, path: ReadonlyArray<string>): unknown => path.reduce<unknown>((inner, key) => (isMapping(inner) ? inner[key] : undefined), value);
 
 /** Returns the name of the layer that last wrote `path`, or the deepest prefix of `path` that a layer wrote: the layer that an error at `path` names. */
-const writerOf = (layers: ReadonlyArray<LayerSource>, path: ReadonlyArray<string>): string => {
+const layerThatWrote = (layers: ReadonlyArray<LayerSource>, path: ReadonlyArray<string>): string => {
   const newestFirst = Arr.reverse(layers);
   // `path` itself first, then each shorter prefix of it.
   const prefixes = Arr.makeBy(path.length, (shorter) => path.slice(0, path.length - shorter));
@@ -158,7 +158,7 @@ const writerOf = (layers: ReadonlyArray<LayerSource>, path: ReadonlyArray<string
 const pluginsOf = (layers: ReadonlyArray<LayerSource>, value: unknown, registry: ReadonlyArray<AnyPlugin>): Effect.Effect<ReadonlyMap<string, Entry>, ConfigInvalid> =>
   Effect.gen(function* () {
     if (value === undefined) return new Map<string, Entry>();
-    const invalid = (path: ReadonlyArray<string>, problem: string) => new ConfigInvalid({ file: writerOf(layers, path), path: path.join("."), problem });
+    const invalid = (path: ReadonlyArray<string>, problem: string) => new ConfigInvalid({ file: layerThatWrote(layers, path), path: path.join("."), problem });
     if (!isMapping(value)) return yield* invalid(["plugins"], "Expected a mapping of names to their plug-in's settings");
     const entries = yield* Effect.forEach(Object.entries(value), ([name, configured]) =>
       Effect.gen(function* () {
@@ -201,7 +201,7 @@ const listOf = (
   configured: ReadonlyMap<string, Entry>,
   registry: ReadonlyArray<AnyPlugin>,
 ): Effect.Effect<ReadonlyArray<Entry>, ConfigInvalid> => {
-  const invalid = (problem: string, index?: number) => new ConfigInvalid({ file: writerOf(layers, [seam]), path: index === undefined ? seam : `${seam}[${index}]`, problem });
+  const invalid = (problem: string, index?: number) => new ConfigInvalid({ file: layerThatWrote(layers, [seam]), path: index === undefined ? seam : `${seam}[${index}]`, problem });
   if (!Array.isArray(list)) return Effect.fail(invalid("Expected a list of names, each one in plugins or a plug-in's own"));
   return Effect.forEach(list, (name: unknown, index) =>
     Effect.gen(function* () {
@@ -226,7 +226,7 @@ const mcpServersOf = (layers: ReadonlyArray<LayerSource>, value: unknown, env: R
   Effect.gen(function* () {
     // `null` means no servers: a later layer that writes it removes the servers of the layers before it.
     if (value === undefined || value === null) return [];
-    const invalid = (path: ReadonlyArray<string>, problem: string) => new ConfigInvalid({ file: writerOf(layers, path), path: path.join("."), problem });
+    const invalid = (path: ReadonlyArray<string>, problem: string) => new ConfigInvalid({ file: layerThatWrote(layers, path), path: path.join("."), problem });
     if (!isMapping(value)) return yield* invalid(["mcpServers"], "Expected a mapping of names to servers");
     return yield* Effect.forEach(Object.entries(value), ([name, configured]) =>
       Effect.gen(function* () {
@@ -301,11 +301,11 @@ export const decodeLayers = (
       all["maxHolds"] === undefined
         ? undefined
         : yield* Schema.decodeUnknownEffect(MaxHolds)(all["maxHolds"]).pipe(
-            Effect.mapError((error) => new ConfigInvalid({ file: writerOf(layers, ["maxHolds"]), path: "maxHolds", problem: problemOf(error) })),
+            Effect.mapError((error) => new ConfigInvalid({ file: layerThatWrote(layers, ["maxHolds"]), path: "maxHolds", problem: problemOf(error) })),
           );
     const lists: Configuration["lists"] = Object.fromEntries(listed);
     if ((lists.turnEnd?.length ?? 0) > 0 && maxHolds === undefined)
-      return yield* new ConfigInvalid({ file: writerOf(layers, ["turnEnd"]), path: "maxHolds", problem: "Required when turnEnd lists hooks: how many times they may hold one turn open" });
+      return yield* new ConfigInvalid({ file: layerThatWrote(layers, ["turnEnd"]), path: "maxHolds", problem: "Required when turnEnd lists hooks: how many times they may hold one turn open" });
     return { lists, ...(maxHolds === undefined ? {} : { maxHolds }), mcpServers: yield* mcpServersOf(layers, all["mcpServers"], env) };
   });
 

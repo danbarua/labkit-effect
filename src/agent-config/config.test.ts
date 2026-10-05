@@ -32,7 +32,7 @@ const write = (path: string, text: string): string => {
   return full;
 };
 
-/** The layers in `files`, each with whether it is trusted (the user's: true unless said). */
+/** The layers in `files`, each with whether it is trusted (true unless a file is given with false). */
 const layersOf = (files: ReadonlyArray<string | readonly [string, boolean]>) =>
   Effect.map(
     Effect.forEach(files, (file) => (typeof file === "string" ? fileLayer(file, true) : fileLayer(file[0], file[1]))),
@@ -417,8 +417,8 @@ test("maxBudget vetoes a model request once the session has cost its usd or more
 test("the environment of the model's commands is a list of transforms; credentials removes the credential variables except those named in pass", async () => {
   const configuration = await load([write("user/env.yml", "plugins:\n  credentials:\n    pass: [SSH_AUTH_SOCK]\ncommandEnvironment: [credentials]\n")]);
   const transforms = seamListsOf(configuration, { canAsk: true }).commandEnvironment ?? [];
-  const given = transforms.reduce((environment, transform) => transform(environment), { PATH: "/bin", GITHUB_TOKEN: "t", SSH_AUTH_SOCK: "/tmp/agent" } as Readonly<Record<string, string>>);
-  expect(given).toEqual({ PATH: "/bin", SSH_AUTH_SOCK: "/tmp/agent" });
+  const environment = transforms.reduce((before, transform) => transform(before), { PATH: "/bin", GITHUB_TOKEN: "t", SSH_AUTH_SOCK: "/tmp/agent" } as Readonly<Record<string, string>>);
+  expect(environment).toEqual({ PATH: "/bin", SSH_AUTH_SOCK: "/tmp/agent" });
 });
 
 test("the resolved configuration lists each entry's settings, defaults included, the layer that wrote each value, and an MCP server's environment by variable names only", async () => {

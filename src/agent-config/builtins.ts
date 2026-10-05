@@ -5,8 +5,8 @@
  *   (3), `stopAt` (5), and `key`, the name of what makes two calls identical (`toolAndInput`: the
  *   same tool and the same input as received).
  * - `permissions` (`agent-policy/permissions.ts`), on `toolCalls`: `mode` (`default`). The host says
- *   whether anyone can be asked (`HostSays.canAsk`). Where the user changes the mode during a
- *   session, the entry follows the host's mode (`HostSays.permissionMode`), and `mode` is the mode
+ *   whether anyone can be asked (`FromHost.canAsk`). Where the user changes the mode during a
+ *   session, the entry follows the host's mode (`FromHost.permissionMode`), and `mode` is the mode
  *   that the session starts in.
  * - `maxTurnRequests` (`agent-policy/max-turn-requests.ts`), on `modelRequests`: `limit` (1000).
  * - `retryIncomplete` (`agent-host/incomplete.ts`), on `turnEnd`: `retries` (1).
