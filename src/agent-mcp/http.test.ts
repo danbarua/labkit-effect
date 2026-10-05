@@ -251,3 +251,33 @@ test("MS4: reconnecting a remote server ends its session and makes another, as a
   expect(value).toEqual({ again: 2, echoed: "two" });
   expect(fake.deleted).toHaveLength(2);
 });
+
+test("a server that refuses a key given under a credential header name (X-API-Key) has failed: the credentials given were refused", async () => {
+  const { value } = await withFake({ transport: "http", auth: { token: "right" } }, (fake) =>
+    Effect.flatMap(startMcpServer(remoteOf(fake, "http", { "X-API-Key": "wrong" }), roots), (server) => server.settled),
+  );
+  expect(value).toEqual({ _tag: "Failed", run: 1, reason: "the server refused the credentials given (HTTP 401: Unauthorized)" });
+});
+
+test("Streamable HTTP: the GET stream is opened again after it ends", async () => {
+  const { value } = await withFake({ transport: "http" }, (fake) =>
+    Effect.gen(function* () {
+      const gets = () => fake.requests.filter((request) => request.method === "GET").length;
+      yield* connectRemote(remoteOf(fake, "http"), roots);
+      yield* until(() => gets() === 1);
+      fake.dropStreams();
+      yield* until(() => gets() === 2);
+      return gets();
+    }),
+  );
+  expect(value).toBe(2);
+});
+
+test("the headers a server is given are never logged, though a request the server refuses is", async () => {
+  const { value, logged } = await withFake({ transport: "http", auth: { token: "right" } }, (fake) =>
+    Effect.flatMap(startMcpServer(remoteOf(fake, "http", { Authorization: "Bearer header-secret-value" }), roots), (server) => server.settled),
+  );
+  expect(value._tag).toBe("Failed");
+  expect(logged).toContain(logKeys.http.refused);
+  expect(JSON.stringify(logged)).not.toContain("header-secret-value");
+});

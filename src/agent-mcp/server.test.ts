@@ -135,3 +135,13 @@ test("MS1: for any events, the run a server's state names never goes back, and w
     { numRuns: 1000 },
   );
 });
+
+test("Connected for a run that has already failed, exited or needs authorization leaves the server in that state", () => {
+  const tools = [{ name: "echo" }] as never;
+  const ended: ReadonlyArray<McpServerState> = [
+    { _tag: "Failed", run: 1, reason: "no answer" },
+    { _tag: "Exited", run: 1, reason: "its process exited with code 7" },
+    { _tag: "NeedsAuth", run: 1, reason: "the server asks for credentials" },
+  ];
+  for (const state of ended) expect(stepMcpServer(state, { _tag: "Connected", run: 1, tools })).toEqual({ state, effects: [] });
+});

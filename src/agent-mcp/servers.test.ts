@@ -2,9 +2,10 @@
 
 import { expect } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, Stream } from "effect";
+import { Effect, Fiber, Logger, Layer, Ref, Stream } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
+import { logKeys } from "./log-keys.ts";
 import { startMcpServers } from "./servers.ts";
 
 const fake = { name: "fake", command: process.execPath, args: [new URL("../../tests/support/mcp-server.ts", import.meta.url).pathname], env: {} };
@@ -59,4 +60,38 @@ test("MK3: a server that stops is told of once, and once more when it is reconne
   expect(seen.again).toBe("Ready");
   expect(seen.back).toEqual(["The MCP server fake is running again: its tools can be called."]);
   expect(seen.unknown).toBeUndefined();
+});
+
+test("a tool whose offered name would be longer than 64 characters is not offered, and is logged as a warning with the server, the tool and the reason", async () => {
+  const long = `server-${"x".repeat(56)}`;
+  const logged: Array<{ readonly level: string; readonly message: unknown }> = [];
+  const logging = Logger.layer([Logger.make((options) => logged.push({ level: options.logLevel, message: options.message }))], { mergeWithExisting: true });
+  const sources = await runTest(
+    Effect.gen(function* () {
+      const servers = yield* startMcpServers([{ server: { ...fake, name: long } }], []);
+      return servers.sources.map((source) => source.tools.length);
+    }).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, logging))),
+  );
+  expect(sources).toEqual([0]);
+  const warned = logged.flatMap((each) => (each.level === "Warn" && Array.isArray(each.message) && each.message[0] === logKeys.server.toolLeftOut ? [each.message[1]] : []));
+  expect(warned).toContainEqual({ server: long, tool: "echo", reason: `mcp__${long}__echo is longer than 64 characters` });
+});
+
+test("while a reconnected server is connecting, no change is recorded: its changes go from Ready to Ready", async () => {
+  const tags = await runTest(
+    Effect.gen(function* () {
+      const servers = yield* startMcpServers([{ server: fake }], []);
+      const seen = yield* Ref.make<ReadonlyArray<string>>([]);
+      const watching = yield* servers.changes.pipe(
+        Stream.runForEach((change) => Ref.update(seen, (before) => [...before, change.state._tag])),
+        Effect.forkChild,
+      );
+      yield* Effect.sleep("100 millis");
+      yield* servers.reconnect("fake");
+      yield* Effect.sleep("300 millis");
+      yield* Fiber.interrupt(watching);
+      return yield* Ref.get(seen);
+    }).pipe(Effect.provide(BunServices.layer)),
+  );
+  expect(tags).toEqual(["Ready", "Ready"]);
 });

@@ -56,3 +56,26 @@ test("MT3: a call runs on the server and its result is recorded as the server se
   expect(seen.refused as unknown).toEqual({ _tag: "Failed", reason: { _tag: "InputRejected", problem: "mcp__fake__echo takes a JSON object as its input." } });
   expect(seen.stopped).toMatchObject({ _tag: "Failed", reason: { _tag: "Reported", error: { body: { text: "fake: echo was not called: the server is not running (it is stopped)" } } } });
 });
+
+/** A server stub whose `call` answers `result`, counting its calls. */
+const stubServer = (result: Readonly<Record<string, unknown>>) => {
+  const calls = { count: 0 };
+  const server = { name: "stub", call: () => Effect.sync(() => (calls.count += 1)).pipe(Effect.as(result)) } as unknown as McpServer;
+  return { server, calls };
+};
+const stubTool = { name: "act", inputSchema: { type: "object" } } as unknown as McpSchema.Tool;
+
+test("a call whose input is JSON but not an object is refused as InputRejected, and the server is not called", async () => {
+  const { server, calls } = stubServer({ content: [] });
+  const { source } = mcpToolSource(server, [stubTool]);
+  const outcome = await Effect.runPromise(source.run(ToolName.make("act"), receivedJson([1, 2]), CallId.make("c1")));
+  expect(outcome as unknown).toEqual({ _tag: "Failed", reason: { _tag: "InputRejected", problem: "mcp__stub__act takes a JSON object as its input." } });
+  expect(calls.count).toBe(0);
+});
+
+test("a result with isError true is the tool's own failure: Reported, with the result as the server sent it", async () => {
+  const result = { content: [{ type: "text", text: "the file is locked" }], isError: true };
+  const { source } = mcpToolSource(stubServer(result).server, [stubTool]);
+  const outcome = await Effect.runPromise(source.run(ToolName.make("act"), receivedJson({}), CallId.make("c1")));
+  expect(outcome as unknown).toEqual({ _tag: "Failed", reason: { _tag: "Reported", error: { mediaType: mcpToolResult, body: { _tag: "Text", text: JSON.stringify(result) } } } });
+});
