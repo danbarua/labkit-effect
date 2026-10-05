@@ -37,6 +37,7 @@ import { bracketedPaste, Multiline } from "./multiline.ts";
 import { answerTo, ask, type Config, endingOf, type Host, lastTurn, logFileOf } from "./session.ts";
 import type { LeftRunning } from "../../agent-machine/left-running.ts";
 import { type TurnKeys, turnKeys } from "./turn-keys.ts";
+import { logKeys } from "./log-keys.ts";
 
 /** What the REPL keeps of a session it follows at a terminal. */
 interface Following {
@@ -250,7 +251,7 @@ const following = (session: Session) =>
         }
       }).pipe(
         // A defect in one input (a presentation or a write that throws) is logged; the follower goes on with the next.
-        Effect.catchDefect((defect) => Effect.logError("cli.follow.input_failed", { input: input._tag, cause: String(defect) })),
+        Effect.catchDefect((defect) => Effect.logError(logKeys.follow.inputFailed, { input: input._tag, cause: String(defect) })),
       );
     const forward = <A extends ProjectionInput>(subscription: PubSub.Subscription<A>) =>
       Effect.forever(PubSub.take(subscription).pipe(Effect.flatMap((item) => Queue.offer(inbox, item))));

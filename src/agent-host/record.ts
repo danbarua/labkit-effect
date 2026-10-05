@@ -7,6 +7,7 @@
 
 import { Data, Effect, FileSystem } from "effect";
 import { sessionFolderOf, storedSessions } from "./directory.ts";
+import { logKeys } from "./log-keys.ts";
 
 /** A session's record could not be written, or read as JSON. */
 export class RecordFailed extends Data.TaggedError("RecordFailed")<{ readonly file: string; readonly message: string }> {}
@@ -61,7 +62,7 @@ export const recordedSessions = (root: string) =>
     return yield* Effect.forEach(stored, ({ sessionId, at }) =>
       readRecord(root, sessionId).pipe(
         Effect.catchTag("RecordFailed", (error) =>
-          Effect.logWarning("host_record.unreadable", { session: sessionId, file: error.file, cause: error.message }).pipe(Effect.as(undefined)),
+          Effect.logWarning(logKeys.record.unreadable, { session: sessionId, file: error.file, cause: error.message }).pipe(Effect.as(undefined)),
         ),
         Effect.map((record) => ({ sessionId, at, record })),
       ),

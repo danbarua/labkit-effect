@@ -10,6 +10,7 @@ import { Effect, Layer, Option, Schema } from "effect";
 import { type Capabilities, KnownModels, type ModelKnowledge, wellKnown } from "../agent-session/configuration/well-known-models.ts";
 import { Settling, type SettlingSource, wellKnownSettling } from "../agent-session/configuration/options.ts";
 import { openAiCompatSettle } from "../agent-session/providers/openai-compat-settings.ts";
+import { logKeys } from "./log-keys.ts";
 
 /** Where the local server is. */
 export const localServer = "http://localhost:8000/v1";
@@ -81,7 +82,7 @@ export const KnownWithLocalServer = Layer.effect(
       Effect.tryPromise(() => fetch(`${localServer}/models`).then((response) => response.json() as Promise<unknown>)).pipe(
         Effect.map(localCapabilities),
         Effect.catch((error) =>
-          Effect.logWarning("host.local_models.not_listed", { url: `${localServer}/models`, error: String(error) }).pipe(Effect.as(new Map<string, Capabilities>())),
+          Effect.logWarning(logKeys.localServer.modelsNotListed, { url: `${localServer}/models`, error: String(error) }).pipe(Effect.as(new Map<string, Capabilities>())),
         ),
       ),
     );

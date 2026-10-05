@@ -36,6 +36,7 @@ import { ephemeralSessionStore, SessionStoreFailed } from "../../agent-session/s
 import { harnessParts, reportedBy } from "../../agent-session/origin.ts";
 import { modelOf, openedWith } from "../../agent-session/configuration/session-setup.ts";
 import { invalid } from "./invalid.ts";
+import { logKeys } from "./log-keys.ts";
 
 export interface Config {
   readonly sessionId: string;
@@ -124,8 +125,8 @@ const written = (config: Config, environment: Readonly<Record<string, string>>) 
       },
     };
     yield* writeEffectiveSettings(folder, config.configuration.layers, config.configuration, host).pipe(
-      Effect.tap((path) => Effect.logInfo("cli.settings.written", { path })),
-      Effect.catch((error) => Effect.logWarning("cli.settings.not_written", { folder, cause: error.message })),
+      Effect.tap((path) => Effect.logInfo(logKeys.settings.written, { path })),
+      Effect.catch((error) => Effect.logWarning(logKeys.settings.notWritten, { folder, cause: error.message })),
     );
   });
 
@@ -167,7 +168,7 @@ const interrupted = (session: Session) =>
     process.once("SIGINT", () => process.exit(130));
     yield* session.observe({ _tag: "TurnInterrupted", turn: left.turn });
     yield* session.idle;
-  }).pipe(Effect.catchTag("SessionStoreFailed", (error) => Effect.logError("cli.session.not_interrupted", { message: error.message })));
+  }).pipe(Effect.catchTag("SessionStoreFailed", (error) => Effect.logError(logKeys.session.notInterrupted, { message: error.message })));
 
 /**
  * Opens a session with `config`, or goes on from the one it continues, and runs `use` with it, with
@@ -208,7 +209,7 @@ export const withSession = <A, E, R, L, H>(
       Stream.runForEach((change) =>
         session.observe(change).pipe(
           reportedBy(harnessParts.mcpServers),
-          Effect.catchTag("SessionStoreFailed", (error) => Effect.logError("cli.mcp.not_recorded", { server: change.server, state: change.state, cause: error.message })),
+          Effect.catchTag("SessionStoreFailed", (error) => Effect.logError(logKeys.mcp.notRecorded, { server: change.server, state: change.state, cause: error.message })),
         ),
       ),
       Effect.forkScoped,

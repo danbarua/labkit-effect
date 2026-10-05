@@ -14,12 +14,10 @@
 
 import { Array as Arr, Effect, Layer, Logger, Order } from "effect";
 import { shouldRedact } from "../agent-process/environment.ts";
+import { logKeys } from "./log-keys.ts";
 
 /** The fewest characters a credential's value has to be looked for. */
 export const shortest = 8;
-
-/** What the log of each credential's variable left out says. */
-export const secretsNotLookedFor = "host_logs.secrets_not_looked_for";
 
 export interface Secrets {
   /** Replaced by `[redacted]` wherever they occur. */
@@ -90,7 +88,7 @@ export const redacting = (secrets: Secrets, formatter: Logger.Logger<unknown, st
 
 /** Says the credentials' variables whose values are not looked for, if any: a warning, by name and length. */
 export const saidTooShort = (secrets: Secrets): Effect.Effect<void> =>
-  secrets.tooShort.length === 0 ? Effect.void : Effect.logWarning(secretsNotLookedFor, { variables: secrets.tooShort, shortest });
+  secrets.tooShort.length === 0 ? Effect.void : Effect.logWarning(logKeys.logs.secretsNotLookedFor, { variables: secrets.tooShort, shortest });
 
 /** `logs`, which say first, in themselves, what of `secrets` they do not look for. */
 export const sayingTooShort = <E, R>(secrets: Secrets, logs: Layer.Layer<never, E, R>): Layer.Layer<never, E, R> =>
