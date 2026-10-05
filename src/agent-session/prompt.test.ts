@@ -5,7 +5,7 @@ import { Deferred, Effect, Exit, Fiber, Layer, PubSub, Ref } from "effect";
 import { BoringContextAssembler, BoringModelProvider, boringOpening } from "../../tests/support/boring.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { smolCatalog, SmolToolRunner } from "../../tests/support/smol-tools.ts";
-import { test } from "../../tests/support/test.ts";
+import { test, testOrigin } from "../../tests/support/test.ts";
 import { BlobId } from "../agent-machine/blob.ts";
 import type { Decision } from "../agent-machine/decision.ts";
 import type { Fact } from "../agent-machine/fact.ts";
@@ -300,4 +300,21 @@ test("L1: a turn the facts left running is under way in the session that goes on
   );
   expect(left).toBe(TurnId.make("turn-1"));
   expect(ended).toBeUndefined();
+});
+
+test("cancel records TurnInterrupted with the origin that CurrentOrigin gives", async () => {
+  const origins = await runTest(
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      return yield* Effect.gen(function* () {
+        const { session, recorded } = yield* opened;
+        yield* Effect.forkChild(session.prompt(said("hello")));
+        yield* seen(recorded, "ModelRequestDispatched");
+        yield* session.cancel;
+        yield* Deferred.succeed(gate, undefined);
+        return (yield* session.facts).flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "TurnInterrupted" ? [fact.origin] : []));
+      }).pipe(Effect.provide(services([{ _tag: "Answer", gate }])));
+    }),
+  );
+  expect(origins).toEqual([testOrigin()]);
 });

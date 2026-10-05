@@ -9,7 +9,7 @@ import { expect } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, Exit, FileSystem, Layer, Logger, Ref, Schema } from "effect";
+import { Deferred, Effect, Exit, FileSystem, Layer, Logger, PlatformError, Ref, Schema } from "effect";
 import { BoringModelProvider, boringOpening, WholeSessionAssembler } from "../../tests/support/boring.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { smolCatalog } from "../../tests/support/smol-tools.ts";
@@ -306,4 +306,69 @@ test.each([["not a pid"], [""], ["0"], ["-1"]])("J4: a lock file that names no p
   expect(opened).toBe(String(process.pid));
   const warned = logged.filter((each) => each.level === "Warn" && Array.isArray(each.message) && each.message[0] === logKeys.sessionStore.lockTakenOver);
   expect(warned.map((each) => (each.message as [string, unknown])[1])).toMatchObject([{ file, held, reason: "the lock file names no process" }]);
+});
+
+/** A logger layer that adds each log line's level and message to `logged`. */
+const loggingTo = (logged: Array<{ readonly level: string; readonly message: unknown }>) =>
+  Logger.layer([Logger.make((options) => logged.push({ level: options.logLevel, message: options.message }))], { mergeWithExisting: true });
+
+const detailsOf = (logged: ReadonlyArray<{ readonly level: string; readonly message: unknown }>, level: string, key: string) =>
+  logged.flatMap((each) => (each.level === level && Array.isArray(each.message) && each.message[0] === key ? [(each.message as [string, unknown])[1]] : []));
+
+test("when the file system cannot flush the folder of a new session file, the store opens and logs a warning with the file and the error", async () => {
+  const file = fileIn();
+  const logged: Array<{ readonly level: string; readonly message: unknown }> = [];
+  // The file system as Bun gives it, except that a folder cannot be opened to be flushed.
+  const noFolderFlush = Layer.effect(
+    FileSystem.FileSystem,
+    Effect.gen(function* () {
+      const base = yield* FileSystem.FileSystem;
+      const open: typeof base.open = (path, options) =>
+        options?.flag === "r"
+          ? Effect.fail(PlatformError.systemError({ _tag: "PermissionDenied", module: "FileSystem", method: "open", description: "folders cannot be opened here", pathOrDescriptor: path }))
+          : base.open(path, options);
+      return { ...base, open };
+    }),
+  ).pipe(Layer.provide(BunServices.layer));
+  const facts = await runTest(
+    Effect.gen(function* () {
+      return yield* (yield* SessionStore).facts;
+    }).pipe(Effect.provide(FileBackedSessionStore(file).pipe(Layer.provide(Layer.mergeAll(noFolderFlush, loggingTo(logged)))))),
+  );
+  expect(facts).toEqual([]);
+  expect(detailsOf(logged, "Warn", logKeys.sessionStore.folderNotFlushed)).toMatchObject([{ file, error: expect.stringContaining("folders cannot be opened here") }]);
+});
+
+test("a write that fails while a tool runs interrupts the tool, and is logged as an error with the facts it did not write", async () => {
+  const running = Deferred.makeUnsafe<void>();
+  const interrupted = Deferred.makeUnsafe<void>();
+  const tools = Layer.succeed(ToolRunner, {
+    run: () => Deferred.succeed(running, undefined).pipe(Effect.andThen(Effect.never), Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined))),
+  });
+  // A store whose write of the input "more" fails.
+  const failing = Layer.effect(
+    SessionStore,
+    Effect.gen(function* () {
+      const kept = yield* Ref.make<ReadonlyArray<Fact>>([]);
+      return {
+        facts: Ref.get(kept),
+        append: (more: ReadonlyArray<Fact>) =>
+          more.some((fact) => fact._tag === "Observed" && fact.observation._tag === "InputArrived" && fact.observation.text === "more")
+            ? Effect.fail(new SessionStoreFailed({ message: "the disk is full" }))
+            : Ref.update(kept, (before) => [...before, ...more]),
+      };
+    }),
+  );
+  const logged: Array<{ readonly level: string; readonly message: unknown }> = [];
+  await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession;
+      yield* session.observe(boringOpening(smolCatalog));
+      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make("echo hi") });
+      yield* Deferred.await(running);
+      yield* Effect.exit(session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make("more") }));
+      yield* Deferred.await(interrupted).pipe(Effect.timeout("5 seconds"));
+    }).pipe(Effect.provide(Layer.mergeAll(over(failing, Scripted, tools), loggingTo(logged)))),
+  );
+  expect(detailsOf(logged, "Error", logKeys.loop.storeFailed)).toMatchObject([{ message: "the disk is full", facts: [expect.any(Number)] }]);
 });
