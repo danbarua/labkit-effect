@@ -32,3 +32,8 @@ test("H14: redactedValue replaces a reference to an enclosing object with [Circu
   const shared = { n: 1 };
   expect(redactedValue({ first: shared, second: shared }, redact)).toEqual({ first: { n: 1 }, second: { n: 1 } });
 });
+
+test("when one secret contains another, the longer one is replaced whole", () => {
+  const redact = redactorOf(["abcdefgh", "abcdefgh-0123456789"]);
+  expect(redact("token abcdefgh-0123456789 and abcdefgh")).toBe("token <redacted> and <redacted>");
+});

@@ -3,7 +3,7 @@
 import { expect } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { BunServices } from "@effect/platform-bun";
-import { DateTime, Effect, Layer, Logger, Schema } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Logger, Schema } from "effect";
 import { boringOpening } from "../../tests/support/boring.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { test, testFolder, testOrigin } from "../../tests/support/test.ts";
@@ -84,4 +84,29 @@ test("H17: the sessions with facts are listed the one written to last first, eac
     ["older", 1_000_000, { cwd: "/work/a", title: "Older" }],
   ]);
   expect(logged).toEqual([["host_record.unreadable", expect.objectContaining({ session: "broken", file: recordFileOf(root, "broken") })]]);
+});
+
+test("a record is flushed to the disk before it is renamed over the old one", async () => {
+  const root = testFolder();
+  const events: Array<string> = [];
+  // The file system as Bun gives it, with each flush of an opened file and each rename noted.
+  const noting = Layer.effect(
+    FileSystem.FileSystem,
+    Effect.gen(function* () {
+      const base = yield* FileSystem.FileSystem;
+      const open: typeof base.open = (path, options) =>
+        base.open(path, options).pipe(
+          Effect.map(
+            (opened) =>
+              new Proxy(opened, {
+                get: (target, key) => (key === "sync" ? target.sync.pipe(Effect.tap(() => Effect.sync(() => events.push("flush")))) : Reflect.get(target, key)),
+              }),
+          ),
+        );
+      const rename: typeof base.rename = (from, to) => base.rename(from, to).pipe(Effect.tap(() => Effect.sync(() => events.push("rename"))));
+      return { ...base, open, rename };
+    }),
+  ).pipe(Layer.provide(BunServices.layer));
+  await Effect.runPromise(writeRecord(root, "s1", { cwd: "/work" }).pipe(Effect.provide(noting)));
+  expect(events).toEqual(["flush", "rename"]);
 });
