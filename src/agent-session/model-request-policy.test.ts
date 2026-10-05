@@ -50,7 +50,7 @@ const heldTurn = async () => {
   return { facts, logged };
 };
 
-test("P9: a request a policy holds is not made; the turn fails, saying to wait, with what the policy asks", async () => {
+test("a model request that a policy holds is not made; the turn fails with a message that tells the user to wait, followed by what the policy asks", async () => {
   const { facts } = await heldTurn();
   const observed = facts.flatMap((fact) => (fact._tag === "Observed" ? [{ origin: fact.origin, observation: fact.observation }] : []));
   expect(observed.some(({ observation }) => observation._tag === "ModelRequestDispatched")).toBe(false);

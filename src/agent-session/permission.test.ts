@@ -84,7 +84,7 @@ const answeredWith = (option: string) =>
     ),
   );
 
-test("P8: an allowed call runs after the answer; a rejected one ends Vetoed and never begins to run", async () => {
+test("a call that the answer allows runs after the answer; a call that the answer rejects ends Vetoed and never starts", async () => {
   const allowed = await answeredWith("allow-once");
   expect(allowed.tags).toEqual(["PermissionAsked", "PermissionAnswered", "ToolCallDispatched", "ToolEnded"]);
   expect(allowed.ended?._tag).toBe("Succeeded");

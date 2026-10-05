@@ -22,13 +22,13 @@ const runTool = (call: string, tool: string) =>
   ({ _tag: "RunTool", call, tool, input: json({}) }) as unknown as EffectRequest;
 const askModel = (turn: string) => ({ _tag: "RequestModelResponse", turn }) as unknown as EffectRequest;
 
-test("P1 P2 P3: a denied tool is vetoed before the person is asked, the veto saying which policy it was (by); another tool waits for the answer", () => {
+test("every vetoes a denied tool before the person is asked, with by giving the vetoing policy's position; a call to another tool waits for the person's answer", () => {
   const policy = every([denyTools(["rm"]), askPerson]);
   expect(decide(policy, runTool("c1", "rm")) as unknown).toEqual({ _tag: "Decided", verdict: { _tag: "Veto", reason: json({ denied: "rm" }) }, by: 0 });
   expect(decide(policy, runTool("c2", "ls")) as unknown).toMatchObject({ _tag: "Waiting", asks: json({ question: "run?", tool: "ls" }) });
 });
 
-test("P1: the person's answer lets the waiting call continue, or vetoes it", () => {
+test("the person's answer lets the waiting call continue, or vetoes it", () => {
   const policy = every([denyTools(["rm"]), askPerson]);
   expect(decide(policy, runTool("c2", "ls"), [{ _tag: "Answered", answer: receivedText("yes") }]) as unknown).toEqual({
     _tag: "Decided",
@@ -41,7 +41,7 @@ test("P1: the person's answer lets the waiting call continue, or vetoes it", () 
   });
 });
 
-test("P1: a delayed model request continues when the clock reaches the policy's time", () => {
+test("a delayed model request continues when the clock reaches the policy's time", () => {
   expect(decide(notBefore(1000), askModel("turn-1"), [{ _tag: "Tick", at: Millis.make(999) }])._tag).toBe("Waiting");
   expect(decide(notBefore(1000), askModel("turn-1"), [{ _tag: "Tick", at: Millis.make(1000) }]) as unknown).toEqual({
     _tag: "Decided",

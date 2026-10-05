@@ -34,7 +34,7 @@ const factsOf = (...observations: ReadonlyArray<unknown>): ReadonlyArray<Fact> =
 const shown = (step: PolicyStep<unknown>): string =>
   step._tag === "Waiting" ? "waits" : step.verdict._tag === "Continue" ? "runs" : `vetoed: ${asText(step.verdict.reason)}`;
 
-test("P10: the third identical call in a row is vetoed, and each after it, with a reason the model reads", () => {
+test("the third identical call in a row is vetoed, and each one after it, with a reason that tells the model how many times it made the call", () => {
   const facts = factsOf(...[1, 2, 3, 4].map((n) => arrived("t1", `c${n}`, "read_file", { path: "a.ts" })));
   const verdicts = [1, 2, 3, 4].map((n) => shown(repeatedCalls(facts).start(run(`c${n}`, "read_file", { path: "a.ts" }))));
   expect(verdicts.slice(0, 2)).toEqual(["runs", "runs"]);
@@ -44,7 +44,7 @@ test("P10: the third identical call in a row is vetoed, and each after it, with 
   expect(verdicts[3]).toStartWith("vetoed: Not run: read_file has been called with this same input 4 times in a row.");
 });
 
-test("P10: a call is counted by its place among identical calls, not by how many the facts hold when it is reviewed", () => {
+test("calls in one response are counted by their position among identical calls, not by how many identical calls the facts hold when each is reviewed", () => {
   // Four identical calls in one response are recorded before any of them is reviewed.
   const facts = factsOf({
     _tag: "ModelResponded",
@@ -63,7 +63,7 @@ test("P10: a call is counted by its place among identical calls, not by how many
   ]);
 });
 
-test("P10: a call made again after other calls is not in a row: running the tests, editing, and running them again", () => {
+test("a call repeated with other calls between the repetitions is not in a row: neither the call nor the turn's next model request is vetoed", () => {
   const tests = (n: number) => arrived("t1", `t${n}`, "run_command", { command: "bun test" });
   const edit = (n: number) => arrived("t1", `e${n}`, "edit_file", { path: "a.ts", edit: n });
   const facts = factsOf(tests(1), edit(1), tests(2), edit(2), tests(3), edit(3), tests(4), edit(4), tests(5));
@@ -83,7 +83,7 @@ test.each([
   expect(shown(repeatedCalls(factsOf(...observations)).start(request))).toBe("runs");
 });
 
-test("P10: a turn's model request is vetoed once its last five calls are identical; other turns' requests are not", () => {
+test("a turn's model request is vetoed once the turn's last five calls are identical; after a different call, or in another turn, the request continues", () => {
   const four = [1, 2, 3, 4].map((n) => arrived("t1", `c${n}`, "read_file", { path: "a.ts" }));
   expect(shown(repeatingTurns(factsOf(...four)).start(ask("t1")))).toBe("runs");
   const five = factsOf(...four, arrived("t1", "c5", "read_file", { path: "a.ts" }));
@@ -93,7 +93,7 @@ test("P10: a turn's model request is vetoed once its last five calls are identic
   expect(shown(repeatingTurns(five).start(ask("t2")))).toBe("runs");
 });
 
-test("P10: what counts as identical, and when to nudge and stop, are settings", () => {
+test("nudgeAt, stopAt and key are settings: with a key of the tool alone, calls with different inputs are identical", () => {
   const facts = factsOf(arrived("t1", "c1", "read_file", { path: "a.ts" }), arrived("t1", "c2", "read_file", { path: "b.ts" }));
   const byTool = { nudgeAt: 2, stopAt: 2, key: (tool: ToolName) => CallKey.make(tool) };
   expect(shown(repeatedCalls(facts, byTool).start(run("c2", "read_file", { path: "b.ts" })))).toStartWith("vetoed");

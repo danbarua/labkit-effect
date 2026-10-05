@@ -288,7 +288,7 @@ twice.
   of steps by status. It is of kind `think`: it runs in every permission mode without asking.
 - AG21. A turn makes at most `maxTurnRequests` model requests (1000 when the launcher does not
   say, `--max-turns` when it does, or what the configuration says): the request beyond it is
-  vetoed (`agent-policy` P11), and the prompt ends with the stop reason `max_turn_requests`.
+  vetoed (`maxTurnRequests` in `agent-policy`), and the prompt ends with the stop reason `max_turn_requests`.
 - AG22. A session's MCP servers (its configuration's, the client's among them: AG25) are started
   when `session/new`, `session/load` or `session/resume` makes it, at once (`agent-mcp` MK1), in the entry's scope, which `session/close` closes: their
   processes end with it. A server has `mcpConnectTimeout` (30 seconds unless the launcher says) to

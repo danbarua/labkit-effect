@@ -37,7 +37,7 @@ const repeatsEcho = () => {
   });
 };
 
-test("P9 P10: calls 1 and 2 run, 3 to 5 are vetoed with a reason the model reads, and the next request is vetoed, ending the turn Vetoed; each veto is recorded from, and logged naming, the policy that made it", async () => {
+test("calls 1 and 2 run, calls 3 to 5 are vetoed with a reason the model reads, and the next model request is vetoed, ending the turn Vetoed; each veto is recorded and logged with the name of the policy that made it", async () => {
   const logged: Array<unknown> = [];
   const capture = Logger.make((options) => {
     logged.push(options.message);

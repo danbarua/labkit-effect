@@ -184,7 +184,7 @@ model.
       question: allow and deny lists by tool and argument (Claude Code's `--allowedTools`,
       `--disallowedTools`), or a tool that answers permission questions (its
       `--permission-prompt-tool`, an MCP tool). Today such a call is vetoed, the reason saying how
-      to let it run (agent-policy P7).
+      to let it run.
 - [ ] Withdrawing input queued for a turn that has not been delivered: the core does it
       (`InputCancelled`, agent-machine `queued-input.test.ts`); no host lets the user do it. The ACP
       host queues no input (a second prompt while one runs is refused) and the CLI drops keys while

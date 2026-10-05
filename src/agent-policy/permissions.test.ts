@@ -20,7 +20,7 @@ const verdict = (mode: PermissionMode, tool: string, facts: ReadonlyArray<Fact> 
   return step._tag === "Waiting" ? "asks" : step.verdict._tag === "Continue" ? "runs" : "vetoed";
 };
 
-test("P5: a tool that only reads runs in every mode; one that changes things runs, asks or is vetoed by the mode", () => {
+test("each permission mode runs, asks about or vetoes a call by its tool's kind; a tool of unknown kind is asked about in default mode", () => {
   const modes: ReadonlyArray<PermissionMode> = ["default", "acceptEdits", "dontAsk", "bypassPermissions"];
   expect(modes.map((mode) => [mode, verdict(mode, "read_file"), verdict(mode, "write_file"), verdict(mode, "run")])).toEqual([
     ["default", "runs", "asks", "asks"],
@@ -32,7 +32,7 @@ test("P5: a tool that only reads runs in every mode; one that changes things run
   expect(verdict("default", "unknown_tool")).toBe("asks");
 });
 
-test("P5: the answer lets the call run, or vetoes it", () => {
+test("a question offers four options; allow-once and allow-session let the call run, and reject-once, reject-session and an option not offered veto it", () => {
   const policy = permissions("default", true, kindOf, []);
   const asked = policy.start(call("write_file"));
   if (asked._tag !== "Waiting" || asked.asks === undefined) throw new Error("expected a question");
@@ -51,7 +51,7 @@ test("P5: the answer lets the call run, or vetoes it", () => {
   ]);
 });
 
-test("P6: a tool allowed for the session, by an answer in the facts, runs without asking", () => {
+test("after allow-session for a tool, later calls to that tool run without a question in default and dontAsk modes; other tools are still asked about, and allow-once is not remembered", () => {
   const asked = permissions("default", true, kindOf, []).start(call("write_file"));
   if (asked._tag !== "Waiting" || asked.asks === undefined) throw new Error("expected a question");
   const session = open();
@@ -68,7 +68,7 @@ test("P6: a tool allowed for the session, by an answer in the facts, runs withou
   expect(verdict("default", "write_file", once.journal)).toBe("asks");
 });
 
-test("P7: where no one can answer, what would be asked is vetoed, with how to let it run", () => {
+test("when no one can answer, a call to a tool that changes files is vetoed with a reason that names acceptEdits or bypassPermissions", () => {
   const step = permissions("default", false, kindOf, []).start(call("write_file"));
   expect(step._tag === "Decided" && step.verdict._tag === "Veto" && step.verdict.reason.body._tag === "Text" ? step.verdict.reason.body.text : "").toBe(
     "write_file needs permission, and no one is there to answer. --permission-mode acceptEdits or bypassPermissions lets it run.",
@@ -76,7 +76,7 @@ test("P7: where no one can answer, what would be asked is vetoed, with how to le
   expect(verdict("acceptEdits", "write_file", [], false)).toBe("runs");
 });
 
-test("P7: where no one can answer, the veto of a tool that does not edit files names only bypassPermissions, the one mode that lets it run", () => {
+test("when no one can answer, a call to a tool that does not change files is vetoed with a reason that names only bypassPermissions", () => {
   const step = permissions("default", false, kindOf, []).start(call("run"));
   expect(step._tag === "Decided" && step.verdict._tag === "Veto" && step.verdict.reason.body._tag === "Text" ? step.verdict.reason.body.text : "").toBe(
     "run needs permission, and no one is there to answer. --permission-mode bypassPermissions lets it run.",
@@ -84,7 +84,7 @@ test("P7: where no one can answer, the veto of a tool that does not edit files n
   expect(verdict("acceptEdits", "run", [], false)).toBe("vetoed");
 });
 
-test("P6: a tool rejected for the session, by an answer in the facts, is vetoed without asking in every mode; other tools are judged as before", () => {
+test("after reject-session for a tool, later calls to that tool are vetoed without a question in every mode; other tools are judged as before", () => {
   const asked = permissions("default", true, kindOf, []).start(call("write_file"));
   if (asked._tag !== "Waiting" || asked.asks === undefined) throw new Error("expected a question");
   const session = open();

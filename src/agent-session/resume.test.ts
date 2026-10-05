@@ -228,7 +228,7 @@ test("X4: a turn left running is ended though earlier turns came before it; only
   ]);
 });
 
-test("P8 X4: a call waiting for an answer when the process ended did not run, and is recorded as not run", async () => {
+test("X4: a call waiting for an answer when the process ended did not run, and is recorded as not run", async () => {
   const session = asked();
   observe(session, {
     _tag: "ModelResponded",

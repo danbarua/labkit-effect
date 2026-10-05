@@ -10,7 +10,7 @@ import { defaultMaxTurnRequests, maxTurnRequests } from "./max-turn-requests.ts"
 
 const askModel = (turn: string): EffectRequest => ({ _tag: "RequestModelResponse", turn: TurnId.make(turn) });
 
-test("P11: a turn's model request beyond the limit is vetoed with the reason ACP's host reads as max_turn_requests, and the veto ends the turn", () => {
+test("a model request beyond the turn's limit is vetoed with the reason { stop: max_turn_requests, limit }, and the veto ends the turn", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
