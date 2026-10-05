@@ -37,14 +37,14 @@ const textOf = (result: ToolResult) =>
 const saidIn = (logged: ReadonlyArray<unknown>) =>
   logged.filter((each): each is { data: string } => typeof each === "object" && each !== null && "data" in each).map((each) => each.data);
 
-test("MC1: the client calls itself what its host says (clientInfo); when it says nothing, the default brand", async () => {
+test("the client calls itself what its host says (clientInfo); when it says nothing, the default brand", async () => {
   // The server logs the clientInfo it was given once it is told initialization was done; a request after it waits for that line.
   const listed = (connection: Effect.Success<ReturnType<typeof connectStdio>>) => connection.tools;
   expect(saidIn((await connected(listed, { name: "acme", version: "2.0.0" })).logged)).toContain("initialized by acme 2.0.0");
   expect(saidIn((await connected(listed)).logged)).toContain("initialized by labkit 0.1.0");
 });
 
-test("MC1 MC5: initialize offers this client's version and the server's answer is kept; its tools are listed across pages; a call gives the tool's result", async () => {
+test("initialize offers this client's version and the server's answer is kept; its tools are listed across pages; a call returns the tool's result", async () => {
   const { value, logged } = await connected((connection) =>
     Effect.gen(function* () {
       const tools = yield* connection.tools;
@@ -57,12 +57,12 @@ test("MC1 MC5: initialize offers this client's version and the server's answer i
   expect(logged).toContainEqual(logKeys.server.logged);
 });
 
-test("MC2: the server's own request during a call (roots/list) is answered with the roots the client was given", async () => {
+test("the server's own request during a call (roots/list) is answered with the roots the client was given", async () => {
   const { value } = await connected((connection) => Effect.map(connection.call("roots", {}), textOf));
   expect(JSON.parse(value)).toEqual({ roots: [{ uri: "file:///work", name: "work" }] });
 });
 
-test("MC3: a call interrupted is cancelled at the server (notifications/cancelled, with its request id)", async () => {
+test("a call interrupted is cancelled at the server (notifications/cancelled, with its request id)", async () => {
   const { logged } = await connected((connection) =>
     Effect.gen(function* () {
       yield* connection.call("slow", {}).pipe(Effect.timeout("200 millis"), Effect.ignore);
@@ -73,7 +73,7 @@ test("MC3: a call interrupted is cancelled at the server (notifications/cancelle
   expect(saidIn(logged).some((data) => /^cancelled \d+$/.test(data))).toBe(true);
 });
 
-test("MC4: a request the server answers with an error fails with McpFailed, naming the server and the request", async () => {
+test("a request the server answers with an error fails with McpFailed, naming the server and the request", async () => {
   const { value } = await connected((connection) => Effect.flip(connection.call("no_such_tool", {})));
   expect(value).toBeInstanceOf(McpFailed);
   expect(value.message).toBe("fake: tools/call no_such_tool failed");

@@ -15,7 +15,7 @@ import { type McpServer, startMcpServer } from "./server.ts";
 
 const fake = { name: "fake", command: process.execPath, args: [new URL("../../tests/support/mcp-server.ts", import.meta.url).pathname], env: {} };
 
-test("MT1: a server's tools are offered under mcp__<server>, characters providers do not take offered as _; one too long or the same as another once offered is left out, with why", () => {
+test("a server's tools are offered under mcp__<server>, with characters that providers do not accept replaced by _; a tool whose offered name is too long or duplicates another is not offered, with the reason", () => {
   expect(namespaceOf("my server.v2")).toBe("mcp__my_server_v2");
   const tool = (name: string) => ({ name, inputSchema: { type: "object" } }) as unknown as McpSchema.Tool;
   const { source, left } = mcpToolSource({ name: "gh" } as McpServer, [tool("search.code"), tool("search_code"), tool("x".repeat(60)), tool("get")]);
@@ -26,7 +26,7 @@ test("MT1: a server's tools are offered under mcp__<server>, characters provider
   ]);
 });
 
-test("MT2: a tool that says it only reads is of kind read and safe to run again; one that says it is idempotent is idempotent; others are other and unsafe", () => {
+test("a tool that says it only reads is of kind read and safe to run again; one that says it is idempotent is idempotent; others are other and unsafe", () => {
   const tool = (name: string, annotations: object) => ({ name, inputSchema: { type: "object" }, annotations }) as unknown as McpSchema.Tool;
   const { source } = mcpToolSource({ name: "s" } as McpServer, [tool("read", { readOnlyHint: true }), tool("put", { idempotentHint: true }), tool("rm", {})]);
   expect(source.tools.map((each) => [each.name as string, each.kind, each.replay])).toEqual([
@@ -36,7 +36,7 @@ test("MT2: a tool that says it only reads is of kind read and safe to run again;
   ]);
 });
 
-test("MT3: a call runs on the server and its result is recorded as the server sent it; input that is not an object is refused; a call to a server not running fails saying why", async () => {
+test("a call runs on the server and its result is recorded as the server sent it; input that is not JSON is refused; a call to a server that is not running fails with the reason", async () => {
   const seen = await runTest(
     Effect.gen(function* () {
       const server = yield* startMcpServer(fake, []);

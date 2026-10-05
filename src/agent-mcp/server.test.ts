@@ -12,7 +12,7 @@ import { type McpServer, runEventOf, startMcpServer } from "./server.ts";
 
 const fake = { name: "fake", command: process.execPath, args: [new URL("../../tests/support/mcp-server.ts", import.meta.url).pathname], env: {} };
 
-test("MS1: a server connects on each run of its process, is ready with its tools, fails or exits with its run; what arrives about an earlier run changes nothing", () => {
+test("a server connects on each run of its process, is ready with its tools, fails or exits with its run; what arrives about an earlier run changes nothing", () => {
   const steps = (events: Parameters<typeof stepMcpServer>[1][]) => events.reduce((state, event) => stepMcpServer(state, event).state, initialMcpServerState);
   const tools = [{ name: "echo" }] as never;
   // A stdio server's run is its process.
@@ -46,7 +46,7 @@ const textOf = (result: ToolResult) =>
 const until = (server: McpServer, is: (state: McpServerState) => boolean) =>
   server.changes.pipe(Stream.filter(is), Stream.runHead, Effect.timeout("10 seconds"), Effect.map((state) => (state._tag === "Some" ? state.value : undefined)));
 
-test("MS2 MS4: a server that connects is ready with its tools and answers calls; one whose process ends has exited, and calls fail saying so, until it is reconnected", async () => {
+test("a server that connects is ready with its tools and answers calls; one whose process ends has exited, and calls fail with that reason until it is reconnected", async () => {
   const seen = await runTest(
     Effect.gen(function* () {
       const server = yield* startMcpServer(fake, []);
@@ -77,7 +77,7 @@ test("MS2 MS4: a server that connects is ready with its tools and answers calls;
   });
 });
 
-test("MS3: a server whose process cannot be started has failed, and a call to it fails saying why", async () => {
+test("a server whose process cannot be started has failed, and a call to it fails with the reason", async () => {
   const seen = await runTest(
     Effect.gen(function* () {
       const server = yield* startMcpServer({ name: "missing", command: "/no/such/server", args: [], env: {} }, []);
@@ -90,7 +90,7 @@ test("MS3: a server whose process cannot be started has failed, and a call to it
   expect(seen.refused).toStartWith("missing: echo was not called: the server is not running (it failed: its process could not be started:");
 });
 
-test("MS5: a server that does not answer initialize, or does not list its tools, in time has failed, and its run is stopped", async () => {
+test("a server that does not answer initialize, or does not list its tools, in time has failed, and its run is stopped", async () => {
   const settle = (server: Parameters<typeof startMcpServer>[0]) =>
     Effect.gen(function* () {
       const started = yield* startMcpServer(server, [], { connectTimeout: "300 millis" });
@@ -122,7 +122,7 @@ const serverEvent = fc.oneof(
   fc.record({ _tag: fc.constant("AuthNeeded" as const), run, reason: fc.constant("no") }),
 );
 
-test("MS1: for any events, the run a server's state names never goes back, and what arrives about an earlier run changes nothing", () => {
+test("for any events, the run a server's state names never goes back, and what arrives about an earlier run changes nothing", () => {
   fc.assert(
     fc.property(fc.array(serverEvent, { maxLength: 30 }), (events) => {
       events.reduce<McpServerState>((state, event) => {

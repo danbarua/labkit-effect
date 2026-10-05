@@ -442,7 +442,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
 
         /**
          * The MCP servers of a session in `cwd`, started at once in a scope of the entry's own, and the world with their tools
-         * after its own (agent-mcp MK1): the configuration's, the client's among them (AG25), and those the client names at a URL,
+         * after its own (`startMcpServers`): the configuration's, the client's among them (AG25), and those the client names at a URL,
          * which are not supported. Two servers whose tools would be offered under one name are -32602, before anything is
          * started. A server the configuration says is required that is not running once they have settled refuses the request,
          * and the servers are stopped (AG26).
@@ -585,7 +585,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               // offered: the session's are the world's and its MCP servers'.
               const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(parent.configuration, { canAsk: true, permissionMode: Ref.get(permissionMode) });
               const runner = SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, world.sources)));
-              // The model is told of the session's MCP servers that are not running (agent-mcp MK2).
+              // The model is told of the session's MCP servers that are not running (`McpServers.notices`).
               const notices = Layer.succeed(Notices, [parent.mcp.notices]);
               const layer = Layer.mergeAll(services(runner).pipe(Layer.provide(notices)), seamLayer(lists), blobs).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
               const context = yield* Layer.buildWithScope(layer, scope);
@@ -608,7 +608,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   }),
               });
               const made = yield* go(session, context, follow);
-              // Once the session's facts have their opening: its MCP servers' states, and each change of them (agent-mcp MK3).
+              // Once the session's facts have their opening: its MCP servers' states, and each change of them (`McpServers.changes`).
               yield* parent.mcp.changes.pipe(
                 Stream.runForEach((change) =>
                   session.observe(change).pipe(

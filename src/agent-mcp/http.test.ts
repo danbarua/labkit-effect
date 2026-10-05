@@ -60,7 +60,7 @@ const transports: ReadonlyArray<Transport> = [
   { name: "HTTP+SSE", options: { transport: "sse" }, transport: "sse" },
 ];
 
-test.each([...transports])("MC1 MC4 MH1: over $name, the client initializes, lists every page of tools, calls one, and a refused call fails naming the server", async ({ options, transport }: Transport) => {
+test.each([...transports])("over $name, the client initializes, lists every page of tools, calls one, and a refused call fails naming the server", async ({ options, transport }: Transport) => {
   const { value, logged } = await withFake(options, (fake, logged) =>
     Effect.gen(function* () {
       const connection = yield* connectRemote(remoteOf(fake, transport), roots, { name: "acme", version: "2.0.0" });
@@ -80,7 +80,7 @@ test.each([...transports])("MC1 MC4 MH1: over $name, the client initializes, lis
 
 // Answered as JSON, a call cannot carry the server's own request: those are over the transports that stream.
 test.each(transports.filter((each) => each.options.respond !== "json"))(
-  "MC2 MC3 MH1: over $name, the server's request during a call (roots/list) is answered, and a call interrupted is cancelled at the server",
+  "over $name, the server's request during a call (roots/list) is answered, and a call interrupted is cancelled at the server",
   async ({ options, transport }: Transport) => {
     const { value, logged } = await withFake(options, (fake, logged) =>
       Effect.gen(function* () {
@@ -96,7 +96,7 @@ test.each(transports.filter((each) => each.options.respond !== "json"))(
   },
 );
 
-test("MH1: Streamable HTTP: after initialize every message carries the session and the version agreed; the GET stream is opened with them; closing the scope ends the session", async () => {
+test("Streamable HTTP: after initialize every message carries the session and the version agreed; the GET stream is opened with them; closing the scope ends the session", async () => {
   const { fake } = await withFake({ transport: "http" }, (fake) =>
     Effect.gen(function* () {
       const connection = yield* connectRemote(remoteOf(fake, "http"), roots);
@@ -116,7 +116,7 @@ test("MH1: Streamable HTTP: after initialize every message carries the session a
   expect(fake.deleted).toEqual([session]);
 });
 
-test("MH1: Streamable HTTP: a server that offers no GET stream (405) is used without one, and says so", async () => {
+test("Streamable HTTP: a server that offers no GET stream (405) is used without one, and says so", async () => {
   const { value, logged } = await withFake({ transport: "http", getStream: false }, (fake, logged) =>
     Effect.gen(function* () {
       const connection = yield* connectRemote(remoteOf(fake, "http"), roots);
@@ -130,7 +130,7 @@ test("MH1: Streamable HTTP: a server that offers no GET stream (405) is used wit
   expect(logged).toContain(logKeys.http.noStream);
 });
 
-test("MH2: HTTP+SSE: messages are posted to the endpoint the stream's first event gives", async () => {
+test("HTTP+SSE: messages are posted to the endpoint the stream's first event gives", async () => {
   const { fake } = await withFake({ transport: "sse" }, (fake) =>
     Effect.gen(function* () {
       const connection = yield* connectRemote(remoteOf(fake, "sse"), roots);
@@ -141,7 +141,7 @@ test("MH2: HTTP+SSE: messages are posted to the endpoint the stream's first even
   expect(fake.requests.slice(1).every((request) => request.method === "POST" && request.path === "/messages")).toBe(true);
 });
 
-test("MH3: a request the endpoint refuses fails with what HTTP said; a server not reached is status 0", async () => {
+test("a request the endpoint refuses fails with what HTTP said; a server not reached is status 0", async () => {
   const { value } = await withFake({ transport: "http", auth: { token: "right", oauth: true } }, (fake) =>
     Effect.gen(function* () {
       const refused = yield* Effect.flip(connectRemote(remoteOf(fake, "http"), roots));
@@ -160,7 +160,7 @@ test("MH3: a request the endpoint refuses fails with what HTTP said; a server no
 const stateWhen = (server: McpServer, is: (state: McpServerState) => boolean) =>
   server.changes.pipe(Stream.filter(is), Stream.runHead, Effect.timeout("5 seconds"), Effect.map((state) => (state._tag === "Some" ? state.value : undefined)));
 
-test("MS6: a remote server that no longer has the session is given a new one, and the call it refused is made again once, said in a warning", async () => {
+test("a remote server that no longer has the session is given a new one, the call it refused is made again once, and the renewal is logged as a warning", async () => {
   const { value, logged, fake } = await withFake({ transport: "http" }, (fake) =>
     Effect.gen(function* () {
       const server = yield* startMcpServer(remoteOf(fake, "http"), roots);
@@ -175,7 +175,7 @@ test("MS6: a remote server that no longer has the session is given a new one, an
   expect(fake.requests.filter((request) => request.carried.includes("initialize"))).toHaveLength(2);
 });
 
-test("MS6: a request whose response stream ends before its answer fails, saying so, and is not made again", async () => {
+test("a request whose response stream ends before its answer fails with that reason, and is not made again", async () => {
   const { value, fake } = await withFake({ transport: "http" }, (fake) =>
     Effect.gen(function* () {
       const connection = yield* connectRemote(remoteOf(fake, "http"), roots);
@@ -190,7 +190,7 @@ test("MS6: a request whose response stream ends before its answer fails, saying 
   expect(fake.requests.filter((request) => request.carried.includes("tools/call"))).toHaveLength(1);
 });
 
-test("MS6: an HTTP+SSE server whose stream ends between requests is connected anew; a call after it is answered", async () => {
+test("an HTTP+SSE server whose stream ends between requests is connected anew; a call after it is answered", async () => {
   const { value, logged } = await withFake({ transport: "sse" }, (fake) =>
     Effect.gen(function* () {
       const server = yield* startMcpServer(remoteOf(fake, "sse"), roots);
@@ -205,7 +205,7 @@ test("MS6: an HTTP+SSE server whose stream ends between requests is connected an
   expect(logged).toContain(logKeys.server.connectionLost);
 });
 
-test("MS7: a server that asks for credentials none are given for needs authorization, saying OAuth when it asks for it; one that refuses those given has failed; given the right ones it is ready", async () => {
+test("a server that asks for credentials when none are given needs authorization, with OAuth named when the server asks for it; a server that refuses the credentials given has failed; with the right credentials it is ready", async () => {
   const settle = (options: FakeHttpOptions, headers: Readonly<Record<string, string>>) =>
     withFake(options, (fake) => Effect.flatMap(startMcpServer(remoteOf(fake, "http", headers), roots), (server) => server.settled)).then(({ value }) => value);
   expect(await settle({ transport: "http", auth: { token: "right", oauth: true } }, {})).toEqual({
@@ -222,7 +222,7 @@ test("MS7: a server that asks for credentials none are given for needs authoriza
   expect((await settle({ transport: "http", auth: { token: "right" } }, { Authorization: "Bearer right" }))._tag).toBe("Ready");
 });
 
-test("MS7: a key revoked mid-session: the next call fails, and the server has failed, saying its credentials were refused", async () => {
+test("a key revoked mid-session: the next call fails, and the server has failed with the reason that its credentials were refused", async () => {
   const { value } = await withFake({ transport: "http", auth: { token: "right" } }, (fake) =>
     Effect.gen(function* () {
       const server = yield* startMcpServer(remoteOf(fake, "http", { Authorization: "Bearer right" }), roots);
@@ -238,7 +238,7 @@ test("MS7: a key revoked mid-session: the next call fails, and the server has fa
   expect(value.failed).toEqual({ _tag: "Failed", run: 1, reason: "the server refused the credentials given (HTTP 401: Unauthorized)" });
 });
 
-test("MS4: reconnecting a remote server ends its session and makes another, as a new run", async () => {
+test("reconnecting a remote server ends its session and makes another, as a new run", async () => {
   const { value, fake } = await withFake({ transport: "http" }, (fake) =>
     Effect.gen(function* () {
       const server = yield* startMcpServer(remoteOf(fake, "http"), roots);

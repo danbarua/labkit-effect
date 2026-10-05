@@ -16,7 +16,7 @@ const given = [
   { server: { name: "remote", transport: "http" as const, url: "http://localhost:1/mcp", headers: {} } },
 ];
 
-test("MK1 MK2: every server is started at once, run or at its URL; the tools of those ready are sources; the model is told once of each server not running", async () => {
+test("all servers start at once, as processes or at their URLs; the ready servers' tools become sources; the model receives one notice for each server that is not running", async () => {
   const seen = await runTest(
     Effect.gen(function* () {
       const servers = yield* startMcpServers(given, []);
@@ -38,7 +38,7 @@ test("MK1 MK2: every server is started at once, run or at its URL; the tools of 
   expect(seen.second).toEqual([]);
 });
 
-test("MK3: a server that stops is told of once, and once more when it is reconnected and runs again; its changes are recorded as McpServerChanged", async () => {
+test("a server that stops produces one notice, and one more when it is reconnected and runs again; its changes are recorded as McpServerChanged", async () => {
   const seen = await runTest(
     Effect.gen(function* () {
       const servers = yield* startMcpServers([{ server: { ...fake, env: { MCP_FAKE_EXIT: "1" } } }], []);
