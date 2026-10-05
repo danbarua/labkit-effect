@@ -18,6 +18,7 @@
  * `config_option_update`, `current_mode_update`, `plan`, and `session/request_permission`.
  */
 
+import { Array as Arr, HashMap, HashSet, Option } from "effect";
 import type { ContentBlock, SessionUpdate, ToolCallContent, ToolCallLocation, ToolKind } from "effective-acp/schema/v1";
 import { ToolCallId } from "effective-acp/schema/v1";
 import type { Fact } from "../agent-machine/fact.ts";
@@ -76,6 +77,12 @@ const failureText = (tool: ToolName, reason: ToolFailure): string => {
 
 const text = (value: string): ContentBlock => ({ type: "text", text: value });
 
+/** What a call's outcome shows: its output, or why it failed; nothing before it ends. */
+const shownOf = (tool: ToolName, outcome: ToolOutcome | undefined): string | undefined => {
+  if (outcome === undefined) return undefined;
+  return outcome._tag === "Succeeded" ? asText(outcome.output) : failureText(tool, outcome.reason);
+};
+
 /**
  * The default presentation over the session's tool catalog (`immutableToolCatalogOf`): the tool's
  * name as the title, its kind from the catalog (none for a tool the catalog does not have), and,
@@ -85,7 +92,7 @@ export const presentFrom =
   (catalog: ReadonlyArray<ToolSpec>): Present =>
   (call, outcome) => {
     const kind = catalog.find((tool) => tool.name === call.tool)?.kind;
-    const shown = outcome === undefined ? undefined : outcome._tag === "Succeeded" ? asText(outcome.output) : failureText(call.tool, outcome.reason);
+    const shown = shownOf(call.tool, outcome);
     return {
       title: call.tool,
       ...(kind === undefined ? {} : { kind }),
@@ -144,7 +151,7 @@ export interface Projected {
 
 const textOf = (state: ProjectionState, turn: TurnId): TurnText => state.texts.get(turn) ?? fresh;
 
-const withText = (state: ProjectionState, turn: TurnId, now: TurnText): ProjectionState => ({ ...state, texts: new Map(state.texts).set(turn, now) });
+const withText = (state: ProjectionState, turn: TurnId, now: TurnText): ProjectionState => ({ ...state, texts: new Map([...state.texts, [turn, now]]) });
 
 const chunkOf = (kind: TextKind, value: string): SessionUpdate =>
   kind === "Thinking" ? { sessionUpdate: "agent_thought_chunk", content: text(value) } : { sessionUpdate: "agent_message_chunk", content: text(value) };
@@ -154,7 +161,7 @@ const announce = (state: ProjectionState, call: Call, context: ProjectionContext
   if (state.calls.has(call.call)) return { state, updates: [] };
   const shown = context.present(call);
   return {
-    state: { ...state, calls: new Map(state.calls).set(call.call, { call, shown }) },
+    state: { ...state, calls: new Map([...state.calls, [call.call, { call, shown }]]) },
     updates: [
       {
         sessionUpdate: "tool_call",
@@ -177,28 +184,36 @@ const callOf = (part: Extract<ModelPart, { _tag: "ToolCall" }>): Call => ({ call
  * they did not send. A part the stream cut is not among `parts`: what was sent of it stays sent.
  */
 const answered = (state: ProjectionState, parts: ReadonlyArray<ModelPart>, sent: Sent, context: ProjectionContext): Projected => {
-  const covered = { ...sent };
-  const updates: Array<SessionUpdate> = [];
-  let now = state;
-  for (const part of parts) {
-    if (part._tag === "ToolCall") {
-      const step = announce(now, callOf(part), context);
-      now = step.state;
-      updates.push(...step.updates);
-    } else if (part._tag === "Text" || part._tag === "Commentary" || part._tag === "Thinking") {
-      const kind = part._tag;
-      if (covered[kind] >= part.text.length) covered[kind] -= part.text.length;
-      else {
-        const rest = part.text.slice(covered[kind]);
-        if (!blank(rest)) updates.push(chunkOf(kind, rest));
-        covered[kind] = 0;
+  const { projected } = parts.reduce<{ readonly projected: Projected; readonly covered: Sent }>(
+    ({ projected, covered }, part) => {
+      if (part._tag === "ToolCall") {
+        const step = announce(projected.state, callOf(part), context);
+        return { projected: { state: step.state, updates: [...projected.updates, ...step.updates] }, covered };
       }
-    }
-  }
-  return { state: now, updates };
+      if (part._tag !== "Text" && part._tag !== "Commentary" && part._tag !== "Thinking") return { projected, covered };
+      const kind = part._tag;
+      if (covered[kind] >= part.text.length) return { projected, covered: { ...covered, [kind]: covered[kind] - part.text.length } };
+      const rest = part.text.slice(covered[kind]);
+      return { projected: blank(rest) ? projected : { ...projected, updates: [...projected.updates, chunkOf(kind, rest)] }, covered: { ...covered, [kind]: 0 } };
+    },
+    { projected: nothing(state), covered: sent },
+  );
+  return projected;
 };
 
 const nothing = (state: ProjectionState): Projected => ({ state, updates: [] });
+
+/**
+ * What the deltas of the request a `ModelResponded` answers sent, and the turn's text after it: those
+ * of the first request ended and not answered; else, live, those streaming now (none while `ahead`:
+ * this request's have not come yet), and its deltas still to come are dropped. On replay there are none.
+ */
+const sentFor = (now: TurnText, mode: ProjectionContext["mode"]): readonly [Sent, TurnText] => {
+  const [first, ...rest] = now.awaiting;
+  if (first !== undefined) return [first, { ...now, awaiting: rest }];
+  if (mode === "replay") return [none, now];
+  return [now.streaming, { ...now, streaming: none, ahead: now.ahead + 1 }];
+};
 
 const status = (call: CallId, value: "pending" | "in_progress"): SessionUpdate => ({
   sessionUpdate: "tool_call_update",
@@ -241,9 +256,8 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
     case "Decided": {
       const decision = input.decision;
       if (decision._tag !== "TurnEnded") return nothing(state);
-      const texts = new Map(state.texts);
-      texts.delete(decision.turn);
-      return nothing({ ...state, texts, ended: new Set(state.ended).add(decision.turn) });
+      const texts = new Map([...state.texts].filter(([turn]) => turn !== decision.turn));
+      return nothing({ ...state, texts, ended: new Set([...state.ended, decision.turn]) });
     }
     case "Observed": {
       const observation = input.observation;
@@ -253,15 +267,7 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
           return { state, updates: context.mode === "replay" && observation.from._tag === "User" ? [{ sessionUpdate: "user_message_chunk", content: text(observation.text) }] : [] };
         case "ModelResponded": {
           const now = textOf(state, observation.turn);
-          // The deltas of this request: those of the first request ended and not answered; else, live,
-          // those streaming now (none while `ahead`: this request's have not come yet), and its
-          // deltas still to come are dropped. On replay there are none.
-          const [sent, after]: readonly [Sent, TurnText] =
-            now.awaiting[0] !== undefined
-              ? [now.awaiting[0], { ...now, awaiting: now.awaiting.slice(1) }]
-              : context.mode === "replay"
-                ? [none, now]
-                : [now.streaming, { ...now, streaming: none, ahead: now.ahead + 1 }];
+          const [sent, after] = sentFor(now, context.mode);
           return answered(withText(state, observation.turn, after), observation.parts, sent, context);
         }
         case "ToolCallArrived":
@@ -289,13 +295,40 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
             ],
           };
         }
-        default:
+        case "SessionOpened":
+        case "InputCancelled":
+        case "TurnStarted":
+        case "TurnInterrupted":
+        case "TurnEndReviewed":
+        case "TurnHoldsExhausted":
+        case "ModelRequestDispatched":
+        case "ModelAttemptFailed":
+        case "ModelFailed":
+        case "ModelVetoed":
+        case "ModelChangeArrived":
+        case "SettingAdjusted":
+        case "PermissionAnswered":
+        case "NoticeInserted":
+        case "CompactionWindow":
+        case "McpServerChanged":
           return nothing(state);
+        default:
+          return observation satisfies never;
       }
     }
     default:
       return input satisfies never;
   }
+}
+
+/** What `inLiveOrder` has found of the inputs so far. */
+interface Reordering {
+  /** Each turn's request in flight: the position of its first ToolCallArrived, none before one. */
+  readonly open: HashMap.HashMap<TurnId, Option.Option<number>>;
+  /** The response to take before the input at each position. */
+  readonly before: HashMap.HashMap<number, ProjectionInput>;
+  /** The positions of the responses so moved. */
+  readonly moved: HashSet.HashSet<number>;
 }
 
 /**
@@ -306,41 +339,51 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
  * `ToolCallArrived`. Every other input keeps its place: the result is a permutation of `inputs`.
  */
 function inLiveOrder(inputs: ReadonlyArray<ProjectionInput>): ReadonlyArray<ProjectionInput> {
-  // Each turn's request in flight: the position of its first ToolCallArrived, or undefined before one.
-  const open = new Map<TurnId, number | undefined>();
-  // The response to take before the input at each position, and the positions of the responses so moved.
-  const before = new Map<number, ProjectionInput>();
-  const moved = new Set<number>();
-  inputs.forEach((input, index) => {
-    if (input._tag !== "Observed") return;
-    const observation = input.observation;
-    switch (observation._tag) {
-      case "ModelRequestDispatched":
-        open.set(observation.turn, undefined);
-        return;
-      case "ToolCallArrived":
-        if (open.has(observation.turn) && open.get(observation.turn) === undefined) open.set(observation.turn, index);
-        return;
-      case "ModelResponded": {
-        const anchor = open.get(observation.turn);
-        open.delete(observation.turn);
-        if (anchor === undefined) return;
-        before.set(anchor, input);
-        moved.add(index);
-        return;
+  const { before, moved } = inputs.reduce<Reordering>(
+    (found, input, index) => {
+      if (input._tag !== "Observed") return found;
+      const observation = input.observation;
+      switch (observation._tag) {
+        case "ModelRequestDispatched":
+          return { ...found, open: HashMap.set(found.open, observation.turn, Option.none()) };
+        case "ToolCallArrived": {
+          const anchor = HashMap.get(found.open, observation.turn);
+          return Option.isSome(anchor) && Option.isNone(anchor.value) ? { ...found, open: HashMap.set(found.open, observation.turn, Option.some(index)) } : found;
+        }
+        case "ModelResponded": {
+          const anchor = Option.flatten(HashMap.get(found.open, observation.turn));
+          const open = HashMap.remove(found.open, observation.turn);
+          if (Option.isNone(anchor)) return { ...found, open };
+          return { open, before: HashMap.set(found.before, anchor.value, input), moved: HashSet.add(found.moved, index) };
+        }
+        case "SessionOpened":
+        case "InputArrived":
+        case "InputCancelled":
+        case "TurnStarted":
+        case "TurnInterrupted":
+        case "TurnEndReviewed":
+        case "TurnHoldsExhausted":
+        case "ModelAttemptFailed":
+        case "ModelFailed":
+        case "ModelVetoed":
+        case "ModelChangeArrived":
+        case "SettingAdjusted":
+        case "ToolCallDispatched":
+        case "ToolEnded":
+        case "PermissionAsked":
+        case "PermissionAnswered":
+        case "NoticeInserted":
+        case "CompactionWindow":
+        case "McpServerChanged":
+          return found;
+        default:
+          return observation satisfies never;
       }
-      default:
-        return;
-    }
-  });
-  if (moved.size === 0) return inputs;
-  const ordered: Array<ProjectionInput> = [];
-  inputs.forEach((input, index) => {
-    const response = before.get(index);
-    if (response !== undefined) ordered.push(response);
-    if (!moved.has(index)) ordered.push(input);
-  });
-  return ordered;
+    },
+    { open: HashMap.empty(), before: HashMap.empty(), moved: HashSet.empty() },
+  );
+  if (HashSet.size(moved) === 0) return inputs;
+  return inputs.flatMap((input, index) => [...Option.toArray(HashMap.get(before, index)), ...(HashSet.has(moved, index) ? [] : [input])]);
 }
 
 /**
@@ -348,12 +391,9 @@ function inLiveOrder(inputs: ReadonlyArray<ProjectionInput>): ReadonlyArray<Proj
  * request's response is taken before its first tool call, as live sent them (`inLiveOrder`).
  */
 export function project(inputs: ReadonlyArray<ProjectionInput>, context: ProjectionContext, from: ProjectionState = start): Projected {
-  const updates: Array<SessionUpdate> = [];
-  let state = from;
-  for (const input of context.mode === "replay" ? inLiveOrder(inputs) : inputs) {
+  const [state, updates] = Arr.mapAccum(context.mode === "replay" ? inLiveOrder(inputs) : inputs, from, (state, input) => {
     const step = next(state, input, context);
-    state = step.state;
-    updates.push(...step.updates);
-  }
-  return { state, updates };
+    return [step.state, step.updates] as const;
+  });
+  return { state, updates: updates.flat() };
 }
