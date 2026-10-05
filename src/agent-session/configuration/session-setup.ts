@@ -1,9 +1,12 @@
 /**
- * A session's set-up, recorded and read back: `openedWith` makes the `SessionOpened` observation
- * from the model, system prompt and tools a session starts with; the readers give, from a session's
- * facts, the model it asks now (the latest change of model taken, or the one it opened with), its
- * settings, and the system prompt and tools it opened with. What a request is sent comes from these, so the
- * facts are the one place they are held.
+ * A session's set-up, recorded and read back.
+ * - `openedWith` makes the `SessionOpened` observation from the model, system prompt and tools that
+ *   a session starts with.
+ * - The readers return, from a session's facts: the model that it asks now (the latest change of
+ *   model taken, or the model it opened with), its settings, and the system prompt and tools that it
+ *   opened with.
+ *
+ * Every request reads these from the facts, so the facts are the one place where they are held.
  */
 
 import { Effect, Schema } from "effect";
@@ -15,7 +18,7 @@ import { type Target, ToolSpec } from "../contracts.ts";
 import { asText, parseJson, receivedJson, receivedText } from "../received.ts";
 import { settingOf } from "./settings.ts";
 
-/** Tools as they are recorded: each one's name, description, and the JSON Schema of its input. */
+/** Tools as they are recorded: each tool's name, description, and the JSON Schema of its input. */
 export const ToolSpecs = Schema.Array(ToolSpec);
 
 type Opened = Extract<Observation, { _tag: "SessionOpened" }>;
@@ -36,9 +39,9 @@ export function openedWith(opening: {
 }
 
 /**
- * The session's opening, if its facts hold one. It is not exported: the opening names the model the
- * session started with, which is not the model it asks once a change has been taken. `modelOf` is
- * the one reader of the model.
+ * Returns the session's opening, if its facts hold one. It is not exported, because the opening names
+ * the model that the session started with, which is not the model it asks after a change has been
+ * taken. `modelOf` is the one reader of the model.
  */
 function openingOf(facts: ReadonlyArray<Fact>): Opened | undefined {
   const found = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "SessionOpened");
@@ -47,7 +50,7 @@ function openingOf(facts: ReadonlyArray<Fact>): Opened | undefined {
 
 type Adjustment = Extract<Observation, { _tag: "SettingAdjusted" }>;
 
-/** `settings` with what was adjusted for a model in place of what was asked. */
+/** Returns `settings` with each adjusted setting replaced by the value that the model used. */
 function withAdjusted(settings: ModelSettings, adjusted: ReadonlyArray<Adjustment>): ModelSettings {
   return adjusted.reduce<ModelSettings>((now, { adjusted: each }) => {
     const { [settingOf[each._tag]]: _asked, ...rest } = now;
@@ -56,15 +59,17 @@ function withAdjusted(settings: ModelSettings, adjusted: ReadonlyArray<Adjustmen
 }
 
 /**
- * The model the session asks now: the one named by the latest change taken, or the one it opened
- * with; and its settings. Each setting is as last said, by the opening or a change taken. Where
- * that model does not allow what was said, the first request to it records what it used instead
- * (`SettingAdjusted`), and from then on that is the setting for that model: the requests after it
- * are sent what the model allows, and nothing more is adjusted. What was said stands for any other
- * model, and saying a setting again puts what was adjusted for it aside.
+ * Returns the model that the session asks now (the one named by the latest change taken, or the one
+ * it opened with) and its settings.
+ * - Each setting has the value last given, by the opening or by a change taken.
+ * - When the model does not allow a value, the first request to it records the value used instead
+ *   (`SettingAdjusted`). From then on that is the setting for that model, so later requests send
+ *   what the model allows and nothing more is adjusted.
+ * - For any other model, the value given still applies. Giving a setting again discards its
+ *   adjustment.
  *
- * A session's facts without its opening is a session that was never opened: asking for its model
- * is a defect.
+ * Facts without an opening belong to a session that was never opened: asking for its model is a
+ * defect.
  */
 export const modelOf = (facts: ReadonlyArray<Fact>): Effect.Effect<Target> => {
   const opened = openingOf(facts)?.model;
@@ -100,8 +105,8 @@ export const modelOf = (facts: ReadonlyArray<Fact>): Effect.Effect<Target> => {
 };
 
 /**
- * ImmutableSystemPrompt: every session's system prompt is the one it opened with, if it has one, for
- * every request. Nothing records a system prompt after the opening.
+ * ImmutableSystemPrompt: returns the system prompt that the session opened with, if any. Every
+ * request uses it; nothing records a system prompt after the opening.
  */
 export const immutableSystemPromptOf = (facts: ReadonlyArray<Fact>): string | undefined => {
   const system = openingOf(facts)?.system;
@@ -109,8 +114,8 @@ export const immutableSystemPromptOf = (facts: ReadonlyArray<Fact>): string | un
 };
 
 /**
- * ImmutableToolCatalog: every session's tools are the ones it opened with, for every request.
- * Nothing records tools after the opening. Tools recorded in a shape they do not decode from are a
+ * ImmutableToolCatalog: returns the tools that the session opened with. Every request uses them;
+ * nothing records tools after the opening. Tools recorded in a shape that does not decode are a
  * defect.
  */
 export const immutableToolCatalogOf = (facts: ReadonlyArray<Fact>): Effect.Effect<ReadonlyArray<ToolSpec>> => {

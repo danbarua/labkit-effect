@@ -1,6 +1,6 @@
 /**
- * What a provider's adapter makes of a session's settings for one model: the fields and headers it
- * adds to the request, and every setting it could not apply as asked, with the reason. The
+ * What a provider's adapter makes of a session's settings for one model: the fields and headers that
+ * it adds to the request, and every setting that it could not apply as asked, with the reason. The
  * function that makes it is pure; `reportAdjusted` records what was adjusted.
  *
  * What each provider does with `cache`, in its own terms:
@@ -33,7 +33,7 @@ export interface Settled {
   readonly adjusted: ReadonlyArray<Adjustment>;
 }
 
-/** Records each setting adjusted on the request the loop is carrying out for `turn`. */
+/** Records each setting adjusted on the request that the loop is carrying out for `turn`. */
 export const reportAdjusted = (turn: TurnId, target: Target, settled: Settled): Effect.Effect<void> =>
   settled.adjusted.length === 0
     ? Effect.void
@@ -63,10 +63,13 @@ const efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 const isEffort = (effort: string): effort is Effort => Effort.literals.some((each) => each === effort);
 
 /**
- * The reasoning effort to send for `settings` to a model that accepts `accepted`: the effort asked,
- * or `none` for thinking `off`, when an effort said beside it is returned as adjusted; one the model
- * does not accept is sent as the nearest it does, the higher of two as near, and that is returned as
- * adjusted. With no list, what was asked is sent.
+ * Returns the reasoning effort to send for `settings` to a model that accepts `accepted`, and the
+ * adjustments made.
+ * - The effort sent is the effort asked, or `none` when thinking is `off`. When thinking is `off`
+ *   and an effort was also given, that effort is returned as adjusted.
+ * - An effort that the model does not accept is sent as the nearest accepted effort (the higher one
+ *   when two are equally near), and returned as adjusted.
+ * - With no `accepted` list, the effort asked is sent.
  */
 export function effortFor(
   settings: ModelSettings,
@@ -81,7 +84,7 @@ export function effortFor(
   if (wanted === undefined || accepted === undefined || accepted.includes(wanted)) return { sent: wanted, adjusted: set(wanted) };
   const at = efforts.indexOf(wanted);
   const distance = (effort: string) => Math.abs(efforts.indexOf(effort) - at);
-  // The nearest first; of two as near, the higher.
+  // The nearest first; of two equally near, the higher.
   const nearest = Order.combine(Order.mapInput(Order.Number, distance), Order.mapInput(Order.flip(Order.Number), (effort: string) => efforts.indexOf(effort)));
   const sent = Arr.sort(accepted, nearest)[0];
   if (sent === undefined) return { sent: wanted, adjusted: [] };
@@ -100,7 +103,7 @@ export const settingOf = {
   Cache: "cache",
 } as const satisfies Record<Adjusted["_tag"], keyof ModelSettings>;
 
-/** The values to offer for each setting; for `maxOutputTokens`, a number, whether to offer it. */
+/** The values to offer for each setting; for `maxOutputTokens`, which takes a number, whether to offer it. */
 export interface SettingChoices {
   readonly effort: ReadonlyArray<Effort>;
   readonly thinking: ReadonlyArray<ThinkingMode>;
@@ -110,10 +113,11 @@ export interface SettingChoices {
 }
 
 /**
- * The values to offer for each setting of `target`, as it is set now: those its provider's adapter
- * (`settle`) applies as asked, beside the target's other settings. A value the adapter would adjust
- * is not offered, so a setting the provider has nothing for is offered no values, and what is
- * offered for one setting follows the others (no effort while thinking is off).
+ * Returns the values to offer for each setting of `target`, as it is set now: the values that the
+ * provider's adapter (`settle`) applies as asked, together with the target's other settings. A value
+ * that the adapter would adjust is not offered. A setting that the provider has no field for is
+ * therefore offered no values, and what is offered for one setting depends on the others (no effort
+ * while thinking is off).
  */
 export function choicesFor(target: Target, settle: (target: Target) => Settled): SettingChoices {
   const applied = <K extends keyof ModelSettings>(name: K, value: NonNullable<ModelSettings[K]>): boolean =>

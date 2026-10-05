@@ -34,63 +34,63 @@ export interface Price {
 }
 
 /**
- * What is known of a model: what it takes and what it costs. A request is shaped to it: a setting
- * outside what the model takes is sent as the nearest it does (an effort above its highest, as its
- * highest).
+ * What is known of a model: what it accepts and what it costs. A request is shaped to it: a setting
+ * outside what the model accepts is sent as the nearest value it does accept (an effort above its
+ * highest, as its highest).
  */
 export interface Capabilities {
-  /** The most tokens of context the model takes, when known. */
+  /** The maximum number of context tokens that the model accepts, when known. */
   readonly context?: number;
-  /** The most tokens the model writes in one response, when known. */
+  /** The maximum number of tokens that the model writes in one response, when known. */
   readonly output?: number;
-  /** The kinds of input it takes: `text`, `image`, `pdf`. */
+  /** The kinds of input that it accepts: `text`, `image`, `pdf`. */
   readonly input: ReadonlyArray<string>;
-  /** The reasoning efforts it takes, least first, when known. */
+  /** The reasoning efforts that it accepts, least first, when known. */
   readonly efforts?: ReadonlyArray<string>;
   readonly price: Price & { readonly above?: Price & { readonly context: number } };
 }
 
 const known: Readonly<Record<string, Readonly<Record<string, Capabilities>>>> = wellKnownModels;
 
-/** `model` is `name` with its release date after it: `-2025-08-07` (OpenAI) or `-20251001` (Anthropic). */
+/** Whether `model` is `name` followed by a release date: `-2025-08-07` (OpenAI) or `-20251001` (Anthropic). */
 const datedFrom = (name: string, model: string): boolean =>
   model.startsWith(`${name}-`) && /^(\d{4}-\d{2}-\d{2}|\d{8})$/.test(model.slice(name.length + 1));
 
-/** What is known of the well-known `model` of `provider`, found by its name or a dated name. */
+/** Returns what is known of the well-known `model` of `provider`, found by its name or a dated name. */
 export function capabilitiesOf(provider: ProviderName | string, model: ModelName | string): Capabilities | undefined {
   const models = known[provider] ?? {};
   const name = model in models ? model : Object.keys(models).find((each) => datedFrom(each, model));
   return name === undefined ? undefined : models[name];
 }
 
-/** What one source knows of a model: its capabilities, or `undefined` when it does not know it. */
+/** One source's answer for a model: its capabilities, or `undefined` when the source does not know it. */
 export type ModelKnowledge = (provider: ProviderName, model: ModelName) => Effect.Effect<Capabilities | undefined>;
 
 /** The well-known models. */
 export const wellKnown: ModelKnowledge = (provider, model) => Effect.succeed(capabilitiesOf(provider, model));
 
 /**
- * What is known of each model, for whoever chooses the model for a request (`ModelFromFacts` puts
- * it on the request's target): sources asked in order, the first that knows a model answering
- * (`firstAnswer`). By default the well-known models; a host that knows more (a local server that
- * says what its models take) puts its source in front.
+ * The sources of what is known of each model, asked in order; the first that knows a model answers
+ * (`firstAnswer`). Whoever chooses the model for a request reads it (`ModelFromFacts` puts it on the
+ * request's target). By default, the well-known models; a host that knows more (a local server that
+ * reports what its models accept) puts its own source first.
  */
 export const KnownModels = Context.Reference<ReadonlyArray<ModelKnowledge>>("agent-session/KnownModels", { defaultValue: () => [wellKnown] });
 
-/** What is known of `model` of `provider`: the first answer of `KnownModels`. */
+/** Returns what is known of `model` of `provider`: the first answer of `KnownModels`. */
 export const knownCapabilities = (provider: ProviderName, model: ModelName): Effect.Effect<Capabilities | undefined> =>
   Effect.gen(function* () {
     const sources = yield* KnownModels;
     return yield* firstAnswer(sources.map((source) => source(provider, model)));
   });
 
-/** What is known of the model a request goes to: what its target carries, or the well-known model's. */
+/** Returns what is known of the model that a request goes to: what its target carries, or the well-known model's entry. */
 export const knownOf = (target: { readonly provider: ProviderName; readonly model: ModelName; readonly capabilities?: Capabilities }): Capabilities | undefined =>
   target.capabilities ?? capabilitiesOf(target.provider, target.model);
 
 /**
- * Whether a model with `capabilities` takes a file of `mediaType` as input: an image (`image/*`) or
- * a PDF when it lists the kind. A model nothing is known of is not known to take either.
+ * Whether a model with `capabilities` accepts a file of `mediaType` as input: an image (`image/*`) or
+ * a PDF, when it lists that kind. A model of which nothing is known is treated as accepting neither.
  */
 export function takesFile(capabilities: Capabilities | undefined, mediaType: string): boolean {
   const kinds = capabilities?.input ?? [];
@@ -103,12 +103,12 @@ type WellKnown = typeof wellKnownModels;
 export type WellKnownProvider = keyof WellKnown;
 export type WellKnownModel<P extends WellKnownProvider> = keyof WellKnown[P];
 
-/** The reasoning efforts a well-known model takes, as measured; where none were, any. */
+/** The reasoning efforts that a well-known model accepts, as measured; any effort where none were measured. */
 type EffortsOf<P extends WellKnownProvider, M extends WellKnownModel<P>> = WellKnown[P][M] extends { readonly efforts: ReadonlyArray<infer Taken> } ? Taken : string;
 
 /**
- * A session's settings for a well-known model: the efforts it takes, and thinking `off` only where
- * it takes effort `none`. A UI bound to this type offers what the model takes.
+ * A session's settings for a well-known model: the efforts that it accepts, and thinking `off` only
+ * where it accepts effort `none`. A UI bound to this type offers only what the model accepts.
  */
 export type SettingsFor<P extends WellKnownProvider, M extends WellKnownModel<P>> = Omit<ModelSettings, "effort" | "thinking"> & {
   readonly effort?: Extract<Effort, EffortsOf<P, M>>;
