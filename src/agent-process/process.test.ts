@@ -11,7 +11,7 @@ import { logKeys } from "./log-keys.ts";
 import { initialProcessState, type ProcessState, stepProcess } from "./machine.ts";
 import { makeProcessGroup, type ProcessGroup } from "./process-group.ts";
 
-test("PG1: an end reported for an earlier run changes nothing once the group was started again; start does nothing while a run is starting or running; stop ends the run", () => {
+test("Start while a run is live changes nothing; Restart kills the live run and spawns the next; an end reported for the earlier run changes nothing; Stop kills the live run and returns to Idle", () => {
   const started = stepProcess(initialProcessState, { _tag: "Start" });
   expect(started).toEqual({ state: { _tag: "Starting", run: 1 }, effects: [{ _tag: "Spawn", run: 1 }] });
   const running = stepProcess(started.state, { _tag: "Started", run: 1, pid: 100 }).state;
@@ -47,7 +47,7 @@ const gone = (pid: number) =>
 
 const sh = (script: string) => ({ name: "test", command: "/bin/sh", args: ["-c", script], env: {} });
 
-test("PG2: a run that ends by itself is Exited, with its exit code", async () => {
+test("a run that exits by itself is Exited with its exit code", async () => {
   const exited = await runTest(
     Effect.gen(function* () {
       const group = yield* makeProcessGroup(sh("exit 3"));
@@ -58,7 +58,7 @@ test("PG2: a run that ends by itself is Exited, with its exit code", async () =>
   expect(exited).toEqual({ _tag: "Exited", run: 1, code: 3, signal: undefined });
 });
 
-test("PG2: a run that a signal ends is Exited, with the signal's name and no exit code", async () => {
+test("a run that a signal ends is Exited with the signal's name and no exit code", async () => {
   const exited = await runTest(
     Effect.gen(function* () {
       const group = yield* makeProcessGroup(sh("kill -TERM $$"));
@@ -69,7 +69,7 @@ test("PG2: a run that a signal ends is Exited, with the signal's name and no exi
   expect(exited).toEqual({ _tag: "Exited", run: 1, code: undefined, signal: "SIGTERM" });
 });
 
-test("PG3: a command that cannot be started is Failed, with the reason", async () => {
+test("a command that cannot be started is Failed, with a reason that names the command", async () => {
   const failed = await runTest(
     Effect.gen(function* () {
       const group = yield* makeProcessGroup({ name: "test", command: "/no/such/command", args: [], env: {} });
@@ -170,7 +170,7 @@ const withChild = (group: (onRun: Parameters<typeof makeProcessGroup>[1]) => Eff
     return { group: made, pid: running?._tag === "Running" ? running.pid : NaN, child };
   });
 
-test("PG4: stopping a run ends its whole group, what it started in the background included; starting again is a new run", async () => {
+test("Stop kills the run's whole process group, including a process started in the background, and the next Start begins run 2", async () => {
   const seen = await runTest(
     Effect.gen(function* () {
       const { group, pid, child } = yield* withChild((onRun) => makeProcessGroup(sh("sleep 30 & echo $!; sleep 30"), onRun));
@@ -185,7 +185,7 @@ test("PG4: stopping a run ends its whole group, what it started in the backgroun
   expect(seen).toEqual({ before: { process: true, child: true }, after: { process: true, child: true, state: "Idle" }, again: 2 });
 });
 
-test("PG5: closing the scope the group was made in (the session's) ends its group", async () => {
+test("closing the scope that the group was made in kills the run's whole process group, including a process started in the background", async () => {
   const seen = await runTest(
     Effect.gen(function* () {
       const session = yield* Scope.make();
@@ -206,7 +206,7 @@ const processEvent = fc.oneof(
   fc.record({ _tag: fc.constant("Ended" as const), run: fc.integer({ min: 0, max: 6 }), code: fc.option(fc.integer({ min: 0, max: 3 }), { nil: undefined }), signal: fc.constant(undefined) }),
 );
 
-test("PG1: for any events, the run never goes back; a run is spawned only when started from no live run or started again, and is then the current one; what is reported about another run changes nothing", () => {
+test("for any sequence of events, the run number never decreases, a run is spawned only by Restart or by Start without a live run, the spawned run is the current one, and an event for another run changes nothing", () => {
   fc.assert(
     fc.property(fc.array(processEvent, { maxLength: 30 }), (events) => {
       events.reduce<ProcessState>((state, event) => {

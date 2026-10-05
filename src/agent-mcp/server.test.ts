@@ -95,7 +95,7 @@ test("MS5: a server that does not answer initialize, or does not list its tools,
     Effect.gen(function* () {
       const started = yield* startMcpServer(server, [], { connectTimeout: "300 millis" });
       const settled = yield* started.settled;
-      // Its process group was stopped (agent-process PG4: a stopped group's processes are ended).
+      // Its process group was stopped (stopping a process group kills all of its processes).
       yield* Effect.sleep("50 millis");
       return { settled, running: yield* started.running };
     });

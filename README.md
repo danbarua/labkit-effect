@@ -18,6 +18,7 @@ The domain core of a coding harness, and the layers around it.
 |---|---|---|
 | `src/agent-machine/` | Machines with mailboxes that pass messages (agent, conversation turn, turn step, call), the router, and the facts, decisions and effect requests they record. See its `MODEL.md`. | `Schema` from `effect` |
 | `src/agent-policy/` | Whether an effect request continues, is vetoed, or waits. See its `MODEL.md`. | `Schema` from `effect`, `agent-machine` |
+| `src/agent-process/` | Child process groups that a session keeps (stdio MCP servers), and the removal of credentials from their environment and from logged arguments. See `docs/agent-process.md`. | `effect` |
 | `src/agent-session/` | The layer around them: contracts as Effect services, adapters, the loop (which records every fact, and so owns the journal). | anything |
 | `src/agent-context/` | Context assembly: what the model is sent, from system prompts, tool catalogs and a view of the conversation. See its `MODEL.md`. | anything |
 | `src/instrumentation/` | Tool usage counted from facts, as Effect metrics, and OpenTelemetry. See its `README.md`. | anything |
@@ -27,9 +28,10 @@ The domain core of a coding harness, and the layers around it.
 | `scripts/probes/` | Live checks against the providers' APIs. Each reads its key from the environment and writes what it saw to a folder per run, `logs/probes/<probe>/<run>/` (not committed). | anything |
 | `scripts/trajectories/` | Importers that project Claude Code and Codex sessions' records through the core's decisions into `trajectories/` (not committed). | anything |
 
-Each module's `MODEL.md` says what it builds, as rules with ids. A rule has at least one test whose
-name starts with its id, and `bun run check:rules` fails when one has none. `DESIGN.next.md`, where
-a module has one, holds direction that is not built. `TODO.md` is what is to be built.
+`docs/<module>.md` describes a module's architecture. A module without one has a `MODEL.md`, which
+states what the module builds as rules with ids. Each rule has at least one test whose name starts
+with its id, and `bun run check:rules` fails when a rule has none. `DESIGN.next.md`, where a module
+has one, holds direction that is not built. `TODO.md` lists what is to be built.
 
 A module's tests are beside its code (`src/agent-machine/turn.test.ts`). The core's tests import only
 the core and `tests/support/`. `tests/` holds what joins modules: `tests/examples/` tests the

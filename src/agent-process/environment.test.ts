@@ -9,7 +9,7 @@ import { shouldRedact, redactedArgs, withoutCredentials } from "./environment.ts
 import { logKeys } from "./log-keys.ts";
 import { makeProcessGroup, type ProcessCommand } from "./process-group.ts";
 
-test("PE1: a variable holds a credential if its name includes known words", () => {
+test("a name whose words include a credential word is a credential name, and withoutCredentials removes those variables and returns their names in order", () => {
   const held = ["ANTHROPIC_API_KEY", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "SSH_AUTH_SOCK", "npm_config__authToken", "DB_PASSWORD", "GH_PAT", "my.secret", "OPENAI_APIKEY"];
   for (const h of held) {
     expect(shouldRedact(h), `"${h} should be redacted`).toBeTrue();
@@ -23,7 +23,7 @@ test("PE1: a variable holds a credential if its name includes known words", () =
   expect(withoutCredentials({ PATH: "/bin", GITHUB_TOKEN: "t", AWS_SECRET_ACCESS_KEY: "s", EMPTY: undefined })).toEqual({ env: { PATH: "/bin" }, left: ["AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"] });
 });
 
-test("PE1: a credential word inside a camelCase name is bounded by a capital after a lower-case letter, at both ends", () => {
+test("in a camelCase name, a credential word counts only where a capital after a lower-case letter starts and ends it: apiKeyId is a credential name, monkey is not", () => {
   const held = ["apiKeyId", "githubTokenValue", "passwordHash", "myPAT", "XApiKey", "authToken"];
   for (const h of held) {
     expect(shouldRedact(h), `"${h}" should be redacted`).toBeTrue();
@@ -34,7 +34,7 @@ test("PE1: a credential word inside a camelCase name is bounded by a capital aft
   }
 });
 
-test("PE1: secret values in flags are not logged", () => {
+test("redactedArgs replaces the value of a credential flag, given as --flag=value or as the next argument, and leaves other arguments unchanged", () => {
   expect(redactedArgs(["stdio", "--token=ghp_x", "--api-key", "sk-y", "--read-only", "--port", "8080", "--auth-token", "--verbose"])).toEqual([
     "stdio",
     "--token=<redacted>",
@@ -48,7 +48,7 @@ test("PE1: secret values in flags are not logged", () => {
   ]);
 });
 
-test("PE2: A run receives this process's environment minus credential variables plus specified kept variables", async () => {
+test("a run receives this process's environment without its credential variables, plus the variables that its command sets, credentials included", async () => {
   process.env["LABKIT_TEST_TOKEN"] = "inherited";
   process.env["LABKIT_TEST_PLAIN"] = "plain";
   const printed = await runTest(
