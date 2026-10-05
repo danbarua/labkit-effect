@@ -1757,7 +1757,7 @@ test("AG3: a call that ends while its permission request is out, its turn cancel
   expect(cancelled).toBe(true);
 });
 
-test("AG5: changes made while a turn runs are held as one: the later model and permission mode, and every setting, the later's winning", async () => {
+test("AG5: changes made while a session's first turn runs are held as one, made when it ends: the later model and permission mode, and every setting, the later's winning", async () => {
   const started = Deferred.makeUnsafe<void>();
   const release = Deferred.makeUnsafe<void>();
   const host = startHost({
@@ -1781,13 +1781,15 @@ test("AG5: changes made while a turn runs are held as one: the later model and p
     for (const [configId, value] of changes) await ctx.request("session/set_config_option", { sessionId, configId, value });
     await Effect.runPromise(Deferred.succeed(release, undefined));
     await first;
-    const after = await ctx.request("session/set_config_option", { sessionId, configId: "effort", value: "low" });
+    // No turn runs now: this change is made at once, after the held one.
+    const after = await ctx.request("session/set_config_option", { sessionId, configId: "effort", value: "high" });
     return { sessionId, after };
   });
   await host.stop();
   const facts = await factsOn(storeFileOf(host.directory, result.sessionId));
   expect(observed(facts).flatMap((fact) => (fact.observation._tag === "ModelChangeArrived" ? [fact.observation] : [])) as unknown).toMatchObject([
     { provider: "openai", model: "gpt-6-luna", settings: { effort: "low", maxOutputTokens: 4096 } },
+    { provider: "openai", model: "gpt-6-luna", settings: { effort: "high" } },
   ]);
   expect(result.after.configOptions.find((option) => option.id === "permission_mode")).toMatchObject({ currentValue: "bypassPermissions" });
 });

@@ -513,12 +513,15 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           );
 
         /** Makes the change the open session's gate holds, if no turn runs; one that could not be recorded is logged. */
+        // The entry's state is read when the effect runs: a prompt's cleanup is made before its turn opens the draft.
         const settled = (entry: Entry) =>
-          entry.state._tag === "Open"
-            ? entry.state.opened.gate.settle.pipe(
-                Effect.catchTag("SessionStoreFailed", (error) => Effect.logError(logKeys.config.refused, { doing: "recording a change held until the turn ended", cause: error.message })),
-              )
-            : Effect.void;
+          Effect.suspend(() =>
+            entry.state._tag === "Open"
+              ? entry.state.opened.gate.settle.pipe(
+                  Effect.catchTag("SessionStoreFailed", (error) => Effect.logError(logKeys.config.refused, { doing: "recording a change held until the turn ended", cause: error.message })),
+                )
+              : Effect.void,
+          );
 
         const configurationOf = (entry: Entry) =>
           Effect.gen(function* () {
