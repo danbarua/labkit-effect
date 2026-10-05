@@ -54,7 +54,9 @@ Dan: "something might execute a decision to continue, veto or delay an Effect." 
   runs. Allowing (once, or for the session) lets the asked call run; rejecting vetoes it.
 - P6. Allowing a tool for the session is an answer in the session's facts. A later call to that tool
   runs without being asked, in any mode, in this process or one that goes on from the facts.
-- P7. Where no one can answer, what would be asked is vetoed, and the reason says how to let it run.
+- P7. Where no one can answer, what would be asked is vetoed. The veto's reason names the permission
+  modes that let the call run: `acceptEdits` or `bypassPermissions` for a tool that edits files,
+  `bypassPermissions` for any other tool.
 - P8. In the loop, a tool call the policy waits on records what it asks (`PermissionAsked`) and runs
   only once an answer is observed for the call (`PermissionAnswered`) and the policy lets it. A
   vetoed call ends `Vetoed` and never begins to run. A call waiting for an answer when its turn

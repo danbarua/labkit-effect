@@ -69,3 +69,11 @@ test("P7: where no one can answer, what would be asked is vetoed, with how to le
   );
   expect(verdict("acceptEdits", "write_file", [], false)).toBe("runs");
 });
+
+test("P7: where no one can answer, the veto of a tool that does not edit files names only bypassPermissions, the one mode that lets it run", () => {
+  const step = permissions("default", false, kindOf, []).start(call("run"));
+  expect(step._tag === "Decided" && step.verdict._tag === "Veto" && step.verdict.reason.body._tag === "Text" ? step.verdict.reason.body.text : "").toBe(
+    "run needs permission, and no one is there to answer. --permission-mode bypassPermissions lets it run.",
+  );
+  expect(verdict("acceptEdits", "run", [], false)).toBe("vetoed");
+});

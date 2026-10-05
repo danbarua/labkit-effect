@@ -13,8 +13,10 @@
  * for the session is an answer in the session's facts: a later call to that tool runs without being
  * asked, in any mode, in this process or one that goes on from the facts.
  *
- * Where there is no one to answer (`canAsk` false: print mode), what would be asked is vetoed, and
- * the reason says how to let it run.
+ * Where there is no one to answer (`canAsk` false: print mode), what would be asked is vetoed. The
+ * veto's reason names the permission modes that let the call run: `acceptEdits` or
+ * `bypassPermissions` for a tool that edits, deletes or moves files; `bypassPermissions` for any
+ * other tool.
  */
 
 import { Schema } from "effect";
@@ -136,10 +138,10 @@ export function permissions(
       if (remembered === "allowed") return proceed;
       if (remembered === "rejected") return veto(FailureText.make(`${request.tool} was rejected for the rest of the session.`));
       if (mode === "dontAsk") return veto(FailureText.make(`${request.tool} needs permission, and the permission mode is dontAsk.`));
-      if (!canAsk)
-        return veto(
-          FailureText.make(`${request.tool} needs permission, and no one is there to answer. --permission-mode acceptEdits or bypassPermissions lets it run.`),
-        );
+      if (!canAsk) {
+        const letting = editsFiles.includes(kind) ? "acceptEdits or bypassPermissions" : "bypassPermissions";
+        return veto(FailureText.make(`${request.tool} needs permission, and no one is there to answer. --permission-mode ${letting} lets it run.`));
+      }
       const question: PermissionQuestion = { tool: request.tool, kind, options: optionsFor(request.tool) };
       return { _tag: "Waiting", state: question, asks: asJson(PermissionQuestion, question) };
     },
