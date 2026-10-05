@@ -7,7 +7,8 @@
  * - `EmojiHappyFizzBuzzSummarizer` says the same in Markdown, with emojis, a platitude, and a
  *   closing offer to do more, in the manner of a chat assistant.
  *
- * Both carry the numbers, so the model can go on counting from either.
+ * Both carry the numbers, so the model can go on counting from either, and the line the scripted
+ * model reads the last number from (`model.ts`): "The last number you returned to the user was: N".
  */
 
 import { Effect } from "effect";
@@ -19,6 +20,9 @@ import { fizzBuzzLabels, fizzBuzzSpan } from "./compaction.ts";
 /** Where the span starts: after the summary before it, or at the start of the conversation. */
 const since = (previous: ReadonlyArray<WindowSummary>): string =>
   previous.length === 0 ? "since it began" : "since the last summary";
+
+/** The line the scripted model reads the last number it returned from. */
+const returnedLine = (returned: string | undefined): string => `The last number you returned to the user was: ${returned ?? "none"}`;
 
 const listed = (numbers: ReadonlyArray<string> | undefined): string =>
   numbers === undefined || numbers.length === 0 ? "none" : numbers.join(", ");
@@ -32,6 +36,7 @@ export const PlainTextFizzBuzzSummarizer: Summarizer = {
         `Summary of the conversation ${since(previous)}. The user and the assistant exchanged ${span.exchanged} messages in it.`,
         ...fizzBuzzLabels.map((label) => `Classified as ${label}: ${listed(span.classified.get(label))}.`),
         `The last number the assistant returned was ${span.returned ?? "none"}.`,
+        returnedLine(span.returned),
       ].join("\n")),
     );
   },
@@ -53,6 +58,7 @@ export const EmojiHappyFizzBuzzSummarizer: Summarizer = {
         ...fizzBuzzLabels.map((label) => `- ${icons[label]} **${label}**: ${listed(span.classified.get(label))} 💯`),
         "",
         `> 🎯 The last number returned was **${span.returned ?? "none"}**! 🎉`,
+        returnedLine(span.returned),
         "",
         "Remember: every number is a step on the path to greatness! 🌈💪",
         "",
