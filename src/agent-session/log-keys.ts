@@ -12,6 +12,14 @@ export const logKeys = {
     /** A blob's file holds bytes whose hash is not its id; the store finds nothing for it. */
     notAsStored: "blobs.file.not_as_stored",
   },
+  sessionStore: {
+    /** The file-backed store opened a session file whose lock names a process that is not running, and took the lock over. */
+    lockTakenOver: "session_store.lock_taken_over",
+    /** The file-backed store could not flush the session file's folder to the disk after creating the file; the details carry the error. */
+    folderNotFlushed: "session_store.folder_not_flushed",
+    /** The session file's last line was not a whole fact (its write did not finish); the store cut it off before writing. */
+    tornLineCut: "session_store.torn_line_cut",
+  },
   provider: {
     /** A model request failed for a reason that is retryable, and is tried again; the details include the whole error. */
     requestRetried: "provider.request.retried",

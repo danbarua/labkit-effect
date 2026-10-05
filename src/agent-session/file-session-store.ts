@@ -22,6 +22,7 @@
 import { Effect, FileSystem, Layer, Ref, Schema } from "effect";
 import { Fact } from "../agent-machine/fact.ts";
 import { SessionStore, SessionStoreFailed } from "./session-store.ts";
+import { logKeys } from "./log-keys.ts";
 
 const FactLine = Schema.fromJsonString(Fact);
 const encodeLine = Schema.encodeSync(FactLine);
@@ -82,7 +83,7 @@ const locked = (file: string) =>
       const holder = Number(yield* fs.readFileString(lock));
       if (Number.isInteger(holder) && running(holder))
         return yield* failed(`${file} is open in another process (pid ${holder}). Close it there, or wait for it to end.`);
-      yield* Effect.logWarning("session_store.lock_taken_over", { file, lock, holder, reason: "the process holding the lock has ended" });
+      yield* Effect.logWarning(logKeys.sessionStore.lockTakenOver, { file, lock, holder, reason: "the process holding the lock has ended" });
       yield* fs.remove(lock);
       yield* take;
     }
@@ -100,7 +101,7 @@ const folderSynced = (file: string) =>
     yield* handle.sync;
   }).pipe(
     Effect.scoped,
-    Effect.catchTag("PlatformError", (error) => Effect.logWarning("session_store.folder_not_flushed", { file, error: error.message })),
+    Effect.catchTag("PlatformError", (error) => Effect.logWarning(logKeys.sessionStore.folderNotFlushed, { file, error: error.message })),
   );
 
 /**
@@ -118,7 +119,7 @@ export const FileBackedSessionStore = (file: string) =>
       yield* locked(file);
       const stored = (yield* fs.exists(file).pipe(Effect.orElseSucceed(() => false))) ? yield* readFacts(file) : { facts: [], bytes: 0, torn: "" };
       if (stored.torn !== "") {
-        yield* Effect.logWarning("session_store.torn_line_cut", { file, bytes: Buffer.byteLength(stored.torn), start: stored.torn.slice(0, 200) });
+        yield* Effect.logWarning(logKeys.sessionStore.tornLineCut, { file, bytes: Buffer.byteLength(stored.torn), start: stored.torn.slice(0, 200) });
         yield* fs.truncate(file, stored.bytes).pipe(Effect.mapError((error) => failed(`${file} could not be cut to its last complete line: ${error.message}`)));
       }
       const created = !(yield* fs.exists(file).pipe(Effect.orElseSucceed(() => false)));

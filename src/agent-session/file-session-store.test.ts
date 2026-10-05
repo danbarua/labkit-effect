@@ -9,7 +9,7 @@ import { expect } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, Exit, FileSystem, Layer, Ref, Schema } from "effect";
+import { Effect, Exit, FileSystem, Layer, Logger, Ref, Schema } from "effect";
 import { BoringModelProvider, boringOpening, WholeSessionAssembler } from "../../tests/support/boring.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { smolCatalog } from "../../tests/support/smol-tools.ts";
@@ -18,6 +18,7 @@ import { Fact } from "../agent-machine/fact.ts";
 import { CallId, InputText, ModelText, StopReason, ToolName } from "../agent-machine/names.ts";
 import { ModelClient, ToolRunner } from "./contracts.ts";
 import { FileBackedSessionStore, readFacts } from "./file-session-store.ts";
+import { logKeys } from "./log-keys.ts";
 import { openSession, type Session } from "./loop.ts";
 import { receivedJson, receivedText } from "./received.ts";
 import { ephemeralSessionStore, SessionStore, SessionStoreFailed } from "./session-store.ts";
@@ -277,4 +278,16 @@ test("J2: each append is flushed to the disk before it returns: a tool runs only
   const at = events.indexOf("tool runs");
   expect(events.slice(at - 2, at + 1)).toEqual(["write dispatch", "flush", "tool runs"]);
   expect(events.filter((event) => event.startsWith("write")).length).toBe(events.filter((event) => event === "flush").length - 1);
+});
+
+test("J4: taking over a lock left by a process that ended, and cutting off a last line whose write did not finish, are logged as warnings", async () => {
+  const file = fileIn();
+  const logged: Array<{ readonly level: string; readonly message: unknown }> = [];
+  const logging = Logger.layer([Logger.make((options) => logged.push({ level: options.logLevel, message: options.message }))], { mergeWithExisting: true });
+  writeFileSync(`${file}.lock`, "999999");
+  writeFileSync(file, '{"_tag":"Observed","seq":1,"ti');
+  await runTest(Layer.build(FileBackedSessionStore(file)).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, logging))));
+  const warned = (key: string) => logged.filter((each) => each.level === "Warn" && Array.isArray(each.message) && each.message[0] === key).map((each) => (each.message as [string, unknown])[1]);
+  expect(warned(logKeys.sessionStore.lockTakenOver)).toMatchObject([{ file, lock: `${file}.lock`, holder: 999999 }]);
+  expect(warned(logKeys.sessionStore.tornLineCut)).toMatchObject([{ file, start: '{"_tag":"Observed","seq":1,"ti' }]);
 });
