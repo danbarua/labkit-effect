@@ -274,9 +274,9 @@ export function gitTools(root: string, options: {
                 // oxlint-disable-next-line abstract/no-in-place-change -- Native remote push operation.
                 await repo.getRemote(input.remote ?? "origin").push(input.refspecs === undefined ? [`${head.name()}:${head.name()}`] : [...input.refspecs], {
                     ...(options.credential === undefined ? {} : {credential: options.credential}),
-                    // oxlint-disable-next-line abstract/no-in-place-change -- Collect failures from the native callback during this push.
                     callbacks: {
                         pushUpdateReference: (ref, status) => {
+                            // oxlint-disable-next-line abstract/no-in-place-change -- Collect failures from the native callback during this push.
                             if (status !== null) failures.push(`${ref}: ${status}`);
                         }
                     },
