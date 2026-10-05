@@ -3,20 +3,20 @@
   "module": "index.ts",
   "type": "module",
   "scripts": {
-    "prepare": "effect-tsgo patch --oxlint",
-    "typecheck": "tsc --noEmit -p .",
+    "acp:dev": "bun src/agent-acp/main.ts",
+    "acp:logs": "bun scripts/acp-logs.ts",
     "check": "bun run vidaimock:install && bun run typecheck && bun run lint && bun run check:brands && bun run check:schemas && bun test",
-    "vidaimock:install": "bun scripts/vidaimock.ts",
-    "lint": "oxlint --type-aware --format default src tests scripts",
     "check:brands": "bun scripts/check-brands.ts",
     "check:schemas": "bun scripts/config-schema.ts --check",
-    "acp:logs": "bun scripts/acp-logs.ts",
     "cli": "bun run src/examples/cli-repl/index.ts",
-    "zork": "bun run src/examples/zork/index.ts",
-    "models:refresh": "bun scripts/models/refresh.ts",
     "cli:watch": "bun --watch src/examples/cli-repl/index.ts",
+    "lint": "oxlint --type-aware --format default src tests scripts",
+    "models:refresh": "bun scripts/models/refresh.ts",
+    "prepare": "effect-tsgo patch --oxlint",
+    "typecheck": "tsc --noEmit -p .",
+    "vidaimock:install": "bun scripts/vidaimock.ts",
     "vscode:dev": "bun scripts/vscode-dev.ts",
-    "acp:dev": "bun src/agent-acp/main.ts"
+    "zork": "bun run src/examples/zork/index.ts"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.5.0",
