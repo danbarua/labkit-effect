@@ -33,10 +33,10 @@ import { type TurnKeys, turnKeys } from "./turn-keys.ts";
 const streamedLast = new WeakMap<Session, Map<TurnId, boolean>>();
 
 /**
- * What is printed after a turn: the answer, unless it was printed as it arrived; saying so when it
- * was cut short; or how the turn ended when it gave none. Nothing, when the stream said it all.
+ * What is printed after a turn: the answer, unless it was printed as it arrived (`printed`); saying
+ * so when it was cut short; or how the turn ended when it gave none. Nothing, when the stream said it all.
  */
-const replyTo = (session: Session, facts: ReadonlyArray<Fact>): string | undefined => {
+export const replyOf = (facts: ReadonlyArray<Fact>, printed: (turn: TurnId) => boolean): string | undefined => {
   const turn = lastTurn(facts);
   const ending = endingOf(facts, turn);
   const answer = answerTo(facts, turn);
@@ -45,13 +45,13 @@ const replyTo = (session: Session, facts: ReadonlyArray<Fact>): string | undefin
   // An answer cut short by a length limit (the output limit, or the context window), or by Ctrl+C, says so.
   const cut =
     ending?._tag === "CutShort" ? "(cut short: the response reached its length limit)" : ending?._tag === "Interrupted" ? "(interrupted)" : undefined;
-  if (turn !== undefined && streamedLast.get(session)?.get(turn) === true) return cut;
+  if (turn !== undefined && printed(turn)) return cut;
   return cut === undefined ? answer : `${answer}\n${cut}`;
 };
 
 const printReply = (session: Session) =>
   Effect.flatMap(session.facts, (facts) => {
-    const reply = replyTo(session, facts);
+    const reply = replyOf(facts, (turn) => streamedLast.get(session)?.get(turn) === true);
     return reply === undefined ? Effect.void : Console.log(reply);
   });
 
