@@ -509,3 +509,38 @@ test("CF8: the JSON Schema of a file takes, in plugins, each plug-in's settings 
   expect(plugins?.additionalProperties?.anyOf.map((each) => each.required)).toEqual([["use"], ["use"], ["use"], ["use"], ["use", "usd"], ["use"]]);
   expect(schema.properties["toolCalls"]?.items).toEqual({ type: "string" });
 });
+
+test("a seam's list gives the session its entries in the order the configuration lists them, each policy under its own name", async () => {
+  const configuration = await load([write("user/order.yml", "plugins:\n  permissions: { mode: dontAsk }\ntoolCalls: [permissions, loopBreaker]\n")]);
+  const named = seamListsOf(configuration, { canAsk: true }).toolCalls ?? [];
+  const verdicts = await runTest(Effect.forEach(named, (entry) => Effect.map(entry.policy(facts()), (policy) => [entry.name, verdictOf(policy, run("c3", "change"))])));
+  expect(verdicts).toEqual([
+    ["permissions", "vetoed: change needs permission, and the permission mode is dontAsk."],
+    ["loopBreaker", "runs"],
+  ]);
+});
+
+test("with no sources named, only the user's file is read: a project's file and the local file are not", async () => {
+  const home = join(testFolder(), "home");
+  const project = join(testFolder(), "project");
+  write("home/.config/labkit/policies.yml", "toolCalls: [permissions]\n");
+  write("project/.labkit/policies.yml", "toolCalls: [loopBreaker]\n");
+  write("project/.labkit/policies.local.yml", "toolCalls: [loopBreaker]\n");
+  const layers = await runTest(policyLayers(project, { home }).pipe(Effect.provide(BunServices.layer)));
+  expect(layers.map((layer) => [layer.name, layer.trusted])).toEqual([[join(home, ".config/labkit/policies.yml"), true]]);
+});
+
+test("an argument with a variable is shown in the resolved configuration as the layers wrote it, not with the variable's value", async () => {
+  const layers = [{ name: "user", trusted: true, value: { mcpServers: { repo: { command: "repo-mcp", args: ["--repo=${REPO}"] } } } }];
+  const configuration = await runTest(loadConfiguration(layers, undefined, { REPO: "acme/secret-project" }));
+  expect(configuration.mcpServers).toMatchObject([{ args: ["--repo=acme/secret-project"] }]);
+  expect((effectiveSettings(layers, configuration) as { readonly mcpServers: ReadonlyArray<unknown> }).mcpServers).toMatchObject([{ args: ["--repo=${REPO}"] }]);
+});
+
+test("a variable set to the empty string counts as not set: ${VAR:-default} takes the default, and ${VAR} is refused", async () => {
+  const layers = [{ name: "user", trusted: true, value: { mcpServers: { s: { command: "s", env: { REGION: "${REGION:-eu}" } } } } }];
+  expect((await runTest(loadConfiguration(layers, undefined, { REGION: "" }))).mcpServers).toMatchObject([{ env: { REGION: "eu" } }]);
+  const strict = [{ name: "user", trusted: true, value: { mcpServers: { s: { command: "${BIN}" } } } }];
+  const refused = await runTest(loadConfiguration(strict, undefined, { BIN: "" }).pipe(Effect.flip, Effect.map((error) => error.message)));
+  expect(refused).toBe("user: mcpServers.s.command: ${BIN} is not set, and has no default (${BIN:-default})");
+});
