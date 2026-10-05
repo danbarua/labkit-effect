@@ -66,16 +66,18 @@ const typing = (lines: ReadonlyArray<string>) =>
     });
   });
 
-/** A model that streams its thinking and its answer, then responds with them; and the requests it was asked. */
-const streaming = () => {
+/** A model that responds with its thinking and its answer, streaming them first when `streams`; and the requests it was asked. */
+const thinkingThenOk = (streams: boolean) => {
   const asked: Array<string> = [];
   const layer = Layer.succeed(ModelClient, {
     respond: (target, _context, turn) =>
       Effect.gen(function* () {
         asked.push(turn);
         const sink = yield* ModelStream;
-        yield* sink({ _tag: "Delta", kind: "Thinking", text: "think" });
-        yield* sink({ _tag: "Delta", kind: "Text", text: "ok" });
+        if (streams) {
+          yield* sink({ _tag: "Delta", kind: "Thinking", text: "think" });
+          yield* sink({ _tag: "Delta", kind: "Text", text: "ok" });
+        }
         return {
           _tag: "ModelResponded" as const,
           turn,
@@ -93,8 +95,8 @@ const streaming = () => {
   return { asked, layer };
 };
 
-test("the REPL: Enter on an empty line asks nothing, a line naming no command says so, /exit ends it; a streamed answer is printed as it arrives, its thinking dimmed", async () => {
-  const model = streaming();
+/** The REPL, followed at a terminal, typed `lines` with `model`: what it wrote to stdout, and the lines it logged after its banner. */
+const typedTo = async (model: ReturnType<typeof thinkingThenOk>, lines: ReadonlyArray<string>) => {
   const written: Array<string> = [];
   const write = process.stdout.write.bind(process.stdout);
   process.stdout.write = ((chunk: string | Uint8Array) => {
@@ -109,7 +111,7 @@ test("the REPL: Enter on an empty line asks nothing, a line naming no command sa
       );
       yield* Terminal.follow(session);
       const config = { sessionId: "s1", target: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") } } as unknown as Config;
-      yield* repl(session, config, undefined, true).pipe(Effect.provideService(EffectTerminal.Terminal, yield* typing(["hello", "", "/nope", "/exit"])));
+      yield* repl(session, config, undefined, true).pipe(Effect.provideService(EffectTerminal.Terminal, yield* typing(lines)));
       return yield* TestConsole.logLines;
     }).pipe(
       Effect.provide(
@@ -129,8 +131,19 @@ test("the REPL: Enter on an empty line asks nothing, a line naming no command sa
   ).finally(() => {
     process.stdout.write = write;
   });
+  return { written: written.join(""), logged: logged.slice(1) };
+};
+
+test("the REPL: Enter on an empty line asks nothing, a line naming no command says so, /exit ends it; a streamed answer is printed as it arrives, its thinking dimmed, and not again after its turn", async () => {
+  const model = thinkingThenOk(true);
+  const { written, logged } = await typedTo(model, ["hello", "", "/nope", "/exit"]);
   expect(model.asked).toHaveLength(1);
-  expect(written.join("")).toBe("\x1b[2mthink\x1b[0m\nok\n");
-  // Whether the answer is printed again after its turn depends on whether the follower took the response's end first: not asserted.
-  expect(logged.filter((line) => line !== "ok").slice(1)).toEqual(["No command /nope. /help lists them."]);
+  expect(written).toBe("\x1b[2mthink\x1b[0m\nok\n");
+  expect(logged).toEqual(["No command /nope. /help lists them."]);
+});
+
+test("the REPL: an answer that did not stream is printed once, from the response, when it arrives", async () => {
+  const { written, logged } = await typedTo(thinkingThenOk(false), ["hello", "/exit"]);
+  expect(written).toBe("\x1b[2mthink\x1b[0m\nok\n");
+  expect(logged).toEqual([]);
 });
