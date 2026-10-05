@@ -71,16 +71,16 @@ test("P10: a call made again after other calls is not in a row: running the test
   expect(shown(repeatingTurns(facts).start(ask("t1")))).toBe("runs");
 });
 
-test("P10: calls with another tool or input, or in another turn, are not identical; a call recorded twice is one call", () => {
-  const facts = factsOf(
-    arrived("t1", "c1", "read_file", { path: "a.ts" }),
-    arrived("t1", "c2", "read_file", { path: "b.ts" }),
-    arrived("t1", "c3", "search", { path: "a.ts" }),
-    arrived("t0", "c0", "read_file", { path: "a.ts" }),
-    arrived("t1", "c1", "read_file", { path: "a.ts" }),
-    arrived("t1", "c4", "read_file", { path: "a.ts" }),
-  );
-  expect(shown(repeatedCalls(facts).start(run("c4", "read_file", { path: "a.ts" })))).toBe("runs");
+const readA = (turn: string, call: string) => arrived(turn, call, "read_file", { path: "a.ts" });
+
+test.each([
+  ["with another input", [readA("t1", "c1"), readA("t1", "c2"), arrived("t1", "c3", "read_file", { path: "b.ts" })], run("c3", "read_file", { path: "b.ts" })],
+  ["with another tool", [readA("t1", "c1"), readA("t1", "c2"), arrived("t1", "c3", "search", { path: "a.ts" })], run("c3", "search", { path: "a.ts" })],
+  ["after two identical calls in an earlier turn", [readA("t0", "c1"), readA("t0", "c2"), readA("t1", "c3")], run("c3", "read_file", { path: "a.ts" })],
+  ["recorded twice after one identical call", [readA("t1", "c1"), readA("t1", "c2"), readA("t1", "c2")], run("c2", "read_file", { path: "a.ts" })],
+  ["whose id an earlier turn used for its third identical call", [readA("t0", "c1"), readA("t0", "c2"), readA("t0", "c3"), arrived("t1", "c3", "read_file", { path: "b.ts" })], run("c3", "read_file", { path: "b.ts" })],
+] as const)("a call %s is not the third identical call in a row, and runs", (_case, observations, request) => {
+  expect(shown(repeatedCalls(factsOf(...observations)).start(request))).toBe("runs");
 });
 
 test("P10: a turn's model request is vetoed once its last five calls are identical; other turns' requests are not", () => {

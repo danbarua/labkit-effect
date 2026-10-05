@@ -12,6 +12,7 @@ import { answerPicking, OptionId, permissions } from "../agent-policy/permission
 import type { Policy } from "../agent-policy/policy.ts";
 import { ModelClient, ToolCallPolicies } from "./contracts.ts";
 import { openSession } from "./loop.ts";
+import { policyPart } from "./origin.ts";
 import { EphemeralSessionStore } from "./session-store.ts";
 import { asText, receivedJson } from "./received.ts";
 import { CountingTurns } from "./turns.ts";
@@ -63,7 +64,9 @@ const answeredWith = (option: string) =>
       yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "echo hi" } as unknown as Observation);
       yield* session.idle;
       const observed = (yield* session.facts).flatMap((fact) => (fact._tag === "Observed" ? [fact.observation] : []));
+      const askedBy = (yield* session.facts).flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "PermissionAsked" ? [fact.origin] : []));
       return {
+        askedBy,
         tags: observed.map((each) => each._tag).filter((tag) => ["PermissionAsked", "PermissionAnswered", "ToolCallDispatched", "ToolEnded"].includes(tag)),
         ended: observed.flatMap((each) => (each._tag === "ToolEnded" ? [each.outcome] : []))[0],
       };
@@ -88,6 +91,10 @@ test("P8: an allowed call runs after the answer; a rejected one ends Vetoed and 
   const rejected = await answeredWith("reject-once");
   expect(rejected.tags).toEqual(["PermissionAsked", "PermissionAnswered", "ToolEnded"]);
   expect(rejected.ended as unknown).toMatchObject({ _tag: "Failed", reason: { _tag: "Vetoed" } });
+});
+
+test("a question that a tool call policy asks is recorded as from that policy, by the name its list gives it", async () => {
+  expect((await answeredWith("allow-once")).askedBy).toEqual([policyPart("tool call policy", "permissions")]);
 });
 
 /** A policy that asks `questions` times, then lets the call run when the last answer is "yes". */
