@@ -141,8 +141,11 @@ After a response with no tool calls, the turn asks the layers around the core fo
   conversation: the one recorded; for a call with none, `Indeterminate` when it began to run and
   `NotRun` when it did not. The result follows the response that made the call, whenever the tool
   ended.
-- A call that arrived in a response that then failed is recorded, with its dispatch and its end. The
-  response is not recorded, so the model is not sent the call or its result.
+- A call that arrived in a response that then failed is recorded, with its dispatch and its end.
+  The response is not recorded, so the model is not sent the call or its result.
+- A call belongs to the turn that started it. A step finishes only when every call it opened has
+  settled, whatever became of its model request, so a turn whose request failed or was vetoed ends
+  after its calls' ends are recorded.
 
 ## Interruption
 
@@ -172,8 +175,8 @@ A session can continue from its facts, which are kept as given.
   - in a session continued from its facts: `ObservationUndelivered`;
   - in a session that was not: `ObservationNotExpected` for a turn's observation, and no decision
     for a call's `ToolEnded`, which the call's machine still takes.
-- Such an observation follows `TurnEnded` when a model request fails while a tool call that arrived
-  in its stream is still running: the failure ends the turn, and the call's `ToolEnded` follows.
+- Every request a turn makes has its outcome recorded before the turn ends, so such an observation
+  comes only from a fault, such as a response reported twice.
 - Facts can also stop while a turn runs: the process ended with requests made and no outcome
   recorded (`leftRunning` lists them). Whoever continues from the facts decides what becomes of the
   turn:

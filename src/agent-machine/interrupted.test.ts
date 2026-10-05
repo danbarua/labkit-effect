@@ -112,3 +112,18 @@ test("a response to a turn that has ended is recorded as ObservationNotExpected"
   observe(session, { ...stopped([{ _tag: "Text", text: "Listing." }]), ending: { _tag: "Complete" } });
   expect(tags(session).slice(-2)).toEqual(["ModelResponded", "ObservationNotExpected"]);
 });
+
+test("an interruption while the calls of a failed request run requests StopTurnWork; the turn ends Interrupted once they have ended", () => {
+  const session = open();
+  observe(session, opened);
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
+  observe(session, { _tag: "ToolCallArrived", turn: "turn-1", call: "c1", tool: "ls", input: json({ path: "." }) });
+  observe(session, { _tag: "ToolCallDispatched", call: "c1" });
+  observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "overloaded", error: json({}) });
+  observe(session, { _tag: "TurnInterrupted", turn: "turn-1" });
+  expect(session.requests.at(-1)).toEqual({ _tag: "StopTurnWork", turn: "turn-1" } as never);
+  expect(tags(session).at(-1)).toBe("TurnInterrupted");
+  observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Failed", reason: { _tag: "Indeterminate" } } });
+  expect(tags(session).slice(-2)).toEqual(["ToolEnded", "TurnEnded"]);
+  expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { ending: { _tag: "Interrupted" } } });
+});

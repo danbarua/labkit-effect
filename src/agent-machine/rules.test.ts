@@ -67,7 +67,7 @@ test("every switch in the core ends in `satisfies never`", () => {
   expect(texts.flatMap(([file, text]) => unguardedSwitches(text).map((line) => `${file}:${line}`))).toEqual([]);
 });
 
-test("a call that arrived in a response that then failed is recorded, with its dispatch and its end", () => {
+test("a call that arrived in a response that then failed is recorded with its dispatch and its end, and the turn ends only after the call's end", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -79,8 +79,11 @@ test("a call that arrived in a response that then failed is recorded, with its d
     failure: "the connection was lost",
     error: { mediaType: "text/plain", body: { _tag: "Text", text: "the connection was lost" } },
   });
+  // The call belongs to the turn that started it: the turn is still running while the call runs.
+  expect(session.world.agent.state._tag).toBe("Running");
   observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } });
   const recorded = session.journal.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
-  expect(recorded.slice(5)).toEqual(["ToolCallArrived", "ToolCallDispatched", "ModelFailed", "TurnEnded", "ToolEnded"]);
+  expect(recorded.slice(5)).toEqual(["ToolCallArrived", "ToolCallDispatched", "ModelFailed", "ToolEnded", "TurnEnded"]);
+  expect(session.journal.at(-1) as unknown).toMatchObject({ decision: { ending: { _tag: "Failed" } } });
   expect(recorded).not.toContain("ObservationNotExpected");
 });

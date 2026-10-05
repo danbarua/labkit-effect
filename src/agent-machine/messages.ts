@@ -72,7 +72,7 @@ export type ToConversationTurn =
   | { readonly _tag: "StepCutShort" }
   /** The model's response was whole, with no tool calls, and marked `Unfinished`; the turn asks again. */
   | { readonly _tag: "StepUnfinished" }
-  /** The step stopped without a response: the request failed or was vetoed. */
+  /** The step stopped without a response: the request failed or was vetoed, and every call the step opened has settled. */
   | { readonly _tag: "StepStopped"; readonly ending: Exclude<Ending, { _tag: "Completed" | "Incomplete" }> };
 
 /** What a conversation turn, or a call, tells a step. */
