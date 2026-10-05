@@ -13,7 +13,7 @@ import type { Policy } from "../agent-policy/policy.ts";
 import { ModelClient, ToolCallPolicies } from "./contracts.ts";
 import { openSession } from "./loop.ts";
 import { EphemeralSessionStore } from "./session-store.ts";
-import { receivedJson } from "./received.ts";
+import { asText, receivedJson } from "./received.ts";
 import { CountingTurns } from "./turns.ts";
 
 /** A model that calls `echo` once, then answers. */
@@ -88,4 +88,71 @@ test("P8: an allowed call runs after the answer; a rejected one ends Vetoed and 
   const rejected = await answeredWith("reject-once");
   expect(rejected.tags).toEqual(["PermissionAsked", "PermissionAnswered", "ToolEnded"]);
   expect(rejected.ended as unknown).toMatchObject({ _tag: "Failed", reason: { _tag: "Vetoed" } });
+});
+
+/** A policy that asks `questions` times, then lets the call run when the last answer is "yes". */
+const asking = (questions: number): Policy<unknown> => ({
+  start: () => (questions === 0 ? { _tag: "Waiting", state: 0, asks: undefined } : { _tag: "Waiting", state: 1, asks: receivedJson({ question: 1 }) }),
+  receive: (state, message) => {
+    const asked = state as number;
+    if (message._tag !== "Answered") return { _tag: "Waiting", state: asked, asks: undefined };
+    if (asked < questions) return { _tag: "Waiting", state: asked + 1, asks: receivedJson({ question: asked + 1 }) };
+    return asText(message.answer) === '"yes"' ? { _tag: "Decided", verdict: { _tag: "Continue" } } : { _tag: "Decided", verdict: { _tag: "Veto", reason: receivedJson("no") } };
+  },
+});
+
+/** A turn in which `echo` is reviewed by `policy`, each question answered by `answer`; the observations recorded. */
+const reviewedBy = (policy: Policy<unknown>, answer: (call: CallId) => ReadonlyArray<Observation>) =>
+  runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
+      const recorded = yield* session.subscribe;
+      yield* Effect.forkScoped(
+        Effect.forever(
+          PubSub.take(recorded).pipe(
+            Effect.flatMap((fact) =>
+              fact._tag === "Observed" && fact.observation._tag === "PermissionAsked"
+                ? Effect.forEach(answer(fact.observation.call), (each) => session.observe(each), { discard: true })
+                : Effect.void,
+            ),
+          ),
+        ),
+      );
+      yield* session.observe(boringOpening(smolCatalog));
+      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "echo hi" } as unknown as Observation);
+      yield* session.idle;
+      return (yield* session.facts).flatMap((fact) => (fact._tag === "Observed" ? [fact.observation] : []));
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          BoringModelProvider,
+          BoringContextAssembler,
+          callsEchoOnce(),
+          SmolToolRunner,
+          CountingTurns,
+          Layer.succeed(ToolCallPolicies, [{ name: "asking", policy: () => Effect.succeed(policy) }]),
+        ),
+      ),
+    ),
+  );
+
+const answered = (call: CallId, answer: string): Observation => ({ _tag: "PermissionAnswered", call, answer: receivedJson(answer) });
+const permissionTags = (observed: ReadonlyArray<Observation>) =>
+  observed.map((each) => each._tag).filter((tag) => ["PermissionAsked", "PermissionAnswered", "ToolCallDispatched", "ToolEnded"].includes(tag));
+
+test("a policy that asks again after an answer has each question recorded and answered before the call runs", async () => {
+  const observed = await reviewedBy(asking(2), (call) => [answered(call, "yes")]);
+  expect(permissionTags(observed)).toEqual(["PermissionAsked", "PermissionAnswered", "PermissionAsked", "PermissionAnswered", "ToolCallDispatched", "ToolEnded"]);
+  expect(observed.flatMap((each) => (each._tag === "ToolEnded" ? [each.outcome._tag] : []))).toEqual(["Succeeded"]);
+});
+
+test("an answer for another call does not answer a policy waiting on this one", async () => {
+  const observed = await reviewedBy(asking(1), (call) => [answered(CallId.make("other"), "no"), answered(call, "yes")]);
+  expect(observed.flatMap((each) => (each._tag === "ToolEnded" ? [each.outcome._tag] : []))).toEqual(["Succeeded"]);
+});
+
+test("a call whose policy waits without asking anything never begins to run, and ends not known to have run", async () => {
+  const observed = await reviewedBy(asking(0), () => []);
+  expect(permissionTags(observed)).toEqual(["ToolEnded"]);
+  expect(observed.flatMap((each) => (each._tag === "ToolEnded" ? [each.outcome] : [])) as unknown).toEqual([{ _tag: "Failed", reason: { _tag: "Indeterminate" } }]);
 });
