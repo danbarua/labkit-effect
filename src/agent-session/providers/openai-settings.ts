@@ -1,15 +1,16 @@
 /**
- * A session's settings as the Responses API takes them: `reasoning.effort`, `reasoning.summary`,
- * `max_output_tokens` and `prompt_cache_retention`. The API has no setting for when a model thinks,
- * other than not at all (effort `none`). It caches every long enough request, for minutes, in
- * memory; asked to keep it for an hour, it is asked for its longer retention, 24 hours. A setting
- * it cannot take is returned as adjusted.
+ * A session's settings as the Responses API accepts them: `reasoning.effort`, `reasoning.summary`,
+ * `max_output_tokens` and `prompt_cache_retention`.
+ * - The API has no setting for when a model thinks, other than not at all (effort `none`).
+ * - The API caches every long enough request in memory, for minutes. When the session asks for an
+ *   hour, the request asks for the API's longer retention, 24 hours.
+ * - A setting that the API cannot accept is returned as adjusted.
  *
- * Each model accepts its own reasoning efforts (`efforts`, of the well-known models): gpt-5 takes
- * `minimal` to `high`, the pro models `medium` to `xhigh` (gpt-5-pro only `high`), and some take no
- * `none`. An effort a model does not accept, thinking `off` (effort `none`) included, is sent as
- * the nearest one it does, the higher of two as near, and that is returned as adjusted. A model
- * with no list is sent what was asked.
+ * Each model accepts its own reasoning efforts (`efforts`, from the well-known models): gpt-5 accepts
+ * `minimal` to `high`, the pro models `medium` to `xhigh` (gpt-5-pro only `high`), and some accept no
+ * `none`. An effort that a model does not accept, including thinking `off` (effort `none`), is sent
+ * as the nearest accepted effort (the higher one when two are equally near), and returned as
+ * adjusted. A model with no list is sent the effort asked.
  */
 
 import type { ModelSettings } from "../../agent-machine/settings.ts";
@@ -41,7 +42,7 @@ export function openAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyA
   const adjusted = [...cacheAdjusted, ...thinkingAdjusted, ...effortAdjusted];
   const reasoning = {
     ...(sent === undefined ? {} : { effort: sent }),
-    // A summary is the only thinking content the API returns on request; commentary comes unasked.
+    // A summary is the only thinking content that the API returns on request; commentary arrives without a request.
     ...(observe === "all" ? { summary: "auto" } : {}),
   };
   return {
@@ -55,5 +56,5 @@ export function openAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyA
   };
 }
 
-/** The same for a request's target: its settings, and the efforts known of its model. */
+/** The same mapping, for a request's target: its settings, and the efforts known for its model. */
 export const openAiSettle = (target: Target): Settled => openAiSettings(target.settings, knownOf(target)?.efforts);

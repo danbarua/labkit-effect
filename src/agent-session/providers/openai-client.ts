@@ -1,27 +1,34 @@
 /**
- * A model client for the OpenAI Responses API, sent through Effect's `OpenAiClient`.
+ * A model client for the OpenAI Responses API, sent through Effect's `OpenAiClient`. xAI accepts the
+ * same requests (`xai-client.ts`).
  *
- * Out: the system text is `instructions`; the context's messages become input items: text as
- * `input_text` or `output_text` messages, a tool call as a `function_call` item, a tool outcome as
- * a `function_call_output` item carrying the text the model is sent. The catalog is sent as
- * `function` tools. Thinking (a `reasoning` item) and an item it did not recognise go back to the
- * provider that produced them unchanged and in their place; for any other provider they are left
- * out, and that is logged. The session's settings go in as `reasoning`
- * (`openai-settings.ts`); what that adjusted is recorded before the request.
+ * Request:
+ * - The system text is `instructions`.
+ * - The context's messages become input items: text as `input_text` or `output_text` messages, a
+ *   tool call as a `function_call` item, and a tool outcome as a `function_call_output` item
+ *   carrying the text that the model is sent.
+ * - The catalog is sent as `function` tools.
+ * - Thinking (a `reasoning` item) and an item that the client did not recognise go back to the
+ *   provider that produced them, unchanged and in their place. They are omitted for any other
+ *   provider, and the omission is logged.
+ * - The session's settings go in as `reasoning` (`openai-settings.ts`); what that adjusted is
+ *   recorded before the request.
  *
- * In: the response streams; each event, the text it adds to an answer, commentary or a reasoning
- * summary, and each completed item are passed on as they arrive, and
- * the stream's last event carries the whole response. Its `output` items that were completed
- * become the observation's parts in order: a `message` whose
- * content is all `output_text` is a `Text` for each, or a `Commentary` for each when its `phase` is
- * `commentary` (sent back with that phase); a `function_call` is `ToolCall` (whatever the
- * tool's name), its arguments kept as the text received; a `reasoning` item is `Thinking` (its
- * summary as text, and the item as received); every other item, a `message` with any
- * other content included, is `Unrecognised`, whole, so that it can be sent back as it came. The stop is the
- * response's `status` (with the reason when it is `incomplete`); everything else in the response is
- * `metadata`. A request that fails, after retries, is observed as `ModelFailed`.
- *
- * xAI takes the same requests (`xai-client.ts`).
+ * Response:
+ * - The response streams. Each event, the text that it adds to an answer, commentary or reasoning
+ *   summary, and each completed item are passed on as they arrive. The stream's last event carries
+ *   the whole response.
+ * - The completed `output` items become the observation's parts, in order:
+ *   - a `message` whose content is all `output_text`: a `Text` for each, or a `Commentary` for each
+ *     when its `phase` is `commentary` (sent back with that phase);
+ *   - a `function_call`: a `ToolCall`, whatever the tool's name, with its arguments kept as the text
+ *     received;
+ *   - a `reasoning` item: `Thinking` (its summary as text, and the item as received);
+ *   - any other item, including a `message` with other content: `Unrecognised`, whole, so that it
+ *     can be sent back as it came.
+ * - The stop is the response's `status`, with the reason when it is `incomplete`. Everything else in
+ *   the response is `metadata`.
+ * - A request that still fails after retries is observed as `ModelFailed`.
  */
 
 import type { BlobId } from "../../agent-machine/blob.ts";
@@ -70,7 +77,7 @@ type Responded = Extract<Observation, { _tag: "ModelResponded" }>;
 
 const caller = { module: "OpenAiResponsesModelClient", method: "respond" };
 
-/** The Responses role for a message, and the type of its text: an instruction is a `developer` message. */
+/** Returns the Responses role for a message and the type of its text. An instruction is a `developer` message. */
 function textAs(message: ContextMessage): { readonly role: string; readonly type: string } {
   switch (message.role) {
     case "user":
@@ -84,7 +91,7 @@ function textAs(message: ContextMessage): { readonly role: string; readonly type
   }
 }
 
-/** The input items one message becomes, in order. */
+/** Returns the input items that one message becomes, in order. */
 function items(
   message: ContextMessage,
   target: Target,
@@ -148,7 +155,7 @@ function items(
   };
 }
 
-/** A request's body for `context`, without settings, and what was supplied or left out in shaping it. */
+/** Returns a request's body for `context`, without settings, and what was supplied or omitted in shaping it. */
 export function body(target: Target, context: ModelContext, files: ReadonlyMap<BlobId, Uint8Array> = new Map()): Shaped {
   const calls = callsIn(context);
   const input = context.messages.map((message) => items(message, target, calls, context, files));
@@ -176,7 +183,7 @@ function isOutputText(content: Json): content is { readonly type: "output_text";
   return isObject(content) && content["type"] === "output_text" && typeof content["text"] === "string";
 }
 
-/** The text of a reasoning item's summary: its parts, a blank line between them; empty when it has none. */
+/** Returns the text of a reasoning item's summary: its parts separated by blank lines; empty when it has none. */
 function summaryOf(item: Schema.JsonObject): ThinkingText {
   const summary = item["summary"];
   const texts = Array.isArray(summary)
@@ -185,7 +192,7 @@ function summaryOf(item: Schema.JsonObject): ThinkingText {
   return ThinkingText.make(texts.join("\n\n"));
 }
 
-/** The parts one output item becomes. */
+/** Returns the parts that one output item becomes. */
 function parts(item: Json): ReadonlyArray<ModelPart> {
   if (!isObject(item)) return [{ _tag: "Unrecognised", received: receivedJson(item) }];
   const { type } = item;
@@ -208,7 +215,7 @@ function stopOf(status: Json | undefined, incomplete: Json | undefined): StopRea
   return StopReason.make(typeof reason === "string" ? `${text}: ${reason}` : text);
 }
 
-/** A response's `status`, and for an incomplete one the reason in `incomplete_details`. */
+/** Returns a response's `status`, with the reason in `incomplete_details` when the response is incomplete. */
 const endings = new Map([
   ["completed", "Complete"],
   ["incomplete: max_output_tokens", "CutShort"],
@@ -219,14 +226,14 @@ const endings = new Map([
 const stillArriving = (item: Json): boolean =>
   isObject(item) && (item["status"] === "incomplete" || item["status"] === "in_progress");
 
-/** The HTTP status a stream's error code stands for, when it stands for one. */
+/** Returns the HTTP status that a stream's error code corresponds to, when it corresponds to one. */
 const statusOfCode = (code: Json | undefined): number | undefined => {
   if (code === "rate_limit_exceeded") return 429;
   if (code === "server_error") return 500;
   return undefined;
 };
 
-/** An error the stream reported, in a `response.failed` event's response or an `error` event. */
+/** Returns an error that the stream reported, in a `response.failed` event's response or in an `error` event. */
 const failedInStream = (event: Schema.JsonObject): AiError.AiError => {
   const response = event["response"];
   const error = response !== undefined && isObject(response) ? response["error"] : event;
@@ -242,7 +249,7 @@ const failedInStream = (event: Schema.JsonObject): AiError.AiError => {
   });
 };
 
-/** A Responses API usage in the core's terms: its `input_tokens` include those read from the cache. */
+/** Returns a Responses API usage in the core's terms. Its `input_tokens` include those read from the cache. */
 export const responsesUsageIn = (reported: Json | undefined) => {
   const usage = usageOf({
     input: numberAt(reported, "input_tokens"),
@@ -254,8 +261,9 @@ export const responsesUsageIn = (reported: Json | undefined) => {
 };
 
 /**
- * What a response's stream has given so far: the response its last event carried, what each output
- * item's text deltas are added to, and the last summary part each reasoning item's deltas were in.
+ * What a response's stream has delivered so far: the response that its last event carried, the text
+ * that each output item's deltas have built, and the last summary part that each reasoning item's
+ * deltas were in.
  */
 interface Reading {
   readonly response: Json | undefined;
@@ -264,9 +272,9 @@ interface Reading {
 }
 
 /**
- * One request. The response streams: each event is passed on as it arrives and each output item's
- * parts when the item is done (`ModelStream`); the observation is made from the response the
- * stream's last event carries.
+ * Makes one request. The response streams: each event is passed on as it arrives, and each output
+ * item's parts when the item is done (`ModelStream`). The observation is made from the response that
+ * the stream's last event carries.
  */
 const respondOnce = (
   http: HttpClient.HttpClient,
@@ -326,7 +334,7 @@ const respondOnce = (
     if (ended === undefined || !isObject(ended) || !Array.isArray(ended["output"]))
       return yield* invalidOutput(caller, `The stream ended without a response: ${JSON.stringify(ended ?? null)}`);
     const { output, status, incomplete_details, ...metadata } = ended;
-    // An item still arriving when the response ended (it was cut short) is not part of it.
+    // An item still arriving when the response ended (it was cut short) is not included.
     const items = output as ReadonlyArray<Json>;
     const whole = items.filter((item) => !stillArriving(item));
     const cutItems = items.filter(stillArriving);
@@ -348,9 +356,10 @@ const respondOnce = (
   });
 
 /**
- * Requests through the configured `OpenAiClient`, retried while retryable; a failure is the
- * `AiError`. `settle` puts the session's settings for the target's model into the request: another provider that takes
- * Responses requests takes them differently (`xai-settings.ts`).
+ * Makes requests through the configured `OpenAiClient`, retried while the failure is retryable; a
+ * failure is the `AiError`. `settle` puts the session's settings for the target's model into the
+ * request, because another provider that accepts Responses requests maps the settings differently
+ * (`xai-settings.ts`).
  */
 export const openAiRequests = (
   retries: Retries = defaultRetries,

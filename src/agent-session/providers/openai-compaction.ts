@@ -1,7 +1,4 @@
-/**
- * The provider's own compaction, through the OpenAI Responses adapter's shaping. xAI takes the same
- * request (`xai-compaction.ts`).
- */
+/** The provider's own compaction, through the OpenAI Responses adapter's shaping. xAI accepts the same request (`xai-compaction.ts`). */
 
 import { OpenAiClient } from "@effect/ai-openai";
 import { Effect, Ref } from "effect";
@@ -14,8 +11,8 @@ import { filesIn, isObject, type Json, type LeftOutLogged, logSupplied } from ".
 import { body } from "./openai-client.ts";
 
 /**
- * What the provider's own compaction returned: `output`, the array of items that stand in for what
- * was compacted, as received; and the rest of the response.
+ * What the provider's own compaction returned: `output`, the array of items that replace what was
+ * compacted, as received; and the rest of the response.
  */
 export interface Compacted {
   readonly output: Received;
@@ -25,13 +22,13 @@ export interface Compacted {
 const compactCaller = { module: "OpenAiResponsesModelClient", method: "compact" };
 
 /**
- * The provider's own compaction of `context` (`POST /responses/compact`), through the configured
- * `OpenAiClient`, retried while retryable. The context is shaped as a request's is, without
- * settings; the response is not streamed. Its `output` items stand in for the input they were made
- * from, and are returned as received: each goes back unchanged, in order, at the head of the next
- * request's input, which is where the provider reads them (xAI returns one `compaction` item;
- * OpenAI returns the user's messages and a `compaction` item). `providerCompaction` makes them a
- * summary.
+ * Asks the provider for its own compaction of `context` (`POST /responses/compact`), through the
+ * configured `OpenAiClient`, retried while the failure is retryable. The context is shaped as a
+ * request's is, without settings; the response is not streamed. Its `output` items replace the input
+ * they were made from, and are returned as received. Each is sent back unchanged, in order, at the
+ * start of the next request's input, which is where the provider reads them. xAI returns one
+ * `compaction` item; OpenAI returns the user's messages and a `compaction` item.
+ * `providerCompaction` turns them into a summary.
  */
 export const openAiCompactions = (
   retries: Retries = defaultRetries,

@@ -1,13 +1,13 @@
 /**
- * A Messages API response assembled from its stream: a machine that takes the stream's events one
- * at a time and holds the message as far as it has arrived. A content block is complete when its
- * `content_block_stop` arrives; `assembled` gives the message as a request without streaming
- * returns it, with the blocks that are complete. A block still arriving when the stream ends (the
- * response was cut short, or the request was stopped) is not part of it.
- *
- * A `tool_use` block's input arrives as JSON text in pieces, and is parsed when the block is
- * complete. When that text is not JSON, the block is still complete, its `input` the text, and
- * the event reports it (`unparsed`): the call is recorded, and the tool rejects the input.
+ * A Messages API response assembled from its stream: a state machine that takes the stream's events
+ * one at a time and holds the message as far as it has arrived.
+ * - A content block is complete when its `content_block_stop` arrives.
+ * - `assembled` returns the message in the form that a non-streaming request returns, with the
+ *   complete blocks only. A block still arriving when the stream ends (the response was cut short,
+ *   or the request was stopped) is not included.
+ * - A `tool_use` block's input arrives as JSON text in pieces, and is parsed when the block is
+ *   complete. When that text is not JSON, the block is still complete, with the text as its `input`,
+ *   and the event reports it (`unparsed`): the call is recorded, and the tool rejects the input.
  */
 
 import { Array as Arr, Order } from "effect";
@@ -17,21 +17,21 @@ interface JsonObject {
   readonly [key: string]: Json;
 }
 
-/** A content block as far as it has arrived, and the JSON text of its input arriving beside it. */
+/** A content block as far as it has arrived, with the JSON text of its input received so far. */
 interface Arriving {
   readonly block: JsonObject;
   readonly inputJson: string;
 }
 
 export interface Assembling {
-  /** The message as `message_start` gave it. */
+  /** The message as `message_start` delivered it. */
   readonly message: JsonObject | undefined;
-  /** What `message_delta` events changed at the top of the message. */
+  /** The top-level message fields that `message_delta` events changed. */
   readonly changed: JsonObject;
   readonly usage: JsonObject | undefined;
   readonly arriving: ReadonlyMap<number, Arriving>;
   readonly complete: ReadonlyMap<number, JsonObject>;
-  /** Whether `message_stop` arrived: the stream's own mark that the message is whole. */
+  /** Whether `message_stop` arrived: the stream's own signal that the message is complete. */
   readonly stopped: boolean;
 }
 
@@ -50,7 +50,7 @@ export interface Assembled {
   readonly completed?: JsonObject;
   /** The stream's own report of an error. */
   readonly failed?: { readonly type: string; readonly message: string };
-  /** The type of a delta this machine does not know how to apply; the block is left without it. */
+  /** The type of a delta that this machine cannot apply; the block is kept without it. */
   readonly notApplied?: string;
   /** The tool_use block this event completed, when its streamed input is not JSON: the block's `input` is that text. */
   readonly unparsed?: Unparsed;
@@ -66,7 +66,7 @@ export interface Unparsed {
 const object = (value: Json | undefined): JsonObject | undefined => (value !== undefined && isObject(value) ? value : undefined);
 const text = (value: Json | undefined): string => (typeof value === "string" ? value : "");
 
-/** The block with the delta applied, or the delta's type when it is one this machine does not know. */
+/** Returns the block with the delta applied, or the delta's type when this machine cannot apply it. */
 function applied(arriving: Arriving, delta: JsonObject): Arriving | string {
   const { block } = arriving;
   const type = text(delta["type"]);
@@ -89,8 +89,8 @@ function applied(arriving: Arriving, delta: JsonObject): Arriving | string {
 }
 
 /**
- * The block complete: its input parsed from the JSON text that arrived, when any did. When that
- * text is not JSON, the block's input is the text, and the block is reported as `unparsed`.
+ * Returns the completed block, with its input parsed from the JSON text that arrived, if any. When
+ * that text is not JSON, the block's input is the text, and the block is reported as `unparsed`.
  */
 function finished(arriving: Arriving): { readonly block: JsonObject; readonly unparsed?: Unparsed } {
   if (arriving.inputJson === "") return { block: arriving.block };
@@ -153,10 +153,10 @@ export function assemble(state: Assembling, event: Json): Assembled {
   }
 }
 
-/** Entries of a map by block index, in index order. */
+/** Returns a map's entries, keyed by block index, in index order. */
 const byIndex: Order.Order<readonly [number, unknown]> = Order.mapInput(Order.Number, ([at]) => at);
 
-/** The message as far as it is complete; undefined when the stream never started one. */
+/** Returns the message with its complete blocks; undefined when the stream never started a message. */
 export function assembled(state: Assembling): JsonObject | undefined {
   if (state.message === undefined) return undefined;
   const usage = state.usage === undefined ? state.message["usage"] : { ...object(state.message["usage"]), ...state.usage };
@@ -168,7 +168,7 @@ export function assembled(state: Assembling): JsonObject | undefined {
   };
 }
 
-/** The types of the blocks that were still arriving, in order. */
+/** Returns the types of the blocks that were still arriving, in order. */
 export function cut(state: Assembling): ReadonlyArray<string> {
   return Arr.sort(state.arriving, byIndex).map(([, arriving]) => text(arriving.block["type"]));
 }

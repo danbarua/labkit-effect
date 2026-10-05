@@ -1,18 +1,18 @@
 /**
- * A session's settings for a Chat Completions provider. The reasoning effort is sent as
- * `reasoning_effort`, the standard Chat Completions parameter: the effort asked, or `none` for
- * thinking `off`; with no effort and no thinking setting, nothing is sent and the server uses its
- * default. An effort the model is known not to take (`efforts`) is sent as the nearest it does
- * (`effortFor`); for a model with no list, what was asked is sent, and a server that does not take
- * it refuses the request in its own words.
+ * A session's settings for a Chat Completions provider.
+ * - **Reasoning effort** is sent as `reasoning_effort`, the standard Chat Completions parameter: the
+ *   effort asked, or `none` when thinking is `off`. With neither an effort nor a thinking setting,
+ *   nothing is sent and the server uses its default. An effort that the model is known not to accept
+ *   (`efforts`) is sent as the nearest accepted effort (`effortFor`). For a model with no list, the
+ *   effort asked is sent, and a server that does not accept it refuses the request in its own words.
+ * - **Output limit** is sent as `max_tokens`; the server ends a response that reaches it with
+ *   `finish_reason: length`.
+ * - **Other settings** are not sent, because each compatible provider accepts them differently;
+ *   each one asked for is returned as adjusted.
  *
- * Measured against a local Rapid-MLX server (vLLM-compatible) running Qwen3.5-9B: it takes `none`,
- * `minimal`, `low`, `medium`, `high` and `xhigh` and refuses `max` with a 400; its default is
- * `none`; with any effort but `none` the response carries `reasoning_content`.
- *
- * The output limit is sent as `max_tokens`; the server ends a response that reaches it with
- * `finish_reason: length`. The other settings are not sent, because what each compatible provider
- * takes for them differs; each one asked for is returned as adjusted.
+ * Measured against a local Rapid-MLX server (vLLM-compatible) running Qwen3.5-9B: it accepts `none`,
+ * `minimal`, `low`, `medium`, `high` and `xhigh`, and refuses `max` with a 400. Its default is
+ * `none`. With any effort except `none`, the response carries `reasoning_content`.
  */
 
 import type { ModelSettings } from "../../agent-machine/settings.ts";
@@ -42,5 +42,5 @@ export function openAiCompatSettings(settings: ModelSettings = {}, efforts?: Rea
   };
 }
 
-/** The same for a request's target: its settings, and the efforts known of its model. */
+/** The same mapping, for a request's target: its settings, and the efforts known for its model. */
 export const openAiCompatSettle = (target: Target): Settled => openAiCompatSettings(target.settings, knownOf(target)?.efforts);

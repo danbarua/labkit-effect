@@ -1,28 +1,34 @@
 /**
- * A model client for OpenAI-compatible Chat Completions APIs, sent through Effect's
- * `OpenAiClient` from `@effect/ai-openai-compat`. The provider is whichever the client's `apiUrl`
- * points at.
+ * A model client for OpenAI-compatible Chat Completions APIs, sent through Effect's `OpenAiClient`
+ * from `@effect/ai-openai-compat`. The provider is whichever server the client's `apiUrl` points at.
  *
- * Out: the system text is a `system` message; the context's messages become chat messages: text
- * as `text` content parts, the model's tool calls as an assistant message's `tool_calls`, each tool
- * outcome as a `tool` message carrying the text the model is sent. The catalog is sent as
- * `function` tools. What an earlier response from this provider and model held besides its text
- * and calls goes back as it came: its other fields (`reasoning_content`, ...) on its message, and a
- * call's other fields on the call. Another model's thinking goes as text; its other parts are left
- * out, and logged. Of the session's settings
- * the reasoning effort is sent, as
- * `reasoning_effort` (`openai-compat-settings.ts`); each other one asked for is recorded as adjusted.
+ * Request:
+ * - The system text is a `system` message.
+ * - The context's messages become chat messages: text as `text` content parts, the model's tool
+ *   calls as an assistant message's `tool_calls`, and each tool outcome as a `tool` message carrying
+ *   the text that the model is sent.
+ * - The catalog is sent as `function` tools.
+ * - What an earlier response from this provider and model held besides its text and calls is sent
+ *   back as it came: the message's other fields (`reasoning_content`, ...) on its message, and a
+ *   call's other fields on the call. Another model's thinking is sent as text; its other parts are
+ *   omitted, and the omission is logged.
+ * - Of the session's settings, only the reasoning effort is sent, as `reasoning_effort`
+ *   (`openai-compat-settings.ts`); each other setting asked for is recorded as adjusted.
  *
- * In: the response streams, and its chunks build the first choice's message (`respondOnce`). The
- * message becomes the observation's parts in order: its thinking (`reasoning_content`, `reasoning`)
- * is `Thinking`, its `content` is `Text` (a list of chunks, Mistral's, is a part per chunk, its
- * thinking `Thinking`), each of its `tool_calls` is `ToolCall` (whatever the
- * tool's name), its arguments kept as the text received, and a call's other fields (Gemini's
- * `extra_content`) are `Unrecognised` holding the call; any other field of the message
- * (`refusal`, ...) is `Unrecognised`, holding that field. As the chunks arrive, the text each adds
- * to the thinking and to the answer is passed on. The stop is the choice's `finish_reason`; the
- * usage is the last a chunk held (`usageIn`); everything else the chunks held is `metadata`. A
- * request that fails, after retries, is observed as `ModelFailed`.
+ * Response:
+ * - The response streams, and its chunks build the first choice's message (`respondOnce`). As the
+ *   chunks arrive, the text that each adds to the thinking and to the answer is passed on.
+ * - The message becomes the observation's parts, in order:
+ *   - its thinking (`reasoning_content`, `reasoning`): `Thinking`;
+ *   - its `content`: `Text`. A list of chunks (Mistral's) is one part per chunk, with thinking
+ *     chunks as `Thinking`;
+ *   - each of its `tool_calls`: a `ToolCall`, whatever the tool's name, with its arguments kept as
+ *     the text received. A call's other fields (Gemini's `extra_content`) become an `Unrecognised`
+ *     part holding the call;
+ *   - any other field of the message (`refusal`, ...): `Unrecognised`, holding that field.
+ * - The stop is the choice's `finish_reason`. The usage is the last usage that a chunk held
+ *   (`usageIn`). Everything else that the chunks held is `metadata`.
+ * - A request that still fails after retries is observed as `ModelFailed`.
  */
 
 import type { BlobId } from "../../agent-machine/blob.ts";
@@ -62,7 +68,7 @@ type Responded = Extract<Observation, { _tag: "ModelResponded" }>;
 
 const caller = { module: "OpenAiCompatModelClient", method: "respond" };
 
-/** The chat role for a message: an instruction is a `system` message in the conversation. */
+/** Returns the chat role for a message. An instruction is a `system` message in the conversation. */
 function role(message: ContextMessage): string {
   switch (message.role) {
     case "user":
@@ -75,7 +81,7 @@ function role(message: ContextMessage): string {
   }
 }
 
-/** The chat messages one context message becomes: tool outcomes each become their own message. */
+/** Returns the chat messages that one context message becomes. Each tool outcome becomes a message of its own. */
 function chatMessages(
   message: ContextMessage,
   target: Target,
@@ -129,11 +135,13 @@ function chatMessages(
 }
 
 /**
- * What an earlier response held besides its text and its calls, put back as it came to the same
- * provider and model (`sentBack`): each of the message's other fields (`reasoning_content`, ...);
- * the chunks of its content that are not text (Mistral's thinking), by the part that holds them;
- * and each call's other fields (Gemini's `extra_content`) on the call with its id. Another model's
- * thinking goes as text in the content, in its place.
+ * Returns what an earlier response held besides its text and its calls, to be sent back as it came to
+ * the same provider and model (`sentBack`):
+ * - each of the message's other fields (`reasoning_content`, ...);
+ * - the chunks of its content that are not text (Mistral's thinking), by the part that holds them;
+ * - each call's other fields (Gemini's `extra_content`), on the call with the same id.
+ *
+ * Another model's thinking is sent as text in the content, in its place.
  */
 function keptFields(
   message: ContextMessage,
@@ -148,7 +156,7 @@ function keptFields(
   const kept = message.parts.reduce<Kept>(
     (kept, part, at) => {
       if (part._tag !== "Thinking" && part._tag !== "Unrecognised") return kept;
-      // One server can serve many models, and a router many vendors: each model's own goes back to it alone.
+      // One server can serve many models, and a router many vendors, so each model's own fields go back to that model alone.
       const back = sentBack(part, target, "Model", (text) => ({ json: [{ content: [{ type: "text", text }] }], supplied: [] }));
       const [piece] = back.json as ReadonlyArray<Json>;
       if (piece === undefined) return { ...kept, supplied: [...kept.supplied, ...back.supplied] };
@@ -160,23 +168,23 @@ function keptFields(
   return { fields: kept.fields, content: kept.content, calls: calls.map((own) => ({ ...kept.extras.get(own["id"] as string), ...own })), supplied: kept.supplied };
 }
 
-/** What `keptFields` has kept of the parts so far. */
+/** What `keptFields` has collected from the parts so far. */
 interface Kept {
   readonly fields: Readonly<Record<string, Json>>;
   /** The chunks of each part's content, by the part's position. */
   readonly content: ReadonlyMap<number, ReadonlyArray<Json>>;
-  /** Each call's other fields, by its id. */
+  /** Each call's other fields, by call id. */
   readonly extras: ReadonlyMap<string, Readonly<Record<string, Json>>>;
-  /** The part each field was kept from. */
+  /** The part that each field was collected from. */
   readonly setBy: ReadonlyMap<string, ContextPart>;
   readonly supplied: Shaped["supplied"];
 }
 
-/** `kept` with one field of what `part`, at `at` in its message, held. */
+/** Returns `kept` with one field that `part`, at position `at` in its message, held. */
 function keptWith(kept: Kept, part: ContextPart, at: number, field: string, value: Json, calls: ReadonlyArray<Readonly<Record<string, Json>>>): Kept {
   if (field === "content" && Array.isArray(value)) return { ...kept, content: new Map<number, ReadonlyArray<Json>>([...kept.content, [at, value]]) };
   if (field !== "tool_calls" || !Array.isArray(value)) {
-    // Two responses with nothing between them are one message: the later one's field is kept.
+    // Two responses with nothing between them are one message, so the later response's field is kept.
     const earlier = kept.setBy.get(field);
     return {
       ...kept,
@@ -216,9 +224,10 @@ function body(target: Target, context: ModelContext, files: ReadonlyMap<BlobId, 
 }
 
 /**
- * The parts one tool call becomes: `ToolCall`, and when the call holds other fields than its `id`,
- * `type` and `function` (Gemini's `extra_content`), `Unrecognised` holding the call as received, so
- * that they go back with it. A call with no id or name is `Unrecognised`.
+ * Returns the parts that one tool call becomes: a `ToolCall`, and, when the call holds fields other
+ * than `id`, `type` and `function` (Gemini's `extra_content`), an `Unrecognised` part holding the call
+ * as received, so that those fields are sent back with it. A call with no id or name is
+ * `Unrecognised`.
  */
 function callParts(call: Json): ReadonlyArray<ModelPart> {
   const received: ModelPart = { _tag: "Unrecognised", received: receivedJson({ tool_calls: [call] }) };
@@ -238,17 +247,19 @@ function callParts(call: Json): ReadonlyArray<ModelPart> {
 const thinkingFields: ReadonlyArray<string> = ["reasoning_content", "reasoning"];
 
 /**
- * The parts the choice's message becomes: its thinking (a text field in `thinkingFields`) as
- * `Thinking`, holding the field as received; its `content` as `Text`; any other field as
- * `Unrecognised`, unless it holds nothing (`null`, or an empty array: OpenAI sends `refusal: null`
- * and `annotations: []` with every message); its tool calls (`callParts`).
+ * Returns the parts that the choice's message becomes:
+ * - its thinking (a text field in `thinkingFields`): `Thinking`, holding the field as received;
+ * - its `content`: `Text`;
+ * - any other field: `Unrecognised`, unless it holds nothing (`null`, or an empty array: OpenAI sends
+ *   `refusal: null` and `annotations: []` with every message);
+ * - its tool calls (`callParts`).
  */
 function parts(message: Schema.JsonObject): ReadonlyArray<ModelPart> {
   const { tool_calls } = message;
   return [...fieldParts(message), ...(Array.isArray(tool_calls) ? (tool_calls as ReadonlyArray<Json>).flatMap(callParts) : [])];
 }
 
-/** The parts the message's fields other than its tool calls become. */
+/** Returns the parts that the message's fields other than its tool calls become. */
 function fieldParts(message: Schema.JsonObject): ReadonlyArray<ModelPart> {
   const { role: _role, content, tool_calls: _calls, ...rest } = message;
   const filled = Object.entries(rest).filter(([, value]) => value !== null && value !== undefined && !(Array.isArray(value) && value.length === 0));
@@ -265,9 +276,10 @@ function fieldParts(message: Schema.JsonObject): ReadonlyArray<ModelPart> {
 }
 
 /**
- * The parts the message's `content` becomes: text as `Text`. A list of chunks (Mistral's) becomes a
- * part per chunk, in order: a text chunk as `Text`; a thinking chunk as `Thinking`, its text the
- * text of its own chunks, holding the chunk; any other chunk as `Unrecognised`, holding it.
+ * Returns the parts that the message's `content` becomes: text becomes `Text`. A list of chunks
+ * (Mistral's) becomes one part per chunk, in order: a text chunk becomes `Text`; a thinking chunk
+ * becomes `Thinking`, whose text is the text of its own chunks, holding the chunk; any other chunk
+ * becomes `Unrecognised`, holding it.
  */
 function contentParts(content: Json | undefined): ReadonlyArray<ModelPart> {
   if (content === undefined || content === null) return [];
@@ -281,14 +293,14 @@ function contentParts(content: Json | undefined): ReadonlyArray<ModelPart> {
   });
 }
 
-/** The text of a thinking chunk: its own text chunks' text, joined. */
+/** Returns the text of a thinking chunk: the text of its own text chunks, joined. */
 const thinkingOf = (chunk: Schema.JsonObject): string => {
   const thinking = chunk["thinking"];
   if (typeof thinking === "string") return thinking;
   return Array.isArray(thinking) ? thinking.flatMap((each) => (isObject(each) && typeof each["text"] === "string" ? [each["text"]] : [])).join("") : "";
 };
 
-/** The text a chunk's delta adds to the answer and to the thinking, as it arrives. */
+/** Returns the text that a chunk's delta adds to the answer and to the thinking, as it arrives. */
 const deltasIn = (delta: Schema.JsonObject): ReadonlyArray<Streamed> => [
   ...thinkingFields.flatMap((field): ReadonlyArray<Streamed> => {
     const text = delta[field];
@@ -315,9 +327,9 @@ const endings = new Map([
 ] as const);
 
 /**
- * A Chat Completions usage in the core's terms: its `prompt_tokens` include those read from the
- * cache. The thinking and the cache read are where OpenAI puts them, or at the top of the usage
- * (SGLang's `reasoning_tokens`, some of Together's models' `cached_tokens`).
+ * Returns a Chat Completions usage in the core's terms. Its `prompt_tokens` include those read from
+ * the cache. The thinking and cache-read counts are read where OpenAI puts them, or at the top level
+ * of the usage (SGLang's `reasoning_tokens`, some of Together's models' `cached_tokens`).
  */
 const chatUsageIn = (reported: Json | undefined) => {
   const usage = usageOf({
@@ -330,7 +342,7 @@ const chatUsageIn = (reported: Json | undefined) => {
   return usage === undefined ? {} : { usage };
 };
 
-/** The usage a chunk holds: as `usage`, in Groq's `x_groq`, or in its choice (Kimi's documentation shows it there). */
+/** Returns the usage that a chunk holds: as `usage`, in Groq's `x_groq`, or in its choice (Kimi's documentation shows it there). */
 const usageIn = (chunk: Schema.JsonObject, choice: Json | undefined): Json | undefined => {
   const groq = chunk["x_groq"];
   return [chunk["usage"], isObject(groq ?? null) ? (groq as Schema.JsonObject)["usage"] : undefined, isObject(choice ?? null) ? (choice as Schema.JsonObject)["usage"] : undefined].find(
@@ -339,19 +351,21 @@ const usageIn = (chunk: Schema.JsonObject, choice: Json | undefined): Json | und
 };
 
 /**
- * A message as its stream's deltas build it. A text field (`content`, `reasoning_content`, ...) is
- * its deltas joined in order; a list of chunks (Mistral's `content`), its deltas' chunks joined
- * (`chunksJoined`), text that follows a list being a text chunk; any other field, as its last delta
- * gave it. Tool calls are kept by their `index`, their `arguments` joined (an object as its JSON
- * text), their `id` as first given and their name as `nameOf` says; a call with no index is the one
- * its `id` names, or a new one.
+ * A message as its stream's deltas build it.
+ * - A text field (`content`, `reasoning_content`, ...) is its deltas joined in order.
+ * - A list of chunks (Mistral's `content`) is its deltas' chunks joined (`chunksJoined`); text that
+ *   follows a list becomes a text chunk.
+ * - Any other field has the value of its last delta.
+ * - Tool calls are kept by their `index`, with their `arguments` joined (an object as its JSON text),
+ *   their `id` as first given, and their name as `nameOf` returns it. A call delta with no index
+ *   belongs to the call that its `id` names, or starts a new call.
  */
 interface Building {
   readonly fields: ReadonlyMap<string, Json>;
   readonly calls: ReadonlyMap<number, BuiltCall>;
 }
 
-/** A tool call as its deltas have built it. */
+/** A tool call as its deltas have built it so far. */
 interface BuiltCall {
   readonly id?: string;
   readonly name?: string;
@@ -374,9 +388,10 @@ const joined = (before: Json | undefined, delta: Json): Json => {
 };
 
 /**
- * `before`'s chunks with `more` after them: a text chunk after a text chunk adds its text to it, and
- * a thinking chunk after a thinking chunk adds its own chunks to it (its other fields, `closed` or a
- * `signature`, the later ones), as a stream sends one chunk in pieces.
+ * Returns `before`'s chunks followed by `more`, merging pieces of one chunk, because a stream sends
+ * one chunk in pieces: a text chunk after a text chunk adds its text to it, and a thinking chunk after
+ * a thinking chunk adds its own chunks to it (the later piece's other fields, `closed` or a
+ * `signature`, win).
  */
 function chunksJoined(before: ReadonlyArray<Json>, more: ReadonlyArray<Json>): ReadonlyArray<Json> {
   return more.reduce<ReadonlyArray<Json>>((all, chunk) => {
@@ -391,7 +406,7 @@ function chunksJoined(before: ReadonlyArray<Json>, more: ReadonlyArray<Json>): R
   }, before);
 }
 
-/** `building` with `delta` added, and the indexes of the calls it added to. */
+/** Returns `building` with `delta` added, and the indexes of the calls that the delta added to. */
 function added(building: Building, delta: Schema.JsonObject): { readonly building: Building; readonly touched: ReadonlyArray<number> } {
   const { role: _role, tool_calls, ...rest } = delta;
   const fields = Object.entries(rest).reduce<ReadonlyMap<string, Json>>(
@@ -417,13 +432,13 @@ function added(building: Building, delta: Schema.JsonObject): { readonly buildin
   return { building: { fields, calls }, touched: touched.flat() };
 }
 
-/** A call's id as its deltas give it: the first one given. */
+/** Returns a call's id from its deltas: the first id given. */
 const idOf = (before: string | undefined, given: Json | undefined): { readonly id?: string } => {
   if (before !== undefined) return { id: before };
   return typeof given === "string" ? { id: given } : {};
 };
 
-/** What a delta adds to a call's arguments: their text, or an object as its JSON text. */
+/** Returns what a delta adds to a call's arguments: their text, or an object as its JSON text. */
 const argumentsText = (given: Json | undefined): string => {
   if (typeof given === "string") return given;
   if (given === undefined || given === null) return "";
@@ -431,15 +446,15 @@ const argumentsText = (given: Json | undefined): string => {
 };
 
 /**
- * A call's name as its deltas give it: the first one given, or a later one that starts with it,
- * as llama.cpp sends the name whole again each time it grows.
+ * Returns a call's name from its deltas: the first name given, or a later name that starts with it,
+ * because llama.cpp sends the whole name again each time it grows.
  */
 const nameOf = (before: string | undefined, given: Json | undefined): { readonly name?: string } => {
   if (typeof given === "string" && given.length > 0 && (before === undefined || given.startsWith(before))) return { name: given };
   return before === undefined ? {} : { name: before };
 };
 
-/** A tool call as the message holds it, from what its deltas built. */
+/** Returns a tool call as the message holds it, from what its deltas built. */
 const callOf = (call: BuiltCall): Json => ({
   id: call.id ?? null,
   type: "function",
@@ -447,7 +462,7 @@ const callOf = (call: BuiltCall): Json => ({
   ...call.rest,
 });
 
-/** The message the deltas built. */
+/** Returns the message that the deltas built. */
 const messageOf = (building: Building): Schema.JsonObject => ({
   role: "assistant",
   ...Object.fromEntries(building.fields),
@@ -457,7 +472,7 @@ const messageOf = (building: Building): Schema.JsonObject => ({
 /** Calls by their index. */
 const byIndex: Order.Order<readonly [number, BuiltCall]> = Order.mapInput(Order.Number, ([at]) => at);
 
-/** What a response's chunks have given so far, and the calls passed on. */
+/** What a response's chunks have delivered so far, and the calls already passed on. */
 interface Streaming {
   readonly finish: Json | undefined;
   readonly usage: Json | undefined;
@@ -467,13 +482,16 @@ interface Streaming {
 }
 
 /**
- * One request. The response streams (`stream: true`, with its usage in the last chunk): each chunk
- * is passed on as it arrives, and a tool call once the next one begins (`ModelStream`); the
- * observation is made from the message the chunks built, as a whole response's message is. A
- * stream that ends with no `finish_reason` was cut short, and fails; a chunk that holds an `error`
- * (Groq's in `x_groq`) fails the request with it, and so does a `finish_reason` of `error`. A
- * server that answers with the whole response instead is read as one chunk holding the whole
- * message.
+ * Makes one request. The response streams (`stream: true`, with its usage in the last chunk).
+ * - Each chunk is passed on as it arrives, and a tool call once the next call begins
+ *   (`ModelStream`).
+ * - The observation is made from the message that the chunks built, as from a whole response's
+ *   message.
+ * - A stream that ends with no `finish_reason` was cut short, and fails.
+ * - A chunk that holds an `error` (Groq's, in `x_groq`) fails the request with that error, and so
+ *   does a `finish_reason` of `error`.
+ * - A server that answers with the whole response instead is read as one chunk holding the whole
+ *   message.
  */
 const respondOnce = (
   http: HttpClient.HttpClient,
@@ -495,8 +513,8 @@ const respondOnce = (
             if (reported !== undefined && reported !== null) return yield* invalidOutput(caller, `The stream reported an error: ${JSON.stringify(reported)}`);
             const { choices, usage: _usage, ...metadata } = chunk;
             const choice = Array.isArray(choices) ? (choices as ReadonlyArray<Json>)[0] : undefined;
-            // A server that answers whole sends the message where a chunk sends its delta; what arrives
-            // whole adds no text as it arrives.
+            // A server that answers with the whole response sends the message where a chunk sends its
+            // delta; a message that arrives whole passes on no text deltas.
             const streamedDelta = choice !== undefined && isObject(choice) ? choice["delta"] : undefined;
             const delta = choice !== undefined && isObject(choice) ? (streamedDelta ?? choice["message"]) : undefined;
             if (streamedDelta !== undefined && isObject(streamedDelta)) yield* Effect.forEach(deltasIn(streamedDelta), passOn, { discard: true });
@@ -541,7 +559,7 @@ const respondOnce = (
     };
   });
 
-/** Requests through the configured compatible client, retried while retryable; a failure is the `AiError`. */
+/** Makes requests through the configured compatible client, retried while the failure is retryable; a failure is the `AiError`. */
 export const openAiCompatRequests = (
   retries: Retries = defaultRetries,
 ): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient> =>

@@ -1,8 +1,8 @@
 /**
- * How many input tokens a request would take, counted by Anthropic before it is sent
- * (`POST /v1/messages/count_tokens`): the request's body as the adapter shapes it, files included,
- * without the output limit, which the endpoint does not take. Counted with the provider's
- * tokenizer, so it is the provider's figure.
+ * Counts the input tokens that a request would take, using Anthropic's endpoint, before the request
+ * is sent (`POST /v1/messages/count_tokens`). The count covers the request's body as the adapter
+ * shapes it, files included, without the output limit, which the endpoint does not accept. The
+ * provider's tokenizer counts, so the figure is the provider's.
  */
 
 import { AnthropicClient } from "@effect/ai-anthropic";

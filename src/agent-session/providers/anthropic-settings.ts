@@ -1,11 +1,13 @@
 /**
- * A session's settings as the Messages API takes them, for one model. The settings are put into
- * `thinking` (its `type` and `display`), `output_config.effort`, and a top-level `cache_control`,
- * which marks the whole request for the cache, for five minutes or, with `ttl`, an hour (nothing is
- * marked when the cache is off). The adapter sends the output
- * limit itself, as `max_tokens`, which the API requires. Where a class of models does not
- * allow what was asked, the nearest thing it allows is sent and the difference is returned as
- * adjusted. A model in no class here is sent what was asked, and the provider answers for it.
+ * A session's settings as the Messages API accepts them, for one model. The settings are put into:
+ * - `thinking` (its `type` and `display`);
+ * - `output_config.effort`;
+ * - a top-level `cache_control`, which marks the whole request for the cache for five minutes or,
+ *   with `ttl`, an hour. Nothing is marked when the cache is off.
+ *
+ * The adapter sends the output limit itself, as `max_tokens`, which the API requires. Where a class
+ * of models does not allow the value asked, the nearest allowed value is sent and the difference is
+ * returned as adjusted. A model in no class here is sent the value asked, and the provider decides.
  */
 
 import type { ModelName } from "../../agent-machine/names.ts";
@@ -16,11 +18,11 @@ import type { Json } from "../shaping.ts";
 
 interface Allowed {
   readonly used: ThinkingMode;
-  /** Why `used` is not what was asked; absent when it is. */
+  /** Why `used` differs from the value asked; absent when it does not. */
   readonly reason?: string;
 }
 
-/** Models that share what they allow for thinking. */
+/** Classes of models that allow the same thinking settings. */
 interface ModelClass {
   readonly matches: (model: string) => boolean;
   readonly thinking: (asked: ThinkingMode, effort: Effort | undefined) => Allowed;
@@ -64,7 +66,7 @@ const updatesBeta = "thinking-display-updates-2026-08-18";
 
 type SentThinking = Exclude<ThinkingMode, "before_answer">;
 
-/** The thinking `model` is sent when `asked` for, and what of it was adjusted. */
+/** Returns the thinking that `model` is sent when `asked` is requested, and what was adjusted. */
 const thinkingFor = (
   model: ModelName,
   asked: ThinkingMode | undefined,
@@ -84,7 +86,7 @@ const thinkingFor = (
   };
 };
 
-/** The `display` sent for `observe` when the thinking sent is `thinking`, and what of it was adjusted. */
+/** Returns the `display` sent for `observe` when the thinking sent is `thinking`, and what was adjusted. */
 const displayFor = (
   observe: Observe | undefined,
   thinking: SentThinking | undefined,
@@ -121,5 +123,5 @@ export function anthropicSettings(model: ModelName, settings: ModelSettings = {}
   };
 }
 
-/** The same for a request's target. */
+/** The same mapping, for a request's target. */
 export const anthropicSettle = (target: Target): Settled => anthropicSettings(target.model, target.settings);

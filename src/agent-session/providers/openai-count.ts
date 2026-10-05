@@ -1,8 +1,8 @@
 /**
- * How many input tokens a request would take, counted by OpenAI before it is sent
- * (`POST /responses/input_tokens`): the request's input as the Responses adapter shapes it, files
- * included. Counted with the provider's tokenizer, so it is the provider's figure. xAI has no such
- * endpoint (it answers 405).
+ * Counts the input tokens that a request would take, using OpenAI's endpoint, before the request is
+ * sent (`POST /responses/input_tokens`). The count covers the request's input as the Responses
+ * adapter shapes it, files included. The provider's tokenizer counts, so the figure is the
+ * provider's. xAI has no such endpoint (it answers 405).
  */
 
 import { OpenAiClient } from "@effect/ai-openai";

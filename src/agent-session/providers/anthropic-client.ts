@@ -1,22 +1,29 @@
 /**
- * A model client for the Anthropic Messages API, sent through Effect's `AnthropicClient`. It shapes the core's types into
- * the wire format and back.
+ * A model client for the Anthropic Messages API, sent through Effect's `AnthropicClient`. It shapes
+ * the core's types into the wire format and back.
  *
- * Out: the context's messages, tools, and tool outcomes become Anthropic blocks. A failed tool call
- * becomes an error `tool_result` whose content tells the model what to do next: for a tool that
- * does not exist, the tools that do; for input that does not fit, the tool's input schema and what
- * was given. Where the wire format needs something the context does not say, the client supplies
- * it and logs that it did. Thinking, and blocks it did not recognise, go back to the provider that
- * produced them unchanged and in their place, as the API requires for thinking to stay valid; for
- * any other provider they are left out, and that is logged. The session's settings go in as
- * `anthropic-settings.ts` puts them for the model; what it adjusted is recorded before the request.
+ * Request:
+ * - The context's messages, tools and tool outcomes become Anthropic blocks.
+ * - A failed tool call becomes an error `tool_result` whose content tells the model what to do next:
+ *   for a tool that does not exist, the tools that do; for input that does not fit, the tool's input
+ *   schema and the input given.
+ * - Where the wire format needs something that the context does not contain, the client supplies it
+ *   and logs that it did.
+ * - Thinking, and blocks that the client did not recognise, go back to the provider that produced
+ *   them, unchanged and in their place, as the API requires for thinking to stay valid. They are
+ *   omitted for any other provider, and the omission is logged.
+ * - The session's settings are applied as `anthropic-settings.ts` maps them for the model; what it
+ *   adjusted is recorded before the request.
  *
- * In: the response streams, and is assembled from its events (`anthropic-stream.ts`); each event
- * and each completed part is passed on as it arrives. The `content` blocks that were completed
- * become the observation's parts in order: a `text` block is
- * `Text`, a `thinking` block is `Thinking` (its text, and the block as received), a `tool_use` block is `ToolCall`
- * (whatever the tool's name), any other block is `Unrecognised` holding the block as received. Everything else in the response is `metadata`. A failure is observed as `ModelFailed`;
- * what was received with it is logged here. The loop annotates these logs with the turn.
+ * Response:
+ * - The response streams and is assembled from its events (`anthropic-stream.ts`); each event and
+ *   each completed part is passed on as it arrives.
+ * - The completed `content` blocks become the observation's parts, in order: `text` is `Text`;
+ *   `thinking` is `Thinking` (its text, and the block as received); `tool_use` is `ToolCall`,
+ *   whatever the tool's name; any other block is `Unrecognised`, holding the block as received.
+ *   Everything else in the response is `metadata`.
+ * - A failure is observed as `ModelFailed`, and what was received with it is logged here. The loop
+ *   annotates these logs with the turn.
  */
 
 import type { BlobId } from "../../agent-machine/blob.ts";
@@ -71,8 +78,8 @@ import {
 type Outcome = Extract<Observation, { _tag: "ModelResponded" | "ModelFailed" }>;
 
 /**
- * The output limit sent when the session's settings give none, because the Messages API requires
- * one: the model's most output when it is a well-known model, otherwise 128,000.
+ * Returns the output limit sent when the session's settings give none, because the Messages API
+ * requires one: the model's maximum output when it is a well-known model, otherwise 128,000.
  */
 const defaultMaxTokens = (target: Target): number => knownOf(target)?.output ?? 128_000;
 
@@ -80,7 +87,7 @@ function resultContent(result: RenderedResult): { content: string; is_error?: tr
   return result.isError ? { content: result.text, is_error: true } : { content: result.text };
 }
 
-/** The blocks one part becomes: one, or none when it is left out. */
+/** Returns the blocks that one part becomes: one block, or none when the part is omitted. */
 function blocks(
   part: ContextPart,
   target: Target,
@@ -131,10 +138,10 @@ function blocks(
 }
 
 /**
- * The Messages API role for a message. An instruction is a mid-conversation `system` message, which
- * not every model accepts; a model that does not fails the request with the provider's error. The
- * API rejects one as the first message, so instructions before the first user or assistant
- * message are sent in the top-level `system` instead (`body`).
+ * Returns the Messages API role for a message. An instruction is a mid-conversation `system`
+ * message, which not every model accepts; a model that does not accept it fails the request with
+ * the provider's error. The API rejects a `system` message as the first message, so instructions
+ * before the first user or assistant message are sent in the top-level `system` instead (`body`).
  */
 function role(message: ContextMessage): string {
   switch (message.role) {
@@ -149,8 +156,8 @@ function role(message: ContextMessage): string {
 }
 
 /**
- * The top-level `system`: the system prompt, then the text of the instructions that open the
- * conversation, each a text block; the prompt alone as a string when no instruction opens it.
+ * Returns the top-level `system`: the system prompt, then the text of the instructions that open the
+ * conversation, each as a text block; the prompt alone, as a string, when no instruction opens it.
  */
 function systemOf(context: ModelContext, opening: ReadonlyArray<ContextMessage>): Json | undefined {
   const texts = [
@@ -170,7 +177,7 @@ export function body(target: Target, context: ModelContext, files: ReadonlyMap<B
     const shaped = message.parts.map((part) => blocks(part, target, context, calls, files));
     const content = shaped.flatMap((each) => each.json as ReadonlyArray<Json>);
     const supplied = shaped.flatMap((each) => each.supplied);
-    // A message whose every part was left out is not sent: the API rejects empty content.
+    // A message whose parts were all omitted is not sent, because the API rejects empty content.
     return content.length === 0 ? [{ json: [], supplied }] : [{ json: [{ role: role(message), content }], supplied }];
   });
   return {
@@ -204,7 +211,7 @@ export function body(target: Target, context: ModelContext, files: ReadonlyMap<B
   };
 }
 
-/** The text an event adds to a text or thinking block, as it arrives. */
+/** Returns the text that an event adds to a text or thinking block, as it arrives. */
 function deltaIn(event: Json): Streamed | undefined {
   if (!isObject(event) || event["type"] !== "content_block_delta") return undefined;
   const delta = event["delta"];
@@ -237,8 +244,9 @@ function part(received: Json): ModelPart {
 const caller = { module: "AnthropicModelClient", method: "respond" };
 
 /**
- * The response's usage in the core's terms. The Messages API counts the input it did not read from
- * or write to the cache as `input_tokens`, so the input carried is the three together.
+ * Returns the response's usage in the core's terms. The Messages API counts only the input that it
+ * neither read from nor wrote to the cache as `input_tokens`, so the input carried is the sum of the
+ * three counts.
  */
 const usageIn = (reported: Json | undefined) => {
   const uncached = numberAt(reported, "input_tokens");
@@ -266,7 +274,7 @@ export const anthropicEndings = new Map([
   ["refusal", "Refused"],
 ] as const);
 
-/** The HTTP status that goes with each error type the API reports, in a stream as in a response. */
+/** The HTTP status for each error type that the API reports, in a stream as in a response. */
 const statusOf = new Map([
   ["invalid_request_error", 400],
   ["authentication_error", 401],
@@ -278,7 +286,7 @@ const statusOf = new Map([
   ["overloaded_error", 529],
 ]);
 
-/** An error the stream reported after it started, as the `AiError` its type's HTTP status gives. */
+/** Returns an error that the stream reported after it started, as the `AiError` for its type's HTTP status. */
 const failedInStream = (failed: { readonly type: string; readonly message: string }): AiError.AiError => {
   const status = statusOf.get(failed.type);
   const description = `The stream reported ${failed.type}: ${failed.message}`;
@@ -292,9 +300,10 @@ const failedInStream = (failed: { readonly type: string; readonly message: strin
 };
 
 /**
- * One request: the observation it produced, or the `AiError` it failed with. The response streams:
- * each event is passed on as it arrives and each part as it is completed (`ModelStream`), and the
- * observation is the message assembled when the stream ends, with the parts that were completed.
+ * Makes one request and returns the observation it produced, or fails with the `AiError`. The
+ * response streams: each event is passed on as it arrives and each part as it is completed
+ * (`ModelStream`). The observation is the message assembled when the stream ends, with the parts that
+ * were completed.
  */
 const respondOnce = (
   http: HttpClient.HttpClient,
@@ -348,9 +357,10 @@ const respondOnce = (
   });
 
 /**
- * Requests go through the configured `AnthropicClient` (its address, key and API version); its
- * typed response decoding is not used, so a block type it does not know is kept as `Unrecognised`
- * rather than failing the response. A failure is an `AiError`; retryable ones are retried.
+ * Requests go through the configured `AnthropicClient` (its address, key and API version). The
+ * client's typed response decoding is not used, so a block type that it does not know is kept as
+ * `Unrecognised` instead of failing the response. A failure is an `AiError`; retryable failures are
+ * retried.
  */
 export const anthropicRequests = (
   retries: Retries = defaultRetries,
