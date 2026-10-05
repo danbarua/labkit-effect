@@ -16,7 +16,7 @@
  * of the turn has been written, so a prompt answers after them.
  */
 
-import { type Context, Deferred, Effect, Fiber, PubSub, Queue, References, type Scope } from "effect";
+import { type Context, Deferred, Effect, Fiber, HashMap, Option, PubSub, Queue, Ref, References, type Scope } from "effect";
 import type { AgentConnection } from "effective-acp/agent";
 import type { V1Version } from "effective-acp/protocol";
 import type { SessionId, SessionUpdate } from "effective-acp/schema/v1";
@@ -65,26 +65,32 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
     const facts = yield* session.subscribe;
     const streamed = yield* session.streamed;
     const inbox = yield* Queue.unbounded<ProjectionInput>();
-    const ends = new Map<TurnId, Deferred.Deferred<void>>();
-    const endOf = (turn: TurnId): Deferred.Deferred<void> => {
-      const found = ends.get(turn);
-      if (found !== undefined) return found;
-      const made = Deferred.makeUnsafe<void>();
-      ends.set(turn, made);
-      return made;
-    };
-    const asking = new Map<CallId, Fiber.Fiber<void>>();
-    let state: ProjectionState = options.initial ?? start;
-    let turn: TurnId | undefined;
+    // What completes when each turn's end is taken, by the turn: made when first asked for.
+    const ends = yield* Ref.make(HashMap.empty<TurnId, Deferred.Deferred<void>>());
+    const endOf = (turn: TurnId): Effect.Effect<Deferred.Deferred<void>> =>
+      Ref.modify(ends, (all) =>
+        Option.match(HashMap.get(all, turn), {
+          onSome: (found) => [found, all] as const,
+          onNone: () => {
+            const made = Deferred.makeUnsafe<void>();
+            return [made, HashMap.set(all, turn, made)] as const;
+          },
+        }),
+      );
+    // The question out for each call, by the call.
+    const asking = yield* Ref.make(HashMap.empty<CallId, Fiber.Fiber<void>>());
+    const state = yield* Ref.make<ProjectionState>(options.initial ?? start);
+    // The turn under way, as the last TurnStarted taken says.
+    const turn = yield* Ref.make<TurnId | undefined>(undefined);
 
     const send = (update: SessionUpdate) =>
       connection
         .notify("session/update", { sessionId, update })
         .pipe(Effect.catch((error) => Effect.logWarning(logKeys.update.notSent, { kind: update.sessionUpdate, cause: error.message })));
 
-    const ask = (call: CallId, question: PermissionQuestion) =>
+    const ask = (call: CallId, question: PermissionQuestion, during: TurnId | undefined) =>
       Effect.gen(function* () {
-        const known = state.calls.get(call);
+        const known = (yield* Ref.get(state)).calls.get(call);
         const answer = yield* Effect.gen(function* () {
           // The projection announces a call before its question (`ToolCallArrived` is recorded first).
           if (known === undefined) {
@@ -134,35 +140,35 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
           ),
         );
       }).pipe(
-        Effect.annotateLogs({ call, ...(turn === undefined ? {} : { turn }) }),
-        Effect.ensuring(Effect.sync(() => asking.delete(call))),
+        Effect.annotateLogs({ call, ...(during === undefined ? {} : { turn: during }) }),
+        Effect.ensuring(Ref.update(asking, HashMap.remove(call))),
       );
 
     /** What the host does on a fact besides its updates: asks permission, cancels a question no call waits for, marks a turn's end. */
     const act = (fact: Fact) =>
       Effect.gen(function* () {
         if (fact._tag === "Decided") {
-          if (fact.decision._tag === "TurnEnded") yield* Deferred.succeed(endOf(fact.decision.turn), undefined);
+          if (fact.decision._tag === "TurnEnded") yield* Deferred.succeed(yield* endOf(fact.decision.turn), undefined);
           return;
         }
         const observation = fact.observation;
-        if (observation._tag === "TurnStarted") turn = observation.turn;
+        if (observation._tag === "TurnStarted") yield* Ref.set(turn, observation.turn);
         if (observation._tag === "PermissionAsked") {
           const question = questionIn(observation.asks);
           if (question === undefined) return;
-          const fiber = yield* Effect.forkScoped(ask(observation.call, question));
-          asking.set(observation.call, fiber);
+          const fiber = yield* Effect.forkScoped(ask(observation.call, question, yield* Ref.get(turn)));
+          yield* Ref.update(asking, HashMap.set(observation.call, fiber));
         }
         if (observation._tag === "ToolEnded") {
-          const fiber = asking.get(observation.call);
-          if (fiber !== undefined) yield* Effect.forkScoped(Fiber.interrupt(fiber));
+          const fiber = HashMap.get(yield* Ref.get(asking), observation.call);
+          if (Option.isSome(fiber)) yield* Effect.forkScoped(Fiber.interrupt(fiber.value));
         }
       });
 
     const take = (input: ProjectionInput) =>
       Effect.gen(function* () {
-        const step = next(state, input, { mode: "live", present: options.present });
-        state = step.state;
+        const step = next(yield* Ref.get(state), input, { mode: "live", present: options.present });
+        yield* Ref.set(state, step.state);
         yield* Effect.forEach(step.updates, send, { discard: true });
         if (input._tag === "Observed" || input._tag === "Decided") yield* act(input);
       }).pipe(
@@ -179,13 +185,6 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
     yield* Effect.forkScoped(annotated(Effect.forever(Queue.take(inbox).pipe(Effect.flatMap(take)))));
 
     return {
-      turnEnded: (ended) =>
-        Deferred.await(endOf(ended)).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              ends.delete(ended);
-            }),
-          ),
-        ),
+      turnEnded: (ended) => Effect.flatMap(endOf(ended), Deferred.await).pipe(Effect.ensuring(Ref.update(ends, HashMap.remove(ended)))),
     };
   });
