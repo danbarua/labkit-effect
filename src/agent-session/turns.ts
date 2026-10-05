@@ -2,7 +2,7 @@
  * The simplest `Turns`: turn identities from a counter.
  */
 
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Ref } from "effect";
 import { TurnId } from "../agent-machine/names.ts";
 import { Turns } from "./contracts.ts";
 import { SessionStore } from "./session-store.ts";
@@ -12,15 +12,12 @@ import { SessionStore } from "./session-store.ts";
  * number of turns a session that is gone on from has started, so none of its identities is used again.
  */
 export const countingTurnsAfter = (already: number) =>
-  Layer.sync(Turns, () => {
-    const started = { count: already };
-    return {
-      start: Effect.sync(() => {
-        started.count += 1;
-        return TurnId.make(`turn-${started.count}`);
-      }),
-    };
-  });
+  Layer.effect(
+    Turns,
+    Effect.map(Ref.make(already), (started) => ({
+      start: Effect.map(Ref.updateAndGet(started, (count) => count + 1), (count) => TurnId.make(`turn-${count}`)),
+    })),
+  );
 
 /** Turn identities `turn-1`, `turn-2`, … in the order turns start. */
 export const CountingTurns = countingTurnsAfter(0);

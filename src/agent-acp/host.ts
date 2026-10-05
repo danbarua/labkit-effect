@@ -240,6 +240,9 @@ const withHeld = (configured: Target, held: HeldChange | undefined): Target => {
   return { provider: change.provider, model: change.model, ...(Object.keys(settings).length === 0 ? {} : { settings }) };
 };
 
+/** What a session this connection holds is: a draft until its first prompt, then open. */
+type EntryState = { readonly _tag: "Draft"; readonly draft: Draft } | { readonly _tag: "Open"; readonly opened: Opened };
+
 /** A session this connection holds: one it made, a draft until its first prompt and then open, or one it started from its facts, open. */
 interface Entry {
   readonly id: AcpSessionId;
@@ -251,9 +254,9 @@ interface Entry {
   readonly mcp: McpServers;
   /** Held while the draft opens and while a configuration change is taken, so neither is lost. */
   readonly lock: Semaphore.Semaphore;
-  state: { readonly _tag: "Draft"; readonly draft: Draft } | { readonly _tag: "Open"; readonly opened: Opened };
+  readonly state: Ref.Ref<EntryState>;
   /** The prompt running, if one is. */
-  prompt: Fiber.Fiber<unknown, unknown> | undefined;
+  readonly prompt: Ref.Ref<Fiber.Fiber<unknown, unknown> | undefined>;
   /** How tool calls are allowed: the host's to keep, read at each call, changed by the user; it starts as the configuration says. */
   readonly permissionMode: Ref.Ref<PermissionMode>;
   /** The session's configuration (AG25): its seam lists, and its MCP servers. */
@@ -513,11 +516,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           );
 
         /** Makes the change the open session's gate holds, if no turn runs; one that could not be recorded is logged. */
-        // The entry's state is read when the effect runs: a prompt's cleanup is made before its turn opens the draft.
         const settled = (entry: Entry) =>
-          Effect.suspend(() =>
-            entry.state._tag === "Open"
-              ? entry.state.opened.gate.settle.pipe(
+          Effect.flatMap(Ref.get(entry.state), (state) =>
+            state._tag === "Open"
+              ? state.opened.gate.settle.pipe(
                   Effect.catchTag("SessionStoreFailed", (error) => Effect.logError(logKeys.config.refused, { doing: "recording a change held until the turn ended", cause: error.message })),
                 )
               : Effect.void,
@@ -525,11 +527,12 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
 
         const configurationOf = (entry: Entry) =>
           Effect.gen(function* () {
-            const held = entry.state._tag === "Open" ? yield* entry.state.opened.gate.held : undefined;
+            const state = yield* Ref.get(entry.state);
+            const held = state._tag === "Open" ? yield* state.opened.gate.held : undefined;
             const configured: Options =
-              entry.state._tag === "Draft"
-                ? yield* optionsOfDraft(entry.state.draft)
-                : yield* optionsFor(withHeld(yield* Effect.flatMap(entry.state.opened.session.facts, configuredOf), held));
+              state._tag === "Draft"
+                ? yield* optionsOfDraft(state.draft)
+                : yield* optionsFor(withHeld(yield* Effect.flatMap(state.opened.session.facts, configuredOf), held));
             const models = yield* askable;
             const limit = (yield* capabilitiesOf(configured))?.output;
             return {
@@ -653,12 +656,13 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
         const exportOf = (entry: Entry) =>
           Effect.gen(function* () {
             const say = (text: string) => send(entry.id, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
-            if (entry.state._tag === "Draft") {
+            const state = yield* Ref.get(entry.state);
+            if (state._tag === "Draft") {
               yield* say("Nothing to export: this session has had no turn yet.");
               return { stopReason: "end_turn" as const };
             }
             const path = join(entry.cwd, folderOf(brand), "exports", `${entry.id}.md`);
-            const markdown = markdownOf(yield* entry.state.opened.session.facts);
+            const markdown = markdownOf(yield* state.opened.session.facts);
             const fs = yield* FileSystem.FileSystem;
             yield* fs.makeDirectory(join(entry.cwd, folderOf(brand), "exports"), { recursive: true }).pipe(
               Effect.andThen(fs.writeFileString(path, markdown)),
@@ -676,8 +680,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
         /** Records the turn's interruption, and logs it, as a client's `session/cancel` does. */
         const cancelTurn = (entry: Entry, by: string) =>
           Effect.gen(function* () {
-            if (entry.state._tag === "Draft") return;
-            const { session, context } = entry.state.opened;
+            const state = yield* Ref.get(entry.state);
+            if (state._tag === "Draft") return;
+            const { session, context } = state.opened;
             const turn = yield* session.turn;
             yield* Effect.logInfo(logKeys.cancel.requested, { by, ...(turn === undefined ? { underWay: false } : { turn }) });
             yield* session.cancel.pipe(Effect.provideContext(context), reportedBy(acpUser));
@@ -693,9 +698,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             const began = yield* Clock.currentTimeMillis;
             const opened = yield* entry.lock.withPermit(
               Effect.gen(function* () {
-                if (entry.state._tag === "Open") return entry.state.opened;
-                const made = yield* open(entry, entry.state.draft, text);
-                entry.state = { _tag: "Open", opened: made };
+                const state = yield* Ref.get(entry.state);
+                if (state._tag === "Open") return state.opened;
+                const made = yield* open(entry, state.draft, text);
+                yield* Ref.set(entry.state, { _tag: "Open", opened: made });
                 return made;
               }),
             );
@@ -839,8 +845,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 scope,
                 mcp,
                 lock: yield* Semaphore.make(1),
-                state: { _tag: "Open", opened },
-                prompt: undefined,
+                state: yield* Ref.make<EntryState>({ _tag: "Open", opened }),
+                prompt: yield* Ref.make<Fiber.Fiber<unknown, unknown> | undefined>(undefined),
                 permissionMode: mode,
                 configuration,
               };
@@ -903,8 +909,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   scope,
                   mcp,
                   lock: yield* Semaphore.make(1),
-                  state: { _tag: "Draft", draft },
-                  prompt: undefined,
+                  state: yield* Ref.make<EntryState>({ _tag: "Draft", draft }),
+                  prompt: yield* Ref.make<Fiber.Fiber<unknown, unknown> | undefined>(undefined),
                   permissionMode: yield* Ref.make(startingModeOf(configuration)),
                   configuration,
                 };
@@ -967,8 +973,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                         yield* Effect.logWarning(logKeys.config.refused, { configId, value: params.value, cause: mode.reason });
                         return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, mode.reason, { configId }));
                       }
-                      const said = entry.state._tag === "Draft" ? "made" : yield* submitted(entry.state.opened, { permissionMode: mode }, configId);
-                      if (entry.state._tag === "Draft") yield* Ref.set(entry.permissionMode, mode);
+                      // The entry's lock is held: its state does not change meanwhile.
+                      const state = yield* Ref.get(entry.state);
+                      const said = state._tag === "Draft" ? "made" : yield* submitted(state.opened, { permissionMode: mode }, configId);
+                      if (state._tag === "Draft") yield* Ref.set(entry.permissionMode, mode);
                       yield* Effect.logInfo(logKeys.config.changed, { configId, value: mode, applies: said === "made" ? "now: no turn runs" : "when the turn ends" });
                       return { configOptions: (yield* configurationOf(entry)).options };
                     }
@@ -981,15 +989,17 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                       yield* Effect.logWarning(logKeys.config.refused, { configId, value: params.value, cause: change.reason });
                       return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, change.reason, { configId }));
                     }
-                    if (entry.state._tag === "Draft") {
-                      const draft = entry.state.draft;
+                    const before = yield* Ref.get(entry.state);
+                    if (before._tag === "Draft") {
+                      const draft = before.draft;
                       const moved =
                         change.provider === draft.model.provider && change.model === draft.model.model
                           ? draft
                           : chooseModel(draft, { provider: change.provider, model: change.model });
-                      entry.state = { _tag: "Draft", draft: change.settings === undefined ? moved : saySettings(moved, change.settings) };
+                      yield* Ref.set(entry.state, { _tag: "Draft", draft: change.settings === undefined ? moved : saySettings(moved, change.settings) });
                     }
-                    const said = entry.state._tag === "Draft" ? "draft" : yield* submitted(entry.state.opened, { model: change }, configId);
+                    const state = yield* Ref.get(entry.state);
+                    const said = state._tag === "Draft" ? "draft" : yield* submitted(state.opened, { model: change }, configId);
                     yield* Effect.logInfo(logKeys.config.changed, {
                       configId,
                       value: params.value,
@@ -1011,12 +1021,13 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 const entry = yield* entryOf(sessionId);
                 const text = promptText(prompt);
                 yield* Effect.logInfo(logKeys.prompt.received, { blocks: prompt.map((block) => block.type), characters: text.length });
-                if (entry.prompt !== undefined) {
+                const self = yield* Effect.fiber;
+                // Taken only when no prompt runs: the check and the taking are one change.
+                const running = yield* Ref.modify(entry.prompt, (now) => (now === undefined ? [false, self] : [true, now]));
+                if (running) {
                   yield* Effect.logWarning(logKeys.prompt.refused, { cause: "a prompt is running" });
                   return yield* Effect.fail(rpcError(-32000, `Session ${sessionId} already has an active prompt`));
                 }
-                const self = yield* Effect.fiber;
-                entry.prompt = self;
                 // A change held while a turn ran with no prompt of this connection's (one gone on with at load) is made before this one starts.
                 yield* settled(entry);
                 // A prompt of one block that is a command the host answers itself; any other is a turn.
@@ -1035,11 +1046,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   );
                 })();
                 return yield* run.pipe(
-                  Effect.ensuring(
-                    Effect.sync(() => {
-                      entry.prompt = undefined;
-                    }).pipe(Effect.andThen(settled(entry))),
-                  ),
+                  Effect.ensuring(Ref.set(entry.prompt, undefined).pipe(Effect.andThen(settled(entry)))),
                 );
               }),
               sessionId,
@@ -1060,13 +1067,14 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               Effect.gen(function* () {
                 const entry = yield* entryOf(sessionId);
                 yield* Ref.update(entries, (all) => HashMap.remove(all, sessionId));
-                if (entry.state._tag === "Open") {
+                if ((yield* Ref.get(entry.state))._tag === "Open") {
                   yield* cancelTurn(entry, "session/close");
-                  if (entry.prompt !== undefined) yield* Fiber.await(entry.prompt);
+                  const running = yield* Ref.get(entry.prompt);
+                  if (running !== undefined) yield* Fiber.await(running);
                 }
                 // The entry's scope holds its MCP servers and its open session's scope: closing it ends them all.
                 yield* Scope.close(entry.scope, Exit.void);
-                yield* Effect.logInfo(logKeys.session.closed, { was: entry.state._tag === "Open" ? "open" : "a draft" });
+                yield* Effect.logInfo(logKeys.session.closed, { was: (yield* Ref.get(entry.state))._tag === "Open" ? "open" : "a draft" });
                 return {};
               }),
               sessionId,

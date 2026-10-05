@@ -85,7 +85,8 @@ export function scriptedFizzBuzzModel(): {
   readonly seen: Effect.Effect<ReadonlyArray<ModelContext>>;
 } {
   const seen = Ref.makeUnsafe<ReadonlyArray<ModelContext>>([]);
-  const calls = { count: 0 };
+  // How many tool calls this model has made: each call's id is `call-<n>`.
+  const calls = Ref.makeUnsafe(0);
 
   const responded = (target: Target, turn: TurnId, parts: ReadonlyArray<ModelPart>): Responded =>
     Effect.succeed({
@@ -101,10 +102,13 @@ export function scriptedFizzBuzzModel(): {
   const failed = (reason: AiError.AiErrorReason): Responded =>
     Effect.fail(AiError.make({ module: "ScriptedFizzBuzzModel", method: "respond", reason }));
   const say = (text: string): ModelPart => ({ _tag: "Text", text: ModelText.make(text) });
-  const call = (tool: string, input: Record<string, string>): ModelPart => {
-    calls.count += 1;
-    return { _tag: "ToolCall", call: CallId.make(`call-${calls.count}`), tool: ToolName.make(tool), input: receivedJson(input) };
-  };
+  const call = (tool: string, input: Record<string, string>): Effect.Effect<ModelPart> =>
+    Effect.map(Ref.updateAndGet(calls, (count) => count + 1), (count) => ({
+      _tag: "ToolCall",
+      call: CallId.make(`call-${count}`),
+      tool: ToolName.make(tool),
+      input: receivedJson(input),
+    }));
 
   function respond(target: Target, context: ModelContext, turn: TurnId): Responded {
     const last = context.messages.at(-1);
@@ -133,14 +137,14 @@ export function scriptedFizzBuzzModel(): {
     const judgement = judged(text, reports ? lastReturned(context.messages) : undefined);
     if (judgement._tag === "Problem")
       return reports
-        ? responded(target, turn, [call("report_error", { error_code: judgement.code, error_message: judgement.message })])
+        ? Effect.flatMap(call("report_error", { error_code: judgement.code, error_message: judgement.message }), (part) => responded(target, turn, [part]))
         : failed(
             new AiError.InvalidUserInputError({
               description: `the scripted FizzBuzz model reads only whole numbers: ${judgement.message}`,
             }),
           );
     const label = labelOf(judgement.n);
-    return responded(target, turn, [label === undefined ? say(String(judgement.n + 1)) : call("classify", { label })]);
+    return label === undefined ? responded(target, turn, [say(String(judgement.n + 1))]) : Effect.flatMap(call("classify", { label }), (part) => responded(target, turn, [part]));
   }
 
   // What this model is given is the context itself, so a failure records that as the request.

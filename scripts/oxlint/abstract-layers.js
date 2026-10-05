@@ -1,6 +1,7 @@
 /**
- * Rules for functional code: no `let` or `var`, no loop statements, no call that changes a value in
- * place; a log event named from a log key table, not by a string; and, for the abstract layers
+ * Rules for functional code: no `let` or `var`, no loop statements, no call or assignment that
+ * changes a value in place (`a.b = …`, `a.b++`, `delete a.b`); a log event named from a log key
+ * table, not by a string; and, for the abstract layers
  * (`scripts/abstract-layers.ts`), every string branded. The rules read syntax only: a method named
  * `push` or `set` on a type of our own is reported too, but a function of a module imported from
  * effect (`Ref.set`) is not.
@@ -69,6 +70,23 @@ export default {
             context.report({ node: event, message: "A log event named by a string: name it from the module's log key table (`logKeys`), where it is described." });
         },
       }),
+    },
+    "no-property-assignment": {
+      create: (context) => {
+        const member = (node) => node?.type === "MemberExpression";
+        const changed = "Assignment to a property changes a value in place: build a new value, or keep the state in a `Ref`.";
+        return {
+          AssignmentExpression(node) {
+            if (member(node.left)) context.report({ node, message: changed });
+          },
+          UpdateExpression(node) {
+            if (member(node.argument)) context.report({ node, message: changed });
+          },
+          UnaryExpression(node) {
+            if (node.operator === "delete" && member(node.argument)) context.report({ node, message: "`delete` changes a value in place: build a new value without the property." });
+          },
+        };
+      },
     },
     "no-string-keyword": {
       create: (context) => ({
