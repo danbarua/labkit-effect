@@ -163,7 +163,7 @@ test("CF2: where the host says the session's permission mode, permissions follow
       const asked = yield* decide;
       now = "bypassPermissions";
       return [asked, yield* decide];
-    }).pipe(Effect.provide(seamLayer(seamListsOf(configuration, { canAsk: true, permissionMode: () => now })))),
+    }).pipe(Effect.provide(seamLayer(seamListsOf(configuration, { canAsk: true, permissionMode: Effect.sync(() => now) })))),
   );
   expect(await verdict).toEqual(["asks", "runs"]);
 });

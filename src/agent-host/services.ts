@@ -40,11 +40,13 @@ export const SessionServices = <E, R>(runner: Layer.Layer<ToolRunner, E, R>) =>
  * next call. A tool call policy (`ToolCallPolicies`).
  */
 export const permissionsFor =
-  (mode: PermissionMode | (() => PermissionMode), canAsk: boolean): PolicyOfFacts =>
+  (mode: PermissionMode | Effect.Effect<PermissionMode>, canAsk: boolean): PolicyOfFacts =>
   (facts) =>
-    Effect.map(
-      immutableToolCatalogOf(facts),
-      (tools) => permissions(typeof mode === "function" ? mode() : mode, canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts) as Policy<unknown>,
+    Effect.flatMap(immutableToolCatalogOf(facts), (tools) =>
+      Effect.map(
+        Effect.isEffect(mode) ? mode : Effect.succeed(mode),
+        (now) => permissions(now, canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts) as Policy<unknown>,
+      ),
     );
 
 /** The limit on a turn's model requests (`agent-policy/max-turn-requests.ts`), 1000 when not given: a model request policy. */

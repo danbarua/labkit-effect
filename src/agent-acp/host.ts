@@ -577,7 +577,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const blobs = BlobsInFolder(join(sessionFolderOf(options.directory, id), "blobs"));
               // The configuration's seam lists, permission following the session's mode (agent-config CF2); its tool sources are not
               // offered: the session's are the world's and its MCP servers'.
-              const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(parent.configuration, { canAsk: true, permissionMode: () => Ref.getUnsafe(permissionMode) });
+              const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(parent.configuration, { canAsk: true, permissionMode: Ref.get(permissionMode) });
               const runner = SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, world.sources)));
               // The model is told of the session's MCP servers that are not running (agent-mcp MK2).
               const notices = Layer.succeed(Notices, [parent.mcp.notices]);

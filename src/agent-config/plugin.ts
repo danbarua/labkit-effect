@@ -41,7 +41,7 @@ export const seams: ReadonlyArray<Seam> = ["toolCalls", "modelRequests", "turnEn
 export interface HostSays {
   readonly canAsk: boolean;
   /** The session's permission mode now, read at each call; the configured `mode` is the one it starts in. */
-  readonly permissionMode?: (() => PermissionMode) | undefined;
+  readonly permissionMode?: Effect.Effect<PermissionMode> | undefined;
 }
 
 /** A plug-in's settings: a struct, each of its settings with a default (`Schema.withDecodingDefaultKey`). */
