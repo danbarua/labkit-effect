@@ -42,7 +42,7 @@ import { describe } from "../agent-mcp/server-machine.ts";
 import { basename, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ChildProcessSpawner } from "effect/process";
-import { Clock, type Context, type Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, type Path, Schema, Scope, Semaphore, Stream } from "effect";
+import { Clock, type Context, type Duration, Effect, Exit, Fiber, FileSystem, HashMap, HashSet, Layer, Option, type Path, Ref, Schema, Scope, Semaphore, Stream } from "effect";
 import * as Agent from "effective-acp/agent";
 import { ErrorCode, type JsonRpcErrorObject } from "effective-acp/json-rpc";
 import * as Protocol from "effective-acp/protocol";
@@ -52,7 +52,7 @@ import { type Asked, askable, keyVariables, ModelCatalog, targetOf } from "../ag
 import { sessionFolderOf, storeFileOf } from "../agent-host/directory.ts";
 import type { BlobRef } from "../agent-machine/blob.ts";
 import { MediaType } from "../agent-machine/received.ts";
-import { Blobs, BlobsInFolder } from "../agent-session/blobs.ts";
+import { Blobs, BlobsInFolder, type BlobStore } from "../agent-session/blobs.ts";
 import { chooseModel, defaultModel, type Draft, draftOf, opening, optionsOfDraft, saySettings, withDefaults } from "../agent-host/draft.ts";
 import { markdownOf } from "../agent-host/export.ts";
 import { KnownWithLocalServer, localServer, SettlingWithLocalServer } from "../agent-host/local-server.ts";
@@ -221,14 +221,16 @@ interface HeldChange {
 
 /** Two changes as one: the later's model and permission mode, and the settings of both, the later's winning. */
 const mergeHeld = (held: HeldChange, next: HeldChange): HeldChange => ({
-  model:
-    next.model === undefined
-      ? held.model
-      : held.model === undefined
-        ? next.model
-        : { ...next.model, ...(held.model.settings === undefined && next.model.settings === undefined ? {} : { settings: { ...held.model.settings, ...next.model.settings } }) },
+  model: mergedModel(held.model, next.model),
   permissionMode: next.permissionMode ?? held.permissionMode,
 });
+
+/** Two model changes as one: the later's model, and the settings of both, the later's winning. */
+const mergedModel = (held: Change | undefined, next: Change | undefined): Change | undefined => {
+  if (next === undefined) return held;
+  if (held === undefined) return next;
+  return { ...next, ...(held.settings === undefined && next.settings === undefined ? {} : { settings: { ...held.settings, ...next.settings } }) };
+};
 
 /** The model the facts will ask from the next turn, with the change held, if any. */
 const withHeld = (configured: Target, held: HeldChange | undefined): Target => {
@@ -253,7 +255,7 @@ interface Entry {
   /** The prompt running, if one is. */
   prompt: Fiber.Fiber<unknown, unknown> | undefined;
   /** How tool calls are allowed: the host's to keep, read at each call, changed by the user; it starts as the configuration says. */
-  permissionMode: PermissionMode;
+  readonly permissionMode: Ref.Ref<PermissionMode>;
   /** The session's configuration (AG25): its seam lists, and its MCP servers. */
   readonly configuration: Configured;
 }
@@ -274,15 +276,38 @@ const configuredOf = (facts: ReadonlyArray<Fact>): Effect.Effect<Target> =>
   });
 
 /** The text a prompt gives the session: its text blocks, and each resource link as a line. */
-const promptText = (prompt: ReadonlyArray<ContentBlock>): string =>
-  prompt
-    .flatMap((block) => (block.type === "text" ? [block.text] : block.type === "resource_link" ? [`[${block.name}](${block.uri})`] : []))
-    .join("\n");
+const promptText = (prompt: ReadonlyArray<ContentBlock>): string => prompt.flatMap(linesOf).join("\n");
+
+/** The text a block gives the prompt's text: a text block's text, a resource link as a line; nothing of a file. */
+const linesOf = (block: ContentBlock): ReadonlyArray<string> => {
+  switch (block.type) {
+    case "text":
+      return [block.text];
+    case "resource_link":
+      return [`[${block.name}](${block.uri})`];
+    case "image":
+    case "audio":
+    case "resource":
+      return [];
+    default:
+      return block satisfies never;
+  }
+};
 
 /** The last part of `uri`'s path, as a file's name. */
 const nameIn = (uri: string | null | undefined): string | undefined => {
   const last = uri?.split(/[/\\]/).filter((part) => part !== "").at(-1);
   return last === undefined || last === "" ? undefined : decodeURIComponent(last);
+};
+
+/** What a block attaches to the input: an image, or an embedded resource, put in the blob store. */
+const attachmentsOf = (blobs: BlobStore, block: ContentBlock): Effect.Effect<ReadonlyArray<BlobRef>> => {
+  if (block.type === "image") return Effect.map(blobs.store(Buffer.from(block.data, "base64"), MediaType.make(block.mimeType), nameIn(block.uri)), (stored): ReadonlyArray<BlobRef> => [stored]);
+  if (block.type !== "resource") return Effect.succeed([]);
+  const resource = block.resource;
+  const bytes = "text" in resource ? new TextEncoder().encode(resource.text) : Buffer.from(resource.blob, "base64");
+  const mediaType = resource.mimeType ?? ("text" in resource ? "text/plain" : "application/octet-stream");
+  return Effect.map(blobs.store(bytes, MediaType.make(mediaType), nameIn(resource.uri)), (stored): ReadonlyArray<BlobRef> => [stored]);
 };
 
 /**
@@ -292,16 +317,7 @@ const nameIn = (uri: string | null | undefined): string | undefined => {
 const promptInput = (prompt: ReadonlyArray<ContentBlock>) =>
   Effect.gen(function* () {
     const blobs = yield* Blobs;
-    const attachments: Array<BlobRef> = [];
-    for (const block of prompt) {
-      if (block.type === "image") attachments.push(yield* blobs.store(Buffer.from(block.data, "base64"), MediaType.make(block.mimeType), nameIn(block.uri)));
-      if (block.type === "resource") {
-        const resource = block.resource;
-        const bytes = "text" in resource ? new TextEncoder().encode(resource.text) : Buffer.from(resource.blob, "base64");
-        const mediaType = resource.mimeType ?? ("text" in resource ? "text/plain" : "application/octet-stream");
-        attachments.push(yield* blobs.store(bytes, MediaType.make(mediaType), nameIn(resource.uri)));
-      }
-    }
+    const attachments = (yield* Effect.forEach(prompt, (block) => attachmentsOf(blobs, block))).flat();
     return { text: InputText.make(promptText(prompt)), ...(attachments.length === 0 ? {} : { attachments }) };
   });
 
@@ -312,17 +328,42 @@ const modelVariableOf = (brand: Brand): string => `${envPrefixOf(brand)}ACP_MODE
 const noModelOf = (brand: Brand) =>
   `No model to ask: set ${Object.values(keyVariables).join(", ")} for a provider's models, or start the local server at ${localServer}, or name one with ${modelVariableOf(brand)} as provider/model.`;
 
+/** When a change of the model or its settings applies, as the log says it. */
+const whenApplied = (said: "draft" | "made" | "held"): string => {
+  switch (said) {
+    case "draft":
+      return "to the draft";
+    case "made":
+      return "now: no turn runs";
+    case "held":
+      return "when the turn ends";
+    default:
+      return said satisfies never;
+  }
+};
+
+/** The world a host's sessions open: the editor's unless it says the local disk's, or gives its own. */
+const worldOf = <R>(world: HostOptions<R>["world"]): World<R> | World<FileSystem.FileSystem> => {
+  if (world === undefined || world === "editor") return editorWorld;
+  return world === "local" ? workspaceWorld : world;
+};
+
+/** The world as the settings written name it. */
+const worldKindOf = <R>(world: HostOptions<R>["world"]): string => {
+  if (world === undefined) return "editor";
+  return typeof world === "string" ? world : "the host's own";
+};
+
 /**
  * The ACP host as an implementation of protocol v1. It needs the model catalog (`ModelCatalog`),
  * the file system (session folders, exports) and what the world needs.
  */
 export const makeHost = <R = never>(options: HostOptions<R>) => {
-  const world: World<R> | World<FileSystem.FileSystem> =
-    options.world === undefined || options.world === "editor" ? editorWorld : options.world === "local" ? workspaceWorld : options.world;
+  const world = worldOf(options.world);
   const services = options.services ?? SessionServices;
   const brand = options.brand ?? defaultBrand;
   const defaults = acpDefaults(options);
-  const worldKind = options.world === undefined ? "editor" : typeof options.world === "string" ? options.world : "the host's own";
+  const worldKind = worldKindOf(options.world);
   return Agent.implement<Protocol.V1Version, ModelCatalog | FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner | Scope.Scope | R>(Protocol.v1, {
     capabilities: {
       promptCapabilities: { image: true, audio: false, embeddedContext: true },
@@ -336,20 +377,23 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
         const connectionId = crypto.randomUUID().slice(0, 8);
         // What is known of each model, and how its settings apply: the local server asked once per connection.
         const known = yield* Layer.buildWithScope(Layer.mergeAll(KnownWithLocalServer, SettlingWithLocalServer), connectionScope);
-        const entries = new Map<string, Entry>();
+        const entries = yield* Ref.make(HashMap.empty<string, Entry>());
         /** The sessions `session/load` or `session/resume` is starting: not yet among `entries`, and not to be started twice. */
-        const starting = new Set<string>();
+        const starting = yield* Ref.make(HashSet.empty<string>());
 
         const traced = <A, E, X>(effect: Effect.Effect<A, E, X>, session?: string) =>
           effect.pipe(Effect.annotateLogs({ connection: connectionId, ...(session === undefined ? {} : { session }) }));
 
-        const entryOf = (sessionId: string): Effect.Effect<Entry, JsonRpcErrorObject> => {
-          const entry = entries.get(sessionId);
-          if (entry !== undefined) return Effect.succeed(entry);
-          return Effect.logWarning(logKeys.session.unknown, { sessionId }).pipe(
-            Effect.andThen(Effect.fail(rpcError(ErrorCode.ResourceNotFound, `Session ${sessionId} not found on this connection`, { sessionId }))),
+        const entryOf = (sessionId: string): Effect.Effect<Entry, JsonRpcErrorObject> =>
+          Effect.flatMap(Ref.get(entries), (all) =>
+            Option.match(HashMap.get(all, sessionId), {
+              onSome: Effect.succeed,
+              onNone: () =>
+                Effect.logWarning(logKeys.session.unknown, { sessionId }).pipe(
+                  Effect.andThen(Effect.fail(rpcError(ErrorCode.ResourceNotFound, `Session ${sessionId} not found on this connection`, { sessionId }))),
+                ),
+            }),
           );
-        };
 
         const send = (sessionId: AcpSessionId, update: SessionUpdate) =>
           connection
@@ -489,7 +533,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               configured,
               models,
               limit,
-              options: [...configOptions(configured, models, limit), permissionOption(held?.permissionMode ?? entry.permissionMode)] as ReadonlyArray<SessionConfigOption>,
+              options: [...configOptions(configured, models, limit), permissionOption(held?.permissionMode ?? (yield* Ref.get(entry.permissionMode)))] as ReadonlyArray<SessionConfigOption>,
             };
           }).pipe(Effect.provideContext(known));
 
@@ -521,7 +565,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
         const startSession = <A extends { readonly feed: Feed }, E, X>(
           id: AcpSessionId,
           world: WorldSession,
-          permissionMode: { readonly get: () => PermissionMode; readonly set: (mode: PermissionMode) => void },
+          permissionMode: Ref.Ref<PermissionMode>,
           parent: { readonly scope: Scope.Scope; readonly mcp: McpServers; readonly configuration: Configured },
           go: (session: Session, context: Context.Context<Services>, follow: (initial: ProjectionState) => Effect.Effect<Feed>) => Effect.Effect<A, E, X>,
         ) =>
@@ -533,7 +577,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const blobs = BlobsInFolder(join(sessionFolderOf(options.directory, id), "blobs"));
               // The configuration's seam lists, permission following the session's mode (agent-config CF2); its tool sources are not
               // offered: the session's are the world's and its MCP servers'.
-              const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(parent.configuration, { canAsk: true, permissionMode: permissionMode.get });
+              const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(parent.configuration, { canAsk: true, permissionMode: () => Ref.getUnsafe(permissionMode) });
               const runner = SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, world.sources)));
               // The model is told of the session's MCP servers that are not running (agent-mcp MK2).
               const notices = Layer.succeed(Notices, [parent.mcp.notices]);
@@ -551,7 +595,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 merge: mergeHeld,
                 make: (change) =>
                   Effect.gen(function* () {
-                    if (change.permissionMode !== undefined) permissionMode.set(change.permissionMode);
+                    if (change.permissionMode !== undefined) yield* Ref.set(permissionMode, change.permissionMode);
                     if (change.model !== undefined)
                       yield* session.observe({ _tag: "ModelChangeArrived", ...change.model }).pipe(Effect.provideContext(context), reportedBy(acpUser));
                     yield* Effect.logInfo(logKeys.config.made, { model: change.model, permissionMode: change.permissionMode });
@@ -587,14 +631,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             const record = recordFor(entry.cwd, text);
             yield* writeRecord(options.directory, entry.id, record).pipe(Effect.catch(failed("writing the session's record at its first prompt")));
             yield* Effect.logInfo(logKeys.record.written, { file: recordFileOf(options.directory, entry.id), cwd: record.cwd, titled: record.title !== undefined });
-            const mode = {
-              get: () => entry.permissionMode,
-              set: (next: PermissionMode) => {
-                entry.permissionMode = next;
-              },
-            };
-            yield* settingsWritten(entry.id, entry.configuration, entry.permissionMode, `${draft.model.provider}/${draft.model.model}`);
-            const opened = yield* startSession(entry.id, entry.world, mode, { scope: entry.scope, mcp: entry.mcp, configuration: entry.configuration }, (session, context, follow) =>
+            yield* settingsWritten(entry.id, entry.configuration, yield* Ref.get(entry.permissionMode), `${draft.model.provider}/${draft.model.model}`);
+            const opened = yield* startSession(entry.id, entry.world, entry.permissionMode, { scope: entry.scope, mcp: entry.mcp, configuration: entry.configuration }, (session, context, follow) =>
               Effect.gen(function* () {
                 // The feed first: the session has no facts yet, and it sends everything from the opening on, live.
                 const feed = yield* follow(start);
@@ -743,7 +781,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               yield* Effect.logWarning(logKeys.session.refused, { doing: method, cwd, cause: "the working folder is not an absolute path" });
               return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, `cwd must be an absolute path: ${cwd}`));
             }
-            if (entries.has(sessionId) || starting.has(sessionId)) {
+            if (HashMap.has(yield* Ref.get(entries), sessionId) || HashSet.has(yield* Ref.get(starting), sessionId)) {
               yield* Effect.logWarning(logKeys.session.refused, { doing: method, cause: "the session is already loaded on this connection" });
               return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, `Session ${sessionId} is already loaded on this connection`, { sessionId }));
             }
@@ -759,7 +797,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               yield* Effect.logWarning(logKeys.session.notStored, { doing: method, file, cause: "the session directory has no facts file for the session" });
               return yield* Effect.fail(rpcError(ErrorCode.ResourceNotFound, `Session ${sessionId} not found in ${options.directory}`, { sessionId }));
             }
-            starting.add(sessionId);
+            yield* Ref.update(starting, (all) => HashSet.add(all, sessionId));
             return yield* Effect.gen(function* () {
               const configuration = yield* configurationFor(cwd, mcpServers, method);
               const own = yield* (world as World<R | FileSystem.FileSystem>).open({
@@ -772,15 +810,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               });
               const { world: its, scope, mcp } = yield* withServers(cwd, own, configuration, method);
               return yield* Effect.gen(function* () {
-              // The policy reads the entry's mode at each call; the entry exists once the session started, and until then the mode is the configuration's.
+              // The policy reads the session's mode at each call; it starts as the configuration says.
               const initialMode = startingModeOf(configuration);
-              let held: Entry | undefined;
-              const mode = {
-                get: () => held?.permissionMode ?? initialMode,
-                set: (next: PermissionMode) => {
-                  if (held !== undefined) held.permissionMode = next;
-                },
-              };
+              const mode = yield* Ref.make(initialMode);
               const opened = yield* startSession(sessionId, its, mode, { scope, mcp, configuration }, (session, context, follow) =>
                 Effect.gen(function* () {
                   const left = leftRunning(yield* session.facts);
@@ -806,11 +838,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 lock: yield* Semaphore.make(1),
                 state: { _tag: "Open", opened },
                 prompt: undefined,
-                permissionMode: initialMode,
+                permissionMode: mode,
                 configuration,
               };
-              held = entry;
-              entries.set(sessionId, entry);
+              yield* Ref.update(entries, (all) => HashMap.set(all, sessionId, entry));
               const now = yield* configuredOf(yield* opened.session.facts);
               yield* settingsWritten(sessionId, configuration, initialMode, `${now.provider}/${now.model}`);
               const { options: configured } = yield* configurationOf(entry);
@@ -829,11 +860,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               return { configOptions: configured };
               }).pipe(Effect.onError(() => Scope.close(scope, Exit.void)));
             }).pipe(
-              Effect.ensuring(
-                Effect.sync(() => {
-                  starting.delete(sessionId);
-                }),
-              ),
+              Effect.ensuring(Ref.update(starting, (all) => HashSet.remove(all, sessionId))),
             );
           });
 
@@ -875,10 +902,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   lock: yield* Semaphore.make(1),
                   state: { _tag: "Draft", draft },
                   prompt: undefined,
-                  permissionMode: startingModeOf(configuration),
+                  permissionMode: yield* Ref.make(startingModeOf(configuration)),
                   configuration,
                 };
-                entries.set(id, entry);
+                yield* Ref.update(entries, (all) => HashMap.set(all, id, entry));
                 const { options: configured } = yield* configurationOf(entry);
                 yield* Effect.logInfo(logKeys.session.created, {
                   cwd,
@@ -938,7 +965,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                         return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, mode.reason, { configId }));
                       }
                       const said = entry.state._tag === "Draft" ? "made" : yield* submitted(entry.state.opened, { permissionMode: mode }, configId);
-                      if (entry.state._tag === "Draft") entry.permissionMode = mode;
+                      if (entry.state._tag === "Draft") yield* Ref.set(entry.permissionMode, mode);
                       yield* Effect.logInfo(logKeys.config.changed, { configId, value: mode, applies: said === "made" ? "now: no turn runs" : "when the turn ends" });
                       return { configOptions: (yield* configurationOf(entry)).options };
                     }
@@ -963,7 +990,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                     yield* Effect.logInfo(logKeys.config.changed, {
                       configId,
                       value: params.value,
-                      applies: said === "draft" ? "to the draft" : said === "made" ? "now: no turn runs" : "when the turn ends",
+                      applies: whenApplied(said),
                     });
                     return { configOptions: (yield* configurationOf(entry)).options };
                   }),
@@ -989,20 +1016,21 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 entry.prompt = self;
                 // A change held while a turn ran with no prompt of this connection's (one gone on with at load) is made before this one starts.
                 yield* settled(entry);
-                const run =
-                  prompt.length === 1 && text.trim() === "/export"
-                    ? exportOf(entry)
-                    : prompt.length === 1 && (text.trim() === "/mcp" || text.trim().startsWith("/mcp "))
-                      ? mcpOf(entry, text.trim().split(/\s+/).slice(1))
-                      : turnOf(entry, text, prompt).pipe(
-                        Effect.onInterrupt(() =>
-                          Effect.flatMap(connection.open, (open) =>
-                            open
-                              ? Effect.logInfo(logKeys.prompt.interrupted, { by: "the client", turn: "cancelled" }).pipe(Effect.andThen(cancelTurn(entry, "$/cancel_request")))
-                              : Effect.logInfo(logKeys.prompt.interrupted, { by: "the end of the connection", turn: "left running" }),
-                          ),
-                        ),
-                      );
+                // A prompt of one block that is a command the host answers itself; any other is a turn.
+                const command = prompt.length === 1 ? text.trim() : undefined;
+                const run = (() => {
+                  if (command === "/export") return exportOf(entry);
+                  if (command === "/mcp" || command?.startsWith("/mcp ") === true) return mcpOf(entry, command.split(/\s+/).slice(1));
+                  return turnOf(entry, text, prompt).pipe(
+                    Effect.onInterrupt(() =>
+                      Effect.flatMap(connection.open, (open) =>
+                        open
+                          ? Effect.logInfo(logKeys.prompt.interrupted, { by: "the client", turn: "cancelled" }).pipe(Effect.andThen(cancelTurn(entry, "$/cancel_request")))
+                          : Effect.logInfo(logKeys.prompt.interrupted, { by: "the end of the connection", turn: "left running" }),
+                      ),
+                    ),
+                  );
+                })();
                 return yield* run.pipe(
                   Effect.ensuring(
                     Effect.sync(() => {
@@ -1017,9 +1045,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           "session/cancel": ({ sessionId }) =>
             traced(
               Effect.gen(function* () {
-                const entry = entries.get(sessionId);
-                if (entry === undefined) return yield* Effect.logWarning(logKeys.session.unknown, { sessionId, doing: "session/cancel" });
-                yield* cancelTurn(entry, "session/cancel");
+                const entry = HashMap.get(yield* Ref.get(entries), sessionId);
+                if (Option.isNone(entry)) return yield* Effect.logWarning(logKeys.session.unknown, { sessionId, doing: "session/cancel" });
+                yield* cancelTurn(entry.value, "session/cancel");
               }),
               sessionId,
             ),
@@ -1028,7 +1056,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             traced(
               Effect.gen(function* () {
                 const entry = yield* entryOf(sessionId);
-                entries.delete(sessionId);
+                yield* Ref.update(entries, (all) => HashMap.remove(all, sessionId));
                 if (entry.state._tag === "Open") {
                   yield* cancelTurn(entry, "session/close");
                   if (entry.prompt !== undefined) yield* Fiber.await(entry.prompt);
