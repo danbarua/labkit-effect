@@ -7,14 +7,14 @@ import { test } from "../../tests/support/test.ts";
 import { brandFrom, brandVariable, defaultBrand, envPrefixOf, folderOf } from "./brand.ts";
 import { launcherLogOptionsFrom } from "./launcher-logs.ts";
 
-test("H18: a brand's prefix is its name in capitals, every other character _, then _; its folder is .<name>", () => {
+test("a brand's prefix is its name in capitals, every other character _, then _; its folder is .<name>", () => {
   expect(envPrefixOf(defaultBrand)).toBe("LABKIT_");
   expect(envPrefixOf({ name: "whitelabel-agent", version: "1.0.0" })).toBe("WHITELABEL_AGENT_");
   expect(envPrefixOf({ name: "acme.ai 2", version: "1.0.0" })).toBe("ACME_AI_2_");
   expect(folderOf({ name: "acme", version: "1.0.0" })).toBe(".acme");
 });
 
-test("H18: the brand is the one LABKIT_BRAND names, else labkit; blank names none", () => {
+test("the brand is the one LABKIT_BRAND names, else labkit; blank names none", () => {
   expect(brandVariable).toBe("LABKIT_BRAND");
   expect(brandFrom({})).toEqual(defaultBrand);
   expect(brandFrom({ LABKIT_BRAND: "  " })).toEqual(defaultBrand);
@@ -23,7 +23,7 @@ test("H18: the brand is the one LABKIT_BRAND names, else labkit; blank names non
   expect(brandFrom({ ACME_BRAND: "other" })).toEqual(defaultBrand);
 });
 
-test("H18 H12: the launcher's logs follow the brand: its variables, and ~/.<name>/logs; another brand's variables are not read", () => {
+test("the launcher's logs follow the brand: its variables, and ~/.<name>/logs; another brand's variables are not read", () => {
   const acme = { name: "acme", version: "1.0.0" };
   expect(launcherLogOptionsFrom({}, acme).dir).toBe(join(homedir(), ".acme", "logs"));
   expect(launcherLogOptionsFrom({ ACME_ACP_LOG_DIR: "/tmp/acme", LABKIT_ACP_LOG_DIR: "/tmp/labkit" }, acme).dir).toBe("/tmp/acme");

@@ -29,7 +29,7 @@ const run = <A, E>(program: Effect.Effect<A, E, BunServices.BunServices>) => run
 const outcome = <A, E extends { readonly _tag: string }>(program: Effect.Effect<A, E, BunServices.BunServices>) =>
   run(program.pipe(Effect.map((value): unknown => value), Effect.catch((error: E) => Effect.succeed({ ...error, failed: error._tag }))));
 
-test("H5: the sessions a folder holds are listed the one written to last first; a folder with no facts file is none", async () => {
+test("the sessions a folder holds are listed the one written to last first; a folder with no facts file is none", async () => {
   const root = `${testFolder()}/sessions`;
   stored(root, "older", 1, 1_000);
   stored(root, "newer", 2, 2_000);
@@ -44,7 +44,7 @@ test("H5: the sessions a folder holds are listed the one written to last first; 
   expect((await run(readSession(root, "older"))).facts.length).toBe(2);
 });
 
-test("H5: a folder that is not there holds no session; a session it does not hold is not found", async () => {
+test("a folder that is not there holds no session; a session it does not hold is not found", async () => {
   const root = `${testFolder()}/none`;
   expect(await run(storedSessions(root))).toEqual([]);
   expect(await outcome(latestSession(root))).toMatchObject({ failed: "NoSessionStored", root });

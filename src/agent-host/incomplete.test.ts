@@ -73,7 +73,7 @@ const fromSystem = (facts: ReadonlyArray<Fact>) =>
 /** The loop records this, and warns, when a turn has been held as many times as it may and a hook would hold it again. */
 const exhausted = (facts: ReadonlyArray<Fact>) => facts.some((fact) => fact._tag === "Observed" && fact.observation._tag === "TurnHoldsExhausted");
 
-test("H15: a response with thinking but no answer is followed by the feedback and a second request, whose answer completes the turn without the loop's holds running out", async () => {
+test("a response with thinking but no answer is followed by the feedback and a second request, whose answer completes the turn without the loop's holds running out", async () => {
   const { ending, facts, texts } = await prompted(["thinks", "answers"]);
   expect(ending).toEqual({ _tag: "Completed" });
   expect(fromSystem(facts)).toEqual([InputText.make(answerNow)]);
@@ -81,7 +81,7 @@ test("H15: a response with thinking but no answer is followed by the feedback an
   expect(exhausted(facts)).toBe(false);
 });
 
-test("H15: a second response with no answer ends the turn Incomplete after one retry, with no third request and without the loop's holds running out", async () => {
+test("a second response with no answer ends the turn Incomplete after one retry, with no third request and without the loop's holds running out", async () => {
   const { ending, facts, texts } = await prompted(["thinks", "thinks"]);
   expect(ending).toEqual({ _tag: "Incomplete" });
   expect(texts).toHaveLength(2);
@@ -89,7 +89,7 @@ test("H15: a second response with no answer ends the turn Incomplete after one r
   expect(exhausted(facts)).toBe(false);
 });
 
-test("H15: the retries asked for are made: two retries answer on the third request, and a turn that never answers ends Incomplete after the third", async () => {
+test("the retries asked for are made: two retries answer on the third request, and a turn that never answers ends Incomplete after the third", async () => {
   const answered = await prompted(["thinks", "thinks", "answers"], 2);
   expect(answered.ending).toEqual({ _tag: "Completed" });
   expect(answered.texts).toHaveLength(3);
@@ -100,14 +100,14 @@ test("H15: the retries asked for are made: two retries answer on the third reque
   expect(exhausted(never.facts)).toBe(false);
 });
 
-test("H15: each turn has its own retries", async () => {
+test("each turn has its own retries", async () => {
   const { endings, facts, texts } = await prompted(["thinks", "answers", "thinks", "answers"], 1, 2);
   expect(endings).toEqual([{ _tag: "Completed" }, { _tag: "Completed" }]);
   expect(texts).toHaveLength(4);
   expect(fromSystem(facts)).toEqual([InputText.make(answerNow), InputText.make(answerNow)]);
 });
 
-test("H15: an answered turn and a response cut short get no feedback", async () => {
+test("an answered turn and a response cut short get no feedback", async () => {
   const answered = await prompted(["answers"]);
   expect(answered.ending).toEqual({ _tag: "Completed" });
   expect(answered.texts).toHaveLength(1);

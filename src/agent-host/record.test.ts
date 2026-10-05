@@ -37,7 +37,7 @@ const run = <A, E>(program: Effect.Effect<A, E, BunServices.BunServices>) => {
   ).then((result) => ({ result, logged }));
 };
 
-test("H16: a record is written whole and read back as the JSON it was; writing again replaces it; a session with none gives undefined", async () => {
+test("a record is written whole and read back as the JSON it was; writing again replaces it; a session with none returns undefined", async () => {
   const root = `${testFolder()}/sessions`;
   expect((await run(readRecord(root, "s1"))).result).toBeUndefined();
   await run(writeRecord(root, "s1", { cwd: "/work/a", title: "First" }));
@@ -48,7 +48,7 @@ test("H16: a record is written whole and read back as the JSON it was; writing a
   expect(readdirSync(sessionFolderOf(root, "s1"))).toEqual(["host.json"]);
 });
 
-test("H16: a record that is not JSON fails as RecordFailed naming its file, and the session beside it with a good one reads", async () => {
+test("a record that is not JSON fails as RecordFailed naming its file, and the session beside it with a good one reads", async () => {
   const root = `${testFolder()}/sessions`;
   await run(writeRecord(root, "good", { cwd: "/work" }));
   mkdirSync(sessionFolderOf(root, "bad"), { recursive: true });
@@ -57,7 +57,7 @@ test("H16: a record that is not JSON fails as RecordFailed naming its file, and 
   expect((await run(readRecord(root, "good"))).result).toEqual({ cwd: "/work" });
 });
 
-test("H16: a record that cannot be written fails as RecordFailed, and the record already there is left as it was", async () => {
+test("a record that cannot be written fails as RecordFailed, and the record already there is left as it was", async () => {
   const root = `${testFolder()}/sessions`;
   await run(writeRecord(root, "s1", { cwd: "/work" }));
   // The partial file's name is taken by a folder, so the write cannot be made.
@@ -66,7 +66,7 @@ test("H16: a record that cannot be written fails as RecordFailed, and the record
   expect(JSON.parse(readFileSync(recordFileOf(root, "s1"), "utf8"))).toEqual({ cwd: "/work" });
 });
 
-test("H17: the sessions with facts are listed the one written to last first, each with its record or undefined; a record that does not read is logged and lists as none", async () => {
+test("the sessions with facts are listed the one written to last first, each with its record or undefined; a record that does not read is logged and lists as none", async () => {
   const root = `${testFolder()}/sessions`;
   stored(root, "older", 1_000);
   stored(root, "newer", 2_000);

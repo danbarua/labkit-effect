@@ -42,7 +42,7 @@ const launched = async (options: Partial<LauncherLogOptions> & { readonly dir: s
   return stderr;
 };
 
-test("H12: a record is a line of JSON in acp-<pid>-<launch id>.jsonl: its time, level, annotations, message and an error's cause in full; the path is said on stderr once", async () => {
+test("a record is a line of JSON in acp-<pid>-<launch id>.jsonl: its time, level, annotations, message and an error's cause in full; the path is written to stderr once", async () => {
   const dir = `${testFolder()}/not/yet/made`;
   const stderr = await launched(
     { dir },
@@ -65,14 +65,14 @@ test("H12: a record is a line of JSON in acp-<pid>-<launch id>.jsonl: its time, 
 test.each([
   ["Trace", ["trace", "debug", "info", "warning", "error"]],
   ["Warn", ["warning", "error"]],
-] as const)("H12: at level %p, the records below it are not written; a warning is written as `warning`", async (level, written) => {
+] as const)("at level %p, the records below it are not written; a warning is written as `warning`", async (level, written) => {
   const dir = `${testFolder()}/logs`;
   const all = [Effect.logTrace("t"), Effect.logDebug("d"), Effect.logInfo("i"), Effect.logWarning("w"), Effect.logError("e")];
   await launched({ dir, level }, Effect.all(all));
   expect((await linesOf(fileOf(dir))).map((line) => line.level)).toEqual([...written]);
 });
 
-test("H12 H14: launcherLogOptionsFrom reads the log folder, level, size limit and backup count from the environment, uses the defaults for unset variables, and collects credential values for redaction, listing credential values shorter than 8 characters separately", () => {
+test("launcherLogOptionsFrom reads the log folder, level, size limit and backup count from the environment, uses the defaults for unset variables, and collects credential values for redaction, listing credential values shorter than 8 characters separately", () => {
   expect(launcherLogOptionsFrom({})).toMatchObject({ dir: join(homedir(), ".labkit", "logs"), level: "Debug", maxBytes: 10 * 1024 * 1024, backups: 4, keep: 20, secrets: { values: [], tooShort: [] } });
   const options = launcherLogOptionsFrom({
     LABKIT_ACP_LOG_DIR: "/tmp/acp-logs",
@@ -96,21 +96,21 @@ test("H12 H14: launcherLogOptionsFrom reads the log folder, level, size limit an
   expect(options.launchId).not.toBe(launcherLogOptionsFrom({}).launchId);
 });
 
-test("H14: MAX_TOKENS is configuration, not a credential, so its value is added to neither the values to redact nor the list of values too short to redact", () => {
+test("MAX_TOKENS is configuration, not a credential, so its value is added to neither the values to redact nor the list of values too short to redact", () => {
   // A value of 8 characters or more would be redacted if MAX_TOKENS were a credential; a shorter value would be listed as too short.
   for (const value of ["4096", "128000000"]) expect(secretsOf({ MAX_TOKENS: value })).toEqual({ values: [], tooShort: [] });
   expect(launcherLogOptionsFrom({ MAX_TOKENS: "128000000" }).secrets).toEqual({ values: [], tooShort: [] });
 });
 
-test.each(["", "ten", "-5", "1.5", "0x", "1e400"])("H12: a size or backup count that does not read (%p) falls back to the default", (value) => {
+test.each(["", "ten", "-5", "1.5", "0x", "1e400"])("a size or backup count that does not read (%p) falls back to the default", (value) => {
   expect(launcherLogOptionsFrom({ LABKIT_ACP_LOG_MAX_BYTES: value, LABKIT_ACP_LOG_BACKUPS: value })).toMatchObject({ maxBytes: 10 * 1024 * 1024, backups: 4 });
 });
 
-test.each(["verbose", "constructor", "Warn"])("H12: a level that is not one of trace, debug, info, warning, error, fatal (%p) falls back to debug", (value) => {
+test.each(["verbose", "constructor", "Warn"])("a level that is not one of trace, debug, info, warning, error, fatal (%p) falls back to debug", (value) => {
   expect(launcherLogOptionsFrom({ LABKIT_ACP_LOG_LEVEL: value }).level).toBe("Debug");
 });
 
-test("H13: a record that would take the file past maxBytes rotates it first: .jsonl to .1 and on, no more than `backups` kept", async () => {
+test("a record that would take the file past maxBytes rotates it first: .jsonl to .1 and on, no more than `backups` kept", async () => {
   const dir = `${testFolder()}/logs`;
   const maxBytes = 1000;
   await launched(
@@ -129,7 +129,7 @@ test("H13: a record that would take the file past maxBytes rotates it first: .js
   expect(indices).toEqual(Array.from({ length: indices.length }, (_, offset) => indices[0]! + offset));
 });
 
-test("H13: with backups set to 0, a record that would take the file past maxBytes deletes the file and starts it again: no backup is kept", async () => {
+test("with backups set to 0, a record that would take the file past maxBytes deletes the file and starts it again: no backup is kept", async () => {
   const dir = `${testFolder()}/logs`;
   await launched(
     { dir, maxBytes: 1000, backups: 0 },
@@ -143,7 +143,7 @@ test("H13: with backups set to 0, a record that would take the file past maxByte
   expect(indices[0]).toBeGreaterThan(0);
 });
 
-test("H13: a record past 256 KiB is cut to fit, saying how many bytes were left out; it is not dropped", async () => {
+test("a record past 256 KiB is cut to fit, with the number of bytes omitted; it is not dropped", async () => {
   const dir = `${testFolder()}/logs`;
   const big = `"é😀\\x`.repeat(60 * 1024);
   await launched({ dir }, Effect.all([Effect.logInfo(big), Effect.logInfo("after")]));
@@ -162,7 +162,7 @@ test("H13: a record past 256 KiB is cut to fit, saying how many bytes were left 
   expect(after).toMatchObject({ message: "after" });
 });
 
-test("H13: at start the newest `keep` stopped launches' files stay, their backups with them; a running launch's stay whatever their age", async () => {
+test("at start the newest `keep` stopped launches' files stay, their backups with them; a running launch's stay whatever their age", async () => {
   const dir = `${testFolder()}/logs`;
   mkdirSync(dir);
   const start = Date.now() / 1000 - 10_000;
@@ -188,7 +188,7 @@ test("H13: at start the newest `keep` stopped launches' files stay, their backup
   );
 });
 
-test("H14: an environment secret is redacted in the message, an annotation and a cause, and a credential field whatever its value; the error's text stays", async () => {
+test("an environment secret is redacted in the message, an annotation and a cause, and a credential field whatever its value; the error's text stays", async () => {
   const dir = `${testFolder()}/logs`;
   await launched(
     { dir, secrets: { values: ["tok-4", "sk-secret-123"], tooShort: [] } },
@@ -209,7 +209,7 @@ test("H14: an environment secret is redacted in the message, an annotation and a
   expect(record!.cause).toContain("[cause]: Error: inner <redacted>");
 });
 
-test("H14: the secrets not looked for are said once at start, by name and length, never their value", async () => {
+test("the secrets too short to search for are reported once at start, by name and length, never by value", async () => {
   const dir = `${testFolder()}/logs`;
   await launched({ dir, secrets: { values: [], tooShort: [{ name: "MAX_TOKENS", length: 4 }] } }, Effect.logInfo("started"));
   const [said, started] = await linesOf(fileOf(dir));
@@ -217,7 +217,7 @@ test("H14: the secrets not looked for are said once at start, by name and length
   expect(started).toMatchObject({ level: "info", message: "started" });
 });
 
-test("H14: a folder that cannot be made is said once on stderr, and every record goes to stderr; nothing throws", async () => {
+test("a folder that cannot be created is reported once on stderr, and every record goes to stderr; nothing throws", async () => {
   writeFileSync(`${testFolder()}/blocker`, "");
   const dir = `${testFolder()}/blocker/logs`;
   const stderr = await launched({ dir }, Effect.all([Effect.logInfo("first"), Effect.logInfo("second")]));
@@ -227,7 +227,7 @@ test("H14: a folder that cannot be made is said once on stderr, and every record
   expect(stderr.slice(2).map((line) => JSON.parse(line).message)).toEqual(["first", "second"]);
 });
 
-test("H14: a file that stops being writable is said once on stderr, and the records after it go to stderr", async () => {
+test("a file that stops being writable is reported once on stderr, and the records after it go to stderr", async () => {
   const dir = `${testFolder()}/logs`;
   mkdirSync(dir);
   const stderr = await launched(

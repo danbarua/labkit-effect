@@ -1,0 +1,279 @@
+# agent-host
+
+`src/agent-host` holds what both hosts share, the CLI and the ACP host: the model catalog, the
+provider clients, the services that a session runs with, the permission policy for a mode, the
+folder where sessions are kept, log files and redaction, the draft that a session is before its
+first turn, the Markdown export, the host's record of a session, the brand, and the launch options.
+It imports the core and no protocol, and nothing of either host.
+
+The hosts' direction, Dan's rulings about them, and the ACP host's design are in
+`src/agent-host/DESIGN.next.md`.
+
+## Files
+
+| File | Responsibility |
+| --- | --- |
+| `catalog.ts` | The model catalog (`ModelCatalog`), `askable`, and `targetOf`. |
+| `local-server.ts` | The local server's models and what is known of them; `KnownWithLocalServer`, `SettlingWithLocalServer`. |
+| `clients.ts` | `Clients`: one model client per provider whose key is set, and the local server. |
+| `services.ts` | `SessionServices`, `permissionsFor`, `loopBreaker`, `turnRequestLimit`, `budgetLimit`. |
+| `directory.ts` | The folder of sessions. |
+| `record.ts` | `host.json`: a host's own record of a session. |
+| `draft.ts` | A draft: a session before its first turn. |
+| `export.ts` | `markdownOf`: a session's transcript as Markdown. |
+| `incomplete.ts` | `retryIncomplete`: the turn-end hook for a response with thinking and no answer. |
+| `logs.ts` | `LogsToFile`, `LogsToStderr`. |
+| `launcher-logs.ts`, `log-file.ts` | The ACP launcher's log files. `log-file.ts` is listed in `imperativeBoundaries` in `oxlint.config.ts`. |
+| `redaction.ts` | Removing the environment's secrets from log records. |
+| `brand.ts` | The name the agent goes by, and what is named after it. |
+| `launch.ts` | The launch options both hosts share, and the configuration layers they make. |
+| `log-keys.ts` | The names of the log events that this module writes. |
+
+## The model catalog
+
+`ModelCatalog` is a service whose `sources` are read anew each time. Each source is a provider and
+the models it lists. `KeyedAndLocalCatalog` has two kinds of source:
+
+1. the well-known models of each provider whose key the environment holds (`keyVariables`), in the
+   order `known` lists them. A key that is empty counts as not set. Keys are read when the layer is
+   built;
+2. the local server (`local-server.ts`), with the models it lists, or no models known when it does
+   not answer within one second.
+
+`askable` is every model that the catalog lists, source by source: what a host offers to pick.
+
+`targetOf(name)` returns the provider and model that a name refers to:
+
+| Name | Result |
+| --- | --- |
+| `<well-known provider>/<model>` | that provider's model, whether `known` lists it or not |
+| `<other source>/<model>` | a model that the source lists |
+| `<model>` | the well-known model of that name, or else another source's model of that name |
+
+| Failure | When |
+| --- | --- |
+| `ModelNotFound`, with the close names (equal apart from case, or one containing the other) | no source has the name |
+| `SourceNotAnswering` | the model's source did not answer |
+| `KeyNotSet`, with the variable to set | the model is a well-known provider's and the provider is not in the catalog |
+
+A host reports these in its own words.
+
+## The local server
+
+What is known of a `localhost` model is what the local server's list says (`GET /v1/models`, its
+`models` entries): its context window, the kinds of input it accepts (text when none is given), and
+its reasoning efforts. An entry, or a value in it, that is written in another form is dropped on its
+own (`localCapabilities`).
+
+- `KnownWithLocalServer` puts the server before the well-known models in `KnownModels`. It asks the
+  server once, when first needed, logs a warning when the server does not answer, and knows only
+  `localhost` models.
+- `SettlingWithLocalServer` puts the Chat Completions adapter's settings function first in
+  `Settling`, for `localhost`.
+
+## Session services
+
+`SessionServices(runner)` is what the loop needs for a session apart from its store, its policies
+and its turn-end hooks: the model that the facts name, what is known of it and how its settings are
+applied, the whole conversation as its context, the clients, turn identities that continue from
+those the store holds, and `runner` for its tools.
+
+- `permissionsFor(mode, canAsk)` is the permission policy (`docs/agent-policy.md`) for `mode`. A
+  call is judged by its tool's kind in the catalog that the session opened with; a tool not in it is
+  treated as changing things. Questions are asked only when `canAsk` is true. `mode` can be an
+  effect, read at each call, when the host lets the user change the mode during a session.
+- `loopBreaker(settings)` returns the loop breaker's two policies, one per list. The CLI puts the
+  loop breaker before the permission policy among the tool call policies, so no one is asked to
+  permit a call that the loop breaker vetoes. The ACP host lists the permission policy alone,
+  because ACP has no stop reason for a turn that the loop breaker stops.
+- `budgetLimit(usd)` vetoes a model request once the session has cost `usd` or more.
+
+## Sessions on disk
+
+A folder of sessions (`directory.ts`) keeps each session in `<root>/<session>/`, with its facts in
+`facts.jsonl` and the host's record in `host.json`.
+
+| Function | Returns |
+| --- | --- |
+| `storedSessions` | the sessions that have a facts file, the one written to last first |
+| `readSession` | one session's facts; `SessionNotFound` when the root does not hold it |
+| `latestSession` | the session written to last; `NoSessionStored` when there is none |
+| `summaryOf` | how many turns a session started, and the model it asks now |
+
+A root that cannot be read fails with `DirectoryUnreadable`.
+
+`host.json` (`record.ts`) is the host's own record of a session: whatever the host keeps that is not
+a fact (its working folder, its title). This module stores and returns it as JSON, and does not read
+its contents.
+
+- `writeRecord` creates the session's folder when it does not exist, writes the record to another
+  file, flushes it to the disk, and renames it over the record, so a reader finds the old record or
+  the new one, never part of one. A failed write leaves the existing record as it was.
+- `readRecord` returns the JSON written, `undefined` for a session with no record, and fails with
+  `RecordFailed`, naming the file, when the record is not JSON or cannot be read.
+- `recordedSessions` returns `storedSessions`, each with its record, or `undefined` when it has none
+  or its record does not read. An unreadable record is logged as a warning
+  (`host_record.unreadable`, with the session, the file and the cause). A folder with a record and
+  no facts file is not a session.
+
+## The draft
+
+A draft (`draft.ts`) is a session before its first turn: no session exists and nothing is recorded.
+It holds the model to ask, the settings as given, the system prompt and the tools.
+
+- `chooseModel` sets another model and keeps the settings as given, including one that the new
+  model does not accept.
+- `saySettings` replaces the settings that it names, and keeps the others.
+- `optionsOfDraft` returns what a host shows (`optionsFor`): each setting with the value that the
+  model will get, so an effort that the model does not accept shows as the nearest one it does.
+- `opening(draft, session)` returns the `SessionOpened` observation that opens `session` with the
+  draft's model, settings, system prompt and tools. A host opens the session at the first input and
+  then drops the draft.
+- `withDefaults(draft, capabilities)` gives a draft with no output limit a limit of 32768 tokens, or
+  the model's own limit when it is known and lower. A limit that was given stays.
+- `defaultModel` is the first model that the catalog lists (`askable`), or none when it lists none.
+
+## Turn-end hook: incomplete responses
+
+`retryIncomplete(retries = 1)` (`incomplete.ts`) is a turn-end hook for models that put their whole
+answer in their reasoning. The CLI and the ACP host run it alone, with `MaxHolds` set to `retries`.
+
+- When the latest decision about the turn is `TurnIncomplete` (a whole response with no tool calls
+  and no answer text) and the hooks have not held the turn open `retries` times since it started,
+  the hook returns `answerNow` ("Your last response had thinking but no answer. Give your answer
+  now."), which holds the turn open for one more request.
+- An answered turn (`TurnCompleted`) and a response cut short get nothing.
+- With no answer after its retries, the turn ends `Incomplete`, and no further request is made.
+- The hook counts every input that the turn-end hooks gave the turn, because the facts do not record
+  which hook gave it. Because it is the only hook, those inputs are its retries, and the loop's bound
+  on holds is the same number. At the bound the loop asks the hooks again, the hook returns nothing,
+  and the turn ends with no `TurnHoldsExhausted` and no `holds_exhausted` warning.
+
+## Export
+
+`markdownOf(facts)` (`export.ts`) returns a session's transcript as Markdown, read from its facts
+alone: no model and no blob store is asked. A host's `/export` writes it; where is the host's choice.
+
+- The transcript opens with the session's id and the models it asked: the opening model, then each
+  change taken, which is also shown where it was taken.
+- Each turn follows in order:
+  - each input, with its sender and its text as recorded, and each attachment by media type, size
+    and blob id;
+  - each response's answer text, and its thinking in a collapsed `<details>` block;
+  - each tool call: the tool's name, its input fenced, the permission question and answer on one
+    line, and how it ended (its output, or why it failed: vetoed with the reason, not run, not
+    observed, input rejected, reported by the tool);
+  - input dropped when the turn ended;
+  - when the turn did not end with an answer, how it ended (cut short, failed with the failure,
+    vetoed, interrupted, no answer).
+- A call whose response was not recorded is shown where it arrived. A turn with no `TurnEnded` is
+  marked as left running, and a call with no `ToolEnded` as having no recorded outcome.
+- A tool's text output is fenced with more backticks than any run of backticks it contains, and is
+  cut after 8 KiB of UTF-8, never inside a character, with a line giving the number of bytes
+  omitted. Bytes are named by media type and size, stored bytes by blob id; they are not read.
+- The transcript ends with totals: turns started, model requests made (`requestsIn`), the tokens the
+  responses reported, the cost (`costIn`), and the context gauge of the current model when it is a
+  well-known one (`contextGauge`).
+
+## Logs
+
+- `LogsToFile(path)` writes log lines to `path`, creating its folder when missing. `LogsToStderr`
+  writes them to stderr, for a host whose stdout carries something else.
+- `LauncherLogs(options)` (`launcher-logs.ts`) is the ACP launcher's log, because the launcher's
+  stdout carries the protocol. `launcherLogOptionsFrom(env)` reads the options from the environment.
+  `bun run acp:logs` prints the newest launch's file; `--errors` prints only its warning, error and
+  fatal records.
+
+### Launcher log files
+
+Each record at or above the level is one JSON line appended to `<dir>/acp-<pid>-<launch id>.jsonl`;
+the folder is created when missing. A record holds its time (ISO), its level (trace, debug, info,
+warning, error, fatal), its log annotations (connection, request, session, turn and call ids), its
+message and, when there is one, its cause as text with its stack and nested causes. The layer also
+sets the minimum log level. The file's path is written to stderr once, at start.
+
+| Variable (after the brand's prefix, `LABKIT_` for labkit) | Default |
+| --- | --- |
+| `ACP_LOG_DIR` | `~/.<brand>/logs` |
+| `ACP_LOG_LEVEL` | debug |
+| `ACP_LOG_MAX_BYTES` | 10 MiB |
+| `ACP_LOG_BACKUPS` | 4 |
+
+A value that does not parse takes the default. Each launch has its own id.
+
+- **Rotation.** A record that would take the file past `maxBytes` first rotates it: `.jsonl` becomes
+  `.jsonl.1`, each backup moves up one, and backups past `backups` are deleted.
+- **Size limit.** A record whose line is longer than 256 KiB is written cut to fit: its time, its
+  level, the start of its line as text (`record`) and the number of bytes omitted (`omittedBytes`).
+- **Old launches.** At start, the files of stopped launches beyond the newest 20, by when their
+  files were last written, are removed with their backups. A launch whose process is running keeps
+  its files and does not count.
+- **Failures.** A folder or file that cannot be written is reported once on stderr, and that record
+  and every later one go to stderr: the launcher does not stop because of its log.
+
+### Redaction
+
+Every log that a host writes (the launcher's, the CLI's to a file or stderr, a test's) is redacted
+(`redaction.ts`):
+
+- The values of the environment variables whose names are credential names (`isCredentialName` in
+  `agent-process`: `OPENAI_API_KEY`, `GITHUB_PAT`) are replaced by `<redacted>` wherever they occur
+  in a record, its annotations and its cause included. The longest value is replaced first, so a
+  secret that contains another is replaced whole.
+- The value of a credential field (`authorization`, `apiKey`, `password`, an access token, a cookie)
+  is replaced by `<redacted>`, whatever it is. The rest of an error's text stays.
+- A value shorter than 8 characters is not searched for, because replacing it would cut ordinary
+  text. Each such variable is reported once, when the log is created, as a warning
+  (`host_logs.secrets_not_looked_for`) with the variable's name and the value's length, never the
+  value.
+- A provider's key is held as `Redacted` from the environment to its client (`keyOf`): a log line or
+  a string of it shows `<redacted>`.
+
+## Brand
+
+`Brand` (`brand.ts`) is the name the agent goes by. A package that ships the agent passes its own
+brand at its entry point; the CLI's `main(brand)` and the ACP launcher's `launch(env, brand)` take it.
+
+- A brand's environment variable prefix is its name in capitals, with every character that is not a
+  letter or a digit replaced by `_`, then `_` (`labkit`: `LABKIT_`; `whitelabel-agent`:
+  `WHITELABEL_AGENT_`). Its folder, in a home or a project, is `.<name>`.
+- The brand is the one the program passes; otherwise the one that `LABKIT_BRAND` names (blank names
+  none); otherwise labkit.
+- Named after the brand: the configuration folders (`~/.config/<name>/`, `<project>/.<name>/`), the
+  launcher's sessions and logs (`~/.<name>/sessions`, `~/.<name>/logs`) and variables
+  (`<PREFIX>ACP_*`), where `/export` writes (`.<name>/exports`), the name the ACP host gives a client
+  (`agentInfo`) and the MCP client a server (`clientInfo`), and the CLI's command.
+
+## Launch options
+
+`launch.ts` holds what both hosts are launched with: the shared options (`launchFlags`), where an
+option that is not given is read from (`launchVariables`), and the configuration layers that the
+options make (`launchConfiguration`, over the host's own defaults).
+
+- The options are `--model`, `--permission-mode` (`manual` means `default`), `--strict-tool-input`,
+  `--max-turns`, `--max-budget-usd`, `--mcp-config` (repeatable), `--strict-mcp-config`,
+  `--settings` and `--setting-sources`.
+- An option that is not given is read from a variable named: the brand's prefix, the host's part
+  (`ACP_` for the ACP launcher, none for the CLI), then the option's name in capitals with `_` for
+  `-` (`LABKIT_MAX_TURNS`, `LABKIT_ACP_MAX_TURNS`). `--mcp-config` takes one value from its
+  variable. An option given on the command line wins; an empty variable counts as not set; a
+  variable value that the option would not accept is that option's error.
+- A variable that is not an option's twin (`OTEL_EXPORTER_OTLP_ENDPOINT`) is read under its own
+  name, after the name with the brand's prefix and the host's part.
+- The layers, merged in order, the last write winning (`docs/agent-config.md`):
+  1. the host's defaults;
+  2. the user's file, and the project's and the local one when `--setting-sources` names them (they
+     still may not name extensions or MCP servers);
+  3. `--settings` (JSON, or a file of JSON or YAML);
+  4. with `--strict-mcp-config`, a layer that removes the MCP servers of the layers before it;
+  5. each `--mcp-config` (JSON, or a file of it, as Claude Code's `.mcp.json`);
+  6. the options: `--permission-mode` sets the permission plug-in's mode, `--max-turns` the turn
+     request limit, and `--max-budget-usd` the session's budget. A plug-in that an option sets is
+     added to the end of the model requests' list when the list does not have it.
+
+## Tests
+
+Each file has a test file beside it: `catalog.test.ts`, `local-server.test.ts`, `clients.test.ts`,
+`services.test.ts`, `directory.test.ts`, `record.test.ts`, `draft.test.ts`, `incomplete.test.ts`,
+`export.test.ts`, `logs.test.ts`, `launcher-logs.test.ts`, `redaction.test.ts`, `brand.test.ts`,
+`launch.test.ts`.

@@ -21,7 +21,7 @@ import { chooseModel, defaultModel, draftOf, opening, optionsOfDraft, saySetting
 const asked = (provider: string, model: string): Asked => ({ provider: ProviderName.make(provider), model: ModelName.make(model) });
 const option = (options: Options, name: keyof ModelSettings) => options.offered.find((each) => each.name === name);
 
-test("H7: another model keeps the settings as said, and the options follow it: an effort it does not take is now the nearest it does", async () => {
+test("choosing another model keeps the settings as given, and the options follow the new model: an effort it does not accept shows as the nearest it does", async () => {
   // gpt-6.1-sol takes effort max; gpt-5.5 goes no higher than xhigh.
   const before = draftOf({ model: asked("openai", "gpt-6.1-sol"), settings: { effort: "max", cache: "1h" } });
   const after = chooseModel(before, asked("openai", "gpt-5.5"));
@@ -32,7 +32,7 @@ test("H7: another model keeps the settings as said, and the options follow it: a
   expect(option(shownAfter, "effort") as unknown).toEqual({ _tag: "OneOf", name: "effort", now: "xhigh", values: ["low", "medium", "high", "xhigh"] });
 });
 
-test("H7: settings said anew replace the ones they name, and a setting not named stays as said", () => {
+test("settings given anew replace the ones they name, and a setting not named keeps its value", () => {
   const draft = draftOf({ model: asked("anthropic", "claude-opus-5-5"), settings: { effort: "high", thinking: "auto" } });
   expect(saySettings(draft, { effort: "low", cache: "5m" }).settings).toEqual({ effort: "low", thinking: "auto", cache: "5m" });
   // A draft made with nothing but its model says no setting, and has no system prompt and no tools.
@@ -50,7 +50,7 @@ const services = Layer.mergeAll(
 
 const look: ToolSpec = { name: ToolName.make("look"), description: "Reads a file.", input: { type: "object" }, kind: "read", replay: "safe" };
 
-test("H8: a session opened with the draft asks its model with its settings, has its system prompt and tools, and shows the draft's options", async () => {
+test("a session opened with the draft asks its model with its settings, has its system prompt and tools, and shows the draft's options", async () => {
   const draft = draftOf({
     model: asked("anthropic", "claude-opus-5-5"),
     settings: { thinking: "off", effort: "max", maxOutputTokens: TokenCount.make(4000) },
@@ -71,7 +71,7 @@ test("H8: a session opened with the draft asks its model with its settings, has 
   expect(fromFacts).toEqual(shown);
 });
 
-test("H8: a draft that says no setting, system prompt or tool opens a session with none", async () => {
+test("a draft with no setting, system prompt or tool opens a session with none", async () => {
   const draft = draftOf({ model: asked("openai", "gpt-5.5") });
   const [model, system, tools] = await runTest(
     Effect.gen(function* () {
@@ -85,7 +85,7 @@ test("H8: a draft that says no setting, system prompt or tool opens a session wi
   expect([model, system, tools]).toEqual([draft.model, undefined, []]);
 });
 
-test("H9: an output limit left unsaid defaults to 32768 tokens, or the model's own when lower; one said stays", () => {
+test("an output limit that is not given defaults to 32768 tokens, or the model's own when lower; a limit that is given stays", () => {
   const limitOf = (provider: string, model: string, settings?: ModelSettings) =>
     withDefaults(draftOf({ model: asked(provider, model), settings: { effort: "high", ...settings } }), capabilitiesOf(provider, model)).settings;
   // claude-opus-5-5 writes up to 128000 tokens; gpt-5.2-chat-latest up to 16384; nothing is known of the local model.
@@ -101,7 +101,7 @@ const source = (provider: string, models: ReadonlyArray<string> | undefined): Ca
   models: models?.map((model) => ModelName.make(model)),
 });
 
-test("H9: the model a draft starts with is the first the catalog lists; a catalog that lists none gives none", async () => {
+test("the model a draft starts with is the first that the catalog lists; a catalog that lists none returns none", async () => {
   const first = await runTest(defaultModel.pipe(Effect.provide(catalogOf([source("lan", undefined), source("anthropic", ["claude-a", "claude-b"]), source("localhost", ["qwen"])]))));
   // The first source did not answer, so it lists nothing.
   expect(first).toEqual(asked("anthropic", "claude-a"));

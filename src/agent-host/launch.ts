@@ -192,7 +192,7 @@ export const launchLayers = (
     return [...before, flagLayer(flags, before)];
   });
 
-/** The configuration for a host run in `project` (none: H20's) whose own defaults are `defaults`, and the layers it was made from. */
+/** Returns the configuration for a host run in `project` (none for a launcher before any session has a project) whose own defaults are `defaults`, and the layers it was made from. */
 export const launchConfiguration = (
   project: string | undefined,
   defaults: LayerSource,

@@ -148,13 +148,13 @@ model.
       trusted. Until then a project's layer may not name extensions or MCP servers (both run code;
       see `docs/agent-config.md`); once a folder is trusted, its layers may. A folder's `.env` is the
       folder's too: Bun reads it by itself where the agent runs, and the options' variables
-      (agent-host H19: `LABKIT_PERMISSION_MODE`, `LABKIT_SETTING_SOURCES`, `LABKIT_MCP_CONFIG`) can
+      (the launch variables: `LABKIT_PERMISSION_MODE`, `LABKIT_SETTING_SOURCES`, `LABKIT_MCP_CONFIG`) can
       loosen permission or start MCP servers; until the folder is trusted they are not to be read
       from it.
 - [ ] Turn-end hooks by name, as policies are: a hold recorded from the hook that made it, so
       `retryIncomplete` counts its own holds, not every hook's.
 - [ ] The product's name (Dan is thinking of `whitelabel-agent`): the default brand
-      (`agent-host/brand.ts`, agent-host H18) is still `labkit`, and with it the meta variable
+      (`agent-host/brand.ts`) is still `labkit`, and with it the meta variable
       (`LABKIT_BRAND`).
 
 - [ ] Plug-ins and `policies.yml`. Dan's decisions (2026-10-03):
@@ -338,7 +338,7 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 
 - [ ] Secrets in data the host does not hold (Dan, 2026-10-04): a provider's error body, an MCP
       server's stderr, a command's or a tool's output. Built: every log leaves out the values of
-      the environment's credentials and of credential fields (agent-host H14). To do: secrets that
+      the environment's credentials and of credential fields (`agent-host/redaction.ts`). To do: secrets that
       are not the environment's values (keys and tokens found by their patterns, as a secret
       scanner finds them); the session's facts and what the model is sent, which are not redacted;
       credentials' values under 8 characters, which the logs do not look for; and which variable

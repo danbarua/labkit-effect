@@ -41,7 +41,7 @@ const allTwins = {
   LABKIT_SETTING_SOURCES: "user,project",
 };
 
-test("H19: a flag not given is read from its variable, the brand's prefix and the flag's name in capitals; a flag given wins", async () => {
+test("a flag not given is read from its variable, the brand's prefix and the flag's name in capitals; a flag given wins", async () => {
   expect((await launched([], allTwins)).seen?.options).toEqual({
     model: "openai/gpt-5.5",
     permissionMode: "acceptEdits",
@@ -68,7 +68,7 @@ test("H19: a flag not given is read from its variable, the brand's prefix and th
   });
 });
 
-test("H19: the host's part comes after the brand's prefix (ACP_ for the ACP launcher), and another brand has its own; an empty variable is none", async () => {
+test("the host's part comes after the brand's prefix (ACP_ for the ACP launcher), and another brand has its own; an empty variable is none", async () => {
   const env = { LABKIT_MAX_TURNS: "1", LABKIT_ACP_MAX_TURNS: "2", WHITELABEL_AGENT_MAX_TURNS: "3", WHITELABEL_AGENT_ACP_MAX_TURNS: "4" };
   expect((await launched([], env)).seen?.options.maxTurns).toBe(1);
   expect((await launched([], env, ["ACP"])).seen?.options.maxTurns).toBe(2);
@@ -78,7 +78,7 @@ test("H19: the host's part comes after the brand's prefix (ACP_ for the ACP laun
   expect((await launched([], { LABKIT_MODEL: "", LABKIT_MAX_TURNS: "" })).seen?.options).toMatchObject({ model: undefined, maxTurns: undefined });
 });
 
-test("H19: a variable the flag would not take is the flag's error; a variable that is no flag's twin is read as it is named", async () => {
+test("a variable value that the flag would not accept is the flag's error; a variable that is no flag's twin is read under its own name", async () => {
   const refused = await launched([], { LABKIT_MAX_TURNS: "lots" });
   expect(Exit.isFailure(refused.exit)).toBe(true);
   expect(refused.seen).toBeUndefined();
@@ -86,7 +86,7 @@ test("H19: a variable the flag would not take is the flag's error; a variable th
   expect((await launched([], { OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel:4318" })).seen?.otel).toBe("http://otel:4318");
 });
 
-test("H20: the host's defaults are the first layer and the flags the last; manual is the default permission mode", async () => {
+test("the host's defaults are the first layer and the flags the last; manual is the default permission mode", async () => {
   const defaults: LayerSource = { name: "the host's defaults", trusted: true, value: { toolCalls: ["permissions"], modelRequests: [] } };
   const configuration = await runTest(
     launchConfiguration(join(testFolder(), "project"), defaults, { mcpConfig: [], strictMcpConfig: false, permissionMode: "manual", maxTurns: 4 }, { home: join(testFolder(), "home") }).pipe(

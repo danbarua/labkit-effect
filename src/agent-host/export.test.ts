@@ -66,7 +66,7 @@ const totals = (session: DrivenMachines) => {
   return transcript.slice(transcript.indexOf("## Totals"));
 };
 
-test("H10 H11: a recorded session: each turn's input, thinking, answer, calls with their outcomes and permission, how it ended; then the totals", () => {
+test("a recorded session: each turn's input, thinking, answer, calls with their outcomes and permission, how it ended; then the totals", () => {
   const session = opened();
   observe(session, asked("Tidy the folder.", [{ id: "ab12", mediaType: "image/png", size: 2048, name: "plan.png" }]));
   observe(
@@ -172,7 +172,7 @@ test("H10 H11: a recorded session: each turn's input, thinking, answer, calls wi
   );
 });
 
-test("H10: a turn with no ending is left running: a call whose response was not recorded shows where it arrived, with no outcome", () => {
+test("a turn with no ending is left running: a call whose response was not recorded shows where it arrived, with no outcome", () => {
   const session = opened();
   observe(session, asked("List the files."));
   observe(session, { _tag: "ToolCallArrived", turn: "turn-1", call: "c1", tool: "ls", input: json({}) });
@@ -202,7 +202,7 @@ test("H10: a turn with no ending is left running: a call whose response was not 
   );
 });
 
-test("H11: a tool's output is cut after 8 KiB, never inside a character, saying how much was left out; stored bytes are named, not read", () => {
+test("a tool's output is cut after 8 KiB, never inside a character, with the number of bytes omitted; stored bytes are named, not read", () => {
   const whole = "a".repeat(8 * 1024);
   expect(shownOutput(plain(whole))).toBe(lines("```", whole, "```").trimEnd());
   // "é" is two bytes, at 8191 and 8192: the cut falls inside it, so it goes before it.
@@ -213,7 +213,7 @@ test("H11: a tool's output is cut after 8 KiB, never inside a character, saying 
   expect(shownOutput(plain("```\nx\n```"))).toBe(lines("````", "```", "x", "```", "````").trimEnd());
 });
 
-test("H10 H11: a change of model: the heading names each model asked, the transcript where it was taken, and the totals price the responses and gauge the model asked now", () => {
+test("a change of model: the heading names each model asked, the transcript where it was taken, and the totals price the responses and gauge the model asked now", () => {
   const session = opened();
   observe(session, asked("Hello."));
   observe(session, responded("turn-1", [{ _tag: "Text", text: "Hi." }], { usage: { input: 50, output: 5 } }));
@@ -254,7 +254,7 @@ const factsOf = (entries: ReadonlyArray<{ readonly observation: unknown } | { re
     ),
   );
 
-test("H10 H11: the transcript names each input's speaker, each way a tool call failed, an unrecognised part, dropped input, and each way a turn ended without an answer", () => {
+test("the transcript names each input's speaker, each way a tool call failed, an unrecognised part, dropped input, and each way a turn ended without an answer", () => {
   const facts = factsOf([
     { observation: boringOpening() },
     { observation: { _tag: "InputArrived", from: { _tag: "System" }, text: "Check the files." } },

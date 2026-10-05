@@ -67,13 +67,13 @@ the core; a launcher runs it with `Agent.run` or `Agent.runStdio`, giving it the
 (`ModelCatalog`) and the file system. `HostOptions`: `directory`, the session directory's root;
 `world`, `"editor"` (the default), `"local"` or a world of the host's own; `model`, `provider/model`
 to start sessions with (else the catalog's first, `defaultModel`); `configFlags`, the launcher's
-options that make each session's configuration (agent-host H19, H20); `home`, where the user's
+options that make each session's configuration (`docs/agent-host.md`, Launch options); `home`, where the user's
 file is; `retries` and `maxTurnRequests`, which make its defaults (`acpDefaults`: permission on
 tool calls, `maxTurnRequests` on model requests, `retryIncomplete` on a turn's end unless retries
 are 0, and the model's commands given the environment without its credentials); `services`, what a
 session runs with given its world's runner, before its configuration's seam lists
 (`SessionServices`); `pageSize`, the most sessions a page of `session/list` gives (50); `brand`,
-what it goes by (agent-host H18; labkit's when left out). It advertises
+what it goes by (`docs/agent-host.md`, Brand; labkit's when not given). It advertises
 `loadSession`, the session methods `close`, `list` and `resume`, and no prompt content but text and
 resource links; no fork and no auth methods.
 
@@ -108,7 +108,7 @@ twice.
   `makeHost` on this process's stdin and stdout (`Agent.runStdio`) with the model catalog of the
   providers whose key is set and the local server (`KeyedAndLocalCatalog`) and the log file of
   `agent-host/launcher-logs.ts`. It runs as the brand it is given, else the one the environment
-  names (agent-host H18). Its options (`launcherFlags`) are those both hosts take (agent-host H19)
+  names (`docs/agent-host.md`, Brand). Its options (`launcherFlags`) are those both hosts take (`docs/agent-host.md`, Launch options)
   and its own: `--sessions-dir` (`sessionsDirectoryOf`; default `~/.<brand>/sessions`),
   `--local-tools` and `--retries`; each not given is read from its variable, the brand's prefix and
   `ACP_` before its name (`LABKIT_ACP_MODEL`). `hostOptionsOf` gives the host's options from them.
@@ -267,7 +267,7 @@ twice.
 - AG15. Sessions are kept in `--sessions-dir` (`<PREFIX>ACP_SESSIONS_DIR`) when it is given, else in
   `~/.<brand>/sessions` (`LABKIT_ACP_SESSIONS_DIR` and `~/.labkit/sessions` for labkit's).
 - AG16. By default a turn whose response had thinking but no answer (`Incomplete`) is asked once
-  more for its answer (agent-host H15): an answer then reaches the client as `agent_message_chunk`
+  more for its answer (`retryIncomplete`): an answer then reaches the client as `agent_message_chunk`
   and the prompt ends `end_turn`, with no warning logged; with none again the turn ends
   `Incomplete` after that one retry, `end_turn` with no answer message. The feedback is not sent to
   the client (PJ1). `--retries` (`LABKIT_ACP_RETRIES`) sets how many times it is asked (0: never);
@@ -313,7 +313,7 @@ twice.
   (`<PREFIX>ACP_MODEL`). The launcher's options are the brand's variables (`<PREFIX>ACP_*`), and no
   other brand's.
 - AG25. A session's configuration is read when `session/new`, `session/load` or `session/resume`
-  makes it, in layers (agent-host H20): the host's defaults (`acpDefaults`), the user's file, the
+  makes it, in layers (`docs/agent-host.md`, Launch options): the host's defaults (`acpDefaults`), the user's file, the
   session's working folder's files when `--setting-sources` names them, the launcher's
   `--settings`, `--mcp-config` and flags, then the MCP servers the client names: each replaces the
   configuration's server of its name whole. A configuration that cannot be used refuses the request

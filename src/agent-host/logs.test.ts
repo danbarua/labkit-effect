@@ -7,14 +7,14 @@ import { runTest } from "../../tests/support/run.ts";
 import { test, testFolder } from "../../tests/support/test.ts";
 import { LogsToFile } from "./logs.ts";
 
-test("H6: log lines go to the file named, in a folder made for it when missing, written by the time the layer is closed", async () => {
+test("log lines go to the file named, in a folder made for it when missing, written by the time the layer is closed", async () => {
   const file = `${testFolder()}/not/yet/made/host.log`;
   await runTest(Effect.logInfo("host.started", { port: 1 }).pipe(Effect.provide(LogsToFile(file).pipe(Layer.provide(BunServices.layer)))));
   const text = await Bun.file(file).text();
   expect(text).toContain("host.started");
 });
 
-test("H14: the CLI's log leaves out the environment's secrets wherever they are, and a credential field's value; a value under 8 characters is said, not looked for", async () => {
+test("the CLI's log redacts the environment's secrets wherever they are, and a credential field's value; a value under 8 characters is reported, not searched for", async () => {
   const file = `${testFolder()}/host.log`;
   const env = { GITHUB_PAT: "github_pat_0123456789", OPENAI_API_KEY: "set", HOME: "/home/x" };
   await runTest(

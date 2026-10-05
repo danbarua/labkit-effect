@@ -29,7 +29,7 @@ const verdicts = (mode: PermissionMode, canAsk: boolean, tools: ReadonlyArray<st
     }),
   );
 
-test("H4: a call is judged by its tool's kind in the catalog the session opened with, in the mode given, and asked only when someone can answer", async () => {
+test("a call is judged by its tool's kind in the catalog that the session opened with, in the given mode, and asked about only when someone can answer", async () => {
   // `elsewhere` is in no catalog the session opened with: taken to change things.
   expect(await verdicts("acceptEdits", false, ["look", "change", "elsewhere"])).toEqual(["runs", "runs", "vetoed"]);
   expect(await verdicts("default", true, ["look", "change", "elsewhere"])).toEqual(["runs", "asks", "asks"]);

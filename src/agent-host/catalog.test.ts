@@ -46,7 +46,7 @@ const withKeys = async <A>(keys: Readonly<Record<string, string | undefined>>, r
   }
 };
 
-test("H1: the catalog's sources are the well-known models of each provider with a key set, then the local server's", async () => {
+test("the catalog's sources are the well-known models of each provider with a key set, then the local server's", async () => {
   const sources = await withKeys({ ANTHROPIC_API_KEY: "set", OPENAI_API_KEY: undefined, XAI_API_KEY: "" }, () =>
     runTest(Effect.gen(function* () { return yield* (yield* ModelCatalog).sources; }).pipe(Effect.provide(KeyedAndLocalCatalog))),
   );
@@ -56,14 +56,14 @@ test("H1: the catalog's sources are the well-known models of each provider with 
   expect([local?.provider, local?.at]).toEqual(["localhost", localServer]);
 });
 
-test("H1: the models offered are each source's in turn; a source that did not answer offers none", async () => {
+test("the models offered are each source's in turn; a source that did not answer offers none", async () => {
   const offered = await runTest(
     askable.pipe(Effect.provide(catalogOf([source("anthropic", ["claude-a", "claude-b"]), source("lan", undefined, "http://lan"), source("localhost", ["qwen"])]))),
   );
   expect(offered.map(({ provider, model }) => `${provider}/${model}`)).toEqual(["anthropic/claude-a", "anthropic/claude-b", "localhost/qwen"]);
 });
 
-test("H2: a name gives a well-known provider's model, as named or by its name alone, or a model another source lists", async () => {
+test("a name resolves to a well-known provider's model, as provider/model or by the model name alone, or to a model that another source lists", async () => {
   const sources = [source("openai", ["gpt-5.5"]), source("localhost", ["qwen", "org/model"])];
   expect(await resolved("gpt-5.5", sources)).toBe("openai/gpt-5.5");
   // A well-known provider takes a model it does not list, named with it.
@@ -72,14 +72,14 @@ test("H2: a name gives a well-known provider's model, as named or by its name al
   expect(await resolved("localhost/org/model", sources)).toBe("localhost/org/model");
 });
 
-test("H2: a name no source has fails with the names it is close to; another source takes only what it lists", async () => {
+test("a name that no source has fails with the names it is close to; another source accepts only the models it lists", async () => {
   const sources = [source("openai", ["gpt-5.5"]), source("localhost", ["qwen"])];
   expect(await resolved("GPT-5.5-PRO", sources)).toEqual({ notFound: ["openai/gpt-5.5-pro"] });
   expect(await resolved("localhost/QWEN", sources)).toEqual({ notFound: ["localhost/qwen"] });
   expect(await resolved("nothing-like-it", sources)).toEqual({ notFound: [] });
 });
 
-test("H2: a model of a source that did not answer, or of a well-known provider with no key, cannot be asked", async () => {
+test("a model of a source that did not answer, or of a well-known provider with no key, cannot be asked", async () => {
   const sources = [source("openai", ["gpt-5.5"]), source("localhost", undefined, "http://localhost:8000/v1")];
   expect(await resolved("localhost/qwen", sources)).toEqual({ notAnswering: "localhost/qwen", at: "http://localhost:8000/v1" });
   // xAI is well known, and not in the catalog: its key is not set.
