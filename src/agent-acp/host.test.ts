@@ -16,6 +16,7 @@ import * as Agent from "effective-acp/agent";
 import { fromWebStreams } from "effective-acp/stdio";
 import type { Brand } from "../agent-host/brand.ts";
 import type { ConfigFlags } from "../agent-host/launch.ts";
+import type { Environment } from "../agent-process/environment.ts";
 import { type CatalogSource, ModelCatalog } from "../agent-host/catalog.ts";
 import { sessionFolderOf, storeFileOf } from "../agent-host/directory.ts";
 import { startFakeHttpServer } from "../../tests/support/mcp-http-server.ts";
@@ -1262,6 +1263,25 @@ test("AL2: the first prompt writes the session's record, its working folder and 
     annotations: { session: result.sessionId, connection: expect.any(String) },
     details: { cwd: host.cwd, titled: true },
   });
+});
+
+test("with only the host's defaults, a session's world is given this process's environment without its credential variables", async () => {
+  process.env["LABKIT_ACP_TEST_TOKEN"] = "inherited";
+  process.env["LABKIT_ACP_TEST_PLAIN"] = "plain";
+  const given: Array<Environment | undefined> = [];
+  const recording: World = { open: (opening) => Effect.sync(() => given.push(opening.environment)).pipe(Effect.andThen(echoWorld.open(opening))) };
+  const host = startHost({ world: recording, script: [answer({ _tag: "Text", text: "Hi." })] });
+  await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(sessionId, "Hello"));
+  });
+  await host.stop();
+  expect(given.length).toBeGreaterThan(0);
+  for (const environment of given) {
+    expect(environment?.["LABKIT_ACP_TEST_PLAIN"]).toBe("plain");
+    expect(environment).not.toHaveProperty("LABKIT_ACP_TEST_TOKEN");
+  }
 });
 
 test("AL3 AL8: session/load in a new process replays the stored turn in order before its answer, answers with the config options, then sends the commands, title and usage; a later prompt is live, repeats nothing and reaches the model with the earlier turn", async () => {

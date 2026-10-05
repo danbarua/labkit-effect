@@ -1,10 +1,12 @@
 /** The MCP client, against a small server over stdio (`tests/support/mcp-server.ts`). */
 
 import { expect } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Logger } from "effect";
 import { runTest } from "../../tests/support/run.ts";
-import { test } from "../../tests/support/test.ts";
+import { test, testFolder } from "../../tests/support/test.ts";
 import { type ClientInfo, connectStdio, McpFailed, protocolVersion, type ToolResult } from "./client.ts";
 import { logKeys } from "./log-keys.ts";
 
@@ -74,4 +76,17 @@ test("MC4: a request the server answers with an error fails with McpFailed, nami
   const { value } = await connected((connection) => Effect.flip(connection.call("no_such_tool", {})));
   expect(value).toBeInstanceOf(McpFailed);
   expect(value.message).toBe("fake: tools/call no_such_tool failed");
+});
+
+test("connectStdio starts the server with this process's environment without its credential variables, plus the server's own env", async () => {
+  process.env["LABKIT_MCP_TEST_TOKEN"] = "inherited";
+  process.env["LABKIT_MCP_TEST_PLAIN"] = "plain";
+  const file = join(testFolder(), "env.txt");
+  // The shell writes the environment it was started with, then becomes the test server.
+  const server = { ...fake, command: "/bin/sh", args: ["-c", `env > "${file}"; exec "$0" "$1"`, fake.command, ...fake.args], env: { SERVER_TOKEN: "given" } };
+  await runTest(connectStdio(server, roots).pipe(Effect.flatMap((connection) => connection.tools), Effect.provide(BunServices.layer)));
+  const names = readFileSync(file, "utf8").split("\n").map((line) => line.split("=")[0]);
+  expect(names).toContain("LABKIT_MCP_TEST_PLAIN");
+  expect(names).not.toContain("LABKIT_MCP_TEST_TOKEN");
+  expect(readFileSync(file, "utf8")).toContain("SERVER_TOKEN=given");
 });

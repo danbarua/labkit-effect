@@ -2,11 +2,12 @@
 
 import { expect } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
-import { Deferred, Effect, Exit, Scope, Stream } from "effect";
+import { Deferred, Duration, Effect, Exit, Layer, Logger, PlatformError, Scope, Sink, Stream } from "effect";
 import fc from "fast-check";
-import type { ChildProcessSpawner } from "effect/process";
+import { ChildProcessSpawner } from "effect/process";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
+import { logKeys } from "./log-keys.ts";
 import { initialProcessState, type ProcessState, stepProcess } from "./machine.ts";
 import { makeProcessGroup, type ProcessGroup } from "./process-group.ts";
 
@@ -78,6 +79,76 @@ test("PG3: a command that cannot be started is Failed, with the reason", async (
   );
   expect(failed?._tag).toBe("Failed");
   expect(failed?._tag === "Failed" ? failed.reason : "").toContain("/no/such/command");
+});
+
+test("after a run exits by itself, onRun reads the run's output to its end before the run's scope closes", async () => {
+  const read = await runTest(
+    Effect.gen(function* () {
+      const output = yield* Deferred.make<string>();
+      const group = yield* makeProcessGroup(sh("echo last words"), (_run, handle) =>
+        Effect.sleep("200 millis").pipe(
+          Effect.andThen(handle.stdout.pipe(Stream.decodeText, Stream.mkString)),
+          Effect.flatMap((text) => Deferred.succeed(output, text)),
+          Effect.ignore,
+        ),
+      );
+      yield* group.start;
+      return yield* Deferred.await(output).pipe(Effect.timeout("5 seconds"));
+    }).pipe(Effect.provide(BunServices.layer)),
+  );
+  expect(read).toBe("last words\n");
+});
+
+test("when onRun is still running 2 seconds after its run exits by itself, the run's scope closes and interrupts onRun", async () => {
+  const waited = await runTest(
+    Effect.gen(function* () {
+      const closed = yield* Deferred.make<void>();
+      const group = yield* makeProcessGroup(sh("exit 0"), () => Effect.addFinalizer(() => Deferred.succeed(closed, undefined)).pipe(Effect.andThen(Effect.never)));
+      yield* group.start;
+      yield* until(group, (state) => state._tag === "Exited");
+      const [elapsed] = yield* Deferred.await(closed).pipe(Effect.timeout("5 seconds"), Effect.timed);
+      return Duration.toMillis(elapsed);
+    }).pipe(Effect.provide(BunServices.layer)),
+  );
+  expect(waited).toBeGreaterThan(1500);
+  expect(waited).toBeLessThan(3000);
+});
+
+/** A spawner whose one process has pid 42, writes nothing, and whose exit code fails to read with an error that names no signal. */
+const exitUnreadable = Layer.succeed(
+  ChildProcessSpawner.ChildProcessSpawner,
+  ChildProcessSpawner.make(() =>
+    Effect.succeed(
+      ChildProcessSpawner.makeHandle({
+        pid: ChildProcessSpawner.ProcessId(42),
+        exitCode: Effect.fail(PlatformError.systemError({ _tag: "Unknown", module: "ChildProcess", method: "exitCode", description: "the exit was lost" })),
+        isRunning: Effect.succeed(false),
+        kill: () => Effect.void,
+        stdin: Sink.drain,
+        stdout: Stream.empty,
+        stderr: Stream.empty,
+        all: Stream.empty,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+        unref: Effect.succeed(Effect.void),
+      }),
+    ),
+  ),
+);
+
+test("when the spawner reports neither an exit code nor a signal, the run is Exited with neither, and process.run.exit_unread is logged as a warning with the error", async () => {
+  const logged: Array<{ readonly level: string; readonly message: unknown }> = [];
+  const logging = Logger.layer([Logger.make((options) => logged.push({ level: options.logLevel, message: options.message }))], { mergeWithExisting: true });
+  const exited = await runTest(
+    Effect.gen(function* () {
+      const group = yield* makeProcessGroup(sh("exit 0"));
+      yield* group.start;
+      return yield* until(group, (state) => state._tag === "Exited");
+    }).pipe(Effect.provide(Layer.mergeAll(exitUnreadable, logging))),
+  );
+  expect(exited).toEqual({ _tag: "Exited", run: 1, code: undefined, signal: undefined });
+  const warned = logged.filter((each) => each.level === "Warn" && Array.isArray(each.message) && each.message[0] === logKeys.process.exitUnread);
+  expect(warned.map((each) => (each.message as [string, unknown])[1])).toMatchObject([{ name: "test", run: 1, error: expect.stringContaining("the exit was lost") }]);
 });
 
 /** A group whose run starts a child in the background and says its pid: the group's pid and the child's. */

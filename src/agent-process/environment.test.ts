@@ -2,11 +2,12 @@
 
 import { expect } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
-import { Deferred, Effect, Stream } from "effect";
+import { Deferred, Effect, Layer, Logger, Stream } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
 import { shouldRedact, redactedArgs, withoutCredentials } from "./environment.ts";
-import { makeProcessGroup } from "./process-group.ts";
+import { logKeys } from "./log-keys.ts";
+import { makeProcessGroup, type ProcessCommand } from "./process-group.ts";
 
 test("PE1: a variable holds a credential if its name includes known words", () => {
   const held = ["ANTHROPIC_API_KEY", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "SSH_AUTH_SOCK", "npm_config__authToken", "DB_PASSWORD", "GH_PAT", "my.secret", "OPENAI_APIKEY"];
@@ -65,4 +66,35 @@ test("PE2: A run receives this process's environment minus credential variables 
   expect(names).toContain("LABKIT_TEST_PLAIN");
   expect(names).not.toContain("LABKIT_TEST_TOKEN");
   expect(printed).toContain("SERVER_TOKEN=given");
+});
+
+/** Starts one run of `command` and returns what the run printed, the details of each log event with a given key, and every log message as JSON text. */
+const loggedBy = (command: ProcessCommand) =>
+  Effect.gen(function* () {
+    const logged: Array<unknown> = [];
+    const logging = Logger.layer([Logger.make((options) => logged.push(options.message))], { mergeWithExisting: true });
+    const printed = yield* Effect.gen(function* () {
+      const output = yield* Deferred.make<string>();
+      const group = yield* makeProcessGroup(command, (_run, handle) => handle.stdout.pipe(Stream.decodeText, Stream.mkString, Effect.flatMap((text) => Deferred.succeed(output, text)), Effect.ignore));
+      yield* group.start;
+      return yield* Deferred.await(output).pipe(Effect.timeout("5 seconds"));
+    }).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, logging)));
+    const details = (key: string) => logged.flatMap((message) => (Array.isArray(message) && message[0] === key ? [message[1] as Record<string, unknown>] : []));
+    return { printed, details, text: JSON.stringify(logged) };
+  });
+
+test("a run's arguments are logged with each credential flag's value redacted, and the process receives the original values", async () => {
+  const { printed, details } = await runTest(loggedBy({ name: "args", command: "/bin/sh", args: ["-c", 'printf "%s" "$0"', "--token=ghp_secret"], env: {} }));
+  expect(printed).toBe("--token=ghp_secret");
+  const changes = details(logKeys.process.changed);
+  expect(changes.length).toBeGreaterThan(0);
+  for (const change of changes) expect(change["args"]).toEqual(["-c", 'printf "%s" "$0"', "--token=<left out>"]);
+});
+
+test("a run's environment is logged by variable names only: the credential variables removed, and the variables the command sets", async () => {
+  process.env["LABKIT_TEST_LOGGED_TOKEN"] = "inherited-value";
+  const { details, text } = await runTest(loggedBy({ name: "env", command: "/bin/sh", args: ["-c", "exit 0"], env: { SERVER_TOKEN: "given-value" } }));
+  expect(details(logKeys.process.environment)).toMatchObject([{ name: "env", run: 1, leftOut: expect.arrayContaining(["LABKIT_TEST_LOGGED_TOKEN"]), set: ["SERVER_TOKEN"] }]);
+  expect(text).not.toContain("inherited-value");
+  expect(text).not.toContain("given-value");
 });
