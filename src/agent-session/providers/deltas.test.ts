@@ -162,3 +162,26 @@ test("V4: a request that fails ends with ModelResponseEnded too", async () => {
   const passed = await streamedIn(openAiCompatModelClient({ times: 0, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(url))));
   expect(tags(passed)).toEqual(["ModelResponseEnded"]);
 });
+
+test("a delta that adds no text to its part is not passed on", async () => {
+  const event = (data: Record<string, unknown>) => `event: ${String(data["type"])}\ndata: ${JSON.stringify(data)}\n\n`;
+  const url = serving(
+    () =>
+      new Response(
+        [
+          { type: "message_start", message: { id: "msg_1" } },
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "" } },
+          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "5." } },
+          { type: "content_block_stop", index: 0 },
+          { type: "message_delta", delta: { stop_reason: "end_turn" } },
+          { type: "message_stop" },
+        ]
+          .map(event)
+          .join(""),
+        { headers: { "content-type": "text/event-stream" } },
+      ),
+  );
+  const passed = await streamedIn(AnthropicModelClient.pipe(Layer.provide(anthropicAt(new URL("/v1/messages", url)))));
+  expect(passed.flatMap((item) => (item._tag === "ModelDelta" ? [item.text as string] : []))).toEqual(["5."]);
+});

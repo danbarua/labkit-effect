@@ -6,7 +6,7 @@
 import { afterAll, expect } from "bun:test";
 import { Effect, Layer, Logger, PubSub } from "effect";
 import { Millis, TurnId } from "../../agent-machine/names.ts";
-import type { Observation } from "../../agent-machine/observation.ts";
+import type { CapturedObservation, Observation } from "../../agent-machine/observation.ts";
 import { openSession } from "../loop.ts";
 import { EphemeralSessionStore } from "../session-store.ts";
 import { ModelStreamInterval } from "../model-stream.ts";
@@ -290,6 +290,70 @@ test("V1: while a response arrives, its events and each completed part are passe
   expect(chunks).toHaveLength(9 + 6);
   expect(passed.every((each) => each.turn === "turn-1")).toBe(true);
   expect(parts(facts)).toEqual([["Text", "ToolCall"], ["Text"]]);
+});
+
+test("a completed part is passed on when it completes, with the events held before it, although the interval has not passed", async () => {
+  const partPassed = Promise.withResolvers<void>();
+  let passedBeforeEnd = false;
+  const event = (data: Record<string, unknown>) => new TextEncoder().encode(`event: ${String(data["type"])}\ndata: ${JSON.stringify(data)}\n\n`);
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      await request.json();
+      // The text block is complete; the stream stays open until the part has been passed on, or 2 seconds.
+      return new Response(
+        new ReadableStream({
+          async start(controller) {
+            controller.enqueue(event({ type: "message_start", message: { id: "msg_1" } }));
+            controller.enqueue(event({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }));
+            controller.enqueue(event({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "5." } }));
+            controller.enqueue(event({ type: "content_block_stop", index: 0 }));
+            passedBeforeEnd = await Promise.race([partPassed.promise.then(() => true), Bun.sleep(2000).then(() => false)]);
+            controller.enqueue(event({ type: "message_delta", delta: { stop_reason: "end_turn" } }));
+            controller.enqueue(event({ type: "message_stop" }));
+            controller.close();
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    },
+  });
+  stops.push(() => server.stop(true));
+  const seen = await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
+      const streamed = yield* session.streamed;
+      const seen: Array<CapturedObservation> = [];
+      yield* Effect.forkScoped(
+        Effect.forever(
+          PubSub.take(streamed).pipe(
+            Effect.map((item) => {
+              seen.push(item);
+              if (item._tag === "ModelPartArrived") partPassed.resolve();
+            }),
+          ),
+        ),
+      );
+      yield* session.observe(boringOpening(smolCatalog));
+      yield* session.observe(input);
+      yield* session.idle;
+      return seen;
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(
+          BoringModelProvider,
+          TurnContextAssembler,
+          AnthropicModelClient.pipe(Layer.provide(anthropicAt(new URL("/v1/messages", server.url)))),
+          CountingTurns,
+          SmolToolRunner,
+        ),
+      ),
+      Effect.provideService(ModelStreamInterval, Millis.make(3_600_000)),
+    ),
+  );
+  expect(passedBeforeEnd).toBe(true);
+  expect(seen.flatMap((item) => (item._tag === "ModelDelta" ? [item.text as string] : []))).toEqual(["5."]);
 });
 
 test("TC2 TC3: a tool call is run as soon as it is complete in the stream, before the response has ended; its result follows the response", async () => {
