@@ -160,7 +160,7 @@ interface HostRun {
 function startHost(
   options: {
     readonly script?: ReadonlyArray<Reply>;
-    readonly world?: World;
+    readonly world?: "editor" | "local" | World;
     readonly sources?: ReadonlyArray<CatalogSource>;
     readonly services?: (runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>;
     readonly pageSize?: number;
@@ -1755,4 +1755,97 @@ test("AG3: a call that ends while its permission request is out, its turn cancel
   });
   await host.stop();
   expect(cancelled).toBe(true);
+});
+
+test("AG5: changes made while a turn runs are held as one: the later model and permission mode, and every setting, the later's winning", async () => {
+  const started = Deferred.makeUnsafe<void>();
+  const release = Deferred.makeUnsafe<void>();
+  const host = startHost({
+    world: echoWorld,
+    script: [heldCall({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "1" } }, started, release), answer({ _tag: "Text", text: "One." })],
+  });
+  const { app } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    const first = ctx.request("session/prompt", say(sessionId, "One"));
+    await Effect.runPromise(Deferred.await(started));
+    const changes: ReadonlyArray<readonly [string, string]> = [
+      ["permission_mode", "acceptEdits"],
+      ["model", "openai/gpt-6-luna"],
+      ["effort", "low"],
+      ["max_output_tokens", "8192"],
+      ["max_output_tokens", "4096"],
+      ["permission_mode", "bypassPermissions"],
+    ];
+    for (const [configId, value] of changes) await ctx.request("session/set_config_option", { sessionId, configId, value });
+    await Effect.runPromise(Deferred.succeed(release, undefined));
+    await first;
+    const after = await ctx.request("session/set_config_option", { sessionId, configId: "effort", value: "low" });
+    return { sessionId, after };
+  });
+  await host.stop();
+  const facts = await factsOn(storeFileOf(host.directory, result.sessionId));
+  expect(observed(facts).flatMap((fact) => (fact.observation._tag === "ModelChangeArrived" ? [fact.observation] : [])) as unknown).toMatchObject([
+    { provider: "openai", model: "gpt-6-luna", settings: { effort: "low", maxOutputTokens: 4096 } },
+  ]);
+  expect(result.after.configOptions.find((option) => option.id === "permission_mode")).toMatchObject({ currentValue: "bypassPermissions" });
+});
+
+test("AG19: an embedded file with no media type is text/plain when it is text and application/octet-stream when it is bytes; a prompt with no files attaches none", async () => {
+  const host = startHost({ script: [answer({ _tag: "Text", text: "Seen." }), answer({ _tag: "Text", text: "Hi." })] });
+  const sessionId = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", {
+      sessionId: created.sessionId,
+      prompt: [
+        { type: "text", text: "What are these?" },
+        { type: "resource", resource: { uri: "file:///work/notes", text: "Notes" } },
+        { type: "resource", resource: { uri: "file:///work/data", blob: Buffer.from([1, 2, 3]).toString("base64") } },
+      ],
+    });
+    await ctx.request("session/prompt", say(created.sessionId, "Hello"));
+    return created.sessionId;
+  });
+  await host.stop();
+  const inputs = observed(await factsOn(storeFileOf(host.directory, sessionId))).flatMap((fact) => (fact.observation._tag === "InputArrived" ? [fact.observation] : []));
+  expect(inputs[0]).toMatchObject({ attachments: [{ mediaType: "text/plain", name: "notes" }, { mediaType: "application/octet-stream", name: "data" }] });
+  expect(inputs[1] !== undefined && "attachments" in inputs[1]).toBe(false);
+});
+
+test("AG12: the local world offers the workspace tools, and the settings written say the world is local", async () => {
+  const host = startHost({ world: "local", script: [answer({ _tag: "Text", text: "Hi." })] });
+  const sessionId = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "Hello"));
+    return created.sessionId;
+  });
+  await host.stop();
+  const facts = await factsOn(storeFileOf(host.directory, sessionId));
+  expect((await Effect.runPromise(immutableToolCatalogOf(facts))).map((tool): string => tool.name)).toContain("list_dir");
+  const written = JSON.parse(readFileSync(join(sessionFolderOf(host.directory, sessionId), "effective-settings.json"), "utf8"));
+  expect(written.host).toMatchObject({ world: "local" });
+});
+
+test("AL7: a session/load of a session still starting on this connection is -32602", async () => {
+  const stored = await storedSession("Echo ping", echoTurn);
+  const opening = Deferred.makeUnsafe<void>();
+  const release = Deferred.makeUnsafe<void>();
+  const slowWorld: World = {
+    open: (given) => Deferred.succeed(opening, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.andThen(echoWorld.open(given))),
+  };
+  const host = startHost({ world: slowWorld });
+  const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const first = ctx.request("session/load", { sessionId: stored.sessionId, cwd: host.cwd, mcpServers: [] });
+    await Effect.runPromise(Deferred.await(opening));
+    const second = await failure(ctx.request("session/load", { sessionId: stored.sessionId, cwd: host.cwd, mcpServers: [] }));
+    await Effect.runPromise(Deferred.succeed(release, undefined));
+    await first;
+    return second;
+  });
+  await host.stop();
+  expect(result).toMatchObject({ code: -32602, message: expect.stringContaining("already loaded") });
 });
