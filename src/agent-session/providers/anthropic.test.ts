@@ -404,7 +404,7 @@ test("another provider's thinking and blocks are left out, and logged the first 
   ]);
   const reason = "produced by other, not boring";
   // One line for a request, describing each part left out and where it came from; once for each model.
-  const lines = logged.filter((line) => Array.isArray(line) && line[0] === logKeys.provider.partLeftOut) as Array<[string, Record<string, unknown>]>;
+  const lines = logged.filter((line) => Array.isArray(line) && line[0] === logKeys.provider.partsOmitted) as Array<[string, Record<string, unknown>]>;
   expect(lines.map(([, details]) => [details["turn"], details["to"], details["count"]])).toEqual([
     ["turn-2", "boring/boring-1", 2],
     ["turn-4", "boring/boring-2", 2],

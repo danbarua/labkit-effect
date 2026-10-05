@@ -12,7 +12,7 @@ export const logKeys = {
   sessionStore: {
     /**
      * The file-backed store opened a session file whose lock names a process that is not running,
-     * or names no process, and took the lock over. The details carry what the lock file held.
+     * or names no process, and took the lock over. The details include the lock file's text (`contents`).
      */
     lockTakenOver: "session_store.lock_taken_over",
     /** The file-backed store could not flush the session file's folder to the disk after creating the file; the details carry the error. */
@@ -34,7 +34,7 @@ export const logKeys = {
     /** A response ended while parts of it were still arriving; they are not recorded. The details name them. */
     partCut: "provider.response.part_cut",
     /** A part of an earlier response was not sent; the details say which part and why. */
-    partLeftOut: "provider.request.parts_left_out",
+    partsOmitted: "provider.request.parts_omitted",
     fileAsPointer: "provider.request.file_as_pointer",
   },
   loop: {

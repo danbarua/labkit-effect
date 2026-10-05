@@ -61,7 +61,7 @@ import {
   endingOf,
   isObject,
   type Json,
-  type LeftOutLogged,
+  type OmittedLogged,
   logSupplied,
   renderToolResult,
   type Shaped,
@@ -367,7 +367,7 @@ export const openAiRequests = (
 ): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
-    const leftOutLogged = yield* Ref.make<LeftOutLogged>(new Set());
+    const omittedLogged = yield* Ref.make<OmittedLogged>(new Set());
     return (target, context, turn) => {
       const settled = settle(target);
       return filesIn(context).pipe(
@@ -379,7 +379,7 @@ export const openAiRequests = (
           body: { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true },
         };
         return reportAdjusted(turn, target, settled).pipe(
-          Effect.andThen(logSupplied(sent.supplied, target, turn, leftOutLogged)),
+          Effect.andThen(logSupplied(sent.supplied, target, turn, omittedLogged)),
           Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
         );
         }),

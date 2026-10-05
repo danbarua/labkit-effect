@@ -305,7 +305,7 @@ test.each([["not a pid"], [""], ["0"], ["-1"]])("a lock file that names no proce
   );
   expect(opened).toBe(String(process.pid));
   const warned = logged.filter((each) => each.level === "Warn" && Array.isArray(each.message) && each.message[0] === logKeys.sessionStore.lockTakenOver);
-  expect(warned.map((each) => (each.message as [string, unknown])[1])).toMatchObject([{ file, held, reason: "the lock file names no process" }]);
+  expect(warned.map((each) => (each.message as [string, unknown])[1])).toMatchObject([{ file, contents: held, reason: "the lock file names no process" }]);
 });
 
 /** A logger layer that adds each log line's level and message to `logged`. */

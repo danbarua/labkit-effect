@@ -6,7 +6,7 @@ import { ProviderName, ThinkingText, WindowId } from "../agent-machine/names.ts"
 import { receivedJson } from "./received.ts";
 import { test } from "../../tests/support/test.ts";
 import type { ContextPart } from "./contracts.ts";
-import { blobPointer, leftOut } from "./shaping.ts";
+import { blobPointer, omittedPart } from "./shaping.ts";
 
 const blob = (size: number) => ({ id: BlobId.make("abc"), mediaType: MediaType.make("image/png"), size });
 
@@ -25,7 +25,7 @@ test.each([
 test("a part left out that holds no text is described by its JSON", () => {
   const part: ContextPart = { _tag: "File", blob: blob(10) };
   const text = JSON.stringify(part);
-  expect(leftOut(part, "not taken").supplied[0]?.details).toMatchObject({ part: "File", chars: text.length, start: text.slice(0, 120), reason: "not taken" });
+  expect(omittedPart(part, "not taken").supplied[0]?.details).toMatchObject({ part: "File", chars: text.length, start: text.slice(0, 120), reason: "not taken" });
 });
 
 test("a part of a provider's compaction left out is said to be from that compaction, by its window", () => {
@@ -36,5 +36,5 @@ test("a part of a provider's compaction left out is said to be from that compact
     text: ThinkingText.make("Summed up."),
     received: receivedJson({ type: "compaction" }),
   };
-  expect(leftOut(part, "not taken").supplied[0]?.details).toMatchObject({ part: "Thinking", from: "anthropic compaction", window: "window-1" });
+  expect(omittedPart(part, "not taken").supplied[0]?.details).toMatchObject({ part: "Thinking", from: "anthropic compaction", window: "window-1" });
 });

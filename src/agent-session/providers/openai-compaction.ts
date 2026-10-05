@@ -7,7 +7,7 @@ import type { Received } from "../../agent-machine/received.ts";
 import type { ModelContext, Target } from "../contracts.ts";
 import { defaultRetries, invalidOutput, type Post, postJson, type Retries, withRetries } from "../provider-call.ts";
 import { receivedJson } from "../received.ts";
-import { filesIn, isObject, type Json, type LeftOutLogged, logSupplied } from "../shaping.ts";
+import { filesIn, isObject, type Json, type OmittedLogged, logSupplied } from "../shaping.ts";
 import { body } from "./openai-client.ts";
 
 /**
@@ -35,12 +35,12 @@ export const openAiCompactions = (
 ): Effect.Effect<(target: Target, context: ModelContext) => Effect.Effect<Compacted, AiError.AiError>, never, OpenAiClient.OpenAiClient> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
-    const leftOutLogged = yield* Ref.make<LeftOutLogged>(new Set());
+    const omittedLogged = yield* Ref.make<OmittedLogged>(new Set());
     return (target, context) => {
       return filesIn(context).pipe(Effect.flatMap((files) => {
       const sent = body(target, context, files);
       const post: Post = { path: "/responses/compact", headers: {}, body: sent.json as Record<string, Json> };
-      return logSupplied(sent.supplied, target, undefined, leftOutLogged).pipe(
+      return logSupplied(sent.supplied, target, undefined, omittedLogged).pipe(
         Effect.andThen(
           postJson(http, compactCaller, post).pipe(
             Effect.flatMap((response) => {

@@ -287,7 +287,7 @@ test("two responses with nothing between them are one message: the later one's f
     ],
     reasoning_content: "Second.",
   });
-  const lines = logged.filter((line) => Array.isArray(line) && line[0] === logKeys.provider.partLeftOut) as Array<[string, Record<string, unknown>]>;
+  const lines = logged.filter((line) => Array.isArray(line) && line[0] === logKeys.provider.partsOmitted) as Array<[string, Record<string, unknown>]>;
   expect(lines[0]?.[1]["parts"]).toMatchObject([{ part: "Thinking", start: "First.", reason: "a later response in the same message holds reasoning_content too" }]);
 });
 
@@ -435,6 +435,6 @@ test("what a response held for a call not in its message is logged as left out, 
     content: null,
     tool_calls: [{ id: "call_1", type: "function", function: { name: "add", arguments: '{"a":2,"b":3}' } }],
   });
-  const lines = logged.filter((line) => Array.isArray(line) && line[0] === logKeys.provider.partLeftOut) as Array<[string, Record<string, unknown>]>;
+  const lines = logged.filter((line) => Array.isArray(line) && line[0] === logKeys.provider.partsOmitted) as Array<[string, Record<string, unknown>]>;
   expect(lines[0]?.[1]["parts"]).toMatchObject([{ part: "Unrecognised", reason: "its call is not in the message" }]);
 });

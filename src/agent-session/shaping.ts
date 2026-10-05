@@ -99,24 +99,24 @@ function describedPart(part: ContextPart): Record<string, unknown> {
  * it from the conversation, and is not logged again. A request to another model, or a changed
  * reason, logs it again.
  */
-export type LeftOutLogged = ReadonlySet<string>;
+export type OmittedLogged = ReadonlySet<string>;
 
 /** Returns the parts omitted from a request to `target` that are logged for the first time, and the updated set of logged parts. */
-export function firstLeftOut(
-  logged: LeftOutLogged,
+export function firstOmitted(
+  logged: OmittedLogged,
   target: Target,
   left: ReadonlyArray<Supplied>,
-): { readonly logged: LeftOutLogged; readonly first: ReadonlyArray<Supplied> } {
+): { readonly logged: OmittedLogged; readonly first: ReadonlyArray<Supplied> } {
   const keyOf = (entry: Supplied) => JSON.stringify([target.provider, target.model, entry.details["digest"], entry.details["reason"]]);
   const first = left.filter((entry, at) => !logged.has(keyOf(entry)) && left.findIndex((other) => keyOf(other) === keyOf(entry)) === at);
   return { logged: new Set([...logged, ...first.map(keyOf)]), first };
 }
 
 /** Returns a part of an earlier response that is not sent, with the reason, as an info-level `Supplied` entry. */
-export function leftOut(part: ContextPart, reason: string): Shaped {
+export function omittedPart(part: ContextPart, reason: string): Shaped {
   return {
     json: [],
-    supplied: [{ level: "info", event: logKeys.provider.partLeftOut, details: { ...describedPart(part), reason } }],
+    supplied: [{ level: "info", event: logKeys.provider.partsOmitted, details: { ...describedPart(part), reason } }],
   };
 }
 
@@ -145,9 +145,9 @@ export function sentBack(
 ): Shaped {
   const model = part.from._tag === "Response" ? part.from.model : undefined;
   const elsewhere = elsewhereOf(part.provider, model, target, to);
-  if (elsewhere !== undefined) return part._tag === "Thinking" && part.text.length > 0 ? asText(part.text) : leftOut(part, elsewhere);
+  if (elsewhere !== undefined) return part._tag === "Thinking" && part.text.length > 0 ? asText(part.text) : omittedPart(part, elsewhere);
   const parsed = parseJson(part.received);
-  return "value" in parsed ? { json: [parsed.value], supplied: [] } : leftOut(part, parsed.reason);
+  return "value" in parsed ? { json: [parsed.value], supplied: [] } : omittedPart(part, parsed.reason);
 }
 
 /** Returns each call in `context`, by call id: the tool's name and the input that the model gave. */
@@ -183,7 +183,7 @@ export function toolInputObject(call: CallId, input: Received): Shaped {
 }
 
 /** Returns the input as JSON when it parses, and as text otherwise. */
-function given(input: Received): Json {
+function parsedOrText(input: Received): Json {
   const parsed = parseJson(input);
   return "value" in parsed ? parsed.value : asText(input);
 }
@@ -234,7 +234,7 @@ export function renderToolResult(
               message: reason.problem,
               tool: called?.tool,
               input_schema: catalog.find((tool) => tool.name === called?.tool)?.input,
-              given: called === undefined ? undefined : given(called.input),
+              given: called === undefined ? undefined : parsedOrText(called.input),
             }),
             isError: true,
           };
@@ -265,23 +265,23 @@ export function renderToolResult(
 /**
  * Logs what an adapter supplied to make a request to `target`, in `turn`. The omitted parts are
  * logged in one line, each with the model and turn it came from, and only those omitted for the
- * first time (`firstLeftOut`, given what `logged` holds of earlier requests).
+ * first time (`firstOmitted`, given what `logged` holds of earlier requests).
  */
-export const logSupplied = (supplied: ReadonlyArray<Supplied>, target: Target, turn: TurnId | undefined, logged: Ref.Ref<LeftOutLogged>): Effect.Effect<void> =>
+export const logSupplied = (supplied: ReadonlyArray<Supplied>, target: Target, turn: TurnId | undefined, logged: Ref.Ref<OmittedLogged>): Effect.Effect<void> =>
   Effect.gen(function* () {
-    const left = supplied.filter((entry) => entry.event === logKeys.provider.partLeftOut);
-    const rest = supplied.filter((entry) => entry.event !== logKeys.provider.partLeftOut);
+    const left = supplied.filter((entry) => entry.event === logKeys.provider.partsOmitted);
+    const rest = supplied.filter((entry) => entry.event !== logKeys.provider.partsOmitted);
     const first = yield* Ref.modify(logged, (before) => {
-      const step = firstLeftOut(before, target, left);
+      const step = firstOmitted(before, target, left);
       return [step.first, step.logged];
     });
-    const leftOutLine: ReadonlyArray<Supplied> =
+    const omittedLine: ReadonlyArray<Supplied> =
       first.length === 0
         ? []
         : [
             {
               level: "info",
-              event: logKeys.provider.partLeftOut,
+              event: logKeys.provider.partsOmitted,
               details: {
                 ...(turn === undefined ? {} : { turn }),
                 to: `${target.provider}/${target.model}`,
@@ -292,7 +292,7 @@ export const logSupplied = (supplied: ReadonlyArray<Supplied>, target: Target, t
             },
           ];
     yield* Effect.forEach(
-      [...rest, ...leftOutLine],
+      [...rest, ...omittedLine],
       (entry) => (entry.level === "warning" ? Effect.logWarning(entry.event, entry.details) : Effect.logInfo(entry.event, entry.details)),
       { discard: true },
     );

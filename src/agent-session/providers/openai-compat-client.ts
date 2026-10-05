@@ -51,8 +51,8 @@ import {
   endingOf,
   isObject,
   type Json,
-  leftOut,
-  type LeftOutLogged,
+  omittedPart,
+  type OmittedLogged,
   logSupplied,
   renderToolResult,
   sentBack,
@@ -160,7 +160,7 @@ function keptFields(
       const back = sentBack(part, target, "Model", (text) => ({ json: [{ content: [{ type: "text", text }] }], supplied: [] }));
       const [piece] = back.json as ReadonlyArray<Json>;
       if (piece === undefined) return { ...kept, supplied: [...kept.supplied, ...back.supplied] };
-      if (!isObject(piece)) return { ...kept, supplied: [...kept.supplied, ...leftOut(part, "it is not a message's fields").supplied] };
+      if (!isObject(piece)) return { ...kept, supplied: [...kept.supplied, ...omittedPart(part, "it is not a message's fields").supplied] };
       return Object.entries(piece).reduce((kept, [field, value]) => keptWith(kept, part, at, field, value as Json, calls), kept);
     },
     { fields: {}, content: new Map(), extras: new Map(), setBy: new Map(), supplied: [] },
@@ -190,12 +190,12 @@ function keptWith(kept: Kept, part: ContextPart, at: number, field: string, valu
       ...kept,
       fields: { ...kept.fields, [field]: value },
       setBy: new Map([...kept.setBy, [field, part]]),
-      supplied: earlier === undefined ? kept.supplied : [...kept.supplied, ...leftOut(earlier, `a later response in the same message holds ${field} too`).supplied],
+      supplied: earlier === undefined ? kept.supplied : [...kept.supplied, ...omittedPart(earlier, `a later response in the same message holds ${field} too`).supplied],
     };
   }
   return (value as ReadonlyArray<Json>).reduce<Kept>((kept, call) => {
     const id = isObject(call) ? call["id"] : undefined;
-    if (typeof id !== "string" || !calls.some((own) => own["id"] === id)) return { ...kept, supplied: [...kept.supplied, ...leftOut(part, "its call is not in the message").supplied] };
+    if (typeof id !== "string" || !calls.some((own) => own["id"] === id)) return { ...kept, supplied: [...kept.supplied, ...omittedPart(part, "its call is not in the message").supplied] };
     return { ...kept, extras: new Map([...kept.extras, [id, call as Readonly<Record<string, Json>>]]) };
   }, kept);
 }
@@ -565,7 +565,7 @@ export const openAiCompatRequests = (
 ): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
-    const leftOutLogged = yield* Ref.make<LeftOutLogged>(new Set());
+    const omittedLogged = yield* Ref.make<OmittedLogged>(new Set());
     return (target, context, turn) => {
       const settled = openAiCompatSettle(target);
       return filesIn(context).pipe(
@@ -577,7 +577,7 @@ export const openAiCompatRequests = (
           body: { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true, stream_options: { include_usage: true } },
         };
         return reportAdjusted(turn, target, settled).pipe(
-          Effect.andThen(logSupplied(sent.supplied, target, turn, leftOutLogged)),
+          Effect.andThen(logSupplied(sent.supplied, target, turn, omittedLogged)),
           Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
         );
         }),

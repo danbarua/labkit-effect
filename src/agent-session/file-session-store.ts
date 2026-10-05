@@ -83,18 +83,18 @@ const locked = (file: string) =>
       Effect.catchReason("PlatformError", "AlreadyExists", () => Effect.succeed(false)),
     );
     if (!taken) {
-      const held = yield* fs.readFileString(lock);
-      const holder = Number(held);
+      const contents = yield* fs.readFileString(lock);
+      const holder = Number(contents);
       // A process id is a positive integer: 0 and a negative number name process groups to `kill`.
-      const names = Number.isInteger(holder) && holder > 0;
-      if (names && running(holder))
+      const namesProcess = Number.isInteger(holder) && holder > 0;
+      if (namesProcess && running(holder))
         return yield* failed(`${file} is open in another process (pid ${holder}). Close it there, or wait for it to end.`);
       yield* Effect.logWarning(logKeys.sessionStore.lockTakenOver, {
         file,
         lock,
-        held,
-        ...(names ? { holder } : {}),
-        reason: names ? "the process holding the lock has ended" : "the lock file names no process",
+        contents,
+        ...(namesProcess ? { holder } : {}),
+        reason: namesProcess ? "the process holding the lock has ended" : "the lock file names no process",
       });
       yield* fs.remove(lock);
       yield* take;

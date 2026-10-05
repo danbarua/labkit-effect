@@ -123,8 +123,8 @@ interface Started {
 }
 
 /** Takes facts from `facts` until `pick` returns a value for one, and returns that value. */
-const firstOf = <A>(facts: PubSub.Subscription<Fact>, pick: (fact: Fact) => Option.Option<A>): Effect.Effect<A> =>
-  Effect.flatMap(PubSub.take(facts), (fact) => Option.match(pick(fact), { onNone: () => firstOf(facts, pick), onSome: Effect.succeed }));
+const firstMatching = <A>(facts: PubSub.Subscription<Fact>, pick: (fact: Fact) => Option.Option<A>): Effect.Effect<A> =>
+  Effect.flatMap(PubSub.take(facts), (fact) => Option.match(pick(fact), { onNone: () => firstMatching(facts, pick), onSome: Effect.succeed }));
 
 /**
  * Returns how many times the turn-end hooks have held `turn` open: the reviews of the turn in which
@@ -265,7 +265,7 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
    * Writes `more` to the store. After a write fails, nothing more is written, and the requests under
    * way are interrupted.
    */
-  const written = (more: ReadonlyArray<Fact>): Effect.Effect<void, SessionStoreFailed> =>
+  const appendFacts = (more: ReadonlyArray<Fact>): Effect.Effect<void, SessionStoreFailed> =>
     Effect.gen(function* () {
       if (yield* Deferred.isDone(broken)) return yield* Deferred.await(broken);
       yield* store.append(more).pipe(
@@ -411,7 +411,7 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
         const { policy, nameAt } = yield* policiesNow(yield* ToolCallPolicies);
         const answers = yield* PubSub.subscribe(recorded);
         const report = yield* Report;
-        const answer = firstOf(answers, (fact) =>
+        const answer = firstMatching(answers, (fact) =>
           fact._tag === "Observed" && fact.observation._tag === "PermissionAnswered" && fact.observation.call === request.call ? Option.some(fact.observation.answer) : Option.none(),
         );
         /** Returns the decided step that `step` reaches once each question is recorded and answered. */
@@ -591,12 +591,12 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
       const observed: Fact = { _tag: "Observed", seq, time, origin, observation };
       // The observation is written before the core decides on it, and the decisions before anything
       // follows from them.
-      yield* written([observed]);
+      yield* appendFacts([observed]);
       const outcome = deliver(yield* Ref.get(machines), seq, observation);
       const decided = outcome.decisions.map(
         (decision, index): Fact => ({ _tag: "Decided", seq: Seq.make(seq + 1 + index), time, decision }),
       );
-      yield* written(decided);
+      yield* appendFacts(decided);
       yield* Ref.set(machines, outcome.world);
       const facts = [observed, ...decided];
       const now = [...before, ...facts];
@@ -729,7 +729,7 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
           }),
         );
         if (turn === undefined) return yield* Effect.die(new Error("No turn was under way or started for the input given to prompt"));
-        const ended = firstOf(fromNow, (fact) =>
+        const ended = firstMatching(fromNow, (fact) =>
           fact._tag === "Decided" && fact.decision._tag === "TurnEnded" && fact.decision.turn === turn ? Option.some(fact.decision.ending) : Option.none(),
         );
         // A write that fails stops the session, and the turn's end is never recorded.

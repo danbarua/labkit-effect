@@ -79,7 +79,7 @@ export const modelOf = (facts: ReadonlyArray<Fact>): Effect.Effect<Target> => {
       fact._tag === "Observed" && fact.observation._tag === "ModelChangeArrived" ? [[fact.seq, fact.observation] as const] : [],
     ),
   );
-  const start = { provider: opened.provider, model: opened.model, said: { ...opened.settings }, adjusted: [] as ReadonlyArray<Adjustment> };
+  const start = { provider: opened.provider, model: opened.model, requested: { ...opened.settings }, adjusted: [] as ReadonlyArray<Adjustment> };
   const now = facts.reduce((state, fact) => {
     if (fact._tag === "Observed")
       return fact.observation._tag === "SettingAdjusted" ? { ...state, adjusted: [...state.adjusted, fact.observation] } : state;
@@ -89,12 +89,12 @@ export const modelOf = (facts: ReadonlyArray<Fact>): Effect.Effect<Target> => {
     return {
       provider: change.provider,
       model: change.model,
-      said: { ...state.said, ...change.settings },
+      requested: { ...state.requested, ...change.settings },
       adjusted: state.adjusted.filter((each) => !restated.has(settingOf[each.adjusted._tag])),
     };
   }, start);
   const settings = withAdjusted(
-    now.said,
+    now.requested,
     now.adjusted.filter((each) => each.provider === now.provider && each.model === now.model),
   );
   return Effect.succeed({

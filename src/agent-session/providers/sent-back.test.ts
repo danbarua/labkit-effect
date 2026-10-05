@@ -74,8 +74,8 @@ async function sent(client: keyof typeof clients, provider: string, model: strin
       ),
     ),
   );
-  const left = logged.filter((line) => Array.isArray(line) && line[0] === logKeys.provider.partLeftOut) as Array<[string, { readonly parts: ReadonlyArray<unknown> }]>;
-  return { body: bodies[0] ?? {}, leftOut: left.flatMap(([, details]) => details.parts) };
+  const left = logged.filter((line) => Array.isArray(line) && line[0] === logKeys.provider.partsOmitted) as Array<[string, { readonly parts: ReadonlyArray<unknown> }]>;
+  return { body: bodies[0] ?? {}, omittedPart: left.flatMap(([, details]) => details.parts) };
 }
 
 const thinking = (provider: string, model: string, received: unknown): ContextPart => ({
@@ -128,5 +128,5 @@ test("Chat Completions: the same model's thinking and fields go back as received
       { type: "text", text: "Adding." },
     ],
   });
-  expect(other.leftOut).toMatchObject([{ part: "Unrecognised", from: "localhost/qwen", reason: "produced by localhost/qwen, not localhost/llama" }]);
+  expect(other.omittedPart).toMatchObject([{ part: "Unrecognised", from: "localhost/qwen", reason: "produced by localhost/qwen, not localhost/llama" }]);
 });
