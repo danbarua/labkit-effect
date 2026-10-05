@@ -87,6 +87,26 @@ test("A6: the next request carries the last request's messages as recorded, thou
   });
 });
 
+test("A6: of two requests, the next request carries the later one's messages as recorded", () => {
+  const session = open();
+  observe(session, opened);
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
+  const first: ReadonlyArray<ContextMessage> = [{ role: "user", parts: [{ _tag: "Text", text: "as the first request carried it" }] }];
+  const second: ReadonlyArray<ContextMessage> = [{ role: "user", parts: [{ _tag: "Text", text: "as the second request carried it" }] }];
+  observe(session, { _tag: "ModelRequestDispatched", turn: "turn-1", provider: "boring", model: "boring-1", sent: sent(first) });
+  observe(session, { _tag: "ModelRequestDispatched", turn: "turn-1", provider: "boring", model: "boring-1", sent: sent(second) });
+  observe(session, responded([{ _tag: "Text", text: "Done." }]));
+  expect(nextMessages(session.journal) as unknown).toEqual([...second, { role: "assistant", parts: [{ _tag: "Text", text: "Done." }] }]);
+});
+
+test("a notice inserted is an instruction message holding its text", () => {
+  const session = open();
+  observe(session, opened);
+  observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
+  observe(session, { _tag: "NoticeInserted", turn: "turn-1", text: "The MCP server fake is not running." });
+  expect(conversationOf(session.journal).at(-1) as unknown).toEqual({ role: "instruction", parts: [{ _tag: "Text", text: "The MCP server fake is not running." }] });
+});
+
 test("an input's files follow its text in the user's message, by reference", () => {
   const session = open();
   observe(session, opened);

@@ -190,3 +190,42 @@ test.each([
   if (responded._tag !== "ModelFailed") throw new Error(`expected ModelFailed, got ${responded._tag}`);
   expect((JSON.parse(asText(responded.error)) as { readonly reason: { readonly _tag: string } }).reason._tag).toBe(reason);
 });
+
+test.each([
+  ["a retry directive", "retry: 1000\n\n", "UnknownError", "The event stream asked to be retried"],
+  ["an event larger than 10 MiB", `data: ${"x".repeat(10 * 1024 * 1024 + 1)}`, "InvalidOutputError", "The event stream could not be read"],
+])("a stream that cannot be read as events fails the request: %s", async (_, body, reason, description) => {
+  const provider = recordingServer([() => new Response(body, { headers: { "content-type": "text/event-stream" } })]);
+  stops.push(provider.stop);
+  const responded = await runTest(
+    Effect.gen(function* () {
+      const client = yield* ModelClient;
+      return yield* client.respond(
+        { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") },
+        { system: undefined, tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "Hello" }] }] },
+        TurnId.make("turn-1"),
+      );
+    }).pipe(Effect.provide(OpenAiModelClient.pipe(Layer.provide(openAiAt(provider.url))))),
+  );
+  if (responded._tag !== "ModelFailed") throw new Error(`expected ModelFailed, got ${responded._tag}`);
+  const error = JSON.parse(asText(responded.error)) as { readonly reason: { readonly _tag: string; readonly description?: string } };
+  expect(error.reason._tag).toBe(reason);
+  expect(error.reason.description).toStartWith(description);
+});
+
+test("a 2xx response with no body to read fails the request as an unknown error", async () => {
+  const provider = recordingServer([() => new Response(null, { status: 204 })]);
+  stops.push(provider.stop);
+  const responded = await runTest(
+    Effect.gen(function* () {
+      const client = yield* ModelClient;
+      return yield* client.respond(
+        { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") },
+        { system: undefined, tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "Hello" }] }] },
+        TurnId.make("turn-1"),
+      );
+    }).pipe(Effect.provide(OpenAiModelClient.pipe(Layer.provide(openAiAt(provider.url))))),
+  );
+  if (responded._tag !== "ModelFailed") throw new Error(`expected ModelFailed, got ${responded._tag}`);
+  expect((JSON.parse(asText(responded.error)) as { readonly reason: { readonly _tag: string } }).reason._tag).toBe("UnknownError");
+});
