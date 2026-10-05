@@ -167,6 +167,7 @@ test("the cache: Anthropic marks the request for five minutes or an hour, OpenAI
   ]);
 });
 
+// grok-4.7 takes low to xhigh, as models.dev lists it.
 const grok = capabilitiesOf("xai", "grok-4.7")?.efforts;
 
 test("xAI: effort goes into reasoning, max as xhigh, the nearest grok takes; the summary always comes back; the cache and its retention cannot be set", () => {
@@ -186,7 +187,7 @@ test("xAI: effort goes into reasoning, max as xhigh, the nearest grok takes; the
       },
       {
         adjusted: { _tag: "Effort", asked: "max", used: "xhigh" },
-        reason: "this model's reasoning efforts are minimal, low, medium, high, xhigh; it is sent xhigh",
+        reason: "this model's reasoning efforts are low, medium, high, xhigh; it is sent xhigh",
       },
     ],
   });
@@ -203,20 +204,20 @@ test("xAI: effort goes into reasoning, max as xhigh, the nearest grok takes; the
     });
 });
 
-test("xAI: thinking off is grok's least effort, minimal, adjusted; an effort said beside it is not sent", () => {
+test("xAI: thinking off is sent as grok's least effort, low, and recorded as adjusted; an effort said beside it is not sent", () => {
   expect(xAiSettings({ thinking: "off" }, grok)).toEqual({
-    fields: { reasoning: { effort: "minimal" } },
+    fields: { reasoning: { effort: "low" } },
     headers: {},
     adjusted: [
       {
         adjusted: { _tag: "Thinking", asked: "off", used: "auto" },
-        reason: "this model's reasoning efforts are minimal, low, medium, high, xhigh; it is sent minimal",
+        reason: "this model's reasoning efforts are low, medium, high, xhigh; it is sent low",
       },
     ],
   });
   expect(xAiSettings({ thinking: "off", effort: "high" }, grok)).toMatchObject({
-    fields: { reasoning: { effort: "minimal" } },
-    adjusted: [{ adjusted: { _tag: "Thinking" } }, { adjusted: { _tag: "Effort", asked: "high" }, reason: "thinking is off, which is sent as reasoning effort minimal" }],
+    fields: { reasoning: { effort: "low" } },
+    adjusted: [{ adjusted: { _tag: "Thinking" } }, { adjusted: { _tag: "Effort", asked: "high" }, reason: "thinking is off, which is sent as reasoning effort low" }],
   });
 });
 

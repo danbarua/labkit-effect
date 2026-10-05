@@ -11,6 +11,14 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
       "price": {
         "input": 10,
         "output": 50,
@@ -26,6 +34,14 @@ export const wellKnownModels = {
         "text",
         "image",
         "pdf"
+      ],
+      "reasoning": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
       ],
       "price": {
         "input": 4,
@@ -43,6 +59,14 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
       "price": {
         "input": 2,
         "output": 10,
@@ -59,6 +83,10 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
+      "budget": {
+        "min": 1024
+      },
       "price": {
         "input": 1,
         "output": 5,
@@ -77,6 +105,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "low",
         "medium",
@@ -106,6 +135,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "none",
         "low",
@@ -136,6 +166,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "none",
         "low",
@@ -166,6 +197,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "low",
         "medium",
@@ -195,6 +227,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "none",
         "low",
@@ -225,6 +258,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "none",
         "low",
@@ -255,6 +289,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "none",
         "low",
@@ -285,6 +320,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "none",
         "low",
@@ -312,6 +348,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "minimal",
         "low",
@@ -332,6 +369,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "minimal",
         "low",
@@ -352,6 +390,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "minimal",
         "low",
@@ -372,6 +411,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "high"
       ],
@@ -388,6 +428,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "none",
         "low",
@@ -408,6 +449,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "none",
         "low",
@@ -428,6 +470,10 @@ export const wellKnownModels = {
         "text",
         "image"
       ],
+      "reasoning": true,
+      "efforts": [
+        "medium"
+      ],
       "price": {
         "input": 1.75,
         "output": 14,
@@ -442,6 +488,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "medium",
         "high",
@@ -459,6 +506,7 @@ export const wellKnownModels = {
         "text",
         "image"
       ],
+      "reasoning": false,
       "price": {
         "input": 1.75,
         "output": 14,
@@ -473,6 +521,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "none",
         "low",
@@ -494,6 +543,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "none",
         "low",
@@ -521,6 +571,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "none",
         "low",
@@ -542,6 +593,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "none",
         "low",
@@ -563,6 +615,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "medium",
         "high",
@@ -586,6 +639,7 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
         "medium",
         "high",
@@ -611,8 +665,8 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
-        "minimal",
         "low",
         "medium",
         "high",
@@ -638,8 +692,8 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
-        "minimal",
         "low",
         "medium",
         "high",
@@ -665,12 +719,11 @@ export const wellKnownModels = {
         "image",
         "pdf"
       ],
+      "reasoning": true,
       "efforts": [
-        "minimal",
         "low",
         "medium",
-        "high",
-        "xhigh"
+        "high"
       ],
       "price": {
         "input": 2,

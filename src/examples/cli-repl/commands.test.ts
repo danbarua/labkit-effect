@@ -82,7 +82,7 @@ const session = (lines: ReadonlyArray<string>, brand: Brand = defaultBrand, sett
 
 test("/model asks another model from the next turn on, and the settings said stay", async () => {
   const { printed, asked } = await session(["hello", "/model claude-sonnet-5-5", "hello again"]);
-  expect(printed).toEqual(["Asking anthropic/claude-sonnet-5-5 effort=low"]);
+  expect(printed).toEqual(["Asking anthropic/claude-sonnet-5-5 effort=low\nthis model takes effort: low, medium, high, xhigh, max"]);
   expect(asked.map((target) => [target.provider, target.model, target.settings?.effort]) as unknown).toEqual([
     ["openai", "gpt-5.5", "low"],
     ["anthropic", "claude-sonnet-5-5", "low"],

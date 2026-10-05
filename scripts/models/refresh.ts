@@ -3,10 +3,12 @@
  * model, as `const` data, so that a model's settings can be typed from it.
  *
  * Two sources are merged. models.dev's catalog (https://models.dev/api.json) gives each model's
- * context window, output limit, kinds of input and price. `well-known-models.measured.json` names
- * the models to include, by provider, and for each holds what was measured against the provider
- * and is not in the catalog, or differs from it: the reasoning efforts it takes, the kinds of input
- * it took when sent them, and the price of an hour-long cache write. What was measured wins.
+ * context window, output limit, kinds of input, price, whether it reasons (`reasoning`), and how its
+ * reasoning is set (`reasoning_options`): the efforts it takes, or a budget of thinking tokens.
+ * `well-known-models.measured.json` names the models to include, by provider, and for each holds what
+ * was measured against the provider and is not in the catalog: the kinds of input it took when sent
+ * them, and the price of an hour-long cache write. What was measured wins. A measured difference in
+ * reasoning is not kept here: a user's configuration overrides it (`docs/agent-config-direction.md`).
  *
  *   bun run models:refresh              # from models.dev
  *   bun run models:refresh <api.json>   # from a copy of the catalog
@@ -20,11 +22,32 @@ const measuredPath = "src/agent-session/configuration/well-known-models.measured
 const generatedPath = "src/agent-session/configuration/well-known-models.gen.ts";
 
 const [from] = process.argv.slice(2);
+/** One way models.dev says a model's reasoning is set: by effort, or by a budget of thinking tokens. */
+type ReasoningOption = { type: "effort"; values: Array<string> } | { type: "budget_tokens"; min: number; max?: number } | { type: string };
+
 const catalog = (from === undefined ? await fetch("https://models.dev/api.json").then((response) => response.json()) : JSON.parse(readFileSync(from, "utf8"))) as Record<
   string,
-  { models: Record<string, { limit: { context: number; output: number }; modalities: { input: Array<string> }; cost: Json }> }
+  {
+    models: Record<
+      string,
+      { limit: { context: number; output: number }; modalities: { input: Array<string> }; cost: Json; reasoning?: boolean; reasoning_options?: Array<ReasoningOption> }
+    >;
+  }
 >;
-const measured = JSON.parse(readFileSync(measuredPath, "utf8")) as Record<string, Record<string, { efforts?: Array<string>; input?: Array<string>; price?: Json }>>;
+const measured = JSON.parse(readFileSync(measuredPath, "utf8")) as Record<string, Record<string, { input?: Array<string>; price?: Json }>>;
+
+/** The reasoning fields of a catalog entry: whether it reasons, its efforts, its thinking budget. An option of another kind fails the refresh, so that it is not dropped unseen. */
+function reasoningOf(name: string, reasoning: boolean | undefined, options: ReadonlyArray<ReasoningOption> | undefined): Json {
+  const efforts = options?.find((option): option is Extract<ReasoningOption, { type: "effort" }> => option.type === "effort")?.values;
+  const budget = options?.find((option): option is Extract<ReasoningOption, { type: "budget_tokens" }> => option.type === "budget_tokens");
+  const unknown = options?.filter((option) => option.type !== "effort" && option.type !== "budget_tokens") ?? [];
+  if (unknown.length > 0) throw new Error(`${name}: reasoning options of a kind this script does not read: ${unknown.map((option) => option.type).join(", ")}`);
+  return {
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(efforts === undefined ? {} : { efforts }),
+    ...(budget === undefined ? {} : { budget: { min: budget.min, ...(budget.max === undefined ? {} : { max: budget.max }) } }),
+  };
+}
 
 /** A catalog price in this harness's names; its first tier is the price above that tier's context. */
 function price(cost: Json): Json {
@@ -57,7 +80,7 @@ const models = Object.fromEntries(
               context: theirs.limit.context,
               output: theirs.limit.output,
               input: ours.input ?? theirs.modalities.input,
-              ...(ours.efforts === undefined ? {} : { efforts: ours.efforts }),
+              ...reasoningOf(`${provider}/${model}`, theirs.reasoning, theirs.reasoning_options),
               price: { ...base, ...ours.price, ...(above === undefined ? {} : { above }) },
             },
           ],
