@@ -4,7 +4,7 @@
  */
 
 import { afterAll, expect } from "bun:test";
-import { Effect, Layer, PubSub } from "effect";
+import { Effect, Layer, Logger, PubSub } from "effect";
 import { Millis, TurnId } from "../../agent-machine/names.ts";
 import type { Observation } from "../../agent-machine/observation.ts";
 import { openSession } from "../loop.ts";
@@ -15,6 +15,7 @@ import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
 import { OpenAiModelClient } from "./openai-client.ts";
 import { receivedJson } from "../received.ts";
 import { ToolRunner } from "../contracts.ts";
+import { logKeys } from "../log-keys.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
 import { CountingTurns } from "../turns.ts";
 import { BoringModelProvider, boringOpening, WholeSessionAssembler } from "../../../tests/support/boring.ts";
@@ -26,7 +27,7 @@ import { anthropicStream, openAiStream } from "../../../tests/support/streams.ts
 import { test } from "../../../tests/support/test.ts";
 
 const fold = (events: ReadonlyArray<unknown>) =>
-  events.reduce<{ state: typeof nothingYet; completed: Array<unknown>; failed: Array<unknown>; notApplied: Array<string> }>(
+  events.reduce<{ state: typeof nothingYet; completed: Array<unknown>; failed: Array<unknown>; notApplied: Array<string>; unparsed: Array<unknown> }>(
     (done, event) => {
       const next = assemble(done.state, event as never);
       return {
@@ -34,9 +35,10 @@ const fold = (events: ReadonlyArray<unknown>) =>
         completed: next.completed === undefined ? done.completed : [...done.completed, next.completed],
         failed: next.failed === undefined ? done.failed : [...done.failed, next.failed],
         notApplied: next.notApplied === undefined ? done.notApplied : [...done.notApplied, next.notApplied],
+        unparsed: next.unparsed === undefined ? done.unparsed : [...done.unparsed, next.unparsed],
       };
     },
-    { state: nothingYet, completed: [], failed: [], notApplied: [] },
+    { state: nothingYet, completed: [], failed: [], notApplied: [], unparsed: [] },
   );
 
 const started = { type: "message_start", message: { id: "msg_1", role: "assistant", content: [], stop_reason: null, usage: { input_tokens: 9, output_tokens: 1 } } };
@@ -98,6 +100,20 @@ test("the blocks still arriving when the stream ends are named in the order of t
     { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
   ]);
   expect(cut(state)).toEqual(["text", "tool_use"]);
+});
+
+test("a tool_use block whose streamed input is not JSON is completed with the input as its text, and reported", () => {
+  const { completed, unparsed, state } = fold([
+    started,
+    { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_1", name: "add", input: {} } },
+    { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"a":2,' } },
+    { type: "content_block_stop", index: 0 },
+    { type: "message_delta", delta: { stop_reason: "tool_use" } },
+    { type: "message_stop" },
+  ]);
+  expect(completed).toEqual([{ type: "tool_use", id: "toolu_1", name: "add", input: '{"a":2,' }]);
+  expect(unparsed).toEqual([{ id: "toolu_1", name: "add", input: '{"a":2,' }]);
+  expect(cut(state)).toEqual([]);
 });
 
 test("the stream's own error, and a delta of a type not known, are reported by the machine", () => {
@@ -437,4 +453,49 @@ test("X1: interrupted while a response streams and its tool runs: both are stopp
       ],
     },
   ]);
+});
+
+/** Messages API events as a stream, each with its event name, as Anthropic sends them. */
+const messageEvents = (all: ReadonlyArray<Record<string, unknown>>) =>
+  new Response(all.map((event) => `event: ${String(event["type"])}\ndata: ${JSON.stringify(event)}\n\n`).join(""), { headers: { "content-type": "text/event-stream" } });
+
+test("Anthropic: a tool call whose streamed input is not JSON is recorded with that text, logged, and rejected by the tool; the turn goes on", async () => {
+  const brokenCall = messageEvents([
+    { type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", content: [], model: "claude-sonnet-5", stop_reason: null, usage: { input_tokens: 9, output_tokens: 1 } } },
+    { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_1", name: "add", input: {} } },
+    { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"a":2,' } },
+    { type: "content_block_stop", index: 0 },
+    { type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 5 } },
+    { type: "message_stop" },
+  ]);
+  const url = serving((request) =>
+    request === 1 ? brokenCall : anthropicStream({ content: [{ type: "text", text: "Sorry." }], stop_reason: "end_turn" }),
+  );
+  const logged: Array<unknown> = [];
+  const facts = await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
+      yield* session.observe(boringOpening(smolCatalog));
+      yield* session.observe(input);
+      yield* session.idle;
+      return yield* session.facts;
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          BoringModelProvider,
+          TurnContextAssembler,
+          AnthropicModelClient.pipe(Layer.provide(anthropicAt(new URL("/v1/messages", url)))),
+          CountingTurns,
+          SmolToolRunner,
+          Logger.layer([Logger.make((options) => logged.push(options.message))], { mergeWithExisting: true }),
+        ),
+      ),
+    ),
+  );
+  const observed = facts.flatMap((fact) => (fact._tag === "Observed" ? [fact.observation] : []));
+  const call = observed.flatMap((each) => (each._tag === "ModelResponded" ? each.parts : [])).find((part) => part._tag === "ToolCall");
+  expect(call as unknown).toMatchObject({ _tag: "ToolCall", call: "toolu_1", tool: "add", input: { mediaType: "text/plain", body: { text: '{"a":2,' } } });
+  expect(observed.find((each) => each._tag === "ToolEnded") as unknown).toMatchObject({ outcome: { _tag: "Failed", reason: { _tag: "InputRejected" } } });
+  expect(facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? [fact.decision.ending._tag] : []))).toEqual(["Completed"]);
+  expect(logged).toContainEqual([logKeys.anthropic.toolInputUnparsed, expect.objectContaining({ call: "toolu_1", tool: "add", input: '{"a":2,' })]);
 });

@@ -4,6 +4,10 @@
  * `content_block_stop` arrives; `assembled` gives the message as a request without streaming
  * returns it, with the blocks that are complete. A block still arriving when the stream ends (the
  * response was cut short, or the request was stopped) is not part of it.
+ *
+ * A `tool_use` block's input arrives as JSON text in pieces, and is parsed when the block is
+ * complete. When that text is not JSON, the block is still complete, its `input` the text, and
+ * the event reports it (`unparsed`): the call is recorded, and the tool rejects the input.
  */
 
 import { Array as Arr, Order } from "effect";
@@ -48,6 +52,15 @@ export interface Assembled {
   readonly failed?: { readonly type: string; readonly message: string };
   /** The type of a delta this machine does not know how to apply; the block is left without it. */
   readonly notApplied?: string;
+  /** The tool_use block this event completed, when its streamed input is not JSON: the block's `input` is that text. */
+  readonly unparsed?: Unparsed;
+}
+
+/** A tool_use block whose input, as streamed, is not JSON. */
+export interface Unparsed {
+  readonly id: string;
+  readonly name: string;
+  readonly input: string;
 }
 
 const object = (value: Json | undefined): JsonObject | undefined => (value !== undefined && isObject(value) ? value : undefined);
@@ -75,13 +88,19 @@ function applied(arriving: Arriving, delta: JsonObject): Arriving | string {
   }
 }
 
-/** The block complete: its input parsed from the JSON text that arrived, when any did. */
-function finished(arriving: Arriving): JsonObject | undefined {
-  if (arriving.inputJson === "") return arriving.block;
+/**
+ * The block complete: its input parsed from the JSON text that arrived, when any did. When that
+ * text is not JSON, the block's input is the text, and the block is reported as `unparsed`.
+ */
+function finished(arriving: Arriving): { readonly block: JsonObject; readonly unparsed?: Unparsed } {
+  if (arriving.inputJson === "") return { block: arriving.block };
   try {
-    return { ...arriving.block, input: JSON.parse(arriving.inputJson) as Json };
+    return { block: { ...arriving.block, input: JSON.parse(arriving.inputJson) as Json } };
   } catch {
-    return undefined;
+    return {
+      block: { ...arriving.block, input: arriving.inputJson },
+      unparsed: { id: text(arriving.block["id"]), name: text(arriving.block["name"]), input: arriving.inputJson },
+    };
   }
 }
 
@@ -106,10 +125,14 @@ export function assemble(state: Assembling, event: Json): Assembled {
     }
     case "content_block_stop": {
       const arriving = state.arriving.get(index);
-      const completed = arriving === undefined ? undefined : finished(arriving);
-      if (completed === undefined) return { state };
+      if (arriving === undefined) return { state };
+      const { block: completed, unparsed } = finished(arriving);
       const stillArriving = new Map([...state.arriving].filter(([at]) => at !== index));
-      return { state: { ...state, arriving: stillArriving, complete: new Map([...state.complete, [index, completed]]) }, completed };
+      return {
+        state: { ...state, arriving: stillArriving, complete: new Map([...state.complete, [index, completed]]) },
+        completed,
+        ...(unparsed === undefined ? {} : { unparsed }),
+      };
     }
     case "message_delta":
       return {

@@ -48,7 +48,7 @@ import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post,
 import { reportAdjusted } from "../configuration/settings.ts";
 import { anthropicSettle } from "./anthropic-settings.ts";
 import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
-import { receivedJson } from "../received.ts";
+import { receivedJson, receivedText } from "../received.ts";
 import {
   type Called,
   callsIn,
@@ -227,7 +227,8 @@ function part(received: Json): ModelPart {
         _tag: "ToolCall",
         call: CallId.make(id),
         tool: ToolName.make(name),
-        input: receivedJson(input),
+        // An input that is not an object is the text a stream gave that was not JSON (`anthropic-stream.ts` `unparsed`).
+        input: typeof input === "string" ? receivedText(input) : receivedJson(input),
       };
   }
   return { _tag: "Unrecognised", received: receivedJson(received) };
@@ -315,6 +316,13 @@ const respondOnce = (
             if (next.failed !== undefined) return yield* failedInStream(next.failed);
             if (next.notApplied !== undefined)
               yield* Effect.logWarning(logKeys.anthropic.deltaNotApplied, { delta: next.notApplied });
+            if (next.unparsed !== undefined)
+              yield* Effect.logWarning(logKeys.anthropic.toolInputUnparsed, {
+                call: next.unparsed.id,
+                tool: next.unparsed.name,
+                input: next.unparsed.input,
+                used: "the input as text, which the tool rejects",
+              });
             if (next.completed !== undefined) yield* passOn({ _tag: "Part", part: part(next.completed) });
             return next.state;
           }),

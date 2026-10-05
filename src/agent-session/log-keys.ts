@@ -67,5 +67,10 @@ export const logKeys = {
     maxTokensSupplied: "anthropic.request.max_tokens_supplied",
     /** A stream's delta was of a type the adapter does not know; the block is recorded without it. */
     deltaNotApplied: "anthropic.response.delta_not_applied",
+    /**
+     * A tool_use block's streamed input was not JSON; the call is recorded with that input as text,
+     * which the tool rejects. The details are the call, its tool and the input.
+     */
+    toolInputUnparsed: "anthropic.response.tool_input_unparsed",
   },
 } as const;
