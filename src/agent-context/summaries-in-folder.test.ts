@@ -21,7 +21,7 @@ const summaryOf = (text: string, writtenAt: string): WindowSummary => ({
   summary: receivedText(text),
 });
 
-test("A7: summaries of one kind written in the same millisecond are read in the order they were recorded", async () => {
+test("summaries of one kind written in the same millisecond are read in the order they were recorded", async () => {
   const texts = await Effect.gen(function* () {
     const summaries = yield* Summaries;
     yield* summaries.record(summaryOf("first", "2026-10-05T10:00:00.000Z"));

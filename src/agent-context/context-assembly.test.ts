@@ -87,7 +87,7 @@ const run = (setup: Setup, messages: ReadonlyArray<ContextMessage>) => {
   ).then((assembled) => ({ assembled, logged }));
 };
 
-test("A1 A2 A3: one provider of each kind: the system prompt and tools recorded at opening, the conversation, the notices", async () => {
+test("with one provider of each kind, a request carries the system prompt and tools recorded at opening, the conversation, and the notices", async () => {
   const messages = conversation("Ping?");
   const { assembled, logged } = await run(oneOfEach, messages);
   expect(assembled as unknown).toEqual({
@@ -100,7 +100,7 @@ test("A1 A2 A3: one provider of each kind: the system prompt and tools recorded 
   expect(logged).toEqual([]);
 });
 
-test("A1: the system prompts are joined, and the tool sources' tools joined, in the order they are listed; a namespaced source's tools are offered under its namespace", async () => {
+test("the system prompts are joined, and the tool sources' tools joined, in the order they are listed; a namespaced source's tools are offered under its namespace", async () => {
   const { assembled } = await run(
     {
       ...oneOfEach,

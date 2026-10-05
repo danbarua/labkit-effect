@@ -15,7 +15,7 @@
  * carries all of its summaries, in the order written, as one instruction message (consecutive
  * messages of one role are merged); a provider's own compaction was made from the summaries before
  * it, so it is carried in their place. Then come the messages of the facts that summary's window keeps and
- * of those after its span. A later request to it carries on from its last request (A6), and so does
+ * of those after its span. A later request to it carries on from its last request (`nextMessages`), and so does
  * a request to a provider whose summaries predate its last request: after a switch back, it goes on
  * from where it was. So two providers in one session can be sent different conversations; what they
  * are both sent is the facts since the later of their summaries. A summary is read from the record

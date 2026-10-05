@@ -228,7 +228,7 @@ to be pleasant to live with; this list is expected to grow.
 
 Built: the window marker, naming what decided it (agent-machine S4); compaction for the provider
 being asked, summaries per provider kept in memory or as files, policies asked between turns, and
-the view that sends each provider its own summaries (agent-context A5–A8); a provider's own
+the view that sends each provider its own summaries (`docs/agent-context.md`); a provider's own
 compaction as a summary, for OpenAI and xAI (`openai-compaction.ts`, `xai-compaction.ts`,
 `provider-compaction.ts`), sent the session's system prompt and tools; a digest of a span made
 with no model, its attachments as pointers and one line for each tool call (`digest.ts`).

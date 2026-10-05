@@ -68,7 +68,7 @@ test("TC4: a call that arrived in a response that then failed is not sent to the
 const sent = (messages: ReadonlyArray<ContextMessage>) =>
   json(Schema.encodeSync(Schema.toCodecJson(ModelContext))({ system: undefined, tools: [], messages }));
 
-test("A6: the next request carries the last request's messages as recorded, though the facts would now project them otherwise", () => {
+test("the next request carries the last request's messages as recorded, though the facts would now project them otherwise", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
@@ -87,7 +87,7 @@ test("A6: the next request carries the last request's messages as recorded, thou
   });
 });
 
-test("A6: of two requests, the next request carries the later one's messages as recorded", () => {
+test("of two requests, the next request carries the later one's messages as recorded", () => {
   const session = open();
   observe(session, opened);
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });

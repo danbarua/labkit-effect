@@ -52,7 +52,7 @@ test("S4: a compaction window during a step waits in the turn's mailbox and is t
   ]);
 });
 
-test("S4 A5: a compaction window records the span only; a summary on it is not part of the fact", () => {
+test("S4: a compaction window records the span only; a summary on it is not part of the fact", () => {
   const session = open();
   observe(session, opened);
   expect(() =>

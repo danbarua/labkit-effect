@@ -57,7 +57,7 @@ function requests(facts: ReadonlyArray<Fact>): ReadonlyArray<{ readonly sent: Mo
   });
 }
 
-test("A5: each compaction's summary is recorded with the summarizer that wrote it", async () => {
+test("each compaction's summary is recorded with the summarizer that wrote it", async () => {
   const { summaries } = await played();
   expect(summaries.map((each) => [each.window, each.writtenBy]) as unknown).toEqual([
     ["window-1", "PlainTextFizzBuzzSummarizer"],
@@ -80,7 +80,7 @@ test("A5: each compaction's summary is recorded with the summarizer that wrote i
   expect(third).toContain("Classified as FizzBuzz: 75.");
 });
 
-test("A7: the first request in each window carries every summary so far, as written, and a change of summarizer rewrites none of them", async () => {
+test("the first request in each window carries every summary so far, as written, and a change of summarizer rewrites none of them", async () => {
   const { facts, summaries } = await played();
   const texts = summaries.map((each) => asText(each.summary));
   const firsts = requests(facts).filter((request) => request.inNewWindow);
@@ -101,7 +101,7 @@ test("A7: the first request in each window carries every summary so far, as writ
   ]);
 });
 
-test("A7: a provider's own compaction is sent as its items, to that provider only, in place of the summaries it was made from", async () => {
+test("a provider's own compaction is sent as its items, to that provider only, in place of the summaries it was made from", async () => {
   const asked: Array<ModelContext> = [];
   const compactions = (_target: unknown, context: ModelContext) =>
     Effect.sync(() => {
@@ -137,7 +137,7 @@ test("A7: a provider's own compaction is sent as its items, to that provider onl
   ]);
 });
 
-test("A6 A7: every other request carries the one before it unchanged, and the model counts on to 94", async () => {
+test("every other request carries the one before it unchanged, and the model counts on to 94", async () => {
   const { facts, seen } = await played();
   const made = requests(facts);
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -157,7 +157,7 @@ test("A6 A7: every other request carries the one before it unchanged, and the mo
   expect(seen).toHaveLength(made.length);
 });
 
-test("A5 A7: compacting after every FizzBuzz, the summarizer chosen for each, each request in a window carries the summaries as written", async () => {
+test("compacting after every FizzBuzz with the summarizer chosen for each, each request in a window carries the summaries as written", async () => {
   const chosen = [PlainTextFizzBuzzSummarizer, EmojiHappyFizzBuzzSummarizer, PlainTextFizzBuzzSummarizer];
   const { facts, summaries } = await runTest(
     play(countingUser(39), {
@@ -185,7 +185,7 @@ test("A5 A7: compacting after every FizzBuzz, the summarizer chosen for each, ea
 
 const provider = (name: string, model: string) => ({ provider: ProviderName.make(name), model: ModelName.make(model) });
 
-test("A5 A8: switching provider, each is sent its own summaries, and a switch back goes on from where it was", async () => {
+test("after a switch of provider, each provider is sent its own summaries, and a switch back continues from where that provider was", async () => {
   const folder = mkdtempSync(join(tmpdir(), "summaries-"));
   const policy = whenCountReaches(
     new Map([
@@ -250,7 +250,7 @@ test("A5 A8: switching provider, each is sent its own summaries, and a switch ba
   expect(replies as unknown).toEqual(countingUser(10).map((n) => String(Number(n) + 1)));
 });
 
-test("A5: a compaction keeps the span's last turn as it was, after the summary; the next compaction summarises it", async () => {
+test("a compaction keeps the span's last turn as it was, after the summary; the next compaction summarises it", async () => {
   const { facts, summaries } = await played();
   const windows = facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "CompactionWindow" ? [fact.observation] : []));
   // Each window keeps one turn: the one that reached the count.

@@ -26,7 +26,7 @@ import { anthropicStream } from "../../tests/support/streams.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { SmolToolRunner, smolCatalog } from "../../tests/support/smol-tools.ts";
 
-test("A4: the notices are sent last, as an instruction after the latest input, and each is reported", async () => {
+test("the notices are sent last, as an instruction after the latest input, and each is reported", async () => {
   const session = open();
   const system = { mediaType: "text/plain", body: { _tag: "Text", text: "You are a helpful assistant." } };
   observe(session, { ...opened, system });
@@ -64,7 +64,7 @@ afterAll(() => {
   for (const stop of stops) stop();
 });
 
-test("S5 A4: a later request carries each earlier notice where it was sent, and a new one at the end", async () => {
+test("S5: a later request carries each earlier notice where it was sent, and a new one at the end", async () => {
   const bodies: Array<{ messages: ReadonlyArray<unknown> }> = [];
   const responses = [
     { content: [{ type: "tool_use", id: "toolu_1", name: "add", input: { a: 2, b: 3 } }], stop_reason: "tool_use" },
