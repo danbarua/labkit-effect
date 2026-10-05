@@ -336,6 +336,15 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 
 ## Later: worth doing, not core
 
+- [ ] `/retry` after a failed turn (Dan, 2026-10-05: not needed yet). A tool call that arrives
+      while a response streams runs at once. When the model request then fails (`ModelFailed`,
+      after retries and fallbacks), the turn ends `Failed`, the response is not recorded, and no
+      later request sends the model the call or its result. The tool ran and may have changed
+      things, and the model does not know, so it may repeat the action. A call still running when
+      the request failed records its `ToolEnded` after `TurnEnded`. `/retry` would start a new turn
+      whose first request carries the failed turn's calls (`ToolCallArrived`) and their results;
+      a call still running would report first. The facts already hold the calls, their dispatch
+      and their ends; text that streamed before the failure is not recorded.
 - [ ] Secrets in data the host does not hold (Dan, 2026-10-04): a provider's error body, an MCP
       server's stderr, a command's or a tool's output. Built: every log leaves out the values of
       the environment's credentials and of credential fields (`agent-host/redaction.ts`). To do: secrets that
