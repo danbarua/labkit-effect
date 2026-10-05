@@ -621,3 +621,37 @@ test("PJ11: live does not reorder: a call recorded before its response is sent a
   const updates = project(session.journal, live).updates;
   expect(updates.slice(0, 4)).toEqual([announced("c1", "ls", "read"), updated("c1", "in_progress"), updated("c1", "completed", { content: output('["a.ts"]') }), thought("I should list them.")] as never);
 });
+
+test("PJ3: a part its deltas sent only some of: the rest of it is sent, and each part of that kind after it whole", () => {
+  const { inputs, stream, fact } = recording();
+  fact(asked("hello"));
+  fact(dispatched());
+  stream(delta("Text", "Hel"));
+  fact(responded([answer("Hello."), answer("Bye.")]));
+  expect(project(inputs, live).updates).toEqual([said("Hel"), said("lo."), said("Bye.")]);
+});
+
+test("a turn that ended keeps no text in the state", () => {
+  const { inputs, stream, fact, session } = recording();
+  fact(asked("hello"));
+  fact(dispatched());
+  stream(delta("Text", "Hel"));
+  fact(responded([answer("Hello.")]));
+  stream(ended());
+  expect(session.journal.some((each) => each._tag === "Decided" && each.decision._tag === "TurnEnded")).toBe(true);
+  const { state } = project(inputs, live);
+  expect([...state.texts.keys()]).toEqual([]);
+  expect([...state.ended].map(String)).toEqual(["turn-1"]);
+});
+
+test("PJ11: a request ends at its response: a second response with no request between is left in place", () => {
+  const rm = (call: string) => ({ call, tool: "rm", input: json({ path: "a.ts" }) });
+  const { session, fact } = recording();
+  fact(asked("remove a.ts"));
+  fact(dispatched());
+  fact({ _tag: "ToolCallArrived", turn: "turn-1", ...rm("c1") });
+  fact(responded([{ _tag: "ToolCall", ...rm("c1") }]));
+  fact({ _tag: "ToolCallArrived", turn: "turn-1", ...rm("c2") });
+  fact(responded([answer("Removed.")]));
+  expect(project(session.journal, replay).updates).toEqual([user("remove a.ts"), announced("c1", "rm", "delete"), announced("c2", "rm", "delete"), said("Removed.")] as never);
+});
