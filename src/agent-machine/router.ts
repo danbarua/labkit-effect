@@ -1,24 +1,28 @@
 /**
  * The router delivers each observation to the machine it is addressed to, then delivers the
- * messages machines send, in the order sent, until none are left.
+ * messages that machines send, in the order sent, until none are left.
  *
- * - An observation's address comes from its own fields: input, a compaction, a change of model and
- *   a turn's start go to the agent; a model's response and a turn's end review to the turn they
- *   name; a tool's end to the call it names.
+ * - The router reads an observation's address from the observation's own fields:
+ *   - the session's opening, input, a compaction window, a change of model and a turn's start go
+ *     to the agent;
+ *   - the model's observations, a turn's end review and an interruption go to the turn they name;
+ *   - a call's permission question and answer, its dispatch and its end go to the call they name.
  * - Only messages between machines create machines: the agent opens a turn, a turn starts its
- *   steps, a step opens its calls.
- * - Every machine has a mailbox. A message its table defers waits there, with its own position;
- *   right after each transition the machine's mailbox is tried again, in order, until nothing more
- *   is taken. A waiting message the machine's new state ignores is discarded, recording nothing.
- * - `InputCancelled` withdraws the input it names from whichever mailbox holds it; if no mailbox
- *   does, nothing changes. This is the one place the router reads more than an address.
- * - An observation addressed to a turn or call that no machine exists for is recorded as
- *   `ObservationUndelivered`. One a machine's state ignores, or that a machine passes on and the next
- *   ignores, is recorded as `ObservationNotExpected`. Any other message between machines that is
- *   ignored records nothing.
+ *   steps, and a step opens its calls.
+ * - Every machine has a mailbox. A message that the machine's table defers waits there, with the
+ *   position of the observation it came from. Right after each transition, the router tries the
+ *   machine's mailbox again, in order, until a pass takes nothing. A waiting message that the
+ *   machine's new state ignores is discarded, and nothing is recorded for it.
+ * - `InputCancelled` withdraws the input it names from whichever mailbox holds it. If no mailbox
+ *   holds it, nothing changes. This is the one case where the router reads more than an address.
+ * - An observation addressed to a turn or a call that no machine exists for is recorded as
+ *   `ObservationUndelivered`.
+ * - An observation that a machine's state ignores, or that a machine passes on and the receiving
+ *   machine ignores, is recorded as `ObservationNotExpected`.
+ * - Any other ignored message between machines records nothing.
  *
- * Decisions are recorded in order at the positions after the observation (the first at `seq + 1`);
- * the caller records them there.
+ * The caller records the decisions in order, at the positions after the observation: the first at
+ * `seq + 1`.
  */
 
 import { type AgentMessage, type AgentState, agentTable, openingAgent } from "./agent.ts";
@@ -34,7 +38,7 @@ import type { Send, StepAddress } from "./messages.ts";
 import { type CallId, Seq, type StepIndex, type TurnId } from "./names.ts";
 import type { Observation } from "./observation.ts";
 import type { EffectRequest } from "./request.ts";
-import { step, type Table, type Tagged } from "./table.ts";
+import { transitionResult, type Table, type Tagged } from "./table.ts";
 import { openingTurnStep, type TurnStepMessage, type TurnStepState, turnStepTable } from "./turn-step.ts";
 
 /** A message waiting in a mailbox, with the position of the observation it came from. */
@@ -101,7 +105,7 @@ function retried<State extends Tagged, Message extends Tagged>(
     readonly took: boolean;
   }>(
     (done, waiting) => {
-      const next = step(table, done.state, waiting.message, { seq: waiting.seq });
+      const next = transitionResult(table, done.state, waiting.message, { seq: waiting.seq });
       if (next === "deferred") return { ...done, kept: [...done.kept, waiting] };
       if (next === "ignored") return done;
       return { state: next.state, kept: done.kept, outputs: joined(done.outputs, next), took: true };
@@ -117,7 +121,7 @@ function handle<State extends Tagged, Message extends Tagged>(
   machine: Machine<State, Message>,
   waiting: Waiting<Message>,
 ): Handled<State, Message> {
-  const next = step(table, machine.state, waiting.message, { seq: waiting.seq });
+  const next = transitionResult(table, machine.state, waiting.message, { seq: waiting.seq });
   if (next === "ignored") return { _tag: "Ignored" };
   if (next === "deferred") return { _tag: "Deferred", machine: { ...machine, mailbox: [...machine.mailbox, waiting] } };
   const done = retried(table, { state: next.state, mailbox: machine.mailbox }, joined(none, next));
@@ -128,7 +132,7 @@ function withEntry<K, V>(map: ReadonlyMap<K, V>, key: K, value: V): ReadonlyMap<
   return new Map([...map, [key, value]]);
 }
 
-/** The world with `handled` applied through `put`, and what it produced; undefined when ignored. */
+/** Returns the world with `handled` written by `put`, and the outputs; undefined when the message was ignored. */
 function applied<State, Message>(
   handled: Handled<State, Message>,
   put: (machine: Machine<State, Message>) => World,
@@ -163,7 +167,7 @@ const toStep = (world: World, address: StepAddress, message: TurnStepMessage, se
 const toCall = (world: World, call: CallId, machine: Machine<CallState, CallMessage>, message: CallMessage, seq: Seq) =>
   applied(handle(callTable, machine, { message, seq }), (next) => ({ ...world, calls: withEntry(world.calls, call, next) }));
 
-/** A message between machines, delivered; a machine it names that does not exist yet is created. */
+/** Delivers a message between machines. A machine that the message names and that does not exist yet is created. */
 function send(world: World, sent: Send, seq: Seq) {
   switch (sent._tag) {
     case "ToAgent":
@@ -201,9 +205,9 @@ function isPassedOn(sent: Send): boolean {
 }
 
 /**
- * Delivers the messages in order, and those they lead to after them, until none are left. An
- * observation passed on and ignored is recorded as `ObservationNotExpected`, as it would be had the
- * first machine ignored it.
+ * Delivers the messages in order, and the messages they lead to after them, until none are left.
+ * An observation that a machine passes on and the receiving machine ignores is recorded as
+ * `ObservationNotExpected`, as it would be if the first machine had ignored it.
  */
 function drain(done: Delivered, pending: ReadonlyArray<Send>, seq: Seq): Delivered {
   const [next, ...rest] = pending;
@@ -228,7 +232,7 @@ function drain(done: Delivered, pending: ReadonlyArray<Send>, seq: Seq): Deliver
       );
 }
 
-/** The world with the input recorded at `input` withdrawn from every mailbox that holds it. */
+/** Returns the world with the input recorded at `input` withdrawn from every mailbox that holds it. */
 function withdrawn(world: World, input: Seq): World {
   const turns = new Map(
     [...world.turns].map(([turn, machine]) => [
@@ -246,7 +250,7 @@ function withdrawn(world: World, input: Seq): World {
   return { ...world, agent, turns };
 }
 
-/** What follows from `observation`, recorded at `seq`. */
+/** Returns the world, decisions and requests that follow from `observation`, recorded at `seq`. */
 export function deliver(world: World, seq: Seq, observation: Observation): Delivered {
   const nothing: Delivered = { world, decisions: [], requests: [] };
   const routed = ((): ReturnType<typeof send> | "undelivered" => {
@@ -260,7 +264,7 @@ export function deliver(world: World, seq: Seq, observation: Observation): Deliv
       case "InputCancelled":
         return { world: withdrawn(world, observation.input), outputs: none };
       case "McpServerChanged":
-        // Recorded for the session's record and its host: no machine acts on it, and nothing follows.
+        // No machine acts on it: the session records it for its record and its host.
         return { world, outputs: none };
       case "ModelResponded":
       case "ModelFailed":

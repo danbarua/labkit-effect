@@ -17,7 +17,7 @@ export const Origin = Schema.Union([
   Schema.TaggedStruct("Tool", { tool: ToolName }),
   /** A part of the harness around the core: the loop, a fallback chain, a context assembler. */
   Schema.TaggedStruct("Harness", { part: HarnessPart }),
-  /** A test, or any other exercise of the code, by its name. */
+  /** A test, or another run of the code such as a probe, by its name. */
   Schema.TaggedStruct("Test", { name: TestName }),
 ]);
 export type Origin = typeof Origin.Type;

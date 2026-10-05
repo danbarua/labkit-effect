@@ -1,12 +1,16 @@
 /**
  * What facts that stop while a turn runs leave under way: the turn, and each request it made that
- * has no outcome in the facts. The process that was carrying them out ended; whoever goes on from
- * the facts decides what becomes of them.
+ * has no outcome in the facts. The process that carried out the requests ended; whoever continues
+ * from the facts decides what becomes of them.
  *
- * A request has its outcome when the facts hold the observation that answers it: a model response
- * (`ModelResponded`, `ModelFailed`, `ModelVetoed`) for its turn; `ToolEnded` for a call;
- * `TurnEndReviewed` for a turn-end review. `StopTurnWork` has none of its own: it is the turn being
- * stopped, which `stopping` says, and the requests it stops answer for themselves.
+ * A request has its outcome when the facts hold the observation that answers it:
+ *
+ * - a model request: `ModelResponded`, `ModelFailed` or `ModelVetoed` for its turn;
+ * - a tool run: `ToolEnded` for its call;
+ * - a turn-end review: `TurnEndReviewed` for its turn.
+ *
+ * `StopTurnWork` has no outcome of its own: `stopping` reports it, and each request that it stops
+ * reports its own outcome.
  */
 
 import type { Fact } from "./fact.ts";
@@ -19,7 +23,7 @@ export interface LeftRunning {
   readonly turn: TurnId;
   /** The requests with no outcome, in the order they were made. */
   readonly requests: ReadonlyArray<Exclude<EffectRequest, { _tag: "StopTurnWork" }>>;
-  /** Whether the turn was asked to stop its work: it was interrupted. */
+  /** Whether the turn requested `StopTurnWork`: it was interrupted. */
   readonly stopping: boolean;
   /** The calls among the requests whose tool began to run (`ToolCallDispatched`). */
   readonly began: ReadonlySet<CallId>;
@@ -45,23 +49,25 @@ function answers(observation: Observation, request: EffectRequest): boolean {
 }
 
 /**
- * The machines as `facts` leave them, and the requests the facts made with no outcome in them. Between
- * turns the machines hold nothing, so only the facts after the last turn's end are delivered.
+ * Returns the machines as `facts` leave them, and the requests in the facts that have no outcome.
+ * Only the facts after the last turn's end are delivered, because between turns the machines hold
+ * nothing that a later turn reads. The machines returned have none for a turn that ended before, so
+ * an observation later addressed to such a turn is recorded as `ObservationUndelivered`.
  */
 export function worldAndRequestsOf(facts: ReadonlyArray<Fact>): { readonly world: World; readonly requests: ReadonlyArray<EffectRequest> } {
   const ended = facts.reduce((last, fact, index) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? index : last), -1);
   return facts.slice(ended + 1).reduce<{ world: World; requests: ReadonlyArray<EffectRequest> }>(
-    (so, fact) => {
-      if (fact._tag !== "Observed") return so;
-      const outcome = deliver(so.world, fact.seq, fact.observation);
-      const open = so.requests.filter((request) => request._tag === "StopTurnWork" || !answers(fact.observation, request));
-      return { world: outcome.world, requests: [...open, ...outcome.requests] };
+    (replayed, fact) => {
+      if (fact._tag !== "Observed") return replayed;
+      const outcome = deliver(replayed.world, fact.seq, fact.observation);
+      const unanswered = replayed.requests.filter((request) => request._tag === "StopTurnWork" || !answers(fact.observation, request));
+      return { world: outcome.world, requests: [...unanswered, ...outcome.requests] };
     },
     { world: emptyWorld, requests: [] },
   );
 }
 
-/** The turn `facts` leave running, and what it left under way; nothing when they stop between turns. */
+/** Returns the turn that `facts` leave running, and the requests it left under way; undefined when the facts stop between turns. */
 export function leftRunning(facts: ReadonlyArray<Fact>): LeftRunning | undefined {
   const { world, requests } = worldAndRequestsOf(facts);
   const agent = world.agent.state;

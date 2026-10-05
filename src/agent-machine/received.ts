@@ -1,7 +1,7 @@
 /**
  * Content from outside the harness, as it arrived: a tool's input or output, a provider's
- * metadata, a policy's reason. It is untrusted. It may not be structured, and parsing it may fail.
- * The core carries it and does not look inside; an adapter that needs its contents parses it.
+ * metadata, a policy's reason. The content is untrusted: it may not be structured, and parsing it
+ * may fail. The core carries it without reading it; an adapter that needs its contents parses it.
  */
 
 import { Schema } from "effect";
@@ -19,8 +19,8 @@ export const BlobId = Schema.String.pipe(Schema.brand("agent-machine/BlobId"));
 export type BlobId = typeof BlobId.Type;
 
 /**
- * Content as text, as bytes, or as bytes kept in the blob store (`Stored`: their id and length),
- * which is how the facts hold bytes that came from outside, such as a tool's image.
+ * Content as text, as bytes, or as a reference to bytes in the blob store (`Stored`: the bytes' id
+ * and length). The facts hold bytes that came from outside, such as a tool's image, as `Stored`.
  */
 export const Received = Schema.Struct({
   mediaType: MediaType,

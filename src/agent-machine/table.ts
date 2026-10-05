@@ -14,14 +14,14 @@ export interface Tagged {
   readonly _tag: PropertyKey;
 }
 
-/** Where a transition happens: the message's own position. */
+/** The context of a transition: the position of the message. */
 export interface Position {
   /** The position of the observation the message came from; a deferred message keeps its own. */
   readonly seq: Seq;
 }
 
 /** What a transition produces: the machine's next state, what it records and requests, what it sends. */
-export interface Step<State, Send> {
+export interface TransitionResult<State, Send> {
   readonly state: State;
   readonly decisions: ReadonlyArray<Decision>;
   readonly requests: ReadonlyArray<EffectRequest>;
@@ -32,7 +32,7 @@ export type Transition<State, Message, Next, Send> = (
   state: State,
   message: Message,
   position: Position,
-) => Step<Next, Send>;
+) => TransitionResult<Next, Send>;
 
 export type Table<State extends Tagged, Message extends Tagged, Send> = {
   readonly [S in State["_tag"]]: {
@@ -43,20 +43,20 @@ export type Table<State extends Tagged, Message extends Tagged, Send> = {
   };
 };
 
-/** The machine's step for `message` in `state`, or "ignored", or "deferred". */
-export function step<State extends Tagged, Message extends Tagged, Send>(
+/** Returns the result of the machine's transition for `message` in `state`, or "ignored", or "deferred". */
+export function transitionResult<State extends Tagged, Message extends Tagged, Send>(
   table: Table<State, Message, Send>,
   state: State,
   message: Message,
   position: Position,
-): Step<State, Send> | "ignored" | "deferred" {
+): TransitionResult<State, Send> | "ignored" | "deferred" {
   const entry = table[state._tag as State["_tag"]][message._tag as Message["_tag"]];
   return entry === "ignored" || entry === "deferred"
     ? entry
     : (entry as Transition<State, Message, State, Send>)(state, message, position);
 }
 
-/** A step that changes the state and nothing else. */
-export function becomes<State, Send>(state: State): Step<State, Send> {
+/** Returns a transition result that changes the state and nothing else. */
+export function becomes<State, Send>(state: State): TransitionResult<State, Send> {
   return { state, decisions: [], requests: [], sends: [] };
 }

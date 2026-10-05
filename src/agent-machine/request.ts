@@ -1,8 +1,11 @@
 /**
- * Effect requests: messages the core sends asking for an action on the outside world. The layers
- * around the core carry each one out, and may first apply a policy that lets it continue, vetoes
- * it, or delays it. Its result arrives as an Observation. When a turn starts is decided by the
- * layers around the core, which report it as `TurnStarted`.
+ * Effect requests: messages that the core sends to ask for an action on the outside world.
+ *
+ * - The layers around the core carry out each request. They may first apply a policy that lets
+ *   the request continue, vetoes it, or makes it wait.
+ * - The result of a request arrives as an observation.
+ * - The core does not request a turn's start: the layers around the core decide when a turn starts
+ *   and report it as `TurnStarted`.
  */
 
 import { Schema } from "effect";
@@ -10,19 +13,21 @@ import { CallId, ToolName, TurnId } from "./names.ts";
 import { Received } from "./received.ts";
 
 export const EffectRequest = Schema.Union([
-  /** Ask the model for its next response in `turn`, given the conversation so far. */
+  /** Ask the model for its next response in `turn`. */
   Schema.TaggedStruct("RequestModelResponse", { turn: TurnId }),
   /**
-   * The model answered `turn` and nothing was waiting: before the turn ends, the layers around the
-   * core may give it more input (a hook's feedback, say). They report `TurnEndReviewed` when done.
+   * The model gave `turn` a response with no tool calls that is not marked `Unfinished`. Before the
+   * turn ends, the layers around the core may give it more input, such as a turn-end hook's
+   * feedback. They report `TurnEndReviewed` when they have finished.
    */
   Schema.TaggedStruct("BeforeTurnEnded", { turn: TurnId }),
-  /** Run one tool call the model proposed. */
+  /** Run one tool call that the model proposed. */
   Schema.TaggedStruct("RunTool", { call: CallId, tool: ToolName, input: Received }),
   /**
-   * Stop what is being carried out for `turn`. Each request under way reports how far it got: a
-   * model request, the response as far as it had arrived; a tool call, how it ended or that this
-   * was not observed.
+   * Stop every request being carried out for `turn`. Each request under way reports how far it got:
+   *
+   * - a model request reports the response as far as it had arrived;
+   * - a tool call reports how it ended, or that its end was not observed.
    */
   Schema.TaggedStruct("StopTurnWork", { turn: TurnId }),
 ]);

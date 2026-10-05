@@ -1,5 +1,5 @@
 /**
- * Decisions: choices the harness makes, each computed from the facts.
+ * Decisions: choices that the core makes. The core's machines compute each decision from the facts.
  */
 
 import { Schema } from "effect";
@@ -8,14 +8,18 @@ import { Received } from "./received.ts";
 
 /** How a turn ended. */
 export const Ending = Schema.Union([
-  /** The model's last response was its answer (`TurnCompleted`), and nothing more was given to the turn. */
+  /** The model's last response was its answer (`TurnCompleted`), and no input was given to the turn after it. */
   Schema.TaggedStruct("Completed", {}),
   /**
-   * The model's last response was whole, with no tool calls, but held no answer, only thinking or
-   * commentary (`TurnIncomplete`), and nothing more was given to the turn.
+   * The model's last response was whole, with no tool calls, and held only thinking or commentary,
+   * no answer text (`TurnIncomplete`). No input was given to the turn after it.
    */
   Schema.TaggedStruct("Incomplete", {}),
-  /** The model's response was cut short (a length limit, a pause) and no input was queued to go on with. */
+  /**
+   * The model's last response had no tool calls and an ending other than `Complete` or `Unfinished`
+   * (for example, a length limit cut it short, or the provider refused it). No input was given to
+   * the turn after it.
+   */
   Schema.TaggedStruct("CutShort", {}),
   /** A request for a model response failed. */
   Schema.TaggedStruct("Failed", { failure: FailureText }),
@@ -29,57 +33,55 @@ export type Ending = typeof Ending.Type;
 export const Decision = Schema.Union([
   /**
    * The model answered `turn`: its response had answer text and no tool calls. The turn ends
-   * (`TurnEnded`) unless the layers around the core give it more first (`BeforeTurnEnded`).
+   * (`TurnEnded`) unless the layers around the core give it more input first (`BeforeTurnEnded`).
    */
   Schema.TaggedStruct("TurnCompleted", { turn: TurnId }),
   /**
    * The model's response to `turn` was whole, with no tool calls and no answer text. The turn ends
-   * as `TurnCompleted`'s does; a host's turn-end hook can give it more instead.
+   * as it does after `TurnCompleted`, unless a turn-end hook gives it more input.
    */
   Schema.TaggedStruct("TurnIncomplete", { turn: TurnId }),
   /**
-   * Inputs were given to `turn`: when it opened, or at a point between steps (after a tool batch
-   * settled, or after a final answer).
+   * Inputs were given to `turn`: when the turn opened, or between steps (after a tool batch
+   * settled, or after a response with no tool calls).
    */
   Schema.TaggedStruct("InputDelivered", { turn: TurnId, inputs: Inputs }),
   /**
-   * The model is to be asked for `turn`'s first step: the request that carries the turn's input.
-   * The request is made from the facts recorded before this one; which of them it sends is the
-   * conversation view's business.
+   * The core asks the model for `turn`'s first step, with a request that carries the turn's input.
+   * The layers around the core make the request from the facts recorded before this decision; the
+   * conversation view decides which of those facts the request sends.
    */
   Schema.TaggedStruct("AskModel", { turn: TurnId }),
   /**
-   * The model is to be told what came of `turn`'s previous step (its tool calls' results, input
-   * given between steps) and asked for `step`, the turn's next step. The request is made as for
-   * `AskModel`.
+   * The core tells the model the outcome of `turn`'s previous step (its tool calls' results, and
+   * input given between steps) and asks it for `step`, the turn's next step. The request is made as
+   * for `AskModel`.
    */
   Schema.TaggedStruct("TellModel", { turn: TurnId, step: StepIndex }),
-  /**
-   * Inputs queued during `turn` were discarded because the turn ended other than by an answer.
-   */
+  /** Inputs waiting in `turn`'s mailbox were discarded, because the turn ended other than by an answer. */
   Schema.TaggedStruct("InputDropped", { turn: TurnId, inputs: Inputs }),
   /**
    * The window of the compaction recorded at `compaction` is in effect: requests to the model from
-   * here on are made in it. Taken at once while no turn runs, and between the steps of a turn that
-   * does.
+   * here on are made in the window. The core takes a window at once while no turn runs; while a
+   * turn runs, the core takes it between steps or when the turn ends.
    */
   Schema.TaggedStruct("WindowOpened", { compaction: Seq }),
   /**
-   * The change of model recorded at `change` is in effect: requests to the model from here on go to
-   * the model it names. Taken at once while no turn runs, and between the steps of a turn that does,
-   * or once it has ended.
+   * The change of model recorded at `change` is in effect: requests from here on go to the model
+   * that the change names. The core takes a change at once while no turn runs; while a turn runs,
+   * the core takes it between steps or when the turn ends.
    */
   Schema.TaggedStruct("ModelChangeTaken", { change: Seq }),
-  /** The turn ended. The session is idle until the next input arrives. */
+  /** The turn ended. No turn runs until the next input arrives. */
   Schema.TaggedStruct("TurnEnded", { turn: TurnId, ending: Ending }),
   /**
-   * The observation recorded at `observation` reached a machine whose state does not act on it. It
-   * stays recorded; nothing changes.
+   * The observation recorded at `observation` reached a machine whose state does not act on it. The
+   * observation stays recorded, and no machine changes state.
    */
   Schema.TaggedStruct("ObservationNotExpected", { observation: Seq }),
   /**
-   * The observation recorded at `observation` names a turn or a call no machine exists for. It stays
-   * recorded; nothing changes.
+   * The observation recorded at `observation` names a turn or a call that no machine exists for.
+   * The observation stays recorded, and no machine changes state.
    */
   Schema.TaggedStruct("ObservationUndelivered", { observation: Seq }),
 ]);

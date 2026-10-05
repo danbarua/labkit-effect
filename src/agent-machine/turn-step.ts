@@ -1,11 +1,15 @@
 /**
- * A turn step: one request to the model and what follows from its response. The step asks the
- * model; each tool call opens a call and requests it be run, when it arrives while the response
- * streams or, for one that did not, when the response does; the step waits for each to settle. A
- * response without tool calls is a final answer, unless it was cut short or stopped, or was whole
- * and not yet an answer, in which case the turn asks again. An attempt at the request that failed while
- * the request goes on changes nothing; the step waits for the request's outcome. The step tells its
- * turn how it finished.
+ * A turn step: one request to the model and what follows from its response.
+ *
+ * - The step requests a model response.
+ * - Each tool call opens a call machine and requests the tool's run: when the call arrives while
+ *   the response streams, or, for a call that did not arrive earlier, when the response is
+ *   recorded. The step waits until every call has settled.
+ * - A response without tool calls tells the turn how it ended: answered, unanswered (whole with no
+ *   answer text), unfinished (the turn asks again), or cut short.
+ * - A failed attempt at the request, after which the request continues, changes nothing; the step
+ *   waits for the request's outcome.
+ * - When the step finishes, it tells its turn how.
  */
 
 import {
@@ -17,13 +21,13 @@ import {
   toConversationTurn,
 } from "./messages.ts";
 import type { CallId } from "./names.ts";
-import { becomes, type Step, type Table } from "./table.ts";
+import { becomes, type Table, type TransitionResult } from "./table.ts";
 
 export type TurnStepState =
   | { readonly _tag: "NotStarted"; readonly step: StepAddress }
   /**
-   * The model was asked. `opened` are the calls that arrived while its response streams, each run
-   * at once; `unsettled` are those of them that have not ended.
+   * The model was asked. `opened` are the calls that arrived while the response streams, each run
+   * at once; `unsettled` are the calls among them that have not ended.
    */
   | {
       readonly _tag: "AwaitingModel";
@@ -36,15 +40,15 @@ export type TurnStepState =
 
 export type TurnStepMessage = ToTurnStep | ModelObservation;
 
-type StepStep = Step<TurnStepState, Send>;
+type StepResult = TransitionResult<TurnStepState, Send>;
 
 export const openingTurnStep = (step: StepAddress): TurnStepState => ({ _tag: "NotStarted", step });
 
-const done = (step: StepAddress, told: Send): StepStep => ({
+const done = (step: StepAddress, report: Send): StepResult => ({
   state: { _tag: "Done", step },
   decisions: [],
   requests: [],
-  sends: [told],
+  sends: [report],
 });
 
 export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
@@ -82,9 +86,11 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
           },
     CallSettled: (state, message) => becomes({ ...state, unsettled: state.unsettled.filter((call) => call !== message.call) }),
     /**
-     * The response's calls that did not arrive earlier are opened and run. With no call at all the
-     * response is an answer, or was cut short; with every call settled the tool batch is; otherwise
-     * the step waits for the calls still running.
+     * The response's calls that did not arrive earlier are opened and run.
+     *
+     * - With no call at all, the step tells the turn how the response ended.
+     * - With every call settled, the step tells the turn that the tool batch has settled.
+     * - Otherwise the step waits for the calls still running.
      */
     ModelResponded: (state, message) => {
       const calls = message.parts.flatMap((part) => (part._tag === "ToolCall" ? [part] : []));
@@ -124,7 +130,7 @@ export const turnStepTable: Table<TurnStepState, TurnStepMessage, Send> = {
     ModelAttemptFailed: (state) => becomes(state),
     /** A notice went into the request; the step waits for its outcome. */
     NoticeInserted: (state) => becomes(state),
-    /** The request was made; the step waits for what comes of it. */
+    /** The request was made; the step waits for its outcome. */
     ModelRequestDispatched: (state) => becomes(state),
     /** A setting was adjusted on the request; the step waits for its outcome. */
     SettingAdjusted: (state) => becomes(state),

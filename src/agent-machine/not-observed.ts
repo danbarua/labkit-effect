@@ -1,8 +1,13 @@
 /**
- * What is recorded for the requests of a turn's step that were made and have no outcome: the
- * process that was carrying them out ended, or a record of another harness stops before them. No
- * response was observed, so the response is indeterminate; how each call that began to run ended
- * was not observed either, and a call that had not begun (waiting for an answer) was not run.
+ * The outcomes to record for the requests of a turn's step that were made and have no outcome,
+ * because the process carrying them out ended, or because an imported record of another harness
+ * stops before them:
+ *
+ * - the model request: `ModelResponded` with ending `Indeterminate`, because no response was
+ *   observed;
+ * - a call whose tool began to run: `ToolEnded` with `Indeterminate`, because its end was not
+ *   observed;
+ * - a call that had not begun (it was waiting for an answer): `ToolEnded` with `NotRun`.
  */
 
 import type { CallId, ModelName, ProviderName, TurnId } from "./names.ts";
@@ -11,8 +16,8 @@ import { MediaType, ReceivedText } from "./received.ts";
 import type { World } from "./router.ts";
 
 /**
- * The outcomes to record for `turn`'s step under way, in `world`. `asked` is the model the request
- * went to, and `arrived` the parts of its response that are known to have arrived.
+ * Returns the outcomes to record for `turn`'s step under way in `world`. `asked` is the model that
+ * the request went to, and `arrived` holds the parts of its response that are known to have arrived.
  */
 export function notObserved(
   world: World,
@@ -28,13 +33,13 @@ export function notObserved(
     const state = world.calls.get(call)?.state;
     return state?._tag === "Running" && state.began;
   };
-  const ends = step.unsettled.map(
+  const callEnds = step.unsettled.map(
     (call): Observation => ({ _tag: "ToolEnded", call, outcome: { _tag: "Failed", reason: { _tag: began(call) ? "Indeterminate" : "NotRun" } } }),
   );
   return step._tag === "RunningTools"
-    ? ends
+    ? callEnds
     : [
-        ...ends,
+        ...callEnds,
         {
           _tag: "ModelResponded",
           turn,

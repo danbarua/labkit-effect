@@ -1,8 +1,8 @@
 /**
- * The call machine: one per tool call. It is opened by the step that proposed it, and settles when
- * the call ends, telling that step. What happens to a call between being opened and settling is
- * this machine's business, not the step's: what a policy asked before it runs and the answer, and
- * whether the tool began to run (`began`).
+ * The call machine: one per tool call. The step that proposed the call opens it. When the call ends
+ * (`ToolEnded`), the machine settles and tells that step (`CallSettled`). Between those two, the
+ * call machine, not the step, tracks the call: a policy's question and its answer, and whether the
+ * tool began to run (`began`).
  */
 
 import { type CallObservation, type Send, type StepAddress, type ToCall, toTurnStep } from "./messages.ts";
@@ -27,11 +27,11 @@ export const callTable: Table<CallState, CallMessage, Send> = {
     ToolEnded: "ignored",
   },
   Running: {
-    /** Recorded; the call waits for the answer. */
+    /** The call waits for the answer. */
     PermissionAsked: (state) => becomes(state),
-    /** Recorded; the policy that asked decides whether the call runs. */
+    /** The policy that asked decides whether the call runs. */
     PermissionAnswered: (state) => becomes(state),
-    /** Recorded; the call waits for how it ends. */
+    /** The tool began to run; the call waits for its end. */
     ToolCallDispatched: (state) => becomes({ ...state, began: true }),
     ToolEnded: (state) => ({
       state: { _tag: "Ended", call: state.call },

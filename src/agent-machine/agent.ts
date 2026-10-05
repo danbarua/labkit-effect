@@ -1,9 +1,12 @@
 /**
- * The agent: the parent of conversation turns. Input that arrives while no turn is running waits in
- * the agent's mailbox. When a turn starts (the layers around the core decide when, and report
- * `TurnStarted`), the agent opens it and passes it each waiting input; input that arrives while a
- * turn runs is passed to that turn. A compaction or a change of model is taken at once while no turn
- * runs, and passed to the running turn otherwise.
+ * The agent: the parent of conversation turns.
+ *
+ * - Input that arrives while no turn runs waits in the agent's mailbox.
+ * - The layers around the core decide when a turn starts, and report `TurnStarted`. The agent then
+ *   opens the turn and passes it each waiting input.
+ * - Input that arrives while a turn runs is passed to that turn.
+ * - The agent takes a compaction window or a change of model at once while no turn runs, and
+ *   passes it to the running turn otherwise.
  */
 
 import { type AgentObservation, type Send, type ToAgent, toConversationTurn } from "./messages.ts";

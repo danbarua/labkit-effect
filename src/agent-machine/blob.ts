@@ -1,7 +1,7 @@
 /**
  * A reference to bytes held outside the facts: an attachment, or a tool's binary output. The facts
- * hold the reference; the bytes are in the blob store (agent-session `Blobs`), found by the id,
- * which is the lowercase hex SHA-256 of the bytes, so the same bytes always have the same id.
+ * hold the reference, and the blob store (agent-session `Blobs`) holds the bytes under their id.
+ * The id is the lowercase hex SHA-256 of the bytes, so the same bytes always have the same id.
  */
 
 import { Schema } from "effect";

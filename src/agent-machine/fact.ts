@@ -1,8 +1,10 @@
 /**
- * Facts: recorded Observations and recorded Decisions, each at its position in the session and with
- * the time it was recorded. An observation is recorded with its origin: who or what reported it. A
- * decision is the core's own, recorded at the time of the observation it follows from.
- * The machines compute from positions only; time is added where facts are recorded.
+ * Facts: recorded observations and recorded decisions. Each fact has its position in the session
+ * (`seq`) and the time it was recorded.
+ *
+ * - An observation is recorded with its origin: who or what reported it.
+ * - A decision is the core's own, and is recorded at the time of the observation it follows from.
+ * - The machines compute from positions only. The layer that records facts adds the time.
  */
 
 import { Schema } from "effect";

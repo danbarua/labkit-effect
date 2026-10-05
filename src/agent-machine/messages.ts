@@ -1,7 +1,7 @@
 /**
- * The messages machines send each other, and the observations each kind of machine receives.
- * Messages between machines are not facts: they are not recorded, and the facts they lead to are
- * recorded by the machine that makes them.
+ * The messages that machines send each other, and the observations that each kind of machine
+ * receives. Messages between machines are not facts and are not recorded. A decision that a message
+ * leads to is recorded by the machine that makes the decision.
  */
 
 import type { Ending } from "./decision.ts";
@@ -60,7 +60,7 @@ export type ToConversationTurn =
   | { readonly _tag: "Compact"; readonly compaction: Seq }
   /** The change of model recorded at `change`, for the turn to take between steps. */
   | { readonly _tag: "ChangeModel"; readonly change: Seq }
-  /** Posted by the turn to itself: its mail is taken, so it goes on. */
+  /** Sent by the turn to itself between steps. It arrives after the waiting messages have been taken; the turn then starts the next step. */
   | { readonly _tag: "Proceed" }
   /** Every call of the step's tool batch settled. */
   | { readonly _tag: "StepToolsSettled" }
@@ -68,11 +68,11 @@ export type ToConversationTurn =
   | { readonly _tag: "StepAnswered" }
   /** The model's response was whole, with no tool calls and no answer text. */
   | { readonly _tag: "StepUnanswered" }
-  /** The model's response was cut short, or stopped, with no tool calls. */
+  /** The model's response had no tool calls and did not end complete or unfinished (cut short, refused, stopped, or not classified). */
   | { readonly _tag: "StepCutShort" }
-  /** The model's response was whole, with no tool calls, and not its answer; the turn asks again. */
+  /** The model's response was whole, with no tool calls, and marked `Unfinished`; the turn asks again. */
   | { readonly _tag: "StepUnfinished" }
-  /** The step stopped without an answer. */
+  /** The step stopped without a response: the request failed or was vetoed. */
   | { readonly _tag: "StepStopped"; readonly ending: Exclude<Ending, { _tag: "Completed" | "Incomplete" }> };
 
 /** What a conversation turn, or a call, tells a step. */
@@ -84,7 +84,7 @@ export type ToTurnStep =
 
 /** What a step tells a call. */
 export type ToCall =
-  /** The call was proposed in `step` and requested. */
+  /** The model proposed the call in `step`, and the step requested its run. */
   { readonly _tag: "CallOpened"; readonly step: StepAddress };
 
 /** A message from one machine to another, tagged with the kind of machine it goes to. */

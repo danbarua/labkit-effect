@@ -1,14 +1,21 @@
 /**
- * A conversation turn: from the input that started it to the model's final answer. It runs steps
- * one after another; after a tool batch, or a response cut short, it goes on to the next. Input for
- * the turn waits in its mailbox while a step runs, and is taken between steps; between steps the
- * turn posts `Proceed` to itself, which arrives after the waiting input is taken, and then goes on.
- * A compaction or a change of model waits in the mailbox the same way, and is taken between steps,
- * or once the turn has ended. After a final answer it asks the layers around the core for
- * anything more first (`BeforeTurnEnded`, answered by `TurnEndReviewed`); it ends when no input was
- * taken by then, or when a step stops without an answer; input still waiting then is dropped. The
- * model's observations are addressed to the turn, which passes them to its current step. An
- * interruption ends the turn at once, from any state before it has ended.
+ * A conversation turn: from the input that started it to the model's final answer.
+ *
+ * - The turn runs steps one after another. After a tool batch settles, or after a response marked
+ *   `Unfinished`, it starts the next step.
+ * - Input for the turn waits in the turn's mailbox while a step runs, and is taken between steps.
+ *   Between steps the turn sends itself `Proceed`, which arrives after the waiting input has been
+ *   taken; on `Proceed` the turn starts the next step.
+ * - A compaction window or a change of model waits in the mailbox the same way, and is taken
+ *   between steps or when the turn ends.
+ * - After a response with no tool calls that is not marked `Unfinished`, the turn requests
+ *   `BeforeTurnEnded`, which the layers around the core answer with `TurnEndReviewed`. If no input
+ *   was taken by then, the turn ends.
+ * - A step that stops without a response (a failed or vetoed request) ends the turn. Input still
+ *   waiting when the turn ends is dropped.
+ * - The model's observations are addressed to the turn, which passes them to its current step.
+ * - An interruption between steps ends the turn at once. An interruption during a step stops the
+ *   step's requests, and the turn ends when the step has heard how far each got.
  */
 
 import type { Ending } from "./decision.ts";
@@ -22,25 +29,25 @@ import {
   toTurnStep,
 } from "./messages.ts";
 import { type Seq, StepIndex, type TurnId } from "./names.ts";
-import { becomes, type Step, type Table } from "./table.ts";
+import { becomes, type Table, type TransitionResult } from "./table.ts";
 
 export type ConversationTurnState =
   | { readonly _tag: "NotStarted"; readonly turn: TurnId }
-  /** Opened; taking its first input before the first step. */
+  /** Opened: the turn takes its first input before the first step. */
   | { readonly _tag: "Opening"; readonly turn: TurnId }
   | { readonly _tag: "Stepping"; readonly turn: TurnId; readonly step: StepIndex }
-  /** Between steps after a tool batch settled, or after a response that was not yet an answer. */
+  /** Between steps, after a tool batch settled or after a response marked `Unfinished`. */
   | { readonly _tag: "Continuing"; readonly turn: TurnId; readonly step: StepIndex }
   /**
-   * Between steps after a response with no tool calls (a final answer, or one cut short), with no
-   * input taken since. `ending` is how the turn ends if none is taken.
+   * Between steps, after a response with no tool calls (a final answer, or a response cut short),
+   * with no input taken since. `ending` is how the turn ends if no input is taken.
    */
   | { readonly _tag: "AfterAnswer"; readonly turn: TurnId; readonly step: StepIndex; readonly ending: LastResponse }
-  /** Between steps after a response with no tool calls, with input taken since. */
+  /** Between steps, after a response with no tool calls, with input taken since. */
   | { readonly _tag: "AfterAnswerSteered"; readonly turn: TurnId; readonly step: StepIndex }
   /**
-   * Interrupted while a step was under way: what was being carried out has been asked to stop, and
-   * the turn ends when the step has heard how far each request got.
+   * Interrupted while a step was under way: the turn has requested `StopTurnWork`, and ends when the
+   * step has heard how far each request got.
    */
   | { readonly _tag: "Interrupting"; readonly turn: TurnId; readonly step: StepIndex }
   | { readonly _tag: "Ended"; readonly turn: TurnId };
@@ -50,13 +57,13 @@ type LastResponse = Extract<Ending, { _tag: "Completed" | "Incomplete" | "CutSho
 
 export type ConversationTurnMessage = ToConversationTurn | ModelObservation | TurnObservation;
 
-type TurnStep = Step<ConversationTurnState, Send>;
+type TurnResult = TransitionResult<ConversationTurnState, Send>;
 
 export const openingConversationTurn = (turn: TurnId): ConversationTurnState => ({ _tag: "NotStarted", turn });
 
 const proceed = (turn: TurnId): Send => toConversationTurn(turn, { _tag: "Proceed" });
 
-const nextStep = (turn: TurnId, previous: number): TurnStep => {
+const nextStep = (turn: TurnId, previous: number): TurnResult => {
   const step = StepIndex.make(previous + 1);
   return {
     state: { _tag: "Stepping", turn, step },
@@ -66,53 +73,57 @@ const nextStep = (turn: TurnId, previous: number): TurnStep => {
   };
 };
 
-/** The input is given to the turn. */
-const take = (state: ConversationTurnState, input: Seq, next: ConversationTurnState = state): TurnStep => ({
+/** Gives the input to the turn (`InputDelivered`). */
+const take = (state: ConversationTurnState, input: Seq, next: ConversationTurnState = state): TurnResult => ({
   state: next,
   decisions: [{ _tag: "InputDelivered", turn: state.turn, inputs: [input] }],
   requests: [],
   sends: [],
 });
 
-/** After a tool batch, or a response that was not yet an answer, the turn goes on once its waiting input is taken. */
-const continuing = (state: Extract<ConversationTurnState, { _tag: "Stepping" }>): TurnStep => ({
+/** After a tool batch or an `Unfinished` response, the turn starts the next step once its waiting input is taken. */
+const continuing = (state: Extract<ConversationTurnState, { _tag: "Stepping" }>): TurnResult => ({
   ...becomes({ _tag: "Continuing", turn: state.turn, step: state.step }),
   sends: [proceed(state.turn)],
 });
 
 /**
- * After a response with no tool calls the layers around the core are asked for anything more before
- * the turn ends (`BeforeTurnEnded`); `TurnEndReviewed` then decides: input taken meanwhile means a
- * next step, none means the turn ends as `ending`. A response cut short is not followed by another
- * request unless input gives the model something new to answer.
+ * After a response with no tool calls that is not marked `Unfinished`, the turn requests
+ * `BeforeTurnEnded`. On `TurnEndReviewed`:
+ *
+ * - if input was taken meanwhile, the turn starts the next step;
+ * - otherwise the turn ends as `ending`.
+ *
+ * A response cut short is not followed by another request unless input gives the model something
+ * new to answer.
  */
 const afterAnswer =
   (ending: LastResponse) =>
-  (state: Extract<ConversationTurnState, { _tag: "Stepping" }>): TurnStep => ({
+  (state: Extract<ConversationTurnState, { _tag: "Stepping" }>): TurnResult => ({
     ...becomes({ _tag: "AfterAnswer", turn: state.turn, step: state.step, ending }),
     requests: [{ _tag: "BeforeTurnEnded", turn: state.turn }],
   });
 
-/** The compaction's window is in effect from here. */
-const compact = (state: ConversationTurnState, compaction: Seq): TurnStep => ({
+/** Records `WindowOpened`: the compaction's window is in effect from here. */
+const compact = (state: ConversationTurnState, compaction: Seq): TurnResult => ({
   ...becomes(state),
   decisions: [{ _tag: "WindowOpened", compaction }],
 });
 
-/** The change of model is in effect from here. */
-const changeModel = (state: ConversationTurnState, change: Seq): TurnStep => ({
+/** Records `ModelChangeTaken`: the change of model is in effect from here. */
+const changeModel = (state: ConversationTurnState, change: Seq): TurnResult => ({
   ...becomes(state),
   decisions: [{ _tag: "ModelChangeTaken", change }],
 });
 
-/** Nothing of the turn's is mid-step: it ends at once, and whatever is being carried out for it is stopped. */
-const interrupted = (state: ConversationTurnState): TurnStep => ({
+/** No step is under way: the turn ends at once and requests `StopTurnWork` for anything still carried out for it. */
+const interrupted = (state: ConversationTurnState): TurnResult => ({
   ...ended(state.turn, { _tag: "Interrupted" }),
   requests: [{ _tag: "StopTurnWork", turn: state.turn }],
 });
 
-/** A step is under way: its requests are stopped, and the turn waits to hear how far each got. */
-const interrupting = (state: Extract<ConversationTurnState, { _tag: "Stepping" }>): TurnStep => ({
+/** A step is under way: the turn requests `StopTurnWork` and waits to hear how far each request got. */
+const interrupting = (state: Extract<ConversationTurnState, { _tag: "Stepping" }>): TurnResult => ({
   ...becomes({ _tag: "Interrupting", turn: state.turn, step: state.step }),
   requests: [{ _tag: "StopTurnWork", turn: state.turn }],
 });
@@ -120,11 +131,11 @@ const interrupting = (state: Extract<ConversationTurnState, { _tag: "Stepping" }
 const passOn = (
   state: Extract<ConversationTurnState, { _tag: "Stepping" | "Interrupting" }>,
   message: ModelObservation,
-): TurnStep => ({ ...becomes(state), sends: [toTurnStep({ turn: state.turn, index: state.step }, message)] });
+): TurnResult => ({ ...becomes(state), sends: [toTurnStep({ turn: state.turn, index: state.step }, message)] });
 
-const endInterrupted = (state: ConversationTurnState): TurnStep => ended(state.turn, { _tag: "Interrupted" });
+const endInterrupted = (state: ConversationTurnState): TurnResult => ended(state.turn, { _tag: "Interrupted" });
 
-const ended = (turn: TurnId, ending: Ending): TurnStep => ({
+const ended = (turn: TurnId, ending: Ending): TurnResult => ({
   state: { _tag: "Ended", turn },
   decisions: [{ _tag: "TurnEnded", turn, ending }],
   requests: [],
@@ -243,7 +254,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ChangeModel: (state, message) => changeModel(state, message.change),
     Proceed: "ignored",
     TurnEndReviewed: (state) => ended(state.turn, state.ending),
-    /** Recorded; the review goes on, without the hooks. */
+    /** Changes nothing: the review continues without the hooks, and `TurnEndReviewed` follows. */
     TurnHoldsExhausted: (state) => becomes(state),
     StepToolsSettled: "ignored",
     StepAnswered: "ignored",
@@ -287,12 +298,12 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
   Interrupting: {
     TurnInterrupted: "ignored",
     TurnOpened: "ignored",
-    /** What waits is dealt with when the turn has ended. */
+    /** A waiting message is handled when the turn has ended. */
     Steer: "deferred",
     Compact: "deferred",
     ChangeModel: "deferred",
     Proceed: "ignored",
-    /** The step has heard from every request it made: the turn ends. */
+    /** The step has heard from every request it made, so the turn ends. */
     StepToolsSettled: endInterrupted,
     StepAnswered: endInterrupted,
     StepUnanswered: endInterrupted,
@@ -318,7 +329,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
       ...becomes(state),
       decisions: [{ _tag: "InputDropped", turn: state.turn, inputs: [message.input] }],
     }),
-    /** A compaction still waiting when the turn ends is taken: its window outlasts the turn. */
+    /** A compaction still waiting when the turn ends is taken, because its window outlasts the turn. */
     Compact: (state, message) => compact(state, message.compaction),
     ChangeModel: (state, message) => changeModel(state, message.change),
     Proceed: "ignored",

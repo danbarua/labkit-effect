@@ -1,6 +1,9 @@
 /**
- * Observations: what reaches the harness from outside. A recorded observation is kept as
- * received; a captured observation is passed on for display and not kept.
+ * Observations: what reaches the harness from outside it.
+ *
+ * - A session records each `Observation` as a fact, unchanged.
+ * - A session publishes each `CapturedObservation` to whoever follows it, for display, and does not
+ *   record it.
  */
 
 import { BlobRef } from "./blob.ts";
@@ -39,23 +42,23 @@ export type InputSource = typeof InputSource.Type;
 export const ModelPart = Schema.Union([
   Schema.TaggedStruct("Text", { text: ModelText }),
   /**
-   * Text a model wrote for whoever is watching, saying what it found or is about to do (a provider
-   * may call it commentary, or a progress update). It is not the model's answer.
+   * Text that the model wrote for whoever watches the session, about what it found or is about to
+   * do. A provider may call it commentary or a progress update. It is not the model's answer.
    */
   Schema.TaggedStruct("Commentary", { text: ModelText }),
   /**
-   * The model's thinking: `text` is what of it can be read (a summary, a note on its progress, or
-   * nothing), and `received` is the provider's block or item as it came, which the provider needs
-   * back unchanged.
+   * The model's thinking. `text` is the readable part: a summary, a progress note, or empty.
+   * `received` is the provider's block or item as received; later requests send it back to the
+   * provider unchanged.
    */
   Schema.TaggedStruct("Thinking", { text: ThinkingText, received: Received }),
   Schema.TaggedStruct("ToolCall", { call: CallId, tool: ToolName, input: Received }),
-  /** A part the decoder does not recognise, holding what was received. */
+  /** A part that the decoder does not recognise, as received. */
   Schema.TaggedStruct("Unrecognised", { received: Received }),
 ]);
 export type ModelPart = typeof ModelPart.Type;
 
-/** Why a tool call failed. Code that only needs to know whether a call succeeded ignores it. */
+/** Why a tool call failed. Code that needs only success or failure matches `ToolOutcome` and ignores the reason. */
 export const ToolFailure = Schema.Union([
   /** The tool ran and reported an error. */
   Schema.TaggedStruct("Reported", { error: Received }),
@@ -65,14 +68,14 @@ export const ToolFailure = Schema.Union([
   Schema.TaggedStruct("InputRejected", { problem: FailureText }),
   /** A policy vetoed the call before it ran, for the reason it gave. */
   Schema.TaggedStruct("Vetoed", { reason: Received }),
-  /** The tool began to run and how it ended was not observed. It may have had effects. */
+  /** The tool began to run, and how it ended was not observed. The tool may have had effects. */
   Schema.TaggedStruct("Indeterminate", {}),
   /** The call was not run. */
   Schema.TaggedStruct("NotRun", {}),
 ]);
 export type ToolFailure = typeof ToolFailure.Type;
 
-/** How a tool call ended: it succeeded, with the tool's output, or it failed, for a reason. */
+/** How a tool call ended: `Succeeded` with the tool's output, or `Failed` with the reason. */
 export const ToolOutcome = Schema.Union([
   Schema.TaggedStruct("Succeeded", { output: Received }),
   Schema.TaggedStruct("Failed", { reason: ToolFailure }),
@@ -80,26 +83,32 @@ export const ToolOutcome = Schema.Union([
 export type ToolOutcome = typeof ToolOutcome.Type;
 
 /**
- * Why a model's response stopped, as its adapter classifies the provider's own reason (kept in
- * `stop`): it is complete (with or without tool calls; a stop sequence the request named ends it
- * complete), it was cut short by a length limit (the output limit, or the context window), it is
- * whole but not yet an answer, the provider refused it, the harness stopped it,
- * nothing of it was observed, or the adapter does not know the reason.
+ * Why a model's response stopped, as the provider's adapter classifies the provider's own reason.
+ * `ModelResponded.stop` keeps the provider's reason.
+ *
+ * - `Complete`: the response is complete, with or without tool calls. A stop sequence that the
+ *   request named also ends a response as complete.
+ * - `CutShort`: a length limit (the output limit or the context window) cut the response short.
+ * - `Unfinished`: the response is whole but is not yet an answer.
+ * - `Refused`: the provider refused to respond.
+ * - `Interrupted`: the harness stopped the response.
+ * - `Indeterminate`: no response was observed.
+ * - `Unclassified`: the adapter does not recognise the provider's reason.
  */
 export const ResponseEnding = Schema.Union([
   Schema.TaggedStruct("Complete", {}),
   Schema.TaggedStruct("CutShort", {}),
   /**
-   * The response is whole, called no tool, and its provider marks it as not the end of the model's
-   * turn (a pause). The model is asked again.
+   * The response is whole and calls no tool, and its provider marks it as not the end of the
+   * model's turn (Anthropic's `pause_turn`). The turn asks the model again.
    */
   Schema.TaggedStruct("Unfinished", {}),
   Schema.TaggedStruct("Refused", {}),
-  /** The response was stopped while it was arriving; it holds the parts that were complete by then. */
+  /** The harness stopped the response while it was arriving. The response holds the parts that were complete by then. */
   Schema.TaggedStruct("Interrupted", {}),
   /**
-   * No response was observed: the request was made, and what came of it is not known. It holds the
-   * parts known to have arrived.
+   * No response was observed: the request was made, and its outcome is not known. The response
+   * holds the parts that are known to have arrived.
    */
   Schema.TaggedStruct("Indeterminate", {}),
   Schema.TaggedStruct("Unclassified", {}),
@@ -107,12 +116,16 @@ export const ResponseEnding = Schema.Union([
 export type ResponseEnding = typeof ResponseEnding.Type;
 
 /**
- * The tokens a request and its response took, as the provider reported them, in the same terms for
- * every provider. `input` is everything the request carried, what was read from the cache
- * (`cacheRead`) and written to it (`cacheWrite`) included; `cacheWrite1h` is the part of
- * `cacheWrite` kept for an hour rather than five minutes, where the provider prices the two apart.
- * `output` is everything the response took, its thinking (`thinking`) included. A part the
- * provider did not report is absent.
+ * The tokens that a request and its response used, as the provider reported them, in the same
+ * terms for every provider. A count that the provider did not report is absent.
+ *
+ * - `input`: every token the request carried, including `cacheRead` and `cacheWrite`.
+ * - `cacheRead`: input tokens read from the provider's cache.
+ * - `cacheWrite`: input tokens written to the provider's cache.
+ * - `cacheWrite1h`: the part of `cacheWrite` kept for one hour rather than five minutes, where the
+ *   provider prices the two differently.
+ * - `output`: every token of the response, including `thinking`.
+ * - `thinking`: the output tokens of the model's thinking.
  */
 export const Usage = Schema.Struct({
   input: TokenCount,
@@ -124,7 +137,7 @@ export const Usage = Schema.Struct({
 });
 export type Usage = typeof Usage.Type;
 
-/** A model, the provider it is asked through, and how it is to process requests, where that is said. */
+/** A model, the provider that serves it, and the model's settings when any are given. */
 export const ModelTarget = Schema.Struct({
   provider: ProviderName,
   model: ModelName,
@@ -135,9 +148,9 @@ export type ModelTarget = typeof ModelTarget.Type;
 /** Observations recorded as facts. */
 export const Observation = Schema.Union([
   /**
-   * A session was opened with what its first turn is given: the model it asks, and its system prompt
-   * and tools when it has any, as they were set. Changes to any of them later are facts of their
-   * own. A session cannot be opened without a model.
+   * The session was opened. `model` is the model that the first turn asks. `system` and `tools` are
+   * the system prompt and the tool catalog, when the session has them. A later change to any of
+   * these is recorded as a fact of its own. A session cannot be opened without a model.
    */
   Schema.TaggedStruct("SessionOpened", {
     session: SessionId,
@@ -145,21 +158,25 @@ export const Observation = Schema.Union([
     system: Schema.optionalKey(Received),
     tools: Schema.optionalKey(Received),
   }),
-  /** An input arrived. It can arrive at any time, including while a turn is under way. */
+  /** An input arrived. Input can arrive at any time, including while a turn runs. */
   Schema.TaggedStruct("InputArrived", {
     from: InputSource,
     text: InputText,
-    /** Files that came with the input, by reference; the bytes are in the blob store. */
+    /** References to the files attached to the input. The blob store holds their bytes. */
     attachments: Schema.optionalKey(Schema.Array(BlobRef)),
   }),
   /**
-   * A span of the conversation was chosen for compaction: the facts through `through`, except those
-   * at `kept`. Once taken (`WindowOpened`), requests are made in the window, where a summary of the
-   * span stands in for it and the facts at `kept` are sent as they are. The summary is not a fact of
-   * the session: it belongs to a fork over the window, held apart, so it can be revised, replaced or
-   * set beside others. `previous` is the window this one follows, when there is one. `decidedBy` is
-   * what decided the compaction was due. The window says a summary of the span should exist; it
-   * does not say that one does, for any provider.
+   * A span of the conversation was chosen for compaction: the facts up to and including `through`,
+   * except the facts at `kept`.
+   *
+   * - `decidedBy` names the policy that decided the compaction was due.
+   * - `previous` is the window that this window follows, when there is one.
+   * - Once the core takes the window (`WindowOpened`), each request is made in the window: a summary
+   *   of the span replaces the span, and the facts at `kept` are sent unchanged.
+   * - The summary is not a fact of the session. It is kept apart from the facts, so it can be
+   *   revised, replaced, or kept beside other summaries.
+   * - The window states that a summary of the span should exist. It does not state that one exists
+   *   for any provider.
    */
   Schema.TaggedStruct("CompactionWindow", {
     window: WindowId,
@@ -169,23 +186,28 @@ export const Observation = Schema.Union([
     kept: Schema.Array(Seq),
   }),
   /**
-   * The session is to ask `model` of `provider` from now on, with the `settings` named; a setting
-   * not named stays as it was. Once taken (`ModelChangeTaken`), the requests that follow go there.
+   * The session is to ask `model` through `provider` from now on, with the `settings` given. A
+   * setting that is not given keeps its value. Once the core takes the change (`ModelChangeTaken`),
+   * the requests that follow go to the new model.
    */
   Schema.TaggedStruct("ModelChangeArrived", {
     provider: ProviderName,
     model: ModelName,
     settings: Schema.optionalKey(ModelSettings),
   }),
-  /** A turn started. It takes the input waiting for it. */
+  /** A turn started. The turn takes every input waiting in the agent's mailbox. */
   Schema.TaggedStruct("TurnStarted", { turn: TurnId }),
-  /** The input recorded at `input`, still queued, was cancelled by its sender. */
+  /** The sender cancelled the input recorded at `input` while it was still waiting in a mailbox. */
   Schema.TaggedStruct("InputCancelled", { input: Seq }),
   /**
-   * An MCP server the session keeps changed state: ready, with the tools it offers by the names they
-   * are offered under; failed (it could not be started, did not connect, or refused the credentials
-   * given), needing authorization the client cannot give, or exited, and why; stopped. Recorded for
-   * the session's record and its host: no machine acts on it.
+   * An MCP server that the session keeps changed state. The session records the change for its
+   * record and its host; no machine acts on it.
+   *
+   * - `Ready`: the server is connected; `tools` are the names its tools are offered under.
+   * - `Failed`: the server could not be started, did not connect, or refused the credentials given.
+   * - `NeedsAuth`: the server requires authorization that the client cannot give.
+   * - `Exited`: the server's process exited.
+   * - `Stopped`: the session stopped the server.
    */
   Schema.TaggedStruct("McpServerChanged", {
     server: McpServerName,
@@ -198,16 +220,20 @@ export const Observation = Schema.Union([
     ]),
   }),
   /**
-   * A request for a model response was made: it was handed to `provider` for `model`, carrying
-   * `sent` (the system prompt, the tools and the conversation, as the layer that assembled them
-   * wrote them down). What comes of it is observed after: a response, a failure, or nothing, in
-   * which case how it ended is not known.
+   * A request for a model response was sent to `provider` for `model`. `sent` is what the request
+   * carried (the system prompt, the tools and the conversation), as the layer that assembled them
+   * wrote them. The outcome is a later observation (`ModelResponded`, `ModelFailed` or
+   * `ModelVetoed`); when none is recorded, the outcome is not known.
    */
   Schema.TaggedStruct("ModelRequestDispatched", { turn: TurnId, provider: ProviderName, model: ModelName, sent: Received }),
   /**
-   * A model responded. `parts` are the response's parts in the order received; `stop` is why it
-   * stopped in the provider's words, when the record has them, and `ending` that reason classified; `metadata` is everything
-   * else the provider sent with it (usage, identifiers), as received.
+   * A model responded.
+   *
+   * - `parts`: the response's parts, in the order received.
+   * - `stop`: the provider's reason for stopping, in the provider's words, when the record has it.
+   * - `ending`: the reason for stopping, classified.
+   * - `metadata`: everything else the provider sent with the response (usage, identifiers), as
+   *   received.
    */
   Schema.TaggedStruct("ModelResponded", {
     turn: TurnId,
@@ -220,9 +246,12 @@ export const Observation = Schema.Union([
     metadata: Received,
   }),
   /**
-   * A request for a model response failed. `failure` says why in words; `error` is the error as the
-   * adapter that failed encoded it, as received; `request` is the request as the adapter made it
-   * (for one that posts over HTTP, the path, the headers it set and the body), when the record has it.
+   * A request for a model response failed.
+   *
+   * - `failure`: why the request failed, in words.
+   * - `error`: the error as the failing adapter encoded it.
+   * - `request`: the request as the adapter made it, when the record has it. For an adapter that
+   *   posts over HTTP: the path, the headers it set, and the body.
    */
   Schema.TaggedStruct("ModelFailed", {
     turn: TurnId,
@@ -231,9 +260,9 @@ export const Observation = Schema.Union([
     request: Schema.optionalKey(Received),
   }),
   /**
-   * One attempt at a request for a model response failed, and the request goes on (to another
-   * provider, say). The turn does not end: the request's outcome is still to come. `error` and
-   * `request` are as for `ModelFailed`.
+   * One attempt at a request for a model response failed, and the request continues (for example,
+   * with another provider). The turn does not end, because the request's outcome is still to come.
+   * `error` and `request` are as for `ModelFailed`.
    */
   Schema.TaggedStruct("ModelAttemptFailed", {
     turn: TurnId,
@@ -244,15 +273,15 @@ export const Observation = Schema.Union([
     request: Schema.optionalKey(Received),
   }),
   /**
-   * A notice went into a request for a model response, after everything else it carried; later
-   * requests carry it in the same place. A notice is disposable: it is timely context, and a
-   * compaction may drop it.
+   * The layers around the core appended a notice to a request for a model response, after
+   * everything else the request carried. Later requests carry the notice in the same position. A
+   * notice is timely context, such as the current time; a compaction may drop it.
    */
   Schema.TaggedStruct("NoticeInserted", { turn: TurnId, text: NoticeText }),
   /**
-   * A request for a model response went out with a setting other than the one asked for, because
-   * the model does not allow what was asked. From then on what was used is the session's setting
-   * for that model.
+   * A request for a model response was sent with a setting other than the one asked for, because
+   * the model does not allow the value asked for. From then on, the value sent is the session's
+   * setting for that model.
    */
   Schema.TaggedStruct("SettingAdjusted", {
     turn: TurnId,
@@ -264,51 +293,55 @@ export const Observation = Schema.Union([
   /** A policy vetoed a request for a model response, for the reason it gave. */
   Schema.TaggedStruct("ModelVetoed", { turn: TurnId, reason: Received }),
   /**
-   * A tool call in a response that is still arriving is complete: the model asked for it. The call
-   * is run without waiting for the rest of the response, which will hold it as one of its parts.
+   * A tool call in a response that is still arriving is complete. The call runs without waiting for
+   * the rest of the response; the recorded response holds the call as one of its parts.
    */
   Schema.TaggedStruct("ToolCallArrived", { turn: TurnId, call: CallId, tool: ToolName, input: Received }),
   /**
-   * Before a call runs, a policy asks for an answer (a person's permission): `asks` is what it asks,
-   * as the policy states it. The call waits for `PermissionAnswered`.
+   * Before a call runs, a policy asks for an answer, such as a person's permission. `asks` is the
+   * question as the policy states it. The call waits for `PermissionAnswered`.
    */
   Schema.TaggedStruct("PermissionAsked", { call: CallId, asks: Received }),
-  /** The answer to what was asked before `call` runs, as the answerer gave it. */
+  /** The answer to the question asked before `call` runs, as the answerer gave it. */
   Schema.TaggedStruct("PermissionAnswered", { call: CallId, answer: Received }),
-  /** The tool a call asks for began to run. */
+  /** The tool that the call names began to run. */
   Schema.TaggedStruct("ToolCallDispatched", { call: CallId }),
   /** A tool call ended. */
   Schema.TaggedStruct("ToolEnded", { call: CallId, outcome: ToolOutcome }),
-  /** The layers around the core finished giving `turn` input before it ends (`BeforeTurnEnded`). */
+  /** The layers around the core have given `turn` any input they had before it ends; this answers `BeforeTurnEnded`. */
   Schema.TaggedStruct("TurnEndReviewed", { turn: TurnId }),
   /**
-   * The layers around the core held `turn` open before it ends as many times as they allow
-   * (`holds`), and would hold it again with `feedback`, which is not given to it; the review goes
-   * on without it.
+   * The turn-end hooks have held `turn` open the maximum number of times (`holds`), and would hold
+   * it open again with `feedback`. The feedback is not given to the turn, and the review continues
+   * without the hooks.
    */
   Schema.TaggedStruct("TurnHoldsExhausted", { turn: TurnId, holds: Schema.Int, feedback: Schema.Array(InputText) }),
-  /** The turn was interrupted (by the user, or whoever else may stop it). It ends at once. */
+  /**
+   * The turn was interrupted, by the user or by another party allowed to stop it. Between steps the
+   * turn ends at once; during a step it ends when each request has reported how far it got.
+   */
   Schema.TaggedStruct("TurnInterrupted", { turn: TurnId }),
 ]);
 export type Observation = typeof Observation.Type;
 
 /**
- * Observations captured for display and not recorded. For one model request they come in the order
- * they arrived, and end with `ModelResponseEnded`, however the request ended.
+ * Observations published for display and not recorded. For one model request they are published in
+ * the order they arrived, and the last is `ModelResponseEnded`, however the request ended.
  */
 export const CapturedObservation = Schema.Union([
-  /** Part of a model response while it is still arriving, as received. */
+  /** One stream event of a model response that is still arriving, as received. */
   Schema.TaggedStruct("ModelStreamed", { turn: TurnId, chunk: Received }),
   /**
-   * Text added to a part of the response while it arrives: an answer's (`Text`), commentary's, or
-   * the readable text of thinking. A part's deltas, joined, are its text, and come before the part's
-   * `ModelPartArrived`. A response that does not stream, and a part with no readable text, have none.
+   * Text that a stream event adds to a part of the response: to an answer (`Text`), to commentary,
+   * or to the readable text of thinking. A part's deltas, joined, are the part's text, and are
+   * published before the part's `ModelPartArrived`. A response that does not stream, a part with no
+   * readable text, and a delta that adds no text publish no delta.
    */
   Schema.TaggedStruct("ModelDelta", { turn: TurnId, kind: Schema.Literals(["Text", "Commentary"]), text: ModelText }),
   Schema.TaggedStruct("ModelDelta", { turn: TurnId, kind: Schema.Literal("Thinking"), text: ThinkingText }),
-  /** A part of a model response is complete, while the rest is still arriving. */
+  /** A part of a model response is complete; the rest of the response may still be arriving. */
   Schema.TaggedStruct("ModelPartArrived", { turn: TurnId, part: ModelPart }),
-  /** The model request ended: answered, failed, or stopped. Nothing more of it follows. */
+  /** The model request ended: answered, failed, or stopped. Nothing more is published for the request. */
   Schema.TaggedStruct("ModelResponseEnded", { turn: TurnId }),
 ]);
 export type CapturedObservation = typeof CapturedObservation.Type;
