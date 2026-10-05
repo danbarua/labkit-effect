@@ -1,17 +1,17 @@
 /**
- * The loop breaker: a model that makes the same tool call again and again in a row is told so, then
- * stopped. It is two policies, one on tool calls and one on model requests, and both count from the
- * session's facts, so a session that goes on from its facts counts the same.
+ * The loop breaker stops a model that makes the same tool call again and again. It is two
+ * policies, and both count from the session's facts, so a resumed session counts the same calls.
  *
- * - `repeatedCalls` vetoes a call that is the `nudgeAt`-th identical call in a row, or later, and
- *   the reason, which the model reads as the call's result, says so.
- * - `repeatingTurns` vetoes a turn's model request once its last `stopAt` calls are identical; the
- *   turn ends `Vetoed`.
+ * - `repeatedCalls` (a tool call policy) vetoes the `nudgeAt`-th identical call in a row and each
+ *   one after it. The model receives the veto's reason as the call's result.
+ * - `repeatingTurns` (a model request policy) vetoes a turn's next model request once the turn's
+ *   last `stopAt` calls are identical. The turn ends `Vetoed`.
  *
- * Calls are identical when `key` gives them the same key: by default, the same tool and the same
- * input as received. Calls are in a row when no other call of their turn came between them, in the
- * order they are first recorded: a model that runs the tests, edits a file and runs them again has
- * made two calls to run the tests, not two in a row.
+ * Two calls are identical when `key` returns the same key for both: by default, when they have the
+ * same tool and the same input as received. Calls are in a row when they are in the same turn and no
+ * other call of that turn came between them, in the order in which each call was first recorded.
+ * For example, a model that runs the tests, edits a file and runs the tests again has made two
+ * calls to run the tests, not two in a row.
  */
 
 import { Schema } from "effect";
@@ -20,20 +20,20 @@ import { type CallId, FailureText, type ToolName, type TurnId } from "../agent-m
 import { MediaType, type Received, ReceivedText } from "../agent-machine/received.ts";
 import type { Policy, PolicyStep } from "./policy.ts";
 
-/** What a call is known by when calls are compared: two calls with the same key are identical. */
+/** A call's identity for comparison: two calls with the same key are identical. */
 export const CallKey = Schema.String.pipe(Schema.brand("agent-policy/CallKey"));
 export type CallKey = typeof CallKey.Type;
 
 export interface LoopBreakerSettings {
-  /** The identical call in a row that is vetoed, and each after it: 3 vetoes the third. */
+  /** The position of the first vetoed call among identical calls in a row: 3 vetoes the third and each one after it. */
   readonly nudgeAt: number;
-  /** How many identical calls in a row end a turn: its next model request is vetoed. */
+  /** The number of identical calls in a row after which the turn's next model request is vetoed. */
   readonly stopAt: number;
-  /** What makes two calls identical: the same key. */
+  /** Returns a call's key. Calls with equal keys are identical. */
   readonly key: (tool: ToolName, input: Received) => CallKey;
 }
 
-/** The same tool, and the same input as received. */
+/** The default key: the tool, and the input as received (its media type and body). */
 export const sameToolAndInput = (tool: ToolName, input: Received): CallKey => {
   const body = input.body;
   switch (body._tag) {
@@ -58,8 +58,9 @@ interface Call {
 }
 
 /**
- * The tool calls the model made, each once, in the order each is first recorded: as it arrived
- * (`ToolCallArrived`) or in its response (`ModelResponded`), in the response's order.
+ * Returns the tool calls that the model made, each once, in the order in which each was first
+ * recorded: as it arrived (`ToolCallArrived`), or in its response (`ModelResponded`), in the
+ * response's order.
  */
 const callsIn = (facts: ReadonlyArray<Fact>): ReadonlyArray<Call> => {
   const made = facts.flatMap((fact): ReadonlyArray<Call> => {
@@ -73,7 +74,7 @@ const callsIn = (facts: ReadonlyArray<Fact>): ReadonlyArray<Call> => {
   return made.filter((call, index) => made.findIndex((other) => other.turn === call.turn && other.call === call.call) === index);
 };
 
-/** How many identical calls in a row end with the call at `index`: it, and those of its turn before it with no other between. */
+/** Returns the number of identical calls in a row that end with the call at `index`: that call, and the calls of its turn just before it that are identical to it. */
 const inARow = (calls: ReadonlyArray<Call>, index: number, key: LoopBreakerSettings["key"]): number => {
   const call = calls[index];
   if (call === undefined) return 0;
@@ -91,12 +92,12 @@ const veto = (reason: FailureText): PolicyStep<unknown> => ({
   verdict: { _tag: "Veto", reason: { mediaType: MediaType.make("text/plain"), body: { _tag: "Text", text: ReceivedText.make(reason) } } },
 });
 
-/** The tool call policy: vetoes the `nudgeAt`-th identical call in a row, and each after it. */
+/** The tool call policy: vetoes the `nudgeAt`-th identical call in a row, and each one after it. */
 export const repeatedCalls = (facts: ReadonlyArray<Fact>, settings: LoopBreakerSettings = loopBreakerDefaults): Policy<unknown> => ({
   start: (request) => {
     if (request._tag !== "RunTool") return proceed;
     const calls = callsIn(facts);
-    // The call as last recorded: a call id can be used again in a later turn.
+    // A later turn can reuse a call id, so the request refers to the last call recorded with it.
     const index = calls.map((call) => call.call).lastIndexOf(request.call);
     const count = inARow(calls, index, settings.key);
     return count < settings.nudgeAt
@@ -111,7 +112,7 @@ export const repeatedCalls = (facts: ReadonlyArray<Fact>, settings: LoopBreakerS
   receive: () => proceed,
 });
 
-/** The model request policy: vetoes a turn's request once its last `stopAt` calls are identical. */
+/** The model request policy: vetoes a turn's model request once the turn's last `stopAt` calls are identical. */
 export const repeatingTurns = (facts: ReadonlyArray<Fact>, settings: LoopBreakerSettings = loopBreakerDefaults): Policy<unknown> => ({
   start: (request) => {
     if (request._tag !== "RequestModelResponse") return proceed;

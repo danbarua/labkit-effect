@@ -1,8 +1,7 @@
 /**
- * A policy decides whether one effect request continues or is vetoed. It is a machine: given the
- * request it gives a verdict, or waits; given a message while waiting it gives a verdict, or waits
- * again. Waiting is how a policy delays an effect. How it reaches a verdict (rules, parsing a
- * command, a model's judgement, asking a person) is the policy's own business.
+ * A policy decides whether one effect request continues, is vetoed, or waits. A policy is a state
+ * machine for one request: `start` returns a verdict or waits, and `receive` handles a message
+ * while the policy waits. Waiting is how a policy delays an effect.
  */
 
 import { Schema } from "effect";
@@ -12,14 +11,14 @@ import type { EffectRequest } from "../agent-machine/request.ts";
 
 export const Verdict = Schema.Union([
   Schema.TaggedStruct("Continue", {}),
-  /** The effect does not happen. `reason` is passed to the core as the policy gave it. */
+  /** The effect is not carried out. The loop passes `reason` to the core unchanged. */
   Schema.TaggedStruct("Veto", { reason: Received }),
 ]);
 export type Verdict = typeof Verdict.Type;
 
-/** What a waiting policy can be sent. */
+/** A message that the loop sends to a waiting policy. */
 export const PolicyMessage = Schema.Union([
-  /** An answer to what the policy asked for while waiting, as the answerer gave it. */
+  /** The answer to the policy's question, as the person or client gave it. */
   Schema.TaggedStruct("Answered", { answer: Received }),
   /** The clock reached `at`. */
   Schema.TaggedStruct("Tick", { at: Millis }),
@@ -27,11 +26,11 @@ export const PolicyMessage = Schema.Union([
 export type PolicyMessage = typeof PolicyMessage.Type;
 
 export type PolicyStep<State> =
-  /** A verdict. `by`, when policies are combined (`every`), is the position of the one whose verdict it is. */
+  /** A verdict. On a veto from `every`, `by` is the position of the policy that vetoed. */
   | { readonly _tag: "Decided"; readonly verdict: Verdict; readonly by?: number }
   /**
-   * No verdict yet. `asks` is what the policy wants answered, if anything, as it states it; the
-   * layer that shows it to someone interprets it.
+   * No verdict yet. `asks` is the question that the policy wants answered, if any. The layer that
+   * shows the question to a person interprets it.
    */
   | {
       readonly _tag: "Waiting";
@@ -44,7 +43,7 @@ export interface Policy<State> {
   readonly receive: (state: State, message: PolicyMessage) => PolicyStep<State>;
 }
 
-/** The state of `every`: which policy is waiting, and its state. */
+/** The state of `every` while a policy waits: the request, the waiting policy's position, and its state. */
 export interface EveryState {
   readonly request: EffectRequest;
   readonly index: number;
@@ -52,12 +51,14 @@ export interface EveryState {
 }
 
 /**
- * Policies applied in order: the first veto is the verdict; the request continues when every
- * policy lets it continue. A waiting policy holds the ones after it.
+ * Returns a policy that applies `policies` in order.
+ * - The first veto is the verdict, with `by` set to the vetoing policy's position.
+ * - A policy that waits holds the policies after it until it decides.
+ * - The request continues when every policy lets it continue.
  */
 export function every(policies: ReadonlyArray<Policy<unknown>>): Policy<EveryState> {
   const decided: PolicyStep<EveryState> = { _tag: "Decided", verdict: { _tag: "Continue" } };
-  /** The combined step after the policy at `index` took `step`. */
+  /** Returns the combined step after the policy at `index` returned `step`. */
   const from = (request: EffectRequest, index: number, step: PolicyStep<unknown>): PolicyStep<EveryState> => {
     switch (step._tag) {
       case "Waiting":

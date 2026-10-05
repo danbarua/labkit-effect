@@ -28,7 +28,7 @@ test("each permission mode runs, asks about or vetoes a call by its tool's kind;
     ["dontAsk", "runs", "vetoed", "vetoed"],
     ["bypassPermissions", "runs", "runs", "runs"],
   ]);
-  // A tool whose kind is not known is taken to change things.
+  // A tool of unknown kind is treated as `other`.
   expect(verdict("default", "unknown_tool")).toBe("asks");
 });
 

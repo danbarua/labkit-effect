@@ -1,4 +1,4 @@
-/** The loop breaker: identical calls in a row are vetoed from the `nudgeAt`-th, and the turn stopped at `stopAt`. */
+/** The loop breaker: identical calls in a row are vetoed from the `nudgeAt`-th, and the turn's next model request after `stopAt`. */
 
 import { expect } from "bun:test";
 import type { Schema } from "effect";
@@ -88,7 +88,7 @@ test("a turn's model request is vetoed once the turn's last five calls are ident
   expect(shown(repeatingTurns(factsOf(...four)).start(ask("t1")))).toBe("runs");
   const five = factsOf(...four, arrived("t1", "c5", "read_file", { path: "a.ts" }));
   expect(shown(repeatingTurns(five).start(ask("t1")))).toBe("vetoed: Stopped: read_file was called with the same input 5 times in a row.");
-  // Another call after them ends the run.
+  // A different call after them ends the run of identical calls.
   expect(shown(repeatingTurns(factsOf(...four, arrived("t1", "c5", "read_file", { path: "a.ts" }), arrived("t1", "c6", "search", {}))).start(ask("t1")))).toBe("runs");
   expect(shown(repeatingTurns(five).start(ask("t2")))).toBe("runs");
 });

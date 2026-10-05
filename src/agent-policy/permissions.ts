@@ -1,29 +1,28 @@
 /**
- * Permission to run a tool call, as Claude Code's permission modes give it. A call to a tool that
- * only reads (its kind is `read`, `search`, `think` or `fetch`) runs. A call to a tool that changes
- * things runs, is vetoed, or waits for a person's answer, by the mode:
+ * The permission policy, by Claude Code's permission modes. A call to a tool that only reads (kind
+ * `read`, `search`, `think` or `fetch`) runs in every mode. Any other call runs, is vetoed, or waits
+ * for an answer, by the mode:
  *
  * - `default`: asks.
- * - `acceptEdits`: a tool that edits, deletes or moves files runs; others ask.
- * - `dontAsk`: is vetoed.
+ * - `acceptEdits`: runs a tool that edits, deletes or moves files; asks about any other tool.
+ * - `dontAsk`: vetoes.
  * - `bypassPermissions`: runs.
  *
- * What is asked offers four options, by ACP's kinds:
+ * A question offers four options, with ACP's kinds:
  *
  * - `allow_once`: allow this call.
  * - `allow_always`: allow the tool for the rest of the session.
  * - `reject_once`: reject this call.
  * - `reject_always`: reject the tool for the rest of the session.
  *
- * An answer for the session is an answer in the session's facts, which holds in this process and
- * in one that goes on from the facts. After `allow_always`, a later call to that tool runs without
- * being asked, in any mode. After `reject_always`, a later call to that tool is vetoed without being
- * asked, in any mode.
+ * Session answers are read from the session's facts, so they also apply in a process that resumes
+ * the session. After `allow_always`, later calls to the tool run without a question, in every mode.
+ * After `reject_always`, later calls to the tool are vetoed without a question, in every mode.
  *
- * Where there is no one to answer (`canAsk` false: print mode), what would be asked is vetoed. The
- * veto's reason names the permission modes that let the call run: `acceptEdits` or
- * `bypassPermissions` for a tool that edits, deletes or moves files; `bypassPermissions` for any
- * other tool.
+ * When no one can answer (`canAsk` is false, as in print mode), a call that would be asked about is
+ * vetoed. The veto's reason names the permission modes that let the call run: `acceptEdits` or
+ * `bypassPermissions` for a tool that edits, deletes or moves files, and `bypassPermissions` for
+ * any other tool.
  */
 
 import { Schema } from "effect";
@@ -35,11 +34,11 @@ import type { Policy, PolicyStep } from "./policy.ts";
 export const PermissionMode = Schema.Literals(["default", "acceptEdits", "dontAsk", "bypassPermissions"]);
 export type PermissionMode = typeof PermissionMode.Type;
 
-/** The id of an option offered, which the answer names. */
+/** The id of an offered option. An answer names the option that it picks by this id. */
 export const OptionId = Schema.String.pipe(Schema.brand("agent-policy/OptionId"));
 export type OptionId = typeof OptionId.Type;
 
-/** An option as it is shown to whoever answers. */
+/** An option's label, as shown to the person who answers. */
 export const OptionName = Schema.String.pipe(Schema.brand("agent-policy/OptionName"));
 export type OptionName = typeof OptionName.Type;
 
@@ -51,8 +50,8 @@ export const PermissionOption = Schema.Struct({
 export type PermissionOption = typeof PermissionOption.Type;
 
 /**
- * What is asked before a call runs (`PermissionAsked.asks`): the call's tool, its kind, and the
- * options. The call's input is in the facts, with the call.
+ * The question asked before a call runs (`PermissionAsked.asks`): the tool, its kind, and the
+ * options. The call's input is not repeated here; it is in the facts, with the call.
  */
 export const PermissionQuestion = Schema.Struct({
   tool: ToolName,
@@ -61,19 +60,19 @@ export const PermissionQuestion = Schema.Struct({
 });
 export type PermissionQuestion = typeof PermissionQuestion.Type;
 
-/** The answer (`PermissionAnswered.answer`): the option picked. */
+/** The answer (`PermissionAnswered.answer`): the id of the option picked. */
 export const PermissionAnswer = Schema.Struct({ optionId: OptionId });
 export type PermissionAnswer = typeof PermissionAnswer.Type;
 
 const json = MediaType.make("application/json");
 
-/** `value` as JSON content, as `PermissionAsked` and `PermissionAnswered` hold it. */
+/** Encodes `value` as JSON content, the form in which `PermissionAsked` and `PermissionAnswered` hold it. */
 const asJson = <S extends Schema.Top & { readonly DecodingServices: never; readonly EncodingServices: never }>(schema: S, value: S["Type"]): Received => ({
   mediaType: json,
   body: { _tag: "Text", text: ReceivedText.make(Schema.encodeSync(Schema.fromJsonString(schema))(value)) },
 });
 
-/** The value of `schema` in `received`, when it holds one. */
+/** Decodes `received` as JSON of `schema`; returns undefined when it is not. */
 const fromJson = <S extends Schema.Top & { readonly DecodingServices: never }>(schema: S, received: Received): S["Type"] | undefined => {
   if (received.body._tag !== "Text") return undefined;
   const text: unknown = received.body.text;
@@ -81,13 +80,13 @@ const fromJson = <S extends Schema.Top & { readonly DecodingServices: never }>(s
   return decoded._tag === "Some" ? decoded.value : undefined;
 };
 
-/** The question in a `PermissionAsked`, when it is one this module asked. */
+/** Decodes the question in a `PermissionAsked`; returns undefined when this module did not ask it. */
 export const questionIn = (asks: Received): PermissionQuestion | undefined => fromJson(PermissionQuestion, asks);
 
-/** The answer that picks `option`, as `PermissionAnswered` holds it. */
+/** Returns the answer that picks `option`, in the form that `PermissionAnswered` holds. */
 export const answerPicking = (option: OptionId): Received => asJson(PermissionAnswer, { optionId: option });
 
-/** The option an answer picked among the question's, when it names one of them. */
+/** Returns the question's option that `answer` picks; undefined when the answer names no offered option. */
 const pickedIn = (question: PermissionQuestion, answer: Received): PermissionOption | undefined => {
   const picked = fromJson(PermissionAnswer, answer);
   return picked === undefined ? undefined : question.options.find((option) => option.optionId === picked.optionId);
@@ -103,7 +102,7 @@ const optionsFor = (tool: ToolName): ReadonlyArray<PermissionOption> => [
   { optionId: OptionId.make("reject-session"), name: OptionName.make(`Reject ${tool} for the rest of the session`), kind: "reject_always" },
 ];
 
-/** Whether an earlier answer in `facts` allowed `tool` for the session, or rejected it for the session. */
+/** Returns the latest session answer for `tool` in `facts`: allowed, rejected, or undefined when there is none. */
 function rememberedFor(facts: ReadonlyArray<Fact>, tool: ToolName): "allowed" | "rejected" | undefined {
   const asked = new Map(
     facts.flatMap((fact) =>
@@ -127,8 +126,9 @@ const veto = (reason: FailureText): PolicyStep<PermissionQuestion> => ({
 });
 
 /**
- * The permission policy for a session in `mode`, as `facts` stand, with what is known of each
- * tool's kind (`kindOf`; a tool not known is `other`). `canAsk` is whether anyone is there to answer.
+ * Returns the permission policy for a session in `mode`, as `facts` stand. `kindOf` returns a tool's
+ * kind; a tool that it does not know is treated as `other`. `canAsk` is whether anyone can answer a
+ * question.
  */
 export function permissions(
   mode: PermissionMode,
@@ -142,7 +142,7 @@ export function permissions(
       const kind = kindOf(request.tool) ?? "other";
       if (onlyReads.includes(kind)) return proceed;
       const remembered = rememberedFor(facts, request.tool);
-      // A rejection for the session holds in every mode.
+      // A session rejection applies in every mode, so it is checked before the mode.
       if (remembered === "rejected") return veto(FailureText.make(`${request.tool} was rejected for the rest of the session.`));
       if (mode === "bypassPermissions") return proceed;
       if (mode === "acceptEdits" && editsFiles.includes(kind)) return proceed;
