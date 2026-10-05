@@ -1,9 +1,12 @@
 /**
  * The JSON Schema of a policies file, made from the Schemas of the plug-ins registered, so that an
  * editor checks a file as it is typed (a `# yaml-language-server: $schema=<path>` comment at its
- * top): `plugins` takes, under a plug-in's own name, that plug-in's settings, and under any other
- * name `use` and the settings of the plug-in it names, and no other property; each seam's list
- * takes names; `mcpServers` takes servers.
+ * top). The schema takes, in `plugins`:
+ *
+ * - under a plug-in's own name, that plug-in's settings without `use`, or `null` (its defaults);
+ * - under any other name, `use` and the settings of the plug-in it names;
+ *
+ * and no other property. Each seam's list takes names. `mcpServers` takes servers, or `null`.
  */
 
 import { Schema } from "effect";
@@ -23,13 +26,15 @@ export const policiesJsonSchema = (registry: ReadonlyArray<AnyPlugin> = builtins
     Schema.Struct({
       extensions: Schema.optionalKey(Schema.Array(Schema.String)),
       maxHolds: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-      mcpServers: Schema.optionalKey(Schema.Record(Schema.String, McpServerSchema)),
+      // `null` takes away the servers of the layers before (CF10).
+      mcpServers: Schema.optionalKey(Schema.NullOr(Schema.Record(Schema.String, McpServerSchema))),
       ...Object.fromEntries(seams.map((seam) => [seam, Schema.optionalKey(Schema.Array(Schema.String))])),
     }),
   ) as { readonly properties: Readonly<Record<string, Schema.Json>> };
   const plugins: Schema.Json = {
     type: "object",
-    properties: Object.fromEntries(registry.map((plugin) => [plugin.use, jsonSchemaOf(Schema.Struct(plugin.settings.fields))])),
+    // `null` under a plug-in's own name is the plug-in with its defaults (CF4).
+    properties: Object.fromEntries(registry.map((plugin) => [plugin.use, jsonSchemaOf(Schema.NullOr(Schema.Struct(plugin.settings.fields)))])),
     additionalProperties: { anyOf: registry.map((plugin) => jsonSchemaOf(Schema.Struct({ use: Schema.Literal(plugin.use), ...plugin.settings.fields }))) },
   };
   return { ...rest, properties: { plugins, ...rest.properties } } as Schema.Json;

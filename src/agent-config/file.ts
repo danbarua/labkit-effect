@@ -182,6 +182,12 @@ const pluginsOf = (layers: ReadonlyArray<LayerSource>, value: unknown, registry:
         if (configured !== null && !isMapping(configured)) return yield* invalid(path, "Expected a mapping of settings");
         const { use = name, ...settings } = configured ?? {};
         if (typeof use !== "string") return yield* invalid([...path, "use"], "Expected the name of a plug-in");
+        // A plug-in's own name takes that plug-in's settings, without `use` (CF8).
+        if (configured !== null && "use" in configured && registry.some((each) => each.use === name))
+          return yield* invalid(
+            [...path, "use"],
+            `plugins.${name} is the ${name} plug-in's own name, which takes its settings without use; ${use === name ? "leave use out" : `to use ${JSON.stringify(use)}, give the entry another name`}`,
+          );
         const plugin = registry.find((each) => each.use === use);
         if (plugin === undefined) return yield* invalid(configured !== null && "use" in configured ? [...path, "use"] : path, `${JSON.stringify(use)} is not a plug-in; those are: ${registry.map((each) => each.use).join(", ")}`);
         // Each setting is decoded alone first, in order, so that a mistake names the layer that wrote it.

@@ -80,10 +80,12 @@ mcpServers:
   them; a project's layer that does is refused. They are loaded, each module once, before the layers
   are decoded, and their plug-ins registered as the built-ins are, for every layer to use. Two
   plug-ins with one name are refused.
-- CF8. The JSON Schema of a file is made from the plug-ins' Schemas: `plugins` takes a plug-in's
-  settings under its own name, and `use` with that plug-in's settings under any other, and no other
-  property; each seam's list takes names. A file an editor checks against it is taken or refused as
-  the loader takes or refuses it, for the mistakes a schema can see.
+- CF8. The JSON Schema of a file is made from the plug-ins' Schemas. `plugins` takes, under a
+  plug-in's own name, that plug-in's settings without `use`, or `null` (its defaults, CF4); under
+  any other name, `use` with the settings of the plug-in it names; and no other property. Each
+  seam's list takes names, and `mcpServers` takes servers or `null` (CF10). A file an editor checks
+  against the schema is taken or refused as the loader takes or refuses it, for the mistakes a
+  schema can see: the loader refuses `use` under a plug-in's own name too.
 - CF9. Two of one plug-in, with different settings, are two names in `plugins`, each with `use`.
 - CF10. `mcpServers` maps a name to a server: one the session runs (`command`, `args`, `env`, `cwd`;
   `type: stdio` may be said, as Claude Code's `.mcp.json` does), or one at a URL (`type: http` or

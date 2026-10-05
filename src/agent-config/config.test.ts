@@ -469,15 +469,43 @@ test("CF8: an editor checking files against the JSON Schema takes good ones and 
   expect(bad.map((file) => valid(file))).toEqual(bad.map(() => false));
 });
 
+test("CF8: under a plug-in's own name, the JSON Schema and the loader both take null (its defaults, CF4) and both refuse use", async () => {
+  const valid = new Ajv2020({ strict: false }).compile(policiesJsonSchema() as object);
+  expect(valid({ plugins: { loopBreaker: null }, toolCalls: ["loopBreaker"] })).toBe(true);
+  expect(valid({ plugins: { permissions: { use: "permissions", mode: "default" } } })).toBe(false);
+  expect(valid({ plugins: { permissions: { use: "loopBreaker", stopAt: 3 } } })).toBe(false);
+  const file = (text: string) => write("user/policies.yml", text);
+  expect(valid({ mcpServers: null })).toBe(true);
+  expect(await load([file("plugins:\n  loopBreaker:\ntoolCalls: [loopBreaker]\nmcpServers: null\n")])).toBeDefined();
+  expect(await refusal([file("plugins:\n  permissions:\n    use: permissions\n")])).toEndWith(
+    "plugins.permissions.use: plugins.permissions is the permissions plug-in's own name, which takes its settings without use; leave use out",
+  );
+  expect(await refusal([file("plugins:\n  permissions:\n    use: loopBreaker\n")])).toEndWith(
+    'plugins.permissions.use: plugins.permissions is the permissions plug-in\'s own name, which takes its settings without use; to use "loopBreaker", give the entry another name',
+  );
+});
+
 test("CF8: the JSON Schema of a file takes, in plugins, each plug-in's settings under its own name and use with settings under another; each seam's list takes names", () => {
   const schema = policiesJsonSchema() as {
-    readonly properties: Readonly<Record<string, { readonly properties?: Readonly<Record<string, { readonly properties: Readonly<Record<string, unknown>> }>>; readonly additionalProperties?: { readonly anyOf: ReadonlyArray<{ readonly required: ReadonlyArray<string> }> }; readonly items?: unknown }>>;
+    readonly properties: Readonly<
+      Record<
+        string,
+        {
+          readonly properties?: Readonly<Record<string, { readonly anyOf: ReadonlyArray<{ readonly type: string; readonly properties?: Readonly<Record<string, unknown>> }> }>>;
+          readonly additionalProperties?: { readonly anyOf: ReadonlyArray<{ readonly required: ReadonlyArray<string> }> };
+          readonly items?: unknown;
+        }
+      >
+    >;
     readonly additionalProperties: boolean;
   };
   expect(schema.additionalProperties).toBe(false);
   const plugins = schema.properties["plugins"];
   expect(Object.keys(plugins?.properties ?? {})).toEqual(["loopBreaker", "permissions", "maxTurnRequests", "retryIncomplete", "maxBudget", "credentials"]);
-  expect(Object.keys(plugins?.properties?.["loopBreaker"]?.properties ?? {})).toEqual(["nudgeAt", "stopAt", "key"]);
+  // Under its own name, a plug-in takes its settings, or null (its defaults).
+  const own = plugins?.properties?.["loopBreaker"]?.anyOf ?? [];
+  expect(own.map((each) => each.type)).toEqual(["object", "null"]);
+  expect(Object.keys(own[0]?.properties ?? {})).toEqual(["nudgeAt", "stopAt", "key"]);
   expect(plugins?.additionalProperties?.anyOf.map((each) => each.required)).toEqual([["use"], ["use"], ["use"], ["use"], ["use", "usd"], ["use"]]);
   expect(schema.properties["toolCalls"]?.items).toEqual({ type: "string" });
 });
