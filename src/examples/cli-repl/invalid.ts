@@ -11,11 +11,15 @@ export const invalid = (message: string, ...hints: ReadonlyArray<string>) =>
 
 const effectFormatter = CliOutput.defaultFormatter();
 
-/** Prints a mistake (`invalid`) as it is said, and any other error (a flag that does not parse, say) as effect/cli prints it. */
+/**
+ * Prints a mistake (`invalid`) as it is said, and the mistakes effect/cli finds in the command line (a
+ * flag it does not know, a value a flag does not take) as an `ERROR:` line each; any other error as
+ * effect/cli prints it. effect/cli prints the help before the mistakes it finds.
+ */
 export const saidFormatter: CliOutput.Formatter = {
   formatHelpDoc: effectFormatter.formatHelpDoc,
   formatCliError: effectFormatter.formatCliError,
   formatVersion: effectFormatter.formatVersion,
-  formatErrors: effectFormatter.formatErrors,
+  formatErrors: (errors) => errors.map((error) => `ERROR: ${error.message}`).join("\n"),
   formatError: (error) => (error._tag === "UserError" && error.userMessage !== undefined ? error.userMessage : effectFormatter.formatError(error)),
 };

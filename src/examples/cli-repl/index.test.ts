@@ -54,6 +54,13 @@ test("print mode with no model is refused: an ERROR line and a HINT line on stde
   expect(result.stderr).toBe("ERROR: --model is required.\nHINT: bun cli models shows available models discovered from the environment.\n");
 });
 
+test("a flag value the flag does not take is said as an ERROR line on stderr", async () => {
+  const result = await invoke(["-p", "Hello", "--effort", "loud"]);
+  expect(result.code).not.toBe(0);
+  expect(result.stderr).toStartWith('ERROR: Invalid value for flag --effort: "loud".');
+  expect(result.stderr.trim().split("\n")).toHaveLength(1);
+});
+
 test("with no --model, a new session asks the model the configuration names", async () => {
   mkdirSync(join(testFolder(), ".config", "labkit"), { recursive: true });
   writeFileSync(join(testFolder(), ".config", "labkit", "models.yml"), "model: openai/gpt-5.5\n");

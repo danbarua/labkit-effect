@@ -30,6 +30,8 @@ as the header of `src/examples/cli-repl/index.ts` describes, with these limits:
 - A continued or resumed session whose model cannot be asked is refused at start, saying what to do;
   it does not open the REPL without a model.
 - `bun cli models` prints its `HINT:` lines to stderr, so that its stdout is only the models.
+- A mistake in a flag (a flag the CLI does not know, a value the flag does not take) is printed as
+  an `ERROR:` line, but effect/cli first prints the whole help to stdout.
 
 ## Offering only what a model takes
 
