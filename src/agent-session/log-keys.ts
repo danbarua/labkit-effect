@@ -13,8 +13,9 @@ export const logKeys = {
     notAsStored: "blobs.file.not_as_stored",
   },
   provider: {
-    /** A model request failed for a reason that is retryable, and is tried again. */
+    /** A model request failed for a reason that is retryable, and is tried again; the details include the whole error. */
     requestRetried: "provider.request.retried",
+    /** A model request failed for a reason that is retryable, and is not tried again; the details say why, and include the whole error. */
     notRetried: "provider.request.not_retried",
     /** A model request failed and will not be tried again; the details are the whole error. */
     requestFailed: "provider.request.failed",

@@ -272,3 +272,26 @@ test("a stream that sends nothing for ModelStreamIdle fails the request, which i
   const alive = await asked(Layer.mergeAll(openAiCompatModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(kept))), Layer.succeed(ModelStreamIdle, "100 millis")));
   expect(alive.observed as unknown).toMatchObject({ _tag: "ModelResponded", parts: [{ _tag: "Text", text: "Hallo" }] });
 });
+
+test("a failed, retried or not-retried request is logged with the whole error, its reason's description carrying the provider's answer", async () => {
+  const body = JSON.stringify({ error: { message: "tools.0.name: bad name" } });
+  const refused = rawServer([`HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\ncontent-length: ${body.length}\r\n\r\n${body}`]);
+  const failed = await asked(openAiCompatModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(refused.url))));
+  refused.stop();
+  type Logged = [string, { readonly error?: { readonly module: string; readonly reason: { readonly _tag: string; readonly description?: string } } }];
+  const [failure] = failed.events(logKeys.provider.requestFailed) as Array<Logged>;
+  expect(failure?.[1].error?.reason).toMatchObject({ _tag: "InvalidRequestError", description: expect.stringContaining("tools.0.name: bad name") });
+
+  const limited = "HTTP/1.1 429 Too Many Requests\r\ncontent-type: application/json\r\nretry-after: 1\r\ncontent-length: 2\r\n\r\n{}";
+  const busy = rawServer([limited, jsonWith(answer, answer.length)]);
+  const retried = await asked(openAiCompatModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(busy.url))));
+  busy.stop();
+  const [retry] = retried.events(logKeys.provider.requestRetried) as Array<Logged>;
+  expect(retry?.[1].error?.reason._tag).toBe("RateLimitError");
+
+  const cut = rawServer([jsonWith(answer.slice(0, 40), answer.length)]);
+  const notRetried = await asked(openAiCompatModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(openAiCompatAt(cut.url))));
+  cut.stop();
+  const [kept] = notRetried.events(logKeys.provider.notRetried) as Array<Logged>;
+  expect(kept?.[1].error?.reason._tag).toBe("NetworkError");
+});

@@ -288,7 +288,7 @@ const retrying = (retries: Retries) =>
         const longest = Duration.fromInputUnsafe(retries.longestWait ?? "1 minute");
         const why = notRetriedBecause(input.began, reason, longest);
         if (why === undefined) return true;
-        yield* Effect.logWarning(logKeys.provider.notRetried, { reason: reason._tag, message: input.error.message, why });
+        yield* Effect.logWarning(logKeys.provider.notRetried, { reason: reason._tag, message: input.error.message, why, error: encodeAiError(input.error) });
         return false;
       }),
     ),
@@ -302,6 +302,7 @@ const retrying = (retries: Retries) =>
           retry: attempt,
           of: retries.times,
           wait: Duration.format(wait),
+          error: encodeAiError(input.error),
         });
         return wait;
       }),
@@ -349,6 +350,7 @@ export const failedAs =
       message: error.message,
       module: error.module,
       method: error.method,
+      error: encodeAiError(error),
     }).pipe(
       Effect.as({
         _tag: "ModelFailed" as const,
