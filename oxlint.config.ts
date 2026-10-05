@@ -7,6 +7,7 @@ const abstractLayer = {
   "abstract/no-let": "error",
   "abstract/no-loop": "error",
   "abstract/no-in-place-change": "error",
+  "abstract/log-event-from-table": "error",
   "abstract/no-string-keyword": "error",
   "abstract/branded-schema-string": "error",
   "no-plusplus": "error",
@@ -27,13 +28,15 @@ const importsAllowed: Record<AbstractLayer, { readonly group: ReadonlyArray<stri
 
 /**
  * What every module that has been refactored to functional code is held to: no mutable bindings,
- * no loop statements, no in-place changes, and no nested conditional expressions. A module joins
- * `functionalModules` when its refactor is done.
+ * no loop statements, no in-place changes, no nested conditional expressions, and every log event
+ * named from its module's log key table. A module joins `functionalModules` when its refactor is
+ * done.
  */
 const functional = {
   "abstract/no-let": "error",
   "abstract/no-loop": "error",
   "abstract/no-in-place-change": "error",
+  "abstract/log-event-from-table": "error",
   "no-plusplus": "error",
   "no-nested-ternary": "error",
   // A `switch` over a union names every member: a `default` does not count, so a new member is a decision the compiler asks for.

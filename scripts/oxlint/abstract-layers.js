@@ -1,11 +1,15 @@
 /**
  * Rules for functional code: no `let` or `var`, no loop statements, no call that changes a value in
- * place; and, for the abstract layers (`scripts/abstract-layers.ts`), every string branded. The rules
- * read syntax only: a method named `push` or `set` on a type of our own is reported too, but a
- * function of a module imported from effect (`Ref.set`) is not.
+ * place; a log event named from a log key table, not by a string; and, for the abstract layers
+ * (`scripts/abstract-layers.ts`), every string branded. The rules read syntax only: a method named
+ * `push` or `set` on a type of our own is reported too, but a function of a module imported from
+ * effect (`Ref.set`) is not.
  */
 
 const inPlace = new Set(["push", "set", "delete", "splice", "sort", "reverse", "fill"]);
+
+/** Effect's functions that log an event: their first argument is the event's name. */
+const logFunctions = new Set(["log", "logTrace", "logDebug", "logInfo", "logWarning", "logError", "logFatal"]);
 
 const report = (message) => (context) => (node) => context.report({ node, message });
 
@@ -53,6 +57,18 @@ export default {
           },
         };
       },
+    },
+    "log-event-from-table": {
+      create: (context) => ({
+        CallExpression(node) {
+          const callee = node.callee;
+          if (callee.type !== "MemberExpression" || callee.computed) return;
+          if (callee.object.type !== "Identifier" || callee.object.name !== "Effect" || !logFunctions.has(callee.property.name)) return;
+          const event = node.arguments[0];
+          if (event?.type === "Literal" || event?.type === "TemplateLiteral")
+            context.report({ node: event, message: "A log event named by a string: name it from the module's log key table (`logKeys`), where it is described." });
+        },
+      }),
     },
     "no-string-keyword": {
       create: (context) => ({
