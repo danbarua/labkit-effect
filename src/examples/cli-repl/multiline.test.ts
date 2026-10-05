@@ -1,7 +1,7 @@
 /** The REPL's input prompt: what each key does to the text typed so far. */
 
 import { expect } from "bun:test";
-import { Effect, Option, type Terminal } from "effect";
+import { Effect, Option, Terminal } from "effect";
 import { test } from "../../../tests/support/test.ts";
 import { hinted, keyed, rendered, rowsOf, type Typed } from "./multiline.ts";
 
@@ -75,6 +75,9 @@ test("the hint is each completion's last word, cut to the room the row has", () 
 
 test("a beep is drawn as the bell; during a paste nothing is drawn", () => {
   const typed: Typed = { text: "ab", pasting: false, drawn: "ab" };
-  expect(Effect.runSync(rendered(typed, { _tag: "Beep" }, () => []) as Effect.Effect<string>)).toBe("\x07");
-  expect(Effect.runSync(rendered({ ...typed, pasting: true }, { _tag: "NextFrame", state: { ...typed, pasting: true } }, () => []) as Effect.Effect<string>)).toBe("");
+  // Neither reads the terminal: it is there for the type only.
+  const draw = (state: Typed, action: Parameters<typeof rendered>[1]) =>
+    Effect.runSync(rendered(state, action, () => []).pipe(Effect.provideService(Terminal.Terminal, {} as Terminal.Terminal)));
+  expect(draw(typed, { _tag: "Beep" })).toBe("\x07");
+  expect(draw({ ...typed, pasting: true }, { _tag: "NextFrame", state: { ...typed, pasting: true } })).toBe("");
 });
