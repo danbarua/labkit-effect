@@ -15,7 +15,7 @@
  */
 
 import type { McpServers } from "../../agent-mcp/servers.ts";
-import { Console, Deferred, Effect, PubSub } from "effect";
+import { Console, Deferred, Effect, HashMap, Option, PubSub, Ref } from "effect";
 import { Prompt } from "effect/cli";
 import type { Fact } from "../../agent-machine/fact.ts";
 import { answerPicking, OptionId, type PermissionQuestion, questionIn } from "../../agent-policy/permissions.ts";
@@ -30,7 +30,17 @@ import type { LeftRunning } from "../../agent-machine/left-running.ts";
 import { type TurnKeys, turnKeys } from "./turn-keys.ts";
 
 /** Of each session the REPL follows: the turns whose last response printed its text as it arrived. */
-const streamedLast = new WeakMap<Session, Map<TurnId, boolean>>();
+const streamedLast = Ref.makeUnsafe(HashMap.empty<Session, HashMap.HashMap<TurnId, boolean>>());
+
+/** Notes whether `turn`'s last response, in `session`, printed its text as it arrived. */
+const markStreamed = (session: Session, turn: TurnId, printed: boolean) =>
+  Ref.update(streamedLast, (all) => HashMap.set(all, session, HashMap.set(Option.getOrElse(HashMap.get(all, session), () => HashMap.empty<TurnId, boolean>()), turn, printed)));
+
+/** What a turn's ending adds to an answer: that it was cut short by a length limit, or interrupted. */
+const cutNote = (ending: ReturnType<typeof endingOf>): string | undefined => {
+  if (ending?._tag === "CutShort") return "(cut short: the response reached its length limit)";
+  return ending?._tag === "Interrupted" ? "(interrupted)" : undefined;
+};
 
 /**
  * What is printed after a turn: the answer, unless it was printed as it arrived (`printed`); saying
@@ -43,20 +53,21 @@ export const replyOf = (facts: ReadonlyArray<Fact>, printed: (turn: TurnId) => b
   if (ending?._tag === "Failed") return `(the turn failed: ${ending.failure})`;
   if (answer === "") return ending?._tag === "Interrupted" ? "(interrupted)" : `(the turn ended ${ending?._tag ?? "with nothing recorded"}, with no answer)`;
   // An answer cut short by a length limit (the output limit, or the context window), or by Ctrl+C, says so.
-  const cut =
-    ending?._tag === "CutShort" ? "(cut short: the response reached its length limit)" : ending?._tag === "Interrupted" ? "(interrupted)" : undefined;
+  const cut = cutNote(ending);
   if (turn !== undefined && printed(turn)) return cut;
   return cut === undefined ? answer : `${answer}\n${cut}`;
 };
 
 const printReply = (session: Session) =>
-  Effect.flatMap(session.facts, (facts) => {
-    const reply = replyOf(facts, (turn) => streamedLast.get(session)?.get(turn) === true);
-    return reply === undefined ? Effect.void : Console.log(reply);
+  Effect.gen(function* () {
+    const facts = yield* session.facts;
+    const streamed = Option.getOrElse(HashMap.get(yield* Ref.get(streamedLast), session), () => HashMap.empty<TurnId, boolean>());
+    const reply = replyOf(facts, (turn) => Option.getOrElse(HashMap.get(streamed, turn), () => false));
+    if (reply !== undefined) yield* Console.log(reply);
   });
 
 /** Of each session the REPL follows at a terminal: who holds its keys while a turn runs. */
-const keysOf = new WeakMap<Session, TurnKeys>();
+const keysOf = Ref.makeUnsafe(HashMap.empty<Session, TurnKeys>());
 
 /**
  * A turn: the input to the model, and what is printed once it ends. While it runs the REPL holds
@@ -65,7 +76,7 @@ const keysOf = new WeakMap<Session, TurnKeys>();
 const turn = (session: Session, input: string) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const keys = keysOf.get(session);
+      const keys = Option.getOrUndefined(HashMap.get(yield* Ref.get(keysOf), session));
       if (keys !== undefined) {
         const interrupted = yield* Deferred.make<void>();
         yield* Effect.acquireRelease(
@@ -146,30 +157,24 @@ const following = (session: Session) =>
     const recorded = yield* session.subscribe;
     const streamed = yield* session.streamed;
     const keys = turnKeys();
-    keysOf.set(session, keys);
-    const last = new Map<TurnId, boolean>();
-    streamedLast.set(session, last);
+    yield* Ref.update(keysOf, HashMap.set(session, keys));
+    yield* Ref.update(streamedLast, HashMap.set(session, HashMap.empty<TurnId, boolean>()));
     // The kind of text the line printed last holds, while it is not ended; whether this response printed any answer.
-    let open: "answer" | "thinking" | undefined;
-    let answered = false;
+    const open = yield* Ref.make<"answer" | "thinking" | undefined>(undefined);
+    const answered = yield* Ref.make(false);
     const write = (text: string) => Effect.sync(() => void process.stdout.write(text));
-    const endLine = Effect.suspend(() => {
-      if (open === undefined) return Effect.void;
-      open = undefined;
-      return write("\n");
-    });
+    const endLine = Effect.flatMap(Ref.getAndSet(open, undefined), (was) => (was === undefined ? Effect.void : write("\n")));
     const print = (item: CapturedObservation) =>
       Effect.gen(function* () {
         if (item._tag === "ModelResponseEnded") {
-          last.set(item.turn, answered);
-          answered = false;
+          yield* markStreamed(session, item.turn, yield* Ref.getAndSet(answered, false));
           return yield* endLine;
         }
         if (item._tag !== "ModelDelta" || item.text === "") return;
         const kind = item.kind === "Thinking" ? "thinking" : "answer";
-        if (open !== kind) yield* endLine;
-        open = kind;
-        if (kind === "answer") answered = true;
+        if ((yield* Ref.get(open)) !== kind) yield* endLine;
+        yield* Ref.set(open, kind);
+        if (kind === "answer") yield* Ref.set(answered, true);
         yield* write(kind === "thinking" ? `\x1b[2m${item.text}\x1b[0m` : item.text);
       });
     yield* Effect.forkScoped(Effect.forever(PubSub.take(streamed).pipe(Effect.flatMap(print))));
@@ -232,16 +237,19 @@ export const repl = (session: Session, config: Config, first: string | undefined
     if (first !== undefined) yield* turn(session, first);
     if (!interactive) return;
     yield* bracketedPaste;
-    while (true) {
+    /** Reads a line and does what it says; whether to read another. */
+    const step = Effect.gen(function* () {
       const input = yield* Multiline(completions(yield* offered(session, mcp)));
-      if (input === "/exit" || input === "/quit") break;
-      if (input.trim() === "") continue;
+      if (input === "/exit" || input === "/quit") return false;
+      if (input.trim() === "") return true;
       if (input.startsWith("/")) {
         // A mistake in a command is said, and the REPL goes on.
         const said = yield* command(session, input, process.cwd(), mcp).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(String(error.userMessage))));
         yield* Console.log(said ?? `No command ${input.split(/\s+/)[0] ?? input}. /help lists them.`);
-        continue;
+        return true;
       }
       yield* turn(session, input);
-    }
+      return true;
+    });
+    yield* step.pipe(Effect.repeat({ while: (again) => again }));
   }));
