@@ -1,0 +1,537 @@
+# agent-acp
+
+`src/agent-acp` is the ACP host: an agent of ACP protocol v1 whose sessions run on the core. It joins
+the protocol package (`effective-acp`) to sessions of `agent-session`, with the services that
+`agent-host` provides. It imports both; `effective-acp` imports nothing of the core.
+
+Dan's rulings about the hosts, their layers, and what is planned are in
+[agent-host-direction.md](agent-host-direction.md). What is not built is in `TODO.md`.
+
+## Files
+
+| File | Responsibility |
+| --- | --- |
+| `host.ts` | `makeHost(options)`: the protocol's handlers, and each session the connection holds. `acpDefaults`: the host's configuration layer. |
+| `feed.ts` | An open session's live view: the facts and the streamed items, projected and sent; permission questions asked of the client. |
+| `projection.ts` | The pure projection of a session's facts and streamed items to `session/update`. |
+| `world.ts` | A session's world: its system prompt, its tools, and how their calls are shown. `editorWorld`, `workspaceWorld`. |
+| `config-options.ts` | A configuration as ACP's config options, and `session/set_config_option` as the change it asks. |
+| `permission.ts` | `session/request_permission` for a `PermissionAsked`, and the answer that the client's response gives. |
+| `stop-reason.ts` | `stopOf`: a turn's ending as the answer to the prompt that began it. |
+| `usage.ts` | `usageUpdate`: the session's `usage_update`. |
+| `session-record.ts` | What the host keeps in a session's record (`host.json`), and the pages of `session/list`. |
+| `log-keys.ts` | The names of the events the host logs. |
+| `main.ts` | The launcher: the host on this process's stdin and stdout. |
+
+## Layers
+
+| Layer | Where | Imports |
+| --- | --- | --- |
+| Core | `agent-machine`, `agent-policy`, `agent-session`, `agent-context` | no host and no protocol |
+| Host services | `agent-host` | the core; no protocol |
+| ACP | `effective-acp` (a package of its own) | nothing of the core |
+| ACP host | `agent-acp` | `effective-acp`, `agent-host` and the core |
+| CLI | `examples/cli-repl` | `agent-host`; never `agent-acp` |
+
+## What the host advertises
+
+`initialize` answers with:
+
+- `loadSession`, and the session methods `close`, `list` and `resume`;
+- prompt content: text, resource links, images and embedded resources (`image`, `embeddedContext`);
+  not audio;
+- MCP over HTTP and SSE (`mcpCapabilities`); not MCP over ACP;
+- no `fork`, because the core has no identity for a fork yet; no auth methods.
+
+## A session's lifetime
+
+The connection holds each session it made or started. A session is a draft until its first prompt,
+then open.
+
+| Request | What the host does |
+| --- | --- |
+| `session/new` | Mints the id, reads the configuration, opens the world, starts the MCP servers, and makes a draft. Writes nothing. |
+| `session/set_config_option` | Changes the draft, or, on an open session, submits the change to the configuration gate. |
+| `session/prompt` | Opens a draft (turn zero), then runs the turn. `/export` and `/mcp` are answered without the model. |
+| `session/cancel` | Interrupts the turn under way. |
+| `session/load`, `session/resume` | Starts a stored session from its facts file. |
+| `session/list` | Lists the stored sessions that have the host's record. |
+| `session/close` | Interrupts the turn under way, waits for its prompt, and closes the session's scope. |
+
+The same id is ACP's `sessionId` and the core's `SessionId`: one id with two lifetimes. A draft that
+never gets a prompt leaves nothing on disk, so `session/list` lists only sessions that had a turn.
+
+### `session/new`
+
+- A `cwd` that is not absolute is refused (-32602).
+- With no model to ask, the request fails (-32603) and names the variables to set or the local server
+  to start. The model comes from `HostOptions.model` (`provider/model`), else the catalog's first.
+- The session's configuration is read (see Configuration), the world is opened for `cwd`, and the
+  MCP servers are started at once.
+- The draft holds the model, its settings, the system prompt and the tools. Its output limit is
+  defaulted (`withDefaults`).
+- The answer carries the session's id and its config options. After the answer is written, the
+  host sends `available_commands_update` with `/export` and `/mcp`.
+
+### Turn zero: the first prompt
+
+The first `session/prompt` opens the draft:
+
+1. The host writes the session's record (`host.json`): the working folder, and a title from the
+   first prompt's text. A record that cannot be written fails the prompt (-32603), and the session
+   stays a draft.
+2. The host writes `effective-settings.json`: what the configuration resolved to, with the model,
+   the permission mode and the world.
+3. The session starts over `FileBackedSessionStore` of its folder's `facts.jsonl`, in a scope of
+   its own. The feed starts before anything is recorded, so it sends everything from the opening.
+4. The host records `SessionOpened` with the draft's model, settings, system prompt and tools, from
+   the user through ACP.
+5. The host sends `session_info_update` with the title (`null` when there is none) and the time as
+   `updatedAt`.
+
+The prompt is then the turn's input, from the same origin. A prompt's input is:
+
+- the text of its text blocks;
+- each resource link as a Markdown link in the text;
+- each image and embedded resource stored in the session's blob store (`blobs/` in its folder) and
+  attached by reference, with its media type and the name its URI ends in.
+
+### A prompt
+
+- One prompt runs at a time. A prompt to a session that has one running is refused (-32000, "already
+  has an active prompt").
+- A request that names a session the connection does not hold is refused (-32002).
+- The feed sends the turn's updates. When the feed has taken the turn's `TurnEnded`, the host sends
+  `usage_update` and answers the prompt with the turn's stop (`stopOf`).
+- `/export`, alone in a prompt, writes the session's transcript (`markdownOf`) to
+  `<cwd>/.<brand>/exports/<sessionId>.md`, says where in an `agent_message_chunk`, and answers
+  `end_turn` without asking the model. On a draft it says that there is nothing to export, and
+  opens nothing.
+- `/mcp`, alone in a prompt, says how each MCP server is. `/mcp reconnect <server>` starts one again
+  and says how it went and whether its tools are offered. Both are answered without the model.
+
+### A turn's stop
+
+| Ending | Answer to the prompt |
+| --- | --- |
+| `Completed`, `Incomplete` | `end_turn` |
+| `CutShort` | `max_tokens` |
+| `Interrupted` | `cancelled` |
+| `Vetoed`, with a reason whose JSON has `stop: "max_turn_requests"` | `max_turn_requests` |
+| `Vetoed`, otherwise | a JSON-RPC error (-32603) carrying the reason as text |
+| `Failed` | a JSON-RPC error (-32603) carrying the failure |
+| any ending, when the turn's last response was `Refused` | `refusal` |
+
+A turn that has not ended has no stop. After a failed turn the session takes the next prompt.
+
+### Cancel and close
+
+- `session/cancel` records `TurnInterrupted` for the turn under way (`Session.cancel`). The turn ends
+  `Interrupted` and its prompt `cancelled`. A prompt request that the client cancels
+  (`$/cancel_request`) cancels its turn the same way. The session then takes the next prompt.
+- `session/close` cancels the turn under way, waits for its prompt (which ends `cancelled`), and
+  closes the session's scope, which ends its MCP servers. A later request that names it is -32002.
+- When the connection ends, every session's scope closes. A turn under way is left running in the
+  facts: nothing records `TurnInterrupted` or `TurnEnded`. The host does not end it, because the
+  core allows a turn to be left running and the next load ends it.
+
+## Load, resume and list
+
+### `session/load` and `session/resume`
+
+1. The request is refused when:
+   - `cwd` is not absolute (-32602);
+   - the connection holds the session already (-32602, "already loaded");
+   - the session directory holds no facts file for it (-32002, with its `sessionId`);
+   - its store cannot be opened, such as a facts file open in another process or one that does
+     not read (-32000, carrying the store's message). Nothing is left open, so the session loads
+     once the cause is gone.
+2. The configuration is read for `cwd` and the client's MCP servers, the world is opened, and the
+   servers are started.
+3. The session starts over its facts, with the model, system prompt and tool catalog that they hold.
+   The record keeps the working folder it had.
+4. A turn that the facts left running is ended (`endTurnLeftRunning`): it ends `Interrupted`, each
+   request under way receives what is known of it, no tool runs, and no model request is made. The
+   editor that closed mid-turn is not watching, and what the turn had begun should not run unseen.
+5. `session/load` sends the facts as the projection replays them, before its answer. `session/resume`
+   sends nothing: the client has the history.
+6. The feed starts from the state the replay leaves, so nothing replayed is sent again.
+7. With no turn left running, the session goes on (`goOn`), so input left waiting starts its turn
+   live.
+8. The host writes `effective-settings.json`, then answers with the session's config options.
+9. After the answer, the host sends `available_commands_update`, `session_info_update` (the record's
+   title, `null` when it has none or it does not read, and when the facts file was last written)
+   and `usage_update`.
+
+A loaded session's permission mode starts at the configuration's mode, as a new session's does. The
+mode a session had when it was closed is not kept.
+
+The replay shows the requests that were answered as live showed them, with each call left running
+`failed`. A request that was in flight adds only the calls that had arrived in it, because the text
+and thinking it streamed were never recorded. ACP has no update for how a turn ended, so a turn whose
+only request was in flight, with no call arrived, shows its input alone.
+
+### `session/list`
+
+- A page lists the stored sessions whose record reads, the one written to last first, and by id among
+  those written at the same time. Given `cwd`, only those made for it are listed.
+- Each session is listed as its `SessionInfo`: its id, working folder, title and when its facts were
+  last written.
+- A page holds at most `pageSize` sessions (50 unless the host is given another; at least one), and
+  `nextCursor` when more follow. A cursor continues after the session its page ended with, so each
+  session comes once and one written to meanwhile is not repeated.
+- A session with no record (the CLI made it) is not listed, and loads by its id.
+- A cursor that `session/list` did not give is refused (-32602, naming it). A session directory that
+  cannot be read is -32603 with the cause.
+
+### The record
+
+`host.json` holds what the host keeps of a session (`session-record.ts`): the working folder and,
+when the first prompt gives one, a title. `agent-host` stores and returns the record as JSON and
+does not read it. A record that is not one, or has no working folder, reads as none.
+
+A title is the first prompt's text trimmed, with each run of whitespace made one space, cut after
+120 characters, never inside a character. When no text is left, there is no title.
+
+## Configuration
+
+A session's configuration is read when `session/new`, `session/load` or `session/resume` makes it,
+in layers (`docs/agent-host.md`, Launch options):
+
+1. the host's defaults (`acpDefaults`);
+2. the user's file;
+3. the working folder's files, when `--setting-sources` names them;
+4. the launcher's `--settings`, `--mcp-config` and flags;
+5. the MCP servers the client names. Each replaces the configuration's server of its name whole.
+
+A configuration that cannot be used refuses the request (-32603), naming the layer at fault. The
+configuration's seam lists are the session's, except its tool sources: the session's tools are the
+world's and its MCP servers'. Its `commandEnvironment` is what a command run on the local disk is
+given.
+
+The host's defaults:
+
+| Seam | Entry |
+| --- | --- |
+| `toolCalls` | `permissions` |
+| `modelRequests` | `maxTurnRequests`, 1000 unless the launcher says otherwise (`--max-turns`) |
+| `turnEnd` | `retryIncomplete`, asked `retries` times (1 unless `--retries` says otherwise); none when `retries` is 0 |
+| `commandEnvironment` | `credentials`: the environment without its credentials |
+
+A turn whose response had thinking and no answer (`Incomplete`) is asked again for its answer, by
+default once. An answer then reaches the client as `agent_message_chunk`, and the prompt ends
+`end_turn`. The hook's feedback is input from the system, so it is not sent to the client.
+
+## Config options
+
+`configOptions(options, models, limit)` gives the selects of a configuration; `models` are the
+catalog's (`askable`), and `limit` is the model's output limit (none known: every preset).
+
+| id | category | values |
+| --- | --- | --- |
+| `model` | `model` | `provider/model` of each model offered, and of the one asked now |
+| `effort` | `thought_level` | the efforts the model takes |
+| `thinking` | `model_config` | the thinking modes the model takes |
+| `max_output_tokens` | `model_config` | 4096, 8192, 16384, 32768, 65536, 128000 up to the model's limit; the limit; the value in force |
+| `permission_mode` | `mode` | `default`, `acceptEdits`, `bypassPermissions`, `dontAsk` |
+
+- `model` comes first, then one select for each setting the options offer, then `permission_mode`.
+  A setting that is not offered has no option.
+- `observe` and `cache` have no option. The editor shows each option as a select above the prompt,
+  and a session keeps what it was configured with for those two.
+- Every option's current value is among its values: the model asked now is offered even when the
+  catalog does not list it.
+- A setting's current value is what the model will get (the option's `now`). For example, an effort
+  above the model's highest shows the nearest effort the model takes, and the effort asked for is
+  not offered.
+- Where nothing is sent for a setting, its value is `not_sent`, which is offered only then.
+- The output limit offers the presets up to the model's limit, the limit itself, and the value in
+  force even when it is above the limit, smallest first.
+
+`changeOf(configId, value, options, models, limit)` is the inverse of `configOptions`:
+
+- Each value offered, taken as a change, gives a configuration whose option has that value now.
+- A change names only what was chosen: the model, or the one setting. A change keeps the settings it
+  does not name.
+- Choosing `not_sent` while it is the value now changes nothing.
+- A model value is found among the values offered, not split, because a local model's name can hold
+  slashes.
+- A value that the option does not offer, or an id that no option has, is an `InvalidChange`, which
+  the host answers with -32602 and sends nothing.
+
+### When a change applies
+
+- On a draft, a change applies at once (`chooseModel`, `withSettings`).
+- On an open session, a change goes through the session's configuration gate
+  (`agent-session/configuration/gate.ts`). Between turns it is made at once: the model change is
+  recorded as `ModelChangeArrived` from the user through ACP. While a turn runs it is held until the
+  turn ends, so the model that started the turn completes it.
+- The gate is settled when a prompt's turn ends and before a prompt starts one.
+- The answer is every option as the configuration will be, held changes included. The same options
+  are sent as `config_option_update`, because a client may draw its controls from updates alone.
+
+### The permission mode
+
+The host keeps each session's permission mode:
+
+- It starts as the session's configuration says: the `mode` of the `permissions` entry that its tool
+  calls list, which the launcher's `--permission-mode` sets; else `default`.
+- A change goes through the gate as a change of model does.
+- Every `permissions` entry that the configuration lists follows it (`FromHost.permissionMode`),
+  including one with a `mode` of its own. Every other tool call policy still decides with it.
+- A value that is not a mode is refused (-32602).
+
+## The projection
+
+`projection.ts` is one pure, incremental function from a session's facts and streamed items to
+`session/update`, for the live view and for `session/load`. `next(state, input, context)` takes one
+input and gives the updates and the state to take the next input from. `project` folds it over many
+inputs, from `start` or a given state. The context is the mode (`live` or `replay`) and the host's
+presentation of tool calls.
+
+The inputs are facts (`session.subscribe`) and the items that a model request passes on while it
+runs (`session.streamed`): `ModelDelta`, `ModelPartArrived` and `ModelResponseEnded`.
+
+| Input | Update |
+| --- | --- |
+| `InputArrived` from the user | `user_message_chunk`, on replay only: live, the client has what it sent |
+| `InputArrived` from the system (a turn-end hook's feedback) or another agent | nothing |
+| `ModelDelta` of `Text` or `Commentary`, live | `agent_message_chunk` with the delta's text |
+| `ModelDelta` of `Thinking`, live | `agent_thought_chunk` with the delta's text |
+| `ModelResponded`: a `Text` or `Commentary` part | `agent_message_chunk` with the part's text that no delta of its request sent |
+| `ModelResponded`: a `Thinking` part | `agent_thought_chunk` with the part's text that no delta of its request sent |
+| `ToolCallArrived`; a `ToolCall` part of `ModelPartArrived` or `ModelResponded` | `tool_call`, `pending`, with the presentation's title, kind, locations and content; once for each call |
+| `PermissionAsked` | `tool_call_update`, `pending` |
+| `ToolCallDispatched` | `tool_call_update`, `in_progress` |
+| `ToolEnded` | `tool_call_update`, `completed` when it succeeded and `failed` otherwise, with the presentation's content and locations, and its title and kind where they changed |
+| anything else | nothing |
+
+### Text is sent once
+
+- Live, each delta is sent as it arrives, and `ModelResponded` sends the text of each part that the
+  deltas of its request did not send. With no deltas (a client that does not stream, a response that
+  arrives whole), `ModelResponded` sends the whole parts. On replay there are no deltas.
+- The text sent for a response, joined, is the text of its parts: live with deltas, live without,
+  and on replay.
+- The deltas of a request cover its parts of their kind in order, across several parts of one kind.
+- A delta of a request whose `ModelResponded` was taken first gives nothing, and so does anything
+  streamed for a turn after its `TurnEnded`: the facts sent that text.
+- A response that was stopped keeps what was sent of it. Its `ModelResponded` holds its complete
+  parts only, so what the deltas sent of a part that the stream cut is not taken back, and nothing
+  is sent again.
+- A failed request has no `ModelResponded`. What its deltas sent stays sent, and the projection
+  forgets it when the turn ends.
+- Text of only whitespace is held, and sent with the next text of its kind. When a call or the
+  response's end comes first, it is not sent, live or on replay, so a client shows no blank message.
+  It counts as sent.
+
+### The order of the two feeds
+
+The facts and the streamed items have no order between them: a request's deltas can come before or
+after its `ModelResponded`, and either feed can be any number of requests or turns ahead. Each feed
+keeps a turn's requests in order, so the projection pairs a request's `ModelResponseEnded` with its
+`ModelResponded` by position in the turn. Every merge of the two sends each response's text once.
+
+### Replay order
+
+Stored facts record a request's tool calls as they arrive, and the calls may have ended before the
+request's `ModelResponded`, which holds the whole response. Live, the response's thinking and text
+were sent as they streamed, before the calls. On replay, `project` takes each `ModelResponded`
+before the first `ToolCallArrived` of its request (`inLiveOrder`), so the replay sends the response's
+parts in order, each call announced at its place among them, then what became of the calls. Nothing
+is added or dropped, and the state it leaves is the same.
+
+Live with no deltas, the updates are the same, except that a call's announcement comes before its
+response's text, which is known only when the response ends.
+
+Projecting the stored facts gives the state that the live feed continues from, with no reset: what
+the load showed is not shown again, and a later request's deltas are sent once.
+
+### Tool calls
+
+- A call is announced once, as `tool_call` `pending`, by the first of `ToolCallArrived`, its part in
+  `ModelPartArrived` and its part in `ModelResponded`. A response recorded after the call ended does
+  not announce it again.
+- A call's status follows its facts. A call that a policy vetoed fails, and is never `in_progress`.
+- What a call shows is the host's presentation (`Present`): announced, its title, kind, locations and
+  content; ended, the presentation with the outcome gives the content and locations, and the title
+  and kind where they changed.
+- The default presentation (`presentFrom(catalog)`) is the tool's name as the title, its kind from
+  the session's catalog, and, once it ends, its output as text, or why it failed in words.
+
+## The feed
+
+`feed.ts` is an open session's live view:
+
+- It subscribes to the facts and to `streamed` before anything is given to the session, so nothing of
+  a turn is missed.
+- It merges the two into the projection (`live`), from `start` or from the state a load gives, and
+  sends each update in the order the projection gives.
+- Each `PermissionAsked` is asked of the client as `session/request_permission`, in a fiber of its
+  own so the updates go on. The answer is recorded as `PermissionAnswered`.
+- `turnEnded(turn)` completes once the feed has taken the turn's `TurnEnded`: by then every update
+  of the turn has been sent, so a prompt answers after them.
+- A defect while projecting one input is logged, and the feed goes on with the next.
+
+### Permission
+
+- The request (`requestOf`) is the call as the host presents it, `pending`, with its input as
+  `rawInput` and, where the presentation has no kind, the question's kind. Its options are exactly
+  the question's, by id, name and kind.
+- A selected option is the answer that picks it (`answerOf`).
+- `cancelled` is the question's reject-once option: the call is refused, nothing is remembered for
+  the session, and the turn goes on. The model then decides what to do next.
+- A request that the client fails, a connection that closes, an option the question did not offer,
+  or a cancel where no option rejects once also refuses the call once. Each is logged as a warning
+  with its cause.
+- A call that ends while its question is still out (its turn was cancelled) has its request
+  cancelled.
+
+## Worlds
+
+A world (`world.ts`) is what the host does not know of a session. Given the session's id, its working
+folder, the client's MCP servers, the connection, whether tool input is strict, and the command
+environment, a world gives the session's system prompt, its tool sources (`ToolSource`) and their
+presentation (`Present`). A host can give a world of its own (`HostOptions.world`).
+
+### `editorWorld`, the default
+
+The tools go through the editor. Each is offered only when the client advertised the methods it
+uses, so no call meets a capability the client does not have.
+
+| Tool | Kind | Offered when the client advertised | What it does |
+| --- | --- | --- | --- |
+| `read_file { path, line?, limit? }` | `read` | `fs.readTextFile` | Reads with `fs/read_text_file`, so the model sees the editor's unsaved buffers; at most 256 KiB. |
+| `write_file { path, content }` | `edit` | `fs.writeTextFile` | Writes with `fs/write_text_file`; at most 256 KiB. |
+| `edit_file { path, old_text, new_text }` | `edit` | both `fs` methods | Reads the file, replaces the one occurrence of `old_text`, and writes it back. |
+| `run_command { command, timeout_seconds? }` | `execute` | `terminal` | Runs `sh -c <command>` in an editor terminal in the working folder. |
+| `update_plan { entries }` | `think` | always | Sends the whole plan as a `plan` update. |
+
+- A path is relative to the working folder, or absolute. A path outside the working folder is
+  refused with a failure the model reads, and the editor is not asked.
+- `edit_file` refuses `old_text` that occurs never or more than once, and writes nothing.
+- `run_command` waits for the command's exit until its time runs out (120 seconds unless the call
+  gives `timeout_seconds`, at most 600), reads its output (the last 256 KiB), and releases the
+  terminal however the call ends, which stops a command still running. Exit code 0 succeeds; any
+  other end fails, with the output and how it ended for the model to read.
+- The editor has no method to list or search a folder, so `run_command` does both.
+- `update_plan` gives an entry the priority `medium` unless it gives one, and succeeds with the count
+  of steps by status. Its kind is `think`, so it runs in every permission mode without asking.
+- `write_file`, `edit_file` and `run_command` ask permission in the default mode.
+- A call whose input has properties its tool does not take runs without them, and its result names
+  them; with `--strict-tool-input` it is refused.
+- A call's title names its command or its path (`run_command: ls`, `edit_file: a.txt`), so a
+  permission question says what it asks about. A path is the call's location. An edit's call shows
+  its change as a `diff`, from when permission is asked; a command's call shows its `terminal` from
+  when it has one, and when it has ended.
+
+### `workspaceWorld`
+
+A stopgap: the workspace tools of `agent-tools/workspace.ts` on the local disk under the working
+folder (`--local-tools`). It bypasses the editor, so the model does not see unsaved buffers and the
+editor is not told of writes.
+
+## MCP servers
+
+- A session's MCP servers are its configuration's, the client's among them. They are started when
+  `session/new`, `session/load` or `session/resume` makes the session, at once
+  (`docs/agent-mcp.md`), in the session's scope, which `session/close` closes.
+- A server has `mcpConnectTimeout` (30 seconds unless the host is given another) to connect.
+- The tools of the servers that are ready are offered after the world's, under `mcp__<server>`. A
+  call is shown with its result as the model is sent it (`agent-session/tool-output.ts`).
+- Servers at a URL are connected over Streamable HTTP or HTTP+SSE, with the headers given. Closing
+  the session ends its session at the server.
+- The servers are told the brand's name and version (`clientInfo`).
+- Once the session opens, it records each server's state and each change of it (`McpServerChanged`,
+  from the harness part "mcp servers").
+- A server that cannot be started, or does not connect, leaves the session running. The model is
+  told it is not running, and its tools are not offered.
+- A server the configuration says is required (`required: true`) that is not running once the
+  servers have settled refuses the request (-32603), naming it and saying how it is. The servers are
+  stopped, and nothing of the session is left open.
+- Two servers whose tools would be offered under one name are refused (-32602) before anything is
+  started.
+- A server over ACP (`type: acp`) is refused (-32602) by `effective-acp`, because the host does not
+  offer it.
+
+## The host's own updates
+
+The projection does not make these; the host sends them:
+
+| Update | When |
+| --- | --- |
+| `available_commands_update` | After `session/new`, `session/load` and `session/resume` answer: `/export` and `/mcp`. |
+| `session_info_update` | At turn zero, and after a load or a resume. |
+| `usage_update` | At each turn's end, before the prompt's answer, and after a load or a resume: the gauge of the model the session asks now (`contextGauge`), with the model's window as `KnownModels` knows it and the cost so far; none for a model whose window is not known. |
+| `config_option_update` | After each `session/set_config_option`. |
+| `plan` | From `update_plan`. |
+
+## Logs
+
+The host logs each event under `log-keys.ts`, with the ids it is about as log annotations:
+`connection` (minted per connection), `request` (set by the peer), `session`, `turn` and `call`.
+
+- Logged at INFO: a session created, opened, loaded, resumed, listed and closed; a record written; a
+  turn left running ended; a prompt received, admitted and settled (its stop reason, and its
+  duration); a cancel requested; a permission asked and answered; a change of configuration; an
+  export written.
+- A routine turn and a routine load log no warning or error.
+- Logged as a warning, with the cause: a refused request; a session not stored; a bad cursor; a
+  permission request that failed; a settled prompt that answers with an error.
+- Logged as an error, with the cause: a store that cannot be opened; a session directory that cannot
+  be read; a draft that cannot be opened; an export that cannot be written.
+
+## The launcher
+
+`main.ts` runs the host on this process's stdin and stdout (`Agent.runStdio`):
+`bun src/agent-acp/main.ts [flags]`.
+
+- It puts nothing but the protocol on stdout. What the command line prints goes to stderr.
+- Its log is a file (`agent-host/launcher-logs.ts`), named once on stderr, which holds no secret of
+  the environment. It exits 0 when stdin closes.
+- It calls itself by its brand's name and version (`agentInfo`). The brand is the one `launch` is
+  given, else the one the environment names, else labkit's.
+- The model catalog is the keyed providers' and the local server's (`KeyedAndLocalCatalog`).
+- Its options are those both hosts take (`docs/agent-host.md`, Launch options) and its own:
+
+  | Flag | Default | Meaning |
+  | --- | --- | --- |
+  | `--sessions-dir` | `~/.<brand>/sessions` | Where sessions are kept. |
+  | `--local-tools` | off | The tools on the local disk instead of through the editor. |
+  | `--retries` | 1 | How many times an incomplete turn is asked again for its answer; 0 never. |
+
+- A flag not given is read from its variable: the brand's prefix, `ACP_`, then the flag's name in
+  capitals (`LABKIT_ACP_MODEL`, `LABKIT_ACP_SESSIONS_DIR`). The launcher reads only its own brand's
+  variables. The log's variables are `<PREFIX>ACP_LOG_*`.
+- Before it serves, it loads what of a session's configuration no session's folder changes: the
+  host's defaults, the user's file, `--settings`, `--mcp-config` and the flags. An option the launcher
+  does not take (`LABKIT_ACP_PERMISSION_MODE=yolo`), or a configuration that cannot be used
+  (`LABKIT_ACP_MAX_TURNS=0`), ends it with exit code 1, said on stderr, with nothing on stdout.
+
+## Design decisions
+
+- **No core session before turn zero.** The draft lives in the host until the first prompt, so a
+  session that never had a turn leaves nothing on disk. Dan: "Until then, core's got no reason to be
+  journalling facts."
+- **A turn left running is ended at load, not continued.** The editor that closed mid-turn is not
+  watching, and what the turn had begun should not run unseen.
+- **One projection for live and replay.** The two differ only in the mode, so a loaded session and a
+  live one show the same text, and the live feed continues from the replay's state.
+- **Tool calls go through the editor.** The model then sees unsaved buffers, and the editor shows and
+  controls what changes. `workspaceWorld` is a stopgap that bypasses it.
+- **A cancelled permission request refuses the call once.** The turn goes on, and the model asks
+  what to do next.
+- **The connection's end leaves a turn running.** The host does not end it; the next load does.
+
+## Tests
+
+| File | Covers |
+| --- | --- |
+| `host.test.ts` | The handlers, against the SDK's client: sessions, prompts, cancel, close, load, resume, list, config options, permission, MCP servers, the editor's tools, logs. |
+| `projection.test.ts` | The projection, live and replay, and every merge of the two feeds. |
+| `config-options.test.ts` | Config options and changes. |
+| `permission.test.ts` | Permission requests and answers. |
+| `stop-reason.test.ts` | Stop reasons. |
+| `usage.test.ts` | `usage_update`. |
+| `session-record.test.ts` | Titles, records, and the pages of `session/list`. |
+| `main.test.ts` | The launcher: stdout, the log file, flags and variables, refused configurations. |

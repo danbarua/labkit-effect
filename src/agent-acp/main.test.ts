@@ -20,7 +20,7 @@ import { hostOptionsOf, launchChecked, launcherFlags, type LauncherOptions, sess
 
 const secret = "sk-launcher-test-0123456789";
 
-test("AG14: the launcher serves the host on stdin and stdout and nothing else on stdout, keeps its log in a file named once on stderr without the environment's secrets, and exits 0 when stdin closes", async () => {
+test("the launcher serves the host on stdin and stdout and nothing else on stdout, keeps its log in a file named once on stderr without the environment's secrets, and exits 0 when stdin closes", async () => {
   const folder = testFolder();
   const logs = join(folder, "logs");
   const child = Bun.spawn([process.execPath, join(import.meta.dir, "main.ts")], {
@@ -114,7 +114,7 @@ const checked = (options: LauncherOptions) =>
     ),
   );
 
-test("AG16: --retries (LABKIT_ACP_RETRIES) is how many times a turn with thinking and no answer is asked again; one that is not a whole number of 0 or more ends the launch", async () => {
+test("--retries (LABKIT_ACP_RETRIES) is how many times a turn with thinking and no answer is asked again; one that is not a whole number of 0 or more ends the launch", async () => {
   expect((await launcherOptions([], { LABKIT_ACP_RETRIES: "2" }))?.retries).toBe(2);
   expect((await launcherOptions(["--retries", "0"], { LABKIT_ACP_RETRIES: "2" }))?.retries).toBe(0);
   expect((await launcherOptions([], {}))?.retries).toBeUndefined();
@@ -124,7 +124,7 @@ test("AG16: --retries (LABKIT_ACP_RETRIES) is how many times a turn with thinkin
   expect(await checked(minusOne!)).toBe('the ACP host\'s defaults: plugins.retryIncomplete.retries: Expected a value greater than or equal to 0 at ["retries"]');
 });
 
-test("AG15: sessions are kept in --sessions-dir (LABKIT_ACP_SESSIONS_DIR), else in ~/.labkit/sessions; for another brand, its variable and folder", async () => {
+test("sessions are kept in --sessions-dir (LABKIT_ACP_SESSIONS_DIR), else in ~/.labkit/sessions; for another brand, its variable and folder", async () => {
   const acme = { name: "acme", version: "1.0.0" };
   expect(sessionsDirectoryOf(undefined, defaultBrand)).toBe(join(homedir(), ".labkit", "sessions"));
   expect(sessionsDirectoryOf(undefined, acme)).toBe(join(homedir(), ".acme", "sessions"));
@@ -137,7 +137,7 @@ test("AG15: sessions are kept in --sessions-dir (LABKIT_ACP_SESSIONS_DIR), else 
   expect(await directory({ ACME_ACP_SESSIONS_DIR: "/tmp/acme" }, acme)).toBe("/tmp/acme");
 });
 
-test("AG24: the launcher's options are the brand's variables, and no other brand's", async () => {
+test("the launcher's options are the brand's variables, and no other brand's", async () => {
   const acme = { name: "acme", version: "1.0.0" };
   const env = { ACME_ACP_MODEL: "openai/gpt-5.5", ACME_ACP_RETRIES: "3", ACME_ACP_PERMISSION_MODE: "acceptEdits", ACME_ACP_LOCAL_TOOLS: "1", LABKIT_ACP_RETRIES: "9" };
   const asAcme = hostOptionsOf((await launcherOptions([], env, acme))!, acme);
@@ -145,7 +145,7 @@ test("AG24: the launcher's options are the brand's variables, and no other brand
   expect(hostOptionsOf((await launcherOptions([], env))!, defaultBrand)).toMatchObject({ model: undefined, world: "editor", retries: 9, configFlags: { permissionMode: undefined } });
 });
 
-test("AG27: the launcher refuses to start when an option cannot be used: said on stderr, nothing on stdout, exit code 1", async () => {
+test("the launcher refuses to start when an option cannot be used: said on stderr, nothing on stdout, exit code 1", async () => {
   const folder = testFolder();
   const launched = async (env: Readonly<Record<string, string>>) => {
     const child = Bun.spawn([process.execPath, join(import.meta.dir, "main.ts")], {

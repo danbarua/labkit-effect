@@ -3,7 +3,7 @@
  * pass on (`streamed`), merged as they come into the projection (`projection.ts`, mode `live`), and
  * each update sent to the client as `session/update`, in the order the projection gives them. The
  * two feeds are subscribed to before anything is given to the session, so nothing of a turn is
- * missed; there is no order between them (PJ9).
+ * missed; there is no order between them (`projection.ts`).
  *
  * The feed also asks the client's permission: each `PermissionAsked` it takes is a
  * `session/request_permission` (`requestOf`), asked in a fiber of its own so the updates go on. The
@@ -44,7 +44,7 @@ export interface FeedOptions {
   readonly annotations: Readonly<Record<string, unknown>>;
   /**
    * The projection's state to go on from: that of the facts the session had before the feed (a loaded
-   * session's, projected), so nothing they showed is shown again (PJ8). Left out, `start`.
+   * session's, projected), so nothing they showed is shown again. Left out, `start`.
    */
   readonly initial?: ProjectionState | undefined;
 }

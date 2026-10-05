@@ -22,16 +22,15 @@ The domain core of a coding harness, and the layers around it.
 | `src/agent-session/` | The layer around them: contracts as Effect services, adapters, the loop (which records every fact, and so owns the journal). See `docs/agent-session.md`. | anything |
 | `src/agent-context/` | Context assembly: what the model is sent, from system prompts, tool catalogs and a view of the conversation; compaction. See `docs/agent-context.md` and `docs/agent-context-direction.md`. | anything |
 | `src/instrumentation/` | Tool usage counted from facts, as Effect metrics, and OpenTelemetry. See its `README.md`. | anything |
-| `src/agent-host/` | What both hosts share, lifted from the CLI: the model catalog, the provider clients, the services a session runs with, the permission policy for a mode, the folder sessions are kept in and a host's record of a session beside its facts, log files (and the ACP launcher's, JSONL, rotated), the draft a session is before turn zero, and a session's transcript as Markdown. See `docs/agent-host.md`, and `DESIGN.next.md` for where the hosts are going. | the core; never `effective-acp` or a host |
-| `src/agent-acp/` | The ACP host, protocol v1 over stdio: `makeHost` joins `effective-acp` (the ACP protocol, a package of its own on npm: github.com/danbarua/effective-acp) to sessions of the core (a draft at `session/new`, turn zero at the first prompt), with tools through the editor's `fs/*`, permission, cancel, `usage_update`, `/export`, and `session/load`, `resume` and `list` over the sessions the directory keeps; the projection of a session's facts and the core's stream items to `session/update`; and the launcher, `bun src/agent-acp/main.ts`. See its `MODEL.md`, and `src/agent-host/DESIGN.next.md` for the layers. | anything |
+| `src/agent-host/` | What both hosts share, lifted from the CLI: the model catalog, the provider clients, the services a session runs with, the permission policy for a mode, the folder sessions are kept in and a host's record of a session beside its facts, log files (and the ACP launcher's, JSONL, rotated), the draft a session is before turn zero, and a session's transcript as Markdown. See `docs/agent-host.md`, and `docs/agent-host-direction.md` for where the hosts are going. | the core; never `effective-acp` or a host |
+| `src/agent-acp/` | The ACP host, protocol v1 over stdio: `makeHost` joins `effective-acp` (the ACP protocol, a package of its own on npm: github.com/danbarua/effective-acp) to sessions of the core (a draft at `session/new`, turn zero at the first prompt), with tools through the editor's `fs/*`, permission, cancel, `usage_update`, `/export`, and `session/load`, `resume` and `list` over the sessions the directory keeps; the projection of a session's facts and the core's stream items to `session/update`; and the launcher, `bun src/agent-acp/main.ts`. See `docs/agent-acp.md`. | anything |
 | `src/examples/` | Examples, not part of the harness: the FizzBuzz session (a scripted model, its tools, a toy compaction) and example policies. | anything |
 | `scripts/probes/` | Live checks against the providers' APIs. Each reads its key from the environment and writes what it saw to a folder per run, `logs/probes/<probe>/<run>/` (not committed). | anything |
 | `scripts/trajectories/` | Importers that project Claude Code and Codex sessions' records through the core's decisions into `trajectories/` (not committed). | anything |
 
-`docs/<module>.md` describes a module's architecture. A module without one has a `MODEL.md`, which
-states what the module builds as rules with ids. Each rule has at least one test whose name starts
-with its id, and `bun run check:rules` fails when a rule has none. `DESIGN.next.md`, where a module
-has one, holds direction that is not built. `TODO.md` lists what is to be built.
+`docs/<module>.md` describes a module's architecture: its files, its states, its interfaces, its
+design decisions and its tests. `docs/<module>-direction.md`, where a module has one, holds direction
+that is not built. `TODO.md` lists what is to be built.
 
 A module's tests are beside its code (`src/agent-machine/turn.test.ts`). The core's tests import only
 the core and `tests/support/`. `tests/` holds what joins modules: `tests/examples/` tests the
@@ -50,7 +49,7 @@ to a type with no unbranded string, however it is built.
 ```sh
 bun install
 bun run vidaimock:install   # the mock provider server the adapter tests run against
-bun run check               # installs it if missing, then typecheck, lint, check:brands, check:rules, tests
+bun run check               # installs it if missing, then typecheck, lint, check:brands, check:schemas, tests
 bun run acp:logs [--errors]  # the newest ACP launch log (~/.labkit/logs; LABKIT_ACP_LOG_DIR, _LEVEL, _MAX_BYTES, _BACKUPS)
 bun cli --help              # the CLI; --model, --permission-mode, --max-turns and its other shared options
                             # are read from LABKIT_MODEL, LABKIT_PERMISSION_MODE, ... when not given

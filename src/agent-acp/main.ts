@@ -15,7 +15,7 @@
  * `OPENAI_API_KEY` and `XAI_API_KEY`.
  *
  * Before it serves, it loads what of each session's configuration no session's folder changes: the
- * host's defaults, the user's file, `--settings`, `--mcp-config` and the flags (AG27). An option, or
+ * host's defaults, the user's file, `--settings`, `--mcp-config` and the flags. An option, or
  * a configuration, that cannot be used ends it at once, said on stderr, with exit code 1. What the
  * command line prints (help, an option's error) goes to stderr.
  */
@@ -58,7 +58,7 @@ export const hostOptionsOf = (options: LauncherOptions, brand: Brand, home?: str
   ...(home === undefined ? {} : { home }),
 });
 
-/** What of each session's configuration no session's folder changes, loaded once (AG27): it fails when it cannot be used. */
+/** What of each session's configuration no session's folder changes, loaded once: it fails when it cannot be used. */
 export const launchChecked = (options: LauncherOptions, brand: Brand, home?: string) =>
   launchConfiguration(undefined, acpDefaults(options), options, { name: brand.name, ...(home === undefined ? {} : { home }) });
 

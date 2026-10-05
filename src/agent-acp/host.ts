@@ -259,7 +259,7 @@ interface Entry {
   readonly prompt: Ref.Ref<Fiber.Fiber<unknown, unknown> | undefined>;
   /** How tool calls are allowed: the host's to keep, read at each call, changed by the user; it starts as the configuration says. */
   readonly permissionMode: Ref.Ref<PermissionMode>;
-  /** The session's configuration (AG25): its seam lists, and its MCP servers. */
+  /** The session's configuration: its seam lists, and its MCP servers. */
   readonly configuration: Configured;
 }
 
@@ -408,7 +408,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
 
         /** The configuration of the session as it will be from the next turn, with what a change is taken against. */
         /**
-         * The configuration of a session in `cwd` whose client names `servers` (AG25): the host's defaults, the launcher's
+         * The configuration of a session in `cwd` whose client names `servers`: the host's defaults, the launcher's
          * layers with `cwd` as the project, then the client's servers. One that cannot be used refuses the request.
          */
         const configurationFor = (cwd: string, servers: ReadonlyArray<McpServer>, doing: string): Effect.Effect<Configured, JsonRpcErrorObject, FileSystem.FileSystem> =>
@@ -427,7 +427,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
         /** What a command the model runs on the local disk is given of the environment: what the configuration composes. */
         const environmentFor = (configuration: Configured) => processEnvironmentWith(seamListsOf(configuration, { canAsk: true }).commandEnvironment ?? [removeCredentials()]);
 
-        /** Writes what a session's configuration resolved to, with what the host says beside it, to the session's folder (AG25). */
+        /** Writes what a session's configuration resolved to, with what the host says beside it, to the session's folder. */
         const settingsWritten = (id: AcpSessionId, configuration: Configured, permissionMode: PermissionMode, model: string) =>
           writeEffectiveSettings(sessionFolderOf(options.directory, id), configuration.layers, configuration, {
             model,
@@ -442,10 +442,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
 
         /**
          * The MCP servers of a session in `cwd`, started at once in a scope of the entry's own, and the world with their tools
-         * after its own (`startMcpServers`): the configuration's, the client's among them (AG25), and those the client names at a URL,
+         * after its own (`startMcpServers`): the configuration's, the client's among them, and those the client names at a URL,
          * which are not supported. Two servers whose tools would be offered under one name are -32602, before anything is
          * started. A server the configuration says is required that is not running once they have settled refuses the request,
-         * and the servers are stopped (AG26).
+         * and the servers are stopped.
          */
         const withServers = (cwd: string, opened: WorldSession, configuration: Configured, doing: string) =>
           Effect.gen(function* () {

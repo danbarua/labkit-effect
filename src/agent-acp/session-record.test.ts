@@ -20,7 +20,7 @@ const idsOf = (response: ReturnType<typeof pageOf>) => pageRead(response).sessio
 /** A page as plain data, for comparing with what a client would be sent. */
 const plain = (response: ReturnType<typeof pageOf>): unknown => ({ ...pageRead(response) });
 
-test("AR1: a title is the prompt's text trimmed, each run of whitespace one space, cut after 120 characters without splitting one, and none when no text is left", () => {
+test("a title is the prompt's text trimmed, each run of whitespace one space, cut after 120 characters without splitting one, and none when no text is left", () => {
   expect(titleOf("  Plan the\n\tsurvey   of  sources \n")).toBe("Plan the survey of sources");
   expect(titleOf("x".repeat(200))).toBe("x".repeat(120));
   // A character outside the basic plane is two UTF-16 units and one character: the cut falls after whole ones.
@@ -31,7 +31,7 @@ test("AR1: a title is the prompt's text trimmed, each run of whitespace one spac
   expect(titleOf(" \n\t ")).toBeUndefined();
 });
 
-test("AR2: a record holds the working folder and the title the first prompt gives, and reads back from JSON; what is not a record, or lacks a folder, reads as none", () => {
+test("a record holds the working folder and the title the first prompt gives, and reads back from JSON; what is not a record, or lacks a folder, reads as none", () => {
   expect(recordFor("/work/a", "  Explain the loop  ")).toEqual({ cwd: "/work/a", title: "Explain the loop" });
   expect(recordFor("/work/a", "   ")).toEqual({ cwd: "/work/a" });
   expect(readSessionRecord(JSON.parse(JSON.stringify(recordFor("/work/a", "Explain"))))).toEqual({ cwd: "/work/a", title: "Explain" });
@@ -41,7 +41,7 @@ test("AR2: a record holds the working folder and the title the first prompt give
   }
 });
 
-test("AR3: a page lists the sessions whose record reads, latest first and by id among equals, filtered by working folder when asked, as session/list's info", () => {
+test("a page lists the sessions whose record reads, latest first and by id among equals, filtered by working folder when asked, as session/list's info", () => {
   const sessions = [
     stored("b", 100, { cwd: "/work/a", title: "Second" }),
     stored("a", 100, { cwd: "/work/b" }),
@@ -67,7 +67,7 @@ test("AR3: a page lists the sessions whose record reads, latest first and by id 
   expect(plain(pageOf(sessions, { cwd: "/work/none" }, 50))).toEqual({ sessions: [] });
 });
 
-test("AR4: pages of a size continue after the session the last one ended with, so each session comes once, in order, and the last page has no cursor; a session written to meanwhile is not repeated", () => {
+test("pages of a size continue after the session the last one ended with, so each session comes once, in order, and the last page has no cursor; a session written to meanwhile is not repeated", () => {
   const sessions = ["a", "b", "c", "d", "e"].map((id, at) => stored(id, (at + 1) * 10, { cwd: "/w" }));
   const first = pageRead(pageOf(sessions, {}, 2));
   expect(idsOf(first)).toEqual(["e", "d"]);
@@ -85,7 +85,7 @@ test("AR4: pages of a size continue after the session the last one ended with, s
   expect(idsOf(pageOf(sessions, {}, 0))).toEqual(["e"]);
 });
 
-test("AR4: a cursor that was not given by pageOf is an InvalidCursor naming it", () => {
+test("a cursor that was not given by pageOf is an InvalidCursor naming it", () => {
   const sessions = [stored("a", 10, { cwd: "/w" })];
   const wrongShape = Buffer.from(JSON.stringify({ at: 1 })).toString("base64url");
   for (const cursor of ["", "not a cursor", "%%%", wrongShape]) {

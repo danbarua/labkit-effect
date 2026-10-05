@@ -1,4 +1,4 @@
-/** Rules of the core that no other test demonstrates: see `MODEL.md`. */
+/** Behaviour of the core that no other test demonstrates: see `docs/agent-machine.md`. */
 
 import { expect } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";

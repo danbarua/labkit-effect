@@ -1,7 +1,7 @@
 # To do
 
-What is to be built, by capability. What is built is in each module's `MODEL.md`; direction that is
-not yet work is in its `DESIGN.next.md`. Delete an item when it is done or dropped. As of
+What is to be built, by capability. What is built is described in `docs/<module>.md`; direction that
+is not yet work is in `docs/<module>-direction.md`. Delete an item when it is done or dropped. As of
 2026-10-02.
 
 ## Build
@@ -15,14 +15,14 @@ folder, the tool catalog, the configuration UI and what a session is called are 
 ACP: the protocol is built, as a package of its own (`effective-acp`,
 github.com/danbarua/effective-acp: schemas, the peer, stdio and Streamable HTTP, negotiation; its
 `src/MODEL.md`, and `src/EFFECT-FIT.md` for where Effect fits). The host, which joins it to the
-session, is built for protocol v1 over stdio (`src/agent-acp`, `bun src/agent-acp/main.ts`; its
-`MODEL.md`) and has run the scenario below against the local Qwen with the SDK's client. It has not
+session, is built for protocol v1 over stdio (`src/agent-acp`, `bun src/agent-acp/main.ts`;
+`docs/agent-acp.md`) and has run the scenario below against the local Qwen with the SDK's client. It has not
 yet been seen in an editor. VS Code comes first, then the JetBrains AI extension (PyCharm,
 WebStorm). The protocol versions and features are those of the labkit monorepo's ACP host, for
 parity; what `session/load` sends back is the ACP side's to decide. In ACP, tools go through the
 editor.
 
-The layers, Dan's rulings and the order of work are in `src/agent-host/DESIGN.next.md`.
+Dan's rulings about the hosts and the order of work are in `docs/agent-host-direction.md`.
 
 A real ACP session's log
 (`~/.labkit/logs/acp-44517-ec9d22b3-8c0d-465a-83c7-9c227e0aec77.jsonl`, labkit-agent, local Qwen)
@@ -86,7 +86,7 @@ model.
       catalog, the provider clients, the services a session runs with, the permission policy for a
       mode, the folder sessions are kept in, log lines to a file or to stderr, the ACP launcher's
       log file (JSONL, rotated, secrets redacted; `bun run acp:logs`), and the host's own record of a
-      session in its folder (`host.json`, stored and returned as JSON) (its `MODEL.md`). To do: a
+      session in its folder (`host.json`, stored and returned as JSON) (`docs/agent-host.md`). To do: a
       hand-written `models.yml` as one more source of the catalog.
 - [ ] `session/update`. Built: the projection of a session's facts and of the core's captured items
       (`ModelDelta`, `ModelPartArrived`, `ModelResponseEnded`), merged in any order, to the client's
@@ -95,7 +95,8 @@ model.
       end; `session/load` sends the projection of the stored facts before its answer, each response
       before the calls it made, as live sent them, and the feed goes on from the state they leave;
       the model's plan (`update_plan`) as a `plan` update. To do: the last plan sent again on
-      `session/load`. Open: live with no deltas (a server that answers whole) announces a call
+      `session/load`; an input's attachments sent on `session/load`; `messageId` on chunks;
+      `current_mode_update` (the host offers the permission mode as a config option instead). Open: live with no deltas (a server that answers whole) announces a call
       before its response's text, which is known only when the response ends.
 - [ ] The ACP host's sessions across processes. Built: each session's facts in a file
       (`FileBackedSessionStore`, `~/.labkit/sessions`); the host's record of a session (`host.json`:

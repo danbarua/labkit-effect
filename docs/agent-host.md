@@ -6,8 +6,8 @@ folder where sessions are kept, log files and redaction, the draft that a sessio
 first turn, the Markdown export, the host's record of a session, the brand, and the launch options.
 It imports the core and no protocol, and nothing of either host.
 
-The hosts' direction, Dan's rulings about them, and the ACP host's design are in
-`src/agent-host/DESIGN.next.md`.
+The ACP host is described in [agent-acp.md](agent-acp.md). The hosts' direction and Dan's rulings
+about them are in [agent-host-direction.md](agent-host-direction.md).
 
 ## Files
 

@@ -358,7 +358,7 @@ const kinds = (updates: ReadonlyArray<Update>) =>
 /** The tool call the model makes in the main scenario: `write_file`, which asks permission under the default mode. */
 const writeNotes = (call = "call-1"): Piece => ({ _tag: "ToolCall", call, tool: "write_file", input: { path: "notes.txt", content: "hello" } });
 
-test("AG1: session/new answers a draft with an id and its config options, writes nothing, and announces /export only after its response", async () => {
+test("session/new answers a draft with an id and its config options, writes nothing, and announces /export only after its response", async () => {
   const host = startHost();
   const seen: Array<string> = [];
   const announced = Promise.withResolvers<void>();
@@ -383,7 +383,7 @@ test("AG1: session/new answers a draft with an id and its config options, writes
   expect(existsSync(host.directory)).toBe(false);
 });
 
-test("AG2: the first prompt opens the draft; thinking and text stream, write_file goes through the editor after the client allows it, and the turn ends end_turn after its usage", async () => {
+test("the first prompt opens the draft; thinking and text stream, write_file goes through the editor after the client allows it, and the prompt answers end_turn after usage_update", async () => {
   const host = startHost({ script: [answer({ _tag: "Thinking", text: "Plan." }, { _tag: "Text", text: "Writing." }, writeNotes()), answer({ _tag: "Text", text: "Done." })] });
   const { app, log } = sdkClient();
   const result = await app.connectWith(host.stream, async (ctx) => {
@@ -425,7 +425,7 @@ test("AG2: the first prompt opens the draft; thinking and text stream, write_fil
   expect(endings(facts)).toEqual(["Completed"]);
 });
 
-test("AG3: a client that answers a permission request cancelled refuses the call: the editor is not asked to write, and the turn goes on to its answer", async () => {
+test("a client that answers a permission request cancelled refuses the call: the editor is not asked to write, and the turn goes on to its answer", async () => {
   const host = startHost({ script: [answer(writeNotes()), answer({ _tag: "Text", text: "I did not write it." })] });
   const { app, log } = sdkClient(() => ({ outcome: { outcome: "cancelled" } }));
   const result = await app.connectWith(host.stream, async (ctx) => {
@@ -441,7 +441,7 @@ test("AG3: a client that answers a permission request cancelled refuses the call
   expect(host.targets).toHaveLength(2);
 });
 
-test("AG4: session/cancel during a turn ends its prompt cancelled, and the session takes the next prompt; a prompt request the client cancels cancels its turn too", async () => {
+test("session/cancel during a turn ends its prompt cancelled, and the session takes the next prompt; a prompt request the client cancels cancels its turn too", async () => {
   const started = Deferred.makeUnsafe<void>();
   const startedAgain = Deferred.makeUnsafe<void>();
   const host = startHost({ script: [held("Thinking it over", started), answer({ _tag: "Text", text: "Hello." }), held("Again", startedAgain)] });
@@ -472,7 +472,7 @@ test("AG4: session/cancel during a turn ends its prompt cancelled, and the sessi
   ]);
 });
 
-test("AG19: a prompt's image and embedded file are attached to the input, their bytes in the session's folder", async () => {
+test("a prompt's image and embedded file are attached to the input, their bytes in the session's folder", async () => {
   const host = startHost({ script: [answer({ _tag: "Text", text: "Seen." })] });
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const sessionId = await sdkClient().app.connectWith(host.stream, async (ctx) => {
@@ -503,7 +503,7 @@ test("AG19: a prompt's image and embedded file are attached to the input, their 
   for (const blob of attached) expect(await Bun.file(join(host.directory, sessionId, "blobs", blob.id)).exists()).toBe(true);
 });
 
-test("AG20: update_plan sends the whole plan to the editor as a plan update, without asking", async () => {
+test("update_plan sends the whole plan to the editor as a plan update, without asking", async () => {
   const entries = [
     { content: "Read the tests", status: "completed" },
     { content: "Fix the bug", status: "in_progress", priority: "high" },
@@ -532,7 +532,7 @@ test("AG20: update_plan sends the whole plan to the editor as a plan update, wit
   });
 });
 
-test("AG18: the permission mode is an option of category mode; changed between turns, it applies at once: a write runs without asking, then is asked about again", async () => {
+test("the permission mode is an option of category mode; changed between turns, it applies at once: a write runs without asking, then is asked about again", async () => {
   const write = (call: string) => answer({ _tag: "ToolCall", call, tool: "write_file", input: { path: "a.txt", content: call } });
   const host = startHost({ script: [write("w-1"), answer({ _tag: "Text", text: "One." }), write("w-2"), answer({ _tag: "Text", text: "Two." })] });
   const { app, log } = sdkClient();
@@ -559,7 +559,7 @@ test("AG18: the permission mode is an option of category mode; changed between t
   expect(result.refused).toMatchObject({ code: -32602 });
 });
 
-test("AG5: set_config_option changes the draft; once the session is open it is ModelChangeArrived from the user through ACP, held while a turn runs and made when it ends; a value not offered is -32602", async () => {
+test("set_config_option changes the draft; once the session is open it is ModelChangeArrived from the user through ACP, held while a turn runs and made when it ends; a value not offered is -32602", async () => {
   const started = Deferred.makeUnsafe<void>();
   const release = Deferred.makeUnsafe<void>();
   // The second turn takes two steps: a tool call, then its answer. The change made during its first step waits for its end.
@@ -600,7 +600,7 @@ test("AG5: set_config_option changes the draft; once the session is open it is M
   });
 });
 
-test("AG6: /export says there is nothing to export on a draft, and on an open session writes its transcript to .labkit/exports in the working folder without asking the model", async () => {
+test("/export says there is nothing to export on a draft, and on an open session writes its transcript to .labkit/exports in the working folder without asking the model", async () => {
   const host = startHost({ script: [answer({ _tag: "Text", text: "Hello there." })] });
   const { app, log } = sdkClient();
   const result = await app.connectWith(host.stream, async (ctx) => {
@@ -624,7 +624,7 @@ test("AG6: /export says there is nothing to export on a draft, and on an open se
   expect(markdown).toContain("Hello there.");
 });
 
-test("AG7: a prompt while one runs is -32000, an unknown session -32002, a relative cwd -32602, and no model to ask an error naming what to set", async () => {
+test("a prompt while one runs is -32000, an unknown session -32002, a relative cwd -32602, and no model to ask an error naming what to set", async () => {
   const started = Deferred.makeUnsafe<void>();
   const host = startHost({ script: [held("Busy", started)] });
   const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {
@@ -655,7 +655,7 @@ test("AG7: a prompt while one runs is -32000, an unknown session -32002, a relat
   expect(said).toContain("local server");
 });
 
-test("AG8: a failed model request answers the prompt with a JSON-RPC error carrying the failure, and the next prompt works", async () => {
+test("a failed model request answers the prompt with a JSON-RPC error carrying the failure, and the next prompt works", async () => {
   const host = startHost({ script: [failed, answer({ _tag: "Text", text: "Back." })] });
   const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {
     await initialize(ctx);
@@ -669,7 +669,7 @@ test("AG8: a failed model request answers the prompt with a JSON-RPC error carry
   expect(result.after.stopReason).toBe("end_turn");
 });
 
-test("AG9: a client that closes the connection mid-turn leaves the turn running in the facts, and the host returns", async () => {
+test("a client that closes the connection mid-turn leaves the turn running in the facts, and the host returns", async () => {
   const started = Deferred.makeUnsafe<void>();
   const host = startHost({ script: [held("Halfway", started)] });
   const sessionId = await sdkClient().app.connectWith(host.stream, async (ctx) => {
@@ -689,7 +689,7 @@ test("AG9: a client that closes the connection mid-turn leaves the turn running 
   expect(host.logged.find((each) => each.key === logKeys.prompt.interrupted)).toMatchObject({ details: { by: "the end of the connection" } });
 });
 
-test("AG17: edit_file replaces one occurrence through fs/*, shown as a diff; run_command runs in the editor's terminal, shown in its call, released however it ends; both ask first", async () => {
+test("edit_file replaces one occurrence through fs/*, shown as a diff; run_command runs in the editor's terminal, shown in its call, released however it ends; both ask first", async () => {
   const host = startHost({
     script: [
       answer(
@@ -750,7 +750,7 @@ test("AG17: edit_file replaces one occurrence through fs/*, shown as a diff; run
   ]);
 });
 
-test("AG10: the editor world offers read_file and write_file as the client advertised fs; read_file reads through fs/read_text_file, a path outside the working folder is refused, and a client with no fs has no file tools", async () => {
+test("the editor world offers read_file and write_file as the client advertised fs; read_file reads through fs/read_text_file, a path outside the working folder is refused, and a client with no fs has no file tools", async () => {
   const host = startHost({
     script: [
       answer({ _tag: "ToolCall", call: "read-1", tool: "read_file", input: { path: "a.txt" } }, { _tag: "ToolCall", call: "read-2", tool: "read_file", input: { path: "../outside.txt" } }),
@@ -789,7 +789,7 @@ test("AG10: the editor world offers read_file and write_file as the client adver
   expect((await Effect.runPromise(immutableToolCatalogOf(await factsOn(storeFileOf(bare.directory, bareSession))))).map((tool): string => tool.name)).toEqual(["update_plan"]);
 });
 
-test("AG3 AG11: each lifecycle point logs its event with the connection, request, session, turn and call it is about; a routine turn logs no warning, and a failure says what failed and why", async () => {
+test("each lifecycle point logs its event with the connection, request, session, turn and call it is about; a routine turn logs no warning, and a failure says what failed and why", async () => {
   const host = startHost({ script: [answer(writeNotes()), answer({ _tag: "Text", text: "Done." })] });
   const sessionId = await sdkClient().app.connectWith(host.stream, async (ctx) => {
     await initialize(ctx);
@@ -840,7 +840,7 @@ test("AG3 AG11: each lifecycle point logs its event with the connection, request
   });
 });
 
-test("AG12: a world of the host's own gives the session its system prompt, tools, runner and presentation", async () => {
+test("a world of the host's own gives the session its system prompt, tools, runner and presentation", async () => {
   const host = startHost({ world: echoWorld, script: [answer({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "ping" } }), answer({ _tag: "Text", text: "Echoed." })] });
   const { app, log } = sdkClient();
   const sessionId = await app.connectWith(host.stream, async (ctx) => {
@@ -856,7 +856,7 @@ test("AG12: a world of the host's own gives the session its system prompt, tools
   expect(readdirSync(host.directory)).toEqual([sessionId]);
 });
 
-test("AG13: session/close stops the turn under way, whose prompt ends cancelled, closes the session, and a later request naming it is -32002", async () => {
+test("session/close stops the turn under way, whose prompt ends cancelled, closes the session, and a later request naming it is -32002", async () => {
   const started = Deferred.makeUnsafe<void>();
   const host = startHost({ script: [held("Working", started)] });
   const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {
@@ -874,7 +874,7 @@ test("AG13: session/close stops the turn under way, whose prompt ends cancelled,
   expect(endings(await factsOn(storeFileOf(host.directory, result.sessionId)))).toEqual(["Interrupted"]);
 });
 
-test("AG21: a turn that would make more model requests than maxTurnRequests ends with max_turn_requests", async () => {
+test("a turn that would make more model requests than maxTurnRequests ends with max_turn_requests", async () => {
   const host = startHost({
     world: echoWorld,
     maxTurnRequests: 2,
@@ -899,7 +899,7 @@ test("AG21: a turn that would make more model requests than maxTurnRequests ends
 /** The test MCP server (`tests/support/mcp-server.ts`), as a client names it in `session/new`. */
 const fakeMcp = (name: string): acp.McpServer => ({ name, command: process.execPath, args: [new URL("../../tests/support/mcp-server.ts", import.meta.url).pathname], env: [] });
 
-test("AG22: the MCP servers a client names are started; their tools are offered after the world's, under mcp__<server>; a call runs on the server and is shown with its result as text; the session records each server's state once it opens", async () => {
+test("the MCP servers a client names are started; their tools are offered after the world's, under mcp__<server>; a call runs on the server and is shown with its result as text; the session records each server's state once it opens", async () => {
   const host = startHost({
     world: echoWorld,
     script: [answer({ _tag: "ToolCall", call: "m-1", tool: "mcp__fake__echo", input: { message: "hi" } }), answer({ _tag: "Text", text: "Done." })],
@@ -925,7 +925,7 @@ test("AG22: the MCP servers a client names are started; their tools are offered 
   expect(facts[0]).toMatchObject({ observation: { _tag: "SessionOpened" } });
 });
 
-test("AG28: a server at a URL the client names is connected over Streamable HTTP or HTTP+SSE: its tools are offered, a call runs on it, and closing the session ends its session", async () => {
+test("a server at a URL the client names is connected over Streamable HTTP or HTTP+SSE: its tools are offered, a call runs on it, and closing the session ends its session", async () => {
   const web = startFakeHttpServer({ transport: "http", auth: { token: "t-1" } });
   const legacy = startFakeHttpServer({ transport: "sse" });
   const host = startHost({
@@ -969,7 +969,7 @@ test("AG28: a server at a URL the client names is connected over Streamable HTTP
   }
 });
 
-test("AG24: the host goes by its brand: /export writes to .acme/exports, an MCP server is told its name, and with no model to ask it names ACME_ACP_MODEL", async () => {
+test("the host goes by its brand: /export writes to .acme/exports, an MCP server is told its name, and with no model to ask it names ACME_ACP_MODEL", async () => {
   const acme = { name: "acme", version: "1.0.0" };
   const host = startHost({ brand: acme, script: [answer({ _tag: "Text", text: "Hello there." })] });
   const { app, log } = sdkClient();
@@ -1005,7 +1005,7 @@ const userFile = (text: string) => {
   writeFileSync(join(folder, "policies.yml"), text);
 };
 
-test("AG25: a session's configuration is read when it is made: the user's file's MCP servers start, the client's replace those of the same name whole, the launcher's mode is the one it starts in, and effective-settings.json is written at its first prompt", async () => {
+test("a session's configuration is read when it is made: the user's file's MCP servers start, the client's replace those of the same name whole, the launcher's mode is the one it starts in, and effective-settings.json is written at its first prompt", async () => {
   const fake = new URL("../../tests/support/mcp-server.ts", import.meta.url).pathname;
   userFile(`mcpServers:\n  fake:\n    command: /no/such/server\n    required: true\n  extra:\n    command: ${process.execPath}\n    args: [${fake}]\n`);
   const host = startHost({
@@ -1052,7 +1052,7 @@ test("AG25: a session's configuration is read when it is made: the user's file's
   expect(written.host).toMatchObject({ permissionMode: "acceptEdits", canAsk: true, world: "the host's own" });
 });
 
-test("AG26: a server the configuration says is required that does not connect refuses session/new, session/load and session/resume, naming it, and leaves nothing open", async () => {
+test("a server the configuration says is required that does not connect refuses session/new, session/load and session/resume, naming it, and leaves nothing open", async () => {
   const host = startHost({ script: [answer({ _tag: "Text", text: "Hello." })] });
   const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {
     await initialize(ctx);
@@ -1076,7 +1076,7 @@ test("AG26: a server the configuration says is required that does not connect re
   }
 });
 
-test("AG23: a server that cannot be started leaves the session running: the model is told it is not running and the session records it failed; /mcp says how each server is; a server over ACP is refused, as the host does not offer it; two servers whose tools would share a name are -32602", async () => {
+test("a server that cannot be started leaves the session running: the model is told it is not running and the session records it failed; /mcp says how each server is; a server over ACP is refused, as the host does not offer it; two servers whose tools would share a name are -32602", async () => {
   const host = startHost({ script: [answer({ _tag: "Text", text: "Hello." })] });
   const { app, log } = sdkClient();
   const result = await app.connectWith(host.stream, async (ctx) => {
@@ -1106,7 +1106,7 @@ test("AG23: a server that cannot be started leaves the session running: the mode
   expect(result.clashing).toMatchObject({ code: -32602, message: "The MCP servers a.b and a_b would offer their tools under one name, mcp__a_b" });
 });
 
-test("AG16: by default a response after a tool call with thinking but no answer is asked again; the client gets the answer, not the feedback, and end_turn", async () => {
+test("by default a response after a tool call with thinking but no answer is asked again; the client gets the answer, not the feedback, and end_turn", async () => {
   const host = startHost({
     world: echoWorld,
     retries: "the host's default",
@@ -1144,7 +1144,7 @@ test("AG16: by default a response after a tool call with thinking but no answer 
   expect(host.logged.filter((each) => each.level === "Warn" || each.level === "Error" || each.level === "Fatal")).toEqual([]);
 });
 
-test("AG16: a turn whose retry has no answer either ends end_turn after one retry, with no answer message", async () => {
+test("a turn whose one retry has no answer either answers end_turn, with no answer message", async () => {
   const host = startHost({
     world: echoWorld,
     retries: 1,
@@ -1231,7 +1231,7 @@ const echoTurn: ReadonlyArray<ReadonlyArray<Piece>> = [
   [{ _tag: "Text", text: "Echoed." }],
 ];
 
-test("AL1: initialize advertises session/load and the session methods close, list and resume, and not fork", async () => {
+test("initialize advertises session/load and the session methods close, list and resume, and not fork", async () => {
   const host = startHost();
   const { initialized } = await sdkClient().app.connectWith(host.stream, async (ctx) => {
     const answered = await ctx.request("initialize", { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: "an-sdk-client", version: "1.0.0" } });
@@ -1243,7 +1243,7 @@ test("AL1: initialize advertises session/load and the session methods close, lis
   expect(initialized.agentCapabilities?.sessionCapabilities?.fork ?? undefined).toBeUndefined();
 });
 
-test("AL2: the first prompt writes the session's record, its working folder and the prompt's text as its title, and sends session_info_update; /export on a draft writes nothing", async () => {
+test("the first prompt writes the session's record, its working folder and the prompt's text as its title, and sends session_info_update; /export on a draft writes nothing", async () => {
   const host = startHost({ world: echoWorld, script: [answer({ _tag: "Text", text: "Hi." })] });
   const { app, log } = sdkClient();
   const result = await app.connectWith(host.stream, async (ctx) => {
@@ -1288,7 +1288,7 @@ test("with only the host's defaults, a session's world is given this process's e
   }
 });
 
-test("AL3 AL8: session/load in a new process replays the stored turn in order before its answer, answers with the config options, then sends the commands, title and usage; a later prompt is live, repeats nothing and reaches the model with the earlier turn", async () => {
+test("session/load in a new process replays the stored turn in order before its answer, answers with the config options, then sends the commands, title and usage; a later prompt is live, repeats nothing and reaches the model with the earlier turn", async () => {
   const stored = await storedSession("Echo ping", echoTurn);
   const replay = replayOf(await factsOn(stored.file));
   const host = startHost({ world: echoWorld, script: [answer({ _tag: "Text", text: "Second." })] });
@@ -1318,7 +1318,7 @@ test("AL3 AL8: session/load in a new process replays the stored turn in order be
   expect(sent).toContain("Echo ping");
   expect(sent).toContain("Echoed.");
   expect(endings(await factsOn(stored.file))).toEqual(["Completed", "Completed"]);
-  // What its configuration resolved to is written when it is loaded (AG25).
+  // What its configuration resolved to is written when it is loaded.
   expect(JSON.parse(readFileSync(join(sessionFolderOf(host.directory, stored.sessionId), "effective-settings.json"), "utf8"))).toMatchObject({
     host: { model: "openai/gpt-6-sol", permissionMode: "default" },
   });
@@ -1330,7 +1330,7 @@ test("AL3 AL8: session/load in a new process replays the stored turn in order be
   });
 });
 
-test("AL9: a session started by session/load or by session/resume offers permission_mode at the launcher's mode, not the mode it had when it was closed, and a mode set after it decides its next tool call", async () => {
+test("a session started by session/load or by session/resume offers permission_mode at the launcher's mode, not the mode it had when it was closed, and a mode set after it decides its next tool call", async () => {
   const write = (call: string) => answer({ _tag: "ToolCall", call, tool: "write_file", input: { path: "a.txt", content: call } });
   const first = startHost({ script: [write("w-1"), answer({ _tag: "Text", text: "One." })] });
   const stored = await sdkClient().app.connectWith(first.stream, async (ctx) => {
@@ -1368,7 +1368,7 @@ test("AL9: a session started by session/load or by session/resume offers permiss
   }
 });
 
-test("AL4 AL8: loading a session whose process ended with a tool call running ends that turn, with no tool run and no model request; the call is replayed once, as failed, and the next prompt works", async () => {
+test("loading a session whose process ended with a tool call running ends that turn, with no tool run and no model request; the call is replayed once, as failed, and the next prompt works", async () => {
   const held = Deferred.makeUnsafe<void>();
   const first = startHost({ world: runsWorld([], held), script: [answer({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "ping" } })] });
   const sessionId = await sdkClient().app.connectWith(first.stream, async (ctx) => {
@@ -1416,7 +1416,7 @@ test("AL4 AL8: loading a session whose process ended with a tool call running en
   });
 });
 
-test("AL4: loading a session whose process ended with a model request in flight and no call under way ends the turn, with no model request made; the replay shows its input alone, and the next prompt works", async () => {
+test("loading a session whose process ended with a model request in flight and no call under way ends the turn, with no model request made; the replay shows its input alone, and the next prompt works", async () => {
   const started = Deferred.makeUnsafe<void>();
   const first = startHost({ world: echoWorld, script: [held("Working on it.", started)] });
   const sessionId = await sdkClient().app.connectWith(first.stream, async (ctx) => {
@@ -1451,7 +1451,7 @@ test("AL4: loading a session whose process ended with a model request in flight 
   expect(endings(await factsOn(file))).toEqual(["Interrupted", "Completed"]);
 });
 
-test("AL4: loading a session whose process ended with the turn's second request in flight replays the first request as it ran, and the request under way adds nothing", async () => {
+test("loading a session whose process ended with the turn's second request in flight replays the first request as it ran, and the request under way adds nothing", async () => {
   const started = Deferred.makeUnsafe<void>();
   const first = startHost({
     world: echoWorld,
@@ -1501,7 +1501,7 @@ test("AL4: loading a session whose process ended with the turn's second request 
   expect(endings(await factsOn(file))).toEqual(["Interrupted", "Completed"]);
 });
 
-test("AL4 PJ11: loading a session whose process ended with a request in flight and a call it had made still running records that call once, in the response the harness gives, and replays it once: announced, started, failed", async () => {
+test("loading a session whose process ended with a request in flight and a call it had made still running records that call once, in the response the harness gives, and replays it once: announced, started, failed", async () => {
   const started = Deferred.makeUnsafe<void>();
   const toolBegan = Deferred.makeUnsafe<void>();
   const first = startHost({
@@ -1559,7 +1559,7 @@ test("AL4 PJ11: loading a session whose process ended with a request in flight a
   expect(endings(await factsOn(file))).toEqual(["Interrupted", "Completed"]);
 });
 
-test("AL5 AL8: session/resume starts the stored session and replays nothing, then sends the commands, title and usage; the next prompt reaches the model with the earlier turn, and the record keeps its working folder", async () => {
+test("session/resume starts the stored session and replays nothing, then sends the commands, title and usage; the next prompt reaches the model with the earlier turn, and the record keeps its working folder", async () => {
   const stored = await storedSession("Echo ping", echoTurn);
   // Written at the session's first prompt: removed, so that the resume is what writes it.
   rmSync(join(sessionFolderOf(stored.directory, stored.sessionId), "effective-settings.json"));
@@ -1582,7 +1582,7 @@ test("AL5 AL8: session/resume starts the stored session and replays nothing, the
   expect(kinds(log.updates.slice(result.beforePrompt))).toEqual(["agent_message_chunk", "usage_update"]);
   expect(JSON.stringify(host.contexts[0]?.messages)).toContain("Echoed.");
   expect(JSON.parse(readFileSync(join(host.directory, stored.sessionId, "host.json"), "utf8"))).toEqual({ cwd: stored.cwd, title: "Echo ping" });
-  // What its configuration resolved to is written when it is resumed (AG25).
+  // What its configuration resolved to is written when it is resumed.
   expect(existsSync(join(sessionFolderOf(host.directory, stored.sessionId), "effective-settings.json"))).toBe(true);
   expect(host.logged.find((each) => each.key === logKeys.session.resumed)).toMatchObject({
     level: "Info",
@@ -1591,7 +1591,7 @@ test("AL5 AL8: session/resume starts the stored session and replays nothing, the
   });
 });
 
-test("AL6 AL8: session/list gives the sessions with a record, latest first, by working folder and a page at a time; a session with no record is not listed but loads; a cursor it did not give is -32602", async () => {
+test("session/list gives the sessions with a record, latest first, by working folder and a page at a time; a session with no record is not listed but loads; a cursor it did not give is -32602", async () => {
   const host = startHost({ world: echoWorld, pageSize: 2, script: ["One.", "Two.", "Three.", "Four."].map((text) => answer({ _tag: "Text", text })) });
   const elsewhere = join(testFolder(), "elsewhere");
   const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {
@@ -1655,7 +1655,7 @@ test("AL6 AL8: session/list gives the sessions with a record, latest first, by w
   expect(later.logged.filter((each) => each.level === "Warn" || each.level === "Error" || each.level === "Fatal")).toEqual([]);
 });
 
-test("AL6 AL8: a session directory that cannot be read answers session/list -32603 with the cause, and logs it as an error", async () => {
+test("a session directory that cannot be read answers session/list -32603 with the cause, and logs it as an error", async () => {
   writeFileSync(join(testFolder(), "sessions"), "not a folder");
   const host = startHost();
   const refused = await sdkClient().app.connectWith(host.stream, async (ctx) => {
@@ -1670,7 +1670,7 @@ test("AL6 AL8: a session directory that cannot be read answers session/list -326
   });
 });
 
-test("AL7 AL8: session/load of an unknown session is -32002, a relative cwd -32602, a session already loaded -32602, and one whose facts another process holds -32000, which leaves nothing open", async () => {
+test("session/load of an unknown session is -32002, a relative cwd -32602, a session already loaded -32602, and one whose facts another process holds -32000, which leaves nothing open", async () => {
   const stored = await storedSession("One", [[{ _tag: "Text", text: "One." }]]);
   writeFileSync(`${stored.file}.lock`, String(process.pid));
   const host = startHost({ world: echoWorld });
@@ -1711,7 +1711,7 @@ test("AL7 AL8: session/load of an unknown session is -32002, a relative cwd -326
   expect(host.logged.filter((each) => each.key === logKeys.session.loaded)).toHaveLength(1);
 });
 
-test("AG17: an editor that writes files and does not read them is offered write_file, not edit_file", async () => {
+test("an editor that writes files and does not read them is offered write_file, not edit_file", async () => {
   const host = startHost({ script: [answer({ _tag: "Text", text: "Hi." })] });
   const { app } = sdkClient();
   const sessionId = await app.connectWith(host.stream, async (ctx) => {
@@ -1725,7 +1725,7 @@ test("AG17: an editor that writes files and does not read them is offered write_
   expect((await Effect.runPromise(immutableToolCatalogOf(facts))).map((tool): string => tool.name)).toEqual(["write_file", "update_plan"]);
 });
 
-test("AG17: a file read over 256 KiB is cut before a character, not inside it; a call's title names its command before its path", async () => {
+test("a file read over 256 KiB is cut before a character, not inside it; a call's title names its command before its path", async () => {
   const content = `${"a".repeat(maxFileBytes - 1)}é and more`;
   const host = startHost({
     script: [
@@ -1753,7 +1753,7 @@ test("AG17: a file read over 256 KiB is cut before a character, not inside it; a
   expect(announced !== undefined && "title" in announced ? announced.title : undefined).toBe("update_plan: ls");
 });
 
-test("AG3: a call that ends while its permission request is out, its turn cancelled, has the request cancelled at the client", async () => {
+test("a call that ends while its permission request is out, its turn cancelled, has the request cancelled at the client", async () => {
   const host = startHost({
     script: [answer({ _tag: "ToolCall", call: "write-1", tool: "write_file", input: { path: "a.txt", content: "hi" } }), answer({ _tag: "Text", text: "Done." })],
   });
@@ -1784,7 +1784,7 @@ test("AG3: a call that ends while its permission request is out, its turn cancel
   expect(cancelled).toBe(true);
 });
 
-test("AG5: changes made while a session's first turn runs are held as one, made when it ends: the later model and permission mode, and every setting, the later's winning", async () => {
+test("changes made while a session's first turn runs are held as one, made when it ends: the later model and permission mode, and every setting, the later's winning", async () => {
   const started = Deferred.makeUnsafe<void>();
   const release = Deferred.makeUnsafe<void>();
   const host = startHost({
@@ -1821,7 +1821,7 @@ test("AG5: changes made while a session's first turn runs are held as one, made 
   expect(result.after.configOptions.find((option) => option.id === "permission_mode")).toMatchObject({ currentValue: "bypassPermissions" });
 });
 
-test("AG19: an embedded file with no media type is text/plain when it is text and application/octet-stream when it is bytes; a prompt with no files attaches none", async () => {
+test("an embedded file with no media type is text/plain when it is text and application/octet-stream when it is bytes; a prompt with no files attaches none", async () => {
   const host = startHost({ script: [answer({ _tag: "Text", text: "Seen." }), answer({ _tag: "Text", text: "Hi." })] });
   const sessionId = await sdkClient().app.connectWith(host.stream, async (ctx) => {
     await initialize(ctx);
@@ -1843,7 +1843,7 @@ test("AG19: an embedded file with no media type is text/plain when it is text an
   expect(inputs[1] !== undefined && "attachments" in inputs[1]).toBe(false);
 });
 
-test("AG12: the local world offers the workspace tools, and the settings written say the world is local", async () => {
+test("the local world offers the workspace tools, and the settings written say the world is local", async () => {
   const host = startHost({ world: "local", script: [answer({ _tag: "Text", text: "Hi." })] });
   const sessionId = await sdkClient().app.connectWith(host.stream, async (ctx) => {
     await initialize(ctx);
@@ -1858,7 +1858,7 @@ test("AG12: the local world offers the workspace tools, and the settings written
   expect(written.host).toMatchObject({ world: "local" });
 });
 
-test("AL7: a session/load of a session still starting on this connection is -32602", async () => {
+test("a session/load of a session still starting on this connection is -32602", async () => {
   const stored = await storedSession("Echo ping", echoTurn);
   const opening = Deferred.makeUnsafe<void>();
   const release = Deferred.makeUnsafe<void>();

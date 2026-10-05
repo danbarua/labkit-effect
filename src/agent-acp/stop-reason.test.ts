@@ -32,7 +32,7 @@ const ended = (...outcomes: ReadonlyArray<unknown>) => {
   return [ending, stopOf(session.journal, TurnId.make("turn-1"))];
 };
 
-test("AA8: each ending is its stop reason, or an error carrying why", () => {
+test("each ending gives its stop reason, or an error carrying why", () => {
   expect([
     ended(responded([answer], "Complete")),
     ended(responded([thinking], "Complete")),
@@ -48,7 +48,7 @@ test("AA8: each ending is its stop reason, or an error carrying why", () => {
   ]);
 });
 
-test("AA8: a veto by the turn-request limit is max_turn_requests; any other veto is an error carrying its reason", () => {
+test("a veto by the turn-request limit is max_turn_requests; any other veto is an error carrying its reason", () => {
   expect([
     ended({ _tag: "ModelVetoed", turn: "turn-1", reason: json({ stop: "max_turn_requests", limit: 3 }) }),
     ended({ _tag: "ModelVetoed", turn: "turn-1", reason: receivedText("No requests after midnight.") }),
@@ -60,20 +60,20 @@ test("AA8: a veto by the turn-request limit is max_turn_requests; any other veto
   ]);
 });
 
-test("AA8: a turn whose last response the provider refused stops with refusal, whatever its ending", () => {
+test("a turn whose last response the provider refused stops with refusal, whatever its ending", () => {
   expect([ended(responded([], "Refused")), ended(responded([answer], "Refused"))]).toEqual([
     [expect.any(String), { stopReason: "refusal" }],
     [expect.any(String), { stopReason: "refusal" }],
   ]);
 });
 
-test("AA8: refusal is read from the turn's last response: one refused after a call stops with refusal", () => {
+test("refusal is read from the turn's last response: one refused after a call stops with refusal", () => {
   const call = { _tag: "ToolCall", call: "c1", tool: "ls", input: json({}) };
   expect(
     ended(responded([call], "Complete"), { _tag: "ToolCallDispatched", call: "c1" }, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json([]) } }, responded([], "Refused")),
   ).toEqual([expect.any(String), { stopReason: "refusal" }]);
 });
 
-test("AA8: a turn that has not ended has no stop reason", () => {
+test("a turn that has not ended has no stop reason", () => {
   expect(ended()).toEqual([undefined, undefined]);
 });

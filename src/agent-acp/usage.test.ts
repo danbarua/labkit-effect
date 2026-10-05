@@ -27,7 +27,7 @@ const session = (provider: string, model: string, ...more: ReadonlyArray<unknown
   return driven.journal;
 };
 
-test("AA9: a well-known model: the visible tokens of the last exchange, the model's window, and the cost so far", async () => {
+test("a well-known model: the visible tokens of the last exchange, the model's window, and the cost so far", async () => {
   expect(await Effect.runPromise(usageUpdate(session("openai", "gpt-5.5")))).toEqual({
     sessionUpdate: "usage_update",
     used: 1150,
@@ -36,12 +36,12 @@ test("AA9: a well-known model: the visible tokens of the last exchange, the mode
   });
 });
 
-test("AA9: the window is the model's the session asks now, after a change of model was taken", async () => {
+test("the window is the model's the session asks now, after a change of model was taken", async () => {
   const changed = session("openai", "gpt-5.5", { _tag: "ModelChangeArrived", provider: "anthropic", model: "claude-haiku-4-5" });
   expect((await Effect.runPromise(usageUpdate(changed)))?.size).toBe(200000);
 });
 
-test("AA9: a model nothing is known of has no gauge; one the host knows has its window", async () => {
+test("a model nothing is known of has no gauge; one the host knows has its window", async () => {
   const local = session("localhost", "qwen/qwen3-8b");
   expect(await Effect.runPromise(usageUpdate(local))).toBeUndefined();
   const known = Effect.provideService(usageUpdate(local), KnownModels, [() => Effect.succeed({ context: 32768, input: ["text"], price: { input: 0, output: 0 } })]);

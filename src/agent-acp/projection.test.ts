@@ -129,7 +129,7 @@ const deltas = (stream: Stream, step: 1 | 2) =>
       )
     : stream(delta("Text", "One file"), delta("Text", ": a.ts."), arrived(answer("One file: a.ts.")));
 
-test("PJ1 PJ2 PJ4 PJ5 PJ6 PJ11: replay of a recorded turn: the input, then each response's parts, its call as it went after them", () => {
+test("replay of a recorded turn sends the input, then each response's parts, then each call as it went", () => {
   const { session } = listing();
   expect(project(session.journal, replay).updates).toEqual([
     user("list the files"),
@@ -142,7 +142,7 @@ test("PJ1 PJ2 PJ4 PJ5 PJ6 PJ11: replay of a recorded turn: the input, then each 
   ] as never);
 });
 
-test("PJ1: on replay only the user's inputs are echoed: what a turn-end hook gave, from the system, is not", () => {
+test("on replay only the user's inputs are echoed: what a turn-end hook gave, from the system, is not", () => {
   const { session, fact } = recording();
   fact(asked("list the files"));
   fact(dispatched());
@@ -156,7 +156,7 @@ test("PJ1: on replay only the user's inputs are echoed: what a turn-end hook gav
   expect(joined(updates, "agent_message_chunk")).toBe("One file: a.ts.");
 });
 
-test("PJ1 PJ2 PJ3 PJ4: live with deltas, each request's end item before its ModelResponded: no echo of the input, each delta once as it comes, and nothing at ModelResponded", () => {
+test("live with deltas, each request's end item before its ModelResponded: no echo of the input, each delta once as it comes, and nothing at ModelResponded", () => {
   const { inputs } = listing(deltas);
   expect(project(inputs, live).updates).toEqual([
     thought("I should "),
@@ -171,7 +171,7 @@ test("PJ1 PJ2 PJ3 PJ4: live with deltas, each request's end item before its Mode
   ] as never);
 });
 
-test("PJ3 PJ9: ModelResponded taken before its end item and before the last deltas: the rest of the text from it, and the late deltas dropped", () => {
+test("ModelResponded taken before its end item and before the last deltas: the rest of the text from it, and the late deltas dropped", () => {
   const { inputs, stream, fact } = recording();
   fact(asked("hello"));
   fact(dispatched());
@@ -181,7 +181,7 @@ test("PJ3 PJ9: ModelResponded taken before its end item and before the last delt
   expect(project(inputs, live).updates).toEqual([thought("A greet"), said("Hel"), thought("ing."), said("lo there.")]);
 });
 
-test("PJ3 PJ9: two requests in a turn, the first's ModelResponded taken after the second's deltas began: each is reconciled against its own deltas", () => {
+test("two requests in a turn, the first's ModelResponded taken after the second's deltas began: each is reconciled against its own deltas", () => {
   const { session, items } = listing(deltas);
   const facts = session.journal;
   const firstResponded = facts.findIndex((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded");
@@ -208,7 +208,7 @@ test("PJ3 PJ9: two requests in a turn, the first's ModelResponded taken after th
   ] as never);
 });
 
-test("PJ2 PJ11: live with no deltas, from a scripted client or a whole answer: each part whole when ModelResponded is taken, the same updates as on replay, which takes the response before its call", () => {
+test("live with no deltas, from a scripted client or a whole answer: each part whole when ModelResponded is taken, the same updates as on replay, which takes the response before its call", () => {
   const scripted = listing();
   expect(encoded(project(scripted.inputs, live).updates)).toEqual(encoded(project(scripted.session.journal, replay).updates.slice(1)));
   expect(project(scripted.inputs, live).updates.at(-1)).toEqual(said("One file: a.ts."));
@@ -217,7 +217,7 @@ test("PJ2 PJ11: live with no deltas, from a scripted client or a whole answer: e
   expect(joined(project(whole.inputs, live).updates, "agent_message_chunk")).toBe("Listing.One file: a.ts.");
 });
 
-test("PJ10: text of only whitespace is sent with the next text of its kind, and not at all when a call or the response's end comes first: no blank message", () => {
+test("text of only whitespace is sent with the next text of its kind, and not at all when a call or the response's end comes first: no blank message", () => {
   const call = { _tag: "ToolCall", ...ls };
   const live1 = recording();
   live1.fact(asked("hi"));
@@ -232,7 +232,7 @@ test("PJ10: text of only whitespace is sent with the next text of its kind, and 
   expect(joined(project(live1.session.journal, replay).updates, "agent_message_chunk")).toEqual("\nDone.");
 });
 
-test("PJ3: several Text parts in one response, each with its deltas: the deltas cover the parts in order, and ModelResponded sends only what none sent", () => {
+test("several Text parts in one response, each with its deltas: the deltas cover the parts in order, and ModelResponded sends only what none sent", () => {
   const parts = [answer("Hello. "), answer("Bye.")];
   const streamed = [delta("Text", "Hel"), delta("Text", "lo. "), arrived(answer("Hello. ")), delta("Text", "By"), delta("Text", "e."), arrived(answer("Bye.")), ended()];
   const usual = recording();
@@ -249,7 +249,7 @@ test("PJ3: several Text parts in one response, each with its deltas: the deltas 
   expect(project(early.inputs, live).updates).toEqual([said("Hel"), said("lo. "), said("By"), said("e.")]);
 });
 
-test("PJ7: a stopped response: what was streamed stays, nothing is sent again, and the parts its ModelResponded holds are not lost", () => {
+test("a stopped response: what was streamed stays, nothing is sent again, and the parts its ModelResponded holds are not lost", () => {
   const { session, inputs, items, fact, stream } = recording();
   fact(asked("plan it"));
   fact(dispatched());
@@ -266,7 +266,7 @@ test("PJ7: a stopped response: what was streamed stays, nothing is sent again, a
   expect(project(session.journal, replay).updates).toEqual([user("plan it"), said("Here is the plan.")]);
 });
 
-test("PJ7 PJ9: a failed request, its turn's end and the next turn: the failed request's deltas stay, and the next turn's text is sent once", () => {
+test("a failed request, its turn's end and the next turn: the failed request's deltas stay, and the next turn's text is sent once", () => {
   const { session, inputs, items, fact, stream } = recording();
   fact(asked("hello"));
   fact(dispatched());
@@ -284,7 +284,7 @@ test("PJ7 PJ9: a failed request, its turn's end and the next turn: the failed re
   expect(joined(project([...session.journal, ...items], live).updates, "agent_message_chunk")).toBe("Hello.");
 });
 
-test("PJ9: what is captured of a turn after its TurnEnded is dropped: its text was sent from its facts", () => {
+test("what is captured of a turn after its TurnEnded is dropped: its text was sent from its facts", () => {
   const { session, items } = listing(deltas);
   const updates = project([...session.journal, ...items], live).updates;
   expect(updates.filter((update) => update.sessionUpdate !== "tool_call_update")).toEqual([
@@ -295,7 +295,7 @@ test("PJ9: what is captured of a turn after its TurnEnded is dropped: its text w
   ] as never);
 });
 
-test("PJ9: a captured item that overtakes its turn's TurnStarted is not lost, and its text is not sent again", () => {
+test("a captured item that overtakes its turn's TurnStarted is not lost, and its text is not sent again", () => {
   const { session, inputs, items, fact, stream } = recording();
   const opening = inputs.length;
   fact(asked("hello"));
@@ -305,7 +305,7 @@ test("PJ9: a captured item that overtakes its turn's TurnStarted is not lost, an
   expect(project([...session.journal.slice(0, opening), ...items, ...session.journal.slice(opening)], live).updates).toEqual([said("Hel"), said("lo.")]);
 });
 
-test("PJ2 PJ8: replay of the stored facts and live with deltas send the same text, joined", () => {
+test("replay of the stored facts and live with deltas send the same text, joined", () => {
   const { session, inputs } = listing(deltas);
   const sent = project(inputs, live).updates;
   const loaded = project(session.journal, replay).updates;
@@ -314,7 +314,7 @@ test("PJ2 PJ8: replay of the stored facts and live with deltas send the same tex
   expect(joined(loaded, "agent_message_chunk")).toBe("Listing.One file: a.ts.");
 });
 
-test("PJ2: a thinking summary whose blank-line separator is a delta of its own joins to the part's text", () => {
+test("a thinking summary whose blank-line separator is a delta of its own joins to the part's text", () => {
   const summary = "Read the files.\n\nThen answer.";
   const { session, inputs, fact, stream } = recording();
   fact(asked("go"));
@@ -331,7 +331,7 @@ test("PJ2: a thinking summary whose blank-line separator is a delta of its own j
 const everyMerge = (before: ReadonlyArray<Fact>, facts: ReadonlyArray<Fact>, items: ReadonlyArray<CapturedObservation>) =>
   Array.from(merges<ProjectionInput>(facts, items), (merged) => project([...before, ...merged], live).updates);
 
-test("PJ9: every merge of one response's facts and its streamed items sends the same text, once", () => {
+test("every merge of one response's facts and its streamed items sends the same text, once", () => {
   const { session, fact, stream } = recording();
   fact(asked("hi"));
   const from = session.journal.findIndex((input) => input._tag === "Observed" && input.observation._tag === "TurnStarted");
@@ -347,7 +347,7 @@ test("PJ9: every merge of one response's facts and its streamed items sends the 
   }
 });
 
-test("PJ4 PJ9: every merge of a two-request turn's facts and its streamed items sends the same text once, and announces the call once", () => {
+test("every merge of a two-request turn's facts and its streamed items sends the same text once, and announces the call once", () => {
   const { session, items } = listing((stream, step) =>
     step === 1 ? stream(delta("Thinking", "I should list them."), delta("Text", "List"), delta("Text", "ing.")) : stream(delta("Text", "One file: a.ts.")),
   );
@@ -359,7 +359,7 @@ test("PJ4 PJ9: every merge of a two-request turn's facts and its streamed items 
   }
 });
 
-test("PJ9: every merge of two turns' facts and their streamed items sends each turn's text once, either feed a turn ahead", () => {
+test("every merge of two turns' facts and their streamed items sends each turn's text once, either feed a turn ahead", () => {
   const { session, fact, stream, items } = recording();
   const from = session.journal.length;
   fact(asked("hi"));
@@ -374,7 +374,7 @@ test("PJ9: every merge of two turns' facts and their streamed items sends each t
     expect(joined(updates, "agent_message_chunk")).toBe("Hello.Hi again.");
 });
 
-test("PJ5 PJ6: a call that fails: failed, with the tool's error as its content", () => {
+test("a call that fails: failed, with the tool's error as its content", () => {
   const { inputs, fact } = recording();
   fact(asked("remove a.ts"));
   fact(responded([{ _tag: "ToolCall", call: "c1", tool: "rm", input: json({ path: "a.ts" }) }]));
@@ -387,7 +387,7 @@ test("PJ5 PJ6: a call that fails: failed, with the tool's error as its content",
   ] as never);
 });
 
-test("PJ5 PJ6: a call a policy vetoed: pending while asked, then failed with the reason, and never in progress", () => {
+test("a call a policy vetoed: pending while asked, then failed with the reason, and never in progress", () => {
   const { inputs, fact } = recording();
   fact(asked("remove a.ts"));
   fact(responded([{ _tag: "ToolCall", call: "c1", tool: "rm", input: json({ path: "a.ts" }) }]));
@@ -401,14 +401,14 @@ test("PJ5 PJ6: a call a policy vetoed: pending while asked, then failed with the
   ] as never);
 });
 
-test("PJ4: a call announced by ToolCallArrived is not announced again by its part or its response, even after it ended", () => {
+test("a call announced by ToolCallArrived is not announced again by its part or its response, even after it ended", () => {
   const { inputs } = listing();
   const updates = project(inputs, live).updates;
   expect(updates.filter((update) => update.sessionUpdate === "tool_call")).toEqual([announced("c1", "ls", "read")] as never);
   expect(updates.at(-1)).toEqual(said("One file: a.ts."));
 });
 
-test("PJ6: a host's presentation is shown in place of the default: title, kind and locations when announced, its content and what changed when ended", () => {
+test("a host's presentation is shown in place of the default: title, kind and locations when announced, its content and what changed when ended", () => {
   const present: Present = (call, outcome) =>
     Effect.succeed({
       title: outcome === undefined ? `List ${call.tool}` : "Listed",
@@ -424,7 +424,7 @@ test("PJ6: a host's presentation is shown in place of the default: title, kind a
   ] as never);
 });
 
-test("PJ8: projecting stored facts gives the state to go on from live: a call already shown is not shown again, and the next turn's deltas are sent once", () => {
+test("projecting stored facts gives the state to go on from live: a call already shown is not shown again, and the next turn's deltas are sent once", () => {
   const { session, fact, stream, inputs } = recording();
   fact(asked("list the files"));
   fact({ _tag: "ToolCallArrived", turn: "turn-1", ...ls });
@@ -446,7 +446,7 @@ test("PJ8: projecting stored facts gives the state to go on from live: a call al
   ] as never);
 });
 
-/** The updates of `inputs` in the order given, each through `next`: what a replay gave without PJ11's reorder. */
+/** The updates of `inputs` in the order given, each through `next`: what a replay gave without `inLiveOrder`. */
 const inStoredOrder = (inputs: ReadonlyArray<ProjectionInput>, context: ProjectionContext) =>
   inputs.reduce<{ state: ProjectionState; updates: Array<SessionUpdate> }>(
     (done, input) => {
@@ -470,7 +470,7 @@ const ahead = (facts: ReadonlyArray<Fact>, before: string, after: string) => {
   return at(before) !== -1 && at(before) < at(after);
 };
 
-test("PJ11: a call that arrived, ran and ended before its response was recorded is replayed after the response's thinking and text, as live sent them", () => {
+test("a call that arrived, ran and ended before its response was recorded is replayed after the response's thinking and text, as live sent them", () => {
   const { session, inputs } = listing(deltas);
   // As the loop records them: the call's facts, its end included, before the ModelResponded that holds it.
   expect(ahead(session.journal, "ToolEnded", "ModelResponded")).toBe(true);
@@ -486,7 +486,7 @@ test("PJ11: a call that arrived, ran and ended before its response was recorded 
   expect(kinds(withoutInputs(inStoredOrder(session.journal, replay).updates))).not.toEqual(kinds(project(inputs, live).updates));
 });
 
-test("PJ11: several requests in a turn: each response is taken before its own request's first call, and each text is sent once, in order", () => {
+test("several requests in a turn: each response is taken before its own request's first call, and each text is sent once, in order", () => {
   const cat = { call: "c2", tool: "ls", input: json({ path: "src" }) };
   const { session, fact } = recording();
   fact(asked("list the files"));
@@ -519,7 +519,7 @@ test("PJ11: several requests in a turn: each response is taken before its own re
   expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
 });
 
-test("PJ11: a response with two calls and text between them: each call is announced at its place among the parts, and the calls' status updates follow all of the response", () => {
+test("a response with two calls and text between them: each call is announced at its place among the parts, and the calls' status updates follow all of the response", () => {
   const rm = { call: "c2", tool: "rm", input: json({ path: "a.ts" }) };
   const { session, fact } = recording();
   fact(asked("list, then remove a.ts"));
@@ -546,7 +546,7 @@ test("PJ11: a response with two calls and text between them: each call is announ
   ] as never);
 });
 
-test("PJ11: what has no call in its request is left in place: a request without calls, a request with no response, and a response with no request", () => {
+test("what has no call in its request is left in place: a request without calls, a request with no response, and a response with no request", () => {
   const { session, fact } = recording();
   fact(asked("hi"));
   fact(dispatched());
@@ -562,7 +562,7 @@ test("PJ11: what has no call in its request is left in place: a request without 
   expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
 });
 
-test("PJ11 PJ4: a request the harness answered as interrupted, as the core records it: the call announced once, by the response's part, and then failed", () => {
+test("a request the harness answered as interrupted, as the core records it: the call announced once, by the response's part, and then failed", () => {
   const rm = { call: "c1", tool: "rm", input: json({ path: "a.ts" }) };
   const { session, fact } = recording();
   fact(asked("remove a.ts"));
@@ -576,7 +576,7 @@ test("PJ11 PJ4: a request the harness answered as interrupted, as the core recor
   fact(responded([{ _tag: "ToolCall", ...rm }], "Indeterminate"));
   expect(ahead(session.journal, "ToolEnded", "ModelResponded")).toBe(true);
   const loaded = project(session.journal, replay);
-  // The response moves before the arrival and announces the call from its part; the arrival then announces nothing (PJ4), so the updates are those of the stored order.
+  // The response moves before the arrival and announces the call from its part; the arrival then announces nothing, as a call is announced once, so the updates are those of the stored order.
   expect(loaded.updates).toEqual(inStoredOrder(session.journal, replay).updates);
   expect(loaded.updates).toEqual([
     user("remove a.ts"),
@@ -588,7 +588,7 @@ test("PJ11 PJ4: a request the harness answered as interrupted, as the core recor
   expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
 });
 
-test("PJ11 PJ4: a request the harness answered as interrupted whose call had ended before the process did: the call is announced once, by the response's part, and completed", () => {
+test("a request the harness answered as interrupted whose call had ended before the process did: the call is announced once, by the response's part, and completed", () => {
   const rm = { call: "c1", tool: "rm", input: json({ path: "a.ts" }) };
   const { session, fact } = recording();
   fact(asked("remove a.ts"));
@@ -611,7 +611,7 @@ test("PJ11 PJ4: a request the harness answered as interrupted whose call had end
   expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
 });
 
-test("PJ11: captured items mixed into a replay keep their place and change nothing it sends; the reorder only reorders, and leaves the same state", () => {
+test("captured items mixed into a replay keep their place and change nothing it sends; the reorder only reorders, and leaves the same state", () => {
   const { session, inputs } = listing();
   expect(inputs.some((input) => input._tag !== "Observed" && input._tag !== "Decided")).toBe(true);
   expect(project(inputs, replay).updates).toEqual(project(session.journal, replay).updates);
@@ -621,13 +621,13 @@ test("PJ11: captured items mixed into a replay keep their place and change nothi
   expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
 });
 
-test("PJ11: live does not reorder: a call recorded before its response is sent at its fact", () => {
+test("live does not reorder: a call recorded before its response is sent at its fact", () => {
   const { session } = listing();
   const updates = project(session.journal, live).updates;
   expect(updates.slice(0, 4)).toEqual([announced("c1", "ls", "read"), updated("c1", "in_progress"), updated("c1", "completed", { content: output('["a.ts"]') }), thought("I should list them.")] as never);
 });
 
-test("PJ3: a part its deltas sent only some of: the rest of it is sent, and each part of that kind after it whole", () => {
+test("a part its deltas sent only some of: the rest of it is sent, and each part of that kind after it whole", () => {
   const { inputs, stream, fact } = recording();
   fact(asked("hello"));
   fact(dispatched());
@@ -649,7 +649,7 @@ test("a turn that ended keeps no text in the state", () => {
   expect([...state.ended].map(String)).toEqual(["turn-1"]);
 });
 
-test("PJ11: a request ends at its response: a second response with no request between is left in place", () => {
+test("a request ends at its response: a second response with no request between is left in place", () => {
   const rm = (call: string) => ({ call, tool: "rm", input: json({ path: "a.ts" }) });
   const { session, fact } = recording();
   fact(asked("remove a.ts"));

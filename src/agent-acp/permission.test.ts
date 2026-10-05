@@ -24,7 +24,7 @@ const decided = (answer: Received) => {
   return step._tag === "Decided" ? step.verdict._tag : step._tag;
 };
 
-test("AA6: the request is the call as presented, pending, with its input, and exactly the options the policy offered, by kind", () => {
+test("the request is the call as presented, pending, with its input, and exactly the options the policy offered, by kind", () => {
   const request = requestOf(SessionId.make("s1"), call, question, { title: "Write a.ts", kind: "edit", locations: [{ path: "/w/a.ts" }] });
   expect(request as unknown).toEqual({
     sessionId: "s1",
@@ -38,19 +38,19 @@ test("AA6: the request is the call as presented, pending, with its input, and ex
   });
 });
 
-test("AA6: the policy's option that rejects for the session is offered to the client too; a presentation with no kind takes the question's", () => {
+test("the policy's option that rejects for the session is offered to the client too; a presentation with no kind takes the question's", () => {
   const request = requestOf(SessionId.make("s1"), call, question, { title: "write_file" });
   expect(request.options.map((option) => option.kind)).toEqual(["allow_once", "allow_always", "reject_once", "reject_always"]);
   expect(request.toolCall.kind).toBe("edit");
 });
 
-test("AA7: the option selected is the answer that picks it; the policy takes it as the option says", () => {
+test("the option selected is the answer that picks it; the policy takes it as the option says", () => {
   const picking = (optionId: string) => answerOf({ outcome: { outcome: "selected", optionId: PermissionOptionId.make(optionId) } }, question);
   const answers = ["allow-once", "allow-session", "reject-once"].map(picking);
   expect(answers.map((answer) => (answer instanceof InvalidAnswer ? answer : decided(answer)))).toEqual(["Continue", "Continue", "Veto"]);
 });
 
-test("AA7: a cancelled request is the refusal of this call alone: the reject-once option, not one that rejects for the session", () => {
+test("a cancelled request is the refusal of this call alone: the reject-once option, not one that rejects for the session", () => {
   const always: PermissionQuestion = {
     ...question,
     options: [{ optionId: OptionId.make("reject-session"), name: OptionName.make("Never"), kind: "reject_always" }, ...question.options],
@@ -61,7 +61,7 @@ test("AA7: a cancelled request is the refusal of this call alone: the reject-onc
   expect(decided(answer)).toBe("Veto");
 });
 
-test("AA7: an option the question did not offer, or a cancel with no option to reject once, is an invalid answer", () => {
+test("an option the question did not offer, or a cancel with no option to reject once, is an invalid answer", () => {
   const unknown = answerOf({ outcome: { outcome: "selected", optionId: PermissionOptionId.make("allow-forever") } }, question);
   const noReject: PermissionQuestion = { ...question, options: question.options.filter((option) => option.kind !== "reject_once") };
   const cancelled = answerOf({ outcome: { outcome: "cancelled" } }, noReject);
