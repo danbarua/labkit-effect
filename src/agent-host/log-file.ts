@@ -22,7 +22,7 @@ export const rotate = (file: string, backups: number): void => {
   }
 };
 
-/** What an append did: wrote the line; failed for the first time, with the error; or did not write, as an earlier append failed. */
+/** The result of an append: wrote the line; failed for the first time, with the error; or did not write, because an earlier append failed. */
 export type Appended = { readonly _tag: "Written" } | { readonly _tag: "FirstFailure"; readonly error: unknown } | { readonly _tag: "FailedEarlier" };
 
 export interface LogFile {
@@ -31,8 +31,8 @@ export interface LogFile {
 }
 
 /**
- * Appends to `file`, which holds `size` bytes now. When `size` is undefined the file could not be
- * prepared, and every append returns `FailedEarlier`.
+ * Returns an appender for `file`, which currently holds `size` bytes. When `size` is undefined the
+ * file could not be prepared, and every append returns `FailedEarlier`.
  */
 export const logFile = (file: string, size: number | undefined, options: { readonly maxBytes: number; readonly backups: number }): LogFile => {
   let failed = size === undefined;

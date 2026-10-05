@@ -1,13 +1,13 @@
 /**
- * A session's transcript as Markdown, read from its facts alone: the body of a host's `/export`.
- * Where it is written is the host's business. Nothing is asked of a model or of the blob store:
- * bytes held outside the facts are named by their id and size.
+ * A session's transcript as Markdown, read from its facts alone: the body of a host's `/export`. The
+ * host decides where it is written. No model and no blob store is asked: bytes kept outside the
+ * facts are named by their id and size.
  *
- * Facts are walked in order. A turn opens at `TurnStarted`; the inputs it is given show where they
- * are delivered (`InputDelivered`), each response where it was recorded (`ModelResponded`), and a
- * tool call with its response, together with what was asked before it ran and how it ended, found
- * by its id further on. A call whose response was never recorded (a stream stopped before it was
- * whole) shows where it arrived (`ToolCallArrived`).
+ * The facts are read in order. A turn opens at `TurnStarted`. Its inputs are shown where they are
+ * delivered (`InputDelivered`), each response where it was recorded (`ModelResponded`), and each tool
+ * call with its response, together with the permission question and how the call ended, which are
+ * looked up by the call's id. A call whose response was never recorded (a stream stopped before the
+ * response was complete) is shown where it arrived (`ToolCallArrived`).
  */
 
 import { Array as Arr, Schema } from "effect";
@@ -24,13 +24,13 @@ import { blobPointer } from "../agent-session/shaping.ts";
 
 type Observed<T extends Observation["_tag"]> = Extract<Observation, { _tag: T }>;
 
-/** How much of a tool's output a transcript shows: 8 KiB of its UTF-8 bytes. */
+/** The amount of a tool's output that a transcript shows: 8 KiB of its UTF-8 bytes. */
 const shownOutputBytes = 8 * 1024;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-/** A fence longer than any run of backticks in `text`, so the text cannot close it. */
+/** Returns `text` fenced with more backticks than any run of backticks it contains, so the text cannot close the fence. */
 const fenced = (text: string, language = ""): string => {
   const longest = Math.max(0, ...Array.from(text.matchAll(/`+/g), (run) => run[0].length));
   const fence = "`".repeat(Math.max(3, longest + 1));
@@ -39,15 +39,16 @@ const fenced = (text: string, language = ""): string => {
 
 const languageOf = (received: Received): string => (received.mediaType === "application/json" ? "json" : "");
 
-/** Whether `byte` is a UTF-8 continuation byte (10xxxxxx): one inside a character, not its first. */
+/** Whether `byte` is a UTF-8 continuation byte (10xxxxxx): a byte inside a character, not its first. */
 const continues = (byte: number): boolean => (byte & 0xc0) === 0x80;
 
-/** The position `at`, or the nearest position before it that is not inside a character: a cut there splits no character. */
+/** Returns `at`, or the nearest position before it that is not inside a character, so a cut there splits no character. */
 const cutBefore = (bytes: Uint8Array, at: number): number => (at > 0 && continues(bytes[at] ?? 0) ? cutBefore(bytes, at - 1) : at);
 
 /**
- * A tool's output or error as Markdown: text fenced, cut at `shownOutputBytes` (never inside a
- * character) with a line saying how many bytes were left out; bytes named, and not read.
+ * Returns a tool's output or error as Markdown: text is fenced and cut at `shownOutputBytes` (never
+ * inside a character), followed by a line giving the number of bytes omitted; bytes are named, not
+ * read.
  */
 const toolContent = (received: Received): string => {
   if (received.body._tag !== "Text") return asText(received);
@@ -58,7 +59,7 @@ const toolContent = (received: Received): string => {
   return `${fenced(decoder.decode(bytes.subarray(0, cut)), languageOf(received))}\n\n_Cut at 8 KiB: ${left} bytes more were left out._`;
 };
 
-/** A model as the transcript names it. */
+/** Returns a model's name as the transcript shows it. */
 const named = (provider: ProviderName, model: ModelName): string => `\`${provider}/${model}\``;
 
 const speaker = (from: InputSource): string => {
@@ -106,7 +107,7 @@ const outcome = (tool: ToolName, ended: ToolOutcome | undefined): ReadonlyArray<
   return ended._tag === "Succeeded" ? ["Output:", toolContent(ended.output)] : failure(tool, ended.reason);
 };
 
-/** What was asked before a call ran and how it was answered, in one line. */
+/** Returns the permission question asked before a call ran, and its answer, in one line. */
 const permission = (asked: Received, answered: Received | undefined): string => {
   const question = questionIn(asked);
   const asks = question === undefined ? `Permission asked: ${asText(asked)}` : `Permission asked (${question.options.map((option) => option.name).join(" / ")})`;
@@ -116,7 +117,7 @@ const permission = (asked: Received, answered: Received | undefined): string => 
   return `${asks}; answered: ${option === undefined ? asText(answered) : option.name}.`;
 };
 
-/** How a turn that did not end in an answer ended; nothing for one that did. */
+/** Returns how a turn that did not end with an answer ended; nothing for a turn that did. */
 const ending = (ended: Ending): ReadonlyArray<string> => {
   switch (ended._tag) {
     case "Completed":
@@ -142,7 +143,7 @@ interface Call {
   readonly input: Received;
 }
 
-/** What the facts say of each call and input, by its id or position, for the walk to look up. */
+/** What the facts record of each call and input, by call id or sequence number, for lookup while reading the facts. */
 interface Index {
   readonly inputs: ReadonlyMap<Seq, Observed<"InputArrived">>;
   readonly changes: ReadonlyMap<Seq, Observed<"ModelChangeArrived">>;
@@ -198,7 +199,7 @@ const response = (index: Index, responded: Observed<"ModelResponded">): Readonly
   }),
 ];
 
-/** The models the session asked, in order: the one it opened with, then each change taken. */
+/** Returns the models that the session asked, in order: the opening model, then each change taken. */
 const modelsOf = (facts: ReadonlyArray<Fact>, index: Index): ReadonlyArray<{ readonly provider: ProviderName; readonly model: ModelName }> =>
   facts.flatMap((fact) => {
     if (fact._tag === "Observed") return fact.observation._tag === "SessionOpened" ? [fact.observation.model] : [];
@@ -236,14 +237,14 @@ const footer = (facts: ReadonlyArray<Fact>, models: ReadonlyArray<{ readonly pro
   ];
 };
 
-/** The inputs recorded at `inputs`, as the transcript shows them. */
+/** Returns the inputs recorded at the sequence numbers in `inputs`, as the transcript shows them. */
 const inputsAt = (index: Index, inputs: ReadonlyArray<Seq>): ReadonlyArray<string> =>
   inputs.flatMap((seq) => {
     const arrived = index.inputs.get(seq);
     return arrived === undefined ? [`_No input is recorded at ${seq}._`] : input(arrived);
   });
 
-/** Where the walk over the facts is: how many turns have started, and whether the last one has no ending yet. */
+/** The state while reading the facts: how many turns have started, and whether the last one has no ending yet. */
 interface Walk {
   readonly turns: number;
   readonly running: boolean;
@@ -251,7 +252,7 @@ interface Walk {
 
 const leftRunningNote = "_The turn was left running: no ending is recorded._";
 
-/** The blocks a decision adds to the transcript, and the walk after it. */
+/** Returns the blocks that a decision adds to the transcript, and the state after it. */
 const decided = (index: Index, walk: Walk, decision: Decision): readonly [Walk, ReadonlyArray<string>] => {
   switch (decision._tag) {
     case "InputDelivered":
@@ -264,7 +265,7 @@ const decided = (index: Index, walk: Walk, decision: Decision): readonly [Walk, 
     }
     case "TurnEnded":
       return [{ ...walk, running: false }, ending(decision.ending)];
-    // These decide what the core does next; the transcript shows what came of them.
+    // These decisions direct what the core does next; the transcript shows their results instead.
     case "TurnCompleted":
     case "TurnIncomplete":
     case "AskModel":
@@ -278,7 +279,7 @@ const decided = (index: Index, walk: Walk, decision: Decision): readonly [Walk, 
   }
 };
 
-/** The blocks an observation adds to the transcript, and the walk after it. */
+/** Returns the blocks that an observation adds to the transcript, and the state after it. */
 const observed = (
   index: Index,
   models: ReadonlyArray<{ readonly provider: ProviderName; readonly model: ModelName }>,
@@ -305,7 +306,7 @@ const observed = (
     case "PermissionAsked":
     case "PermissionAnswered":
     case "ToolEnded":
-    // These are not part of the conversation.
+    // These observations are not part of the conversation.
     case "CompactionWindow":
     case "InputCancelled":
     case "McpServerChanged":
@@ -326,10 +327,11 @@ const observed = (
 };
 
 /**
- * The transcript of the session `facts` hold, as Markdown: a heading with the session and the models
- * it asked; each turn in order, with its inputs, the model's answer text, its thinking in a collapsed
- * block, each tool call with its input, what was asked before it ran and how it ended, and how the
- * turn ended when not in an answer (or that it was left running); then the totals.
+ * Returns the transcript of the session that `facts` hold, as Markdown: a heading with the session
+ * and the models it asked; each turn in order, with its inputs, the model's answer text, its
+ * thinking in a collapsed block, each tool call with its input, permission question and outcome, and
+ * how the turn ended when it did not end with an answer (or that it was left running); then the
+ * totals.
  */
 export function markdownOf(facts: ReadonlyArray<Fact>): string {
   const index = indexOf(facts);

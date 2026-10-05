@@ -1,29 +1,30 @@
 /**
- * What both hosts are launched with: the options they share, as flags, and the configuration's
- * layers those options make (agent-config).
+ * What both hosts are launched with: the options they share, as flags, and the configuration layers
+ * that those options make (agent-config).
  *
- * Each option is a flag with a variable as its twin. A flag not given is read from its variable
- * (`launchVariables`): the brand's prefix, the host's own part (`ACP_` for the ACP launcher's, none
- * for the CLI's), then the flag's name in capitals, `_` for `-` (`--max-turns`: `LABKIT_MAX_TURNS`,
- * `LABKIT_ACP_MAX_TURNS`). A flag given wins; `--mcp-config`, which may be given again, takes one
- * value from its variable.
+ * Each option is a flag with a twin variable. A flag that is not given is read from its variable
+ * (`launchVariables`): the brand's prefix, the host's own part (`ACP_` for the ACP launcher, none for
+ * the CLI), then the flag's name in capitals with `_` for `-` (`--max-turns`: `LABKIT_MAX_TURNS`,
+ * `LABKIT_ACP_MAX_TURNS`). A flag given on the command line wins. `--mcp-config`, which can be
+ * repeated, takes one value from its variable.
  *
  * The layers, merged in order, the last write winning:
  *
  * 1. the host's own defaults;
- * 2. the user's file, and the project's and the local one when `--setting-sources` names them: a
- *    folder's files are not read unless asked for, as a cloned one's could turn off permission or
- *    pass the model's commands credentials. Named, they are read, and still may not name extensions
- *    or MCP servers (they are not trusted);
+ * 2. the user's file, and the project's and the local one when `--setting-sources` names them. A
+ *    folder's files are read only when named, because a cloned folder's files could turn off
+ *    permission or give the model's commands credentials. Named files are read but are not trusted,
+ *    so they still may not name extensions or MCP servers;
  * 3. `--settings`: JSON, or a file of JSON or YAML;
- * 4. with `--strict-mcp-config`, no MCP servers but those `--mcp-config` names;
- * 5. `--mcp-config`, each one JSON or a file of it, as Claude Code's `.mcp.json`
+ * 4. with `--strict-mcp-config`, a layer that removes every MCP server except those `--mcp-config`
+ *    names;
+ * 5. each `--mcp-config`: JSON or a file of it, as Claude Code's `.mcp.json`
  *    (`{ "mcpServers": { <name>: { "command", "args", "env" } } }`);
- * 6. the flags: `--permission-mode` (the permission plug-in's mode), `--max-turns` (the most model
- *    requests a turn makes) and `--max-budget-usd` (the session's budget). A flag that sets a
- *    plug-in the model requests do not list adds it to their list, last.
+ * 6. the flags: `--permission-mode` (the permission plug-in's mode), `--max-turns` (the maximum number
+ *    of model requests in a turn) and `--max-budget-usd` (the session's budget). A flag that sets a
+ *    plug-in that the model requests list does not have adds it to the end of that list.
  *
- * Everything but the project's file and the local one is the user's, so may load extensions.
+ * Every layer except the project's file and the local one is the user's, so it may load extensions.
  */
 
 import { Config, ConfigProvider, Effect, FileSystem, Option } from "effect";
@@ -33,28 +34,28 @@ import { merged } from "../agent-config/merge.ts";
 import type { PermissionMode } from "../agent-policy/permissions.ts";
 import { type Brand, envPrefixOf } from "./brand.ts";
 
-/** The name a flag's value has in configuration: its name in camel case (`max-turns`: `maxTurns`). */
+/** Returns a flag's name as a configuration key: in camel case (`max-turns`: `maxTurns`). */
 const keyOf = (flag: string): string => flag.replace(/-([a-z0-9])/g, (_, letter: string) => letter.toUpperCase());
 
 const optional = <A>(flag: Flag.Flag<A>) => flag.pipe(Flag.optional, Flag.map(Option.getOrUndefined));
 
-/** A flag of text, read from its variable when not given; undefined when neither says. */
+/** A text flag, read from its variable when not given; undefined when neither gives a value. */
 export const textFlag = (name: string, description: string) =>
   optional(Flag.String(name).pipe(Flag.withDescription(description), Flag.withFallbackConfig(Config.String(keyOf(name)))));
 
-/** A flag that is on or off, read from its variable when not given (`1`, `true`, `yes`, `on`); off when neither says. */
+/** An on/off flag, read from its variable when not given (`1`, `true`, `yes`, `on`); off when neither gives a value. */
 export const toggleFlag = (name: string, description: string) =>
   Flag.Boolean(name).pipe(Flag.withDescription(description), Flag.withFallbackConfig(Config.Boolean(keyOf(name))), Flag.withDefault(false));
 
-/** A flag of a whole number, read from its variable when not given; undefined when neither says. */
+/** A whole-number flag, read from its variable when not given; undefined when neither gives a value. */
 export const intFlag = (name: string, description: string) =>
   optional(Flag.Int(name).pipe(Flag.withDescription(description), Flag.withFallbackConfig(Config.Int(keyOf(name)))));
 
 
-/** The permission modes a host is launched in: `manual` is `default`. */
+/** The permission modes that a host can be launched in; `manual` means `default`. */
 const permissionModes = ["default", "manual", "acceptEdits", "dontAsk", "bypassPermissions"] as const;
 
-/** The options both hosts take, each with its variable as its twin. */
+/** The options that both hosts accept, each with a twin variable. */
 export const launchFlags = {
   model: textFlag("model", "A well-known model, or provider/model"),
   // `plan` and `auto` are not built.
@@ -74,7 +75,7 @@ export const launchFlags = {
       Flag.withFallbackConfig(Config.Finite(keyOf("max-budget-usd"))),
     ),
   ),
-  // At least one, so that none given is missing and its variable is read.
+  // At least one, so that when none is given, the variable is read.
   mcpConfig: Flag.String("mcp-config").pipe(
     Flag.atLeast(1),
     Flag.withDescription("MCP servers, as JSON or a file of it, as Claude Code's .mcp.json; the flag may be given again"),
@@ -91,10 +92,10 @@ export const launchFlags = {
 export type LaunchOptions = Command.Command.Config.Infer<typeof launchFlags>;
 
 /**
- * Where the flags' twins are read from: `env`'s variables named with `brand`'s prefix and the host's
- * own part (`["ACP"]` for the ACP launcher's, none for the CLI's), then `env`'s variables as named,
- * for configuration that is not a flag's twin (`OTEL_EXPORTER_OTLP_ENDPOINT`). An empty variable is
- * none.
+ * Returns where the flags' twin variables are read from: `env`'s variables named with `brand`'s prefix
+ * and the host's own part (`["ACP"]` for the ACP launcher, none for the CLI), then `env`'s variables
+ * under their own names, for configuration that is not a flag's twin (`OTEL_EXPORTER_OTLP_ENDPOINT`).
+ * An empty variable counts as not set.
  */
 export const launchVariables = (
   brand: Brand,
@@ -113,7 +114,7 @@ export interface ConfigFlags {
   readonly settings?: string | undefined;
   /** MCP servers, each JSON or a file of it, as Claude Code's `.mcp.json`. */
   readonly mcpConfig: ReadonlyArray<string>;
-  /** Whether the MCP servers are only those `mcpConfig` names. */
+  /** Whether the MCP servers are limited to those that `mcpConfig` names. */
   readonly strictMcpConfig: boolean;
   readonly permissionMode?: PermissionMode | "manual" | undefined;
   readonly maxTurns?: number | undefined;
@@ -122,7 +123,7 @@ export interface ConfigFlags {
 
 const isMapping = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** A layer from `given`: JSON when it starts with `{`, else a file, of JSON when it ends `.json`, else of YAML. */
+/** Reads a layer from `given`: JSON when it starts with `{`; otherwise a file, read as JSON when its name ends `.json` and as YAML otherwise. */
 const givenLayer = (flag: string, given: string): Effect.Effect<LayerSource, ConfigInvalid, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const json = (text: string, name: string) =>
@@ -139,9 +140,10 @@ const givenLayer = (flag: string, given: string): Effect.Effect<LayerSource, Con
   });
 
 /**
- * The file layers `--setting-sources` names: the user's alone, unless it says. A project's file and
- * the local one come with the folder the host runs in, and could change what runs without asking or
- * what a command is given, so they are read only when named, until a folder can be trusted.
+ * Returns the file layers that `--setting-sources` names: only the user's when it is not given. A
+ * project's file and the local one come with the folder the host runs in, and could change what runs
+ * without asking or what a command receives, so they are read only when named, until a folder can be
+ * trusted.
  */
 const sourcesOf = (given: string | undefined): Effect.Effect<ReadonlyArray<FileSource>, ConfigInvalid> => {
   if (given === undefined) return Effect.succeed(["user"]);
@@ -152,7 +154,7 @@ const sourcesOf = (given: string | undefined): Effect.Effect<ReadonlyArray<FileS
     : Effect.fail(new ConfigInvalid({ file: "--setting-sources", path: "", problem: `${JSON.stringify(unknown)} is not a source; those are: ${fileSources.join(", ")}` }));
 };
 
-/** The flags' own layer, over `before`: a plug-in a flag sets is added to the model requests' list when it is not on it. */
+/** Returns the flags' own layer, over `before`. A plug-in that a flag sets is added to the model requests' list when the list does not have it. */
 const flagLayer = (flags: ConfigFlags, before: ReadonlyArray<LayerSource>): LayerSource => {
   const sofar = merged(before.map((layer) => layer.value ?? {}));
   const listed = isMapping(sofar) && Array.isArray(sofar["modelRequests"]) ? (sofar["modelRequests"] as ReadonlyArray<unknown>) : [];
@@ -171,8 +173,8 @@ const flagLayer = (flags: ConfigFlags, before: ReadonlyArray<LayerSource>): Laye
 };
 
 /**
- * The layers, in order, for a host run in `project` whose own defaults are `defaults`. With no
- * project (a launcher before any session has one), the user's file is the only file read.
+ * Returns the layers, in order, for a host run in `project` whose own defaults are `defaults`. With
+ * no project (a launcher before any session has one), the user's file is the only file read.
  */
 export const launchLayers = (
   project: string | undefined,
