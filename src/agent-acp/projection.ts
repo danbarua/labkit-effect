@@ -1,21 +1,22 @@
 /**
  * The projection of a session to ACP's `session/update`: one pure, incremental function from the
- * core's facts (`session.subscribe`) and what it passes on while a model responds (`session.streamed`,
- * `CapturedObservation`) to the updates each gives. Live, a host merges the two feeds; on
- * `session/load`, it projects the stored facts (`project`). The two differ in `mode`: live, an input
- * is not echoed, since the client has what it sent.
+ * core's facts (`session.subscribe`) and the items that a model request passes on while it runs
+ * (`session.streamed`, `CapturedObservation`) to the updates that each input makes.
  *
- * The two feeds keep their own order, and none between them: a request's deltas can come before or
- * after its `ModelResponded`, and the host may be a request or a turn ahead on either. Text is sent
- * once whatever the merge. Each feed holds a turn's model requests in the same order, so the
- * projection pairs them by position: a request's end item (`ModelResponseEnded`) on the captured
- * feed with its outcome (`ModelResponded`) on the facts. Live, a delta is sent as it comes;
- * `ModelResponded` sends what of each part its request's deltas did not. A tool call is announced
- * once, by whichever of `ToolCallArrived`, its `ModelPartArrived` or its response comes first; its
- * status follows the call's facts.
+ * - Live, a host merges the two feeds. On `session/load`, it projects the stored facts (`project`).
+ *   The two differ only in `mode`: live, an input is not echoed, because the client has what it sent.
+ * - Each feed keeps its own order, and there is no order between them: a request's deltas can come
+ *   before or after its `ModelResponded`, and either feed can be a request or a turn ahead. Each
+ *   feed holds a turn's model requests in the same order, so the projection pairs a request's end
+ *   item (`ModelResponseEnded`) on the streamed feed with its outcome (`ModelResponded`) on the
+ *   facts by position. Text is sent once, whatever the merge.
+ * - Live, a delta is sent as it arrives, and `ModelResponded` sends the text of each part that its
+ *   request's deltas did not send.
+ * - A tool call is announced once, by whichever of `ToolCallArrived`, its `ModelPartArrived` or its
+ *   response comes first. Its status follows the call's facts.
  *
- * Not here, the host's own: `usage_update`, `session_info_update`, `available_commands_update`,
- * `config_option_update`, `current_mode_update`, `plan`, and `session/request_permission`.
+ * The host sends its own updates, which are not made here: `usage_update`, `session_info_update`,
+ * `available_commands_update`, `config_option_update` and `plan`, and `session/request_permission`.
  */
 
 import { Effect, HashMap, HashSet, Option, Ref } from "effect";
@@ -28,7 +29,7 @@ import type { Received } from "../agent-machine/received.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
 import { asText } from "../agent-session/received.ts";
 
-/** What the projection takes: a fact, or an item a model request passed on while it ran. */
+/** An input to the projection: a fact, or an item that a model request passed on while it ran. */
 export type ProjectionInput = Fact | CapturedObservation;
 
 /** A tool call as the model made it. */
@@ -46,7 +47,7 @@ export interface Presented {
   readonly content?: ReadonlyArray<ToolCallContent>;
 }
 
-/** The host's presentation of a tool call, without its outcome while it has none. */
+/** The host's presentation of a tool call; `outcome` is absent until the call ends. */
 export type Present = (call: Call, outcome?: ToolOutcome) => Effect.Effect<Presented>;
 
 export interface ProjectionContext {
@@ -55,7 +56,7 @@ export interface ProjectionContext {
   readonly present: Present;
 }
 
-/** A tool failure in words, for a reader. */
+/** Returns a tool failure in words, for a reader. */
 const failureText = (tool: ToolName, reason: ToolFailure): string => {
   switch (reason._tag) {
     case "Reported":
@@ -77,7 +78,7 @@ const failureText = (tool: ToolName, reason: ToolFailure): string => {
 
 const text = (value: string): ContentBlock => ({ type: "text", text: value });
 
-/** What a call's outcome shows: its output, or why it failed; nothing before it ends. */
+/** Returns the text that a call's outcome shows: its output, or why it failed; undefined before it ends. */
 const shownOf = (tool: ToolName, outcome: ToolOutcome | undefined): string | undefined => {
   if (outcome === undefined) return undefined;
   return outcome._tag === "Succeeded" ? asText(outcome.output) : failureText(tool, outcome.reason);
@@ -104,28 +105,29 @@ export const presentFrom =
 /** The kinds of text a delta carries, as `ModelDelta` names them. */
 type TextKind = "Text" | "Commentary" | "Thinking";
 
-/** The length of the delta text sent, by kind. */
+/** The number of characters of delta text sent, by kind. */
 type Sent = { readonly [Kind in TextKind]: number };
 
 const none: Sent = { Text: 0, Commentary: 0, Thinking: 0 };
 
 /**
  * One turn's text, live: what its requests' deltas sent, until each request's `ModelResponded` is
- * taken. Of a turn's requests, the captured feed has ended the first `c` (their end items) and the
- * facts have answered the first `a`; at most one of `awaiting` and `ahead` is not empty.
+ * taken. When the streamed feed is ahead (requests ended and not yet answered), `awaiting` holds
+ * them; when the facts are ahead (requests answered before their end item), `ahead` counts them.
+ * At most one of the two is non-empty.
  */
 interface TurnText {
-  /** What the deltas of the request streaming now sent; none while `ahead`, whose deltas are dropped. */
+  /** What the deltas of the request streaming now sent; nothing while `ahead` is above 0, because that request's deltas are dropped. */
   readonly streaming: Sent;
   /**
-   * Of each kind, the deltas of only whitespace since its last text sent: sent with the next text of
-   * that kind, and dropped when a call or the response's end comes first, so that a client shows no
-   * blank message. They count as sent.
+   * For each kind, the deltas of only whitespace since the last text of that kind was sent. They are
+   * sent with the next text of that kind, and dropped when a call or the response's end comes first,
+   * so that a client shows no blank message. They count as sent.
    */
   readonly held: { readonly [Kind in TextKind]?: string };
-  /** Of each request ended but not answered yet, in order: what its deltas sent. */
+  /** For each request that has ended but is not answered yet, in order: what its deltas sent. */
   readonly awaiting: ReadonlyArray<Sent>;
-  /** How many requests were answered (`ModelResponded`) before their end item: their deltas are dropped. */
+  /** How many requests were answered (`ModelResponded`) before their end item. Their remaining deltas are dropped. */
   readonly ahead: number;
 }
 
@@ -134,9 +136,9 @@ const fresh: TurnText = { streaming: none, held: {}, awaiting: [], ahead: 0 };
 const blank = (value: string): boolean => value.trim() === "";
 
 export interface ProjectionState {
-  /** The text of each turn under way, by the turn: made by the first input that names it. */
+  /** The text of each turn under way, by the turn, created by the first input that names the turn. */
   readonly texts: ReadonlyMap<TurnId, TurnText>;
-  /** The turns ended (`TurnEnded`): what is captured of them after is dropped, its text sent by their facts. */
+  /** The turns that have ended (`TurnEnded`). Items streamed for them afterwards are dropped, because their facts sent the text. */
   readonly ended: ReadonlySet<TurnId>;
   /** The calls announced, as they were presented. */
   readonly calls: ReadonlyMap<CallId, { readonly call: Call; readonly shown: Presented }>;
@@ -178,9 +180,10 @@ const announce = (state: ProjectionState, call: Call, context: ProjectionContext
 const callOf = (part: Extract<ModelPart, { _tag: "ToolCall" }>): Call => ({ call: part.call, tool: part.tool, input: part.input });
 
 /**
- * The parts of a response its deltas sent `sent` of: of each kind, the deltas cover that kind's
- * parts in order, so a part they covered gives nothing and the first they did not gives what of it
- * they did not send. A part the stream cut is not among `parts`: what was sent of it stays sent.
+ * Returns the updates for the parts of a response whose deltas sent `sent`. For each kind, the
+ * deltas cover that kind's parts in order: a part they covered sends nothing, and the first part
+ * they did not cover sends the text they did not send. A part that the stream cut is not among
+ * `parts`, so what was sent of it stays sent.
  */
 const answered = (state: ProjectionState, parts: ReadonlyArray<ModelPart>, sent: Sent, context: ProjectionContext): Effect.Effect<Projected> =>
   Effect.map(
@@ -203,9 +206,12 @@ const answered = (state: ProjectionState, parts: ReadonlyArray<ModelPart>, sent:
 const nothing = (state: ProjectionState): Projected => ({ state, updates: [] });
 
 /**
- * What the deltas of the request a `ModelResponded` answers sent, and the turn's text after it: those
- * of the first request ended and not answered; else, live, those streaming now (none while `ahead`:
- * this request's have not come yet), and its deltas still to come are dropped. On replay there are none.
+ * Returns what the deltas of the request that a `ModelResponded` answers sent, and the turn's text
+ * after it:
+ *
+ * - the first request that has ended and is not answered, when there is one;
+ * - otherwise, live, the request streaming now. Its deltas still to come are dropped (`ahead`).
+ * - On replay there are no deltas.
  */
 const sentFor = (now: TurnText, mode: ProjectionContext["mode"]): readonly [Sent, TurnText] => {
   const [first, ...rest] = now.awaiting;
@@ -220,7 +226,7 @@ const status = (call: CallId, value: "pending" | "in_progress"): SessionUpdate =
   status: value,
 });
 
-/** The updates `input` gives, and the state to take the next input from. */
+/** Returns the updates that `input` makes, and the state to take the next input from. */
 export function next(state: ProjectionState, input: ProjectionInput, context: ProjectionContext): Effect.Effect<Projected> {
   switch (input._tag) {
     case "ModelStreamed":
@@ -228,7 +234,7 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
     case "ModelDelta": {
       if (state.ended.has(input.turn)) return Effect.succeed(nothing(state));
       const now = textOf(state, input.turn);
-      // Its request was answered already, and `ModelResponded` sent its text.
+      // Its request was answered already, and `ModelResponded` sent its text; a delta with no text adds nothing.
       if (now.ahead > 0 || input.text === "") return Effect.succeed(nothing(state));
       const streaming = { ...now.streaming, [input.kind]: now.streaming[input.kind] + input.text.length };
       const held = (now.held[input.kind] ?? "") + input.text;
@@ -264,7 +270,7 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
       const observation = input.observation;
       switch (observation._tag) {
         case "InputArrived":
-          // Only what the user said is echoed: the feedback of a turn-end hook is the system's, another agent's is its own.
+          // Only the user's input is echoed: a turn-end hook's feedback is input from the system, and another agent's is that agent's.
           return Effect.succeed({
             state,
             updates: context.mode === "replay" && observation.from._tag === "User" ? [{ sessionUpdate: "user_message_chunk", content: text(observation.text) }] : [],
@@ -327,20 +333,21 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
 
 /** What `inLiveOrder` has found of the inputs so far. */
 interface Reordering {
-  /** Each turn's request in flight: the position of its first ToolCallArrived, none before one. */
+  /** For each turn's request in flight: the position of its first `ToolCallArrived`, or none before one. */
   readonly open: HashMap.HashMap<TurnId, Option.Option<number>>;
   /** The response to take before the input at each position. */
   readonly before: HashMap.HashMap<number, ProjectionInput>;
-  /** The positions of the responses so moved. */
+  /** The positions of the responses that were moved. */
   readonly moved: HashSet.HashSet<number>;
 }
 
 /**
- * `inputs` in the order live sent them, for a replay. The loop records a tool call as the model's
- * stream passes it, so a request's calls, and even their ends, come before the `ModelResponded`
- * that holds the whole response. A request runs from a `ModelRequestDispatched` to its turn's next
- * `ModelResponded`; when calls arrived in it, that response is taken just before the first
- * `ToolCallArrived`. Every other input keeps its place: the result is a permutation of `inputs`.
+ * Returns `inputs` in the order that live sent them, for a replay. The loop records a tool call as
+ * the model's stream passes it, so a request's calls, and even their ends, come before the
+ * `ModelResponded` that holds the whole response. A request runs from a `ModelRequestDispatched` to
+ * its turn's next `ModelResponded`; when calls arrived in it, that response is moved to just before
+ * the first `ToolCallArrived`. Every other input keeps its place: the result is a permutation of
+ * `inputs`.
  */
 function inLiveOrder(inputs: ReadonlyArray<ProjectionInput>): ReadonlyArray<ProjectionInput> {
   const { before, moved } = inputs.reduce<Reordering>(
@@ -391,8 +398,9 @@ function inLiveOrder(inputs: ReadonlyArray<ProjectionInput>): ReadonlyArray<Proj
 }
 
 /**
- * The updates `inputs` give, in order, from `from`; and the state after them. On replay, each
- * request's response is taken before its first tool call, as live sent them (`inLiveOrder`).
+ * Returns the updates that `inputs` make, in order, starting from `from`, and the state after them.
+ * On replay, each request's response is taken before its first tool call, as live sent them
+ * (`inLiveOrder`).
  */
 export function project(inputs: ReadonlyArray<ProjectionInput>, context: ProjectionContext, from: ProjectionState = start): Effect.Effect<Projected> {
   return Effect.gen(function* () {

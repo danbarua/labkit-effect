@@ -1,8 +1,8 @@
 /**
  * Every event the ACP host logs, by the area that logs it. The key is the event's name in the log:
- * `<area>.<subject>.<what happened>`. The ids an event is about ride as log annotations: `connection`
+ * `<area>.<subject>.<what happened>`. The ids an event is about are log annotations: `connection`
  * (minted per connection), `request` (the JSON-RPC id, set by the peer), `session`, `turn` and
- * `call`; the details say the rest.
+ * `call`. The details hold the rest.
  */
 
 export const logKeys = {

@@ -23,7 +23,7 @@ import { asText, parseJson } from "../agent-session/received.ts";
 
 export type Stop = { readonly stopReason: StopReason } | { readonly error: JsonRpcErrorObject };
 
-/** The reason the turn-request limit records (`agent-policy/max-turn-requests.ts`); it may say more. */
+/** The reason that the turn-request limit records (`agent-policy/max-turn-requests.ts`). The reason may hold more fields. */
 const isTurnLimit = Schema.is(Schema.Struct({ stop: Schema.Literal("max_turn_requests") }));
 
 const stopFor = (ending: Ending): Stop => {
@@ -48,7 +48,7 @@ const stopFor = (ending: Ending): Stop => {
   }
 };
 
-/** The answer to the prompt that began `turn`, as `facts` have it ended; none while it has not ended. */
+/** Returns the answer to the prompt that began `turn`, from the ending that `facts` record; undefined while the turn has not ended. */
 export function stopOf(facts: ReadonlyArray<Fact>, turn: TurnId): Stop | undefined {
   const ended = facts.find((fact) => fact._tag === "Decided" && fact.decision._tag === "TurnEnded" && fact.decision.turn === turn);
   if (ended?._tag !== "Decided" || ended.decision._tag !== "TurnEnded") return undefined;

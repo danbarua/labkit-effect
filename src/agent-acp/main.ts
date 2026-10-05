@@ -1,7 +1,7 @@
 /**
- * The ACP agent as an editor launches it: `bun src/agent-acp/main.ts [flags]`, the protocol on stdin
- * and stdout and nothing else on stdout. Its log is a file (`launcher-logs.ts`) whose path it says
- * once on stderr; it exits 0 when stdin closes.
+ * The ACP agent as an editor launches it: `bun src/agent-acp/main.ts [flags]`, with the protocol on
+ * stdin and stdout and nothing else on stdout. Its log is a file (`launcher-logs.ts`) whose path it
+ * writes once to stderr; it exits 0 when stdin closes.
  *
  * It runs as the brand `launch` is given, else the one the environment names (`LABKIT_BRAND`), else
  * labkit (`agent-host/brand.ts`). Its options are those both hosts take (`agent-host/launch.ts`:
@@ -15,9 +15,9 @@
  * `OPENAI_API_KEY` and `XAI_API_KEY`.
  *
  * Before it serves, it loads what of each session's configuration no session's folder changes: the
- * host's defaults, the user's file, `--settings`, `--mcp-config` and the flags. An option, or
- * a configuration, that cannot be used ends it at once, said on stderr, with exit code 1. What the
- * command line prints (help, an option's error) goes to stderr.
+ * host's defaults, the user's file, `--settings`, `--mcp-config` and the flags. An option or a
+ * configuration that cannot be used ends the launch at once with exit code 1, and the reason is
+ * written to stderr. What the command line prints (help, an option's error) goes to stderr.
  */
 
 import { homedir } from "node:os";
@@ -43,10 +43,10 @@ export const launcherFlags = {
 
 export type LauncherOptions = Command.Command.Config.Infer<typeof launcherFlags>;
 
-/** Where sessions are kept: the folder given, else `~/.<brand>/sessions`. */
+/** Returns where sessions are kept: the folder given, else `~/.<brand>/sessions`. */
 export const sessionsDirectoryOf = (given: string | undefined, brand: Brand): string => (given ? resolve(given) : join(homedir(), folderOf(brand), "sessions"));
 
-/** The host's options, from the launcher's. */
+/** Returns the host's options from the launcher's options. */
 export const hostOptionsOf = (options: LauncherOptions, brand: Brand, home?: string): HostOptions => ({
   directory: sessionsDirectoryOf(options.sessionsDir, brand),
   world: options.localTools ? "local" : "editor",
@@ -58,19 +58,19 @@ export const hostOptionsOf = (options: LauncherOptions, brand: Brand, home?: str
   ...(home === undefined ? {} : { home }),
 });
 
-/** What of each session's configuration no session's folder changes, loaded once: it fails when it cannot be used. */
+/** Loads, once, the part of each session's configuration that no session's folder changes; fails when it cannot be used. */
 export const launchChecked = (options: LauncherOptions, brand: Brand, home?: string) =>
   launchConfiguration(undefined, acpDefaults(options), options, { name: brand.name, ...(home === undefined ? {} : { home }) });
 
-/** What the command line prints, on stderr: stdout is the protocol's. */
+/** Sends what the command line prints to stderr, because stdout carries the protocol. */
 const toStderr: Console.Console = (() => {
   const error = (...args: ReadonlyArray<unknown>) => globalThis.console.error(...args);
   return { ...globalThis.console, log: error, info: error, debug: error, table: error };
 })();
 
 /**
- * The agent on this process's stdin and stdout, with `args` and `env`, as `brand` (the one `env`
- * names, else the default, unless a program gives one). It returns when stdin closes.
+ * Runs the agent on this process's stdin and stdout, with `args` and `env`, as `brand` (given by a
+ * program, else the one `env` names, else the default). It returns when stdin closes.
  */
 export const launch = (args: ReadonlyArray<string>, env: Readonly<Record<string, string | undefined>>, brand: Brand = brandFrom(env)) => {
   const launcher = Command.make(`${brand.name}-acp`, launcherFlags, (options) =>
@@ -95,5 +95,5 @@ export const launch = (args: ReadonlyArray<string>, env: Readonly<Record<string,
   );
 };
 
-// What ended a launch is said on stderr (by `launch`, or the command line): the runtime's report would go to stdout.
+// `launch` or the command line writes what ended a launch to stderr; the runtime's own report would go to stdout.
 if (import.meta.main) BunRuntime.runMain(launch(process.argv.slice(2), process.env), { disableErrorReporting: true });

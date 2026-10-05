@@ -2,34 +2,34 @@
  * The ACP host: an agent of protocol v1 (`Agent.implement`) whose sessions run on the core. A
  * launcher runs `makeHost(options)` with `Agent.run` or `Agent.runStdio`.
  *
- * Per connection the host holds the sessions it made, each a draft or open:
+ * Per connection the host holds the sessions it made or started, each a draft or open
+ * (`docs/agent-acp.md`):
  *
- * - `session/new` mints the id (ACP's `sessionId` and the core's `SessionId`), opens the session's
- *   world (`world.ts`), and makes a draft with the model to start with: nothing is written. Its
- *   answer carries the config options; `available_commands_update` (`/export`) follows it, once the
- *   client knows the session.
- * - `session/set_config_option` changes the draft, or, once open, is `ModelChangeArrived` from the
- *   user through ACP, taken at the next turn. The answer is every option as the
- *   configuration will be.
+ * - `session/new` mints the id (ACP's `sessionId` and the core's `SessionId`), reads the session's
+ *   configuration, opens its world (`world.ts`), starts its MCP servers, and makes a draft with the
+ *   model to start with. Nothing is written. Its answer carries the config options; after the
+ *   answer, `available_commands_update` offers `/export` and `/mcp`.
+ * - `session/set_config_option` changes the draft. On an open session it goes through the
+ *   configuration gate: made at once between turns, held until the turn ends otherwise. The answer
+ *   is every option as the configuration will be.
  * - `session/prompt` opens a draft (turn zero: the session's record, `host.json`, with its working
- *   folder and the first prompt's text as its title; its folder in the session directory, its
- *   services, `SessionOpened`; then `session_info_update` with the title) and runs the turn with
- *   `Session.prompt`. The session's feed (`feed.ts`) sends the turn's updates and asks permission;
- *   once it has taken the turn's end the host sends `usage_update` and answers with the turn's stop
- *   (`stopOf`). `/export` alone writes the transcript to `<cwd>/.<brand>/exports/<sessionId>.md`
- *   without asking the model, and opens no draft.
- * - `session/load` starts a stored session on this connection: its facts file, with the world
- *   opened for the `cwd` and MCP servers asked. A turn its facts left running is ended, not gone
- *   on with. Its facts are replayed through the projection (`replay`) before the answer, and the
- *   feed goes on from the state they leave. `session/resume` does the same and replays nothing.
+ *   folder and the first prompt's text as its title; its folder in the session directory; its
+ *   services; `SessionOpened`; then `session_info_update` with the title) and runs the turn with
+ *   `Session.prompt`. The session's feed (`feed.ts`) sends the turn's updates and asks permission.
+ *   Once the feed has taken the turn's end, the host sends `usage_update` and answers with the
+ *   turn's stop (`stopOf`). `/export` and `/mcp` are answered without the model.
+ * - `session/load` starts a stored session on this connection from its facts file, with the world
+ *   opened for the `cwd` and the MCP servers asked. A turn that its facts left running is ended, not
+ *   continued. Its facts are replayed through the projection (`replay`) before the answer, and the
+ *   feed continues from the state they leave. `session/resume` does the same and replays nothing.
  *   After either answer: `available_commands_update`, `session_info_update` and `usage_update`.
  * - `session/list` lists the stored sessions that have the host's record (`session-record.ts`).
- * - `session/cancel` is `Session.cancel`; so is a prompt request the client cancels
+ * - `session/cancel` is `Session.cancel`, and so is a prompt request that the client cancels
  *   (`$/cancel_request`). A prompt interrupted by the end of the connection leaves its turn running
  *   in the facts, as the core allows: the host does not end it.
- * - `session/close` stops the turn under way and closes the session's scope.
+ * - `session/close` interrupts the turn under way and closes the session's scope.
  *
- * The connection's end closes every session's scope.
+ * The end of the connection closes every session's scope.
  */
 
 import { type Brand, defaultBrand, envPrefixOf, folderOf } from "../agent-host/brand.ts";
@@ -87,7 +87,7 @@ import { usageUpdate } from "./usage.ts";
 import { editorWorld, type World, type WorldSession, workspaceWorld } from "./world.ts";
 
 export interface HostOptions<R = never> {
-  /** The session directory's root (`agent-host/directory.ts`): each session that had a turn is a folder in it. */
+  /** The session directory's root (`agent-host/directory.ts`). Each session that had a turn is a folder in it. */
   readonly directory: string;
   /**
    * Where the sessions' tools come from: `"editor"` (`editorWorld`, the default), `"local"`
@@ -95,7 +95,7 @@ export interface HostOptions<R = never> {
    * world of the host's own.
    */
   readonly world?: "editor" | "local" | World<R> | undefined;
-  /** The model sessions start with, as `provider/model` (the launcher's `--model`); left out, the first the catalog lists. */
+  /** The model that sessions start with, as `provider/model` (the launcher's `--model`); the catalog's first model when left out. */
   readonly model?: string | undefined;
   /**
    * The launcher's options that make each session's configuration (`agent-host/launch.ts`):
@@ -107,41 +107,45 @@ export interface HostOptions<R = never> {
   readonly home?: string | undefined;
   /**
    * How many times a turn whose response had thinking but no answer is asked again for it (the
-   * launcher's `--retries`; 0 asks never); 1 when left out. The host's defaults list
-   * `retryIncomplete` with it.
+   * launcher's `--retries`; 0 means never); 1 when left out. The host's defaults list
+   * `retryIncomplete` with this number.
    */
   readonly retries?: number | undefined;
   /**
    * Whether a tool call whose input has properties its tool does not take is refused (the
-   * launcher's `--strict-tool-input`); if not (the default), it runs without them, and its result
-   * says which were ignored.
+   * launcher's `--strict-tool-input`). If not (the default), the call runs without them, and its
+   * result names the properties that were ignored.
    */
   readonly strictToolInput?: boolean | undefined;
   /**
-   * The most model requests one turn makes unless the configuration says (`--max-turns`): the
-   * request beyond it is vetoed, and the prompt ends with the stop reason `max_turn_requests`
-   * (`agent-policy/max-turn-requests.ts`); 1000 when left out. The host's defaults list
-   * `maxTurnRequests` with it.
+   * The maximum number of model requests in one turn, unless the configuration gives another
+   * (`--max-turns`): the request beyond it is vetoed, and the prompt ends with the stop reason
+   * `max_turn_requests` (`agent-policy/max-turn-requests.ts`); 1000 when left out. The host's
+   * defaults list `maxTurnRequests` with this limit.
    */
   readonly maxTurnRequests?: number | undefined;
-  /** How long an MCP server a client names has to start and answer `initialize`; 30 seconds when left out. */
+  /** How long an MCP server has to start and answer `initialize`; 30 seconds when left out. */
   readonly mcpConnectTimeout?: Duration.Input | undefined;
   /**
    * What a session runs with, given its world's tool runner, over the session's store, before its
    * configuration's seam lists; `SessionServices` when left out.
    */
   readonly services?: ((runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>) | undefined;
-  /** The most sessions one page of `session/list` gives; 50 when left out. */
+  /** The maximum number of sessions on one page of `session/list`; 50 when left out. */
   readonly pageSize?: number | undefined;
-  /** The name the agent goes by (`agent-host/brand.ts`): where `/export` writes, and what it calls itself to MCP servers. */
+  /** The name the agent goes by (`agent-host/brand.ts`): it names the folder `/export` writes to, and is the name the host gives MCP servers. */
   readonly brand?: Brand | undefined;
 }
 
 /**
- * The ACP host's defaults, the first of a session's layers (`agent-host/launch.ts`): permission on
- * tool calls; the limit on a turn's model requests (`maxTurnRequests`, 1000 when not given); a turn
- * with thinking and no answer asked again for it `retries` times (1 when not given; with 0, no
- * turn-end hook); the model's commands given the environment without its credentials.
+ * Returns the ACP host's defaults, the first of a session's configuration layers (`agent-host/launch.ts`):
+ *
+ * - `permissions` on tool calls;
+ * - the limit on a turn's model requests (`maxTurnRequests`, 1000 when not given);
+ * - `retryIncomplete` on the turn's end, asking a turn with thinking and no answer again `retries`
+ *   times (1 when not given; with 0, no turn-end hook);
+ * - `credentials` on the command environment: the model's commands receive the environment without
+ *   its credentials.
  */
 export const acpDefaults = (options: { readonly retries?: number | undefined; readonly maxTurnRequests?: number | undefined }): LayerSource => {
   const retries = options.retries ?? 1;
@@ -162,9 +166,9 @@ export const acpDefaults = (options: { readonly retries?: number | undefined; re
 };
 
 /**
- * One of the client's MCP servers as a layer writes it: run in the session's folder, or at its URL.
- * MCP over ACP (`type: acp`) is not offered (`mcpCapabilities`): written as it is, the
- * configuration refuses it.
+ * Returns one of the client's MCP servers as a configuration layer writes it: a command run in the
+ * session's working folder, or a URL. MCP over ACP (`type: acp`) is not offered (`mcpCapabilities`),
+ * so it is written as it is, and the configuration refuses it.
  */
 const writtenOf = (cwd: string, server: McpServer) => {
   const pairs = (each: ReadonlyArray<{ readonly name: string; readonly value: string }>) => Object.fromEntries(each.map(({ name, value }) => [name, value]));
@@ -174,8 +178,9 @@ const writtenOf = (cwd: string, server: McpServer) => {
 };
 
 /**
- * The client's MCP servers for a session in `cwd`, as the last layers: the first takes out the
- * configuration's servers of the same names, so the client's replaces each whole.
+ * Returns the client's MCP servers for a session in `cwd`, as the last two layers. The first layer
+ * removes the configuration's servers of the same names, so each of the client's servers replaces
+ * the configuration's whole.
  */
 const clientLayers = (cwd: string, servers: ReadonlyArray<McpServer>): ReadonlyArray<LayerSource> => {
   if (servers.length === 0) return [];
@@ -186,7 +191,7 @@ const clientLayers = (cwd: string, servers: ReadonlyArray<McpServer>): ReadonlyA
   ];
 };
 
-/** The mode a session starts in: the setting of the `permissions` its tool calls list; `default` when none. */
+/** Returns the mode a session starts in: the `mode` of the `permissions` entry its tool calls list; `default` when none. */
 const startingModeOf = (configuration: Configuration): PermissionMode => {
   const mode = (configuration.lists.toolCalls?.find((entry) => entry.plugin.use === "permissions")?.settings as { readonly mode?: unknown } | undefined)?.mode;
   return Schema.is(PermissionMode)(mode) ? mode : "default";
@@ -195,15 +200,15 @@ const startingModeOf = (configuration: Configuration): PermissionMode => {
 /** A session's configuration, and the layers it was made from. */
 type Configured = Configuration & { readonly layers: ReadonlyArray<LayerSource> };
 
-/** The command the host runs itself, without the model. */
+/** The `/export` command, which the host answers without the model. */
 const exportCommandOf = (brand: Brand) => ({ name: "export", description: `Write this session's transcript as Markdown to ${folderOf(brand)}/exports/<session>.md in the working folder.` });
 
-/** The command that says how the session's MCP servers are, and starts one again. */
+/** The `/mcp` command, which reports the state of each of the session's MCP servers and can start one again. */
 const mcpCommand = { name: "mcp", description: "Say how this session's MCP servers are; `reconnect <server>` starts one again.", input: { hint: "reconnect <server>" } };
 
 const rpcError = (code: number, message: string, data?: unknown): JsonRpcErrorObject => ({ code, message, ...(data === undefined ? {} : { data }) });
 
-/** An open session: the core's, the services its operations run with, its scope and its feed. */
+/** An open session: the core's session, the services its operations run with, its scope and its feed. */
 interface Opened {
   readonly session: Session;
   readonly context: Context.Context<Services>;
@@ -219,20 +224,20 @@ interface HeldChange {
   readonly permissionMode?: PermissionMode | undefined;
 }
 
-/** Two changes as one: the later's model and permission mode, and the settings of both, the later's winning. */
+/** Merges two held changes: the later model and permission mode, and the settings of both, the later's settings winning. */
 const mergeHeld = (held: HeldChange, next: HeldChange): HeldChange => ({
   model: mergedModel(held.model, next.model),
   permissionMode: next.permissionMode ?? held.permissionMode,
 });
 
-/** Two model changes as one: the later's model, and the settings of both, the later's winning. */
+/** Merges two model changes: the later model, and the settings of both, the later's settings winning. */
 const mergedModel = (held: Change | undefined, next: Change | undefined): Change | undefined => {
   if (next === undefined) return held;
   if (held === undefined) return next;
   return { ...next, ...(held.settings === undefined && next.settings === undefined ? {} : { settings: { ...held.settings, ...next.settings } }) };
 };
 
-/** The model the facts will ask from the next turn, with the change held, if any. */
+/** Returns the model that the next turn will ask, with the held change applied, if there is one. */
 const withHeld = (configured: Target, held: HeldChange | undefined): Target => {
   const change = held?.model;
   if (change === undefined) return configured;
@@ -240,10 +245,10 @@ const withHeld = (configured: Target, held: HeldChange | undefined): Target => {
   return { provider: change.provider, model: change.model, ...(Object.keys(settings).length === 0 ? {} : { settings }) };
 };
 
-/** What a session this connection holds is: a draft until its first prompt, then open. */
+/** The state of a session this connection holds: a draft until its first prompt, then open. */
 type EntryState = { readonly _tag: "Draft"; readonly draft: Draft } | { readonly _tag: "Open"; readonly opened: Opened };
 
-/** A session this connection holds: one it made, a draft until its first prompt and then open, or one it started from its facts, open. */
+/** A session this connection holds: one it made (a draft until its first prompt, then open), or one it started from its facts (open). */
 interface Entry {
   readonly id: AcpSessionId;
   readonly cwd: string;
@@ -252,20 +257,21 @@ interface Entry {
   /** The entry's scope, from `session/new` (or load, or resume) to `session/close`: its MCP servers, and its open session's scope, are in it. */
   readonly scope: Scope.Closeable;
   readonly mcp: McpServers;
-  /** Held while the draft opens and while a configuration change is taken, so neither is lost. */
+  /** Held while the draft opens and while a configuration change is applied, so that neither change is lost. */
   readonly lock: Semaphore.Semaphore;
   readonly state: Ref.Ref<EntryState>;
   /** The prompt running, if one is. */
   readonly prompt: Ref.Ref<Fiber.Fiber<unknown, unknown> | undefined>;
-  /** How tool calls are allowed: the host's to keep, read at each call, changed by the user; it starts as the configuration says. */
+  /** The permission mode. The host keeps it; the policy reads it at each call; the user changes it. It starts as the configuration says. */
   readonly permissionMode: Ref.Ref<PermissionMode>;
   /** The session's configuration: its seam lists, and its MCP servers. */
   readonly configuration: Configured;
 }
 
 /**
- * The model the facts will ask from the next turn: the one `modelOf` gives, with each change that
- * arrived and is not taken yet (a change taken during a turn waits for a step or the turn's end).
+ * Returns the model that the next turn will ask: the one `modelOf` returns, with each change that
+ * arrived and is not yet taken (a change that arrives during a turn waits for a step or the turn's
+ * end).
  */
 const configuredOf = (facts: ReadonlyArray<Fact>): Effect.Effect<Target> =>
   Effect.map(modelOf(facts), (now) => {
@@ -278,10 +284,10 @@ const configuredOf = (facts: ReadonlyArray<Fact>): Effect.Effect<Target> =>
     }, now);
   });
 
-/** The text a prompt gives the session: its text blocks, and each resource link as a line. */
+/** Returns the text of a prompt: its text blocks, and each resource link as a line. */
 const promptText = (prompt: ReadonlyArray<ContentBlock>): string => prompt.flatMap(linesOf).join("\n");
 
-/** The text a block gives the prompt's text: a text block's text, a resource link as a line; nothing of a file. */
+/** Returns the lines a block adds to the prompt's text: a text block's text, a resource link as a Markdown link; nothing for a file. */
 const linesOf = (block: ContentBlock): ReadonlyArray<string> => {
   switch (block.type) {
     case "text":
@@ -297,13 +303,13 @@ const linesOf = (block: ContentBlock): ReadonlyArray<string> => {
   }
 };
 
-/** The last part of `uri`'s path, as a file's name. */
+/** Returns the last part of `uri`'s path, as a file's name. */
 const nameIn = (uri: string | null | undefined): string | undefined => {
   const last = uri?.split(/[/\\]/).filter((part) => part !== "").at(-1);
   return last === undefined || last === "" ? undefined : decodeURIComponent(last);
 };
 
-/** What a block attaches to the input: an image, or an embedded resource, put in the blob store. */
+/** Stores what a block attaches to the input (an image, or an embedded resource) in the blob store, and returns its references. */
 const attachmentsOf = (blobs: BlobStore, block: ContentBlock): Effect.Effect<ReadonlyArray<BlobRef>> => {
   if (block.type === "image") return Effect.map(blobs.store(Buffer.from(block.data, "base64"), MediaType.make(block.mimeType), nameIn(block.uri)), (stored): ReadonlyArray<BlobRef> => [stored]);
   if (block.type !== "resource") return Effect.succeed([]);
@@ -314,8 +320,9 @@ const attachmentsOf = (blobs: BlobStore, block: ContentBlock): Effect.Effect<Rea
 };
 
 /**
- * The input a prompt's blocks give: its text (`promptText`), and each image and embedded resource
- * (an editor's file, as text or bytes) put in the session's blob store and attached by reference.
+ * Returns the input that a prompt's blocks make: its text (`promptText`), and each image and
+ * embedded resource (an editor's file, as text or bytes) stored in the session's blob store and
+ * attached by reference.
  */
 const promptInput = (prompt: ReadonlyArray<ContentBlock>) =>
   Effect.gen(function* () {
@@ -324,16 +331,16 @@ const promptInput = (prompt: ReadonlyArray<ContentBlock>) =>
     return { text: InputText.make(promptText(prompt)), ...(attachments.length === 0 ? {} : { attachments }) };
   });
 
-/** The variable that names the model sessions start with, as `brand`'s launcher reads it. */
+/** Returns the variable that names the model sessions start with, as `brand`'s launcher reads it. */
 const modelVariableOf = (brand: Brand): string => `${envPrefixOf(brand)}ACP_MODEL`;
 
-/** What `session/new` says when no model can be asked. */
+/** Returns the error message of `session/new` when no model can be asked. */
 const noModelOf = (brand: Brand) =>
   `No model to ask: set ${Object.values(keyVariables).join(", ")} for a provider's models, or start the local server at ${localServer}, or name one with ${modelVariableOf(brand)} as provider/model.`;
 
-/** When a change of the model or its settings applies, as the log says it. */
-const whenApplied = (said: "draft" | "made" | "held"): string => {
-  switch (said) {
+/** Returns when a change of the model or its settings applies, in the log's words. */
+const whenApplied = (when: "draft" | "made" | "held"): string => {
+  switch (when) {
     case "draft":
       return "to the draft";
     case "made":
@@ -341,17 +348,17 @@ const whenApplied = (said: "draft" | "made" | "held"): string => {
     case "held":
       return "when the turn ends";
     default:
-      return said satisfies never;
+      return when satisfies never;
   }
 };
 
-/** The world a host's sessions open: the editor's unless it says the local disk's, or gives its own. */
+/** Returns the world that a host's sessions open: the editor's, unless the options name the local disk's or give a world of their own. */
 const worldOf = <R>(world: HostOptions<R>["world"]): World<R> | World<FileSystem.FileSystem> => {
   if (world === undefined || world === "editor") return editorWorld;
   return world === "local" ? workspaceWorld : world;
 };
 
-/** The world as the settings written name it. */
+/** Returns the world's name as `effective-settings.json` records it. */
 const worldKindOf = <R>(world: HostOptions<R>["world"]): string => {
   if (world === undefined) return "editor";
   return typeof world === "string" ? world : "the host's own";
@@ -378,10 +385,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
       Effect.gen(function* () {
         const connectionScope = yield* Scope.Scope;
         const connectionId = crypto.randomUUID().slice(0, 8);
-        // What is known of each model, and how its settings apply: the local server asked once per connection.
-        const known = yield* Layer.buildWithScope(Layer.mergeAll(KnownWithLocalServer, SettlingWithLocalServer), connectionScope);
+        // What is known of each model, and how its settings apply: the local server is asked once per connection.
+        const modelKnowledge = yield* Layer.buildWithScope(Layer.mergeAll(KnownWithLocalServer, SettlingWithLocalServer), connectionScope);
         const entries = yield* Ref.make(HashMap.empty<string, Entry>());
-        /** The sessions `session/load` or `session/resume` is starting: not yet among `entries`, and not to be started twice. */
+        /** The sessions that `session/load` or `session/resume` is starting: not yet among `entries`, and not to be started twice. */
         const starting = yield* Ref.make(HashSet.empty<string>());
 
         const traced = <A, E, X>(effect: Effect.Effect<A, E, X>, session?: string) =>
@@ -404,12 +411,12 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             .pipe(Effect.catch((error) => Effect.logWarning(logKeys.update.notSent, { kind: update.sessionUpdate, cause: error.message })));
 
         const capabilitiesOf = (target: { readonly provider: Asked["provider"]; readonly model: Asked["model"] }) =>
-          knownCapabilities(target.provider, target.model).pipe(Effect.provideContext(known));
+          knownCapabilities(target.provider, target.model).pipe(Effect.provideContext(modelKnowledge));
 
-        /** The configuration of the session as it will be from the next turn, with what a change is taken against. */
         /**
-         * The configuration of a session in `cwd` whose client names `servers`: the host's defaults, the launcher's
-         * layers with `cwd` as the project, then the client's servers. One that cannot be used refuses the request.
+         * Returns the configuration of a session in `cwd` whose client names `servers`: the host's defaults, the
+         * launcher's layers with `cwd` as the project, then the client's servers. A configuration that cannot be used
+         * refuses the request (-32603).
          */
         const configurationFor = (cwd: string, servers: ReadonlyArray<McpServer>, doing: string): Effect.Effect<Configured, JsonRpcErrorObject, FileSystem.FileSystem> =>
           Effect.gen(function* () {
@@ -424,7 +431,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             ),
           );
 
-        /** What a command the model runs on the local disk is given of the environment: what the configuration composes. */
+        /** Returns the environment that a command the model runs on the local disk receives, as the configuration composes it. */
         const environmentFor = (configuration: Configured) => processEnvironmentWith(seamListsOf(configuration, { canAsk: true }).commandEnvironment ?? [removeCredentials()]);
 
         /** Writes what a session's configuration resolved to, with what the host says beside it, to the session's folder. */
@@ -441,11 +448,12 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           );
 
         /**
-         * The MCP servers of a session in `cwd`, started at once in a scope of the entry's own, and the world with their tools
-         * after its own (`startMcpServers`): the configuration's, the client's among them, and those the client names at a URL,
-         * which are not supported. Two servers whose tools would be offered under one name are -32602, before anything is
-         * started. A server the configuration says is required that is not running once they have settled refuses the request,
-         * and the servers are stopped.
+         * Starts the MCP servers of a session in `cwd` at once, in a scope of the entry's own (`startMcpServers`), and returns
+         * the world with their tools after its own. The servers are the configuration's, the client's among them.
+         *
+         * - Two servers whose tools would be offered under one name are refused (-32602) before anything is started.
+         * - A server that the configuration says is required and that is not running once the servers have settled refuses
+         *   the request (-32603), and the servers are stopped.
          */
         const withServers = (cwd: string, opened: WorldSession, configuration: Configured, doing: string) =>
           Effect.gen(function* () {
@@ -486,7 +494,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             const world: WorldSession = {
               system: opened.system,
               sources: [...opened.sources, ...mcp.sources],
-              // A call is shown with its result as the model is sent it: an MCP server's as text, whether or not the server is here now.
+              // A call is shown with its result as the model is sent it: an MCP server's result as text, whether or not the server is still running.
               present: (call, outcome) => {
                 const sent = outcome === undefined ? undefined : outcomeAsSent(outcome);
                 return catalog.some((tool) => tool.name === call.tool) ? mcpPresent(call, sent) : opened.present(call, sent);
@@ -496,7 +504,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             }).pipe(Effect.onError(() => Scope.close(scope, Exit.void)));
           });
 
-        /** `/mcp`: each MCP server and its state; `/mcp reconnect <server>` starts it again and says how it went. Said in a message. */
+        /** Answers `/mcp` with each MCP server and its state, and `/mcp reconnect <server>` by starting it again and reporting how it went, in a message. */
         const mcpOf = (entry: Entry, words: ReadonlyArray<string>) =>
           Effect.gen(function* () {
             const say = (text: string) => send(entry.id, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
@@ -505,7 +513,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             return { stopReason: "end_turn" as const };
           });
 
-        /** Gives a user's change to the open session's gate; a change that could not be recorded is -32603. */
+        /** Submits a user's change to the open session's gate; a change that could not be recorded is -32603. */
         const submitted = (opened: Opened, change: HeldChange, configId: string) =>
           opened.gate.submit(change).pipe(
             Effect.catchTag("SessionStoreFailed", (error) =>
@@ -515,7 +523,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             ),
           );
 
-        /** Makes the change the open session's gate holds, if no turn runs; one that could not be recorded is logged. */
+        /** Makes the change that the open session's gate holds, if no turn runs; a change that could not be recorded is logged as an error. */
         const settled = (entry: Entry) =>
           Effect.flatMap(Ref.get(entry.state), (state) =>
             state._tag === "Open"
@@ -525,6 +533,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               : Effect.void,
           );
 
+        /** Returns the session's configuration as it will be from the next turn, held changes included, and its config options. */
         const configurationOf = (entry: Entry) =>
           Effect.gen(function* () {
             const state = yield* Ref.get(entry.state);
@@ -541,9 +550,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               limit,
               options: [...configOptions(configured, models, limit), permissionOption(held?.permissionMode ?? (yield* Ref.get(entry.permissionMode)))] as ReadonlyArray<SessionConfigOption>,
             };
-          }).pipe(Effect.provideContext(known));
+          }).pipe(Effect.provideContext(modelKnowledge));
 
-        /** The model `session/new` starts with, or why there is none. */
+        /** The model that `session/new` starts with, or the error saying why there is none. */
         const startingModel: Effect.Effect<Asked, JsonRpcErrorObject, ModelCatalog> =
           options.model === undefined
             ? Effect.filterOrFail(defaultModel, (model): model is Asked => model !== undefined, () => rpcError(ErrorCode.InternalError, noModelOf(brand)))
@@ -564,9 +573,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               );
 
         /**
-         * Starts the session `id` over its facts file in a scope of its own, forked from the connection's: its services, the core's
-         * session, then what `go` does with them. `go` starts the session's feed (`follow`, from the projection's state it gives) at the
-         * point from which the feed is to send what is recorded. Whatever fails closes the scope: nothing is left open.
+         * Starts the session `id` over its facts file, in a scope of its own forked from the entry's: its services, the core's
+         * session, then `go`. `go` starts the session's feed (`follow`, from the projection state it passes) at the point from
+         * which the feed is to send what is recorded. Any failure closes the scope, so nothing is left open.
          */
         const startSession = <A extends { readonly feed: Feed }, E, X>(
           id: AcpSessionId,
@@ -579,10 +588,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             const scope = yield* Scope.fork(parent.scope);
             return yield* Effect.gen(function* () {
               const file = storeFileOf(options.directory, id);
-              // The session's blobs (its inputs' images and files) are kept in its folder, so a session gone on from its facts has them.
+              // The session's blobs (its inputs' images and files) are kept in its folder, so a session continued from its facts has them.
               const blobs = BlobsInFolder(join(sessionFolderOf(options.directory, id), "blobs"));
-              // The configuration's seam lists, permission following the session's mode (`FromHost.permissionMode`); its tool sources are not
-              // offered: the session's are the world's and its MCP servers'.
+              // The configuration's seam lists, with permission following the session's mode (`FromHost.permissionMode`). Its tool
+              // sources are not used: the session's tools are the world's and its MCP servers'.
               const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(parent.configuration, { canAsk: true, permissionMode: Ref.get(permissionMode) });
               const runner = SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, world.sources)));
               // The model is told of the session's MCP servers that are not running (`McpServers.notices`).
@@ -608,7 +617,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   }),
               });
               const made = yield* go(session, context, follow);
-              // Once the session's facts have their opening: its MCP servers' states, and each change of them (`McpServers.changes`).
+              // Once the session's facts have their opening, its MCP servers' states, and each change of them, are recorded (`McpServers.changes`).
               yield* parent.mcp.changes.pipe(
                 Stream.runForEach((change) =>
                   session.observe(change).pipe(
@@ -624,8 +633,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           });
 
         /**
-         * Opens the entry's draft at its first prompt (turn zero): its record (`host.json`: the working folder, and the title `text`
-         * gives), its folder, its services in a scope of its own, its feed, then `SessionOpened`; then `session_info_update`.
+         * Opens the entry's draft at its first prompt (turn zero): writes its record (`host.json`: the working folder, and the
+         * title from `text`) and `effective-settings.json`, starts its services in a scope of its own and its feed, records
+         * `SessionOpened`, then sends `session_info_update`.
          */
         const open = (entry: Entry, draft: Draft, text: string) =>
           Effect.gen(function* () {
@@ -640,7 +650,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             yield* settingsWritten(entry.id, entry.configuration, yield* Ref.get(entry.permissionMode), `${draft.model.provider}/${draft.model.model}`);
             const opened = yield* startSession(entry.id, entry.world, entry.permissionMode, { scope: entry.scope, mcp: entry.mcp, configuration: entry.configuration }, (session, context, follow) =>
               Effect.gen(function* () {
-                // The feed first: the session has no facts yet, and it sends everything from the opening on, live.
+                // The feed starts first: the session has no facts yet, so the feed sends everything from the opening on, live.
                 const feed = yield* follow(start);
                 yield* session.observe(opening(draft, SessionId.make(entry.id))).pipe(Effect.provideContext(context), reportedBy(acpUser));
                 return { feed };
@@ -652,7 +662,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             return opened satisfies Opened;
           });
 
-        /** `/export`: the transcript to `<cwd>/.<brand>/exports/<id>.md`, said in a message. */
+        /** Answers `/export`: writes the transcript to `<cwd>/.<brand>/exports/<id>.md`, and says where in a message. */
         const exportOf = (entry: Entry) =>
           Effect.gen(function* () {
             const say = (text: string) => send(entry.id, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
@@ -677,7 +687,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             return { stopReason: "end_turn" as const };
           });
 
-        /** Records the turn's interruption, and logs it, as a client's `session/cancel` does. */
+        /** Records the interruption of the turn under way, and logs it, as a client's `session/cancel` does. */
         const cancelTurn = (entry: Entry, by: string) =>
           Effect.gen(function* () {
             const state = yield* Ref.get(entry.state);
@@ -692,7 +702,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             ),
           );
 
-        /** Opens the draft if it is one, runs the turn, waits for the feed to take its end, sends the usage and gives the stop. */
+        /** Opens the draft if it is one, runs the turn, waits for the feed to take the turn's end, sends `usage_update`, and returns the stop. */
         const turnOf = (entry: Entry, text: string, blocks: ReadonlyArray<ContentBlock>) =>
           Effect.gen(function* () {
             const began = yield* Clock.currentTimeMillis;
@@ -738,7 +748,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             return { stopReason: stop.stopReason };
           });
 
-        /** The title in the session's record: none when it has no record (the CLI made it), or one that does not read, which is logged. */
+        /** Returns the title in the session's record; undefined when it has no record (the CLI made it), or a record that does not read, which is logged. */
         const recordedTitle = (sessionId: AcpSessionId) => {
           const file = recordFileOf(options.directory, sessionId);
           return readRecord(options.directory, sessionId).pipe(
@@ -754,7 +764,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           );
         };
 
-        /** What the host sends of a session started from its facts once the client knows it: the commands, its title and last write, and its usage. */
+        /** Sends what the host sends of a session started from its facts, once the client knows it: the commands, its title and last write, and its usage. */
         const announce = (entry: Entry, opened: Opened) =>
           Effect.gen(function* () {
             yield* send(entry.id, { sessionUpdate: "available_commands_update", availableCommands: [exportCommandOf(brand), mcpCommand] });
@@ -774,11 +784,14 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           });
 
         /**
-         * `session/load` or `session/resume`: the stored session started on this connection, with the world opened for `cwd` and
-         * `mcpServers`. A turn its facts left running is ended, with nothing run again. On load the facts, as they are then, are sent as
-         * the projection replays them, before the answer. The feed goes on from the state they leave, so nothing is sent twice; only then
-         * does the session go on (input left waiting starts its turn, which the feed sends). The entry is held once it started; after the
-         * answer the host sends what it sends of a session (`announce`).
+         * Handles `session/load` or `session/resume`: starts the stored session on this connection, with the world opened for `cwd` and
+         * `mcpServers`.
+         *
+         * 1. A turn that its facts left running is ended, with nothing run again.
+         * 2. On load, the facts as they are then are sent as the projection replays them, before the answer.
+         * 3. The feed continues from the state they leave, so nothing is sent twice.
+         * 4. Only then does the session go on (`goOn`): input left waiting starts its turn, which the feed sends.
+         * 5. The connection holds the entry once it has started. After the answer, the host sends `announce`.
          */
         const reopen = (
           method: "session/load" | "session/resume",
@@ -809,7 +822,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             yield* Ref.update(starting, (all) => HashSet.add(all, sessionId));
             return yield* Effect.gen(function* () {
               const configuration = yield* configurationFor(cwd, mcpServers, method);
-              const own = yield* (world as World<R | FileSystem.FileSystem>).open({
+              const worldAlone = yield* (world as World<R | FileSystem.FileSystem>).open({
                 sessionId,
                 cwd,
                 mcpServers,
@@ -817,12 +830,12 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 strictInput: options.strictToolInput ?? false,
                 environment: environmentFor(configuration),
               });
-              const { world: its, scope, mcp } = yield* withServers(cwd, own, configuration, method);
+              const { world: sessionWorld, scope, mcp } = yield* withServers(cwd, worldAlone, configuration, method);
               return yield* Effect.gen(function* () {
-              // The policy reads the session's mode at each call; it starts as the configuration says.
+              // The policy reads the session's mode at each call; the mode starts as the configuration says.
               const initialMode = startingModeOf(configuration);
               const mode = yield* Ref.make(initialMode);
-              const opened = yield* startSession(sessionId, its, mode, { scope, mcp, configuration }, (session, context, follow) =>
+              const opened = yield* startSession(sessionId, sessionWorld, mode, { scope, mcp, configuration }, (session, context, follow) =>
                 Effect.gen(function* () {
                   const left = leftRunning(yield* session.facts);
                   if (left !== undefined) {
@@ -831,7 +844,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                       Effect.annotateLogs({ turn: left.turn }),
                     );
                   }
-                  const replayed = yield* project(yield* session.facts, { mode: "replay", present: its.present });
+                  const replayed = yield* project(yield* session.facts, { mode: "replay", present: sessionWorld.present });
                   if (method === "session/load") yield* Effect.forEach(replayed.updates, (update) => send(sessionId, update), { discard: true });
                   const feed = yield* follow(replayed.state);
                   if (left === undefined) yield* session.goOn.pipe(Effect.provideContext(context));
@@ -841,7 +854,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const entry: Entry = {
                 id: sessionId,
                 cwd,
-                world: its,
+                world: sessionWorld,
                 scope,
                 mcp,
                 lock: yield* Semaphore.make(1),
@@ -860,7 +873,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 facts: (yield* opened.session.facts).length,
                 replayed: opened.replayed,
                 turnsLeftRunning: opened.left === undefined ? [] : [opened.left],
-                tools: (yield* toolsOf(its.sources)).catalog.map((tool) => tool.name),
+                tools: (yield* toolsOf(sessionWorld.sources)).catalog.map((tool) => tool.name),
                 mcpServers: mcpServers.length,
               });
               // The updates follow the response: the response is written before this handler's fiber ends.
@@ -886,7 +899,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 );
                 const configuration = yield* configurationFor(cwd, mcpServers, "session/new");
                 const id = AcpSessionId.make(crypto.randomUUID());
-                const own = yield* (world as World<R | FileSystem.FileSystem>).open({
+                const worldAlone = yield* (world as World<R | FileSystem.FileSystem>).open({
                   sessionId: id,
                   cwd,
                   mcpServers,
@@ -894,18 +907,18 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   strictInput: options.strictToolInput ?? false,
                   environment: environmentFor(configuration),
                 });
-                const { world: opened, scope, mcp } = yield* withServers(cwd, own, configuration, "session/new");
+                const { world: sessionWorld, scope, mcp } = yield* withServers(cwd, worldAlone, configuration, "session/new");
                 return yield* Effect.gen(function* () {
                 const capabilities = yield* capabilitiesOf(model);
-                const { catalog } = yield* toolsOf(opened.sources);
+                const { catalog } = yield* toolsOf(sessionWorld.sources);
                 const draft = withDefaults(
-                  draftOf({ model, tools: catalog, ...(opened.system === undefined ? {} : { system: opened.system }) }),
+                  draftOf({ model, tools: catalog, ...(sessionWorld.system === undefined ? {} : { system: sessionWorld.system }) }),
                   capabilities,
                 );
                 const entry: Entry = {
                   id,
                   cwd,
-                  world: opened,
+                  world: sessionWorld,
                   scope,
                   mcp,
                   lock: yield* Semaphore.make(1),
@@ -975,9 +988,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                       }
                       // The entry's lock is held: its state does not change meanwhile.
                       const state = yield* Ref.get(entry.state);
-                      const said = state._tag === "Draft" ? "made" : yield* submitted(state.opened, { permissionMode: mode }, configId);
+                      const applies = state._tag === "Draft" ? "made" : yield* submitted(state.opened, { permissionMode: mode }, configId);
                       if (state._tag === "Draft") yield* Ref.set(entry.permissionMode, mode);
-                      yield* Effect.logInfo(logKeys.config.changed, { configId, value: mode, applies: said === "made" ? "now: no turn runs" : "when the turn ends" });
+                      yield* Effect.logInfo(logKeys.config.changed, { configId, value: mode, applies: applies === "made" ? "now: no turn runs" : "when the turn ends" });
                       return { configOptions: (yield* configurationOf(entry)).options };
                     }
                     const now = yield* configurationOf(entry);
@@ -999,11 +1012,11 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                       yield* Ref.set(entry.state, { _tag: "Draft", draft: change.settings === undefined ? moved : withSettings(moved, change.settings) });
                     }
                     const state = yield* Ref.get(entry.state);
-                    const said = state._tag === "Draft" ? "draft" : yield* submitted(state.opened, { model: change }, configId);
+                    const applies = state._tag === "Draft" ? "draft" : yield* submitted(state.opened, { model: change }, configId);
                     yield* Effect.logInfo(logKeys.config.changed, {
                       configId,
                       value: params.value,
-                      applies: whenApplied(said),
+                      applies: whenApplied(applies),
                     });
                     return { configOptions: (yield* configurationOf(entry)).options };
                   }),
@@ -1028,9 +1041,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   yield* Effect.logWarning(logKeys.prompt.refused, { cause: "a prompt is running" });
                   return yield* Effect.fail(rpcError(-32000, `Session ${sessionId} already has an active prompt`));
                 }
-                // A change held while a turn ran with no prompt of this connection's (one gone on with at load) is made before this one starts.
+                // A change held while a turn ran without a prompt of this connection's (a turn continued at load) is made before this prompt's turn starts.
                 yield* settled(entry);
-                // A prompt of one block that is a command the host answers itself; any other is a turn.
+                // A prompt of one block that is a command is answered by the host itself; any other prompt is a turn.
                 const command = prompt.length === 1 ? text.trim() : undefined;
                 const run = (() => {
                   if (command === "/export") return exportOf(entry);

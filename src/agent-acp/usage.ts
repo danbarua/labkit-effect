@@ -1,7 +1,7 @@
 /**
  * The session's context gauge as ACP's `usage_update`: the tokens in context now, the context window
- * of the model the session asks now, and the cost so far (`contextGauge`). What is known of the
- * model is `KnownModels`', so a host that knows a local model's window gives a gauge for it too.
+ * of the model the session asks now, and the cost so far (`contextGauge`). The model's window comes
+ * from `KnownModels`, so a host that knows a local model's window gets a gauge for that model too.
  */
 
 import { Effect } from "effect";
@@ -13,11 +13,11 @@ import { knownCapabilities } from "../agent-session/configuration/well-known-mod
 
 export type UsageUpdate = Extract<SessionUpdate, { sessionUpdate: "usage_update" }>;
 
-/** The `usage_update` of a session as `facts` have it; none when the window of the model it asks now is not known. */
+/** Returns the `usage_update` of the session that `facts` record; undefined when the window of the model that the session asks now is not known. */
 export const usageUpdate = (facts: ReadonlyArray<Fact>): Effect.Effect<UsageUpdate | undefined> =>
   Effect.gen(function* () {
     const target = yield* modelOf(facts);
-    // `modelOf` gives no capabilities: what is known of the model is `KnownModels`'.
+    // `modelOf` returns no capabilities, so what is known of the model comes from `KnownModels`.
     const known = yield* knownCapabilities(target.provider, target.model);
     const gauge = contextGauge(facts, target.provider, target.model, known);
     return gauge === undefined ? undefined : { sessionUpdate: "usage_update", used: gauge.used, size: gauge.size, cost: gauge.cost };

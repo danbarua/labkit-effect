@@ -1,19 +1,20 @@
 /**
- * The live view of one open session: the session's facts (`subscribe`) and what its model requests
- * pass on (`streamed`), merged as they come into the projection (`projection.ts`, mode `live`), and
- * each update sent to the client as `session/update`, in the order the projection gives them. The
- * two feeds are subscribed to before anything is given to the session, so nothing of a turn is
- * missed; there is no order between them (`projection.ts`).
+ * The live view of one open session.
  *
- * The feed also asks the client's permission: each `PermissionAsked` it takes is a
- * `session/request_permission` (`requestOf`), asked in a fiber of its own so the updates go on. The
- * answer (`answerOf`) is observed as `PermissionAnswered`. A client that fails the request, a
- * connection that closes, or an answer that fits no option counts as the reject-once option, and is
- * logged as a warning with its cause. A call that ends while its question is still out (its turn was
- * cancelled) has its request cancelled.
- *
- * `turnEnded(turn)` completes once the feed has taken the turn's `TurnEnded`: by then every update
- * of the turn has been written, so a prompt answers after them.
+ * - The feed merges the session's facts (`subscribe`) and what its model requests pass on
+ *   (`streamed`), as they arrive, into the projection (`projection.ts`, mode `live`), and sends each
+ *   update to the client as `session/update`, in the order the projection returns them.
+ * - It subscribes to both before anything is given to the session, so nothing of a turn is missed.
+ *   The two have no order between them; the projection sends the same text whatever the merge.
+ * - Each `PermissionAsked` it takes is asked of the client as `session/request_permission`
+ *   (`requestOf`), in a fiber of its own so the updates go on. The answer (`answerOf`) is recorded
+ *   as `PermissionAnswered`.
+ * - A client that fails the request, a connection that closes, or an answer that fits no option
+ *   counts as the reject-once option, and is logged as a warning with its cause.
+ * - A call that ends while its question is still out (its turn was cancelled) has its request
+ *   cancelled.
+ * - `turnEnded(turn)` completes once the feed has taken the turn's `TurnEnded`. By then every update
+ *   of the turn has been sent, so a prompt answers after them.
  */
 
 import { type Context, Deferred, Effect, Fiber, HashMap, Option, PubSub, Queue, Ref, References, type Scope } from "effect";
@@ -30,7 +31,7 @@ import { logKeys } from "./log-keys.ts";
 import { answerOf, InvalidAnswer, requestOf } from "./permission.ts";
 import { next, type Present, type ProjectionInput, type ProjectionState, start } from "./projection.ts";
 
-/** Who the host reports as: a person, through ACP. */
+/** The origin that the host records observations with: a person, through ACP. */
 export const acpUser: Origin = { _tag: "User", via: Via.make("acp") };
 
 export interface FeedOptions {
@@ -43,18 +44,18 @@ export interface FeedOptions {
   /** The log annotations of everything the feed logs (the connection and the session). */
   readonly annotations: Readonly<Record<string, unknown>>;
   /**
-   * The projection's state to go on from: that of the facts the session had before the feed (a loaded
-   * session's, projected), so nothing they showed is shown again. Left out, `start`.
+   * The projection's state to continue from: the state of the facts that the session had before the
+   * feed (a loaded session's, projected), so nothing they showed is shown again. `start` when left out.
    */
   readonly initial?: ProjectionState | undefined;
 }
 
 export interface Feed {
-  /** Completes once the feed has taken `turn`'s `TurnEnded`, every update of the turn sent. */
+  /** Completes once the feed has taken `turn`'s `TurnEnded` and sent every update of the turn. */
   readonly turnEnded: (turn: TurnId) => Effect.Effect<void>;
 }
 
-/** The option that refuses this call once, which a failed or cancelled question picks. */
+/** Returns the answer that picks the option refusing this call once, which a failed or cancelled question records. */
 const rejectOnce = (question: PermissionQuestion) =>
   answerPicking(question.options.find((option) => option.kind === "reject_once")?.optionId ?? OptionId.make("reject-once"));
 
@@ -65,7 +66,7 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
     const facts = yield* session.subscribe;
     const streamed = yield* session.streamed;
     const inbox = yield* Queue.unbounded<ProjectionInput>();
-    // What completes when each turn's end is taken, by the turn: made when first asked for.
+    // For each turn, a signal that completes when the feed takes the turn's end; made when first asked for.
     const ends = yield* Ref.make(HashMap.empty<TurnId, Deferred.Deferred<void>>());
     const endOf = (turn: TurnId): Effect.Effect<Deferred.Deferred<void>> =>
       Ref.modify(ends, (all) =>
@@ -77,10 +78,10 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
           },
         }),
       );
-    // The question out for each call, by the call.
+    // For each call, the fiber that asks its question while the question is out.
     const asking = yield* Ref.make(HashMap.empty<CallId, Fiber.Fiber<void>>());
     const state = yield* Ref.make<ProjectionState>(options.initial ?? start);
-    // The turn under way, as the last TurnStarted taken says.
+    // The turn under way: the turn of the last `TurnStarted` taken.
     const turn = yield* Ref.make<TurnId | undefined>(undefined);
 
     const send = (update: SessionUpdate) =>
@@ -144,7 +145,7 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
         Effect.ensuring(Ref.update(asking, HashMap.remove(call))),
       );
 
-    /** What the host does on a fact besides its updates: asks permission, cancels a question no call waits for, marks a turn's end. */
+    /** Acts on a fact beyond its updates: asks permission, cancels a question that no call waits for, and marks a turn's end. */
     const act = (fact: Fact) =>
       Effect.gen(function* () {
         if (fact._tag === "Decided") {

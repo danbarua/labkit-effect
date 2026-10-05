@@ -1,7 +1,7 @@
 /**
  * A session's configuration as ACP's config options (`session/new`, `config_option_update`), and a
- * client's `session/set_config_option` as the change it asks. Both read what `optionsFor` or
- * `optionsOf` says of the configuration, with the models the catalog offers (`askable`) and the
+ * client's `session/set_config_option` as the change it asks. Both read the `Options` that
+ * `optionsFor` or `optionsOf` returns, with the models the catalog offers (`askable`) and the
  * model's output limit, so a draft before turn zero and an open session show the same options.
  *
  * Every option is a select with a stable snake_case id:
@@ -14,13 +14,14 @@
  * | `max_output_tokens` | `model_config` | the presets up to the model's limit, the limit, and the value in force |
  * | `permission_mode` | `mode` | the permission modes (`permissionOption`), which the host keeps, not the model |
  *
- * A setting the options do not offer gives no option, and nor do `observe` (how much of its thinking
- * the provider returns) and `cache` (how long the provider keeps a request): the editor shows each
- * option as a select above the prompt, and a session keeps what it was said to have of those two.
- * An option's current value is what the model will get (a `SettingOption`'s `now`); where nothing
- * is sent for a setting, it is `not_sent`, which is offered only then. A change of a setting names
- * that setting alone, since a change keeps the settings it does not name; choosing `not_sent` while
- * it is the value now changes nothing.
+ * - A setting that the options do not offer has no option.
+ * - `observe` (how much of its thinking the provider returns) and `cache` (how long the provider
+ *   caches a request) have no option: the editor shows each option as a select above the prompt,
+ *   and a session keeps what it was configured with for those two.
+ * - An option's current value is what the model will get (a `SettingOption`'s `now`). Where nothing
+ *   is sent for a setting, the value is `not_sent`, which is offered only then.
+ * - A change of a setting names that setting alone, because a change keeps the settings it does not
+ *   name. Choosing `not_sent` while it is the current value changes nothing.
  */
 
 import { Array as Arr, Data, Order, Schema } from "effect";
@@ -33,7 +34,7 @@ import type { Options, SettingOption } from "../agent-session/configuration/opti
 import type { Asked } from "../agent-host/catalog.ts";
 import { PermissionMode } from "../agent-policy/permissions.ts";
 
-/** What `ModelChangeArrived` carries: the model to ask, and the settings it names. A draft takes the same. */
+/** What `ModelChangeArrived` carries: the model to ask, and the settings it names. A draft takes the same change. */
 export type Change = Omit<Extract<Observation, { _tag: "ModelChangeArrived" }>, "_tag">;
 
 /** A `session/set_config_option` that names no option, or a value the option does not offer; the host answers -32602. */
@@ -42,7 +43,7 @@ export class InvalidChange extends Data.TaggedError("InvalidChange")<{ readonly 
 /** The output limits offered, up to the model's own (`vscode-workspace.ts` in labkit-agent's `app-acp`). */
 const outputPresets: ReadonlyArray<number> = [4096, 8192, 16384, 32768, 65536, 128000];
 
-/** The value of an option whose setting is sent nothing: the setting is unsaid, or the adapter sends nothing for it. */
+/** The value of an option for which nothing is sent: the setting is not given, or the adapter sends nothing for it. */
 const notSent = "not_sent";
 
 /** The settings shown as options. */
@@ -80,18 +81,18 @@ const value = (id: string, name: string, description?: string): SessionConfigSel
 
 const notSentValue = value(notSent, "Not set", "No value of this setting is sent to the model.");
 
-/** The models to offer, each with its option value: `models`, then the one asked now when they do not list it. */
+/** Returns the models to offer, each with its option value: `models`, then the model asked now when `models` does not list it. */
 const modelsOffered = (options: Options, models: ReadonlyArray<Asked>): ReadonlyArray<Asked & { readonly value: string }> => {
   const listed = models.map((each) => ({ ...each, value: `${each.provider}/${each.model}` }));
   const now = `${options.provider}/${options.model}`;
   return listed.some((each) => each.value === now) ? listed : [...listed, { provider: options.provider, model: options.model, value: now }];
 };
 
-/** The output limits to offer: the presets up to `limit`, `limit`, and `now`, least first. */
+/** Returns the output limits to offer: the presets up to `limit`, `limit` itself, and `now`, smallest first. */
 const outputLimits = (limit: number | undefined, now: number | undefined): ReadonlyArray<number> =>
   Arr.sort(new Set([...outputPresets.filter((tokens) => limit === undefined || tokens <= limit), ...(limit === undefined ? [] : [limit]), ...(now === undefined ? [] : [now])]), Order.Number);
 
-/** The values of `setting` to offer, by id and name, and the one now; `not_sent` is among them when nothing is sent. */
+/** Returns the values of `setting` to offer, by id and name, and the current value; `not_sent` is among them when nothing is sent. */
 const valuesOf = (setting: SettingOption, limit: number | undefined): { readonly values: ReadonlyArray<SessionConfigSelectOption>; readonly now: string } => {
   const unsent = setting.now === undefined ? [notSentValue] : [];
   if (setting._tag === "Number") {
@@ -104,8 +105,8 @@ const valuesOf = (setting: SettingOption, limit: number | undefined): { readonly
 };
 
 /**
- * The config options of a session configured as `options`, offering `models` to change to, for a
- * model whose output limit is `limit` (none known: every preset).
+ * Returns the config options of a session configured as `options`, offering `models` to change to,
+ * for a model whose output limit is `limit` (when no limit is known, every preset is offered).
  */
 export function configOptions(options: Options, models: ReadonlyArray<Asked>, limit: number | undefined): ReadonlyArray<SessionConfigOption> {
   const model: SessionConfigOption = {
@@ -131,9 +132,10 @@ export function configOptions(options: Options, models: ReadonlyArray<Asked>, li
 }
 
 /**
- * The change `session/set_config_option` asks, setting option `configId` to `value`, for a session
- * configured as `options` that offers `models`: the model, or the one setting, chosen. A value the
- * option does not offer (`configOptions` with the same arguments) is an `InvalidChange`.
+ * Returns the change that `session/set_config_option` asks, setting option `configId` to `value`,
+ * for a session configured as `options` that offers `models`: the model, or the one setting, chosen.
+ * A value that the option does not offer (`configOptions` with the same arguments) is an
+ * `InvalidChange`.
  */
 export function changeOf(configId: string, value: string, options: Options, models: ReadonlyArray<Asked>, limit: number | undefined): Change | InvalidChange {
   const unchanged: Change = { provider: options.provider, model: options.model };
@@ -162,7 +164,7 @@ const modes: ReadonlyArray<{ readonly mode: PermissionMode; readonly name: strin
 /** The id of the permission option. */
 export const permissionId = "permission_mode";
 
-/** The permission option, its current value `mode`: how tool calls are allowed from the next one. */
+/** Returns the permission option with current value `mode`: which tool calls run without asking, from the next turn. */
 export const permissionOption = (mode: PermissionMode): SessionConfigOption => ({
   id: SessionConfigId.make(permissionId),
   name: "Permissions",
@@ -173,6 +175,6 @@ export const permissionOption = (mode: PermissionMode): SessionConfigOption => (
   options: modes.map((each) => value(each.mode, each.name, each.description)),
 });
 
-/** The permission mode `value` names, or why it names none. */
+/** Returns the permission mode that `value` names, or an `InvalidChange` saying why it names none. */
 export const permissionModeOf = (value: string): PermissionMode | InvalidChange =>
   Schema.is(PermissionMode)(value) ? value : new InvalidChange({ reason: `${value} is not a permission mode: ${modes.map((each) => each.mode).join(", ")}.` });

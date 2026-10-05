@@ -1,9 +1,9 @@
 /**
  * What the ACP host does not know of a session: the world it works in. From `session/new`'s working
  * folder, the MCP servers the client named and the connection (the client's capabilities, its
- * `fs/*` methods), a world gives the session's system prompt, its tool sources (`ToolSource`: the
- * tools and what runs a call to one) and how their calls are shown (`Present`). The core is told
- * what happened; it never sees the world.
+ * `fs/*` methods), a world returns the session's system prompt, its tool sources (`ToolSource`: the
+ * tools and what runs a call to one) and how their calls are shown (`Present`). The core records
+ * what happened, and never sees the world.
  *
  * - `editorWorld`, the default: the tools go through the editor. `read_file` reads with the client's
  *   `fs/read_text_file`, so the model sees the editor's unsaved buffers; `write_file` writes with
@@ -17,8 +17,8 @@
  *   `write_file`) on the local disk under the working folder, bypassing the editor and its unsaved
  *   buffers. A launcher chooses it explicitly.
  *
- * A path given to a tool is relative to the working folder, or absolute; one outside it is refused
- * with a failure the model reads.
+ * A path given to a tool is relative to the working folder, or absolute. A path outside the working
+ * folder is refused with a failure the model reads.
  */
 
 import type { Environment } from "../agent-process/environment.ts";
@@ -37,7 +37,7 @@ import { asText, parseJson, receivedText } from "../agent-session/received.ts";
 import { workspaceTools } from "../agent-tools/workspace.ts";
 import { type Present, type Presented, presentFrom } from "./projection.ts";
 
-/** What a world is given for one session, at `session/new`. */
+/** What a world is given for one session, when the session is made. */
 export interface WorldOpening {
   readonly sessionId: SessionId;
   /** The working folder, absolute. */
@@ -45,14 +45,14 @@ export interface WorldOpening {
   readonly mcpServers: ReadonlyArray<McpServer>;
   readonly connection: AgentConnection<V1Version>;
   /**
-   * Whether a tool call whose input has properties its tool does not take is refused; if not, it
-   * runs without them, and its result says which were ignored.
+   * Whether a tool call whose input has properties its tool does not take is refused. If not, the
+   * call runs without them, and its result names the properties that were ignored.
    */
   readonly strictInput: boolean;
   /**
-   * What a command the model runs on the local disk is given of the environment (the
-   * configuration's `commandEnvironment`); this process's, without its credentials, when left out.
-   * A command run in the editor's terminal is given the editor's.
+   * The environment that a command the model runs on the local disk receives (the configuration's
+   * `commandEnvironment`); when left out, this process's environment without its credentials. A
+   * command run in the editor's terminal receives the editor's environment.
    */
   readonly environment?: Environment | undefined;
 }
@@ -60,7 +60,7 @@ export interface WorldOpening {
 /** One session's world: fixed when the session is made, and the same for every turn of it. */
 export interface WorldSession {
   readonly system: string | undefined;
-  /** In order: the session's tools are theirs, joined (`toolsOf`). */
+  /** In order. The session's tools are the tools of all of them, joined (`toolsOf`). */
   readonly sources: ReadonlyArray<ToolSource>;
   readonly present: Present;
 }
@@ -69,7 +69,7 @@ export interface World<R = never> {
   readonly open: (opening: WorldOpening) => Effect.Effect<WorldSession, never, R>;
 }
 
-/** The most bytes a tool reads or writes in one call. */
+/** The maximum number of bytes that a tool reads or writes in one call. */
 export const maxFileBytes = 256 * 1024;
 
 const ReadFile = Schema.Struct({
@@ -91,21 +91,21 @@ const PlanEntryInput = Schema.Struct({
 });
 const UpdatePlan = Schema.Struct({ entries: Schema.Array(PlanEntryInput) });
 
-/** How long a command runs before it is stopped, unless the call says otherwise. */
+/** How many seconds a command runs before it is stopped, unless the call gives `timeout_seconds`. */
 export const commandSeconds = 120;
 
 const rejected = (problem: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "InputRejected", problem: FailureText.make(problem) } });
 const reported = (message: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(message) } });
 const succeeded = (output: string): ToolOutcome => ({ _tag: "Succeeded", output: receivedText(output) });
 
-/** `path` resolved against `root`, or why it is refused: it leaves `root`. */
+/** Returns `path` resolved against `root`, or why it is refused: it leaves `root`. */
 const inside = (root: string, path: string): { readonly full: string } | { readonly problem: string } => {
   const full = resolve(root, path);
   const from = relative(root, full);
   return from.startsWith("..") || isAbsolute(from) ? { problem: `${path} is not inside the working folder, ${root}.` } : { full };
 };
 
-/** `text` cut to at most `max` bytes of UTF-8, never inside a character, and the bytes left out. */
+/** Returns `text` cut to at most `max` bytes of UTF-8, never inside a character, and how many bytes were cut. */
 const cut = (text: string, max: number): { readonly kept: string; readonly omitted: number } => {
   const bytes = Buffer.from(text, "utf8");
   if (bytes.length <= max) return { kept: text, omitted: 0 };
@@ -113,16 +113,16 @@ const cut = (text: string, max: number): { readonly kept: string; readonly omitt
   return { kept: bytes.subarray(0, end).toString("utf8"), omitted: bytes.length - end };
 };
 
-/** `at`, or, when the byte there is inside a character (a continuation byte, 10xxxxxx), the position of the character's first byte. */
+/** Returns `at`, or, when the byte there is inside a character (a continuation byte, 10xxxxxx), the position of the character's first byte. */
 const characterStart = (bytes: Uint8Array, at: number): number => (at > 0 && ((bytes[at] ?? 0) & 0xc0) === 0x80 ? characterStart(bytes, at - 1) : at);
 
-/** `tool`, offered when `offered` holds. */
+/** Returns `tool` in a list when `offered` is true, else an empty list. */
 const offeredIf = (offered: boolean, tool: ToolSpec): ReadonlyArray<ToolSpec> => (offered ? [tool] : []);
 
 /**
- * A command's outcome, for the model to read: its output, then how it ended. One that exited 0
- * succeeded; one that exited otherwise, was stopped by a signal, or ran past its time failed with
- * its output.
+ * Returns a command's outcome, for the model to read: its output, then how it ended. A command that
+ * exited 0 succeeded. A command that exited otherwise, was stopped by a signal, or ran past its
+ * time failed, with its output.
  */
 const commandOutcome = (
   output: string,
@@ -138,31 +138,32 @@ const commandOutcome = (
   return Option.isSome(exited) && exited.value.exitCode === 0 ? succeeded(text) : reported(text);
 };
 
-/** `text` on one line of at most 120 characters, for a title. */
+/** Returns `text` on one line of at most 120 characters, for a title. */
 const oneLine = (text: string): string => {
   const line = text.replace(/\s+/g, " ").trim();
   return line.length <= 120 ? line : `${line.slice(0, 119)}…`;
 };
 
-/** `outcome` with `note` after its output, or after the error it reported. */
+/** Returns `outcome` with `note` after its output, or after the error it reported. */
 const noted = (outcome: ToolOutcome, note: string): ToolOutcome => {
   if (outcome._tag === "Succeeded") return succeeded(`${asText(outcome.output)}${note}`);
   return outcome.reason._tag === "Reported" ? reported(`${asText(outcome.reason.error)}${note}`) : outcome;
 };
 
-/** What a call is about, for its title: its command, else its path. */
+/** Returns what a call is about, for its title: its command, else its path. */
 const aboutOf = (input: Readonly<Record<string, unknown>>): string | undefined => {
   if (typeof input["command"] === "string") return input["command"];
   return typeof input["path"] === "string" ? input["path"] : undefined;
 };
 
-/** What a failed call to the editor is, for the model to read. */
+/** Returns a description of a failed call to the editor, for the model to read. */
 const editorFailure = (method: string, path: string, error: { readonly _tag?: string; readonly message?: string; readonly reason?: string }): string =>
   `${method} ${path}: ${error._tag === "PeerClosed" ? `the editor's connection closed (${error.reason ?? ""})` : (error.message ?? error._tag ?? "the editor gave no reason")}`;
 
 /**
  * The tools that go through the editor, for the methods the client advertised: `read_file` with
- * `fs/read_text_file`, `write_file` with `fs/write_text_file`.
+ * `fs/read_text_file`, `write_file` with `fs/write_text_file`, `edit_file` with both, `run_command`
+ * with `terminal/*`; and `update_plan` for every client.
  */
 export const editorWorld: World = {
   open: ({ sessionId, cwd, connection, strictInput }) =>
@@ -332,9 +333,10 @@ export const editorWorld: World = {
       };
 
       const plain = presentFrom(tools);
-      // The title names what the call is about, its command or its path, so a permission prompt
-      // says what it asks about; a file's path is its location; an edit's change is a diff, before
-      // it runs (when permission is asked) and once it succeeded; a command's terminal, once it has one.
+      // The title names what the call is about, its command or its path, so a permission question
+      // shows what it asks about. A file's path is its location. An edit's change is shown as a diff
+      // before it runs (when permission is asked) and once it succeeded. A command's terminal is shown
+      // once the call has one.
       const present: Present = (call, outcome) =>
         Effect.gen(function* () {
           const parsed = parseJson(call.input);
@@ -358,8 +360,8 @@ export const editorWorld: World = {
 
 /**
  * A stopgap world: the workspace tools of `agent-tools/workspace.ts` on the local disk under the
- * working folder. It bypasses the editor, so the model does not see unsaved buffers and the editor
- * is not told of writes.
+ * working folder. It bypasses the editor, so the model does not see unsaved buffers, and the editor
+ * is not notified of writes.
  */
 export const workspaceWorld: World<FileSystem.FileSystem> = {
   open: ({ cwd, strictInput, environment }) =>

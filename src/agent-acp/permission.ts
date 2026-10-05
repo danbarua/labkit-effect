@@ -1,9 +1,9 @@
 /**
- * A permission the core asks (`PermissionAsked`) as ACP's `session/request_permission`, and the
- * client's response as the answer the core records (`PermissionAnswered`). The options are the ones
- * the policy offered, by their kinds; the client picks one, or answers `cancelled`, which is the
- * refusal of this call alone (the policy's reject-once option): the turn goes on, and the model
- * decides what to do next.
+ * Converts a permission question that the core records (`PermissionAsked`) to ACP's
+ * `session/request_permission`, and the client's response to the answer that the core records
+ * (`PermissionAnswered`). The options are the ones the policy offered, with their kinds. The client
+ * picks one, or answers `cancelled`, which refuses this call alone (the policy's reject-once
+ * option): the turn goes on, and the model decides what to do next.
  */
 
 import { Data } from "effect";
@@ -18,8 +18,8 @@ import type { Call, Presented } from "./projection.ts";
 export class InvalidAnswer extends Data.TaggedError("InvalidAnswer")<{ readonly reason: string }> {}
 
 /**
- * The `session/request_permission` for `call` in session `sessionId`: the call as the host presents
- * it, `pending`, with its input as given, and the options `question` offers.
+ * Returns the `session/request_permission` for `call` in session `sessionId`: the call as the host
+ * presents it, `pending`, with its input as `rawInput`, and the options that `question` offers.
  */
 export function requestOf(sessionId: SessionId, call: Call, question: PermissionQuestion, presented: Presented): RequestPermissionRequest {
   const input = parseJson(call.input);
@@ -39,8 +39,8 @@ export function requestOf(sessionId: SessionId, call: Call, question: Permission
 }
 
 /**
- * The answer `response` gives to `question`, as `PermissionAnswered` holds it: the option selected,
- * or, for `cancelled`, the option that rejects this call once.
+ * Returns the answer that `response` gives to `question`, as `PermissionAnswered` records it: the
+ * option selected, or, for `cancelled`, the option that rejects this call once.
  */
 export function answerOf(response: RequestPermissionResponse, question: PermissionQuestion): Received | InvalidAnswer {
   const { outcome } = response;

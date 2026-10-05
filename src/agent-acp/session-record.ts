@@ -7,7 +7,7 @@ import { Array as Arr, Data, Option, Order, Schema } from "effect";
 import type { ListSessionsResponse, SessionInfo } from "effective-acp/schema/v1";
 import { SessionId } from "effective-acp/schema/v1";
 
-/** The most characters a title has. */
+/** The maximum number of characters in a title. */
 const titleLength = 120;
 
 /** What the host records of a session. */
@@ -17,8 +17,9 @@ export type SessionRecord = typeof SessionRecord.Type;
 const decodeRecord = Schema.decodeUnknownOption(SessionRecord);
 
 /**
- * A title from the text of a session's first prompt: trimmed, each run of whitespace one space,
- * cut after `titleLength` characters (never inside one). Nothing when no text is left.
+ * Returns a title from the text of a session's first prompt: trimmed, with each run of whitespace
+ * made one space, and cut after `titleLength` characters, never inside a character. Undefined when
+ * no text is left.
  */
 export const titleOf = (text: string): string | undefined => {
   const collapsed = text.trim().replace(/\s+/g, " ");
@@ -26,13 +27,13 @@ export const titleOf = (text: string): string | undefined => {
   return title === "" ? undefined : title;
 };
 
-/** The record turn zero writes: the working folder, and the title the first prompt gives, if it gives one. */
+/** Returns the record that turn zero writes: the working folder, and the title from the first prompt when it gives one. */
 export const recordFor = (cwd: string, firstPrompt: string): SessionRecord => {
   const title = titleOf(firstPrompt);
   return title === undefined ? { cwd } : { cwd, title };
 };
 
-/** A host record as a `SessionRecord`, or nothing when it is not one. Fields it has besides are left out. */
+/** Returns a host record as a `SessionRecord`, or undefined when it is not one. Other fields of the record are dropped. */
 export const readSessionRecord = (record: unknown): SessionRecord | undefined => Option.getOrUndefined(decodeRecord(record));
 
 /** A cursor that `pageOf` did not give. */
@@ -45,7 +46,7 @@ export interface StoredSession {
   readonly record: unknown;
 }
 
-/** Where in the order a cursor stands: the time of the last session a page ended with, and its id. */
+/** The position that a cursor encodes: when the last session of its page was written, and that session's id. */
 const Position = Schema.Tuple([Schema.Finite, Schema.String]);
 const positionFrom = (cursor: string): readonly [number, string] | undefined => {
   try {
@@ -56,19 +57,22 @@ const positionFrom = (cursor: string): readonly [number, string] | undefined => 
 };
 const cursorAt = (at: number, sessionId: string): string => Buffer.from(JSON.stringify([at, sessionId])).toString("base64url");
 
-/** Sessions by when they were last written, the latest first (one never written last), then by id. */
+/** Orders sessions by when they were last written, the latest first (a session never written comes last), then by id. */
 const latestFirst: Order.Order<{ readonly sessionId: string; readonly at: Date | undefined }> = Order.combine(
   Order.mapInput(Order.flip(Order.Number), (each) => each.at?.getTime() ?? 0),
   Order.mapInput(Order.String, (each) => each.sessionId),
 );
 
 /**
- * One page of `session/list`. Only sessions whose record reads are listed, and only those made for
- * `request.cwd` when it is given. They are in the order of when they were last written, the latest
- * first, and by id among those written at the same time. The page has at most `size` sessions, and
- * `nextCursor` when more follow it; a `request.cursor` continues after the session its page ended
- * with, so a session written to meanwhile is not repeated. A cursor `pageOf` did not give is an
- * `InvalidCursor`.
+ * Returns one page of `session/list`.
+ *
+ * - Only sessions whose record reads are listed, and, when `request.cwd` is given, only those made
+ *   for it.
+ * - Sessions are ordered by when they were last written, the latest first, then by id.
+ * - The page has at most `size` sessions (at least one), and `nextCursor` when more follow it.
+ * - `request.cursor` continues after the session that its page ended with, so a session written to
+ *   meanwhile is not repeated.
+ * - A cursor that `pageOf` did not give is an `InvalidCursor`.
  */
 export const pageOf = (
   stored: ReadonlyArray<StoredSession>,
