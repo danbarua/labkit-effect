@@ -4,7 +4,7 @@
  * - Providers accept tool names of letters, digits, `_` and `-`, at most 64 characters. Every other
  *   character of a server's or a tool's name is replaced by `_`. A tool whose name is still too long,
  *   or the same as another's after replacement, is not offered, and the reason is returned
- *   (`left`).
+ *   (`omitted`).
  * - A tool is of kind `read` and safe to run again when the server says it only reads
  *   (`readOnlyHint`); idempotent when the server says so (`idempotentHint`); otherwise of kind
  *   `other` and unsafe to run again.
@@ -37,7 +37,7 @@ export const namespaceOf = (server: string): string => `mcp__${offerable(server)
 export interface McpToolSource {
   readonly source: ToolSource;
   /** The tools not offered, each with the reason. */
-  readonly left: ReadonlyArray<{ readonly tool: string; readonly reason: string }>;
+  readonly omitted: ReadonlyArray<{ readonly tool: string; readonly reason: string }>;
 }
 
 const specOf = (name: string, tool: McpSchema.Tool): ToolSpec => {
@@ -64,16 +64,16 @@ const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
 export const mcpToolSource = (server: McpServer, tools: ReadonlyArray<McpSchema.Tool>): McpToolSource => {
   const namespace = namespaceOf(server.name);
   const named = tools.map((tool) => ({ tool, name: offerable(tool.name) }));
-  const left = named.flatMap(({ tool, name }, index) => {
+  const omitted = named.flatMap(({ tool, name }, index) => {
     if (`${namespace}__${name}`.length > maxToolName) return [{ tool: tool.name, reason: `${namespace}__${name} is longer than ${maxToolName} characters` }];
     if (named.findIndex((other) => other.name === name) !== index) return [{ tool: tool.name, reason: `${tool.name} is offered as ${name}, as another of the server's tools is` }];
     return [];
   });
-  const kept = named.filter(({ tool }) => !left.some((each) => each.tool === tool.name));
+  const kept = named.filter(({ tool }) => !omitted.some((each) => each.tool === tool.name));
   const own = new Map(kept.map(({ tool, name }) => [name, tool.name] as const));
   const reported = (text: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(text) } });
   return {
-    left,
+    omitted,
     source: {
       namespace,
       tools: kept.map(({ tool, name }) => specOf(name, tool)),

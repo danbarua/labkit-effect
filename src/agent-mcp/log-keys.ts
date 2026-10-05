@@ -29,7 +29,7 @@ export const logKeys = {
     /** The server reported that its tool list changed (`notifications/tools/list_changed`). */
     toolsChanged: "mcp.server.tools_changed",
     /** Warning: a server's tool is not offered, because its offered name is too long or the same as another's. */
-    toolLeftOut: "mcp.server.tool_left_out",
+    toolOmitted: "mcp.server.tool_omitted",
     /** `/mcp reconnect` started a server again: its name, and its state once settled. */
     reconnected: "mcp.server.reconnected",
     /** The server's input closed: nothing more can be sent to it. */

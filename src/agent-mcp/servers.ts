@@ -99,12 +99,12 @@ export const startMcpServers = (
 
     const sources = settled.flatMap(({ server, state }) => {
       if (state._tag !== "Ready") return [];
-      const { source, left } = mcpToolSource(server, state.tools);
-      return [{ source, left, server: server.name }];
+      const { source, omitted } = mcpToolSource(server, state.tools);
+      return [{ source, omitted, server: server.name }];
     });
     yield* Effect.forEach(
-      sources.flatMap(({ server, left }) => left.map(({ tool, reason }) => ({ server, tool, reason }))),
-      (each) => Effect.logWarning(logKeys.server.toolLeftOut, each),
+      sources.flatMap(({ server, omitted }) => omitted.map(({ tool, reason }) => ({ server, tool, reason }))),
+      (each) => Effect.logWarning(logKeys.server.toolOmitted, each),
       { discard: true },
     );
     const offered = (server: McpServer) => (state: Extract<McpServerState, { _tag: "Ready" }>) =>
@@ -113,14 +113,14 @@ export const startMcpServers = (
     const states: McpServers["states"] = Effect.forEach(started, (server) => Effect.map(server.state, (state) => ({ name: server.name, state })));
 
     // The status that the model was last told for each server. A server that is ready when the session starts counts as already reported as running.
-    const told = yield* Ref.make<ReadonlyMap<string, Running>>(
+    const reported = yield* Ref.make<ReadonlyMap<string, Running>>(
       new Map(settled.flatMap(({ server, state }) => (state._tag === "Ready" ? [[server.name, "running"] as const] : []))),
     );
     const notices: NoticeProvider = {
       notices: Effect.gen(function* () {
         const now = yield* states;
-        const before = yield* Ref.get(told);
-        const said = now.flatMap(({ name, state }): ReadonlyArray<readonly [string, Running, string]> => {
+        const before = yield* Ref.get(reported);
+        const newReports = now.flatMap(({ name, state }): ReadonlyArray<readonly [string, Running, string]> => {
           const running = runningOf(state, before.get(name));
           if (running === undefined || running === before.get(name)) return [];
           return [
@@ -133,8 +133,8 @@ export const startMcpServers = (
             ],
           ];
         });
-        yield* Ref.set(told, new Map([...before, ...said.map(([name, running]) => [name, running] as const)]));
-        return said.map(([, , text]) => text);
+        yield* Ref.set(reported, new Map([...before, ...newReports.map(([name, running]) => [name, running] as const)]));
+        return newReports.map(([, , text]) => text);
       }),
     };
 

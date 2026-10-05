@@ -34,14 +34,14 @@ const textOf = (result: ToolResult) =>
     .join("");
 
 /** What the server logged, as text. */
-const saidIn = (logged: ReadonlyArray<unknown>) =>
+const serverLogData = (logged: ReadonlyArray<unknown>) =>
   logged.filter((each): each is { data: string } => typeof each === "object" && each !== null && "data" in each).map((each) => each.data);
 
 test("the client calls itself what its host says (clientInfo); when it says nothing, the default brand", async () => {
   // The server logs the clientInfo it was given once it is told initialization was done; a request after it waits for that line.
   const listed = (connection: Effect.Success<ReturnType<typeof connectStdio>>) => connection.tools;
-  expect(saidIn((await connected(listed, { name: "acme", version: "2.0.0" })).logged)).toContain("initialized by acme 2.0.0");
-  expect(saidIn((await connected(listed)).logged)).toContain("initialized by labkit 0.1.0");
+  expect(serverLogData((await connected(listed, { name: "acme", version: "2.0.0" })).logged)).toContain("initialized by acme 2.0.0");
+  expect(serverLogData((await connected(listed)).logged)).toContain("initialized by labkit 0.1.0");
 });
 
 test("initialize offers this client's version and the server's answer is kept; its tools are listed across pages; a call returns the tool's result", async () => {
@@ -70,7 +70,7 @@ test("a call interrupted is cancelled at the server (notifications/cancelled, wi
       yield* Effect.sleep("200 millis");
     }),
   );
-  expect(saidIn(logged).some((data) => /^cancelled \d+$/.test(data))).toBe(true);
+  expect(serverLogData(logged).some((data) => /^cancelled \d+$/.test(data))).toBe(true);
 });
 
 test("a request the server answers with an error fails with McpFailed, naming the server and the request", async () => {

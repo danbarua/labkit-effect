@@ -18,9 +18,9 @@ const fake = { name: "fake", command: process.execPath, args: [new URL("../../te
 test("a server's tools are offered under mcp__<server>, with characters that providers do not accept replaced by _; a tool whose offered name is too long or duplicates another is not offered, with the reason", () => {
   expect(namespaceOf("my server.v2")).toBe("mcp__my_server_v2");
   const tool = (name: string) => ({ name, inputSchema: { type: "object" } }) as unknown as McpSchema.Tool;
-  const { source, left } = mcpToolSource({ name: "gh" } as McpServer, [tool("search.code"), tool("search_code"), tool("x".repeat(60)), tool("get")]);
+  const { source, omitted } = mcpToolSource({ name: "gh" } as McpServer, [tool("search.code"), tool("search_code"), tool("x".repeat(60)), tool("get")]);
   expect(source.tools.map((each) => each.name as string)).toEqual(["search_code", "get"]);
-  expect(left).toEqual([
+  expect(omitted).toEqual([
     { tool: "search_code", reason: "search_code is offered as search_code, as another of the server's tools is" },
     { tool: "x".repeat(60), reason: `mcp__gh__${"x".repeat(60)} is longer than 64 characters` },
   ]);

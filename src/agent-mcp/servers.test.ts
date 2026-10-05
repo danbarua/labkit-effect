@@ -73,7 +73,7 @@ test("a tool whose offered name would be longer than 64 characters is not offere
     }).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, logging))),
   );
   expect(sources).toEqual([0]);
-  const warned = logged.flatMap((each) => (each.level === "Warn" && Array.isArray(each.message) && each.message[0] === logKeys.server.toolLeftOut ? [each.message[1]] : []));
+  const warned = logged.flatMap((each) => (each.level === "Warn" && Array.isArray(each.message) && each.message[0] === logKeys.server.toolOmitted ? [each.message[1]] : []));
   expect(warned).toContainEqual({ server: long, tool: "echo", reason: `mcp__${long}__echo is longer than 64 characters` });
 });
 

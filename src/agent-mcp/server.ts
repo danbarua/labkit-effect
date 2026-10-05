@@ -85,7 +85,7 @@ const givesCredentials = (server: McpServerRemote): boolean => Object.keys(serve
 type Verdict = Extract<McpServerEvent, { readonly _tag: "ConnectFailed" | "AuthNeeded" }>;
 
 export const refusalOf = (server: McpServerRemote, run: number, rejection: HttpRejection): Verdict => {
-  const status = rejection.status === 0 ? rejection.said : `HTTP ${rejection.status}${rejection.said === "" ? "" : `: ${rejection.said}`}`;
+  const status = rejection.status === 0 ? rejection.text : `HTTP ${rejection.status}${rejection.text === "" ? "" : `: ${rejection.text}`}`;
   if (rejection.status !== 401 && rejection.status !== 403) return { _tag: "ConnectFailed", run, reason: status };
   if (givesCredentials(server)) return { _tag: "ConnectFailed", run, reason: `the server refused the credentials given (${status})` };
   const oauth = /resource_metadata|oauth/i.test(rejection.authenticate ?? "");
@@ -102,7 +102,7 @@ export const refusalOf = (server: McpServerRemote, run: number, rejection: HttpR
 const verdictOf = (server: McpServerConfig, run: number, error: McpFailed | RemoteRefused): Verdict => {
   const rejection = error._tag === "RemoteRefused" ? error.rejection : rejectionOf(error);
   if (isRemote(server) && rejection !== undefined) return refusalOf(server, run, rejection);
-  return { _tag: "ConnectFailed", run, reason: error._tag === "RemoteRefused" ? error.rejection.said : error.reason };
+  return { _tag: "ConnectFailed", run, reason: error._tag === "RemoteRefused" ? error.rejection.text : error.reason };
 };
 
 /** How a server's runs start and end: its process group, or its connections. */
@@ -141,7 +141,7 @@ export const startMcpServer = (
               yield* SubscriptionRef.set(state, step.state);
               if (step.state.run !== before.run || (step.state._tag !== "Ready" && step.state._tag !== "Connecting")) yield* Ref.update(connections, HashMap.remove(before.run));
               const tools = step.state._tag === "Ready" ? step.state.tools.map((tool) => tool.name) : undefined;
-              yield* Effect.logInfo(logKeys.server.changed, { server: server.name, event: event._tag, from: before._tag, to: step.state._tag, run: step.state.run, said: describe(step.state), ...(tools === undefined ? {} : { tools }) });
+              yield* Effect.logInfo(logKeys.server.changed, { server: server.name, event: event._tag, from: before._tag, to: step.state._tag, run: step.state.run, description: describe(step.state), ...(tools === undefined ? {} : { tools }) });
             }
             return step.effects;
           }),
@@ -340,7 +340,7 @@ const remoteConnection = (
             () =>
               Effect.logWarning(logKeys.server.sessionRenewed, { server: server.name, url: whereOf(server.url), tool }).pipe(
                 Effect.andThen(renew(used)),
-                Effect.mapError((failed) => (failed._tag === "McpFailed" ? failed : new McpFailed({ server: server.name, reason: failed.rejection.said, cause: failed }))),
+                Effect.mapError((failed) => (failed._tag === "McpFailed" ? failed : new McpFailed({ server: server.name, reason: failed.rejection.text, cause: failed }))),
                 Effect.flatMap((made) => made.connection.call(tool, args)),
               ),
           ),

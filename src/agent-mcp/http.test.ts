@@ -42,7 +42,7 @@ const withFake = async <A, E>(
 };
 
 /** The data of the messages the server logged (`notifications/message`). */
-const saidIn = (logged: ReadonlyArray<unknown>) =>
+const serverLogData = (logged: ReadonlyArray<unknown>) =>
   logged.flat().filter((each): each is { data: string } => typeof each === "object" && each !== null && "data" in each).map((each) => each.data);
 
 /** Waits, within five seconds, until `done`: for what happens in the background (a stream's messages, a connection made anew). */
@@ -68,12 +68,12 @@ test.each([...transports])("over $name, the client initializes, lists every page
       const echoed = textOf(yield* connection.call("echo", { message: "hi" }));
       const unknown = yield* Effect.flip(connection.call("no_such_tool", {}));
       // The server's log line arrives on a stream of its own (the GET stream, or HTTP+SSE's).
-      yield* until(() => saidIn(logged).includes("initialized by acme 2.0.0"));
+      yield* until(() => serverLogData(logged).includes("initialized by acme 2.0.0"));
       return { server: connection.initialized.serverInfo.name, tools: tools.map((tool) => tool.name), echoed, unknown: unknown.message };
     }),
   );
   expect(value).toEqual({ server: "fake", tools: ["echo", "roots", "slow"], echoed: "hi", unknown: "fake: tools/call no_such_tool failed" });
-  expect(saidIn(logged)).toContain("initialized by acme 2.0.0");
+  expect(serverLogData(logged)).toContain("initialized by acme 2.0.0");
   // A stream's priming event (an id, no data) is no message: nothing the client sent was refused.
   expect(logged).not.toContain(logKeys.http.refused);
 });
@@ -87,12 +87,12 @@ test.each(transports.filter((each) => each.options.respond !== "json"))(
         const connection = yield* connectRemote(remoteOf(fake, transport), roots);
         const asked = JSON.parse(textOf(yield* connection.call("roots", {})));
         yield* connection.call("slow", {}).pipe(Effect.timeout("200 millis"), Effect.ignore);
-        yield* until(() => saidIn(logged).some((data) => data.startsWith("cancelled")));
+        yield* until(() => serverLogData(logged).some((data) => data.startsWith("cancelled")));
         return asked;
       }),
     );
     expect(value).toEqual({ roots: [{ uri: "file:///work", name: "work" }] });
-    expect(saidIn(logged).some((data) => /^cancelled \d+$/.test(data))).toBe(true);
+    expect(serverLogData(logged).some((data) => /^cancelled \d+$/.test(data))).toBe(true);
   },
 );
 
@@ -150,14 +150,14 @@ test("a request the endpoint refuses fails with what HTTP said; a server not rea
       return { refused: rejectionOf(refused), unreached: rejectionOf(unreached) };
     }),
   );
-  expect(value.refused).toMatchObject({ status: 401, sessionExpired: false, said: "Unauthorized" });
+  expect(value.refused).toMatchObject({ status: 401, sessionExpired: false, text: "Unauthorized" });
   expect(value.refused?.authenticate).toContain("resource_metadata=");
   expect(value.unreached).toMatchObject({ status: 0, sessionExpired: false });
-  expect(value.unreached?.said).toStartWith("the server could not be reached:");
+  expect(value.unreached?.text).toStartWith("the server could not be reached:");
 });
 
 /** The first state of `server` that `is` accepts, within five seconds. */
-const stateWhen = (server: McpServer, is: (state: McpServerState) => boolean) =>
+const firstStateWhere = (server: McpServer, is: (state: McpServerState) => boolean) =>
   server.changes.pipe(Stream.filter(is), Stream.runHead, Effect.timeout("5 seconds"), Effect.map((state) => (state._tag === "Some" ? state.value : undefined)));
 
 test("a remote server that no longer has the session is given a new one, the call it refused is made again once, and the renewal is logged as a warning", async () => {
@@ -229,7 +229,7 @@ test("a key revoked mid-session: the next call fails, and the server has failed 
       const ready = (yield* server.settled)._tag;
       fake.setToken("rotated");
       const refused = yield* Effect.flip(server.call("echo", { message: "now" }));
-      const failed = yield* stateWhen(server, (state) => state._tag === "Failed");
+      const failed = yield* firstStateWhere(server, (state) => state._tag === "Failed");
       return { ready, refused: refused.message, failed, running: yield* server.running };
     }),
   );
@@ -244,7 +244,7 @@ test("reconnecting a remote server ends its session and makes another, as a new 
       const server = yield* startMcpServer(remoteOf(fake, "http"), roots);
       yield* server.settled;
       yield* server.reconnect;
-      const again = yield* stateWhen(server, (state) => state._tag === "Ready" && state.run === 2);
+      const again = yield* firstStateWhere(server, (state) => state._tag === "Ready" && state.run === 2);
       return { again: again?.run, echoed: textOf(yield* server.call("echo", { message: "two" })) };
     }),
   );

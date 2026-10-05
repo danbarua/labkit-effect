@@ -54,7 +54,7 @@ export interface HttpRejection {
   /** True for a 404 to a message that carried a session: the server no longer has the session. */
   readonly sessionExpired: boolean;
   /** The start of the response's body, or the reason the server was not reached. */
-  readonly said: string;
+  readonly text: string;
 }
 
 /** The JSON-RPC error code of a request that the endpoint refused (`HttpRejection` in its data). */
@@ -79,7 +79,7 @@ export interface RemoteWire {
 export class RemoteRefused extends Data.TaggedError("RemoteRefused")<{ readonly rejection: HttpRejection }> {}
 
 /** The number of characters of a refusing response's body that are kept. */
-const saidLimit = 2000;
+const textLimit = 2000;
 
 const requestIdsOf = (message: JsonRpcMessage | ReadonlyArray<JsonRpcMessage>): ReadonlyArray<JsonRpcId> =>
   (Array.isArray(message) ? message : [message]).flatMap((each) => ("method" in each && "id" in each && each.id !== undefined && each.id !== null ? [each.id] : []));
@@ -145,7 +145,7 @@ const makeInbox = (server: McpServerRemote) =>
     const refused = (message: JsonRpcMessage | ReadonlyArray<JsonRpcMessage>, rejection: HttpRejection) =>
       Effect.gen(function* () {
         yield* Effect.logWarning(logKeys.http.refused, { server: server.name, url: whereOf(server.url), methods: methodsOf(message), ...rejection });
-        const text = rejection.status === 0 ? rejection.said : `HTTP ${rejection.status}${rejection.sessionExpired ? " (the session has ended)" : ""}: ${rejection.said}`;
+        const text = rejection.status === 0 ? rejection.text : `HTTP ${rejection.status}${rejection.sessionExpired ? " (the session has ended)" : ""}: ${rejection.text}`;
         yield* Effect.forEach(
           requestIdsOf(message),
           (id) => deliver(WireInput.Json({ value: { jsonrpc: "2.0", id, error: { code: refusedCode, message: text, data: { http: rejection } } } })),
@@ -187,11 +187,11 @@ const rejectionFrom = (response: HttpClientResponse.HttpClientResponse, withSess
       status: response.status,
       authenticate: response.headers["www-authenticate"],
       sessionExpired: withSession && response.status === 404,
-      said: body.slice(0, saidLimit),
+      text: body.slice(0, textLimit),
     }),
   );
 
-const unreached = (error: { readonly message: string }): HttpRejection => ({ status: 0, sessionExpired: false, said: `the server could not be reached: ${error.message}` });
+const unreached = (error: { readonly message: string }): HttpRejection => ({ status: 0, sessionExpired: false, text: `the server could not be reached: ${error.message}` });
 
 /** Returns the messages that a response carries: an SSE stream's events, or one JSON message. */
 const messagesOf = (response: HttpClientResponse.HttpClientResponse): Stream.Stream<string, unknown> =>
