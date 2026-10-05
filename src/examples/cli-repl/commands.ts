@@ -2,7 +2,8 @@
  * The REPL's own commands: lines that start with `/` and do not go to the model.
  *
  * - `/model <name>` asks another model from the next turn on: a well-known model, or
- *   `provider/model`. `/model` alone shows the model being asked and offers the known ones to pick.
+ *   `provider/model`. `/model` alone shows the model being asked and offers the models that can be
+ *   asked to pick; when there are none, it says what would make one available.
  * - `/settings name=value …` changes the settings named (`thinking`, `observe`, `effort`,
  *   `maxOutputTokens`, `cache`); the rest stay as they were. `/settings` alone shows the settings
  *   in force and offers each to change. What is offered is what the provider's adapter applies as
@@ -33,11 +34,11 @@ import type { Session } from "../../agent-session/loop.ts";
 import { knownCapabilities } from "../../agent-session/configuration/well-known-models.ts";
 import { immutableToolCatalogOf, modelOf } from "../../agent-session/configuration/session-setup.ts";
 import { optionsOf, type SettingOption } from "../../agent-session/configuration/options.ts";
-import { askable } from "../../agent-host/catalog.ts";
+import { askable, ModelCatalog } from "../../agent-host/catalog.ts";
 import { mcpCommand } from "../../agent-mcp/command.ts";
 import type { McpServers } from "../../agent-mcp/servers.ts";
 import { invalid } from "./invalid.ts";
-import { targetOf } from "./models.ts";
+import { targetOf, unavailable } from "./models.ts";
 
 /** Each command and what it says of itself in `/help`. */
 export const commands: ReadonlyArray<readonly [string, string]> = [
@@ -122,6 +123,22 @@ export const settingsGiven = (given: Readonly<Record<string, unknown>>) =>
 /** The models the catalog lists (the known models whose provider has a key set, and the local server's), for picking. */
 const pickable = Effect.map(askable, (models) => models.map(({ provider, model }) => ({ title: `${provider}/${model}`, value: `${provider}/${model}` })));
 
+/**
+ * The model `/model` names: its first word, or with none, the one the user picks from the models the
+ * catalog lists, asked with `message`; undefined when the user leaves the pick (Ctrl+C). When the
+ * catalog lists no model, fails saying what would make one available.
+ */
+export const modelNamed = (words: ReadonlyArray<string>, message: string) =>
+  Effect.gen(function* () {
+    if (words[0] !== undefined) return words[0];
+    const choices = yield* pickable;
+    if (choices.length === 0) return yield* invalid("No model can be asked.", ...unavailable(yield* (yield* ModelCatalog).sources));
+    return yield* Prompt.Select({ message, choices }).pipe(Effect.catchTag("QuitError", () => Effect.undefined));
+  });
+
+/** What the REPL says of a line that starts with `/` and names none of its commands. */
+export const noCommand = (line: string) => invalid(`No command ${line.trim().split(/\s+/)[0] ?? line}.`, "/help lists them.");
+
 /** What a line can be completed from: the models that can be asked, and the settings to offer for the model being asked, as it is set now. */
 export interface Offered {
   readonly models: ReadonlyArray<string>;
@@ -135,6 +152,9 @@ export const offered = (session: Session, mcp?: McpServers) =>
     const result: Offered = { models: (yield* pickable).map((each) => each.value), settings: (yield* optionsOf(yield* session.facts)).offered, servers: mcp?.names ?? [] };
     return result;
   });
+
+/** What a line can be completed from before a model is picked: the models that can be asked; no settings, and no servers. */
+export const offeredWithoutModel = Effect.map(pickable, (models): Offered => ({ models: models.map((each) => each.value), settings: [], servers: [] }));
 
 /** A command's name as it is typed: with a space after it when words can follow. */
 const typedAs = [...commands.map(([usage]) => (usage.includes(" ") ? `${usage.slice(0, usage.indexOf(" "))} ` : usage)), "/quit"];
@@ -225,10 +245,12 @@ export const command = (session: Session, line: string, folder: string = process
       }
       case "/model": {
         const now = yield* modelOf(yield* session.facts);
-        const chosen = words[0] ?? (yield* Prompt.Select({ message: `Asking ${now.provider}/${now.model}. Ask which model?`, choices: yield* pickable }));
-        const target = yield* targetOf(chosen);
-        yield* session.observe({ _tag: "ModelChangeArrived", provider: target.provider, model: target.model });
-        yield* session.idle;
+        const chosen = yield* modelNamed(words, `Asking ${now.provider}/${now.model}. Ask which model?`);
+        if (chosen !== undefined) {
+          const target = yield* targetOf(chosen, "/model");
+          yield* session.observe({ _tag: "ModelChangeArrived", provider: target.provider, model: target.model });
+          yield* session.idle;
+        }
         return `Asking ${yield* inForce(session)}`;
       }
       case "/settings": {

@@ -4,10 +4,20 @@
  * Claude Code's CLI (https://code.claude.com/docs/en/cli-reference); the ones not built yet are
  * kept here, commented out, and the ones only Claude Code has are left out.
  *
- * The model is `--model`: a well-known model, found with its provider, or `provider/model` (`localhost/<model>` is a local
- * Chat Completions server at http://localhost:8000/v1). With no model there is nothing to ask:
- * `bun cli models` lists them, and which providers have a key set (`ANTHROPIC_API_KEY`,
- * `OPENAI_API_KEY`, `XAI_API_KEY`).
+ * The model is the one `--model` names, else the configuration's `model:`: a well-known model, found
+ * with its provider, or `provider/model` (`localhost/<model>` is a local Chat Completions server at
+ * http://localhost:8000/v1). `bun cli models` prints the models that can be asked to stdout, one per
+ * line as `--model` takes them, and prints to stderr a `HINT:` line for each provider whose key is not
+ * set (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`) and for a local server that does not
+ * answer. A model cannot be asked when none is named, when its provider's key is not set, or when its
+ * server does not answer:
+ *
+ * - With `-p`, without a terminal, or when a session is continued or resumed, the CLI refuses at once.
+ * - At a terminal, a new session's REPL opens without a model (`withoutModel` in `repl.ts`). The
+ *   session opens once `/model` names a model that can be asked.
+ *
+ * A mistake is printed as an `ERROR:` line and a `HINT:` line for each thing the user can do about
+ * it (`invalid.ts`). A hint printed outside the REPL names no slash command.
  *
  * A session runs through the loop as any other: its opening holds the model, its settings and the
  * system prompt; each input is the user's, through the CLI; the conversation is every turn of it.
@@ -39,20 +49,20 @@
 
 import { cliConfiguration } from "./configuration.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { ConfigProvider, Console, Effect, Option, Stdio, Stream } from "effect";
-import { Argument, Command, Flag, Prompt } from "effect/cli";
+import { ConfigProvider, Console, Effect, Layer, Option, Result, Stdio, Stream } from "effect";
+import { Argument, CliOutput, Command, Flag, Prompt } from "effect/cli";
 import { Effort, ThinkingMode } from "../../agent-machine/settings.ts";
 import { settingsGiven } from "./commands.ts";
 import { modelOf } from "../../agent-session/configuration/session-setup.ts";
-import { KeyedAndLocalCatalog, keyOf, keyVariables, known, ModelCatalog } from "../../agent-host/catalog.ts";
+import { askable, KeyedAndLocalCatalog, ModelCatalog } from "../../agent-host/catalog.ts";
 import { latestSession, readSession, storedSessions, summaryOf } from "../../agent-host/directory.ts";
 import { LogsToFile, LogsToStderr } from "../../agent-host/logs.ts";
 import { Brand, brandFrom } from "../../agent-host/brand.ts";
 import { launchFlags, launchVariables } from "../../agent-host/launch.ts";
-import { invalid } from "./invalid.ts";
-import { targetOf } from "./models.ts";
+import { invalid, saidFormatter } from "./invalid.ts";
+import { askedOf, targetOf, unavailable } from "./models.ts";
 import { printOnce } from "./print.ts";
-import { repl, Terminal } from "./repl.ts";
+import { repl, Terminal, withoutModel } from "./repl.ts";
 import { type Config, Headless, logFileOf, storeFolder, withSession } from "./session.ts";
 
 const optional = <A>(flag: Flag.Flag<A>) => flag.pipe(Flag.optional, Flag.map(Option.getOrUndefined));
@@ -137,10 +147,17 @@ const resumed = (named: string, interactive: boolean) =>
   });
 
 /**
- * The session's configuration, as the flags give it. A new session asks the model that `--model`
- * names, else the configuration's (`model:`). With `--continue`, the session written to last, or
- * with `--resume`, the one it names or the one picked, asking the model `--model` names or the one it
- * asked; the settings are the ones the flags name, which change those it had.
+ * A session's configuration before the model it asks is found in the catalog: the model's name
+ * (`named`), which is undefined when nothing names one.
+ */
+type Unresolved = Omit<Config, "target"> & { readonly named: string | undefined };
+
+/**
+ * The session's configuration, as the flags give it, with the name of the model to ask. A new
+ * session asks the model that `--model` names, else the configuration's (`model:`). With
+ * `--continue`, the session written to last, or with `--resume`, the one it names or the one picked,
+ * asking the model `--model` names or the one it asked; the settings are the ones the flags name,
+ * which change those it had.
  */
 const configOf = (options: Options, interactive: boolean) =>
   Effect.gen(function* () {
@@ -159,14 +176,14 @@ const configOf = (options: Options, interactive: boolean) =>
     const system = yield* systemOf(options);
     if (options.continue && options.resume !== undefined) return yield* invalid("Pass --continue or --resume, not both.");
     if (!options.continue && options.resume === undefined) {
-      const config: Config = { sessionId: options.sessionId ?? crypto.randomUUID(), target: yield* targetOf(options.model ?? configuration.model), settings, system, ...permissions };
+      const config: Unresolved = { sessionId: options.sessionId ?? crypto.randomUUID(), named: options.model ?? configuration.model, settings, system, ...permissions };
       return config;
     }
     if (options.sessionId !== undefined) return yield* invalid("--session-id names a new session: a continued or resumed one keeps its own.");
     if (system !== undefined) return yield* invalid("A continued session keeps the system prompt it opened with: all sessions have ImmutableSystemPrompt until further notice.");
     const latest = options.resume === undefined ? yield* latestSession(storeFolder) : yield* resumed(options.resume, interactive);
     const now = yield* modelOf(latest.facts);
-    const config: Config = { sessionId: latest.sessionId, target: yield* targetOf(options.model ?? `${now.provider}/${now.model}`), settings, system, continues: latest.facts, ...permissions };
+    const config: Unresolved = { sessionId: latest.sessionId, named: options.model ?? `${now.provider}/${now.model}`, settings, system, continues: latest.facts, ...permissions };
     return config;
   }).pipe(
     Effect.catchTags({
@@ -178,12 +195,6 @@ const configOf = (options: Options, interactive: boolean) =>
     }),
   );
 
-/** A provider's models as the list says them: not answering, none, or their names. */
-const modelsSaid = (models: ReadonlyArray<string> | undefined): string => {
-  if (models === undefined) return "not answering";
-  return models.length === 0 ? "no models" : models.join(", ");
-};
-
 /** The CLI, called by `brand`'s name. */
 export const cliOf = (brand: Brand) =>
   Command.make(
@@ -192,14 +203,25 @@ export const cliOf = (brand: Brand) =>
     Effect.fnUntraced(function* (options) {
       const stdio = yield* Stdio.Stdio;
       const interactive = yield* stdio.stdinIsTerminal;
-      const config = yield* configOf(options, interactive);
+      const { named, ...unresolved } = yield* configOf(options, interactive);
+      // At a terminal, a new session whose model cannot be asked opens the REPL without one, to pick one with /model.
+      if (interactive && !options.print && unresolved.continues === undefined) {
+        const found = yield* Effect.result(askedOf(named, "/model"));
+        const target = Result.isSuccess(found) ? found.success : yield* withoutModel(found.failure, options.prompt);
+        if (target === undefined) return;
+        const config: Config = { ...unresolved, target };
+        // The prompt the command line gave was refused, and not kept, when the REPL opened without a model.
+        const first = Result.isSuccess(found) ? options.prompt : undefined;
+        return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), Terminal, (session, mcp) => repl(session, config, first, interactive, mcp));
+      }
+      const config: Config = { ...unresolved, target: yield* targetOf(named, "--model") };
       if (!options.print)
         return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), interactive ? Terminal : Headless, (session, mcp) => repl(session, config, options.prompt, interactive, mcp));
       // Piped input is read only when no prompt was given: a shell that leaves stdin open would
       // otherwise keep a prompted run waiting for an end of input that never comes.
       const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));
       // Said before the session opens, so a run with nothing to ask leaves no session behind.
-      if (prompt === "") return yield* invalid("No prompt: pass one, or pipe it in.");
+      if (prompt === "") return yield* invalid("No prompt.", "Pass one as an argument, or pipe it in.");
       yield* withSession(config, LogsToStderr, Headless, (session) => printOnce(session, config, prompt, options.outputFormat ?? "text", options.verbose));
     }),
   ).pipe(
@@ -208,26 +230,16 @@ export const cliOf = (brand: Brand) =>
       { command: `${brand.name} -p "Hello" --model claude-sonnet-5-5`, description: "Ask once and print the answer" },
       { command: `${brand.name} -p "Hello" --model gpt-5.5 --output-format json`, description: "The answer with the session's figures" },
       { command: `${brand.name} --model localhost/mlx-community/Qwen3.5-9B-8bit`, description: "A REPL with a local model" },
-      { command: `${brand.name} models`, description: "The known models, which providers have a key set, and the local server's models" },
+      { command: `${brand.name} models`, description: "The models that can be asked, one per line, as --model takes them" },
     ]),
     Command.withSubcommands([
+      // The models on stdout, so that they can be piped; what would make more available on stderr.
       Command.make("models", {}, () =>
         Effect.gen(function* () {
-          yield* Effect.forEach(
-            Object.entries(known),
-            ([provider, listed]) => Console.log(`${provider} (${keyOf(provider) === undefined ? `no ${keyVariables[provider] ?? "key"}` : "key set"}): ${Object.keys(listed).join(", ")}`),
-            { discard: true },
-          );
-          const sources = yield* (yield* ModelCatalog).sources;
-          yield* Effect.forEach(
-            sources.filter(({ provider }) => !(provider in known)),
-            ({ provider, models, at }) =>
-              Console.log(`${provider}${at === undefined ? "" : ` (${at})`}: ${modelsSaid(models)}`),
-            { discard: true },
-          );
-          yield* Console.log("Name a model with --model or /model as it is listed here, or as provider/model: openai/gpt-5.5, localhost/<a local model>.");
+          yield* Effect.forEach(yield* askable, ({ provider, model }) => Console.log(`${provider}/${model}`), { discard: true });
+          yield* Effect.forEach(unavailable(yield* (yield* ModelCatalog).sources), (hint) => Console.error(`HINT: ${hint}`), { discard: true });
         }),
-      ).pipe(Command.withDescription("The known models, which providers have a key set, and the local server's models")),
+      ).pipe(Command.withDescription("The models that can be asked, one per line, as --model takes them")),
     ]),
   );
 
@@ -248,7 +260,7 @@ export const withResumeValue = (args: ReadonlyArray<string>): ReadonlyArray<stri
  */
 export const run = (args: ReadonlyArray<string>, brand: Brand = brandFrom(process.env)) =>
   Command.runWith(cliOf(brand), { version: brand.version })(withResumeValue(args)).pipe(
-    Effect.provide(KeyedAndLocalCatalog),
+    Effect.provide(Layer.mergeAll(CliOutput.layer(saidFormatter), KeyedAndLocalCatalog)),
     Effect.provideService(Brand, brand),
     Effect.provideService(ConfigProvider.ConfigProvider, launchVariables(brand)),
   );

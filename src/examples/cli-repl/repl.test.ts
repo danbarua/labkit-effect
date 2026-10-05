@@ -5,9 +5,9 @@ import { observe, open, opened } from "../../../tests/support/drive.ts";
 import { json } from "../../../tests/support/received.ts";
 import { test } from "../../../tests/support/test.ts";
 import { BunServices } from "@effect/platform-bun";
-import { type Cause, Effect, Layer, Option, Queue, Terminal as EffectTerminal } from "effect";
+import { Effect, Layer, Terminal as EffectTerminal } from "effect";
 import { TestConsole } from "effect/testing";
-import { KeyedAndLocalCatalog } from "../../agent-host/catalog.ts";
+import { type CatalogSource, KeyedAndLocalCatalog, ModelCatalog } from "../../agent-host/catalog.ts";
 import { Millis, ModelName, ModelText, ProviderName, SessionId, ThinkingText } from "../../agent-machine/names.ts";
 import { ModelClient, ToolRunner } from "../../agent-session/contracts.ts";
 import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
@@ -19,7 +19,9 @@ import { EphemeralSessionStore } from "../../agent-session/session-store.ts";
 import { CountingTurns } from "../../agent-session/turns.ts";
 import { BoringContextAssembler } from "../../../tests/support/boring.ts";
 import { runTest } from "../../../tests/support/run.ts";
-import { replyOf, repl, Terminal } from "./repl.ts";
+import { typing } from "../../../tests/support/terminal.ts";
+import { CannotAsk } from "./models.ts";
+import { replyOf, repl, Terminal, withoutModel } from "./repl.ts";
 import { ask, type Config } from "./session.ts";
 
 /** What is printed after a turn whose one response said `text` and ended `ending`; `printed`, whether it was printed as it arrived. */
@@ -42,29 +44,6 @@ test("an answer printed as it arrived is not printed again: only how it was cut 
   expect(replied("1, 2, 3", "Complete", true)).toBeUndefined();
   expect(replied("1, 2, 3", "CutShort", true)).toBe("(cut short: the response reached its length limit)");
 });
-
-const key = (name: string, input?: string): EffectTerminal.UserInput => ({
-  input: input === undefined ? Option.none() : Option.some(input),
-  key: { name, ctrl: false, meta: false, shift: false },
-});
-
-/** A terminal that is typed `lines`, each ended with Enter, and shows nothing. */
-const typing = (lines: ReadonlyArray<string>) =>
-  Effect.gen(function* () {
-    const keys = yield* Queue.unbounded<EffectTerminal.UserInput, Cause.Done>();
-    yield* Queue.offerAll(
-      keys,
-      lines.flatMap((line) => [...line.split("").map((each) => key(each, each)), key("return", "\r")]),
-    );
-    return EffectTerminal.make({
-      columns: Effect.succeed(80),
-      rows: Effect.succeed(24),
-      // Every prompt reads from the one queue: what one prompt leaves is the next one's.
-      readInput: Effect.succeed(keys),
-      readLine: Effect.fail(new EffectTerminal.QuitError()),
-      display: () => Effect.void,
-    });
-  });
 
 /** A model that responds with its thinking and its answer, streaming them first when `streams`; and the requests it was asked. */
 const thinkingThenOk = (streams: boolean) => {
@@ -145,7 +124,7 @@ test("the REPL: Enter on an empty line asks nothing, a line naming no command sa
   const { written, logged } = await typedTo(model, ["hello", "", "/nope", "/exit"]);
   expect(model.asked).toHaveLength(1);
   expect(written).toBe("\x1b[2mthink\x1b[0m\nok\n");
-  expect(logged).toEqual(["No command /nope. /help lists them."]);
+  expect(logged).toEqual(["ERROR: No command /nope.\nHINT: /help lists them."]);
 });
 
 test("the REPL: an answer that did not stream is printed once, from the response, when it arrives", async () => {
@@ -173,4 +152,62 @@ test("the REPL: after going on with a turn that ended before it followed the ses
     }).pipe(Effect.provide(services(thinkingThenOk(false)))),
   );
   expect(logged).toEqual([]);
+});
+
+/** A catalog of `sources`, so that what can be asked depends on neither the environment nor a local server. */
+const catalogOf = (sources: ReadonlyArray<CatalogSource>) => Layer.succeed(ModelCatalog, { sources: Effect.succeed(sources) });
+
+const openai: CatalogSource = { provider: ProviderName.make("openai"), models: [ModelName.make("gpt-5.5"), ModelName.make("gpt-5")] };
+const notAnswering: CatalogSource = { provider: ProviderName.make("localhost"), models: undefined, at: "http://localhost:8000/v1" };
+const noModel = new CannotAsk({ message: "No model is set.", hint: "Pick one with /model." });
+
+/** The REPL before a model is picked, typed `lines`, with a catalog of `sources`: the model picked, and what it logged. */
+const waited = (lines: ReadonlyArray<string>, first?: string, sources: ReadonlyArray<CatalogSource> = [openai]) =>
+  runTest(
+    Effect.gen(function* () {
+      const picked = yield* withoutModel(noModel, first).pipe(Effect.provideService(EffectTerminal.Terminal, yield* typing(lines)));
+      return { picked, logged: yield* TestConsole.logLines };
+    }).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, catalogOf(sources), TestConsole.layer))),
+  );
+
+const banner = "No model to ask · /model to pick one, /help for commands, /exit to quit.";
+
+test("before a model is picked: input for the model is not sent, the other commands are refused, and /model naming a model that can be asked returns that model", async () => {
+  const { picked, logged } = await waited(["hello", "/tools", "/nope", "/model grok-4.7", "/model gpt-99", "/model gpt-5.5", "never read"]);
+  expect(picked as unknown).toEqual({ provider: "openai", model: "gpt-5.5" });
+  expect(logged).toEqual([
+    banner,
+    "ERROR: No model is set.\nHINT: Pick one with /model.",
+    "ERROR: Not sent. No model is set.\nHINT: Pick one with /model.",
+    "ERROR: /tools works once a model is picked.\nHINT: Pick one with /model.",
+    "ERROR: No command /nope.\nHINT: /help lists them.",
+    "ERROR: XAI_API_KEY is not set, so xai models cannot be asked.\nHINT: Pick another model with /model, or restart with XAI_API_KEY set.",
+    "ERROR: No model is named gpt-99.\nHINT: Pick one with /model.",
+  ]);
+});
+
+test("before a model is picked: /model alone picks from the models that can be asked", async () => {
+  // Enter on the pick takes the first model listed.
+  const { picked } = await waited(["/model", ""]);
+  expect(picked as unknown).toEqual({ provider: "openai", model: "gpt-5.5" });
+});
+
+test("before a model is picked: the prompt the command line gave is said to be not sent, and /exit returns no model", async () => {
+  const { picked, logged } = await waited(["/exit"], "hello");
+  expect(picked).toBeUndefined();
+  expect(logged).toEqual([banner, "ERROR: Not sent. No model is set.\nHINT: Pick one with /model."]);
+});
+
+test("before a model is picked: /model alone, with no model that can be asked, says what would make one available", async () => {
+  const { picked, logged } = await waited(["/model", "/exit"], undefined, [notAnswering]);
+  expect(picked).toBeUndefined();
+  expect(logged.slice(2)).toEqual([
+    [
+      "ERROR: No model can be asked.",
+      "HINT: Set ANTHROPIC_API_KEY to use anthropic models.",
+      "HINT: Set OPENAI_API_KEY to use openai models.",
+      "HINT: Set XAI_API_KEY to use xai models.",
+      "HINT: The local server at http://localhost:8000/v1 is not answering; start it to use localhost models.",
+    ].join("\n"),
+  ]);
 });

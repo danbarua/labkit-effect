@@ -57,7 +57,7 @@ const session = (lines: ReadonlyArray<string>, brand: Brand = defaultBrand, sett
         // `/settings` alone asks at the terminal which setting to change; here it stands for what it shows first.
         if (line === "/settings") printed.push(yield* inForce(opened));
         else if (line === "(offered)") printed.push(JSON.stringify(yield* offered(opened)));
-        else if (line.startsWith("/")) printed.push(yield* command(opened, line, testFolder()).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(`error: ${String(error.userMessage)}`))));
+        else if (line.startsWith("/")) printed.push(yield* command(opened, line, testFolder()).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(String(error.userMessage)))));
         else yield* ask(opened, line);
       }
       return { printed, asked };
@@ -122,11 +122,11 @@ test("/tools shows the tools the session opened with: here, none", async () => {
 
 test("a mistake in a command is said and changes nothing; a line that names no command is not one", async () => {
   const { printed } = await session(["/settings effort=loud", "/settings volume=11", "/model gpt-99", "/model grok-4.7", "/nope", "/settings"]);
-  expect(printed[0]).toStartWith("error: Not settings the session takes:");
-  expect(printed[1]).toStartWith("error: Not settings the session takes:");
+  expect(printed[0]).toStartWith("ERROR: Not settings the session takes:");
+  expect(printed[1]).toStartWith("ERROR: Not settings the session takes:");
   expect(printed.slice(2)).toEqual([
-    "error: No model named gpt-99. `bun cli models` lists the models you can use; name one as it lists it, or as provider/model (for example openai/gpt-5.5, or localhost/<a model the local server serves>).",
-    "error: Set XAI_API_KEY before calling xai/* models, or try a different model with --model provider/model.",
+    "ERROR: No model is named gpt-99.\nHINT: Pick one with /model.",
+    "ERROR: XAI_API_KEY is not set, so xai models cannot be asked.\nHINT: Pick another model with /model, or restart with XAI_API_KEY set.",
     undefined,
     "openai/gpt-5.5 effort=low\nthis model takes effort: none, low, medium, high, xhigh",
   ]);
@@ -187,5 +187,5 @@ test("/settings takes effort=none as thinking=off, and refuses effort=none with 
   const off = await session(["/settings thinking=off", "hello"]);
   expect(asked[0]?.settings as unknown).toEqual(off.asked[0]?.settings);
   expect(asked[0]?.settings).toMatchObject({ thinking: "off" });
-  expect(printed[1]).toBe("error: effort=none is thinking=off, and thinking=auto says otherwise.");
+  expect(printed[1]).toBe("ERROR: effort=none is thinking=off, and thinking=auto says otherwise.");
 });
