@@ -13,6 +13,7 @@
     "check:schemas": "bun scripts/config-schema.ts --check",
     "acp:logs": "bun scripts/acp-logs.ts",
     "cli": "bun run src/examples/cli-repl/index.ts",
+    "zork": "bun run src/examples/zork/index.ts",
     "models:refresh": "bun scripts/models/refresh.ts",
     "cli:watch": "bun --watch src/examples/cli-repl/index.ts",
     "vscode:dev": "bun scripts/vscode-dev.ts",
