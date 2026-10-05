@@ -41,7 +41,7 @@ const functional = {
 } as const;
 
 /** The modules under `src/` held to `functional`, besides the abstract layers. */
-const functionalModules = ["agent-process", "agent-config", "agent-tools", "agent-host", "agent-mcp", "agent-context", "agent-session", "agent-acp", "examples"] as const;
+const functionalModules = ["agent-process", "agent-config", "agent-tools", "agent-host", "agent-mcp", "agent-context", "agent-session", "agent-acp", "examples", "instrumentation"] as const;
 
 /**
  * Files that are glue to an imperative API, where mutable state or loops are needed. Each entry
@@ -54,6 +54,8 @@ const imperativeBoundaries: ReadonlyArray<string> = [
   "src/agent-mcp/peer.ts",
   // Raw mode and key events on Node's stdin (node:tty), around Effect's terminal prompts.
   "src/examples/cli-repl/turn-keys.ts",
+  // A span that keeps its events, as Effect's Tracer.Span, whose methods Effect calls synchronously.
+  "src/instrumentation/telemetry.ts",
 ];
 
 export default defineConfig({

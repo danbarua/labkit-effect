@@ -23,6 +23,13 @@ const none: ToolStats = {
   unfinished: 0,
 };
 
+/** `now` with one more call, as it ended: succeeded, failed for its reason, or unfinished when its end is not recorded. */
+const withCall = (now: ToolStats, outcome: ToolOutcome | undefined): ToolStats => {
+  if (outcome === undefined) return { ...now, calls: now.calls + 1, unfinished: now.unfinished + 1 };
+  if (outcome._tag === "Succeeded") return { ...now, calls: now.calls + 1, succeeded: now.succeeded + 1 };
+  return { ...now, calls: now.calls + 1, failed: { ...now.failed, [outcome.reason._tag]: now.failed[outcome.reason._tag] + 1 } };
+};
+
 export function toolStats(facts: ReadonlyArray<Fact>): ReadonlyMap<ToolName, ToolStats> {
   const calls = new Map<CallId, ToolName>(
     facts.flatMap((fact) =>
@@ -39,18 +46,7 @@ export function toolStats(facts: ReadonlyArray<Fact>): ReadonlyMap<ToolName, Too
     ),
   );
   return [...calls].reduce((stats, [call, tool]) => {
-    const now = stats.get(tool) ?? none;
-    const outcome = ends.get(call);
-    const next: ToolStats =
-      outcome === undefined
-        ? { ...now, calls: now.calls + 1, unfinished: now.unfinished + 1 }
-        : outcome._tag === "Succeeded"
-          ? { ...now, calls: now.calls + 1, succeeded: now.succeeded + 1 }
-          : {
-              ...now,
-              calls: now.calls + 1,
-              failed: { ...now.failed, [outcome.reason._tag]: now.failed[outcome.reason._tag] + 1 },
-            };
+    const next = withCall(stats.get(tool) ?? none, ends.get(call));
     return new Map([...stats, [tool, next]]);
   }, new Map<ToolName, ToolStats>());
 }
