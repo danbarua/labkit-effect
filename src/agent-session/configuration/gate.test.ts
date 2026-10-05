@@ -22,7 +22,7 @@ const gated = Effect.gen(function* () {
   return { running, made, gate };
 });
 
-test("G1: while no turn runs a change is made at once", () => {
+test("while no turn runs a change is made at once", () => {
   const { said, made } = Effect.runSync(
     Effect.gen(function* () {
       const { made, gate } = yield* gated;
@@ -33,7 +33,7 @@ test("G1: while no turn runs a change is made at once", () => {
   expect(made).toEqual([{ model: "b" }]);
 });
 
-test("G2: while a turn runs changes are held, merged in order, and made as one when it ends (settle); settle makes nothing while a turn runs, or with nothing held", () => {
+test("while a turn runs changes are held, merged in order, and made as one when it ends (settle); settle makes nothing while a turn runs, or with nothing held", () => {
   const seen = Effect.runSync(
     Effect.gen(function* () {
       const { running, made, gate } = yield* gated;
@@ -58,7 +58,7 @@ test("G2: while a turn runs changes are held, merged in order, and made as one w
   });
 });
 
-test("G3: a change submitted once the turn has ended, before the host settles, is made with the one held, not lost", () => {
+test("a change submitted once the turn has ended, before the host settles, is made with the one held, not lost", () => {
   const made = Effect.runSync(
     Effect.gen(function* () {
       const { running, made, gate } = yield* gated;

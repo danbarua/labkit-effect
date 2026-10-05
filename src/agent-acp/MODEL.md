@@ -229,7 +229,7 @@ twice.
   `cancelled`. A prompt request the client cancels (`$/cancel_request`) cancels its turn the same
   way. The session takes the next prompt.
 - AG5. `session/set_config_option` changes a draft (`chooseModel`, `saySettings`). On an open session
-  it goes through the session's configuration gate (agent-session G1–G3): made at once between
+  it goes through the session's configuration gate (`agent-session/configuration/gate.ts`): made at once between
   turns (`ModelChangeArrived` from the user through ACP), and while a turn runs held until it ends,
   so the model that started the turn completes it. The gate is settled when a prompt's turn ends
   and before a prompt starts one. The answer is every option as the configuration will be, the
@@ -293,7 +293,7 @@ twice.
   when `session/new`, `session/load` or `session/resume` makes it, at once (`agent-mcp` MK1), in the entry's scope, which `session/close` closes: their
   processes end with it. A server has `mcpConnectTimeout` (30 seconds unless the launcher says) to
   connect. The tools of those ready are offered after the world's, under `mcp__<server>`; a call is
-  shown with its result as the model is sent it (`agent-session` TO1). Once the session opens it
+  shown with its result as the model is sent it (`agent-session/tool-output.ts`). Once the session opens it
   records each server's state, and each change of it (`McpServerChanged`, from the harness part
   "mcp servers").
 - AG23. A server that cannot be started, or does not connect, leaves the session running: the model

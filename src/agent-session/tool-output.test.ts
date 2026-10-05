@@ -31,7 +31,7 @@ const sent = (outcome: unknown) => {
 
 const mcp = (result: unknown) => ({ mediaType: mcpToolResult, body: { _tag: "Text", text: JSON.stringify(result) } });
 
-test("TO1: an MCP server's result is sent as plain text: its text blocks, an embedded text resource, a resource link as a link, an image named", () => {
+test("an MCP server's result is sent as plain text: its text blocks, an embedded text resource, a resource link as a link, an image named", () => {
   const outcome = sent({
     _tag: "Succeeded",
     output: mcp({
@@ -50,7 +50,7 @@ test("TO1: an MCP server's result is sent as plain text: its text blocks, an emb
   ]);
 });
 
-test("TO1: with no text, its structured content is sent as JSON; a tool's own failure (isError) is sent as its text; other output is sent as recorded", () => {
+test("an MCP result with no text is sent as its structured content in JSON; an MCP tool's own failure (isError) is sent as its text; other output is sent as recorded", () => {
   const structured = sent({ _tag: "Succeeded", output: mcp({ content: [], structuredContent: { sum: 3 } }) });
   expect(structured?._tag === "Succeeded" ? asText(structured.output) : structured).toBe('{"sum":3}');
   const failed = sent({ _tag: "Failed", reason: { _tag: "Reported", error: mcp({ content: [{ type: "text", text: "no such file" }], isError: true }) } });

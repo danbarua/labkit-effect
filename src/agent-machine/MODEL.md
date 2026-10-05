@@ -184,7 +184,7 @@ then continues").
   loaded from its record asks the model it last changed to. A fallback chain is built on this:
   when another provider answers, it reports the change, which the core takes between steps so the
   turn can complete. A user's change is observed only between turns: when, is decided outside the
-  core (agent-session G1–G3).
+  core (`agent-session/configuration/gate.ts`).
 - M2. How a model is to process requests is said in the core's own terms: `thinking` (auto,
   before_answer, between_tools, off), `observe` (all, progress_only, off), `effort` (low to max)
   and `maxOutputTokens`. Each is optional, said in the opening or in a change of model, and stays

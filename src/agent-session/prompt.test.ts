@@ -87,7 +87,7 @@ const seen = (recorded: PubSub.Subscription<Fact>, tag: string, times = 1) =>
 const decided = <T extends Decision["_tag"]>(facts: ReadonlyArray<Fact>, tag: T): ReadonlyArray<Extract<Decision, { _tag: T }>> =>
   facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === tag ? [fact.decision as Extract<Decision, { _tag: T }>] : []));
 
-test("L1 L2: prompt with no turn under way starts one and returns how it ended; turn names it while it runs, and none after", async () => {
+test("prompt with no turn under way starts one and returns how it ended; turn names it while it runs, and none after", async () => {
   const { during, ending, after, facts } = await runTest(
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>();
@@ -114,7 +114,7 @@ test("L1 L2: prompt with no turn under way starts one and returns how it ended; 
   });
 });
 
-test("L2: while prompt waits the session takes observations: a permission question its turn asks is answered from another fiber", async () => {
+test("while prompt waits the session takes observations: a permission question its turn asks is answered from another fiber", async () => {
   const { ending, ended } = await runTest(
     Effect.gen(function* () {
       const { session, recorded } = yield* opened;
@@ -130,7 +130,7 @@ test("L2: while prompt waits the session takes observations: a permission questi
   expect(ended).toEqual(["Succeeded"]);
 });
 
-test("L3: two prompts at once go to one turn: the first starts it, the second is taken between steps, and both return its ending", async () => {
+test("two prompts at once go to one turn: the first starts it, the second is taken between steps, and both return its ending", async () => {
   const { endings, facts } = await runTest(
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>();
@@ -153,7 +153,7 @@ test("L3: two prompts at once go to one turn: the first starts it, the second is
   expect(tagsOf(facts).filter((tag) => tag === "AskModel" || tag === "TellModel")).toEqual(["AskModel", "TellModel"]);
 });
 
-test("L3 L5: a cancelled turn drops a prompt's input still queued; both prompts return Interrupted, and the next prompt starts a turn", async () => {
+test("a cancelled turn drops a prompt's input still queued; both prompts return Interrupted, and the next prompt starts a turn", async () => {
   const { endings, next, facts } = await runTest(
     Effect.gen(function* () {
       const never = yield* Deferred.make<void>();
@@ -176,7 +176,7 @@ test("L3 L5: a cancelled turn drops a prompt's input still queued; both prompts 
   expect(decided(facts, "TurnEnded").map((each) => each.turn)).toEqual([TurnId.make("turn-1"), TurnId.make("turn-2")]);
 });
 
-test("L4: prompt after a turn that failed starts a new turn and returns how that one ended", async () => {
+test("prompt after a turn that failed starts a new turn and returns how that one ended", async () => {
   const { endings, facts } = await runTest(
     Effect.gen(function* () {
       const { session } = yield* opened;
@@ -191,7 +191,7 @@ test("L4: prompt after a turn that failed starts a new turn and returns how that
   ]);
 });
 
-test("L5: cancel with no turn under way records nothing, before the first turn and after one", async () => {
+test("cancel with no turn under way records nothing, before the first turn and after one", async () => {
   const { counts } = await runTest(
     Effect.gen(function* () {
       const { session } = yield* opened;
@@ -208,7 +208,7 @@ test("L5: cancel with no turn under way records nothing, before the first turn a
   expect(counts).toEqual([0, 0]);
 });
 
-test("L5: cancel returns once TurnInterrupted is recorded; the turn ends Interrupted when its request has reported how far it got", async () => {
+test("cancel returns once TurnInterrupted is recorded; the turn ends Interrupted when its request has reported how far it got", async () => {
   const { atCancel, ending, after } = await runTest(
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>();
@@ -232,7 +232,7 @@ test("L5: cancel returns once TurnInterrupted is recorded; the turn ends Interru
   expect(after).toBeUndefined();
 });
 
-test("L5: cancel while a call waits for a permission answer: the call ends NotRun without running, the question is dropped, and prompt returns Interrupted", async () => {
+test("cancel while a call waits for a permission answer: the call ends NotRun without running, the question is dropped, and prompt returns Interrupted", async () => {
   const { ending, observed } = await runTest(
     Effect.gen(function* () {
       const { session, recorded } = yield* opened;
@@ -250,7 +250,7 @@ test("L5: cancel while a call waits for a permission answer: the call ends NotRu
   expect(observed.flatMap((each) => (each._tag === "ToolEnded" ? [each.outcome] : []))).toEqual([{ _tag: "Failed", reason: { _tag: "NotRun" } }]);
 });
 
-test("J3: a write that fails while prompt waits fails prompt with the reason, and cancel after it too", async () => {
+test("a write that fails while prompt waits fails prompt with the reason, and cancel after it too", async () => {
   // A store whose write of a model request's dispatch fails.
   const failing = Layer.effect(
     SessionStore,
@@ -278,7 +278,7 @@ test("J3: a write that fails while prompt waits fails prompt with the reason, an
   expect(Exit.isFailure(cancelled) ? String(cancelled.cause) : "").toContain("the disk is full");
 });
 
-test("L1: a turn the facts left running is under way in the session that goes on from them, until the host ends it", async () => {
+test("a turn that the facts left running is under way in a session that continues from them, until the host ends it", async () => {
   const { left, ended } = await runTest(
     Effect.gen(function* () {
       const never = yield* Deferred.make<void>();

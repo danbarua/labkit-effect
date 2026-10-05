@@ -62,7 +62,7 @@ const over = (store: Layer.Layer<SessionStore, SessionStoreFailed, FileSystem.Fi
 const ask = (session: Session, text: string) =>
   session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make(text) }).pipe(Effect.andThen(session.idle));
 
-test("J2: every fact is in the file as it is recorded, once, in order, and reads back as it was", async () => {
+test("every fact is in the file as it is recorded, once, in order, and reads back as it was", async () => {
   const file = fileIn();
   const { held, read } = await runTest(
     Effect.gen(function* () {
@@ -77,7 +77,7 @@ test("J2: every fact is in the file as it is recorded, once, in order, and reads
   expect(tagsIn(read)).toContain("ToolEnded");
 });
 
-test("J2: that a request was made is in the file before it goes out: the model and the tool find it there", async () => {
+test("that a request was made is in the file before it goes out: the model and the tool find it there", async () => {
   const file = fileIn();
   const seen: Array<string> = [];
   const lastLine = () => {
@@ -108,7 +108,7 @@ test("J2: that a request was made is in the file before it goes out: the model a
   expect(seen).toEqual(["model: ModelRequestDispatched", "tool: ToolCallDispatched", "model: ModelRequestDispatched"]);
 });
 
-test("J3: a write that fails stops the session: nothing after it is written, the tool does not run, and observe fails", async () => {
+test("a write that fails stops the session: nothing after it is written, the tool does not run, and observe fails", async () => {
   const ran = { count: 0 };
   const tools = Layer.succeed(ToolRunner, {
     run: () => Effect.sync(() => (ran.count += 1)).pipe(Effect.as({ _tag: "Succeeded" as const, output: receivedText("hi") })),
@@ -145,7 +145,7 @@ test("J3: a write that fails stops the session: nothing after it is written, the
   expect(tagsIn(kept).filter((tag) => tag === "InputArrived")).toHaveLength(1);
 });
 
-test("J4: one process writes a file at a time; a lock left by a process that ended is taken over", async () => {
+test("one process writes a file at a time; a lock left by a process that ended is taken over", async () => {
   const file = fileIn();
   const second = await runTest(
     Effect.gen(function* () {
@@ -167,7 +167,7 @@ test("J4: one process writes a file at a time; a lock left by a process that end
   expect(taken).toBe(String(process.pid));
 });
 
-test("J4: a last line whose write did not finish is not read, and is cut off before the file is written to again", async () => {
+test("a last line whose write did not finish is not read, and is cut off before the file is written to again", async () => {
   const file = fileIn();
   const held = await runTest(
     Effect.gen(function* () {
@@ -193,7 +193,7 @@ test("J4: a last line whose write did not finish is not read, and is cut off bef
   expect(after.now.length).toBeGreaterThan(held.length);
 });
 
-test("J4: a file whose facts are not in order is refused", async () => {
+test("a file whose facts are not in order is refused", async () => {
   const file = fileIn();
   const held = await runTest(
     Effect.gen(function* () {
@@ -208,7 +208,7 @@ test("J4: a file whose facts are not in order is refused", async () => {
   expect(Exit.isFailure(read) ? String(read.cause) : "").toContain("line 2 holds fact 3 where fact 2 belongs");
 });
 
-test("J1: an ephemeral store keeps the facts in memory only; a store opened on facts goes on from them", async () => {
+test("an ephemeral store keeps the facts in memory only; a session opened on a store that holds facts continues from them", async () => {
   const held = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
@@ -231,7 +231,7 @@ test("J1: an ephemeral store keeps the facts in memory only; a store opened on f
   });
 });
 
-test("J2: each append is flushed to the disk before it returns: a tool runs only after its dispatch is written and flushed", async () => {
+test("each append is flushed to the disk before it returns: a tool runs only after its dispatch is written and flushed", async () => {
   const file = fileIn();
   const events: Array<string> = [];
   // The file system as Bun gives it, with each write to and each flush of an opened file noted.
@@ -280,7 +280,7 @@ test("J2: each append is flushed to the disk before it returns: a tool runs only
   expect(events.filter((event) => event.startsWith("write")).length).toBe(events.filter((event) => event === "flush").length - 1);
 });
 
-test("J4: taking over a lock left by a process that ended, and cutting off a last line whose write did not finish, are logged as warnings", async () => {
+test("taking over a lock left by a process that ended, and cutting off a last line whose write did not finish, are logged as warnings", async () => {
   const file = fileIn();
   const logged: Array<{ readonly level: string; readonly message: unknown }> = [];
   const logging = Logger.layer([Logger.make((options) => logged.push({ level: options.logLevel, message: options.message }))], { mergeWithExisting: true });
@@ -292,7 +292,7 @@ test("J4: taking over a lock left by a process that ended, and cutting off a las
   expect(warned(logKeys.sessionStore.tornLineCut)).toMatchObject([{ file, start: '{"_tag":"Observed","seq":1,"ti' }]);
 });
 
-test.each([["not a pid"], [""], ["0"], ["-1"]])("J4: a lock file that names no process (it holds %j) is taken over, logged with what the file held", async (held) => {
+test.each([["not a pid"], [""], ["0"], ["-1"]])("a lock file that names no process (it holds %j) is taken over, logged with what the file held", async (held) => {
   const file = fileIn();
   const logged: Array<{ readonly level: string; readonly message: unknown }> = [];
   const logging = Logger.layer([Logger.make((options) => logged.push({ level: options.logLevel, message: options.message }))], { mergeWithExisting: true });

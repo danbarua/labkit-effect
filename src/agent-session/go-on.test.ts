@@ -115,7 +115,7 @@ const wentOn = (facts: ReadonlyArray<Fact>) => {
 const tags = (facts: ReadonlyArray<Fact>) => facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
 const ending = (facts: ReadonlyArray<Fact>) => facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? [fact.decision.ending._tag] : []));
 
-test("X5 J5: a model request made and not answered is made again, and the turn goes on", async () => {
+test("X5: a model request made and not answered is made again, and the turn goes on", async () => {
   const session = asked();
   expect(leftRunning(session.journal)?.requests.map((request) => request._tag)).toEqual(["RequestModelResponse"]);
   const { after, asked: times } = await wentOn(session.journal);

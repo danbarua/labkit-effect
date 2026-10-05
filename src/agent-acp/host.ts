@@ -209,7 +209,7 @@ interface Opened {
   readonly context: Context.Context<Services>;
   readonly scope: Scope.Closeable;
   readonly feed: Feed;
-  /** When the user's changes are made: at once between turns, else held until the turn ends (agent-session G1–G3). */
+  /** When the user's changes are made: at once between turns, else held until the turn ends (the configuration gate, `agent-session/configuration/gate.ts`). */
   readonly gate: ConfigurationGate<HeldChange, SessionStoreFailed>;
 }
 
