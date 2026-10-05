@@ -1,8 +1,8 @@
 /**
  * Print mode (`-p`): one input, the answer printed, and the process ends. As text, the answer alone;
  * as `json`, the answer with the session's figures, in the shape of Claude Code's result; as
- * `stream-json`, every fact as it is recorded and then the result. A turn that did not end with an
- * answer fails the process.
+ * `stream-json`, every fact as it is recorded and then the result. The process exits 0 only when
+ * the turn ended `Completed`; a turn that ended any other way, or did not end, fails the process.
  */
 
 import { Console, Effect, Fiber, PubSub, Ref, Schema } from "effect";
@@ -25,7 +25,7 @@ const resultOf = (facts: ReadonlyArray<Fact>, config: Config, started: number, k
   return {
     type: "result",
     subtype: ended?._tag ?? "NotEnded",
-    is_error: ended === undefined || ended._tag === "Failed" || ended._tag === "Vetoed" || ended._tag === "Interrupted",
+    is_error: ended?._tag !== "Completed",
     duration_ms: Date.now() - started,
     num_turns: facts.filter((fact) => fact._tag === "Decided" && (fact.decision._tag === "AskModel" || fact.decision._tag === "TellModel")).length,
     result: ended?._tag === "Failed" ? ended.failure : answerTo(facts, turn),
