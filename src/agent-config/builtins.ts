@@ -17,7 +17,7 @@
  *   for `git push` over SSH); the others are left out.
  */
 
-import { credentialsLeftOut } from "../agent-process/environment.ts";
+import { removeCredentials } from "../agent-process/environment.ts";
 import { Effect, Schema } from "effect";
 import { retryIncomplete as retryIncompleteHook } from "../agent-host/incomplete.ts";
 import { budgetLimit, loopBreaker as loopBreakerPolicies, permissionsFor, turnRequestLimit } from "../agent-host/services.ts";
@@ -64,7 +64,7 @@ export const maxBudget = plugin("maxBudget", Schema.Struct({ usd: Schema.Finite.
 }));
 
 export const credentials = plugin("credentials", Schema.Struct({ pass: defaulted(Schema.Array(Schema.String), []) }), ["commandEnvironment"], ({ pass }) => ({
-  commandEnvironment: credentialsLeftOut(pass),
+  commandEnvironment: removeCredentials(pass),
 }));
 
 export const builtins: ReadonlyArray<AnyPlugin> = [loopBreaker, permissions, maxTurnRequests, retryIncomplete, maxBudget, credentials];

@@ -37,7 +37,7 @@ import { type ConfigFlags, launchLayers } from "../agent-host/launch.ts";
 import { writeEffectiveSettings } from "../agent-config/effective.ts";
 import { type Configuration, type LayerSource, loadConfiguration } from "../agent-config/file.ts";
 import { seamLayer, seamListsOf } from "../agent-config/seams.ts";
-import { credentialsLeftOut, environmentOf } from "../agent-process/environment.ts";
+import { removeCredentials, processEnvironmentWith } from "../agent-process/environment.ts";
 import { describe } from "../agent-mcp/server-machine.ts";
 import { basename, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -425,7 +425,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           );
 
         /** What a command the model runs on the local disk is given of the environment: what the configuration composes. */
-        const environmentFor = (configuration: Configured) => environmentOf(seamListsOf(configuration, { canAsk: true }).commandEnvironment ?? [credentialsLeftOut()]);
+        const environmentFor = (configuration: Configured) => processEnvironmentWith(seamListsOf(configuration, { canAsk: true }).commandEnvironment ?? [removeCredentials()]);
 
         /** Writes what a session's configuration resolved to, with what the host says beside it, to the session's folder (AG25). */
         const settingsWritten = (id: AcpSessionId, configuration: Configured, permissionMode: PermissionMode, model: string) =>

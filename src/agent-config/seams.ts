@@ -21,7 +21,7 @@ export interface SeamLists {
   readonly knownModels?: ReadonlyArray<ModelKnowledge>;
   readonly settling?: ReadonlyArray<SettlingSource>;
   readonly toolSources?: ReadonlyArray<Entries["toolSources"]>;
-  /** Not a context seam: the host gives the commands it runs what they compose (`environmentOf`). */
+  /** Not a context seam: the host gives the commands it runs what they compose (`processEnvironmentWith`). */
   readonly commandEnvironment?: ReadonlyArray<Entries["commandEnvironment"]>;
   readonly maxHolds?: number;
 }

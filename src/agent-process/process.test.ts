@@ -154,19 +154,19 @@ test("when the spawner reports neither an exit code nor a signal, the run is Exi
 /** Starts a group whose run starts a child process in the background and prints the child's pid. Returns the group, the run's pid and the child's pid. */
 const withChild = (group: (onRun: Parameters<typeof makeProcessGroup>[1]) => Effect.Effect<ProcessGroup, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner>) =>
   Effect.gen(function* () {
-    const said = yield* Deferred.make<number>();
+    const childPid = yield* Deferred.make<number>();
     const made = yield* group((_run, handle) =>
       handle.stdout.pipe(
         Stream.decodeText,
         Stream.splitLines,
         Stream.runHead,
-        Effect.flatMap((line) => Deferred.succeed(said, Number(line._tag === "Some" ? line.value : NaN))),
+        Effect.flatMap((line) => Deferred.succeed(childPid, Number(line._tag === "Some" ? line.value : NaN))),
         Effect.ignore,
       ),
     );
     yield* made.start;
     const running = yield* until(made, (state) => state._tag === "Running");
-    const child = yield* Deferred.await(said).pipe(Effect.timeout("5 seconds"));
+    const child = yield* Deferred.await(childPid).pipe(Effect.timeout("5 seconds"));
     return { group: made, pid: running?._tag === "Running" ? running.pid : NaN, child };
   });
 

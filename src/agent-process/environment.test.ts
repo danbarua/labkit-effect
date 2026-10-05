@@ -5,32 +5,32 @@ import { BunServices } from "@effect/platform-bun";
 import { Deferred, Effect, Layer, Logger, Stream } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
-import { shouldRedact, redactedArgs, withoutCredentials } from "./environment.ts";
+import { isCredentialName, redactedArgs, withoutCredentials } from "./environment.ts";
 import { logKeys } from "./log-keys.ts";
 import { makeProcessGroup, type ProcessCommand } from "./process-group.ts";
 
 test("a name whose words include a credential word is a credential name, and withoutCredentials removes those variables and returns their names in order", () => {
-  const held = ["ANTHROPIC_API_KEY", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "SSH_AUTH_SOCK", "npm_config__authToken", "DB_PASSWORD", "GH_PAT", "my.secret", "OPENAI_APIKEY"];
-  for (const h of held) {
-    expect(shouldRedact(h), `"${h} should be redacted`).toBeTrue();
+  const credentialNames = ["ANTHROPIC_API_KEY", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "SSH_AUTH_SOCK", "npm_config__authToken", "DB_PASSWORD", "GH_PAT", "my.secret", "OPENAI_APIKEY"];
+  for (const name of credentialNames) {
+    expect(isCredentialName(name), `"${name}" should be a credential name`).toBeTrue();
   }
 
-  const kept = ["PATH", "HOME", "GIT_AUTHOR_NAME", "KEYBOARD_LAYOUT", "MONKEY", "PATTERN", "LANG", "MAX_TOKENS"];
-  for (const k of kept) {
-    expect(shouldRedact(k), `"${k}" should not be redacted`).toBeFalse();
+  const otherNames = ["PATH", "HOME", "GIT_AUTHOR_NAME", "KEYBOARD_LAYOUT", "MONKEY", "PATTERN", "LANG", "MAX_TOKENS"];
+  for (const name of otherNames) {
+    expect(isCredentialName(name), `"${name}" should not be a credential name`).toBeFalse();
   }
 
-  expect(withoutCredentials({ PATH: "/bin", GITHUB_TOKEN: "t", AWS_SECRET_ACCESS_KEY: "s", EMPTY: undefined })).toEqual({ env: { PATH: "/bin" }, left: ["AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"] });
+  expect(withoutCredentials({ PATH: "/bin", GITHUB_TOKEN: "t", AWS_SECRET_ACCESS_KEY: "s", EMPTY: undefined })).toEqual({ env: { PATH: "/bin" }, removed: ["AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"] });
 });
 
 test("in a camelCase name, a credential word counts only where a capital after a lower-case letter starts and ends it: apiKeyId is a credential name, monkey is not", () => {
-  const held = ["apiKeyId", "githubTokenValue", "passwordHash", "myPAT", "XApiKey", "authToken"];
-  for (const h of held) {
-    expect(shouldRedact(h), `"${h}" should be redacted`).toBeTrue();
+  const credentialNames = ["apiKeyId", "githubTokenValue", "passwordHash", "myPAT", "XApiKey", "authToken"];
+  for (const name of credentialNames) {
+    expect(isCredentialName(name), `"${name}" should be a credential name`).toBeTrue();
   }
-  const kept = ["monkey", "bypass", "compass", "turkey", "keyboard", "tokenizer", "pathToFile"];
-  for (const k of kept) {
-    expect(shouldRedact(k), `"${k}" should not be redacted`).toBeFalse();
+  const otherNames = ["monkey", "bypass", "compass", "turkey", "keyboard", "tokenizer", "pathToFile"];
+  for (const name of otherNames) {
+    expect(isCredentialName(name), `"${name}" should not be a credential name`).toBeFalse();
   }
 });
 
@@ -94,7 +94,7 @@ test("a run's arguments are logged with each credential flag's value redacted, a
 test("a run's environment is logged by variable names only: the credential variables removed, and the variables the command sets", async () => {
   process.env["LABKIT_TEST_LOGGED_TOKEN"] = "inherited-value";
   const { details, text } = await runTest(loggedBy({ name: "env", command: "/bin/sh", args: ["-c", "exit 0"], env: { SERVER_TOKEN: "given-value" } }));
-  expect(details(logKeys.process.environment)).toMatchObject([{ name: "env", run: 1, leftOut: expect.arrayContaining(["LABKIT_TEST_LOGGED_TOKEN"]), set: ["SERVER_TOKEN"] }]);
+  expect(details(logKeys.process.environment)).toMatchObject([{ name: "env", run: 1, removed: expect.arrayContaining(["LABKIT_TEST_LOGGED_TOKEN"]), set: ["SERVER_TOKEN"] }]);
   expect(text).not.toContain("inherited-value");
   expect(text).not.toContain("given-value");
 });

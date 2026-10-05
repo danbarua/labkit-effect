@@ -18,7 +18,7 @@ import { writeEffectiveSettings } from "../../agent-config/effective.ts";
 import type { Configuration, LayerSource } from "../../agent-config/file.ts";
 import { seamLayer, seamListsOf } from "../../agent-config/seams.ts";
 import { describe } from "../../agent-mcp/server-machine.ts";
-import { credentialsLeftOut, environmentOf } from "../../agent-process/environment.ts";
+import { removeCredentials, processEnvironmentWith } from "../../agent-process/environment.ts";
 import { type GivenServer, type McpServers, startMcpServers } from "../../agent-mcp/servers.ts";
 import type { Asked } from "../../agent-host/catalog.ts";
 import { sessionFolderOf, storeFileOf } from "../../agent-host/directory.ts";
@@ -81,7 +81,7 @@ export const logFileOf = (sessionId: string): string => `${sessionFolderOf(store
 const workspaceOf = (config: Config) =>
   workspaceTools(process.cwd(), {
     strictInput: config.strictToolInput,
-    environment: environmentOf(seamListsOf(config.configuration, { canAsk: config.canAsk }).commandEnvironment ?? [credentialsLeftOut()]),
+    environment: processEnvironmentWith(seamListsOf(config.configuration, { canAsk: config.canAsk }).commandEnvironment ?? [removeCredentials()]),
   });
 
 /**

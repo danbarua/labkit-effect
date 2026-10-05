@@ -14,7 +14,7 @@ command arguments before they are logged.
 | --- | --- |
 | `machine.ts` | A pure state machine for one process group. `stepProcess(state, event)` returns the next state and the effects to perform (`Spawn`, `Kill`). |
 | `process-group.ts` | `makeProcessGroup(command, onRun)` performs the machine's effects with Effect's `ChildProcessSpawner` and logs every state change. |
-| `environment.ts` | Classifies environment variable names as credential names (`shouldRedact`), removes credential variables from an inherited environment, and redacts credential flag values in command arguments (`redactedArgs`). |
+| `environment.ts` | Classifies environment variable names as credential names (`isCredentialName`), removes credential variables from an inherited environment, and redacts credential flag values in command arguments (`redactedArgs`). |
 | `log-keys.ts` | The names of the log events that this module writes. |
 
 ## States
@@ -33,19 +33,20 @@ command arguments before they are logged.
   `ProcessGroup` with `start`, `restart`, `stop`, `state` and `changes`.
 - `onRun(run, handle)` receives each run's process handle. `onRun` runs in the run's scope, so it is
   interrupted when the run's scope closes.
-- `EnvironmentTransform` and `environmentOf` build the environment for commands that the model
-  runs. `agent-config` exposes the transforms as the `commandEnvironment` seam.
-  `credentialsLeftOut(allowList)` is the transform that removes credential variables.
+- `EnvironmentTransform` and `processEnvironmentWith` build the environment for commands that the
+  model runs. `agent-config` exposes the transforms as the `commandEnvironment` seam.
+  `removeCredentials(allowList)` returns the transform that removes credential variables, except
+  those named in `allowList`.
 
 Other modules use these functions:
 
 | Module | Uses |
 | --- | --- |
-| `agent-mcp` | `makeProcessGroup` for stdio servers; `withoutCredentials` in `connectStdio`; `shouldRedact` for HTTP header names. |
+| `agent-mcp` | `makeProcessGroup` for stdio servers; `withoutCredentials` in `connectStdio`; `isCredentialName` for HTTP header names. |
 | `agent-tools` | `withoutCredentials` for the default environment of `run_command`. |
-| `agent-config` | `credentialsLeftOut` for the `credentials` plug-in; `redactedArgs` for `effective-settings.json`. |
-| `agent-host` | `shouldRedact` to collect the credential values that logs redact; `redactionPlaceholder`. |
-| `agent-acp`, CLI | `environmentOf` and `credentialsLeftOut` for the environment of the commands that the model runs. |
+| `agent-config` | `removeCredentials` for the `credentials` plug-in; `redactedArgs` for `effective-settings.json`. |
+| `agent-host` | `isCredentialName` to collect the credential values that logs redact; `redactionPlaceholder`. |
+| `agent-acp`, CLI | `processEnvironmentWith` and `removeCredentials` for the environment of the commands that the model runs. |
 
 ## Design decisions
 
@@ -63,7 +64,7 @@ Other modules use these functions:
   `consumerGrace` (2 seconds) for `onRun` to finish before it closes the run's scope. A process's
   last output can still be unread when the process exits.
 - **Which variables are removed.** A variable that the child inherits from this process is removed
-  when `shouldRedact` classifies its name as a credential name. A variable that the command's own
+  when `isCredentialName` classifies its name as a credential name. A variable that the command's own
   configuration sets (an MCP server's `env`) is passed unchanged, because that is how a server
   receives the credential it needs.
 - **Arguments are redacted in logs only.** The log shows `--token=<redacted>`. The process receives

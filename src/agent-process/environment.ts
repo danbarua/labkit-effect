@@ -3,7 +3,7 @@
  * arguments before they are logged.
  *
  * A name is a credential name when one of its words is a credential word, in any letter case
- * (`COMMON_CREDENTIAL_PATTERNS`), or when it matches a secret's format (`KNOWN_KEY_PATTERNS`).
+ * (`CREDENTIAL_WORD_PATTERNS`), or when it matches a secret's format (`SECRET_VALUE_PATTERNS`).
  * - Credential names: `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`,
  *   `SSH_AUTH_SOCK`, `apiKeyId`.
  * - Not credential names: `GIT_AUTHOR_NAME`, `PATH`, `MAX_TOKENS`, `monkey`.
@@ -11,8 +11,8 @@
 
 import { Array as Arr, Order } from "effect";
 
-/** Formats of secret values. `shouldRedact` applies them to names as well. */
-export const KNOWN_KEY_PATTERNS = [
+/** Formats of secret values. `isCredentialName` applies them to names as well. */
+export const SECRET_VALUE_PATTERNS = [
   // URLs with credentials
   /(\S{1,1024}):\/\/[^:\s]{1,1024}:[^@\s]{1,1024}@/i,
   // GitHub tokens
@@ -41,7 +41,7 @@ const credentialWord = (word: string): RegExp => {
 };
 
 /** The credential words. A name that contains one of these words is a credential name. */
-export const COMMON_CREDENTIAL_PATTERNS: ReadonlyArray<RegExp> = [
+export const CREDENTIAL_WORD_PATTERNS: ReadonlyArray<RegExp> = [
   credentialWord("TOKEN"),
   credentialWord("KEY"),
   credentialWord("APIKEY"),
@@ -57,9 +57,9 @@ export const COMMON_CREDENTIAL_PATTERNS: ReadonlyArray<RegExp> = [
   credentialWord("CERTIFICATE"),
 ];
 
-/** Returns true when `name` is a credential name: one of its words is a credential word, or it matches `KNOWN_KEY_PATTERNS`. */
-export const shouldRedact = (name: string): boolean =>
-  COMMON_CREDENTIAL_PATTERNS.some((pattern) => pattern.test(name)) || KNOWN_KEY_PATTERNS.some((pattern) => pattern.test(name));
+/** Returns true when `name` is a credential name: one of its words is a credential word, or it matches `SECRET_VALUE_PATTERNS`. */
+export const isCredentialName = (name: string): boolean =>
+  CREDENTIAL_WORD_PATTERNS.some((pattern) => pattern.test(name)) || SECRET_VALUE_PATTERNS.some((pattern) => pattern.test(name));
 
 /** Environment variables: each name with its value. */
 export type Environment = Readonly<Record<string, string>>;
@@ -68,34 +68,34 @@ export type Environment = Readonly<Record<string, string>>;
 export type EnvironmentTransform = (environment: Environment) => Environment;
 
 /** Returns a transform that removes every credential variable except those named in `allowList`. */
-export const credentialsLeftOut =
+export const removeCredentials =
   (allowList: ReadonlyArray<string> = []): EnvironmentTransform =>
   (environment) =>
-    Object.fromEntries(Object.entries(environment).filter(([name]) => allowList.includes(name) || !shouldRedact(name)));
+    Object.fromEntries(Object.entries(environment).filter(([name]) => allowList.includes(name) || !isCredentialName(name)));
 
 /**
  * Applies `transforms` in order to this process's environment, without the variables that have no
  * value. With no transforms, returns that environment unchanged.
  */
-export const environmentOf = (transforms: ReadonlyArray<EnvironmentTransform>): Environment =>
-  transforms.reduce<Environment>((environment, transform) => transform(environment), definedOf(process.env));
+export const processEnvironmentWith = (transforms: ReadonlyArray<EnvironmentTransform>): Environment =>
+  transforms.reduce<Environment>((environment, transform) => transform(environment), definedVariables(process.env));
 
 /** Returns the variables in `environment` that have a value. */
-const definedOf = (environment: Readonly<Record<string, string | undefined>>): Environment =>
+const definedVariables = (environment: Readonly<Record<string, string | undefined>>): Environment =>
   Object.fromEntries(Object.entries(environment).flatMap(([name, value]) => (value === undefined ? [] : [[name, value] as const])));
 
 /**
  * Returns `environment` without its credential variables and without the variables that have no
- * value (`env`), and the names of the removed credential variables, sorted (`left`).
+ * value (`env`), and the names of the removed credential variables, sorted (`removed`).
  */
 export const withoutCredentials = (
   environment: Readonly<Record<string, string | undefined>>,
-): { readonly env: Readonly<Record<string, string>>; readonly left: ReadonlyArray<string> } => {
+): { readonly env: Readonly<Record<string, string>>; readonly removed: ReadonlyArray<string> } => {
   const entries = Object.entries(environment).flatMap(([name, value]) => (value === undefined ? [] : [[name, value] as const]));
   return {
-    env: Object.fromEntries(entries.filter(([name]) => !shouldRedact(name))),
-    left: Arr.sort(
-      entries.flatMap(([name]) => (shouldRedact(name) ? [name] : [])),
+    env: Object.fromEntries(entries.filter(([name]) => !isCredentialName(name))),
+    removed: Arr.sort(
+      entries.flatMap(([name]) => (isCredentialName(name) ? [name] : [])),
       Order.String,
     ),
   };
@@ -114,8 +114,8 @@ export const redactionPlaceholder = "<redacted>";
 export const redactedArgs = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
   args.map((arg, index) => {
     const joined = /^--?([^=]+)=/.exec(arg);
-    if (joined?.[1] !== undefined) return shouldRedact(joined[1]) ? `${arg.slice(0, arg.indexOf("=") + 1)}${redactionPlaceholder}` : arg;
+    if (joined?.[1] !== undefined) return isCredentialName(joined[1]) ? `${arg.slice(0, arg.indexOf("=") + 1)}${redactionPlaceholder}` : arg;
     const before = args[index - 1];
     const flag = before === undefined ? undefined : /^--?([^=]+)$/.exec(before)?.[1];
-    return flag !== undefined && shouldRedact(flag) && !arg.startsWith("-") ? redactionPlaceholder : arg;
+    return flag !== undefined && isCredentialName(flag) && !arg.startsWith("-") ? redactionPlaceholder : arg;
   });

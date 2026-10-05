@@ -1,7 +1,7 @@
 /**
  * What a host's log lines leave out: the values of the environment's credentials, wherever they
  * occur, and the value of a field named for a credential, whatever it is. A credential's variable is
- * one whose name is a credential's (`agent-process/environment.ts` `isCredential`: `GITHUB_PAT`,
+ * one whose name is a credential's (`agent-process/environment.ts` `isCredentialName`: `GITHUB_PAT`,
  * `OPENAI_API_KEY`, `SSH_AUTH_SOCK`).
  *
  * A value shorter than `shortest` is not looked for: replaced wherever it occurs, it would cut
@@ -13,7 +13,7 @@
  */
 
 import { Array as Arr, Effect, Layer, Logger, Order } from "effect";
-import { redactionPlaceholder, shouldRedact } from "../agent-process/environment.ts";
+import { isCredentialName, redactionPlaceholder } from "../agent-process/environment.ts";
 import { logKeys } from "./log-keys.ts";
 
 /** The fewest characters a credential's value has to be looked for. */
@@ -28,7 +28,7 @@ export interface Secrets {
 
 /** The secrets of `env`: the non-empty values of its credentials' variables, those shorter than `shortest` set aside. */
 export const secretsOf = (env: Readonly<Record<string, string | undefined>>): Secrets => {
-  const credentials = Object.entries(env).flatMap(([name, value]) => (value !== undefined && value !== "" && shouldRedact(name) ? [{ name, value }] : []));
+  const credentials = Object.entries(env).flatMap(([name, value]) => (value !== undefined && value !== "" && isCredentialName(name) ? [{ name, value }] : []));
   return {
     values: credentials.flatMap(({ value }) => (value.length >= shortest ? [value] : [])),
     tooShort: credentials.flatMap(({ name, value }) => (value.length < shortest ? [{ name, length: value.length }] : [])),

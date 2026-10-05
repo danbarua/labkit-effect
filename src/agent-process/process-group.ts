@@ -85,7 +85,7 @@ export const makeProcessGroup = (
         yield* Ref.update(runs, HashMap.set(run, runScope));
         // The command's own `env` is applied after the credentials are removed, so a server receives the credential that its configuration names.
         const inherited = withoutCredentials(process.env);
-        yield* Effect.logInfo(logKeys.process.environment, { name: command.name, run, leftOut: inherited.left, set: Object.keys(command.env) });
+        yield* Effect.logInfo(logKeys.process.environment, { name: command.name, run, removed: inherited.removed, set: Object.keys(command.env) });
         const started = yield* ChildProcess.make(command.command, [...command.args], {
           env: { ...inherited.env, ...command.env },
           extendEnv: false,
