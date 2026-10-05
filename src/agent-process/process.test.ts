@@ -1,4 +1,4 @@
-/** A session's child process groups: the machine, and real processes run by it. */
+/** The process group state machine, and process groups that run real processes. */
 
 import { expect } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
@@ -18,17 +18,17 @@ test("Start while a run is live changes nothing; Restart kills the live run and 
   expect(stepProcess(running, { _tag: "Start" })).toEqual({ state: running, effects: [] });
   const restarted = stepProcess(running, { _tag: "Restart" });
   expect(restarted).toEqual({ state: { _tag: "Starting", run: 2 }, effects: [{ _tag: "Kill", run: 1 }, { _tag: "Spawn", run: 2 }] });
-  // Run 1 reports its end after run 2 was asked for: nothing changes.
+  // Run 1 reports its end after run 2 was requested; the state does not change.
   expect(stepProcess(restarted.state, { _tag: "Ended", run: 1, code: 143, signal: undefined })).toEqual({ state: restarted.state, effects: [] });
   const second = stepProcess(restarted.state, { _tag: "Started", run: 2, pid: 200 }).state;
   expect(stepProcess(second, { _tag: "Stop" })).toEqual({ state: { _tag: "Idle", run: 2 }, effects: [{ _tag: "Kill", run: 2 }] });
 });
 
-/** The first state of `group` that `is` accepts, within five seconds. */
+/** Returns the first state of `group` that `is` accepts; fails after five seconds. */
 const until = (group: ProcessGroup, is: (state: ProcessState) => boolean) =>
   group.changes.pipe(Stream.filter(is), Stream.runHead, Effect.timeout("5 seconds"), Effect.map((state) => (state._tag === "Some" ? state.value : undefined)));
 
-/** Whether a process (a positive id) or a process group (a negative one) is still there. */
+/** Whether the process with id `pid` exists. A negative `pid` names a process group. */
 const alive = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
@@ -38,7 +38,7 @@ const alive = (pid: number): boolean => {
   }
 };
 
-/** Waits, a second at most, until `pid` is gone; whether it is. */
+/** Waits up to one second for process `pid` to exit, and returns whether it has exited. */
 const gone = (pid: number) =>
   Effect.gen(function* () {
     for (let tries = 0; tries < 50 && alive(pid); tries++) yield* Effect.sleep("20 millis");
@@ -151,7 +151,7 @@ test("when the spawner reports neither an exit code nor a signal, the run is Exi
   expect(warned.map((each) => (each.message as [string, unknown])[1])).toMatchObject([{ name: "test", run: 1, error: expect.stringContaining("the exit was lost") }]);
 });
 
-/** A group whose run starts a child in the background and says its pid: the group's pid and the child's. */
+/** Starts a group whose run starts a child process in the background and prints the child's pid. Returns the group, the run's pid and the child's pid. */
 const withChild = (group: (onRun: Parameters<typeof makeProcessGroup>[1]) => Effect.Effect<ProcessGroup, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner>) =>
   Effect.gen(function* () {
     const said = yield* Deferred.make<number>();

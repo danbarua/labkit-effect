@@ -1,18 +1,17 @@
 /**
- * A child process group a session keeps, run by the machine in `machine.ts`. Each run is started in
- * a scope of its own, a child of the scope the group is made in (a session's): the process runs in a
- * group of its own (Effect's spawner starts it detached), and closing the run's scope ends the whole
- * group, what the process started included. Stopping a run, starting it again, and closing the
- * session's scope all end it that way. What a consumer does with a run's input and output (`onRun`)
- * runs in the run's scope, and ends with it.
+ * A process group that a session keeps. `makeProcessGroup` performs the effects of the state
+ * machine in `machine.ts` with Effect's `ChildProcessSpawner`.
  *
- * A run that ends by itself is `Exited` at once; what it wrote is read to its end (`onRun` finishes,
- * for `consumerGrace` at most) before its scope closes, which ends what it left running.
- *
- * A run is given this process's environment without the variables that hold credentials
- * (`environment.ts`), and the command's own `env` over it. Every change of state is logged, with the
- * group's name and everything the state says, and each run's environment by the names left out and
- * set, never their values.
+ * - Each run has its own scope, a child of the scope that the group is made in. The spawner starts
+ *   the process detached, in a new process group, and closing the run's scope kills that process
+ *   group. `stop`, `restart` and closing the group's scope all close the run's scope.
+ * - `onRun` runs in the run's scope. After a run exits by itself, the run's scope stays open until
+ *   `onRun` finishes, for `consumerGrace` at most.
+ * - A run inherits this process's environment without its credential variables, with the command's
+ *   own `env` applied over it.
+ * - Every state change is logged with the group's name, the command line with credential values
+ *   redacted, the event, and the states before and after. Each run's environment is logged by
+ *   variable names only.
  */
 
 import { Effect, Exit, Fiber, HashMap, Option, type PlatformError, Ref, Scope, Semaphore, Stream, SubscriptionRef } from "effect";
@@ -21,36 +20,37 @@ import { redactedArgs, withoutCredentials } from "./environment.ts";
 import { logKeys } from "./log-keys.ts";
 import { initialProcessState, type ProcessEffect, type ProcessEvent, type ProcessState, stepProcess } from "./machine.ts";
 
-/** How long, once a run has ended by itself, what it gave `onRun` may go on before its scope closes. */
+/** How long a run's scope stays open for `onRun` after the run exits by itself. */
 export const consumerGrace = "2 seconds";
 
 export interface ProcessCommand {
-  /** What the group is called in the log. */
+  /** The group's name in log events. */
   readonly name: string;
   readonly command: string;
   readonly args: ReadonlyArray<string>;
-  /** Set over this process's environment. */
+  /** Variables set over the inherited environment, credentials included. */
   readonly env: Readonly<Record<string, string>>;
-  /** The folder it runs in; this process's when left out. */
+  /** The working directory. When undefined, the process uses this process's working directory. */
   readonly cwd?: string | undefined;
 }
 
 export interface ProcessGroup {
   readonly state: Effect.Effect<ProcessState>;
-  /** The state now, then each change of it. */
+  /** Emits the current state, then each new state. */
   readonly changes: Stream.Stream<ProcessState>;
-  /** Starts a run, unless one is starting or running. */
+  /** Starts a new run, unless a run is starting or running. */
   readonly start: Effect.Effect<void>;
-  /** Ends the run there is, if any, and starts another. */
+  /** Kills the live run, if there is one, and starts a new run. */
   readonly restart: Effect.Effect<void>;
-  /** Ends the run there is, if any. */
+  /** Kills the live run, if there is one. */
   readonly stop: Effect.Effect<void>;
 }
 
 /**
- * The signal that ended a run, from the error Effect's spawner fails `exitCode` with when a signal
- * ends the process: its cause is an `Error` whose message is "Process interrupted due to receipt of
- * signal: '<name>'". Undefined when the error is not that one.
+ * Returns the name of the signal that ended a run, parsed from the error that `exitCode` fails with.
+ * When a signal ends a process, Effect's spawner fails `exitCode` with an error whose cause is an
+ * `Error` with the message "Process interrupted due to receipt of signal: '<name>'". Returns
+ * undefined for any other error.
  */
 const signalOf = (error: PlatformError.PlatformError): string | undefined => {
   const cause = error.reason.cause;
@@ -58,8 +58,8 @@ const signalOf = (error: PlatformError.PlatformError): string | undefined => {
 };
 
 /**
- * The group for `command`, in the scope given; nothing runs until it is started. `onRun` is given
- * each run's handle once it runs, and runs in the run's scope.
+ * Returns the process group for `command`, in the current scope. No process starts until `start` or
+ * `restart` is called. `onRun` receives each run's process handle once the process has started.
  */
 export const makeProcessGroup = (
   command: ProcessCommand,
@@ -70,7 +70,7 @@ export const makeProcessGroup = (
     const context = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
     const state = yield* SubscriptionRef.make<ProcessState>(initialProcessState);
     const lock = yield* Semaphore.make(1);
-    // Each live run's scope, by run number.
+    // The scope of each live run, by run number.
     const runs = yield* Ref.make(HashMap.empty<number, Scope.Closeable>());
 
     /** Removes `run` from the live runs and closes its scope, if it is live. */
@@ -83,7 +83,7 @@ export const makeProcessGroup = (
       Effect.gen(function* () {
         const runScope = yield* Scope.fork(scope);
         yield* Ref.update(runs, HashMap.set(run, runScope));
-        // This process's environment without its credentials, then the command's own, as said.
+        // The command's own `env` is applied after the credentials are removed, so a server receives the credential that its configuration names.
         const inherited = withoutCredentials(process.env);
         yield* Effect.logInfo(logKeys.process.environment, { name: command.name, run, leftOut: inherited.left, set: Object.keys(command.env) });
         const started = yield* ChildProcess.make(command.command, [...command.args], {
@@ -103,7 +103,7 @@ export const makeProcessGroup = (
         if (exit._tag === "Failure" && signal === undefined)
           yield* Effect.logWarning(logKeys.process.exitUnread, { name: command.name, run, error: exit.failure.message, cause: String(exit.failure.reason.cause) });
         yield* dispatch({ _tag: "Ended", run, code: exit._tag === "Success" ? exit.success : undefined, signal });
-        // What the run wrote before it ended is read to its end before the run's scope closes, for a while at most.
+        // Closing the run's scope interrupts onRun, so onRun gets up to consumerGrace to read the run's last output.
         yield* Fiber.await(consumer).pipe(Effect.timeoutOption(consumerGrace));
         yield* ended(run);
       }).pipe(Effect.forkIn(scope), Effect.asVoid);

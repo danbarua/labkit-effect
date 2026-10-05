@@ -1,9 +1,8 @@
 /**
- * The life of a child process group that a session keeps: started, running, ended by itself, failed
- * to start, stopped, started again. Each start is a run, numbered from 1; what arrives about a run
- * that is not the current one (an end reported after a restart) changes nothing. The machine is
- * pure: given its state and what happened, it gives the next state and what is to be done (start a
- * run, stop one).
+ * A pure state machine for one process group. `stepProcess` returns the next state and the effects
+ * to perform. Each start creates a run, numbered from 1. An event about a run other than the current
+ * one changes nothing, because a stopped process can report its exit after its replacement has
+ * started.
  */
 
 export type ProcessState =
@@ -11,23 +10,26 @@ export type ProcessState =
   | { readonly _tag: "Idle"; readonly run: number }
   | { readonly _tag: "Starting"; readonly run: number }
   | { readonly _tag: "Running"; readonly run: number; readonly pid: number }
-  /** The run ended by itself: its exit code, or the signal that ended it. */
+  /**
+   * The run's process ended without a stop request. `code` is the exit code, and `signal` is the name
+   * of the signal that ended the process. Both are undefined when the spawner reported neither.
+   */
   | { readonly _tag: "Exited"; readonly run: number; readonly code: number | undefined; readonly signal: string | undefined }
   /** The run could not be started. */
   | { readonly _tag: "Failed"; readonly run: number; readonly reason: string };
 
 export type ProcessEvent =
-  /** Asked to start: does nothing while a run is starting or running. */
+  /** A request to start a run. Ignored while a run is starting or running. */
   | { readonly _tag: "Start" }
-  /** Asked to start again: stops the run there is, if any, and starts another. */
+  /** A request to kill the live run, if there is one, and start a new run. */
   | { readonly _tag: "Restart" }
-  /** Asked to stop: stops the run there is, if any. */
+  /** A request to kill the live run, if there is one. */
   | { readonly _tag: "Stop" }
   | { readonly _tag: "Started"; readonly run: number; readonly pid: number }
   | { readonly _tag: "StartFailed"; readonly run: number; readonly reason: string }
   | { readonly _tag: "Ended"; readonly run: number; readonly code: number | undefined; readonly signal: string | undefined };
 
-/** What is to be done: start run `run`, or stop it (its whole group). */
+/** An effect to perform: spawn run `run`, or kill the whole process group of run `run`. */
 export type ProcessEffect = { readonly _tag: "Spawn"; readonly run: number } | { readonly _tag: "Kill"; readonly run: number };
 
 export interface ProcessStep {
@@ -37,7 +39,7 @@ export interface ProcessStep {
 
 export const initialProcessState: ProcessState = { _tag: "Idle", run: 0 };
 
-/** Whether a run is live: starting or running. A new state must be classified here. */
+/** Whether a run is live: starting or running. */
 const live = (state: ProcessState): boolean => {
   switch (state._tag) {
     case "Starting":
@@ -54,7 +56,7 @@ const live = (state: ProcessState): boolean => {
 
 const stay = (state: ProcessState): ProcessStep => ({ state, effects: [] });
 
-/** The next state, and what is to be done, once `event` happened in `state`. */
+/** Returns the next state and the effects to perform after `event` in `state`. */
 export const stepProcess = (state: ProcessState, event: ProcessEvent): ProcessStep => {
   switch (event._tag) {
     case "Start":

@@ -1,4 +1,4 @@
-/** A spawned process's environment: this process's without its credentials, and a command's own over it. */
+/** Credential name classification, argument redaction, and the environment that a run receives and logs. */
 
 import { expect } from "bun:test";
 import { BunServices } from "@effect/platform-bun";

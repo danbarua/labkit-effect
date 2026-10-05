@@ -1,16 +1,17 @@
 /**
- * The environment a spawned process is given: this process's, without the variables that hold
- * credentials. A variable holds one when a word of its name is one of the credential words in
- * `COMMON_CREDENTIAL_PATTERNS` (any case). The words of a name are separated by `_`, `-` and `.`, and
- * by a capital that follows a lower-case letter (`credentialWord`): `ANTHROPIC_API_KEY`,
- * `GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`, `SSH_AUTH_SOCK` and `apiKeyId` are left out;
- * `GIT_AUTHOR_NAME`, `PATH` and `monkey` are kept.
- * What a command's own configuration sets (an MCP server's `env`) is given as it says, credentials
- * included: that is how a server is given the one it needs.
+ * Removes credentials from the environment that a child process inherits, and from command
+ * arguments before they are logged.
+ *
+ * A name is a credential name when one of its words is a credential word, in any letter case
+ * (`COMMON_CREDENTIAL_PATTERNS`), or when it matches a secret's format (`KNOWN_KEY_PATTERNS`).
+ * - Credential names: `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`,
+ *   `SSH_AUTH_SOCK`, `apiKeyId`.
+ * - Not credential names: `GIT_AUTHOR_NAME`, `PATH`, `MAX_TOKENS`, `monkey`.
  */
 
 import { Array as Arr, Order } from "effect";
 
+/** Formats of secret values. `shouldRedact` applies them to names as well. */
 export const KNOWN_KEY_PATTERNS = [
   // URLs with credentials
   /(\S{1,1024}):\/\/[^:\s]{1,1024}:[^@\s]{1,1024}@/i,
@@ -26,16 +27,20 @@ export const KNOWN_KEY_PATTERNS = [
 ];
 
 /**
- * A word of a name, in any case. A word starts at the name's start, after a separator (`_`, `-`,
- * `.`), or at a capital that follows a lower-case letter; it ends at the name's end, before a
- * separator, or before a capital that follows a lower-case letter. So `apiKeyId` holds `Key`, and
- * `monkey` does not hold `key`.
+ * Returns a pattern that matches `word` as a whole word of a name, in any letter case.
+ * - A word starts at the start of the name, after `_`, `-` or `.`, or at an upper-case letter that
+ *   follows a lower-case letter.
+ * - A word ends at the end of the name, before `_`, `-` or `.`, or before an upper-case letter that
+ *   follows a lower-case letter.
+ *
+ * For example, `apiKeyId` contains the word `Key`, and `monkey` does not contain the word `key`.
  */
 const credentialWord = (word: string): RegExp => {
   const letters = word.split("").map((letter) => `[${letter.toLowerCase()}${letter.toUpperCase()}]`).join("");
   return new RegExp(`(?:^|[_\\-.]|(?<=[a-z])(?=[A-Z]))${letters}(?=$|[_\\-.]|(?<=[a-z])[A-Z])`);
 };
 
+/** The credential words. A name that contains one of these words is a credential name. */
 export const COMMON_CREDENTIAL_PATTERNS: ReadonlyArray<RegExp> = [
   credentialWord("TOKEN"),
   credentialWord("KEY"),
@@ -52,31 +57,37 @@ export const COMMON_CREDENTIAL_PATTERNS: ReadonlyArray<RegExp> = [
   credentialWord("CERTIFICATE"),
 ];
 
-/** Whether a variable name or other text content matches known secret patterns. */
+/** Returns true when `name` is a credential name: one of its words is a credential word, or it matches `KNOWN_KEY_PATTERNS`. */
 export const shouldRedact = (name: string): boolean =>
   COMMON_CREDENTIAL_PATTERNS.some((pattern) => pattern.test(name)) || KNOWN_KEY_PATTERNS.some((pattern) => pattern.test(name));
 
-/** A fancy word for a dictionary of strings. */
+/** Environment variables: each name with its value. */
 export type Environment = Readonly<Record<string, string>>;
 
-/** Applies a transformation to a dictionary of strings (environment). */
+/** A function that returns a changed copy of an environment. */
 export type EnvironmentTransform = (environment: Environment) => Environment;
 
-/** Filters an environment for credential-shaped variables unless asked not to. */
+/** Returns a transform that removes every credential variable except those named in `allowList`. */
 export const credentialsLeftOut =
   (allowList: ReadonlyArray<string> = []): EnvironmentTransform =>
   (environment) =>
     Object.fromEntries(Object.entries(environment).filter(([name]) => allowList.includes(name) || !shouldRedact(name)));
 
-/** `transforms` one after another over this process's environment; with none, it whole. */
+/**
+ * Applies `transforms` in order to this process's environment, without the variables that have no
+ * value. With no transforms, returns that environment unchanged.
+ */
 export const environmentOf = (transforms: ReadonlyArray<EnvironmentTransform>): Environment =>
   transforms.reduce<Environment>((environment, transform) => transform(environment), definedOf(process.env));
 
-/** The variables of `environment` that have a value. */
+/** Returns the variables in `environment` that have a value. */
 const definedOf = (environment: Readonly<Record<string, string | undefined>>): Environment =>
   Object.fromEntries(Object.entries(environment).flatMap(([name, value]) => (value === undefined ? [] : [[name, value] as const])));
 
-/** `environment` without the variables that hold credentials, and the names of those left out. */
+/**
+ * Returns `environment` without its credential variables and without the variables that have no
+ * value (`env`), and the names of the removed credential variables, sorted (`left`).
+ */
 export const withoutCredentials = (
   environment: Readonly<Record<string, string | undefined>>,
 ): { readonly env: Readonly<Record<string, string>>; readonly left: ReadonlyArray<string> } => {
@@ -94,9 +105,11 @@ export const withoutCredentials = (
 export const redactionPlaceholder = "<redacted>";
 
 /**
- * `args` as they may be logged or written down: the value of a flag whose name holds a credential is
- * left out, given with the flag (`--token=<redacted>`) or as the argument after it (`--api-key`
- * `<redacted>`). They are run as given.
+ * Returns `args` with the value of each credential flag replaced by `redactionPlaceholder`, for logs
+ * and written configuration. A credential flag is a flag whose name is a credential name. The value
+ * is replaced in both forms:
+ * - `--token=ghp_x` becomes `--token=<redacted>`;
+ * - in `--api-key sk-y`, the argument `sk-y` becomes `<redacted>`, unless it starts with `-`.
  */
 export const redactedArgs = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
   args.map((arg, index) => {
