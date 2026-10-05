@@ -1,33 +1,16 @@
 /**
  * A session's configuration, read from layers merged in order, the last write winning (`merge.ts`):
- * the user's file (`~/.config/<name>/policies.yml`), then the project's (`<project>/.<name>/policies.yml`),
- * then the user's own for the project (`<project>/.<name>/policies.local.yml`), then what a host
- * adds (a settings file named on its command line, its flags). A file that is not there is an empty
- * layer. `<name>` is `configName` unless the caller says another.
+ * the user's file (`~/.config/<name>/policies.yml`), the project's (`<project>/.<name>/policies.yml`),
+ * the user's own for the project (`<project>/.<name>/policies.local.yml`), then what a host adds (a
+ * settings file named on its command line, its flags). A file that does not exist is an empty layer.
+ * `<name>` is `configName` unless the caller gives another. `docs/agent-config.md` lists what a layer
+ * holds.
  *
- * A layer is a mapping (YAML, read with `effect/encoding` `Yaml`; or a value a host makes) of:
- *
- * - `plugins`: the plug-ins used, by the name the lists use, each with its settings; `use` names the
- *   plug-in when it is not the name (two of one plug-in, with different settings). A setting not
- *   given takes its default, so a later layer can change one setting alone.
- * - a list for each seam (`toolCalls`, `modelRequests`, `turnEnd`, `knownModels`, `settling`,
- *   `toolSources`): names, in order, each one in `plugins` or a plug-in's own name (its defaults).
- *   A plug-in's settings are said once, in `plugins`, however many lists it is on.
- * - `maxHolds`: how many times the turn-end hooks may hold one turn open, which the layers must say
- *   when `turnEnd` lists hooks.
- * - `mcpServers`: the MCP servers a session starts, by name: a command it runs (`command`, `args`,
- *   `env`, `cwd`), or a server at a URL (`type: http` or `sse`, `url`, `headers`); whether the
- *   session needs it (`required`), and how long it has to connect (`connectTimeout`). `${VAR}` and
- *   `${VAR:-default}` in `command`, `args`, `env`, `url` and `headers` are the environment's.
- * - `extensions`: modules to load, each exporting by default a plug-in or a list of them, a path
- *   relative to its file's folder.
- *
- * Only a trusted layer, the user's own, may name extensions or MCP servers: both run code, and a
- * project's file comes with the project.
- *
- * The layers are decoded merged. A mistake is refused naming the layer that last wrote the value at
- * fault, where in it, and what is wrong. A plug-in's settings are decoded with its Schema, refusing a
- * property it does not have.
+ * - Only a trusted layer, the user's own, may name extensions or MCP servers, because both run code
+ *   and a project's file comes with the project.
+ * - The merged layers are decoded together. A mistake is refused with an error naming the layer that
+ *   last wrote the value at fault, the path in it, and the problem. A plug-in's settings are decoded
+ *   with its Schema, which refuses a property that the plug-in does not have.
  */
 
 import type { McpServerStdio } from "../agent-mcp/client.ts";
@@ -42,17 +25,18 @@ import { builtins } from "./builtins.ts";
 import { merged } from "./merge.ts";
 import { type AnyPlugin, type Seam, seams } from "./plugin.ts";
 
-/** The name of the configuration's folders unless a caller says another: the default brand's (`agent-host/brand.ts`). */
+/** The name of the configuration's folders unless a caller gives another: the default brand's (`agent-host/brand.ts`). */
 export const configName = defaultBrand.name;
 
-/** Where a configuration file is: the user's, the project's (kept with it), or the user's own for the project (`local`, kept out of its history). */
+/** Which configuration file: the user's, the project's (kept with the project), or the user's own for the project (`local`, kept out of the project's history). */
 export type FileSource = "user" | "project" | "local";
 
 export const fileSources: ReadonlyArray<FileSource> = ["user", "project", "local"];
 
 /**
- * The files a session's policies are read from, in order: `~/.config/<name>/policies.yml`,
- * `<project>/.<name>/policies.yml`, `<project>/.<name>/policies.local.yml`.
+ * Returns the paths of the files that a session's policies are read from, in order:
+ * `~/.config/<name>/policies.yml`, `<project>/.<name>/policies.yml`,
+ * `<project>/.<name>/policies.local.yml`.
  */
 export const policyFiles = (project: string, options: { readonly name?: string; readonly home?: string } = {}): Readonly<Record<FileSource, string>> => {
   const name = options.name ?? configName;
@@ -63,7 +47,7 @@ export const policyFiles = (project: string, options: { readonly name?: string; 
   };
 };
 
-/** A configuration that cannot be used: the layer, where in it, and what is wrong. */
+/** A configuration that cannot be used: the layer, the path in it, and the problem. */
 export class ConfigInvalid extends Data.TaggedError("ConfigInvalid")<{
   readonly file: string;
   readonly path: string;
@@ -74,7 +58,7 @@ export class ConfigInvalid extends Data.TaggedError("ConfigInvalid")<{
   }
 }
 
-/** One layer: what names it in an error (its file, or "the command line"), its value as parsed, and whether it may load extensions. */
+/** One layer: the name that an error gives it (its file, or "the command line"), its value as parsed, and whether it is trusted to load extensions and start MCP servers. */
 export interface LayerSource {
   readonly name: string;
   readonly value: unknown;
@@ -88,14 +72,14 @@ export interface Entry {
   readonly settings: unknown;
 }
 
-/** An MCP server the configuration starts: one it runs, or one at a URL; its variables expanded. */
+/** An MCP server that the configuration starts: run as a process, or reached at a URL, with its variables expanded. */
 export type McpServerConfig = (McpServerStdio | McpServerRemote) & {
-  /** Whether a session that cannot connect to it is not to open. */
+  /** Whether a session that cannot connect to the server must not open. */
   readonly required: boolean;
   readonly connectTimeout?: Duration.Input | undefined;
 };
 
-/** The configuration decoded: each seam the layers list, in order; `maxHolds` when they say it; the MCP servers. A seam no layer lists is left out. */
+/** The decoded configuration: each seam that the layers list, in order; `maxHolds` when they give it; the MCP servers. A seam that no layer lists is absent. */
 export interface Configuration {
   readonly lists: Partial<Record<Seam, ReadonlyArray<Entry>>>;
   readonly maxHolds?: number;
@@ -114,7 +98,7 @@ const serverTiming = {
   connectTimeout: Schema.optionalKey(Schema.String),
 };
 
-/** An MCP server the session runs: Claude Code's `.mcp.json` may say `type: stdio`. */
+/** An MCP server that the session runs as a process. `type: stdio` is accepted, as Claude Code's `.mcp.json` writes it. */
 const StdioServer = Schema.Struct({
   type: Schema.optionalKey(Schema.Literal("stdio")),
   command: Schema.NonEmptyString,
@@ -132,13 +116,13 @@ const RemoteServer = Schema.Struct({
   ...serverTiming,
 });
 
-/** An MCP server as a layer writes it: what the file's JSON Schema is made from too. */
+/** An MCP server as a layer writes it; the file's JSON Schema is made from it too. */
 export const McpServerSchema = Schema.Union([StdioServer, RemoteServer]);
 
 /** `${VAR}` or `${VAR:-default}`. */
 const variable = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
 
-/** The value `${name}` or `${name:-fallback}` expands to: the variable's value when it is set and not empty, else the fallback. */
+/** Returns the value that `${name}` or `${name:-fallback}` expands to: the variable's value when it is set and not empty, else the fallback. */
 const expansionOf = (env: Readonly<Record<string, string | undefined>>, name: string, fallback: string | undefined): string | undefined => {
   const set = env[name];
   return set !== undefined && set !== "" ? set : fallback;
@@ -151,17 +135,17 @@ const expansionOf = (env: Readonly<Record<string, string | undefined>>, name: st
 const expandedIn = (text: string, env: Readonly<Record<string, string | undefined>>): { readonly value: string } | { readonly missing: string } => {
   const missing = [...text.matchAll(variable)].find(([, name = "", fallback]) => expansionOf(env, name, fallback) === undefined)?.[1];
   if (missing !== undefined) return { missing };
-  // Every variable has a value here: the first check returned when one did not.
+  // Every variable has a value here, because the check above returned when one did not.
   return { value: text.replaceAll(variable, (whole, name: string, fallback: string | undefined) => expansionOf(env, name, fallback) ?? whole) };
 };
 
-/** The problem a Schema found, on one line. */
+/** Returns the problem that a Schema found, on one line. */
 const problemOf = (error: Schema.SchemaError): string => error.message.replaceAll(/\s*\n\s*/g, " ");
 
-/** The value at `path` in `value`, or undefined. */
+/** Returns the value at `path` in `value`, or undefined. */
 const at = (value: unknown, path: ReadonlyArray<string>): unknown => path.reduce<unknown>((inner, key) => (isMapping(inner) ? inner[key] : undefined), value);
 
-/** The layer that last wrote `path`, or the deepest part of it that one wrote: what an error at `path` names. */
+/** Returns the name of the layer that last wrote `path`, or the deepest prefix of `path` that a layer wrote: the layer that an error at `path` names. */
 const writerOf = (layers: ReadonlyArray<LayerSource>, path: ReadonlyArray<string>): string => {
   const newestFirst = Arr.reverse(layers);
   // `path` itself first, then each shorter prefix of it.
@@ -170,7 +154,7 @@ const writerOf = (layers: ReadonlyArray<LayerSource>, path: ReadonlyArray<string
   return writer?.name ?? layers.at(-1)?.name ?? "the configuration";
 };
 
-/** The plug-ins configured in `plugins`, by name, with their settings decoded; each mistake named for the layer that wrote it. */
+/** Decodes the plug-ins configured in `plugins`, by name, with their settings; each mistake names the layer that wrote it. */
 const pluginsOf = (layers: ReadonlyArray<LayerSource>, value: unknown, registry: ReadonlyArray<AnyPlugin>): Effect.Effect<ReadonlyMap<string, Entry>, ConfigInvalid> =>
   Effect.gen(function* () {
     if (value === undefined) return new Map<string, Entry>();
@@ -209,7 +193,7 @@ const pluginsOf = (layers: ReadonlyArray<LayerSource>, value: unknown, registry:
     return new Map<string, Entry>(entries);
   });
 
-/** One seam's list: each name a plug-in configured in `plugins`, or a plug-in's own name with its defaults, on that seam. */
+/** Decodes one seam's list: each name is a plug-in configured in `plugins`, or a plug-in's own name with its defaults, and must be on that seam. */
 const listOf = (
   layers: ReadonlyArray<LayerSource>,
   seam: Seam,
@@ -237,10 +221,10 @@ const listOf = (
   );
 };
 
-/** The MCP servers in `mcpServers`, by name, their variables `env`'s. */
+/** Decodes the MCP servers in `mcpServers`, by name, with their variables expanded from `env`. */
 const mcpServersOf = (layers: ReadonlyArray<LayerSource>, value: unknown, env: Readonly<Record<string, string | undefined>>): Effect.Effect<ReadonlyArray<McpServerConfig>, ConfigInvalid> =>
   Effect.gen(function* () {
-    // `null` is no servers: a later layer that writes it takes away those of the layers before it.
+    // `null` means no servers: a later layer that writes it removes the servers of the layers before it.
     if (value === undefined || value === null) return [];
     const invalid = (path: ReadonlyArray<string>, problem: string) => new ConfigInvalid({ file: writerOf(layers, path), path: path.join("."), problem });
     if (!isMapping(value)) return yield* invalid(["mcpServers"], "Expected a mapping of names to servers");
@@ -253,7 +237,7 @@ const mcpServersOf = (layers: ReadonlyArray<LayerSource>, value: unknown, env: R
         );
         const timeout = server.connectTimeout === undefined ? undefined : Duration.fromInput(server.connectTimeout as Duration.Input);
         if (timeout !== undefined && timeout._tag === "None") return yield* invalid([...path, "connectTimeout"], `${JSON.stringify(server.connectTimeout)} is not a duration, such as "30 seconds"`);
-        /** `text` at `at`, its variables the environment's. */
+        /** Expands the variables in `text`, found at `at`; a missing variable fails with an error naming that path. */
         const expand = (text: string, at: ReadonlyArray<string>) => {
           const done = expandedIn(text, env);
           return "value" in done ? Effect.succeed(done.value) : Effect.fail(invalid([...path, ...at], `\${${done.missing}} is not set, and has no default (\${${done.missing}:-default})`));
@@ -284,7 +268,7 @@ const mcpServersOf = (layers: ReadonlyArray<LayerSource>, value: unknown, env: R
     );
   });
 
-/** Fails with the first problem in `layer` taken alone: not a mapping, an unknown key, or extensions or MCP servers in an untrusted layer. */
+/** Fails with the first problem in `layer` on its own: not a mapping, an unknown key, or extensions or MCP servers in an untrusted layer. */
 const checkedLayer = (layer: LayerSource): Effect.Effect<void, ConfigInvalid> => {
   if (layer.value === undefined || layer.value === null) return Effect.void;
   if (!isMapping(layer.value)) return Effect.fail(new ConfigInvalid({ file: layer.name, path: "", problem: "Expected a mapping" }));
@@ -292,13 +276,13 @@ const checkedLayer = (layer: LayerSource): Effect.Effect<void, ConfigInvalid> =>
   if (unknown !== undefined) return Effect.fail(new ConfigInvalid({ file: layer.name, path: unknown, problem: `Not a key of the configuration; those are: ${topKeys.join(", ")}` }));
   if (!layer.trusted && layer.value["extensions"] !== undefined)
     return Effect.fail(new ConfigInvalid({ file: layer.name, path: "extensions", problem: "Extensions are loaded only from the user's own configuration: a project's does not run code" }));
-  // A server is a command the session runs: a project's layer that names or changes one would run code that came with the project.
+  // A server is a command that the session runs, so a project's layer that names or changes one would run code that came with the project.
   if (!layer.trusted && layer.value["mcpServers"] !== undefined)
     return Effect.fail(new ConfigInvalid({ file: layer.name, path: "mcpServers", problem: "MCP servers are started only from the user's own configuration: a project's does not run commands" }));
   return Effect.void;
 };
 
-/** `layers`, merged and decoded against `registry`. */
+/** Merges `layers` and decodes the result against `registry`. */
 export const decodeLayers = (
   layers: ReadonlyArray<LayerSource>,
   registry: ReadonlyArray<AnyPlugin>,
@@ -325,7 +309,7 @@ export const decodeLayers = (
     return { lists, ...(maxHolds === undefined ? {} : { maxHolds }), mcpServers: yield* mcpServersOf(layers, all["mcpServers"], env) };
   });
 
-/** The layer in `file`, parsed, its extensions' paths made absolute; undefined when the file is not there. */
+/** Reads and parses the layer in `file`, with its extensions' paths made absolute; undefined when the file does not exist. */
 export const fileLayer = (file: string, trusted: boolean): Effect.Effect<LayerSource | undefined, ConfigInvalid, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -341,11 +325,11 @@ export const fileLayer = (file: string, trusted: boolean): Effect.Effect<LayerSo
   });
 
 /**
- * The layers of `policyFiles`, those of `sources` (the user's alone, unless said), in order: the
+ * Reads the layers of `policyFiles` named in `sources` (only the user's, unless given), in order: the
  * user's file, which is trusted, then the project's and the local one, which are in the project's
- * folder, and are not. A folder's files are read only when named: one that comes with a cloned
- * project could turn off permission or give the model's commands credentials, until a folder can be
- * trusted. A file that is not there is left out.
+ * folder and are not trusted. A folder's files are read only when named, because a file that comes
+ * with a cloned project could turn off permission or give the model's commands credentials. A file
+ * that does not exist is omitted.
  */
 export const policyLayers = (
   project: string,
@@ -367,7 +351,7 @@ const isPlugin = (value: unknown): value is AnyPlugin =>
   value["on"].every((seam) => seams.includes(seam as Seam)) &&
   typeof value["entries"] === "function";
 
-/** The plug-ins a module exports by default: one, or a list. */
+/** Loads the plug-ins that a module exports by default: one plug-in, or a list. */
 const loadExtension = (module: string, file: string): Effect.Effect<ReadonlyArray<AnyPlugin>, ConfigInvalid> =>
   Effect.tryPromise({
     try: () => import(pathToFileURL(module).href) as Promise<{ readonly default?: unknown }>,
@@ -382,9 +366,10 @@ const loadExtension = (module: string, file: string): Effect.Effect<ReadonlyArra
   );
 
 /**
- * The configuration in `layers`, in order, the last write winning, against `registry` (the built-in
- * plug-ins when not given) and the plug-ins the trusted layers' extensions export, each module
- * loaded once. A plug-in's name used twice is refused. The MCP servers' variables are `env`'s.
+ * Decodes the configuration in `layers`, in order, the last write winning, against `registry` (the
+ * built-in plug-ins when not given) and the plug-ins that the trusted layers' extensions export; each
+ * module is loaded once. A plug-in name used twice is refused. The MCP servers' variables are
+ * expanded from `env`.
  */
 export const loadConfiguration = (
   layers: ReadonlyArray<LayerSource>,

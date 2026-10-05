@@ -1,11 +1,14 @@
 /**
- * What a session's configuration resolved to, for a person finding out why a session did what it
- * did (`effective-settings.json`): the layers, in order; each seam's entries, by name, with their
- * plug-in and every setting as resolved, defaults included; `maxHolds`; the MCP servers; for every
- * value the layers wrote, the layer that wrote it last (`from`); and what the host says beside the
- * layers (`host`). An MCP server's environment and headers are given by their names, never their
- * values; its command, arguments and URL as the layers wrote them (`${VAR}`, not the variable's
- * value), and the value of an argument whose flag names a credential is left out (`redactedArgs`).
+ * What a session's configuration resolved to (`effective-settings.json`), for a person finding out
+ * why a session behaved as it did:
+ * - the layers, in order;
+ * - each seam's entries by name, with their plug-in and every setting as resolved, defaults included;
+ * - `maxHolds`;
+ * - the MCP servers. Environment and headers are shown by name, never by value. Command, arguments
+ *   and URL are shown as the layers wrote them (`${VAR}`, not the variable's value), with credential
+ *   flag values redacted (`redactedArgs`);
+ * - for every value that the layers wrote, the layer that wrote it last (`from`);
+ * - what the host provides beside the layers (`host`).
  */
 
 import { Array as Arr, Duration, Effect, FileSystem, type PlatformError, type Schema } from "effect";
@@ -15,7 +18,7 @@ import { merged } from "./merge.ts";
 
 const isMapping = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Every path of `value` to a value that is not a mapping, written as `a.b.c`. */
+/** Returns every path in `value` that leads to a value that is not a mapping. */
 const leaves = (value: unknown, path: ReadonlyArray<string> = []): ReadonlyArray<ReadonlyArray<string>> => {
   if (isMapping(value)) return Object.entries(value).flatMap(([key, inner]) => leaves(inner, [...path, key]));
   // A value that is not a mapping is a leaf, unless it is the whole value.
@@ -24,7 +27,7 @@ const leaves = (value: unknown, path: ReadonlyArray<string> = []): ReadonlyArray
 
 const at = (value: unknown, path: ReadonlyArray<string>): unknown => path.reduce<unknown>((inner, key) => (isMapping(inner) ? inner[key] : undefined), value);
 
-/** For each value the merged layers have, the layer that wrote it last. */
+/** Returns, for each value that the merged layers hold, the name of the layer that wrote it last, keyed by `a.b.c` path. */
 export const sourcesOf = (layers: ReadonlyArray<LayerSource>): Readonly<Record<string, string>> =>
   Object.fromEntries(
     leaves(merged(layers.map((layer) => layer.value ?? {}))).map((path) => [
@@ -33,10 +36,10 @@ export const sourcesOf = (layers: ReadonlyArray<LayerSource>): Readonly<Record<s
     ]),
   );
 
-/** The name of the file a session's folder keeps `effectiveSettings` in. */
+/** The name of the file in a session's folder that holds `effectiveSettings`. */
 export const effectiveSettingsFile = "effective-settings.json";
 
-/** Writes `effectiveSettings` to `folder` (made when missing) as `effective-settings.json`; the file's path. */
+/** Writes `effectiveSettings` to `folder` (created when missing) as `effective-settings.json`, and returns the file's path. */
 export const writeEffectiveSettings = (
   folder: string,
   layers: ReadonlyArray<LayerSource>,
@@ -51,7 +54,7 @@ export const writeEffectiveSettings = (
     return path;
   });
 
-/** The configuration as resolved from `layers`, with what the host says (`host`). */
+/** Returns the configuration as resolved from `layers`, with what the host provides (`host`). */
 export const effectiveSettings = (layers: ReadonlyArray<LayerSource>, configuration: Configuration, host: Readonly<Record<string, Schema.Json>> = {}): Schema.Json => {
   const all = merged(layers.map((layer) => layer.value ?? {}));
   return {

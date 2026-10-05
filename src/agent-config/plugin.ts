@@ -1,11 +1,12 @@
 /**
- * What a plug-in is: a name (`use`, its key in a configuration file), a Schema for its settings
- * with a default for every setting that has one (a budget has none), the seams it adds to, and the entries it adds to them, given
- * its settings and what the host says (`HostSays`).
+ * What a plug-in is: a name (`use`, its key in a configuration file), a Schema for its settings with
+ * a default for every setting that has one (a budget has none), the seams it adds to, and a function
+ * that makes its entries from its settings and what the host provides (`HostSays`).
  *
- * A seam is one of the ordered lists a session's logic plugs into (`agent-session`): the tool call
- * policies, the model request policies, the turn-end hooks, what is known of models, how settings
- * are applied for a provider, and the tool sources. A plug-in on two seams is listed in each.
+ * A seam is one of the ordered lists that a session's logic plugs into (`agent-session`): the tool
+ * call policies, the model request policies, the turn-end hooks, what is known of models, how
+ * settings are applied for a provider, the tool sources, and the command environment. A plug-in on
+ * two seams is listed in each.
  */
 
 import type { EnvironmentTransform } from "../agent-process/environment.ts";
@@ -23,24 +24,24 @@ export interface Entries {
   readonly turnEnd: TurnEndHook;
   readonly knownModels: ModelKnowledge;
   readonly settling: SettlingSource;
-  /** A source started in the session's scope (an MCP server's, say). */
+  /** A source started in the session's scope (an MCP server's, for example). */
   readonly toolSources: Effect.Effect<ToolSource, never, Scope.Scope>;
-  /** What a command the model runs is given of the environment (`agent-process` `EnvironmentTransform`). */
+  /** A transform of the environment that the model's commands receive (`agent-process` `EnvironmentTransform`). */
   readonly commandEnvironment: EnvironmentTransform;
 }
 
 export type Seam = keyof Entries;
 
-/** The seams, in the order a file lists them. */
+/** The seams, in the order that a file lists them. */
 export const seams: ReadonlyArray<Seam> = ["toolCalls", "modelRequests", "turnEnd", "knownModels", "settling", "toolSources", "commandEnvironment"];
 
 /**
- * What the host says, that a file does not: whether anyone is there to answer a question before a
- * call runs; and, where the user changes the permission mode during a session, the mode now.
+ * What the host provides that a file cannot: whether anyone can answer a question before a call
+ * runs, and, where the user changes the permission mode during a session, the current mode.
  */
 export interface HostSays {
   readonly canAsk: boolean;
-  /** The session's permission mode now, read at each call; the configured `mode` is the one it starts in. */
+  /** The session's current permission mode, read at each call; the configured `mode` is the mode that the session starts in. */
   readonly permissionMode?: Effect.Effect<PermissionMode> | undefined;
 }
 
@@ -54,7 +55,7 @@ export interface Plugin<S extends Settings = Settings, On extends Seam = Seam> {
   readonly entries: (settings: S["Type"], host: HostSays) => Pick<Entries, On>;
 }
 
-/** A plug-in named `use`, on the seams `on`. */
+/** Returns a plug-in named `use`, on the seams `on`. */
 export const plugin = <S extends Settings, const On extends Seam>(
   use: string,
   settings: S,
@@ -62,7 +63,7 @@ export const plugin = <S extends Settings, const On extends Seam>(
   entries: (settings: S["Type"], host: HostSays) => Pick<Entries, On>,
 ): Plugin<S, On> => ({ use, settings, on, entries });
 
-/** A plug-in with its settings and seams erased, as a registry holds it: its entries are asked for with settings its own Schema decoded. */
+/** A plug-in with its settings and seams types erased, as a registry holds it. Its entries are made with settings that its own Schema decoded. */
 export interface AnyPlugin {
   readonly use: string;
   readonly settings: Schema.Top & { readonly fields: Schema.Struct.Fields; readonly DecodingServices: never };

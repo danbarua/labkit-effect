@@ -1,8 +1,8 @@
 /**
- * The seam lists a decoded configuration gives a session: each seam's entries, in order, made by
- * their plug-ins from their settings and what the host says, and the layer that provides them. A
- * seam the configuration does not list is not provided, so the host's own list, or the seam's
- * default, stands for it.
+ * The seam lists that a decoded configuration gives a session: each seam's entries, in order, made
+ * by their plug-ins from their settings and what the host provides, and the layer that provides
+ * them. A seam that the configuration does not list is not provided, so the host's own list, or the
+ * seam's default, applies.
  */
 
 import { Effect, Layer } from "effect";
@@ -13,7 +13,7 @@ import { ToolSources } from "../agent-session/tool-sources.ts";
 import type { Configuration } from "./file.ts";
 import type { Entries, HostSays, Seam } from "./plugin.ts";
 
-/** Each seam the configuration lists, as the session's list for it, and `maxHolds` when it says it. */
+/** Each seam that the configuration lists, as the session's list for it, and `maxHolds` when the configuration gives it. */
 export interface SeamLists {
   readonly toolCalls?: ReadonlyArray<NamedPolicy>;
   readonly modelRequests?: ReadonlyArray<NamedPolicy>;
@@ -21,12 +21,12 @@ export interface SeamLists {
   readonly knownModels?: ReadonlyArray<ModelKnowledge>;
   readonly settling?: ReadonlyArray<SettlingSource>;
   readonly toolSources?: ReadonlyArray<Entries["toolSources"]>;
-  /** Not a context seam: the host gives the commands it runs what they compose (`processEnvironmentWith`). */
+  /** Not a context seam: the host applies these transforms to the environment of the commands it runs (`processEnvironmentWith`). */
   readonly commandEnvironment?: ReadonlyArray<Entries["commandEnvironment"]>;
   readonly maxHolds?: number;
 }
 
-/** The entries of `seam` the configuration lists, in order; undefined when it does not list the seam. */
+/** Returns the entries of `seam` that the configuration lists, in order; undefined when it does not list the seam. */
 const listOf = <S extends Seam>(configuration: Configuration, seam: S, host: HostSays): ReadonlyArray<Entries[S]> | undefined =>
   configuration.lists[seam]?.map((entry) => {
     const made = entry.plugin.entries(entry.settings as never, host)[seam];
@@ -35,14 +35,14 @@ const listOf = <S extends Seam>(configuration: Configuration, seam: S, host: Hos
     return made as Entries[S];
   });
 
-/** The policies `seam` lists, each by the name it is listed by. */
+/** Returns the policies that `seam` lists, each under the name it is listed by. */
 const namedListOf = (configuration: Configuration, seam: "toolCalls" | "modelRequests", host: HostSays): ReadonlyArray<NamedPolicy> | undefined => {
   const made = listOf(configuration, seam, host);
   const names = configuration.lists[seam] ?? [];
   return made?.map((policy, index) => ({ name: names[index]?.name ?? "", policy }));
 };
 
-/** The seam lists of `configuration`, with what the host says. */
+/** Returns the seam lists of `configuration`, given what the host provides. */
 export const seamListsOf = (configuration: Configuration, host: HostSays): SeamLists => {
   const lists = {
     toolCalls: namedListOf(configuration, "toolCalls", host),
@@ -57,7 +57,7 @@ export const seamListsOf = (configuration: Configuration, host: HostSays): SeamL
   return Object.fromEntries(Object.entries(lists).filter(([, value]) => value !== undefined));
 };
 
-/** The layer that provides each of `lists`; a seam it does not have is left as the host or its default has it. */
+/** Returns the layer that provides each of `lists`. A seam that `lists` does not have keeps the host's list or its default. */
 export const seamLayer = (lists: SeamLists): Layer.Layer<never> => {
   const provided: ReadonlyArray<Layer.Layer<never> | undefined> = [
     lists.toolCalls && Layer.succeed(ToolCallPolicies, lists.toolCalls),

@@ -1,12 +1,12 @@
 /**
- * The JSON Schema of a policies file, made from the Schemas of the plug-ins registered, so that an
- * editor checks a file as it is typed (a `# yaml-language-server: $schema=<path>` comment at its
- * top). The schema takes, in `plugins`:
+ * The JSON Schema of a policies file, made from the registered plug-ins' Schemas, so that an editor
+ * checks a file as it is typed (a `# yaml-language-server: $schema=<path>` comment at its top). The
+ * schema accepts, in `plugins`:
  *
  * - under a plug-in's own name, that plug-in's settings without `use`, or `null` (its defaults);
  * - under any other name, `use` and the settings of the plug-in it names;
  *
- * and no other property. Each seam's list takes names. `mcpServers` takes servers, or `null`.
+ * and no other property. Each seam's list accepts names. `mcpServers` accepts servers, or `null`.
  */
 
 import { Schema } from "effect";
@@ -17,9 +17,9 @@ import { type AnyPlugin, seams } from "./plugin.ts";
 
 
 /**
- * The JSON Schema of a file whose plug-ins are `registry`'s (the built-ins when not given).
- * `plugins` is written out here: its plug-ins' own names as `properties` and any other name as
- * `additionalProperties`, side by side, so that the one does not apply to the other.
+ * Returns the JSON Schema of a file whose plug-ins are `registry`'s (the built-ins when not given).
+ * `plugins` is written out here: the plug-ins' own names as `properties` and any other name as
+ * `additionalProperties`, side by side, so that neither applies to the other's names.
  */
 export const policiesJsonSchema = (registry: ReadonlyArray<AnyPlugin> = builtins): Schema.Json => {
   const rest = jsonSchemaOf(

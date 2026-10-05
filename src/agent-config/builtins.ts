@@ -1,20 +1,20 @@
 /**
- * The plug-ins every host has, each over logic built elsewhere:
+ * The plug-ins that every host has, each over logic built elsewhere. Defaults are in parentheses.
  *
  * - `loopBreaker` (`agent-policy/loop-breaker.ts`), on `toolCalls` and `modelRequests`: `nudgeAt`
- *   (3), `stopAt` (5), and `key`, what makes two calls identical, by name: `toolAndInput`, the same
- *   tool and the same input as received.
- * - `permissions` (`agent-policy/permissions.ts`), on `toolCalls`: `mode` (`default`). Whether
- *   anyone can be asked is the host's to say (`HostSays.canAsk`); where the user changes the mode
- *   during a session, the mode it follows is the host's too (`HostSays.permissionMode`), and `mode`
- *   is the one the session starts in.
+ *   (3), `stopAt` (5), and `key`, the name of what makes two calls identical (`toolAndInput`: the
+ *   same tool and the same input as received).
+ * - `permissions` (`agent-policy/permissions.ts`), on `toolCalls`: `mode` (`default`). The host says
+ *   whether anyone can be asked (`HostSays.canAsk`). Where the user changes the mode during a
+ *   session, the entry follows the host's mode (`HostSays.permissionMode`), and `mode` is the mode
+ *   that the session starts in.
  * - `maxTurnRequests` (`agent-policy/max-turn-requests.ts`), on `modelRequests`: `limit` (1000).
  * - `retryIncomplete` (`agent-host/incomplete.ts`), on `turnEnd`: `retries` (1).
- * - `maxBudget` (`agent-host/services.ts`), on `modelRequests`: `usd`, which it has no default for:
- *   a model request once the session has cost that much is vetoed.
+ * - `maxBudget` (`agent-host/services.ts`), on `modelRequests`: `usd`, with no default. A model
+ *   request is vetoed once the session has cost that much.
  * - `credentials` (`agent-process/environment.ts`), on `commandEnvironment`: `pass` (none), the
- *   variables a command the model runs is given although they hold credentials (`SSH_AUTH_SOCK`,
- *   for `git push` over SSH); the others are left out.
+ *   credential variables that the model's commands still receive (`SSH_AUTH_SOCK`, for `git push`
+ *   over SSH). The other credential variables are removed.
  */
 
 import { removeCredentials } from "../agent-process/environment.ts";
@@ -28,12 +28,12 @@ import type { ToolName } from "../agent-machine/names.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { type AnyPlugin, plugin } from "./plugin.ts";
 
-/** A setting `schema` takes, `value` when the file does not say. */
+/** A setting of type `schema`, which takes `value` when the file does not give it. */
 const defaulted = <S extends Schema.Top>(schema: S, value: S["Encoded"]) => schema.pipe(Schema.withDecodingDefaultKey(Effect.succeed(value)));
 
 const atLeast = (minimum: number) => Schema.Int.check(Schema.isGreaterThanOrEqualTo(minimum));
 
-/** The ways of telling identical calls apart, by the name a file gives them. */
+/** The ways of telling identical calls apart, by the name that a file uses for each. */
 const keys: Readonly<Record<"toolAndInput", (tool: ToolName, input: Received) => CallKey>> = { toolAndInput: sameToolAndInput };
 
 export const loopBreaker = plugin(
