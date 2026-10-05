@@ -181,3 +181,11 @@ test("/mcp completes a server's name only after reconnect", () => {
   const complete = completions({ models: [], settings: [], servers: ["github", "files"] });
   expect(complete("/mcp other ")).toEqual([]);
 });
+
+test("/settings takes effort=none as thinking=off, and refuses effort=none with another thinking mode", async () => {
+  const { printed, asked } = await session(["/settings effort=none", "hello", "/settings effort=none thinking=auto"]);
+  const off = await session(["/settings thinking=off", "hello"]);
+  expect(asked[0]?.settings as unknown).toEqual(off.asked[0]?.settings);
+  expect(asked[0]?.settings).toMatchObject({ thinking: "off" });
+  expect(printed[1]).toBe("error: effort=none is thinking=off, and thinking=auto says otherwise.");
+});

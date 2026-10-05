@@ -89,17 +89,32 @@ export const inForce = (session: Session) =>
     ].join("\n");
   });
 
-/** The settings `name=value …` names, as the core's grammar reads them; a name or value it does not know is said. */
+/** The settings `name=value …` names, as `settingsGiven` reads them. */
 export const settingsFrom = (words: ReadonlyArray<string>) =>
-  Effect.gen(function* () {
-    // What was typed is not yet known to be settings: the schema says.
-    const given: unknown = Object.fromEntries(
+  settingsGiven(
+    Object.fromEntries(
       words.map((word) => {
         const [name = "", value = ""] = word.split("=");
         return [name, /^\d+$/.test(value) ? Number(value) : value];
       }),
-    );
-    return yield* Schema.decodeUnknownEffect(ModelSettings)(given, { onExcessProperty: "error" }).pipe(
+    ),
+  );
+
+/**
+ * Settings as the CLI takes them (`/settings`, `--effort`, `--thinking`), read by the core's grammar
+ * (`ModelSettings`); a name or value the grammar does not know is refused, saying why. The CLI
+ * also takes `effort=none`, which is `thinking=off`: the core has no effort `none`, and a provider's
+ * adapter sends thinking off as that provider says it (effort `none` to OpenAI and xAI, `thinking:
+ * disabled` to Anthropic). `effort=none` with a thinking mode other than `off` is refused.
+ */
+export const settingsGiven = (given: Readonly<Record<string, unknown>>) =>
+  Effect.gen(function* () {
+    const { effort, ...rest } = given;
+    const thinking = rest["thinking"];
+    if (effort === "none" && thinking !== undefined && thinking !== "off")
+      return yield* invalid(`effort=none is thinking=off, and thinking=${typeof thinking === "string" ? thinking : JSON.stringify(thinking)} says otherwise.`);
+    const said = effort === "none" ? { ...rest, thinking: "off" } : given;
+    return yield* Schema.decodeEffect(ModelSettings)(said, { onExcessProperty: "error" }).pipe(
       Effect.mapError((error) => invalid(`Not settings the session takes: ${error.message}`)),
     );
   });

@@ -40,7 +40,8 @@ import { cliConfiguration } from "./configuration.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { ConfigProvider, Console, Effect, Option, Stdio, Stream } from "effect";
 import { Argument, Command, Flag, Prompt } from "effect/cli";
-import { Effort, type ModelSettings, ThinkingMode } from "../../agent-machine/settings.ts";
+import { Effort, ThinkingMode } from "../../agent-machine/settings.ts";
+import { settingsGiven } from "./commands.ts";
 import { modelOf } from "../../agent-session/configuration/session-setup.ts";
 import { KeyedAndLocalCatalog, keyOf, keyVariables, known, ModelCatalog } from "../../agent-host/catalog.ts";
 import { latestSession, readSession, storedSessions, summaryOf } from "../../agent-host/directory.ts";
@@ -64,7 +65,7 @@ const arg = (name: string) => Argument.String(name).pipe(Argument.optional, Argu
 
 const flags = {
   print: toggle("print", "Ask once, print the answer and exit", "p"),
-  effort: choice("effort", Effort.literals, "Reasoning effort; a model that does not take it is sent the nearest it does"),
+  effort: choice("effort", [...Effort.literals, "none"], "Reasoning effort; a model that does not take it is sent the nearest it does; none is --thinking off"),
   thinking: choice("thinking", ThinkingMode.literals, "When the model thinks"),
   systemPrompt: text("system-prompt", "The system prompt"),
   systemPromptFile: text("system-prompt-file", "A file holding the system prompt"),
@@ -149,10 +150,10 @@ const configOf = (options: Options, interactive: boolean) =>
       persist: !options.noSessionPersistence,
       strictToolInput: options.strictToolInput,
     } as const;
-    const settings: ModelSettings = {
+    const settings = yield* settingsGiven({
       ...(options.effort === undefined ? {} : { effort: options.effort }),
       ...(options.thinking === undefined ? {} : { thinking: options.thinking }),
-    };
+    });
     const system = yield* systemOf(options);
     if (options.continue && options.resume !== undefined) return yield* invalid("Pass --continue or --resume, not both.");
     if (!options.continue && options.resume === undefined) {
