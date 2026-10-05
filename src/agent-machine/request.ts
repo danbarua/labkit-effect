@@ -27,7 +27,9 @@ export const EffectRequest = Schema.Union([
    * Stop every request being carried out for `turn`. Each request under way reports how far it got:
    *
    * - a model request reports the response as far as it had arrived;
-   * - a tool call reports how it ended, or that its end was not observed.
+   * - a tool call reports how it ended, or that its end was not observed;
+   * - a turn-end review reports `TurnEndReviewed` at once: its hooks are stopped, and their feedback
+   *   is not given to the turn.
    */
   Schema.TaggedStruct("StopTurnWork", { turn: TurnId }),
 ]);

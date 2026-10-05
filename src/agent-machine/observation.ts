@@ -317,8 +317,9 @@ export const Observation = Schema.Union([
    */
   Schema.TaggedStruct("TurnHoldsExhausted", { turn: TurnId, holds: Schema.Int, feedback: Schema.Array(InputText) }),
   /**
-   * The turn was interrupted, by the user or by another party allowed to stop it. Between steps the
-   * turn ends at once; during a step it ends when each request has reported how far it got.
+   * The turn was interrupted, by the user or by another party allowed to stop it. The turn stops
+   * what is under way for it (a step, or the turn-end review) and ends when each request has
+   * reported how far it got. The model is not asked again in the turn.
    */
   Schema.TaggedStruct("TurnInterrupted", { turn: TurnId }),
 ]);

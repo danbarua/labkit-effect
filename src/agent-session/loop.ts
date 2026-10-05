@@ -550,7 +550,16 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
         );
       }
       case "BeforeTurnEnded":
-        return reviewTurnEnd(request.turn).pipe(Effect.raceFirst(stopped.pipe(Effect.as<ReadonlyArray<Observed>>([]))));
+        // An interrupted turn asks the model nothing more: its hooks are stopped, their feedback is
+        // not given, and the review reports at once so that the turn ends.
+        return reviewTurnEnd(request.turn).pipe(
+          Effect.raceFirst(
+            stopped.pipe(
+              Effect.andThen(Effect.logInfo(logKeys.loop.reviewStopped, { turn: request.turn })),
+              Effect.as<ReadonlyArray<Observed>>([{ origin: harnessParts.loop, observation: { _tag: "TurnEndReviewed", turn: request.turn } }]),
+            ),
+          ),
+        );
       case "StopTurnWork":
         return cancelOf(request.turn).pipe(
           Effect.flatMap((cancel) => Deferred.succeed(cancel, undefined)),
@@ -834,8 +843,9 @@ const askedIn = (
  * Ends the turn that the session's facts leave running. Facts can stop while a turn runs, with
  * requests made and no outcome recorded, because the process that was carrying them out has ended.
  * The turn is interrupted, and each request under way receives what is known of it: a model request
- * gets no response (`Indeterminate`, with the tool calls that had arrived), and a running tool call
- * gets an end that was not observed. No request is made again. When the facts leave no turn
+ * gets no response (`Indeterminate`, with the tool calls that had arrived), a running tool call
+ * gets an end that was not observed, and a turn-end review gets `TurnEndReviewed` with no input
+ * from the hooks. No request is made again. When the facts leave no turn
  * running, nothing is recorded.
  */
 export const endTurnLeftRunning = (session: Session): Effect.Effect<void, SessionStoreFailed, Services> =>

@@ -114,6 +114,26 @@ test("a model request was made and nothing came of it: no response was observed,
   ]);
 });
 
+test("a turn-end review was under way: the turn ends Interrupted with the review reported, and the model is not asked again", async () => {
+  const session = asked();
+  session.reviewsTurnEnds = false;
+  observe(session, dispatched);
+  observe(session, {
+    _tag: "ModelResponded",
+    turn: "turn-1",
+    provider: "boring",
+    model: "boring-1",
+    parts: [{ _tag: "Text", text: "a.ts" }],
+    ending: { _tag: "Complete" },
+    metadata: json({}),
+  });
+  const { settled, seen } = await resumed(session.journal);
+  expect(tags(settled)).toEqual(["TurnInterrupted", "TurnEndReviewed", "TurnEnded"]);
+  expect(settled[1] as unknown).toMatchObject({ origin: { _tag: "Harness", part: "resume" } });
+  expect(settled[2] as unknown).toMatchObject({ decision: { turn: "turn-1", ending: { _tag: "Interrupted" } } });
+  expect(seen).toEqual([]);
+});
+
 test("a tool was running: how it ended was not observed, and the model is told so with the next input", async () => {
   const session = asked();
   observe(session, {

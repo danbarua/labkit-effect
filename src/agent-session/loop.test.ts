@@ -77,27 +77,30 @@ test("while a request is carried out, CurrentWork and every log line name its se
   expect(worked).toEqual([expected]);
 });
 
-/** A model that answers every request with text, and a loop over it with the given turn-end hooks. */
+/** A model that answers every request with text. */
+const answering = Layer.succeed(ModelClient, {
+  respond: (target, _context, turn) =>
+    Effect.succeed({
+      _tag: "ModelResponded" as const,
+      turn,
+      provider: target.provider,
+      model: target.model,
+      parts: [{ _tag: "Text" as const, text: ModelText.make("Done.") }],
+      stop: StopReason.make("end_turn"),
+      ending: { _tag: "Complete" },
+      metadata: receivedJson({}),
+    }),
+});
+
+const stubProvider = Layer.succeed(ModelProvider, {
+  select: () => Effect.succeed({ provider: ProviderName.make("stub"), model: ModelName.make("stub-1") }),
+});
+
+/** A loop over the answering model, with the given turn-end hooks. */
 async function answeringTurn(hooks: ReadonlyArray<() => ReadonlyArray<string>>, maxHolds: number) {
   const logged: Array<unknown> = [];
   const capture = Logger.make((options) => {
     logged.push(options.message);
-  });
-  const client = Layer.succeed(ModelClient, {
-    respond: (target, _context, turn) =>
-      Effect.succeed({
-        _tag: "ModelResponded" as const,
-        turn,
-        provider: target.provider,
-        model: target.model,
-        parts: [{ _tag: "Text" as const, text: ModelText.make("Done.") }],
-        stop: StopReason.make("end_turn"),
-        ending: { _tag: "Complete" },
-        metadata: receivedJson({}),
-      }),
-  });
-  const provider = Layer.succeed(ModelProvider, {
-    select: () => Effect.succeed({ provider: ProviderName.make("stub"), model: ModelName.make("stub-1") }),
   });
   const turnEndHooks = Layer.mergeAll(
     Layer.succeed(
@@ -116,7 +119,7 @@ async function answeringTurn(hooks: ReadonlyArray<() => ReadonlyArray<string>>, 
       return yield* session.facts;
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(provider, client, BoringContextAssembler, CountingTurns, turnEndHooks, SmolToolRunner, Logger.layer([capture], { mergeWithExisting: true })),
+        Layer.mergeAll(stubProvider, answering, BoringContextAssembler, CountingTurns, turnEndHooks, SmolToolRunner, Logger.layer([capture], { mergeWithExisting: true })),
       ),
     ),
   );
@@ -170,6 +173,39 @@ test("a hook that holds the turn its maxHolds times and then lets go ends it wit
   expect(tags).not.toContain("TurnHoldsExhausted");
   expect(tags.slice(-2)).toEqual(["TurnEndReviewed", "TurnEnded"]);
   expect(logged.some((line) => Array.isArray(line) && line[0] === logKeys.loop.holdsExhausted)).toBe(false);
+});
+
+test("an interruption while the turn-end hooks run stops them: their feedback is not given, the model is not asked again, and the turn ends Interrupted", async () => {
+  const hookRunning = Promise.withResolvers<void>();
+  const logged: Array<unknown> = [];
+  const capture = Logger.make((options) => {
+    logged.push(options.message);
+  });
+  const hooks = Layer.mergeAll(
+    Layer.succeed(TurnEndHooks, [() => Effect.sync(() => hookRunning.resolve()).pipe(Effect.andThen(Effect.never))]),
+    Layer.succeed(MaxHolds, 5),
+  );
+  const facts = await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
+      yield* session.observe(boringOpening());
+      yield* session.idle;
+      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
+      yield* Effect.promise(() => hookRunning.promise);
+      yield* session.observe({ _tag: "TurnInterrupted", turn: TurnId.make("turn-1") });
+      yield* session.idle;
+      return yield* session.facts;
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(stubProvider, answering, BoringContextAssembler, CountingTurns, hooks, SmolToolRunner, Logger.layer([capture], { mergeWithExisting: true })),
+      ),
+    ),
+  );
+  const tags = facts.map((fact) => (fact._tag === "Observed" ? fact.observation._tag : fact.decision._tag));
+  expect(tags.slice(4)).toEqual(["AskModel", "ModelRequestDispatched", "ModelResponded", "TurnCompleted", "TurnInterrupted", "TurnEndReviewed", "TurnEnded"]);
+  expect(facts.at(-2) as unknown).toMatchObject({ origin: { _tag: "Harness", part: "loop" }, observation: { _tag: "TurnEndReviewed" } });
+  expect(facts.at(-1) as unknown).toMatchObject({ decision: { ending: { _tag: "Interrupted" } } });
+  expect(logged).toContainEqual([logKeys.loop.reviewStopped, { turn: "turn-1" }]);
 });
 
 test("a subscriber receives every fact recorded after it subscribed, in order", async () => {

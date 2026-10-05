@@ -14,8 +14,11 @@
  * - A step that stops without a response (a failed or vetoed request) ends the turn. Input still
  *   waiting when the turn ends is dropped.
  * - The model's observations are addressed to the turn, which passes them to its current step.
- * - An interruption between steps ends the turn at once. An interruption during a step stops the
- *   step's requests, and the turn ends when the step has heard how far each got.
+ * - An interruption during a step stops the step's requests, and the turn ends when the step has
+ *   heard how far each got.
+ * - An interruption during the turn-end review stops the review, and the turn ends when the review
+ *   reports (`TurnEndReviewed`). The turn takes no input after the interruption, so the model is not
+ *   asked again.
  */
 
 import type { Ending } from "./decision.ts";
@@ -50,6 +53,11 @@ export type ConversationTurnState =
    * step has heard how far each request got.
    */
   | { readonly _tag: "Interrupting"; readonly turn: TurnId; readonly step: StepIndex }
+  /**
+   * Interrupted while the turn-end review (`BeforeTurnEnded`) was under way: the turn has requested
+   * `StopTurnWork`, and ends when the review reports (`TurnEndReviewed`).
+   */
+  | { readonly _tag: "InterruptingReview"; readonly turn: TurnId }
   | { readonly _tag: "Ended"; readonly turn: TurnId };
 
 /** How a turn ends when its last response had no tool calls and no input follows it. */
@@ -116,7 +124,7 @@ const changeModel = (state: ConversationTurnState, change: Seq): TurnResult => (
   decisions: [{ _tag: "ModelChangeTaken", change }],
 });
 
-/** No step is under way: the turn ends at once and requests `StopTurnWork` for anything still carried out for it. */
+/** Nothing is under way for the turn: it ends at once, and requests `StopTurnWork` in case anything is. */
 const interrupted = (state: ConversationTurnState): TurnResult => ({
   ...ended(state.turn, { _tag: "Interrupted" }),
   requests: [{ _tag: "StopTurnWork", turn: state.turn }],
@@ -125,6 +133,12 @@ const interrupted = (state: ConversationTurnState): TurnResult => ({
 /** A step is under way: the turn requests `StopTurnWork` and waits to hear how far each request got. */
 const interrupting = (state: Extract<ConversationTurnState, { _tag: "Stepping" }>): TurnResult => ({
   ...becomes({ _tag: "Interrupting", turn: state.turn, step: state.step }),
+  requests: [{ _tag: "StopTurnWork", turn: state.turn }],
+});
+
+/** The turn-end review is under way: the turn requests `StopTurnWork` and waits for the review to report. */
+const interruptingReview = (state: Extract<ConversationTurnState, { _tag: "AfterAnswer" | "AfterAnswerSteered" }>): TurnResult => ({
+  ...becomes({ _tag: "InterruptingReview", turn: state.turn }),
   requests: [{ _tag: "StopTurnWork", turn: state.turn }],
 });
 
@@ -246,7 +260,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     TurnHoldsExhausted: "ignored",
   },
   AfterAnswer: {
-    TurnInterrupted: interrupted,
+    TurnInterrupted: interruptingReview,
     TurnOpened: "ignored",
     Steer: (state, message) =>
       take(state, message.input, { _tag: "AfterAnswerSteered", turn: state.turn, step: state.step }),
@@ -272,7 +286,7 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelVetoed: "ignored",
   },
   AfterAnswerSteered: {
-    TurnInterrupted: interrupted,
+    TurnInterrupted: interruptingReview,
     TurnOpened: "ignored",
     Steer: (state, message) => take(state, message.input),
     Compact: (state, message) => compact(state, message.compaction),
@@ -320,6 +334,33 @@ export const conversationTurnTable: Table<ConversationTurnState, ConversationTur
     ModelVetoed: passOn,
     TurnEndReviewed: "ignored",
     TurnHoldsExhausted: "ignored",
+  },
+  InterruptingReview: {
+    TurnInterrupted: "ignored",
+    TurnOpened: "ignored",
+    /** A waiting message is handled when the turn has ended: input is dropped, so the model is not asked again. */
+    Steer: "deferred",
+    Compact: "deferred",
+    ChangeModel: "deferred",
+    Proceed: "ignored",
+    /** The review has reported, so the turn ends. */
+    TurnEndReviewed: endInterrupted,
+    /** Changes nothing: `TurnEndReviewed` follows. */
+    TurnHoldsExhausted: (state) => becomes(state),
+    StepToolsSettled: "ignored",
+    StepAnswered: "ignored",
+    StepUnanswered: "ignored",
+    StepCutShort: "ignored",
+    StepUnfinished: "ignored",
+    StepStopped: "ignored",
+    ModelResponded: "ignored",
+    ModelFailed: "ignored",
+    ModelAttemptFailed: "ignored",
+    NoticeInserted: "ignored",
+    ModelRequestDispatched: "ignored",
+    SettingAdjusted: "ignored",
+    ToolCallArrived: "ignored",
+    ModelVetoed: "ignored",
   },
   Ended: {
     TurnInterrupted: "ignored",

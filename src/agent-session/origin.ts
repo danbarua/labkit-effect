@@ -32,7 +32,7 @@ export const policyPart = (seam: string, name: string): Extract<Origin, { _tag: 
 
 /** The parts of the harness that report observations. */
 export const harnessParts = {
-  /** Starts turns. */
+  /** Starts turns, and reports a turn-end review that it stopped because the turn was interrupted. */
   loop: harness("loop"),
   /** Runs the hooks that may hold a turn open before it ends. */
   turnEndHooks: harness("turn-end hooks"),

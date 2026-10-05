@@ -151,7 +151,12 @@ After a response with no tool calls, the turn asks the layers around the core fo
   arrived, with the complete parts (`ModelResponded`, ending `Interrupted`); a tool that was running
   reports that its end was not observed; a call not yet run reports that it was not. The turn then
   ends `Interrupted`, on a step's boundary, so the conversation continues from it.
-- Interrupted between steps, the turn ends at once.
+- Interrupted during the turn-end review (`BeforeTurnEnded`), the turn asks for the review to stop
+  (`StopTurnWork`) and waits for it to report (`TurnEndReviewed`). The layers around the core stop
+  the turn-end hooks and report at once, without the hooks' feedback. The turn then ends
+  `Interrupted`, and the model is not asked again, even when input was taken during the review.
+- An interruption records the user's intent. The turn ends once what was under way for it has
+  reported.
 - Input that arrives while the turn waits is dropped when it ends. A compaction window or a change of
   model that arrives while the turn waits is taken when it ends.
 
@@ -162,16 +167,21 @@ A session can continue from its facts, which are kept as given.
 - Between turns the machines hold nothing, and every request reads what it carries from the facts,
   so continuing from facts that stop between turns is the same as starting the next turn.
 - A session continued from its facts builds its machines from the facts after the last turn's end
-  only (`worldAndRequestsOf`). It has no machine for a turn that ended before, so an observation
-  addressed to that turn is recorded as `ObservationUndelivered`. A session that was not continued
-  from its facts records the same observation as `ObservationNotExpected`.
+  only (`worldAndRequestsOf`). It has no machine for a turn, or a call, of a turn that ended
+  before. An observation addressed to one is recorded differently:
+  - in a session continued from its facts: `ObservationUndelivered`;
+  - in a session that was not: `ObservationNotExpected` for a turn's observation, and no decision
+    for a call's `ToolEnded`, which the call's machine still takes.
+- Such an observation follows `TurnEnded` when a model request fails while a tool call that arrived
+  in its stream is still running: the failure ends the turn, and the call's `ToolEnded` follows.
 - Facts can also stop while a turn runs: the process ended with requests made and no outcome
   recorded (`leftRunning` lists them). Whoever continues from the facts decides what becomes of the
   turn:
   - **End it.** The turn is interrupted, and each request under way receives what is known of it: a
     model request gets `ModelResponded` with ending `Indeterminate`, holding the tool calls that had
     arrived; a call that began gets an end that was not observed; a call that had not begun was not
-    run. No request is made again. The turn ends `Interrupted`, and the conversation continues from
+    run; a turn-end review gets `TurnEndReviewed`, with no input from the hooks. No request is made
+    again. The turn ends `Interrupted`, and the conversation continues from
     it.
   - **Continue it.** Each request with no outcome is carried out. A model request is made again. A
     tool call runs again only when its tool's `replay` is `safe` (it changes nothing), and is asked

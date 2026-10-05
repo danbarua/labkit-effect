@@ -189,6 +189,26 @@ test("a turn that was being interrupted is given what is known of each request, 
   expect(ending(after)).toEqual(["Interrupted"]);
 });
 
+test("a turn interrupted during its turn-end review is given the review's report, and ends Interrupted; the model is not asked", async () => {
+  const session = asked();
+  session.reviewsTurnEnds = false;
+  observe(session, {
+    _tag: "ModelResponded",
+    turn: "turn-1",
+    provider: "boring",
+    model: "boring-1",
+    parts: [{ _tag: "Text", text: "Done." }],
+    ending: { _tag: "Complete" },
+    metadata: json({}),
+  });
+  observe(session, { _tag: "TurnInterrupted", turn: "turn-1" });
+  expect(leftRunning(session.journal)?.stopping).toBe(true);
+  const { after, asked: times } = await wentOn(session.journal);
+  expect(times).toBe(0);
+  expect(tags(after)).toEqual(["TurnEndReviewed", "TurnEnded"]);
+  expect(ending(after)).toEqual(["Interrupted"]);
+});
+
 test("input that arrived with no turn started for it starts one", async () => {
   const session = open();
   session.startsTurns = false;

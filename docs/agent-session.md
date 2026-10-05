@@ -102,7 +102,9 @@ A write that fails stops the session:
   from another fiber.
 - **`cancel`** returns before the turn has ended. The turn ends `Interrupted` once its requests have
   reported how far they got. A call that is waiting for a permission answer ends `NotRun`, and its
-  question is no longer waited on. With no turn under way, `cancel` records nothing.
+  question is no longer waited on. Turn-end hooks that are running are stopped: the loop records
+  `TurnEndReviewed` (origin `loop`) without their feedback, logs `loop.turn_end.stopped`, and the
+  model is not asked again. With no turn under way, `cancel` records nothing.
 
 ### A turn the facts left running
 
@@ -113,8 +115,8 @@ ended. The host chooses what to do:
 - `goOn` carries out each request that has no outcome. A model request is made again. A tool call
   runs again only when its tool's `replay` is `safe` (it changes nothing). Any other call ends
   `Indeterminate` if it had begun, and `NotRun` if it had not.
-- `endTurnLeftRunning` interrupts the turn and records what is known of each request. No request is
-  made again.
+- `endTurnLeftRunning` interrupts the turn and records what is known of each request, including
+  `TurnEndReviewed` for a turn-end review that was under way. No request is made again.
 
 ## Where facts are kept
 

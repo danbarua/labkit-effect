@@ -61,6 +61,8 @@ export const logKeys = {
     turnHeld: "loop.turn_end.held",
     /** A turn's hooks gave feedback after it had been held `maxHolds` times; the feedback was not given to it. */
     holdsExhausted: "loop.turn_end.holds_exhausted",
+    /** The turn was interrupted while its turn-end hooks ran: the hooks were stopped, and any feedback they had was not given to it. */
+    reviewStopped: "loop.turn_end.stopped",
   },
   anthropic: {
     /** The request carried the default `max_tokens`, because the session's settings gave no output limit. */
