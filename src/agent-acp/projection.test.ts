@@ -412,15 +412,15 @@ test("PJ6: a host's presentation is shown in place of the default: title, kind a
   const present: Present = (call, outcome) =>
     Effect.succeed({
       title: outcome === undefined ? `List ${call.tool}` : "Listed",
-      kind: "search",
+      kind: outcome === undefined ? "search" : "read",
       locations: [{ path: "/work" }],
-      ...(outcome === undefined ? {} : { content: output("1 file") as never }),
+      content: (outcome === undefined ? output("listing /work") : output("1 file")) as never,
     });
   const { inputs } = listing();
   expect(project(inputs, { mode: "live", present }).updates.slice(0, 3)).toEqual([
-    { ...announced("c1", "List ls", "search"), locations: [{ path: "/work" }] },
+    { ...announced("c1", "List ls", "search"), locations: [{ path: "/work" }], content: output("listing /work") },
     updated("c1", "in_progress"),
-    updated("c1", "completed", { title: "Listed", locations: [{ path: "/work" }], content: output("1 file") }),
+    updated("c1", "completed", { title: "Listed", kind: "read", locations: [{ path: "/work" }], content: output("1 file") }),
   ] as never);
 });
 
@@ -659,4 +659,45 @@ test("PJ11: a request ends at its response: a second response with no request be
   fact({ _tag: "ToolCallArrived", turn: "turn-1", ...rm("c2") });
   fact(responded([answer("Removed.")]));
   expect(project(session.journal, replay).updates).toEqual([user("remove a.ts"), announced("c1", "rm", "delete"), announced("c2", "rm", "delete"), said("Removed.")] as never);
+});
+
+test("a call whose part arrives on the streamed feed before its ToolCallArrived is announced at its place, before the text that streams after it", () => {
+  const { inputs, fact, stream } = recording();
+  fact(asked("list the files"));
+  fact(dispatched());
+  stream(arrived({ _tag: "ToolCall", ...ls }), delta("Text", "Listing."));
+  fact({ _tag: "ToolCallArrived", turn: "turn-1", ...ls });
+  expect(project(inputs, live).updates).toEqual([announced("c1", "ls", "read"), said("Listing.")] as never);
+});
+
+test("after a request answered before its end item, the next request of the turn sends its deltas as they come", () => {
+  const { session, items } = listing(deltas);
+  const facts = session.journal;
+  const firstResponded = facts.findIndex((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded");
+  const secondDispatched = facts.findIndex((fact, at) => at > firstResponded && fact._tag === "Observed" && fact.observation._tag === "ModelRequestDispatched");
+  const firstEnd = items.findIndex((item) => item._tag === "ModelResponseEnded");
+  // The first request's items but its end item; its response; then its end item, and the second request.
+  const inputs: ReadonlyArray<ProjectionInput> = [
+    ...facts.slice(0, firstResponded),
+    ...items.slice(0, firstEnd),
+    ...facts.slice(firstResponded, secondDispatched + 1),
+    ...items.slice(firstEnd),
+    ...facts.slice(secondDispatched + 1),
+  ];
+  const updates = project(inputs, live).updates;
+  expect(updates.filter((update) => update.sessionUpdate === "agent_message_chunk")).toEqual([said("List"), said("ing."), said("One file"), said(": a.ts.")] as never);
+});
+
+test("text of only whitespace that ends a request is not sent with the next request's text", () => {
+  const { inputs, fact, stream } = recording();
+  fact(asked("list the files"));
+  fact(dispatched());
+  stream(delta("Text", "Listing."), delta("Text", "\n"), ended());
+  fact(responded([answer("Listing.\n"), { _tag: "ToolCall", ...ls }]));
+  fact({ _tag: "ToolCallDispatched", call: "c1" });
+  fact({ _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } });
+  fact(dispatched());
+  stream(delta("Text", "Done."), ended());
+  fact(responded([answer("Done.")]));
+  expect(project(inputs, live).updates.filter((update) => update.sessionUpdate === "agent_message_chunk")).toEqual([said("Listing."), said("Done.")] as never);
 });

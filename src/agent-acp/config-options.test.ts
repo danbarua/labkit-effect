@@ -103,3 +103,14 @@ test("AA5: a value the option does not offer, or an id no option has, is an inva
   expect(invalid("model", "openai/gpt-4o")).toBe("openai/gpt-4o is not a model offered.");
   expect(invalid("temperature", "1")).toBe("No option has the id temperature.");
 });
+
+test("a setting's current value that its values do not list is offered beside them", () => {
+  const options = {
+    provider: ProviderName.make("openai"),
+    model: ModelName.make("gpt-5.5"),
+    settings: {},
+    offered: [{ _tag: "OneOf" as const, name: "effort" as const, values: ["low", "high"], now: "medium" }],
+  };
+  const effort = shown(configOptions(options, models, undefined)).find((option) => option.id === "effort");
+  expect(effort).toEqual({ id: "effort", category: "thought_level", values: ["low", "high", "medium"], now: "medium" } as never);
+});

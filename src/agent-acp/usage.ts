@@ -17,7 +17,8 @@ export type UsageUpdate = Extract<SessionUpdate, { sessionUpdate: "usage_update"
 export const usageUpdate = (facts: ReadonlyArray<Fact>): Effect.Effect<UsageUpdate | undefined> =>
   Effect.gen(function* () {
     const target = yield* modelOf(facts);
-    const known = target.capabilities ?? (yield* knownCapabilities(target.provider, target.model));
+    // `modelOf` gives no capabilities: what is known of the model is `KnownModels`'.
+    const known = yield* knownCapabilities(target.provider, target.model);
     const gauge = contextGauge(facts, target.provider, target.model, known);
     return gauge === undefined ? undefined : { sessionUpdate: "usage_update", used: gauge.used, size: gauge.size, cost: gauge.cost };
   });

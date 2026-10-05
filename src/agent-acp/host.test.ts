@@ -167,8 +167,9 @@ function startHost(
     readonly pageSize?: number;
     readonly maxTurnRequests?: number;
     readonly brand?: Brand;
-    /** How many times a turn with thinking and no answer is asked again; 0 (no turn-end hook) when left out. */
-    readonly retries?: number;
+    /** How many times a turn with thinking and no answer is asked again; 0 (no turn-end hook) when left out, and the host's own default when "the host's default". */
+    readonly retries?: number | "the host's default";
+    readonly strictToolInput?: boolean;
     readonly configFlags?: ConfigFlags;
   } = {},
 ): HostRun {
@@ -209,7 +210,8 @@ function startHost(
     ...(options.maxTurnRequests === undefined ? {} : { maxTurnRequests: options.maxTurnRequests }),
     ...(options.brand === undefined ? {} : { brand: options.brand }),
     ...(options.configFlags === undefined ? {} : { configFlags: options.configFlags }),
-    retries: options.retries ?? 0,
+    ...(options.retries === "the host's default" ? {} : { retries: options.retries ?? 0 }),
+    ...(options.strictToolInput === undefined ? {} : { strictToolInput: options.strictToolInput }),
     // The user's file is the test's own, not the machine's.
     home: join(testFolder(), "home"),
     services: (runner) => Layer.mergeAll((options.services ?? SessionServices)(runner), scripted, Layer.succeed(ModelStreamInterval, Millis.make(0))),
@@ -924,7 +926,7 @@ test("AG22: the MCP servers a client names are started; their tools are offered 
 });
 
 test("AG28: a server at a URL the client names is connected over Streamable HTTP or HTTP+SSE: its tools are offered, a call runs on it, and closing the session ends its session", async () => {
-  const web = startFakeHttpServer({ transport: "http" });
+  const web = startFakeHttpServer({ transport: "http", auth: { token: "t-1" } });
   const legacy = startFakeHttpServer({ transport: "sse" });
   const host = startHost({
     world: echoWorld,
@@ -937,13 +939,15 @@ test("AG28: a server at a URL the client names is connected over Streamable HTTP
       const { sessionId } = await ctx.request("session/new", {
         cwd: host.cwd,
         mcpServers: [
-          { type: "http", name: "web", url: web.url, headers: [{ name: "X-Trace", value: "t-1" }] },
+          { type: "http", name: "web", url: web.url, headers: [{ name: "Authorization", value: "Bearer t-1" }] },
           { type: "sse", name: "legacy", url: legacy.url, headers: [] },
         ],
       });
       const prompted = await ctx.request("session/prompt", say(sessionId, "Echo over http."));
       await ctx.request("session/close", { sessionId });
-      return { prompted };
+      // Closing the session, not the end of the connection, ends its session at the server.
+      for (let tries = 0; web.deleted.length === 0 && tries < 100; tries++) await Bun.sleep(10);
+      return { prompted, deletedAtClose: web.deleted.length };
     });
     await host.stop();
     expect(result.prompted.stopReason).toBe("end_turn");
@@ -958,7 +962,7 @@ test("AG28: a server at a URL the client names is connected over Streamable HTTP
     ]);
     const completed = log.updates.find((update) => update.sessionUpdate === "tool_call_update" && update.status === "completed");
     expect(completed).toMatchObject({ toolCallId: "w-1", content: [{ type: "content", content: { type: "text", text: "over http" } }] });
-    expect(web.deleted).toHaveLength(1);
+    expect(result.deletedAtClose).toBe(1);
   } finally {
     web.stop();
     legacy.stop();
@@ -1105,7 +1109,7 @@ test("AG23: a server that cannot be started leaves the session running: the mode
 test("AG16: by default a response after a tool call with thinking but no answer is asked again; the client gets the answer, not the feedback, and end_turn", async () => {
   const host = startHost({
     world: echoWorld,
-    retries: 1,
+    retries: "the host's default",
     script: [
       answer({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "4" } }),
       answer({ _tag: "Thinking", text: "The echo said 4, so the answer is 4." }),
@@ -1216,7 +1220,7 @@ const storedSession = async (text: string, pieces: ReadonlyArray<ReadonlyArray<P
     return created.sessionId;
   });
   await host.stop();
-  return { sessionId, cwd: host.cwd, file: storeFileOf(host.directory, sessionId) };
+  return { sessionId, cwd: host.cwd, directory: host.directory, file: storeFileOf(host.directory, sessionId) };
 };
 
 const echoTurn: ReadonlyArray<ReadonlyArray<Piece>> = [
@@ -1557,6 +1561,8 @@ test("AL4 PJ11: loading a session whose process ended with a request in flight a
 
 test("AL5 AL8: session/resume starts the stored session and replays nothing, then sends the commands, title and usage; the next prompt reaches the model with the earlier turn, and the record keeps its working folder", async () => {
   const stored = await storedSession("Echo ping", echoTurn);
+  // Written at the session's first prompt: removed, so that the resume is what writes it.
+  rmSync(join(sessionFolderOf(stored.directory, stored.sessionId), "effective-settings.json"));
   const elsewhere = join(testFolder(), "elsewhere");
   const host = startHost({ world: echoWorld, script: [answer({ _tag: "Text", text: "Second." })] });
   const { app, log, until } = sdkClient();
@@ -1570,6 +1576,7 @@ test("AL5 AL8: session/resume starts the stored session and replays nothing, the
   });
   await host.stop();
   expect(kinds(log.updates.slice(0, result.beforePrompt))).toEqual(announced);
+  expect(log.updates[0]).toMatchObject({ availableCommands: [{ name: "export" }, { name: "mcp" }] });
   expect(log.updates[1]).toMatchObject({ title: "Echo ping" });
   expect(result.resumed.configOptions?.find((option) => option.id === "model")).toMatchObject({ currentValue: "openai/gpt-6-sol" });
   expect(kinds(log.updates.slice(result.beforePrompt))).toEqual(["agent_message_chunk", "usage_update"]);
@@ -1870,4 +1877,201 @@ test("AL7: a session/load of a session still starting on this connection is -326
   });
   await host.stop();
   expect(result).toMatchObject({ code: -32602, message: expect.stringContaining("already loaded") });
+});
+
+/** A request that says it started, waits for `release`, then answers with `pieces`. */
+const after = (started: Deferred.Deferred<void>, release: Deferred.Deferred<void>, ...pieces: ReadonlyArray<Piece>): Reply => (turn, target) =>
+  Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.andThen(answer(...pieces)(turn, target)));
+
+/** Appends to a session's facts file the input `text` from the user, with no turn started for it: as a process that ended between the two leaves it. */
+const inputLeftWaiting = async (file: string, text: string) => {
+  const seq = (await factsOn(file)).length + 1;
+  const line = { _tag: "Observed", seq, time: new Date().toISOString(), origin: { _tag: "User", via: "acp" }, observation: { _tag: "InputArrived", from: { _tag: "User" }, text } };
+  writeFileSync(file, `${readFileSync(file, "utf8")}${JSON.stringify(line)}\n`);
+};
+
+test("a prompt is answered only after the client has every update of its turn, however long the feed takes to send them", async () => {
+  // The presentation of a call's end takes 300 ms, so the feed sends the turn's last updates after its end is recorded.
+  const slowWorld: World = {
+    open: () =>
+      Effect.succeed({
+        system: "Test.",
+        sources: [{ tools: [echoTool], run: (_name, input) => Effect.succeed({ _tag: "Succeeded", output: input }) }],
+        present: (call, outcome) => (outcome === undefined ? presentFrom([echoTool])(call) : Effect.sleep("300 millis").pipe(Effect.andThen(presentFrom([echoTool])(call, outcome)))),
+      }),
+  };
+  const host = startHost({ world: slowWorld, script: [answer({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "4" } }), answer({ _tag: "Text", text: "Done." })] });
+  const prompted = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    return ctx.request("session/prompt", say(sessionId, "Echo 4."));
+  });
+  await host.stop();
+  expect(prompted.stopReason).toBe("end_turn");
+  const answeredAt = host.wire.findIndex((message) => typeof message["result"] === "object" && message["result"] !== null && "stopReason" in message["result"]);
+  const lastUpdateAt = host.wire.reduce((last, message, at) => (isUpdateNotification(message) && message.params.update.sessionUpdate === "agent_message_chunk" ? at : last), -1);
+  const completedAt = host.wire.findIndex((message) => isUpdateNotification(message) && message.params.update.sessionUpdate === "tool_call_update" && message.params.update.status === "completed");
+  expect(completedAt).toBeGreaterThan(0);
+  expect(lastUpdateAt).toBeGreaterThan(completedAt);
+  expect(answeredAt).toBeGreaterThan(lastUpdateAt);
+});
+
+test("a change of model held while a turn the host went on with ran is made before the next prompt's turn starts, which asks the new model", async () => {
+  const stored = await storedSession("One", [[{ _tag: "Text", text: "One." }]]);
+  await inputLeftWaiting(stored.file, "Two");
+  const started = Deferred.makeUnsafe<void>();
+  const release = Deferred.makeUnsafe<void>();
+  const host = startHost({ world: echoWorld, script: [after(started, release, { _tag: "Text", text: "Two." }), answer({ _tag: "Text", text: "Three." })] });
+  const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    await ctx.request("session/load", { sessionId: stored.sessionId, cwd: host.cwd, mcpServers: [] });
+    // The input left waiting starts its turn once the session goes on; the change arrives while it runs.
+    await Effect.runPromise(Deferred.await(started));
+    await ctx.request("session/set_config_option", { sessionId: stored.sessionId, configId: "model", value: "openai/gpt-6-luna" });
+    await Effect.runPromise(Deferred.succeed(release, undefined));
+    await eventually(stored.file, (facts) => endings(facts).length === 2);
+    return ctx.request("session/prompt", say(stored.sessionId, "Three"));
+  });
+  await host.stop();
+  expect(result.stopReason).toBe("end_turn");
+  expect(host.targets).toEqual(["openai/gpt-6-sol", "openai/gpt-6-luna"]);
+});
+
+test("loading a session whose facts end with input that no turn took starts its turn live, once the feed has started", async () => {
+  const stored = await storedSession("One", [[{ _tag: "Text", text: "One." }]]);
+  await inputLeftWaiting(stored.file, "Are you there?");
+  const host = startHost({ world: echoWorld, script: [answer({ _tag: "Text", text: "Yes." })] });
+  const { app, log } = sdkClient();
+  await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    await ctx.request("session/load", { sessionId: stored.sessionId, cwd: host.cwd, mcpServers: [] });
+    await eventually(stored.file, (facts) => endings(facts).length === 2);
+  });
+  await host.stop();
+  expect(endings(await factsOn(stored.file))).toEqual(["Completed", "Completed"]);
+  expect(host.targets).toHaveLength(1);
+  expect(log.updates).toContainEqual({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Yes." } });
+});
+
+test("session/list gives at most 50 sessions a page unless the host says otherwise, and a cursor for the rest", async () => {
+  const host = startHost();
+  for (let index = 0; index < 51; index++) {
+    const folder = sessionFolderOf(host.directory, `s-${String(index).padStart(2, "0")}`);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "facts.jsonl"), "");
+    writeFileSync(join(folder, "host.json"), JSON.stringify({ cwd: host.cwd }));
+  }
+  const page = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    return ctx.request("session/list", {});
+  });
+  await host.stop();
+  expect(page.sessions).toHaveLength(50);
+  expect(typeof page.nextCursor).toBe("string");
+});
+
+test("a session's record that cannot be written at its first prompt fails the prompt with -32603, and the session stays a draft", async () => {
+  const host = startHost({ script: [answer({ _tag: "Text", text: "Hello." })] });
+  const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    // A folder where the record's file belongs: the record cannot be written.
+    mkdirSync(join(sessionFolderOf(host.directory, sessionId), "host.json"), { recursive: true });
+    const refused = await failure(ctx.request("session/prompt", say(sessionId, "Hi.")));
+    const exported = await ctx.request("session/prompt", say(sessionId, "/export"));
+    return { sessionId, refused, exported };
+  });
+  await host.stop();
+  expect(result.refused).toMatchObject({ code: -32603 });
+  expect(result.refused?.message).toStartWith("The session could not be opened:");
+  expect(existsSync(storeFileOf(host.directory, result.sessionId))).toBe(false);
+  expect(host.targets).toEqual([]);
+  expect(host.logged.find((each) => each.key === logKeys.session.notOpened)).toMatchObject({ level: "Error", details: { doing: "writing the session's record at its first prompt" } });
+});
+
+test("a configuration that cannot be used refuses session/new with -32603, naming the problem", async () => {
+  userFile("nonsense: 1\n");
+  const host = startHost();
+  const refused = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    return failure(ctx.request("session/new", { cwd: host.cwd, mcpServers: [] }));
+  });
+  await host.stop();
+  expect(refused).toMatchObject({ code: -32603 });
+  expect(refused?.message).toStartWith("The configuration cannot be used:");
+});
+
+test("a session refused for a required server that is not running ends the servers it started: a server at a URL has its session ended", async () => {
+  userFile("mcpServers:\n  needed:\n    command: /no/such/server\n    required: true\n");
+  const web = startFakeHttpServer({ transport: "http" });
+  const host = startHost();
+  try {
+    const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+      await initialize(ctx, {});
+      const refused = await failure(ctx.request("session/new", { cwd: host.cwd, mcpServers: [{ type: "http", name: "web", url: web.url, headers: [] }] }));
+      for (let tries = 0; web.deleted.length === 0 && tries < 100; tries++) await Bun.sleep(10);
+      return { refused, deleted: web.deleted.length };
+    });
+    await host.stop();
+    expect(result.refused).toMatchObject({ code: -32603, data: { servers: ["needed"] } });
+    expect(result.deleted).toBe(1);
+  } finally {
+    web.stop();
+  }
+});
+
+test("with retries set to 0, an incomplete turn is not asked again: it answers end_turn after one request", async () => {
+  const host = startHost({ world: echoWorld, retries: 0, script: [answer({ _tag: "Thinking", text: "The answer is 4." })] });
+  const prompted = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    return ctx.request("session/prompt", say(sessionId, "What is 2 + 2?"));
+  });
+  await host.stop();
+  expect(prompted.stopReason).toBe("end_turn");
+  expect(host.targets).toHaveLength(1);
+});
+
+test("a permission mode set while a turn runs applies when the turn ends: the turn's own call is still asked about, the next turn's is not", async () => {
+  const started = Deferred.makeUnsafe<void>();
+  const release = Deferred.makeUnsafe<void>();
+  const host = startHost({
+    script: [after(started, release, writeNotes("call-1")), answer({ _tag: "Text", text: "Written." }), answer(writeNotes("call-2")), answer({ _tag: "Text", text: "Written again." })],
+  });
+  const { app, log } = sdkClient();
+  await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    const first = ctx.request("session/prompt", say(sessionId, "Write hello."));
+    await Effect.runPromise(Deferred.await(started));
+    await ctx.request("session/set_config_option", { sessionId, configId: "permission_mode", value: "bypassPermissions" });
+    await Effect.runPromise(Deferred.succeed(release, undefined));
+    await first;
+    await ctx.request("session/prompt", say(sessionId, "Write it again."));
+  });
+  await host.stop();
+  expect(log.asked.map((asked) => asked.toolCall.toolCallId)).toEqual(["call-1"]);
+});
+
+test("a call with properties its tool does not take runs without them and says which; with strict tool input it is refused", async () => {
+  const call: Piece = { _tag: "ToolCall", call: "call-1", tool: "write_file", input: { path: "notes.txt", content: "hello", mode: "0644" } };
+  const run = async (strictToolInput: boolean) => {
+    const host = startHost({ strictToolInput, script: [answer(call), answer({ _tag: "Text", text: "Done." })] });
+    const { app, log } = sdkClient();
+    await app.connectWith(host.stream, async (ctx) => {
+      await initialize(ctx);
+      const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+      await ctx.request("session/prompt", say(sessionId, "Write hello."));
+    });
+    await host.stop();
+    return { ended: log.updates.find((update) => update.sessionUpdate === "tool_call_update" && (update.status === "completed" || update.status === "failed")), files: log.files };
+  };
+  const lenient = await run(false);
+  expect(lenient.ended).toMatchObject({ status: "completed" });
+  expect(JSON.stringify(lenient.ended)).toContain("[Not inputs of write_file, so ignored: mode.]");
+  expect(lenient.files.map((each) => each.method)).toEqual(["fs/write_text_file"]);
+  const strict = await run(true);
+  expect(strict.ended).toMatchObject({ status: "failed" });
+  expect(JSON.stringify(strict.ended)).toContain("write_file does not take this input");
+  expect(strict.files).toEqual([]);
 });
