@@ -230,6 +230,16 @@ test("xAI: effort goes into reasoning, max as xhigh, the nearest grok takes; the
     });
 });
 
+test("xAI: grok-build-0.1 reasons and takes no effort (models.dev lists no options for it): an effort is not sent, and is recorded", () => {
+  expect(xAiSettings({ effort: "high" }, known("xai", "grok-build-0.1"))).toEqual({
+    fields: {},
+    headers: {},
+    adjusted: [{ adjusted: { _tag: "Effort", asked: "high" }, reason: "this model has no effort setting" }],
+  });
+  const target = { provider: ProviderName.make("xai"), model: ModelName.make("grok-build-0.1") };
+  expect(choicesFor({ ...target, capabilities: known("xai", "grok-build-0.1") ?? { input: [], price: { input: 0, output: 0 } } }, xAiSettle)).toMatchObject({ effort: [], thinking: [] });
+});
+
 test("xAI: grok lists no effort none, so disabled is not sent and recorded; an effort given beside it is sent", () => {
   expect(xAiSettings({ thinking: "disabled", effort: "high" }, grok)).toEqual({
     fields: { reasoning: { effort: "high" } },

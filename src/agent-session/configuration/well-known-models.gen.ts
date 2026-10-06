@@ -739,6 +739,28 @@ export const wellKnownModels = {
           "cacheRead": 0.6
         }
       }
+    },
+    "grok-build-0.1": {
+      "context": 256000,
+      "output": 256000,
+      "input": [
+        "text",
+        "image",
+        "pdf"
+      ],
+      "reasoning": true,
+      "efforts": [],
+      "price": {
+        "input": 1,
+        "output": 2,
+        "cacheRead": 0.2,
+        "above": {
+          "context": 200000,
+          "input": 2,
+          "output": 4,
+          "cacheRead": 0.4
+        }
+      }
     }
   }
 } as const;

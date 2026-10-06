@@ -5,8 +5,10 @@
  * sources. models.dev's catalog gives each model's context window, output limit, kinds of input,
  * price in US dollars per million tokens (`above` is the price of a request whose input is over its
  * `context`), whether it reasons, and how its reasoning is set: the efforts it takes, or a budget of
- * thinking tokens. `well-known-models.measured.json` names the models and holds what was measured
- * against the providers (2026-10-01) and is not in the catalog:
+ * thinking tokens. `well-known-models.measured.json` names the models (each provider's latest frontier
+ * models, and xAI's fast coding model grok-build-0.1, alias grok-code-fast-1, as Claude Haiku is
+ * Anthropic's) and holds what was measured against the providers (2026-10-01) and is not in the
+ * catalog:
  *
  * - PDF input for ten GPT-5 models the catalog lists as taking none (each read one when sent it);
  * - Anthropic's hour-long cache writes, at twice the input price (the catalog has the five-minute rate);

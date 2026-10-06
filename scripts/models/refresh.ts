@@ -45,7 +45,12 @@ const measured = JSON.parse(readFileSync(measuredPath, "utf8")) as Record<string
 /** The efforts the core names: `none` (thinking disabled, as a provider's effort), then the core's `Effort`. */
 const namedEfforts: ReadonlyArray<string> = ["none", ...Effort.literals];
 
-/** The reasoning fields of a catalog entry: whether it reasons, its efforts, its thinking budget. An option of another kind fails the refresh, so that it is not dropped unseen. */
+/**
+ * The reasoning fields of a catalog entry: whether it reasons, its efforts, its thinking budget. An
+ * option of another kind fails the refresh, so that it is not dropped unseen. An empty list of options
+ * is a model that takes no setting for its reasoning, so it takes no effort (measured 2026-10-06:
+ * grok-build-0.1 refuses `reasoning.effort`).
+ */
 function reasoningOf(name: string, reasoning: boolean | undefined, options: ReadonlyArray<ReasoningOption> | undefined): Json {
   const efforts = options?.find((option): option is Extract<ReasoningOption, { type: "effort" }> => option.type === "effort")?.values;
   const budget = options?.find((option): option is Extract<ReasoningOption, { type: "budget_tokens" }> => option.type === "budget_tokens");
@@ -53,9 +58,10 @@ function reasoningOf(name: string, reasoning: boolean | undefined, options: Read
   if (unknown.length > 0) throw new Error(`${name}: reasoning options of a kind this script does not read: ${unknown.map((option) => option.type).join(", ")}`);
   const unnamed = efforts?.filter((effort) => !namedEfforts.includes(effort)) ?? [];
   if (unnamed.length > 0) throw new Error(`${name}: efforts the core does not name: ${unnamed.join(", ")} (it names ${namedEfforts.join(", ")})`);
+  const none = options !== undefined && options.length === 0;
   return {
     ...(reasoning === undefined ? {} : { reasoning }),
-    ...(efforts === undefined ? {} : { efforts }),
+    ...(efforts === undefined ? (none ? { efforts: [] } : {}) : { efforts }),
     ...(budget === undefined ? {} : { budget: { min: budget.min, ...(budget.max === undefined ? {} : { max: budget.max }) } }),
   };
 }
