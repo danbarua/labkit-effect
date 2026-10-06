@@ -5,6 +5,8 @@
  * The tools work in the folder the CLI runs in (`agent-tools/workspace.ts`): `read_file` and
  * `list_dir` read it, `write_file` and `edit_file` change it, and `run_command` runs a shell command
  * in it; then come the tools of the MCP servers the configuration names (`configuration.ts`). The
+ * system prompt starts with the line that names that folder as the working folder, which the tool
+ * descriptions refer to; the `--system-prompt` and `--append-system-prompt` text follows it. The
  * policies and turn-end hooks come from the configuration (`agent-config`); by default, permission
  * follows `--permission-mode`.
  */
@@ -43,6 +45,7 @@ export interface Config {
   readonly target: Asked;
   /** The settings given on the command line: a new session opens with them, and a continued session applies them as a change. */
   readonly settings: SettingsChange;
+  /** The `--system-prompt` and `--append-system-prompt` text, which follows the line that names the working folder. */
   readonly system: string | undefined;
   /**
    * The facts of the session being continued (`--continue`, `--resume`). The session keeps its
@@ -185,7 +188,7 @@ export const withSession = <A, E, R, L, H>(
     yield* host.follow(session);
     const facts = yield* session.facts;
     if (facts.length === 0)
-      yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: changed({}, config.settings) }, system: config.system, tools: yield* offeredTools }));
+      yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: changed({}, config.settings) }, system: [workspace.system, ...(config.system === undefined ? [] : [config.system])].join("\n\n"), tools: yield* offeredTools }));
     else {
       const left = leftRunning(facts);
       if (left === undefined) yield* session.goOn;

@@ -34,7 +34,7 @@ import type { ToolSource } from "../agent-session/tool-sources.ts";
 import { decoderOf, ignoredNote, jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
 import { asText, parseJson, receivedText } from "../agent-session/received.ts";
-import { workspaceTools } from "../agent-tools/workspace.ts";
+import { commandSeconds, EditFile, filePath, maxReadBytes, maxReadText, ReadFile, RunCommand, workingFolderLine, workspaceTools } from "../agent-tools/workspace.ts";
 import { type Present, type Presented, presentFrom } from "./projection.ts";
 
 /** What a world is given for one session, when the session is made. */
@@ -70,19 +70,9 @@ export interface World<R = never> {
 }
 
 /** The maximum number of bytes that a tool reads or writes in one call. */
-export const maxFileBytes = 256 * 1024;
+export const maxFileBytes = maxReadBytes;
 
-const ReadFile = Schema.Struct({
-  path: Schema.NonEmptyString,
-  line: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
-  limit: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
-});
-const WriteFile = Schema.Struct({ path: Schema.NonEmptyString, content: Schema.String });
-const EditFile = Schema.Struct({ path: Schema.NonEmptyString, old_text: Schema.NonEmptyString, new_text: Schema.String });
-const RunCommand = Schema.Struct({
-  command: Schema.NonEmptyString,
-  timeout_seconds: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(Schema.isLessThanOrEqualTo(600))),
-});
+const WriteFile = Schema.Struct({ path: filePath, content: Schema.String.annotate({ description: `The file's new text, at most ${maxReadText}.` }) });
 
 const PlanEntryInput = Schema.Struct({
   content: Schema.NonEmptyString,
@@ -90,9 +80,6 @@ const PlanEntryInput = Schema.Struct({
   priority: Schema.optionalKey(Schema.Literals(["high", "medium", "low"])),
 });
 const UpdatePlan = Schema.Struct({ entries: Schema.Array(PlanEntryInput) });
-
-/** How many seconds a command runs before it is stopped, unless the call gives `timeout_seconds`. */
-export const commandSeconds = 120;
 
 const rejected = (problem: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "InputRejected", problem: FailureText.make(problem) } });
 const reported = (message: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(message) } });
@@ -134,7 +121,7 @@ const commandOutcome = (
     onNone: () => `[Still running after ${seconds} seconds: stopped.]`,
     onSome: ({ exitCode, signal }) => (typeof exitCode === "number" ? `[Exit code ${exitCode}.]` : `[Stopped by signal ${signal ?? "unknown"}.]`),
   });
-  const text = `${truncated ? "[The output's beginning was cut: its last 256 KiB follow.]\n" : ""}${output}${output.endsWith("\n") || output === "" ? "" : "\n"}${ending}`;
+  const text = `${truncated ? `[The output's beginning was cut: its last ${maxReadText} follow.]\n` : ""}${output}${output.endsWith("\n") || output === "" ? "" : "\n"}${ending}`;
   return Option.isSome(exited) && exited.value.exitCode === 0 ? succeeded(text) : reported(text);
 };
 
@@ -169,27 +156,26 @@ export const editorWorld: World = {
   open: ({ sessionId, cwd, connection, strictInput }) =>
     Effect.gen(function* () {
       const fs = connection.profile.client.capabilities.fs;
-      const scope = ` Relative paths are inside the working folder, ${cwd}.`;
       const tools: ReadonlyArray<ToolSpec> = [
         ...offeredIf(fs?.readTextFile === true, {
           name: ToolName.make("read_file"),
           kind: "read",
           replay: "safe",
-          description: `Read a UTF-8 file as the editor has it, unsaved changes included, at most 256 KiB per result. Use line (1-based) and limit (a count of lines) to read a large file in parts, for example {"path": "src/a.ts", "line": 1, "limit": 100}.${scope}`,
+          description: `Read a UTF-8 text file in the working folder as the editor has it, unsaved changes included. A result is at most ${maxReadText}: read a larger file in parts with line and limit.`,
           input: jsonSchemaOf(ReadFile),
         }),
         ...offeredIf(fs?.writeTextFile === true, {
           name: ToolName.make("write_file"),
           kind: "edit",
           replay: "idempotent",
-          description: `Create a UTF-8 file, or replace one, with the content given, at most 256 KiB, through the editor.${scope}`,
+          description: "Create a UTF-8 text file in the working folder, or replace one, through the editor.",
           input: jsonSchemaOf(WriteFile),
         }),
         ...offeredIf(fs?.readTextFile === true && fs.writeTextFile === true, {
           name: ToolName.make("edit_file"),
           kind: "edit",
           replay: "unsafe",
-          description: `Replace one occurrence of old_text in a UTF-8 file with new_text, through the editor, its unsaved changes included. old_text must occur exactly once: include enough of the lines around it to make it so.${scope}`,
+          description: "Replace one occurrence of old_text with new_text in a UTF-8 text file in the working folder, through the editor, its unsaved changes included.",
           input: jsonSchemaOf(EditFile),
         }),
         {
@@ -204,7 +190,7 @@ export const editorWorld: World = {
           name: ToolName.make("run_command"),
           kind: "execute",
           replay: "unsafe",
-          description: `Run a shell command (sh -c) in the editor's terminal, in the working folder, and get its output (the last 256 KiB) and how it exited. It is stopped after timeout_seconds (${commandSeconds} unless given; at most 600). Use it to list and search files (ls, find, grep), run tests and use git.${scope}`,
+          description: `Run a shell command in the editor's terminal, in the working folder. The result is its output and its exit code; an output over ${maxReadText} is cut to its last ${maxReadText}. Use it to list and search files (ls, find, grep), run tests and use git.`,
           input: jsonSchemaOf(RunCommand),
         }),
       ];
@@ -221,7 +207,7 @@ export const editorWorld: World = {
           Effect.map(({ content }) => {
             const { kept, omitted } = cut(content, maxFileBytes);
             return succeeded(
-              omitted === 0 ? kept : `${kept}\n[Cut at 256 KiB: ${omitted} bytes left out. Read the rest with line and limit.]`,
+              omitted === 0 ? kept : `${kept}\n[Cut at ${maxReadText}: ${omitted} bytes left out. Read the rest with line and limit.]`,
             );
           }),
           Effect.catch((error) => Effect.succeed(reported(editorFailure("fs/read_text_file", input.path, error)))),
@@ -232,7 +218,7 @@ export const editorWorld: World = {
         const at = inside(cwd, input.path);
         if ("problem" in at) return Effect.succeed(rejected(at.problem));
         const bytes = Buffer.byteLength(input.content);
-        if (bytes > maxFileBytes) return Effect.succeed(rejected(`The content is over 256 KiB (${bytes} bytes). Write less.`));
+        if (bytes > maxFileBytes) return Effect.succeed(rejected(`The content is over ${maxReadText} (${bytes} bytes). Write less.`));
         return connection.client["fs/write_text_file"]({ sessionId, path: at.full, content: input.content }).pipe(
           Effect.as(succeeded(`Wrote ${bytes} bytes to ${input.path}.`)),
           Effect.catch((error) => Effect.succeed(reported(editorFailure("fs/write_text_file", input.path, error)))),
@@ -251,7 +237,7 @@ export const editorWorld: World = {
               );
             const changed = content.replace(input.old_text, () => input.new_text);
             const bytes = Buffer.byteLength(changed);
-            if (bytes > maxFileBytes) return Effect.succeed(rejected(`The file would be over 256 KiB (${bytes} bytes).`));
+            if (bytes > maxFileBytes) return Effect.succeed(rejected(`The file would be over ${maxReadText} (${bytes} bytes).`));
             return connection.client["fs/write_text_file"]({ sessionId, path: at.full, content: changed }).pipe(Effect.as(succeeded(`Edited ${input.path}.`)));
           }),
           Effect.catch((error) => Effect.succeed(reported(editorFailure("edit_file", input.path, error as never)))),
@@ -354,7 +340,7 @@ export const editorWorld: World = {
             : located;
         });
 
-      return { system: `The working folder is ${cwd}.`, sources: [source], present };
+      return { system: workingFolderLine(cwd), sources: [source], present };
     }),
 };
 
@@ -369,7 +355,7 @@ export const workspaceWorld: World<FileSystem.FileSystem> = {
       const fs = yield* FileSystem.FileSystem;
       const workspace = workspaceTools(cwd, { strictInput, ...(environment === undefined ? {} : { environment }) });
       return {
-        system: `The working folder is ${cwd}.`,
+        system: workspace.system,
         sources: [yield* workspace.source.pipe(Effect.provideService(FileSystem.FileSystem, fs))],
         present: presentFrom(workspace.catalog),
       };

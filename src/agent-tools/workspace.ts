@@ -1,9 +1,16 @@
 /**
  * Tools for a workspace, a folder on disk: `read_file` and `list_dir`, which read; `write_file` and
- * `edit_file`, which change it; and `run_command`, which runs a shell command in it. Each tool is its catalog entry (what the model is offered, with its kind, which
- * a permission policy reads) and the function that runs it, defined together, so a tool offered is
- * a tool that runs. `workspaceTools(root)` gives the catalog, and the tool source (`ToolSource`,
- * the host's own tools, with no namespace) that runs a call, given the file system.
+ * `edit_file`, which change it; and `run_command`, which runs a shell command in it. Each tool is its
+ * catalog entry (what the model is offered, with its kind, which a permission policy reads) and the
+ * function that runs it, defined together, so a tool offered is a tool that runs.
+ * `workspaceTools(root)` returns the catalog, the tool source (`ToolSource`, the host's own tools,
+ * with no namespace) that runs a call given the file system, and the system text that names the
+ * root as the working folder.
+ *
+ * A tool's description states what the tool does and its limits; each input's description states
+ * what the input means, whether it is optional, and its default. The descriptions call the root "the
+ * working folder" and do not name it: the host sends the system text (`workingFolderLine`) that
+ * names it once.
  *
  * A path is relative to the root, or absolute; one that is not inside the root is not accepted.
  * `read_file` reads UTF-8 text, at most 256 KiB in one result; `line` (1-based) and `limit` (a
@@ -16,8 +23,8 @@
  * occurs never or more than once is refused. `run_command` runs `sh -c <command>` in the root, and
  * gives its output (stdout, then stderr; the last 256 KiB, kept as it is read) and how it ended:
  * exit code 0 succeeds, any other end fails with the output. It runs as a process group of its own,
- * stopped whole, what it started included, after its time (`commandSeconds` unless the call says,
- * at most 600 seconds) or when the call is interrupted; a command that ends by itself leaves what
+ * stopped whole, what it started included, after its time (`commandSeconds` unless the call says, at most
+ * `maxCommandSeconds`) or when the call is interrupted; a command that ends by itself leaves what
  * it started in the background to run on. Neither runs again when a
  * session goes on (`"unsafe"`).
  *
@@ -36,24 +43,49 @@ import { type Decoded, decoderOf, ignoredNote, jsonSchemaOf } from "../agent-ses
 import { logKeys } from "../agent-session/log-keys.ts";
 import { parseJson, receivedText } from "../agent-session/received.ts";
 
-/** The most bytes `read_file` returns in one result. */
+/** The most bytes `read_file` returns in one result, `write_file` writes, and `run_command` returns. */
 export const maxReadBytes = 256 * 1024;
 
-const ReadFile = Schema.Struct({
-  path: Schema.NonEmptyString,
-  line: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
-  limit: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
-});
-const ListDir = Schema.Struct({ path: Schema.NonEmptyString });
-const WriteFile = Schema.Struct({ path: Schema.NonEmptyString, text: Schema.String });
-const EditFile = Schema.Struct({ path: Schema.NonEmptyString, old_text: Schema.NonEmptyString, new_text: Schema.String });
-const RunCommand = Schema.Struct({
-  command: Schema.NonEmptyString,
-  timeout_seconds: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(Schema.isLessThanOrEqualTo(600))),
-});
+/** `maxReadBytes` as the tool descriptions state it. */
+export const maxReadText = `${maxReadBytes / 1024} KiB`;
 
 /** How long a command runs before it is stopped, unless the call says otherwise. */
 export const commandSeconds = 120;
+
+/** The longest time that a call can give a command. */
+export const maxCommandSeconds = 600;
+
+/**
+ * The system text that names the working folder. The tool descriptions refer to "the working folder"
+ * without naming it, so a host that offers these tools sends this text as well.
+ */
+export const workingFolderLine = (folder: string): string => `The working folder is ${folder}.`;
+
+/** A path input of a tool that reads or changes one file. */
+export const filePath = Schema.NonEmptyString.annotate({ description: "The file's path: relative to the working folder, or absolute inside it." });
+
+export const ReadFile = Schema.Struct({
+  path: filePath,
+  line: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).annotate({ description: "Optional: the first line to read, 1-based. Default: 1." })),
+  limit: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).annotate({ description: "Optional: the number of lines to read. Default: to the end of the file." })),
+});
+const ListDir = Schema.Struct({
+  path: Schema.NonEmptyString.annotate({ description: 'The folder\'s path: relative to the working folder, or absolute inside it. "." is the working folder.' }),
+});
+const WriteFile = Schema.Struct({ path: filePath, text: Schema.String.annotate({ description: `The file's new text, at most ${maxReadText}.` }) });
+export const EditFile = Schema.Struct({
+  path: filePath,
+  old_text: Schema.NonEmptyString.annotate({ description: "The text to replace. It must occur exactly once in the file: include enough of the lines around it to make it so." }),
+  new_text: Schema.String.annotate({ description: "The text to put in its place." }),
+});
+export const RunCommand = Schema.Struct({
+  command: Schema.NonEmptyString.annotate({ description: "The command, run with sh -c." }),
+  timeout_seconds: Schema.optionalKey(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+      .check(Schema.isLessThanOrEqualTo(maxCommandSeconds))
+      .annotate({ description: `Optional: the number of seconds after which the command is stopped, at most ${maxCommandSeconds}. Default: ${commandSeconds}.` }),
+  ),
+});
 
 /** The end of a stream read so far: its newest chunks, how many bytes they hold, and whether older chunks were dropped. */
 interface Tail {
@@ -130,14 +162,13 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
       : Effect.succeed(full);
   };
   const reported = (path: string) => (error: { readonly message: string }) => new Reported({ message: `${path}: ${error.message}` });
-  const scope = ` Relative paths are inside the workspace, ${root}.`;
 
   const tools: ReadonlyArray<WorkspaceTool<unknown>> = [
     tool({
       name: ToolName.make("read_file"),
       kind: "read",
       replay: "safe",
-      description: `Read a UTF-8 file in the workspace, at most 256 KiB per result. Use line (1-based) and limit (a count of lines) to read a large file in parts, for example {"path": "src/a.ts", "line": 1, "limit": 100}. If a path does not exist, list its folder with list_dir.${scope}`,
+      description: `Read a UTF-8 text file in the working folder. A result is at most ${maxReadText}: read a larger file in parts with line and limit. If the file does not exist, list its folder with list_dir.`,
       input: jsonSchemaOf(ReadFile),
       decode: decoderOf(ReadFile, strict),
       run: ({ path, line, limit }) =>
@@ -150,14 +181,14 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
           const part = whole ? text : text.split("\n").slice(start, limit === undefined ? undefined : start + limit).join("\n");
           if (Buffer.byteLength(part) <= maxReadBytes) return part;
           const fewer = { path, line: line ?? 1, limit: limit === undefined ? 100 : Math.max(1, Math.floor(limit / 2)) };
-          return yield* new Rejected({ problem: `The result is over 256 KiB. Read fewer lines: ${JSON.stringify(fewer)}.` });
+          return yield* new Rejected({ problem: `The result is over ${maxReadText}. Read fewer lines: ${JSON.stringify(fewer)}.` });
         }),
     } satisfies WorkspaceTool<typeof ReadFile.Type>),
     tool({
       name: ToolName.make("list_dir"),
       kind: "search",
       replay: "safe",
-      description: `List one folder in the workspace, without recursion; a folder's name ends with /. Use "." for the workspace itself.${scope}`,
+      description: "List the files and folders in one folder of the working folder, without recursion. A folder's name ends with /.",
       input: jsonSchemaOf(ListDir),
       decode: decoderOf(ListDir, strict),
       run: ({ path }) =>
@@ -178,14 +209,14 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
       name: ToolName.make("write_file"),
       kind: "edit",
       replay: "idempotent",
-      description: `Create a UTF-8 file in the workspace, or replace one, with the text given, at most 256 KiB. The folder it is in must exist.${scope}`,
+      description: "Create a UTF-8 text file in the working folder, or replace one. The file's folder must exist.",
       input: jsonSchemaOf(WriteFile),
       decode: decoderOf(WriteFile, strict),
       run: ({ path, text }) =>
         Effect.gen(function* () {
           const full = yield* inside(path);
           const bytes = Buffer.byteLength(text);
-          if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The text is over 256 KiB (${bytes} bytes). Write less.` });
+          if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The text is over ${maxReadText} (${bytes} bytes). Write less.` });
           yield* (yield* FileSystem.FileSystem).writeFileString(full, text).pipe(Effect.mapError(reported(path)));
           return `Wrote ${bytes} bytes to ${path}.`;
         }),
@@ -194,7 +225,7 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
       name: ToolName.make("edit_file"),
       kind: "edit",
       replay: "unsafe",
-      description: `Replace one occurrence of old_text in a UTF-8 file in the workspace with new_text. old_text must occur exactly once: include enough of the lines around it to make it so.${scope}`,
+      description: "Replace one occurrence of old_text with new_text in a UTF-8 text file in the working folder.",
       input: jsonSchemaOf(EditFile),
       decode: decoderOf(EditFile, strict),
       run: ({ path, old_text, new_text }) =>
@@ -209,7 +240,7 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
             });
           const changed = text.replace(old_text, () => new_text);
           const bytes = Buffer.byteLength(changed);
-          if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The file would be over 256 KiB (${bytes} bytes).` });
+          if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The file would be over ${maxReadText} (${bytes} bytes).` });
           yield* fs.writeFileString(full, changed).pipe(Effect.mapError(reported(path)));
           return `Edited ${path}.`;
         }),
@@ -218,7 +249,7 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
       name: ToolName.make("run_command"),
       kind: "execute",
       replay: "unsafe",
-      description: `Run a shell command (sh -c) in the workspace, and get its output (stdout, then stderr; the last 256 KiB) and how it exited. It is stopped after timeout_seconds (${commandSeconds} unless given; at most 600). Use it to search files (grep, find), run tests and use git.${scope}`,
+      description: `Run a shell command in the working folder. The result is its output (stdout, then stderr) and its exit code; an output over ${maxReadText} is cut to its last ${maxReadText}. Use it to search files (grep, find), run tests and use git.`,
       input: jsonSchemaOf(RunCommand),
       decode: decoderOf(RunCommand, strict),
       run: ({ command, timeout_seconds }) => {
@@ -253,7 +284,7 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
             const output = `${stdout}${stdout !== "" && stderr !== "" && !stdout.endsWith("\n") ? "\n" : ""}${stderr}`;
             const last = lastBytes(output, maxReadBytes);
             const [kept, cut] = [last.kept, last.cut || out.cut || err.cut];
-            const text = `${cut ? "[The output's beginning was cut: its last 256 KiB follow.]\n" : ""}${kept}${kept === "" || kept.endsWith("\n") ? "" : "\n"}[Exit code ${code}.]`;
+            const text = `${cut ? `[The output's beginning was cut: its last ${maxReadText} follow.]\n` : ""}${kept}${kept === "" || kept.endsWith("\n") ? "" : "\n"}[Exit code ${code}.]`;
             return code === 0 ? Effect.succeed(text) : Effect.fail(new Reported({ message: text }));
           }),
         );
@@ -296,5 +327,5 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
     };
   });
 
-  return { catalog, source, environment };
+  return { catalog, source, environment, system: workingFolderLine(root) };
 }

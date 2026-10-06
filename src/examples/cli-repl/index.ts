@@ -75,7 +75,7 @@ const flags = {
   print: toggle("print", "Answer one prompt, print the answer, and exit", "p"),
   effort: choice("effort", ["default", ...Effort.literals], "Reasoning effort; default leaves it to the provider"),
   thinking: choice("thinking", ["default", ...ThinkingMode.literals], "Thinking mode; default leaves it to the provider"),
-  systemPrompt: text("system-prompt", "The system prompt"),
+  systemPrompt: text("system-prompt", "The system prompt, after the line that names the working folder"),
   systemPromptFile: text("system-prompt-file", "Read the system prompt from a file"),
   appendSystemPrompt: text("append-system-prompt", "Append text to the system prompt"),
   appendSystemPromptFile: text("append-system-prompt-file", "Append a file's text to the system prompt"),

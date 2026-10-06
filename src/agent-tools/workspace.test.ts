@@ -18,7 +18,7 @@ mkdirSync(join(root, "src"));
 writeFileSync(join(root, "src", "a.txt"), "one\ntwo\nthree\nfour");
 writeFileSync(join(root, "big.txt"), "x".repeat(300 * 1024));
 
-const { catalog, source } = workspaceTools(root);
+const { catalog, source, system } = workspaceTools(root);
 const runner = Layer.effect(ToolRunner, source);
 
 /** What a call of `tool` with `input` gives: its output, or its failure. */
@@ -42,13 +42,24 @@ test("the catalog is read_file, list_dir, write_file, edit_file and run_command,
   ]);
 });
 
-test("a tool's input schema is its Schema's, closed to other properties; a call with another property runs without it and says so, or, with strictInput, is refused", async () => {
+test("the system text names the folder as the working folder, and no tool's description or input schema names it", () => {
+  expect(system).toBe(`The working folder is ${root}.`);
+  expect(catalog.filter((tool) => JSON.stringify([tool.description, tool.input]).includes(root))).toEqual([]);
+});
+
+test("a tool's input schema is its Schema's with a description for each input, closed to other properties; a call with another property runs without it and says so, or, with strictInput, is refused", async () => {
   expect(catalog.find((tool) => tool.name === "read_file")?.input).toEqual({
     type: "object",
-    properties: { path: { type: "string", minLength: 1 }, line: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1 } },
+    properties: {
+      path: { type: "string", minLength: 1, description: "The file's path: relative to the working folder, or absolute inside it." },
+      line: { type: "integer", minimum: 1, description: "Optional: the first line to read, 1-based. Default: 1." },
+      limit: { type: "integer", minimum: 1, description: "Optional: the number of lines to read. Default: to the end of the file." },
+    },
     required: ["path"],
     additionalProperties: false,
   });
+  const described = catalog.flatMap((tool) => Object.entries((tool.input as { readonly properties: Record<string, { readonly description?: string }> }).properties).map(([name, input]) => [tool.name, name, input.description !== undefined]));
+  expect(described.filter(([, , has]) => has !== true)).toEqual([]);
   expect(catalog.find((tool) => tool.name === "run_command")?.input).toMatchObject({ properties: { timeout_seconds: { minimum: 1, maximum: 600 } } });
   expect(await call("read_file", { path: "src/a.txt", lines: 2, extra: { a: 1 } })).toBe("one\ntwo\nthree\nfour\n[Not inputs of read_file, so ignored: lines, extra.]");
   const strict = workspaceTools(root, { strictInput: true });

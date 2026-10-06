@@ -395,6 +395,12 @@ folder, the client's MCP servers, the connection, whether tool input is strict, 
 environment, a world gives the session's system prompt, its tool sources (`ToolSource`) and their
 presentation (`Present`). A host can give a world of its own (`HostOptions.world`).
 
+Both worlds below send one line of system prompt, which names the working folder
+(`workingFolderLine` in `agent-tools/workspace.ts`). Their tool descriptions refer to "the working
+folder" without naming it. Each tool input has a description that states what it means, whether it
+is optional, and its default. The descriptions and limits shared with the workspace tools come from
+`agent-tools/workspace.ts`.
+
 ### `editorWorld`, the default
 
 The tools go through the editor. Each is offered only when the client advertised the methods it
