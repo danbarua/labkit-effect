@@ -93,14 +93,14 @@ export type McpServerConfig = (McpServerStdio | McpServerRemote) & {
   readonly connectTimeout?: Duration.Input | undefined;
 };
 
-/** What a host shows the user: whether it shows the model's thinking (`thinking`, `on` when no layer sets it). It changes nothing in a request. */
+/** What the CLI shows the user: whether it shows the model's thinking (`thinking`, `on` when no layer sets it). It changes nothing in a request; the ACP host does not read it. */
 export const View = Schema.Struct({ thinking: Schema.optionalKey(Schema.Literals(["on", "off"])) });
 export type View = typeof View.Type;
 
 /**
  * The decoded configuration: each seam that the layers list, in order; `maxHolds` when they give it;
  * the MCP servers; the model that sessions start with, when the layers name one; the user's
- * overrides of what is known of models, by `provider/model`; and what a host shows the user. A seam
+ * overrides of what is known of models, by `provider/model`; and what the CLI shows the user. A seam
  * that no layer lists is absent.
  */
 export interface Configuration {

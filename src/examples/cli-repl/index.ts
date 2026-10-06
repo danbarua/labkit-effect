@@ -14,7 +14,7 @@
  *
  * - With `-p`, without a terminal, or when a session is continued or resumed, the CLI refuses at once.
  * - At a terminal, a new session's REPL opens without a model (`withoutModel` in `repl.ts`). The
- *   session opens once `/model` names a model that can be asked.
+ *   session opens once `/model` or `/switch` names a model that can be asked.
  *
  * A mistake is printed as an `ERROR:` line and a `HINT:` line for each thing the user can do about
  * it (`invalid.ts`). A hint printed outside the REPL names no slash command.

@@ -34,7 +34,7 @@ export const configJsonSchema = (registry: ReadonlyArray<AnyPlugin> = builtins):
       model: Schema.optionalKey(Schema.NonEmptyString),
       // What is known of models, by provider/model, over the catalog; `null` removes the overrides of the layers before it.
       models: Schema.optionalKey(Schema.NullOr(Schema.Record(Schema.String, Schema.NullOr(ModelOverride)))),
-      // What a host shows the user: thinking on or off.
+      // What the CLI shows the user: thinking on or off.
       view: Schema.optionalKey(Schema.NullOr(View)),
     }),
   ) as { readonly properties: Readonly<Record<string, Schema.Json>> };

@@ -43,7 +43,7 @@ export const writeSetting = (folder: string, path: ReadonlyArray<string>, value:
     const document = setting?.document ?? ((yield* fs.exists(file).pipe(Effect.mapError(failed(file)))) ? yield* parsed(file) : new Document({}));
     document.setIn(path, value);
     yield* fs.makeDirectory(folder, { recursive: true }).pipe(Effect.mapError(failed(folder)));
-    // A flow list stays as the folder's files write it: `[low, high]`, not `[ low, high ]`.
-    yield* fs.writeFileString(file, document.toString({ flowCollectionPadding: false })).pipe(Effect.mapError(failed(file)));
+    // A flow list stays as the folder's files write it (`[low, high]`, not `[ low, high ]`), and a long value on one line, not folded at 80 columns.
+    yield* fs.writeFileString(file, document.toString({ flowCollectionPadding: false, lineWidth: 0 })).pipe(Effect.mapError(failed(file)));
     return file;
   });

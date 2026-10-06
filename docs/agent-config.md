@@ -75,7 +75,7 @@ that names either is refused.
 | `extensions` | Module paths, absolute or relative to the file's folder. |
 | `model` | The model that a new session asks unless the command line names another, as `provider/model`. |
 | `models` | What is known of models, by `provider/model`, over models.dev's catalog (see Models). |
-| `view` | What a host shows the user: `thinking` (`on`, `off`), whether it shows the model's thinking; `on` when no layer sets it. It changes nothing in a request. |
+| `view` | What the CLI shows the user: `thinking` (`on`, `off`), whether it shows the model's thinking; `on` when no layer sets it. It changes nothing in a request. The ACP host does not read it. |
 
 - A seam's entries become the session's list for that seam, in the same order. Each entry is made by
   its plug-in from its settings, which are the same on every list the entry is on.
@@ -176,7 +176,8 @@ folder's value:
 - when no file sets it, into a file that the host names (`models.yml` for `model`, `settings.yml`
   for `view.thinking`), which is created, with the folder, when it does not exist.
 
-The file keeps its comments and its layout; a flow list is written without padding (`[low, high]`).
+The file keeps its comments and its layout: a long value stays on one line, and a flow list is
+written without padding (`[low, high]`).
 A file of the folder that does not parse is not written, and the error (`SettingNotWritten`) names
 it. A layer read after the user's folder (a project's file, `--settings`) that sets the same key
 still decides it for a session that reads that layer.

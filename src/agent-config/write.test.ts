@@ -42,6 +42,23 @@ test("a setting is written into the last of the folder's files that sets it, kee
   expect(existsSync(join(folder, "models.yml"))).toBe(false);
 });
 
+test("a file written keeps a long value on one line, and a quoted value quoted", async () => {
+  const text = [
+    "model: openai/gpt-5",
+    "mcpServers:",
+    "  files:",
+    "    command: files-mcp",
+    '    args: ["--root", "/a/very/long/path/that/goes/on/and/on/and/on/past/eighty/columns/for/sure/really"]',
+    "    env:",
+    "      NOTE: this is a long plain value with many words in it that runs well past the eighty column default width",
+    "      QUOTED: 'single quoted'",
+    "",
+  ].join("\n");
+  const folder = folderWith({ "models.yml": text });
+  await written(folder, ["model"], "openai/gpt-5.5", "models.yml");
+  expect(readFileSync(join(folder, "models.yml"), "utf8")).toBe(text.replace("model: openai/gpt-5\n", "model: openai/gpt-5.5\n"));
+});
+
 test("a setting no file sets is written into the fallback file, which is created, with the folder, when it does not exist", async () => {
   const folder = join(testFolder(), "new");
   const { file, configuration } = await written(folder, ["view", "thinking"], "off", "settings.yml");
