@@ -53,6 +53,7 @@ import { modelOf } from "../../agent-session/configuration/session-setup.ts";
 import { askable, KeyedAndLocalCatalog, ModelCatalog } from "../../agent-host/catalog.ts";
 import { latestSession, readSession, storedSessions, summaryOf } from "../../agent-host/directory.ts";
 import { LogsToFile, LogsToStderr } from "../../agent-host/logs.ts";
+import { OtlpSpansAndMetrics } from "../../instrumentation/telemetry.ts";
 import { Brand, brandFrom } from "../../agent-host/brand.ts";
 import { launchFlags, launchVariables, userFolderOf } from "../../agent-host/launch.ts";
 import { invalid, saidFormatter } from "./invalid.ts";
@@ -225,17 +226,17 @@ export const cliOf = (brand: Brand) =>
         const config: Config = yield* checked({ ...unresolved, target });
         // A prompt given on the command line was not sent when the REPL opened without a model, so it is dropped.
         const first = Result.isSuccess(found) ? options.prompt : undefined;
-        return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), terminal(context.view), (session, mcp) => repl(session, config, first, interactive, context, mcp));
+        return yield* withSession(config, LogsToFile(logFileOf(config.sessionId), `${brand.name}-cli`), terminal(context.view), (session, mcp) => repl(session, config, first, interactive, context, mcp));
       }
       const config: Config = yield* checked({ ...unresolved, target: yield* targetOf(named, "--model") });
       if (!options.print)
-        return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), interactive ? terminal(context.view) : Headless, (session, mcp) => repl(session, config, options.prompt, interactive, context, mcp));
+        return yield* withSession(config, LogsToFile(logFileOf(config.sessionId), `${brand.name}-cli`), interactive ? terminal(context.view) : Headless, (session, mcp) => repl(session, config, options.prompt, interactive, context, mcp));
       // Piped input is read only when no prompt was given: a shell that leaves stdin open would
       // otherwise keep a prompted run waiting for an end of input that never comes.
       const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));
       // Checked before the session opens, so a run with no prompt saves no session.
       if (prompt === "") return yield* invalid("No prompt given.", "Pass the prompt as an argument, or pipe it to stdin.");
-      yield* withSession(config, LogsToStderr, Headless, (session) => printOnce(session, config, prompt, options.outputFormat ?? "text", options.verbose));
+      yield* withSession(config, LogsToStderr(`${brand.name}-cli`), Headless, (session) => printOnce(session, config, prompt, options.outputFormat ?? "text", options.verbose));
     }),
   ).pipe(
     Command.withDescription("A coding agent: an interactive REPL, or -p to answer one prompt and exit."),
@@ -278,6 +279,7 @@ export const run = (args: ReadonlyArray<string>, brand: Brand = brandFrom(proces
   );
 
 /** Runs the CLI with this process's arguments, as `brand`; a package's bin passes its own brand. */
-export const main = (brand: Brand = brandFrom(process.env)) => run(process.argv.slice(2), brand).pipe(Effect.provide(BunServices.layer), BunRuntime.runMain);
+export const main = (brand: Brand = brandFrom(process.env)) =>
+  run(process.argv.slice(2), brand).pipe(Effect.provide(Layer.mergeAll(OtlpSpansAndMetrics(`${brand.name}-cli`), BunServices.layer)), BunRuntime.runMain);
 
 if (import.meta.main) main();

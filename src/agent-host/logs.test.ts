@@ -9,7 +9,7 @@ import { LogsToFile } from "./logs.ts";
 
 test("log lines go to the file named, in a folder made for it when missing, written by the time the layer is closed", async () => {
   const file = `${testFolder()}/not/yet/made/host.log`;
-  await runTest(Effect.logInfo("host.started", { port: 1 }).pipe(Effect.provide(LogsToFile(file).pipe(Layer.provide(BunServices.layer)))));
+  await runTest(Effect.logInfo("host.started", { port: 1 }).pipe(Effect.provide(LogsToFile(file, "labkit-tests").pipe(Layer.provide(BunServices.layer)))));
   const text = await Bun.file(file).text();
   expect(text).toContain("host.started");
 });
@@ -20,7 +20,7 @@ test("the CLI's log redacts the environment's secrets wherever they are, and a c
   await runTest(
     Effect.logWarning("pushing with github_pat_0123456789", { headers: { authorization: "Bearer plain-credential" }, settings: "set" }, Cause.fail(new Error("refused github_pat_0123456789"))).pipe(
       Effect.annotateLogs({ request: "r-github_pat_0123456789" }),
-      Effect.provide(LogsToFile(file, env).pipe(Layer.provide(BunServices.layer))),
+      Effect.provide(LogsToFile(file, "labkit-tests", env).pipe(Layer.provide(BunServices.layer))),
     ),
   );
   const text = await Bun.file(file).text();

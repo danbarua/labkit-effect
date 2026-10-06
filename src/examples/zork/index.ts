@@ -5,7 +5,7 @@
  * from its variable: `LABKIT_ANTHROPIC_API_KEY` for Claude, `LABKIT_XAI_API_KEY` for Grok. By default
  * the Engine is claude-sonnet-4-5 and the Adventurer claude-haiku-4-5.
  */
-import { Effect, Logger, Redacted } from "effect";
+import { Effect, Layer, Logger, Redacted } from "effect";
 import { TestName } from "../../agent-machine/names.ts";
 import { known } from "../../agent-host/catalog.ts";
 import { reportedBy } from "../../agent-session/origin.ts";
@@ -13,6 +13,8 @@ import { anthropicPlayer } from "./anthropic.ts";
 import type { Player } from "./scenario.ts";
 import { play } from "./scenario.ts";
 import { xaiPlayer } from "./xai.ts";
+import { OtlpSpansAndMetrics, otlpLogger } from "../../instrumentation/telemetry.ts";
+
 
 /** Each provider a player can ask, with the variable that holds its key. */
 const players: Readonly<Record<string, { readonly variable: string; readonly player: (key: Redacted.Redacted<string>) => (model: string) => Player }>> = {
@@ -53,7 +55,8 @@ const game = await Effect.runPromise(
   play({ engine: playerFor(engineModel), adventurer: playerFor(adventurerModel) }).pipe(
     reportedBy({ _tag: "Test", name: TestName.make("zork") }),
     Effect.timeout("10 minutes"),
-    Effect.provide(Logger.layer([])),
+    // The console shows only the game; log lines go only to OTLP, when OTEL_EXPORTER_OTLP_ENDPOINT is set.
+    Effect.provide(Layer.mergeAll(Logger.layer([otlpLogger("labkit-zork")]), OtlpSpansAndMetrics("labkit-zork"))),
   ),
 );
 console.log(`Eaten by a Grue after ${game.exchanges.length} turns. Transcript: ${game.transcriptPath}`);

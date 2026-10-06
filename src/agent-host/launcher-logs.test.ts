@@ -37,7 +37,7 @@ const linesOf = async (file: string): Promise<Array<Line>> =>
 const launched = async (options: Partial<LauncherLogOptions> & { readonly dir: string }, program: Effect.Effect<unknown>): Promise<Array<string>> => {
   const stderr: Array<string> = [];
   const console = { ...globalThis.console, error: (...args: ReadonlyArray<unknown>) => void stderr.push(args.map(String).join(" ")) };
-  const layer = LauncherLogs({ level: "Debug", maxBytes: 1024 * 1024, backups: 2, launchId: "test", keep: 20, secrets: { values: [], tooShort: [] }, ...options });
+  const layer = LauncherLogs({ level: "Debug", maxBytes: 1024 * 1024, backups: 2, launchId: "test", keep: 20, secrets: { values: [], tooShort: [] }, service: "labkit-tests", ...options });
   await runTest(program.pipe(Effect.provide(layer.pipe(Layer.provide(BunServices.layer))), Effect.provideService(Console.Console, console)));
   return stderr;
 };

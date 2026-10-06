@@ -10,6 +10,7 @@ import { redactedValue, redactorOf, type Secrets, withTooShortWarning, secretsOf
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { Array as Arr, Cause, Console, Effect, FileSystem, Layer, Logger, type LogLevel, Option, Order, Path, References } from "effect";
+import { otlpLogger } from "../instrumentation/telemetry.ts";
 import { logFile } from "./log-file.ts";
 
 export interface LauncherLogOptions {
@@ -27,6 +28,8 @@ export interface LauncherLogOptions {
   readonly keep: number;
   /** The secrets to redact (`redaction.ts`); those too short to search for are reported at start. */
   readonly secrets: Secrets;
+  /** The service that log lines sent as OTLP are named after (`instrumentation/telemetry.ts`): `<brand>-acp`. */
+  readonly service: string;
 }
 
 /** A record's line is cut past this many UTF-8 bytes. */
@@ -83,6 +86,7 @@ export const launcherLogOptionsFrom = (env: Readonly<Record<string, string | und
     launchId: crypto.randomUUID(),
     keep: 20,
     secrets: secretsOf(env),
+    service: `${brand.name}-acp`,
   };
 };
 
@@ -226,7 +230,7 @@ export const LauncherLogs = (options: LauncherLogOptions): Layer.Layer<never, ne
             return appended satisfies never;
         }
       });
-      const logs = Layer.mergeAll(Logger.layer([logger]), Layer.succeed(References.MinimumLogLevel, options.level));
+      const logs = Layer.mergeAll(Logger.layer([logger, otlpLogger(options.service)]), Layer.succeed(References.MinimumLogLevel, options.level));
       return withTooShortWarning(options.secrets, logs);
     }),
   );

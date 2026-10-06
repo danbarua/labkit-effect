@@ -29,6 +29,7 @@ import * as Agent from "effective-acp/agent";
 import { type Brand, brandFrom, folderOf } from "../agent-host/brand.ts";
 import { KeyedAndLocalCatalog } from "../agent-host/catalog.ts";
 import { LauncherLogs, launcherLogOptionsFrom } from "../agent-host/launcher-logs.ts";
+import { OtlpSpansAndMetrics } from "../instrumentation/telemetry.ts";
 import { intFlag, launchConfiguration, launchFlags, launchVariables, textFlag, toggleFlag } from "../agent-host/launch.ts";
 import { acpDefaults, type HostOptions, makeHost } from "./host.ts";
 import { logKeys } from "./log-keys.ts";
@@ -91,7 +92,9 @@ export const launch = (args: ReadonlyArray<string>, env: Readonly<Record<string,
   return Command.runWith(launcher, { version: brand.version })(args).pipe(
     Effect.provideService(ConfigProvider.ConfigProvider, launchVariables(brand, ["ACP"], env)),
     Effect.provideService(Console.Console, toStderr),
-    Effect.provide(Layer.mergeAll(KeyedAndLocalCatalog, LauncherLogs(launcherLogOptionsFrom(env, brand)).pipe(Layer.provideMerge(BunServices.layer)), BunStdio.layer)),
+    Effect.provide(
+      Layer.mergeAll(KeyedAndLocalCatalog, LauncherLogs(launcherLogOptionsFrom(env, brand)).pipe(Layer.provideMerge(BunServices.layer)), BunStdio.layer, OtlpSpansAndMetrics(`${brand.name}-acp`)),
+    ),
   );
 };
 

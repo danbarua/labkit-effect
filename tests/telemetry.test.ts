@@ -7,14 +7,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "bun:test";
 import { test, testFolder } from "./support/test.ts";
-import { ConfigProvider, Effect, Layer, Metric } from "effect";
+import { Cause, ConfigProvider, Effect, Layer, Metric } from "effect";
 import { ModelName, ProviderName } from "../src/agent-machine/names.ts";
 import { ModelClient, type ProviderRequest } from "../src/agent-session/contracts.ts";
 import { FallbackModelClient } from "../src/agent-session/model-fallback.ts";
 import { scriptedFizzBuzzModel } from "../src/examples/fizzbuzz/model.ts";
 import { advanced, play } from "../src/examples/fizzbuzz/scenario.ts";
 import { SourcedToolRunner } from "../src/agent-session/tool-sources.ts";
-import { type SpanLine, SpansTo, TelemetryToFiles } from "../src/instrumentation/telemetry.ts";
+import { OtlpFromEnv, type SpanLine, SpansTo, TelemetryToFiles } from "../src/instrumentation/telemetry.ts";
 import { CountedToolRunner } from "../src/instrumentation/tool-metrics.ts";
 import { runTest } from "./support/run.ts";
 
@@ -130,6 +130,42 @@ test("with OTEL_EXPORTER_OTLP_ENDPOINT set, the spans go to it and to the file, 
     expect(logs.length).toBeGreaterThan(0);
     expect(logs.length).toBe(readLines(`${base}.logs.jsonl`).length);
   } finally {
+    await server.stop(true);
+  }
+});
+
+test("with OTEL_EXPORTER_OTLP_ENDPOINT set, log lines go to it as the service named by the caller or by OTEL_SERVICE_NAME, without the environment's secrets in their message, annotations or cause", async () => {
+  const secret = "otlp-secret-value-123456";
+  process.env["TELEMETRY_TEST_API_KEY"] = secret;
+  const received: Array<unknown> = [];
+  const server = Bun.serve({
+    port: 0,
+    fetch: async (request) => {
+      if (new URL(request.url).pathname === "/v1/logs") received.push(await request.json());
+      return Response.json({});
+    },
+  });
+  const logged = (env: Record<string, string>) =>
+    runTest(
+      Effect.gen(function* () {
+        yield* Effect.logWarning(`the key is ${secret}`).pipe(Effect.annotateLogs({ token: secret }));
+        yield* Effect.logError("the request failed", Cause.fail(new Error(`refused ${secret}`)));
+      }).pipe(
+        Effect.provide(OtlpFromEnv("labkit-telemetry-test")),
+        Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnvRecord({ OTEL_EXPORTER_OTLP_ENDPOINT: `http://localhost:${server.port}`, ...env })),
+      ),
+    );
+  try {
+    await logged({});
+    await logged({ OTEL_SERVICE_NAME: "named-by-env" });
+    const sent = JSON.stringify(received);
+    expect(sent).not.toContain(secret);
+    expect(sent).toContain("the key is <redacted>");
+    expect(sent).toContain("refused <redacted>");
+    const services = received.flatMap((body: any) => body.resourceLogs.map((resource: any) => resource.resource.attributes.find((each: any) => each.key === "service.name")?.value.stringValue));
+    expect(new Set(services)).toEqual(new Set(["labkit-telemetry-test", "named-by-env"]));
+  } finally {
+    delete process.env["TELEMETRY_TEST_API_KEY"];
     await server.stop(true);
   }
 });
