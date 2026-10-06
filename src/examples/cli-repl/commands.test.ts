@@ -7,11 +7,12 @@ import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Ref } from "effect";
 import { Brand, defaultBrand } from "../../agent-host/brand.ts";
 import { KeyedAndLocalCatalog } from "../../agent-host/catalog.ts";
-import { BoringContextAssembler } from "../../../tests/support/boring.ts";
+import { AgentContextAssembler, WholeConversation } from "../../agent-context/assembler.ts";
+import { workspaceTools } from "../../agent-tools/workspace.ts";
 import { runTest } from "../../../tests/support/run.ts";
 import { test, testFolder } from "../../../tests/support/test.ts";
 import { ModelName, ModelText, ProviderName, SessionId } from "../../agent-machine/names.ts";
-import { ModelClient, type Target, ToolRunner } from "../../agent-session/contracts.ts";
+import { ModelClient, type Target, ToolRunner, type ToolSpec } from "../../agent-session/contracts.ts";
 import { openSession } from "../../agent-session/loop.ts";
 import { EphemeralSessionStore } from "../../agent-session/session-store.ts";
 import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
@@ -23,6 +24,7 @@ import { inForce } from "./model-settings.ts";
 import type { LayerSource } from "../../agent-config/file.ts";
 import { said } from "./command.ts";
 import { viewOf } from "./view.ts";
+import { shown } from "./commands/tools.ts";
 import { ask } from "./session.ts";
 
 /** The test's user configuration folder, where commands save settings. */
@@ -30,8 +32,9 @@ const configFolder = () => join(testFolder(), "config");
 
 /**
  * Runs `lines` in order (commands, or input for the model) as `brand` (labkit by default), with the
- * configuration layers `layers`. Returns what each command printed, the target of each model request,
- * and whether thinking is shown at the end.
+ * configuration layers `layers`, in a session that opens with `tools`. The CLI's context assembler
+ * builds each model request. Returns what each command printed, the target and the tools of each
+ * model request, and whether thinking is shown at the end.
  */
 const session = (
   lines: ReadonlyArray<string>,
@@ -39,12 +42,15 @@ const session = (
   settings: Readonly<Record<string, unknown>> = { effort: "low" },
   after: ReadonlyArray<unknown> = [],
   layers: ReadonlyArray<LayerSource> = [],
+  tools: ReadonlyArray<ToolSpec> = [],
 ) => {
   const asked: Array<Target> = [];
+  const sent: Array<ReadonlyArray<ToolSpec>> = [];
   const recording = Layer.succeed(ModelClient, {
-    respond: (target, _context, turn) =>
+    respond: (target, context, turn) =>
       Effect.sync(() => {
         asked.push(target);
+        sent.push(context.tools);
         return {
           _tag: "ModelResponded" as const,
           turn,
@@ -64,7 +70,7 @@ const session = (
     Effect.gen(function* () {
       const opened = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* opened.observe(
-        openedWith({ session: SessionId.make("s1"), model: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5"), settings }, system: undefined, tools: [] } as Parameters<typeof openedWith>[0]),
+        openedWith({ session: SessionId.make("s1"), model: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5"), settings }, system: undefined, tools } as Parameters<typeof openedWith>[0]),
       );
       for (const observation of after) yield* opened.observe(observation as Parameters<typeof opened.observe>[0]);
       const view = yield* viewOf("on");
@@ -80,7 +86,7 @@ const session = (
         }
         else yield* ask(opened, line);
       }
-      return { printed, asked, thinking: yield* Ref.get(view.thinking) };
+      return { printed, asked, sent, thinking: yield* Ref.get(view.thinking) };
     }).pipe(
       // No command here prompts; the terminal is provided because `/model` and `/settings` alone could.
       Effect.orDie,
@@ -90,7 +96,7 @@ const session = (
           BunServices.layer,
           KeyedAndLocalCatalog,
           ModelFromFacts,
-          BoringContextAssembler,
+          AgentContextAssembler.pipe(Layer.provide(WholeConversation)),
           recording,
           CountingTurns,
           Layer.succeed(ToolRunner, { run: () => Effect.die("no tools") }),
@@ -139,6 +145,15 @@ test("/export writes under the brand's folder: .acme/exports for the acme brand"
 test("/tools says when the session has no tools", async () => {
   const { printed } = await session(["/tools"]);
   expect(printed).toEqual(["This session has no tools."]);
+});
+
+test("/tools prints each tool's name, description and input schema, the same as a model request carries", async () => {
+  const { catalog } = workspaceTools(testFolder());
+  const { printed, sent } = await session(["hello", "/tools"], defaultBrand, undefined, [], [], catalog);
+  const [read] = catalog;
+  expect(sent).toEqual([catalog]);
+  expect(printed).toEqual([(sent[0] ?? []).map(shown).join("\n\n")]);
+  expect(printed[0]).toStartWith(`read_file\n${read?.description}\n{\n  "type": "object",\n  "properties": {\n    "path": {`);
 });
 
 test("an invalid command prints an error and changes nothing, and an unknown command is reported as unknown", async () => {
