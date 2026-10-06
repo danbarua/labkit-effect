@@ -1,9 +1,10 @@
 /**
  * Run one round: `bun run zork [engine-model] [adventurer-model]`. A model is named as
  * `provider/model`, or by its name alone: a well-known model's provider, or `anthropic` for a name
- * that starts with `claude-` and `xai` for one that starts with `grok-`. Each player is asked as the
- * CLI asks a model, with its provider's key from the provider's variable (`agent-host/catalog.ts`):
- * `ANTHROPIC_API_KEY` for Claude, `XAI_API_KEY` for Grok. By default the Engine is
+ * that starts with `claude-`, `openai` for one that starts with `gpt-` and `xai` for one that starts
+ * with `grok-`. Each player is asked as the CLI asks a model, with its provider's key from the
+ * provider's variable (`agent-host/catalog.ts`): `ANTHROPIC_API_KEY` for Claude, `OPENAI_API_KEY`
+ * for GPT, `XAI_API_KEY` for Grok. By default the Engine is
  * claude-sonnet-5-5 and the Adventurer claude-haiku-4-5.
  *
  * A game's two sessions are saved in `~/.local/share/labkit/sessions/` and log to
@@ -21,18 +22,20 @@ import { play, type Player } from "./scenario.ts";
 
 /**
  * The settings each provider's players ask with: short responses, and as little thinking as the
- * model allows. A Claude model that can turn its thinking off (Haiku 4.5) does; one that cannot
- * (Sonnet 5.5, whose adapter records that `disabled` was not sent) thinks at low effort, within an
- * output limit that leaves room for it. Grok's models cannot turn their reasoning off, so no thinking
- * setting is given; xAI does not count the reasoning against the output limit.
+ * model allows. A Claude or GPT model that can turn its thinking off (Haiku 4.5, gpt-6-luna) does;
+ * one that cannot (Sonnet 5.5, gpt-6.1-sol, whose adapters record that `disabled` was not sent)
+ * thinks at low effort, within an output limit that leaves room for it. Grok's models cannot turn
+ * their reasoning off, so no thinking setting is given; xAI does not count the reasoning against the
+ * output limit.
  */
 const settingsOf: Readonly<Record<string, ModelSettings>> = {
   anthropic: { thinking: "disabled", effort: "low", maxOutputTokens: TokenCount.make(4096) },
+  openai: { thinking: "disabled", effort: "low", maxOutputTokens: TokenCount.make(4096) },
   xai: { maxOutputTokens: TokenCount.make(1024) },
 };
 
 /** The provider of a model that is not well-known, by the start of its name. */
-const namePrefixes: Readonly<Record<string, string>> = { "claude-": "anthropic", "grok-": "xai" };
+const namePrefixes: Readonly<Record<string, string>> = { "claude-": "anthropic", "gpt-": "openai", "grok-": "xai" };
 
 /** The provider of `named`, and the model's name: as `provider/model`, a well-known model's, or by the name's start. */
 const providerOf = (named: string): { readonly provider: string | undefined; readonly model: string } => {
@@ -49,7 +52,7 @@ const playerFor = (named: string): Player => {
   const settings = provider === undefined ? undefined : settingsOf[provider];
   const variable = provider === undefined ? undefined : keyVariables[provider];
   if (provider === undefined || settings === undefined || variable === undefined) {
-    console.error(`ERROR: Unknown model: ${named}.\nHINT: Name a Claude or Grok model, as provider/model or by its name.`);
+    console.error(`ERROR: Unknown model: ${named}.\nHINT: Name a Claude, GPT or Grok model, as provider/model or by its name.`);
     process.exit(2);
   }
   if ((process.env[variable] ?? "").trim() === "") {
