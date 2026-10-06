@@ -5,7 +5,8 @@
  * with `grok-`. Each player is asked as the CLI asks a model, with its provider's key from the
  * provider's variable (`agent-host/catalog.ts`): `ANTHROPIC_API_KEY` for Claude, `OPENAI_API_KEY`
  * for GPT, `XAI_API_KEY` for Grok. By default the Engine is
- * claude-sonnet-5-5 and the Adventurer claude-haiku-4-5.
+ * claude-sonnet-5-5 and the Adventurer claude-haiku-4-5. An Adventurer whose model has a
+ * customisation (`customisations.ts`) plays with it.
  *
  * A game's two sessions are saved in `~/.local/share/labkit/sessions/` and log to
  * `~/.local/share/labkit/logs/zork-<role>-<game>.log`; with `OTEL_EXPORTER_OTLP_ENDPOINT` set, their
@@ -18,7 +19,8 @@ import { ModelName, ProviderName, TestName, TokenCount } from "../../agent-machi
 import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { reportedBy } from "../../agent-session/origin.ts";
 import { OtlpSpansAndMetrics, otlpLogger } from "../../instrumentation/telemetry.ts";
-import { play, type Player } from "./scenario.ts";
+import { adventurerCustomisations } from "./customisations.ts";
+import { play, type Adventurer, type Player } from "./scenario.ts";
 
 /**
  * The settings each provider's players ask with: short responses, and as little thinking as the
@@ -62,9 +64,16 @@ const playerFor = (named: string): Player => {
   return { target: { provider: ProviderName.make(provider), model: ModelName.make(model), settings } };
 };
 
+/** The adventurer for `named`: its player, with the customisation for its model when there is one. */
+const adventurerFor = (named: string): Adventurer => {
+  const player = playerFor(named);
+  const customise = adventurerCustomisations[`${player.target.provider}/${player.target.model}`];
+  return customise === undefined ? player : { ...player, customise };
+};
+
 const [engineModel = "claude-sonnet-5-5", adventurerModel = "claude-haiku-4-5"] = process.argv.slice(2);
 const game = await Effect.runPromise(
-  play({ engine: playerFor(engineModel), adventurer: playerFor(adventurerModel) }).pipe(
+  play({ engine: playerFor(engineModel), adventurer: adventurerFor(adventurerModel) }).pipe(
     reportedBy({ _tag: "Test", name: TestName.make("zork") }),
     Effect.timeout("10 minutes"),
     // The console shows only the game; each session's log lines go to its log file, and to OTLP when it is set up.

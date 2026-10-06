@@ -38,6 +38,8 @@ export const logKeys = {
     /** A part of an earlier response was not sent; the details say which part and why. */
     partsOmitted: "provider.request.parts_omitted",
     fileAsPointer: "provider.request.file_as_pointer",
+    /** A field of the request's context that this provider's adapter does not translate was not sent; the details name the field, its value, and what the provider does without it. */
+    notTranslated: "provider.request.not_translated",
   },
   loop: {
     /**

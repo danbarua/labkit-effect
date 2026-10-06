@@ -7,8 +7,10 @@ import { CallId, FailureText, ModelName, ModelText, ProviderName, StopReason, To
 import type { ModelPart } from "../../src/agent-machine/observation.ts";
 import { ModelClient, type ModelContext } from "../../src/agent-session/contracts.ts";
 import { receivedJson } from "../../src/agent-session/received.ts";
-import { play, type Player, type Setup } from "../../src/examples/zork/scenario.ts";
-import { catalog, offeredTools, worldTools, type GameState } from "../../src/examples/zork/tools.ts";
+import { sentIn } from "../../src/agent-session/sent.ts";
+import { adventurerCustomisations, haikuAdventurer } from "../../src/examples/zork/customisations.ts";
+import { play, type Adventurer, type Player, type Setup } from "../../src/examples/zork/scenario.ts";
+import { catalog, moveInputJson, offeredTools, worldTools, type GameState } from "../../src/examples/zork/tools.ts";
 import { applyAction, availableTools, grueEnding, initialWorld, inventory, maxTurns, view, type Action, type World } from "../../src/examples/zork/world.ts";
 import { runTest } from "../support/run.ts";
 import { test, testFolder } from "../support/test.ts";
@@ -52,7 +54,7 @@ const scriptedAdventurer = (choose: (world: ReturnType<typeof view>, context: Mo
   if (context.messages.at(-1)?.parts.some((part) => part._tag === "ToolResult")) return say("Done.");
   return call(choose(userWorld(context), context), `action-${n}`);
 });
-const setup = (engine: Player, adventurer: Player): Setup => ({ engine, adventurer, directory: join(testFolder(), "zork"), home: testFolder() });
+const setup = (engine: Player, adventurer: Adventurer): Setup => ({ engine, adventurer, directory: join(testFolder(), "zork"), home: testFolder() });
 /** Plays a game with the platform's file system, which its saved sessions and logs are written with. */
 const played = (given: Setup) => play(given).pipe(Effect.provide(BunServices.layer));
 const act = (world: World, action: Action): World => {
@@ -81,6 +83,8 @@ test("Zork records engine-selected tools, inventory changes and an early Grue de
   expect(adventurer.seen[0]?.tools.map((tool) => String(tool.name))).toEqual(["open"]);
   expect(adventurer.seen[1]?.tools).toEqual([]);
   expect(adventurer.seen[2]?.tools.map((tool) => String(tool.name))).toEqual(["take"]);
+  // An adventurer without a customisation is sent the requests as the game makes them.
+  expect(adventurer.seen.filter((context) => context.toolChoice !== undefined || context.tools.some((tool) => tool.constrained !== undefined))).toEqual([]);
   expect(userWorld(adventurer.seen[4]!).inventory).toEqual(["leaflet"]);
   expect(userWorld(engine.seen[2]!).inventory).toEqual(["leaflet"]);
   for (const [role, facts] of Object.entries(game.facts)) {
@@ -93,6 +97,33 @@ test("Zork records engine-selected tools, inventory changes and an early Grue de
   expect(markdown).toContain("Offered tools: open");
   expect(markdown.trim()).toEndWith(grueEnding);
   expect(game.transcriptPath).toMatch(/\d{4}-\d{2}-\d{2}T.*\.md$/);
+});
+
+test("Haiku's adventurer requests, as recorded, require a tool call while tools are offered, constrain each tool, and let move take only the open exits; the reply after an action is unchanged", async () => {
+  expect(adventurerCustomisations["anthropic/claude-haiku-4-5"]).toBe(haikuAdventurer);
+  // The narrowed move is the catalog's move with fewer directions.
+  expect(moveInputJson(["north", "south", "east", "west", "up", "down", "n", "s", "e", "w", "u", "d"])).toEqual(catalog.find((tool) => tool.name === "move")!.input);
+  const actions: ReadonlyArray<Action> = [move("north"), move("north"), target("open", "trapdoor"), move("down")];
+  const engine = scriptedEngine();
+  const adventurer = scriptedAdventurer((world) => actions[world.turn] ?? { tool: "look", input: {} });
+  const game = await runTest(played(setup(engine.player, { ...adventurer.player, customise: haikuAdventurer })));
+  expect(game.exchanges).toHaveLength(4);
+  const sent = game.facts.adventurer.flatMap((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelRequestDispatched" ? [sentIn(fact.observation.sent)] : []);
+  const offering = sent.filter((context) => context.tools.length > 0);
+  const replies = sent.filter((context) => context.tools.length === 0);
+  expect(offering).toHaveLength(4);
+  expect(offering.map((context) => context.toolChoice)).toEqual(["required", "required", "required", "required"]);
+  expect(offering.every((context) => context.tools.every((tool) => tool.constrained === true))).toBe(true);
+  const directions = (context: ModelContext): Array<string> => {
+    const offered = context.tools.find((tool) => tool.name === "move");
+    if (offered === undefined) throw new Error("move was not offered");
+    return [...(offered.input as { readonly properties: { readonly direction: { readonly enum: ReadonlyArray<string> } } }).properties.direction.enum];
+  };
+  // House, forest, the clearing with its trapdoor closed, then open.
+  expect(offering.map(directions)).toEqual([["north"], ["south", "north"], ["south"], ["south", "down"]]);
+  expect(offering.map((context) => Object.keys(userWorld(context).exits))).toEqual(offering.map(directions));
+  expect(replies).toHaveLength(4);
+  expect(replies.map((context) => context.toolChoice)).toEqual([undefined, undefined, undefined, undefined]);
 });
 
 test("Zork enforces thirty actions and runner-owned death even when narration disagrees", async () => {

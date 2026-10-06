@@ -63,6 +63,18 @@ tool, at most twice within that request limit. Provider failures, invalid Engine
 selections and persistent failure to act fail the run. The CLI has a ten-minute
 timeout.
 
+An Adventurer's requests can be changed for its model (`customisations.ts`). A
+customisation is given the game's state and each request as the game makes it,
+and returns the request to send; the Adventurer's session records each request
+as it was sent. `index.ts` gives the Adventurer the customisation listed for its
+model, and the game itself is the same for every model. Claude Haiku 4.5 has one:
+while the Engine offers tools, each request requires a tool call, each offered
+tool is constrained (Anthropic's strict tool use), and `move` takes only the open
+exits. The reply after an action is sent unchanged. The Anthropic API refuses a
+required tool call while thinking is on, so the customisation depends on Haiku
+playing with its thinking disabled, as `index.ts` sets it. Other models play
+without a customisation.
+
 Completed games write `logs/zork/<UTC-date-and-time>-<unique-id>.md`, including
 the models, opening, offered tools, successful tool calls, world results and
 Engine narration. The CLI prints the path. Session facts retain rejected calls
@@ -72,7 +84,7 @@ and provider details; the readable transcript shows the successful actions.
 bun test tests/examples/zork.test.ts
 ```
 
-`scenario.ts` exports `play(setup)` for other model clients; `anthropic.ts` supplies
+`scenario.ts` exports `play(setup)` for other model clients; `index.ts` supplies
 the live setup. Set an observation origin using `reportedBy` when calling `play`
 directly (the CLI and `runTest` already do). The result includes both sessions'
 facts, the final world and the transcript path. Tests can set `setup.directory`

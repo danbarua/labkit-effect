@@ -4,6 +4,10 @@
  *
  * Request:
  * - The context's messages, tools and tool outcomes become Anthropic blocks.
+ * - A tool that is `constrained` is sent with `strict: true`. A context with `toolChoice: "required"`
+ *   is sent with `tool_choice: {type: "any"}`. The API refuses a forced tool choice while thinking is
+ *   on (HTTP 400, "Thinking may not be enabled when tool_choice forces tool use."); the request is
+ *   sent as asked, and fails.
  * - A failed tool call becomes an error `tool_result` whose content tells the model what to do next:
  *   for a tool that does not exist, the tools that do; for input that does not fit, the tool's input
  *   schema and the input given.
@@ -192,8 +196,10 @@ export function body(target: Target, context: ModelContext, files: ReadonlyMap<B
               name: tool.name,
               description: tool.description,
               input_schema: tool.input,
+              ...(tool.constrained === true ? { strict: true } : {}),
             })),
           }),
+      ...(context.toolChoice === "required" ? { tool_choice: { type: "any" } } : {}),
       messages: messages.flatMap((message) => message.json as ReadonlyArray<Json>),
     },
     supplied: [

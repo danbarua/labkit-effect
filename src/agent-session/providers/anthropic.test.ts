@@ -12,7 +12,7 @@ import { receivedJson } from "../received.ts";
 import type { Observation } from "../../agent-machine/observation.ts";
 import { BoringModelProvider } from "../../../tests/support/boring.ts";
 import { CountingTurns } from "../turns.ts";
-import { AnthropicModelClient } from "./anthropic-client.ts";
+import { AnthropicModelClient, body } from "./anthropic-client.ts";
 import { openSession } from "../loop.ts";
 import { EphemeralSessionStore } from "../session-store.ts";
 import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
@@ -419,4 +419,19 @@ test("requests go to /v1/messages with the client's key and API version", async 
   const provider = recording([{ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" }]);
   await respondWith(provider);
   expect(provider.headers[0]).toMatchObject({ "x-api-key": "test-key", "anthropic-version": "2023-06-01" });
+});
+
+test("a constrained tool is sent with strict, and a required tool choice as tool_choice any; a context without them sends neither", () => {
+  const [add, ...rest] = smolCatalog;
+  if (add === undefined) throw new Error("the smol catalog has no tools");
+  const messages: ModelContext["messages"] = [{ role: "user", parts: [{ _tag: "Text", text: "Add 2 and 3." }] }];
+  const forced = body(target, { system: undefined, tools: [{ ...add, constrained: true }, ...rest], messages, toolChoice: "required" }).json as {
+    readonly tools: ReadonlyArray<Record<string, unknown>>;
+    readonly tool_choice?: unknown;
+  };
+  expect(forced.tool_choice).toEqual({ type: "any" });
+  expect(forced.tools.map((tool) => tool["strict"])).toEqual([true, ...rest.map(() => undefined)]);
+  const plain = body(target, { system: undefined, tools: smolCatalog, messages }).json as { readonly tools: ReadonlyArray<Record<string, unknown>> };
+  expect(plain).not.toHaveProperty("tool_choice");
+  expect(plain.tools.every((tool) => !("strict" in tool))).toBe(true);
 });

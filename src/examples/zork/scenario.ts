@@ -20,13 +20,14 @@ import type { Ending } from "../../agent-machine/decision.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
 import { InputText } from "../../agent-machine/names.ts";
 import type { ModelTarget } from "../../agent-machine/observation.ts";
-import { ContextAssembler, MaxHolds, ModelRequestPolicies, TurnEndHooks, type ModelClient, type ToolSpec } from "../../agent-session/contracts.ts";
+import { ContextAssembler, MaxHolds, ModelRequestPolicies, TurnEndHooks, type ModelClient, type ModelContext } from "../../agent-session/contracts.ts";
 import { maxTurnRequests } from "../../agent-policy/max-turn-requests.ts";
 import type { Session } from "../../agent-session/loop.ts";
 import { parseJson, receivedJsonText } from "../../agent-session/received.ts";
 import { SourcedToolRunner, type ToolSource } from "../../agent-session/tool-sources.ts";
+import type { Customisation } from "./customisations.ts";
 import { adventurerPrompt, enginePrompt } from "./prompt.ts";
-import { offeredTools, worldTools, type GameState } from "./tools.ts";
+import { offeredIn, worldTools, type GameState } from "./tools.ts";
 import { actionNames, availableTools, grueEnding, initialWorld, maxTurns, view, type Action, type ActionName, type World } from "./world.ts";
 
 export interface Player {
@@ -34,10 +35,14 @@ export interface Player {
   /** The client the player asks; the provider's own, from its key in the environment, when not given (a test gives a scripted one). */
   readonly client?: Layer.Layer<ModelClient>;
 }
+export interface Adventurer extends Player {
+  /** How each request the adventurer is sent is changed for its model (`customisations.ts`); unchanged when not given. */
+  readonly customise?: Customisation;
+}
 export class ZorkResponseFailed extends Data.TaggedError("ZorkResponseFailed")<{ readonly message: string }> {}
 export interface Setup {
   readonly engine: Player;
-  readonly adventurer: Player;
+  readonly adventurer: Adventurer;
   /** Where transcripts are written. Defaults to logs/zork/ relative to the working directory. */
   readonly directory?: string;
   /** The home folder under which sessions and logs are kept (`~/.local/share/<brand>/`). Defaults to the user's. */
@@ -64,20 +69,20 @@ export interface Played {
 
 /**
  * The services of a zork session: `SessionServices` with the player's client when it has its own, at
- * most four model requests in a game turn, two turn-end holds with `feedback`, and, when `offered`
- * is given, only the tools it returns offered to each request.
+ * most four model requests in a game turn, two turn-end holds with `feedback`, and, when `request` is
+ * given, each request as `request` returns it.
  */
-const servicesOf = (player: Player, offered?: Effect.Effect<ReadonlyArray<ToolSpec>>, feedback: Effect.Effect<ReadonlyArray<string>> = Effect.succeed([])) => {
+const servicesOf = (player: Player, request?: (context: ModelContext) => Effect.Effect<ModelContext>, feedback: Effect.Effect<ReadonlyArray<string>> = Effect.succeed([])) => {
   const assembler = Layer.effect(ContextAssembler, Effect.gen(function* () {
     const base = yield* ContextAssembler;
     return { assemble: (facts, turn) => Effect.gen(function* () {
       const context = yield* base.assemble(facts, turn);
-      return offered === undefined ? context : { ...context, tools: yield* offered };
+      return request === undefined ? context : yield* request(context);
     }) } satisfies ContextAssembler["Service"];
   })).pipe(Layer.provide(AgentContextAssembler.pipe(Layer.provide(WholeConversation))));
   return Layer.mergeAll(
     SessionServices(SourcedToolRunner),
-    ...(offered === undefined ? [] : [assembler]),
+    ...(request === undefined ? [] : [assembler]),
     ...(player.client === undefined ? [] : [player.client]),
     // Bound retries and tool follow-ups within each game turn.
     Layer.succeed(ModelRequestPolicies, [{ name: "zork request limit", policy: (facts) => Effect.succeed(maxTurnRequests(facts, 4)) }]),
@@ -89,7 +94,7 @@ const servicesOf = (player: Player, offered?: Effect.Effect<ReadonlyArray<ToolSp
 /** One of a game's two sessions, `zork-<role>-<game>`, as `withSession` runs it. `source` is the adventurer's bolt-on, the world's tools. */
 const optionsOf = (
   setup: Setup, game: string, role: "engine" | "adventurer", player: Player, prompt: string, brand: Brand,
-  source?: ToolSource, offered?: Effect.Effect<ReadonlyArray<ToolSpec>>, feedback?: Effect.Effect<ReadonlyArray<string>>,
+  source?: ToolSource, request?: (context: ModelContext) => Effect.Effect<ModelContext>, feedback?: Effect.Effect<ReadonlyArray<string>>,
 ) => {
   const sessionId = `zork-${role}-${game}`;
   const home = setup.home ?? homedir();
@@ -101,7 +106,7 @@ const optionsOf = (
     persist: true,
     root: sessionsFolderOf(brand, home),
     record: { host: "zork", game, role, cwd: process.cwd() },
-    services: servicesOf(player, offered, feedback),
+    services: servicesOf(player, request, feedback),
     boltOns: source === undefined ? [] : [{ sources: [source] }],
     logs: LogsToFile(join(logsFolderOf(brand, home), `${sessionId}.log`), "labkit-zork"),
     host: Headless,
@@ -165,8 +170,14 @@ export const play = (setup: Setup) => {
     const feedback = Ref.get(state).pipe(Effect.map((current) => current.action === undefined
       ? [`No action has succeeded yet. Call exactly one of the offered tools now: ${current.offered.join(", ")}. Use the world snapshot and correct any rejected arguments. Text alone does not act.`]
       : []));
+    // Each of the adventurer's requests offers the engine's tools, as the adventurer's customisation changes it.
+    const customise = setup.adventurer.customise;
+    const request = (context: ModelContext) => Ref.get(state).pipe(Effect.map((current) => {
+      const offered = { ...context, tools: offeredIn(current) };
+      return customise === undefined ? offered : customise(current, offered);
+    }));
     return yield* withSession(optionsOf(setup, id, "engine", setup.engine, enginePrompt(commands), brand), (engineSession) =>
-      withSession(optionsOf(setup, id, "adventurer", setup.adventurer, adventurerPrompt(commands), brand, worldTools(state), offeredTools(state), feedback), (adventurerSession) =>
+      withSession(optionsOf(setup, id, "adventurer", setup.adventurer, adventurerPrompt(commands), brand, worldTools(state), request, feedback), (adventurerSession) =>
         Effect.gen(function* () {
           const engine = asked(engineSession);
           const adventurer = asked(adventurerSession);

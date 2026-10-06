@@ -7,7 +7,8 @@
  * - The context's messages become input items: text as `input_text` or `output_text` messages, a
  *   tool call as a `function_call` item, and a tool outcome as a `function_call_output` item
  *   carrying the text that the model is sent.
- * - The catalog is sent as `function` tools.
+ * - The catalog is sent as `function` tools. A context's `toolChoice` and its `constrained` tools are not
+ *   sent, and a warning names them (`untranslated`).
  * - Thinking (a `reasoning` item) and an item that the client did not recognise go back to the
  *   provider that produced them, unchanged and in their place. They are omitted for any other
  *   provider, and the omission is logged.
@@ -71,6 +72,7 @@ import {
   usageOf,
   fileAs,
   filesIn,
+  untranslated,
 } from "../shaping.ts";
 
 type Responded = Extract<Observation, { _tag: "ModelResponded" }>;
@@ -175,7 +177,7 @@ export function body(target: Target, context: ModelContext, files: ReadonlyMap<B
           }),
       input: input.flatMap((message) => message.json as ReadonlyArray<Json>),
     },
-    supplied: input.flatMap((message) => message.supplied),
+    supplied: [...untranslated(context), ...input.flatMap((message) => message.supplied)],
   };
 }
 

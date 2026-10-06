@@ -203,6 +203,11 @@ back into the core's observations:
   the user's overrides). A setting that a model does not take is sent as the nearest one it does, or
   not sent, and the difference is recorded as adjusted before the request. Claude Haiku 4.5, which
   takes a thinking budget in place of an effort, is sent each effort as a budget.
+- A context can require a tool call (`toolChoice: "required"`), and a tool can be `constrained`: the
+  provider constrains the model to input that the tool's schema accepts. Only the Anthropic adapter
+  sends them, as `tool_choice` `any` and `strict` on the tool. The other adapters leave them out and
+  log a warning that names them (`untranslated` in `shaping.ts`). The Anthropic API refuses a
+  required tool call while thinking is on; the adapter sends the request as asked, and it fails.
 
 ## Design decisions
 

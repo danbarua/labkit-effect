@@ -438,3 +438,33 @@ test("what a response held for a call not in its message is logged as left out, 
   const lines = logged.filter((line) => Array.isArray(line) && line[0] === logKeys.provider.partsOmitted) as Array<[string, Record<string, unknown>]>;
   expect(lines[0]?.[1]["parts"]).toMatchObject([{ part: "Unrecognised", reason: "its call is not in the message" }]);
 });
+
+test("a required tool choice and a constrained tool are not sent, and a warning names each", async () => {
+  const logged: Array<{ readonly level: string; readonly message: unknown }> = [];
+  const capture = Logger.make((options) => {
+    logged.push({ level: options.logLevel, message: options.message });
+  });
+  const provider = recordingServer([answers]);
+  stops.push(provider.stop);
+  const [add, ...rest] = smolCatalog;
+  if (add === undefined) throw new Error("the smol catalog has no tools");
+  const context: ModelContext = {
+    system: undefined,
+    tools: [{ ...add, constrained: true }, ...rest],
+    messages: [{ role: "user", parts: [{ _tag: "Text", text: "Add 2 and 3." }] }],
+    toolChoice: "required",
+  };
+  await runTest(
+    Effect.gen(function* () {
+      yield* (yield* ModelClient).respond({ provider: ProviderName.make("boring"), model: ModelName.make("boring-1") }, context, TurnId.make("turn-1"));
+    }).pipe(Effect.provide(Layer.mergeAll(OpenAiCompatModelClient.pipe(Layer.provide(openAiCompatAt(provider.url))), Logger.layer([capture], { mergeWithExisting: true })))),
+  );
+  const sent = provider.bodies[0] as { readonly tools: ReadonlyArray<{ readonly function: Record<string, unknown> }> };
+  expect(sent).not.toHaveProperty("tool_choice");
+  expect(sent.tools.map((tool) => tool.function["strict"])).toEqual(sent.tools.map(() => undefined));
+  const warnings = logged.filter(({ message }) => Array.isArray(message) && message[0] === logKeys.provider.notTranslated);
+  expect(warnings.map(({ level, message }) => [level, (message as [string, Record<string, unknown>])[1]])).toEqual([
+    ["Warn", expect.objectContaining({ field: "toolChoice", value: "required", without: "the model chooses whether to call a tool" })],
+    ["Warn", expect.objectContaining({ field: "constrained", tools: ["add"], without: "the model's tool input is checked only when the tool runs" })],
+  ]);
+});

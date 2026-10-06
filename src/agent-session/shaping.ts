@@ -112,6 +112,22 @@ export function firstOmitted(
   return { logged: new Set([...logged, ...first.map(keyOf)]), first };
 }
 
+/**
+ * Returns a warning for each field of `context` that an adapter which does not translate it leaves
+ * out of the request: the context's `toolChoice`, and its tools that are `constrained`.
+ */
+export function untranslated(context: ModelContext): ReadonlyArray<Supplied> {
+  const constrained = context.tools.filter((tool) => tool.constrained === true).map((tool) => tool.name);
+  return [
+    ...(context.toolChoice === undefined
+      ? []
+      : [{ level: "warning" as const, event: logKeys.provider.notTranslated, details: { field: "toolChoice", value: context.toolChoice, without: "the model chooses whether to call a tool" } }]),
+    ...(constrained.length === 0
+      ? []
+      : [{ level: "warning" as const, event: logKeys.provider.notTranslated, details: { field: "constrained", tools: constrained, without: "the model's tool input is checked only when the tool runs" } }]),
+  ];
+}
+
 /** Returns a part of an earlier response that is not sent, with the reason, as an info-level `Supplied` entry. */
 export function omittedPart(part: ContextPart, reason: string): Shaped {
   return {

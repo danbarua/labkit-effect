@@ -7,7 +7,8 @@
  * - The context's messages become chat messages: text as `text` content parts, the model's tool
  *   calls as an assistant message's `tool_calls`, and each tool outcome as a `tool` message carrying
  *   the text that the model is sent.
- * - The catalog is sent as `function` tools.
+ * - The catalog is sent as `function` tools. A context's `toolChoice` and its `constrained` tools are not
+ *   sent, and a warning names them (`untranslated`).
  * - What an earlier response from this provider and model held besides its text and calls is sent
  *   back as it came: the message's other fields (`reasoning_content`, ...) on its message, and a
  *   call's other fields on the call. Another model's thinking is sent as text; its other parts are
@@ -62,6 +63,7 @@ import {
   usageOf,
   fileAs,
   filesIn,
+  untranslated,
 } from "../shaping.ts";
 
 type Responded = Extract<Observation, { _tag: "ModelResponded" }>;
@@ -219,7 +221,7 @@ function body(target: Target, context: ModelContext, files: ReadonlyMap<BlobId, 
             })),
           }),
     },
-    supplied: messages.flatMap((message) => message.supplied),
+    supplied: [...untranslated(context), ...messages.flatMap((message) => message.supplied)],
   };
 }
 

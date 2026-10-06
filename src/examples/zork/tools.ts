@@ -35,6 +35,10 @@ export const catalog: ReadonlyArray<ToolSpec> = actionNames.map((name) => ({
   input: { ...Schema.toJsonSchemaDocument(inputSchema(name)).schema, additionalProperties: false } as Schema.Json,
   kind: "other", replay: "unsafe",
 }));
+/** The input schema of `move` as it is sent, taking only `directions`. With every direction, it is the catalog's. */
+export const moveInputJson = (directions: ReadonlyArray<string>): Schema.Json => ({
+  type: "object", properties: { direction: { type: "string", enum: directions } }, required: ["direction"], additionalProperties: false,
+});
 
 export interface GameState {
   readonly world: World;
@@ -61,7 +65,8 @@ export const worldTools = (state: Ref.Ref<GameState>): ToolSource => ({
   }),
 });
 
-/** The actual request catalog changes each turn; the session keeps the full supported catalog. */
-export const offeredTools = (state: Ref.Ref<GameState>): Effect.Effect<ReadonlyArray<ToolSpec>> => Ref.get(state).pipe(
-  Effect.map((current) => current.action === undefined ? catalog.filter((tool) => current.offered.some((name) => name === tool.name)) : []),
-);
+/** The tools a request offers in `current`: the engine's offer until an action succeeds, then none. The session keeps the full supported catalog. */
+export const offeredIn = (current: GameState): ReadonlyArray<ToolSpec> =>
+  current.action === undefined ? catalog.filter((tool) => current.offered.some((name) => name === tool.name)) : [];
+/** The actual request catalog changes each turn (`offeredIn`). */
+export const offeredTools = (state: Ref.Ref<GameState>): Effect.Effect<ReadonlyArray<ToolSpec>> => Ref.get(state).pipe(Effect.map(offeredIn));

@@ -5,13 +5,14 @@ import { test } from "../../../tests/support/test.ts";
 import { Effect, Layer } from "effect";
 import { ModelName, ProviderName, TurnId } from "../../agent-machine/names.ts";
 import type { Observation } from "../../agent-machine/observation.ts";
-import { ModelClient } from "../contracts.ts";
+import { ModelClient, type ModelContext } from "../contracts.ts";
+import { logKeys } from "../log-keys.ts";
 import { asText } from "../received.ts";
 import { BoringModelProvider } from "../../../tests/support/boring.ts";
 import { CountingTurns } from "../turns.ts";
 import { openSession } from "../loop.ts";
 import { EphemeralSessionStore } from "../session-store.ts";
-import { OpenAiModelClient } from "./openai-client.ts";
+import { body, OpenAiModelClient } from "./openai-client.ts";
 import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
 import { openAiAt, recordingServer } from "../../../tests/support/providers.ts";
@@ -228,4 +229,23 @@ test("a 2xx response with no body to read fails the request as an unknown error"
   );
   if (responded._tag !== "ModelFailed") throw new Error(`expected ModelFailed, got ${responded._tag}`);
   expect((JSON.parse(asText(responded.error)) as { readonly reason: { readonly _tag: string } }).reason._tag).toBe("UnknownError");
+});
+
+test("a required tool choice and a constrained tool are not sent to the Responses API, and a warning names each", () => {
+  const [add, ...rest] = smolCatalog;
+  if (add === undefined) throw new Error("the smol catalog has no tools");
+  const context: ModelContext = {
+    system: undefined,
+    tools: [{ ...add, constrained: true }, ...rest],
+    messages: [{ role: "user", parts: [{ _tag: "Text", text: "Add 2 and 3." }] }],
+    toolChoice: "required",
+  };
+  const shaped = body({ provider: ProviderName.make("boring"), model: ModelName.make("boring-1") }, context);
+  const sent = shaped.json as { readonly tools: ReadonlyArray<Record<string, unknown>> };
+  expect(sent).not.toHaveProperty("tool_choice");
+  expect(sent.tools.every((tool) => !("strict" in tool))).toBe(true);
+  expect(shaped.supplied.filter((entry) => entry.event === logKeys.provider.notTranslated).map((entry) => [entry.level, entry.details["field"]])).toEqual([
+    ["warning", "toolChoice"],
+    ["warning", "constrained"],
+  ]);
 });

@@ -33,8 +33,19 @@ export class ModelProvider extends Context.Service<
  * A tool the model may call: its name, what it does, the JSON Schema of its input, its kind
  * (`ToolKind`), and whether it can be run again (`ToolReplay`). Kind and replay are not sent to
  * models.
+ *
+ * A tool that is `constrained` is sent so that the provider constrains the model, while it writes a
+ * call to the tool, to input that the schema accepts (Anthropic's strict tool use). Only the
+ * Anthropic adapter sends it; the other adapters log a warning that it was not sent.
  */
-export const ToolSpec = Schema.Struct({ name: ToolName, description: Schema.String, input: Schema.Json, kind: ToolKind, replay: ToolReplay });
+export const ToolSpec = Schema.Struct({
+  name: ToolName,
+  description: Schema.String,
+  input: Schema.Json,
+  kind: ToolKind,
+  replay: ToolReplay,
+  constrained: Schema.optionalKey(Schema.Literal(true)),
+});
 export type ToolSpec = typeof ToolSpec.Type;
 
 /**
@@ -80,11 +91,16 @@ export type ContextMessage = typeof ContextMessage.Type;
 /**
  * What the model is sent for one request, before any provider's wire format. It is recorded with
  * the request (`ModelRequestDispatched.sent`), so the record says what each request carried.
+ *
+ * With `toolChoice: "required"`, the model must answer with a call to one of `tools`. Without it, the
+ * model chooses whether to call one. Only the Anthropic adapter sends it (`tool_choice` `any`); the
+ * other adapters log a warning that it was not sent.
  */
 export const ModelContext = Schema.Struct({
   system: Schema.UndefinedOr(Schema.String),
   tools: Schema.Array(ToolSpec),
   messages: Schema.Array(ContextMessage),
+  toolChoice: Schema.optionalKey(Schema.Literal("required")),
 });
 export type ModelContext = typeof ModelContext.Type;
 
