@@ -160,7 +160,8 @@ test("a line that starts with / completes to a command, a model, a setting not y
   expect(complete("/se")).toEqual(["/settings "]);
   expect(complete("/model openai/gpt-6-s")).toEqual(["/model openai/gpt-6-sol"]);
   expect(complete("/model xai/")).toEqual([]);
-  expect(complete("/settings ")).toEqual(["effort=", "thinking=", "observe=", "cache=", "maxOutputTokens=", "view.thinking="].map((each) => `/settings ${each}`));
+  // The output limit is not offered: it defaults to the model's own. Typed, it is taken.
+  expect(complete("/settings ")).toEqual(["effort=", "thinking=", "observe=", "cache=", "view.thinking="].map((each) => `/settings ${each}`));
   expect(complete("/settings view.thinking=")).toEqual(["/settings view.thinking=on", "/settings view.thinking=off"]);
   expect(complete("/effort ")).toEqual(["default", "low", "medium", "high", "xhigh"].map((each) => `/effort ${each}`));
   expect(complete("/switch openai/gpt-6-s")).toEqual(["/switch openai/gpt-6-sol"]);
@@ -282,4 +283,10 @@ test("/settings with a mistake in any setting named changes none of them", async
   expect(thinking).toBe("on");
   expect(existsSync(configFolder())).toBe(false);
   expect(asked[0]?.settings as unknown).toEqual({ effort: "low" });
+});
+
+test("/settings reads the settings named together: Sonnet 5.5 thinks only between tool calls at high effort or below", async () => {
+  const { printed } = await session(["/switch claude-sonnet-5-5", "/settings thinking=between_tools effort=xhigh", "/settings thinking=between_tools effort=high"]);
+  expect(printed[1]).toBe("ERROR: anthropic/claude-sonnet-5-5 does not take thinking=between_tools.\nHINT: thinking=between_tools is not taken with effort=xhigh.");
+  expect(printed[2]).toStartWith("Asking anthropic/claude-sonnet-5-5 thinking=between_tools effort=high");
 });

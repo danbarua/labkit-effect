@@ -15,6 +15,7 @@
 import { Array as Arr, Effect, Order } from "effect";
 import { AdjustmentReason, TokenCount, type TurnId } from "../../agent-machine/names.ts";
 import { CacheFor, Effort, type Adjusted, type ModelSettings, Observe, ThinkingMode } from "../../agent-machine/settings.ts";
+import { type Capabilities, effortsTaken, turnsThinkingOff } from "./well-known-models.ts";
 import type { Target } from "../contracts.ts";
 import { harnessParts } from "../origin.ts";
 import { Report } from "../report.ts";
@@ -84,28 +85,30 @@ export function effortFor(
 
 /**
  * Returns the reasoning effort to send, as the Responses and Chat Completions APIs take it, for
- * `settings` to a model that takes the efforts `efforts` (from models.dev, `none` among them when it
- * can turn its reasoning off), and what was adjusted:
+ * `settings` to a model with `capabilities`, and what was adjusted:
  *
- * - `thinking: disabled` is sent as effort `none` to a model whose efforts list `none`, or whose
- *   efforts are not known. An effort given with it is not sent, and is returned as adjusted. To a
- *   model that cannot turn its reasoning off, nothing is sent for thinking, the thinking is returned
- *   as adjusted, and the effort given is sent as `effortFor` says.
- * - Otherwise the effort is sent as `effortFor` says.
+ * - `thinking: disabled` is sent as effort `none` to a model that can turn its reasoning off
+ *   (`turnsThinkingOff`: its efforts list `none`), or of which that is not known. An effort given
+ *   with it is not sent, and is returned as adjusted. To a model that cannot (one that does not
+ *   reason, or lists no `none`), nothing is sent for thinking, the thinking is returned as adjusted,
+ *   and the effort given is sent as `effortFor` says.
+ * - Otherwise the effort is sent as `effortFor` says, from the efforts the model takes
+ *   (`effortsTaken`): none to a model that does not reason.
  */
 export function reasoningEffortFor(
   settings: ModelSettings,
-  efforts: ReadonlyArray<string> | undefined,
+  capabilities: Capabilities | undefined,
 ): { readonly sent: string | undefined; readonly adjusted: ReadonlyArray<Adjustment> } {
-  const taken = efforts?.filter((effort): effort is Effort => effort !== "none");
+  const taken = effortsTaken(capabilities);
   if (settings.thinking === "disabled") {
-    if (efforts === undefined || efforts.includes("none")) {
+    if (turnsThinkingOff(capabilities) !== false) {
       const unsent: ReadonlyArray<Adjustment> =
         settings.effort === undefined ? [] : [{ adjusted: { _tag: "Effort", asked: settings.effort }, reason: "thinking is disabled, which is sent as reasoning effort none" }];
       return { sent: "none", adjusted: unsent };
     }
     const { sent, adjusted } = effortFor(settings.effort, taken);
-    return { sent, adjusted: [{ adjusted: { _tag: "Thinking", asked: "disabled" }, reason: "this model cannot turn its reasoning off" }, ...adjusted] };
+    const reason = capabilities?.reasoning === false ? "this model does not reason" : "this model cannot turn its reasoning off";
+    return { sent, adjusted: [{ adjusted: { _tag: "Thinking", asked: "disabled" }, reason }, ...adjusted] };
   }
   return effortFor(settings.effort, taken);
 }

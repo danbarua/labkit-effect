@@ -3,7 +3,7 @@
  * translates where the model does not take what was given, and how a session's facts give them.
  */
 
-import { capabilitiesOf } from "./well-known-models.ts";
+import { type Capabilities, capabilitiesOf, type KnownEffort } from "./well-known-models.ts";
 import { afterAll, expect } from "bun:test";
 import { Effect, Layer } from "effect";
 import { ModelName, ProviderName, SessionId, TokenCount } from "../../agent-machine/names.ts";
@@ -31,6 +31,10 @@ import { test } from "../../../tests/support/test.ts";
 
 /** What is known of a well-known model. */
 const known = (provider: string, model: string) => capabilitiesOf(provider, model);
+/** What is known of a model that takes `efforts` and nothing more is known of. */
+const taking = (efforts: ReadonlyArray<KnownEffort>): Capabilities => ({ input: [], efforts, price: { input: 0, output: 0 } });
+/** What is known of an OpenAI model. */
+const gpt = (model: string) => known("openai", model);
 const anthropic = (model: string, settings: ModelSettings) => anthropicSettings(settings, known("anthropic", model));
 
 test("Anthropic: nothing said sends nothing; what is said goes into thinking and output_config", () => {
@@ -104,6 +108,25 @@ test("Anthropic: Haiku 4.5 takes a thinking budget in place of an effort: each e
   });
 });
 
+test("Anthropic: Haiku 4.5 does not think when no budget fits below its output limit", () => {
+  expect(anthropic("claude-haiku-4-5", { effort: "low", maxOutputTokens: TokenCount.make(1024) })).toEqual({
+    fields: {},
+    headers: {},
+    adjusted: [{ adjusted: { _tag: "Effort", asked: "low" }, reason: "this model's least thinking budget, 1024 tokens, is not below its output limit, 1024 tokens" }],
+  });
+});
+
+test("OpenAI: a model that does not reason is sent no effort, and no thinking off", () => {
+  expect(openAiSettings({ effort: "high", thinking: "disabled" }, gpt("gpt-5.3-chat-latest"))).toEqual({
+    fields: {},
+    headers: {},
+    adjusted: [
+      { adjusted: { _tag: "Thinking", asked: "disabled" }, reason: "this model does not reason" },
+      { adjusted: { _tag: "Effort", asked: "high" }, reason: "this model takes no reasoning effort" },
+    ],
+  });
+});
+
 test("Anthropic: Haiku 4.5 can turn its thinking off, and thinks only when an effort is given", () => {
   expect(anthropic("claude-haiku-4-5", { thinking: "disabled", effort: "high" })).toEqual({
     fields: { thinking: { type: "disabled" } },
@@ -132,16 +155,15 @@ test("Anthropic: a model of which nothing is known is sent each value as given",
 });
 
 test("OpenAI: effort and a summary go into reasoning; disabled is effort none where the model lists it; between tool calls cannot be said", () => {
-  const efforts = (model: string) => known("openai", model)?.efforts;
   expect(openAiSettings({})).toEqual({ fields: {}, headers: {}, adjusted: [] });
   expect(openAiSettings({ observe: "all", effort: "xhigh" })).toEqual({ fields: { reasoning: { effort: "xhigh", summary: "auto" } }, headers: {}, adjusted: [] });
-  expect(openAiSettings({ thinking: "disabled", effort: "high" }, efforts("gpt-5.5"))).toEqual({
+  expect(openAiSettings({ thinking: "disabled", effort: "high" }, gpt("gpt-5.5"))).toEqual({
     fields: { reasoning: { effort: "none" } },
     headers: {},
     adjusted: [{ adjusted: { _tag: "Effort", asked: "high" }, reason: "thinking is disabled, which is sent as reasoning effort none" }],
   });
   // gpt-5 lists no none: thinking stays on, and the effort is sent as the nearest it takes.
-  expect(openAiSettings({ thinking: "disabled", effort: "xhigh" }, efforts("gpt-5"))).toEqual({
+  expect(openAiSettings({ thinking: "disabled", effort: "xhigh" }, gpt("gpt-5"))).toEqual({
     fields: { reasoning: { effort: "high" } },
     headers: {},
     adjusted: [
@@ -155,13 +177,13 @@ test("OpenAI: effort and a summary go into reasoning; disabled is effort none wh
 });
 
 test("an effort the model does not take is sent as the nearest it takes, the higher of two as near", () => {
-  expect(openAiSettings({ effort: "medium" }, ["low", "high"]).fields).toEqual({ reasoning: { effort: "high" } });
+  expect(openAiSettings({ effort: "medium" }, taking(["low", "high"])).fields).toEqual({ reasoning: { effort: "high" } });
   expect(effortFor("high", [])).toEqual({ sent: undefined, adjusted: [{ adjusted: { _tag: "Effort", asked: "high" }, reason: "this model takes no reasoning effort" }] });
   expect(effortFor("high", undefined)).toEqual({ sent: "high", adjusted: [] });
 });
 
 test("OpenAI: the adjustments are the cache's, then thinking's, then effort's", () => {
-  const { adjusted } = openAiSettings({ cache: "off", thinking: "between_tools", effort: "max" }, ["low", "medium", "high"]);
+  const { adjusted } = openAiSettings({ cache: "off", thinking: "between_tools", effort: "max" }, taking(["low", "medium", "high"]));
   expect(adjusted.map((each) => each.adjusted._tag)).toEqual(["Cache", "Thinking", "Effort"]);
 });
 
@@ -183,7 +205,7 @@ test("the cache: Anthropic marks the request for five minutes or an hour, OpenAI
 });
 
 // grok-4.7 takes low to xhigh, as models.dev lists it.
-const grok = known("xai", "grok-4.7")?.efforts;
+const grok = known("xai", "grok-4.7");
 
 test("xAI: effort goes into reasoning, max as xhigh, the nearest grok takes; the summary always comes back; the cache and its retention cannot be set", () => {
   expect(xAiSettings({}, grok)).toEqual({ fields: {}, headers: {}, adjusted: [] });
@@ -217,16 +239,15 @@ test("xAI: grok lists no effort none, so disabled is not sent and recorded; an e
 });
 
 test("OpenAI: an effort a model does not accept is sent as the nearest it does, the higher of two as near, and adjusted", () => {
-  const efforts = (model: string) => known("openai", model)?.efforts;
-  expect(openAiSettings({ effort: "xhigh" }, efforts("gpt-5")).fields).toEqual({ reasoning: { effort: "high" } });
+  expect(openAiSettings({ effort: "xhigh" }, gpt("gpt-5")).fields).toEqual({ reasoning: { effort: "high" } });
   // gpt-5-pro takes only high; the 5.5 pro takes medium to xhigh, so low goes up to medium and max down to xhigh.
-  expect(openAiSettings({ effort: "low" }, efforts("gpt-5-pro")).adjusted).toEqual([
+  expect(openAiSettings({ effort: "low" }, gpt("gpt-5-pro")).adjusted).toEqual([
     { adjusted: { _tag: "Effort", asked: "low", used: "high" }, reason: "this model's reasoning efforts are high; it is sent high" },
   ]);
-  expect(openAiSettings({ effort: "low" }, efforts("gpt-5.5-pro")).fields).toEqual({ reasoning: { effort: "medium" } });
-  expect(openAiSettings({ effort: "max" }, efforts("gpt-5.5")).fields).toEqual({ reasoning: { effort: "xhigh" } });
+  expect(openAiSettings({ effort: "low" }, gpt("gpt-5.5-pro")).fields).toEqual({ reasoning: { effort: "medium" } });
+  expect(openAiSettings({ effort: "max" }, gpt("gpt-5.5")).fields).toEqual({ reasoning: { effort: "xhigh" } });
   // What a model accepts is sent as asked; a model with no list is sent what was asked.
-  expect(openAiSettings({ thinking: "disabled" }, efforts("gpt-5.5"))).toEqual({ fields: { reasoning: { effort: "none" } }, headers: {}, adjusted: [] });
+  expect(openAiSettings({ thinking: "disabled" }, gpt("gpt-5.5"))).toEqual({ fields: { reasoning: { effort: "none" } }, headers: {}, adjusted: [] });
   expect(openAiSettings({ effort: "max" }).fields).toEqual({ reasoning: { effort: "max" } });
 });
 
@@ -240,7 +261,7 @@ test("Chat Completions: the effort is sent as reasoning_effort, none for thinkin
   });
   // A model with no list of efforts is sent what was asked; one with a list, the nearest it takes.
   expect(openAiCompatSettings({ effort: "max" }).fields).toEqual({ reasoning_effort: "max" });
-  expect(openAiCompatSettings({ effort: "max" }, ["none", "low", "medium", "high", "xhigh"]).fields).toEqual({ reasoning_effort: "xhigh" });
+  expect(openAiCompatSettings({ effort: "max" }, taking(["none", "low", "medium", "high", "xhigh"])).fields).toEqual({ reasoning_effort: "xhigh" });
   // The output limit is sent as max_tokens.
   expect(openAiCompatSettings({ observe: "all", maxOutputTokens: TokenCount.make(2000) }) as unknown).toEqual({
     fields: { max_tokens: 2000 },

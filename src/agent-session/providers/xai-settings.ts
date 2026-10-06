@@ -22,11 +22,11 @@
 import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { type Adjustment, reasoningEffortFor, type Settled } from "../configuration/settings.ts";
 import type { Target } from "../contracts.ts";
-import { knownOf } from "../configuration/well-known-models.ts";
+import { type Capabilities, knownOf } from "../configuration/well-known-models.ts";
 
-export function xAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyArray<string>): Settled {
+export function xAiSettings(settings: ModelSettings = {}, capabilities?: Capabilities): Settled {
   const { thinking, observe, maxOutputTokens, cache } = settings;
-  const { sent: sentEffort, adjusted: effortAdjusted } = reasoningEffortFor(settings, efforts);
+  const { sent: sentEffort, adjusted: effortAdjusted } = reasoningEffortFor(settings, capabilities);
   const cacheAdjusted: ReadonlyArray<Adjustment> =
     cache === undefined
       ? []
@@ -58,5 +58,5 @@ export function xAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyArra
   };
 }
 
-/** The same mapping, for a request's target: its settings, and the efforts known for its model. */
-export const xAiSettle = (target: Target): Settled => xAiSettings(target.settings, knownOf(target)?.efforts);
+/** The same mapping, for a request's target: its settings, and what is known of its model. */
+export const xAiSettle = (target: Target): Settled => xAiSettings(target.settings, knownOf(target));

@@ -18,11 +18,11 @@
 import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { type Adjustment, reasoningEffortFor, type Settled } from "../configuration/settings.ts";
 import type { Target } from "../contracts.ts";
-import { knownOf } from "../configuration/well-known-models.ts";
+import { type Capabilities, knownOf } from "../configuration/well-known-models.ts";
 
-export function openAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyArray<string>): Settled {
+export function openAiSettings(settings: ModelSettings = {}, capabilities?: Capabilities): Settled {
   const { thinking, observe, maxOutputTokens, cache } = settings;
-  const { sent, adjusted: effortAdjusted } = reasoningEffortFor(settings, efforts);
+  const { sent, adjusted: effortAdjusted } = reasoningEffortFor(settings, capabilities);
   const cacheAdjusted: ReadonlyArray<Adjustment> =
     cache === "off"
       ? [
@@ -51,5 +51,5 @@ export function openAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyA
   };
 }
 
-/** The same mapping, for a request's target: its settings, and the efforts known for its model. */
-export const openAiSettle = (target: Target): Settled => openAiSettings(target.settings, knownOf(target)?.efforts);
+/** The same mapping, for a request's target: its settings, and what is known of its model. */
+export const openAiSettle = (target: Target): Settled => openAiSettings(target.settings, knownOf(target));

@@ -20,12 +20,12 @@
 import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { type Adjustment, reasoningEffortFor, type Settled } from "../configuration/settings.ts";
 import type { Target } from "../contracts.ts";
-import { knownOf } from "../configuration/well-known-models.ts";
+import { type Capabilities, knownOf } from "../configuration/well-known-models.ts";
 
 const reason = "the Chat Completions adapter does not send this setting";
 
-export function openAiCompatSettings(settings: ModelSettings = {}, efforts?: ReadonlyArray<string>): Settled {
-  const { sent, adjusted: effortAdjusted } = reasoningEffortFor(settings, efforts);
+export function openAiCompatSettings(settings: ModelSettings = {}, capabilities?: Capabilities): Settled {
+  const { sent, adjusted: effortAdjusted } = reasoningEffortFor(settings, capabilities);
   const adjusted: ReadonlyArray<Adjustment> = [
     ...(settings.thinking === "between_tools" ? [{ adjusted: { _tag: "Thinking" as const, asked: settings.thinking }, reason: "Chat Completions has no setting for thinking only between tool calls" }] : []),
     ...effortAdjusted,
@@ -42,5 +42,5 @@ export function openAiCompatSettings(settings: ModelSettings = {}, efforts?: Rea
   };
 }
 
-/** The same mapping, for a request's target: its settings, and the efforts known for its model. */
-export const openAiCompatSettle = (target: Target): Settled => openAiCompatSettings(target.settings, knownOf(target)?.efforts);
+/** The same mapping, for a request's target: its settings, and what is known of its model. */
+export const openAiCompatSettle = (target: Target): Settled => openAiCompatSettings(target.settings, knownOf(target));

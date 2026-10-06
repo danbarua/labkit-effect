@@ -2,10 +2,11 @@
  * `/settings name=value …` changes the settings named; the rest stay as they were. `/settings`
  * alone shows the settings in force and offers each to change. The settings are:
  *
- * - the model's (`effort`, `budget`, `thinking`, `observe`, `cache`, `maxOutputTokens`), for this
- *   session. What is offered, and taken, is what the model takes beside the settings in force
- *   (`optionsOf`, `takenBy`), and `default`, which returns a setting to the provider's default. The
- *   change is reported to the session (`ModelChangeArrived`), which takes it between turns.
+ * - the model's (`effort`, `thinking`, `observe`, `cache`, `maxOutputTokens`), for this session.
+ *   What is offered, and taken, is what the model takes beside the settings in force (`optionsOf`,
+ *   `takenBy`), and `default`, which returns a setting to the provider's default. The output limit is
+ *   taken when typed, and not offered: it defaults to the model's own. The change is reported to the
+ *   session (`ModelChangeArrived`), which takes it between turns.
  * - the user's (`view.thinking`, `user-settings.ts`), which apply at once and are written into the
  *   user's configuration folder.
  *
@@ -30,6 +31,12 @@ interface Pickable {
   readonly values?: ReadonlyArray<string>;
   readonly min?: number;
 }
+
+/**
+ * Whether a setting the model is offered is listed in completion and the picker. The output limit is
+ * not: it defaults to the model's own, and a user need not choose it. Typed, it is taken.
+ */
+const listed = (option: SettingOption): boolean => option.name !== "maxOutputTokens";
 
 /** A setting the model is offered, as the picker offers it. */
 const pickableOf = (option: SettingOption): Pickable => {
@@ -72,7 +79,7 @@ export const settings: ReplCommand = {
   says: "Change the settings named; with none, show them and pick one to change",
   // A setting not yet named on the line, then one of its values.
   complete: (words, from) => {
-    const options = [...from.settings.map((each) => ({ name: each.name, values: each._tag === "OneOf" ? each.values : [] })), ...Object.entries(userSettings).map(([name, values]) => ({ name, values }))];
+    const options = [...from.settings.filter(listed).map((each) => ({ name: each.name, values: each._tag === "OneOf" ? each.values : [] })), ...Object.entries(userSettings).map(([name, values]) => ({ name, values }))];
     const last = words.at(-1) ?? "";
     const equals = last.indexOf("=");
     if (equals >= 0) {
@@ -85,7 +92,7 @@ export const settings: ReplCommand = {
   inSession: (session: Session, words, context) =>
     Effect.gen(function* () {
       const shown = `${yield* inForce(session)}\n${yield* userSettingsLine(context)}`;
-      const offered = (yield* optionsOf(yield* session.facts)).offered.map(pickableOf);
+      const offered = (yield* optionsOf(yield* session.facts)).offered.filter(listed).map(pickableOf);
       const change = words.length === 0 ? yield* picked(shown.split("\n")[0] ?? "", [...offered, ...(yield* userPickable(context))]) : undefined;
       if (words.length === 0 && change === undefined) return said(shown);
       const given = change === undefined ? words : [change];

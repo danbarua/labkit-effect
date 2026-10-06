@@ -58,11 +58,11 @@ const limitFor = (asked: TokenCount | undefined, capabilities: Capabilities | un
   return { sent: used, adjusted: [{ adjusted: { _tag: "MaxOutputTokens", asked, used }, reason: `this model's output limit is ${output} tokens` }] };
 };
 
-/** Returns the budget sent for `effort` to a model that takes budgets from `least`, at most `most`, and below `limit` (`max_tokens`). */
-const budgetFor = (effort: Exclude<Effort, "minimal">, least: number, most: number | undefined, limit: number | undefined): TokenCount => {
-  const largest = Math.min(most ?? Number.POSITIVE_INFINITY, limit === undefined ? Number.POSITIVE_INFINITY : limit - 1);
-  return TokenCount.make(Math.max(least, Math.min(least * budgets[effort], largest)));
-};
+/** The largest budget a model that takes budgets at most `most` is sent, below `limit` (`max_tokens`). */
+const largestBudget = (most: number | undefined, limit: number | undefined): number => Math.min(most ?? Number.POSITIVE_INFINITY, limit === undefined ? Number.POSITIVE_INFINITY : limit - 1);
+
+/** Returns the budget sent for `effort` to a model that takes budgets from `least` to `largest`. */
+const budgetFor = (effort: Exclude<Effort, "minimal">, least: number, largest: number): TokenCount => TokenCount.make(Math.max(least, Math.min(least * budgets[effort], largest)));
 
 /** Returns the thinking sent for `settings` to a model with `capabilities`, when any, and what was adjusted. `effort` is the effort it takes, and `limit` its `max_tokens`. */
 const thinkingFor = (
@@ -81,7 +81,11 @@ const thinkingFor = (
   const notOff: ReadonlyArray<Adjustment> = thinking === "disabled" ? [{ adjusted: { _tag: "Thinking", asked: "disabled" }, reason: "this model cannot turn its thinking off" }] : [];
   if (range !== undefined && effort !== undefined && effort !== "minimal") {
     const between: ReadonlyArray<Adjustment> = thinking === "between_tools" ? [{ adjusted: { _tag: "Thinking", asked: "between_tools" }, reason: "this model does not think only between tool calls" }] : [];
-    return { thinking: { type: "enabled", budget_tokens: budgetFor(effort, range.min, range.max, limit) }, adjusted: [...notOff, ...between] };
+    const largest = largestBudget(range.max, limit);
+    // No budget fits below an output limit at or under the least budget, so the model does not think.
+    if (largest < range.min)
+      return { thinking: undefined, adjusted: [...notOff, ...between, { adjusted: { _tag: "Effort", asked: effort }, reason: `this model's least thinking budget, ${range.min} tokens, is not below its output limit, ${limit} tokens` }] };
+    return { thinking: { type: "enabled", budget_tokens: budgetFor(effort, range.min, largest) }, adjusted: [...notOff, ...between] };
   }
   if (thinking === "between_tools") {
     if (capabilities !== undefined && capabilities.thinking?.includes("between_tools") !== true)
