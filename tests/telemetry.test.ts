@@ -134,7 +134,7 @@ test("with OTEL_EXPORTER_OTLP_ENDPOINT set, the spans go to it and to the file, 
   }
 });
 
-test("with OTEL_EXPORTER_OTLP_ENDPOINT set, log lines go to it as the service named by the caller or by OTEL_SERVICE_NAME, without the environment's secrets in their message, annotations or cause", async () => {
+test("with OTEL_EXPORTER_OTLP_ENDPOINT set, log lines go to it as one JSON object each, as the service named by the caller or by OTEL_SERVICE_NAME, without the environment's secrets in their message, annotations or cause", async () => {
   const secret = "otlp-secret-value-123456";
   process.env["TELEMETRY_TEST_API_KEY"] = secret;
   const received: Array<unknown> = [];
@@ -150,6 +150,7 @@ test("with OTEL_EXPORTER_OTLP_ENDPOINT set, log lines go to it as the service na
       Effect.gen(function* () {
         yield* Effect.logWarning(`the key is ${secret}`).pipe(Effect.annotateLogs({ token: secret }));
         yield* Effect.logError("the request failed", Cause.fail(new Error(`refused ${secret}`)));
+        yield* Effect.logInfo("tool.ran", { tool: "read_file", count: 2 });
       }).pipe(
         Effect.provide(OtlpFromEnv("labkit-telemetry-test")),
         Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnvRecord({ OTEL_EXPORTER_OTLP_ENDPOINT: `http://localhost:${server.port}`, ...env })),
@@ -162,6 +163,8 @@ test("with OTEL_EXPORTER_OTLP_ENDPOINT set, log lines go to it as the service na
     expect(sent).not.toContain(secret);
     expect(sent).toContain("the key is <redacted>");
     expect(sent).toContain("refused <redacted>");
+    const bodies = received.flatMap((body: any) => body.resourceLogs.flatMap((resource: any) => resource.scopeLogs.flatMap((scope: any) => scope.logRecords.map((record: any) => record.body.stringValue))));
+    expect(bodies.map((body: string) => JSON.parse(body))).toContainEqual({ message: "tool.ran", tool: "read_file", count: 2 });
     const services = received.flatMap((body: any) => body.resourceLogs.map((resource: any) => resource.resource.attributes.find((each: any) => each.key === "service.name")?.value.stringValue));
     expect(new Set(services)).toEqual(new Set(["labkit-telemetry-test", "named-by-env"]));
   } finally {

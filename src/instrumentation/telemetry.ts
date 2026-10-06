@@ -8,6 +8,8 @@
  *   `Otlp.layerFromConfig` also asks for `OTEL_TRACES_EXPORTER=otlp` and its kin, which this does not.
  *   - The service is named `OTEL_SERVICE_NAME` when it is set, else the name its caller gives
  *     (`labkit-cli`, `labkit-acp`, `labkit-tests`); `OTEL_RESOURCE_ATTRIBUTES` adds attributes.
+ *   - A log line's body is one JSON object: its text parts joined as `message`, and the fields of
+ *     the objects logged with it (`Effect.logInfo(logKeys.x, { … })`), so that Loki shows the fields.
  *   - A log line is sent without the environment's secrets (`agent-host/redaction.ts`) in its
  *     message, its annotations or its cause, as the log files are written.
  *   - `OtlpSpansAndMetrics` sends spans and metrics. `otlpLogger` is the logger that sends log lines:
@@ -65,6 +67,24 @@ const withRedactedAnnotations = (fiber: Fiber.Fiber<unknown, unknown>, redact: (
     },
   });
 
+/** JSON that holds a bigint as its digits, where `JSON.stringify` would throw. */
+const json = (value: unknown): string => JSON.stringify(value, (_, each) => (typeof each === "bigint" ? each.toString() : each));
+
+const isFields = (part: unknown): part is Readonly<Record<string, unknown>> => typeof part === "object" && part !== null && !Array.isArray(part);
+
+/**
+ * Returns a log line's message as one JSON object: its text parts joined by spaces as `message`, and
+ * the fields of its objects. Another kind of part (an array) is listed under `values`. When an
+ * object has a field named `message`, the objects' fields are under `fields` instead.
+ */
+const jsonBody = (message: unknown): string => {
+  const parts: ReadonlyArray<unknown> = Array.isArray(message) ? message : [message];
+  const text = parts.filter((part) => !isFields(part) && !Array.isArray(part)).map(String).join(" ");
+  const fields = Object.assign({}, ...parts.filter(isFields)) as Readonly<Record<string, unknown>>;
+  const values = parts.filter((part) => Array.isArray(part));
+  return json({ message: text, ...(Object.hasOwn(fields, "message") ? { fields } : fields), ...(values.length === 0 ? {} : { values }) });
+};
+
 /**
  * The logger that sends each log line as OTLP to `OTEL_EXPORTER_OTLP_ENDPOINT`, without the
  * environment's secrets in its message, its annotations or its cause; when the variable is not set,
@@ -79,7 +99,7 @@ export const otlpLogger = (service: string): Effect.Effect<Logger.Logger<unknown
     return Logger.make((options) =>
       inner.log({
         ...options,
-        message: redactedValue(options.message, redact),
+        message: jsonBody(redactedValue(options.message, redact)),
         cause: options.cause.reasons.length === 0 ? options.cause : Cause.fail(redact(Cause.pretty(options.cause))),
         fiber: withRedactedAnnotations(options.fiber, redact),
       }),
@@ -193,8 +213,6 @@ export const SpansTo = (ended: (line: SpanLine) => void): Layer.Layer<never> =>
     ),
   );
 
-/** JSON that holds a bigint as its digits, where `JSON.stringify` would throw. */
-const json = (value: unknown): string => JSON.stringify(value, (_, each) => (typeof each === "bigint" ? each.toString() : each));
 
 /** Appends `line` to the file at `path` as JSON on a line of its own, making its folder if missing. */
 const append = (path: string, line: unknown): void => {

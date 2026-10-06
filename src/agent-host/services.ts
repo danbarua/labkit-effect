@@ -12,6 +12,7 @@ import { immutableToolCatalogOf } from "../agent-session/configuration/session-s
 import { CountingTurnsInStore } from "../agent-session/turns.ts";
 import { costIn } from "../agent-session/accounting.ts";
 import { receivedJson } from "../agent-session/received.ts";
+import { CountedToolRunner } from "../instrumentation/tool-metrics.ts";
 import { Clients } from "./clients.ts";
 import { KnownWithLocalServer, SettlingWithLocalServer } from "./local-server.ts";
 
@@ -20,7 +21,7 @@ import { KnownWithLocalServer, SettlingWithLocalServer } from "./local-server.ts
  * model that the facts name, what is known of it and how its settings are applied, the whole
  * conversation as context with the notices from the context that the layer is built in (`Notices`:
  * none unless the host provides them), the provider clients, turn identities that continue from
- * those the store holds, and `runner` for its tools.
+ * those the store holds, and `runner` for its tools, each run counted and timed.
  */
 export const SessionServices = <E, R>(runner: Layer.Layer<ToolRunner, E, R>) =>
   Layer.mergeAll(
@@ -30,7 +31,8 @@ export const SessionServices = <E, R>(runner: Layer.Layer<ToolRunner, E, R>) =>
     AgentContextAssembler.pipe(Layer.provide(WholeConversation)),
     Clients,
     CountingTurnsInStore,
-    runner,
+    // Each tool run is counted and timed (`instrumentation/tool-metrics.ts`), which OTLP sends when it is set up.
+    CountedToolRunner(runner),
   );
 
 /**
