@@ -8,10 +8,12 @@ bun run zork
 ```
 
 The Game Engine uses `claude-sonnet-4-5`; the Adventurer uses `claude-haiku-4-5`.
-Override them with positional arguments:
+Override them with positional arguments: any Claude or Grok model that `bun cli models` lists. A
+Grok model reads its key from `LABKIT_XAI_API_KEY`, and the two may be of different providers:
 
 ```sh
 bun run zork claude-sonnet-4-5 claude-sonnet-4-5
+bun run zork grok-4.7 grok-build-0.1
 ```
 
 The runner owns a small world: six connected locations, a mailbox, a trapdoor,

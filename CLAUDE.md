@@ -11,6 +11,27 @@ what is known of each model; what a host offers to change (`options.ts`).
 
 What is built is described in `docs/<module>.md`; what is not built is in `TODO.md`.
 
+## User-facing text
+
+User-facing text is CLI output, errors and hints, `/help`, flag descriptions, ACP option names and
+values, and the reasons a setting is not sent. It uses the user's words, not the code's. The code's
+own terms ("facts", "session store", "asked", "taken", "said", "offered", "ImmutableSystemPrompt")
+do not appear in it.
+
+- An error is `ERROR: <what is wrong>.` and, when there is something to do, `HINT: <one action>.`
+- A list of choices shows at most three, then says where to see the rest. It is never a
+  comma-separated wall of names.
+- Outside the REPL, a hint names no slash command.
+
+| Not this | This |
+| --- | --- |
+| `No model is named localhost/.` followed by every known model | `Unknown model: localhost/.` / `HINT: Did you mean localhost/qwen3.5-9b-8bit? …` |
+| `XAI_API_KEY is not set, so xai models cannot be asked.` | `xai models are unavailable: XAI_API_KEY is not set.` |
+| `Not settings the session takes: Expected "minimal" \| … at ["effort"]` | `Invalid value for effort: loud.` / `HINT: Use one of: default, minimal, …` |
+| `openai/gpt-5 does not take thinking=disabled.` / `HINT: openai/gpt-5 takes no thinking setting.` | `openai/gpt-5 has no thinking setting.` |
+| `Asking openai/gpt-5.5 effort=low` / `this model takes effort: …` | `openai/gpt-5.5 · effort=low` / `Efforts: low, medium, high, xhigh` |
+| `No command /nope.` / `HINT: /help lists them.` | `Unknown command: /nope.` / `HINT: Type /help to list the commands.` |
+
 ## Commands
 
 - `bun run check`: typecheck, lint and tests. Run it before committing.
