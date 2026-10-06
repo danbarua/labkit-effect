@@ -222,6 +222,11 @@ model.
 - [ ] The system prompt belongs in context assembly, as configuration; it is to be designed and
       tried. A hard-coded one ("You are a helpful assistant") will do until the host's question
       of where a user's things live has an answer.
+- [ ] `/allow env:NAME` passes one environment variable that the command environment removes (a
+      credential such as `GITHUB_PAT`) through to the session's commands; its completion offers the
+      variables set in the shell, so the user checks the shell's set-up where it matters.
+      `/allow net:github.com` allows requests to a host, once network access is modelled; it is not
+      (Dan, 2026-10-06).
 - [ ] `/preview` (or `/system`): the CLI shows what the next model request would send, the system
       prompt included. `/tools` shows the tools; nothing in the CLI shows the system prompt (Dan,
       2026-10-06).
@@ -240,7 +245,8 @@ compaction as a summary, for OpenAI and xAI (`openai-compaction.ts`, `xai-compac
 `provider-compaction.ts`), sent the session's system prompt and tools; a digest of a span made
 with no model, its attachments as pointers and one line for each tool call (`digest.ts`).
 
-- [ ] When to compact, as a setting (Dan, 2026-10-06): a global `autocompact` threshold, as a share
+- [ ] When to compact, as a setting (Dan, 2026-10-06), the first use of configuration scoped to a
+      model or a provider (`docs/agent-config-direction.md`): a global `autocompact` threshold, as a share
       of the context window or as a number of tokens (`"60%"`, `"192k"`), that a configuration can
       override for one model or for one provider, with models.dev's data as the defaults. A model
       that loses accuracy late in a 1M window can compact at 60%; a provider that charges more above

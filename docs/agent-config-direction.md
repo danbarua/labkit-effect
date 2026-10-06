@@ -125,6 +125,21 @@ Thinking is toggled with a key, as Claude Code does with Option+T and pi with Sh
 - `bun cli models` lists one model per line, as `--model` takes it (`provider/model`), and only the
   providers that can be used now. A provider whose key is not set is named in a `HINT:` line.
 
+## Configuration has a state and a scope
+
+Direction of 2026-10-06, not built. The first use is when to compact (`TODO.md`, Compaction).
+
+- A setting has a state:
+  - **draft**: the user is changing it, and it is not applied yet;
+  - **persisted**: it is written to disk;
+  - **running**: it applies to the current turn.
+- A layer of configuration has a scope: the user, a project, a model, or a provider. A layer scoped
+  to a model or a provider applies only to sessions that ask that model or provider, over the
+  layers before it. Example: a global `autocompact: "60%"`, and `"75%"` or `"192k"` for Claude
+  Haiku 4.5.
+- Dan: "do not lock the runtime into only doing things one way, all the time" and "make it intuitive
+  and easy to apply configuration where customisation and tweaking is needed".
+
 ## Order of work
 
 1. The configuration folder, and its example files. Built.
