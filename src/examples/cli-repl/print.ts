@@ -11,6 +11,7 @@ import { contextGauge } from "../../agent-session/accounting.ts";
 import type { Session } from "../../agent-session/loop.ts";
 import { type Capabilities, knownCapabilities } from "../../agent-session/configuration/well-known-models.ts";
 import { invalid } from "./invalid.ts";
+import { failureOf } from "./failure.ts";
 import { answerTo, ask, type Config, endingOf, lastTurn } from "./session.ts";
 
 export type OutputFormat = "text" | "json" | "stream-json";
@@ -73,7 +74,11 @@ export const printOnce = (session: Session, config: Config, prompt: string, form
     yield* ask(session, prompt);
     if (printer !== undefined) yield* printer.finish;
     const known = yield* knownCapabilities(config.target.provider, config.target.model);
-    const result = resultOf(yield* session.facts, config, started, known);
-    yield* Console.log(printedAs(format, result));
+    const all = yield* session.facts;
+    const result = resultOf(all, config, started, known);
+    // A failed turn is an error on stderr; the JSON formats also carry the failure as the session recorded it.
+    const failure = failureOf(all, lastTurn(all));
+    if (format !== "text" || failure === undefined) yield* Console.log(printedAs(format, result));
+    if (failure !== undefined) return yield* invalid(failure.message, ...(failure.hint === undefined ? [] : [failure.hint]));
     if (result.is_error) return yield* invalid(`The turn ended ${result.subtype}.`);
   });

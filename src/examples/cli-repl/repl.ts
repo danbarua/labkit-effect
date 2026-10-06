@@ -40,6 +40,7 @@ import { invalid } from "./invalid.ts";
 import { type CannotAsk, saidOf } from "./models.ts";
 import { bracketedPaste, type KeyBinding, Multiline } from "./multiline.ts";
 import type { Host } from "../../agent-host/with-session.ts";
+import { errorLines, failureOf } from "./failure.ts";
 import { answerTo, ask, type Config, endingOf, lastTurn, logFileOf } from "./session.ts";
 import type { LeftRunning } from "../../agent-machine/left-running.ts";
 import { type TurnKeys, turnKeys } from "./turn-keys.ts";
@@ -74,7 +75,8 @@ export const replyOf = (facts: ReadonlyArray<Fact>, printed: (turn: TurnId) => b
   const turn = lastTurn(facts);
   const ending = endingOf(facts, turn);
   const answer = answerTo(facts, turn);
-  if (ending?._tag === "Failed") return `(turn failed: ${ending.failure})`;
+  const failure = failureOf(facts, turn);
+  if (failure !== undefined) return errorLines(failure);
   if (answer === "") return ending?._tag === "Interrupted" ? "(interrupted)" : `(no answer: the turn ended ${ending?._tag ?? "with nothing recorded"})`;
   const cut = cutNote(ending);
   if (turn !== undefined && printed(turn)) return cut;
