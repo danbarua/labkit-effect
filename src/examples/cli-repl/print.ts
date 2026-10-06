@@ -1,8 +1,8 @@
 /**
- * Print mode (`-p`): one input, the answer printed, and the process ends. As text, the answer alone;
- * as `json`, the answer with the session's figures, in the shape of Claude Code's result; as
- * `stream-json`, every fact as it is recorded and then the result. The process exits 0 only when
- * the turn ended `Completed`; a turn that ended any other way, or did not end, fails the process.
+ * Print mode (`-p`): one prompt, the answer printed, then exit. With text output, only the answer is
+ * printed; with `json`, the answer and the session's usage and cost, in the shape of Claude Code's
+ * result; with `stream-json`, each fact as it is recorded, then the result. The process exits with 0
+ * only when the turn completed; any other ending, or no ending, exits with failure.
  */
 
 import { Console, Effect, Fiber, PubSub, Ref, Schema } from "effect";
@@ -17,7 +17,7 @@ export type OutputFormat = "text" | "json" | "stream-json";
 
 const encodeFact = Schema.encodeSync(Fact);
 
-/** The result of the session's last turn. */
+/** Returns the result of the session's last turn. */
 const resultOf = (facts: ReadonlyArray<Fact>, config: Config, started: number, known: Capabilities | undefined) => {
   const turn = lastTurn(facts);
   const ended = endingOf(facts, turn);
@@ -36,8 +36,8 @@ const resultOf = (facts: ReadonlyArray<Fact>, config: Config, started: number, k
 };
 
 /**
- * Prints the session's facts as they are recorded, in order, each once: a new fact wakes the
- * printer, which prints the facts from where it had got to. `finish` stops it and prints the rest.
+ * Prints the session's facts in order as they are recorded, each once: a new fact wakes the printer,
+ * which prints from where it left off. `finish` stops it and prints any remaining facts.
  */
 const printingFacts = (session: Session) =>
   Effect.gen(function* () {
@@ -52,7 +52,7 @@ const printingFacts = (session: Session) =>
     return { finish: Fiber.interrupt(follower).pipe(Effect.andThen(printRest)) };
   });
 
-/** The result as `format` prints it: JSON, indented; one line of JSON; or the answer's text. */
+/** Formats the result for `format`: indented JSON, one line of JSON, or the answer's text. */
 const printedAs = (format: OutputFormat, result: { readonly result: string }): string => {
   switch (format) {
     case "json":

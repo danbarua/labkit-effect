@@ -1,50 +1,46 @@
 /**
- * A command-line agent, as a walking skeleton for configuration, context assembly and the loop:
- * `bun cli` is a REPL; `bun cli -p "Hello"` asks once, prints the answer and exits. Its flags follow
- * Claude Code's CLI (https://code.claude.com/docs/en/cli-reference); the ones not built yet are
- * kept here, commented out, and the ones only Claude Code has are left out.
+ * A command-line agent, built as a walking skeleton for configuration, context assembly and the
+ * loop. `bun cli` starts a REPL; `bun cli -p "Hello"` answers one prompt and exits. The flags follow
+ * Claude Code's CLI (https://code.claude.com/docs/en/cli-reference): flags not built yet are listed
+ * here, commented out, and flags only Claude Code has are left out.
  *
- * The model is the one `--model` names, else the configuration's `model:`: a well-known model, found
- * with its provider, or `provider/model` (`localhost/<model>` is a local Chat Completions server at
- * http://localhost:8000/v1). `bun cli models` prints the models that can be asked to stdout, one per
- * line as `--model` takes them, and prints to stderr a `HINT:` line for each provider whose key is not
- * set (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`) and for a local server that does not
- * answer. A model cannot be asked when none is named, when its provider's key is not set, or when its
- * server does not answer:
+ * The model is the one `--model` names, else the configuration's `model:`: a well-known model, or
+ * `provider/model` (`localhost/<model>` is a local Chat Completions server at
+ * http://localhost:8000/v1). `bun cli models` prints the usable models to stdout, one per line, and
+ * to stderr a `HINT:` line for each provider without an API key (`ANTHROPIC_API_KEY`,
+ * `OPENAI_API_KEY`, `XAI_API_KEY`) and for a local server that does not respond. When the model
+ * cannot be used (none is named, its provider has no key, or its server does not respond):
  *
- * - With `-p`, without a terminal, or when a session is continued or resumed, the CLI refuses at once.
- * - At a terminal, a new session's REPL opens without a model (`withoutModel` in `repl.ts`). The
- *   session opens once `/model` or `/switch` names a model that can be asked.
+ * - with `-p`, without a terminal, or when continuing or resuming a session, the CLI exits with an
+ *   error;
+ * - at a terminal, a new session's REPL opens without a model (`withoutModel` in `repl.ts`), and the
+ *   session opens once `/model` or `/switch` picks a usable model.
  *
- * A mistake is printed as an `ERROR:` line and a `HINT:` line for each thing the user can do about
- * it (`invalid.ts`). A hint printed outside the REPL names no slash command.
+ * Errors are printed as an `ERROR:` line and a `HINT:` line for each thing the user can do
+ * (`invalid.ts`). A hint printed outside the REPL names no slash command.
  *
- * A session runs through the loop as any other: its opening holds the model, its settings and the
- * system prompt; each input is the user's, through the CLI; the conversation is every turn of it.
- * With `--output-format json` the answer comes with the session's figures; with `stream-json` each
- * fact is printed as it is recorded, then the result.
+ * With `--output-format json`, the answer is printed with the session's usage and cost; with
+ * `stream-json`, each fact is printed as it is recorded, then the result.
  *
- * Its policies, turn-end hooks and MCP servers are its configuration (`configuration.ts`): its own
- * defaults, the files of the user's configuration folder (`~/.config/<brand>/`, or `--config-dir`),
- * the project's and the local ones (in `.<brand>/` in the folder it runs in) when `--setting-sources`
- * names them, `--settings`,
- * `--mcp-config`, then the flags
- * (`--permission-mode`, `--max-turns`, `--max-budget-usd`), the last write winning. What it resolved
- * to, and which layer said each value, is written to the session's folder as
- * `effective-settings.json`.
+ * The configuration (`configuration.ts`) is made of layers, the last one winning: the CLI's defaults;
+ * the files in the user's configuration folder (`~/.config/<brand>/`, or `--config-dir`); the
+ * project's and local files (in `.<brand>/` in the working folder) when `--setting-sources` names
+ * them; `--settings`; `--mcp-config`; then the flags (`--permission-mode`, `--max-turns`,
+ * `--max-budget-usd`). The resolved configuration, and the layer each value came from, is written to
+ * the session's folder as `effective-settings.json`.
  *
- * Each session's facts and log are kept in `logs/cli/<session>/` (`agent-host/directory.ts`); `--continue` goes on from the
- * one written to last, `--resume <session>` from the one named (with no id, one picked from a list), so `bun run cli:watch --continue` restarts on a change to the code and
- * keeps the conversation.
+ * Each session's facts and log are kept in `logs/cli/<session>/` (`agent-host/directory.ts`).
+ * `--continue` continues the most recently written session, and `--resume <session>` the one named
+ * (with no ID, the user picks one from a list). `bun run cli:watch --continue` therefore restarts
+ * on each code change and keeps the conversation.
  *
- * It runs as the brand `main` is given, else the one the environment names (`LABKIT_BRAND`), else
- * labkit (`agent-host/brand.ts`): the brand names its command and its folders. The options it shares
- * with the ACP launcher (`agent-host/launch.ts`) are read from their variables when not given:
- * `--max-turns` from `LABKIT_MAX_TURNS`, and so on.
+ * The brand is the one passed to `main`, else `LABKIT_BRAND`, else labkit (`agent-host/brand.ts`); it
+ * names the command and its folders. Options shared with the ACP launcher (`agent-host/launch.ts`)
+ * fall back to environment variables: `--max-turns` to `LABKIT_MAX_TURNS`, and so on.
  *
- * Calling it from an agent's shell tool, use `-p` with the prompt as an argument: without `-p` the
- * REPL waits for input, and without a prompt `-p` reads it from stdin to its end. `bun --silent
- * cli` keeps bun's echo of the script off stdout.
+ * From an agent's shell tool, use `-p` with the prompt as an argument: without `-p` the REPL waits
+ * for input, and `-p` without a prompt reads stdin to its end. `bun --silent cli` keeps bun's echo of
+ * the script off stdout.
  */
 
 import { cliConfiguration } from "./configuration.ts";
@@ -89,7 +85,7 @@ const flags = {
   resume: text("resume", "Resume a session by ID, or pick one from a list", "r"),
   noSessionPersistence: toggle("no-session-persistence", "Do not save the session to disk"),
   sessionId: text("session-id", "ID for the new session"),
-  // The options the ACP launcher takes too, each with its variable as its twin.
+  // Options shared with the ACP launcher, each with an environment variable as its fallback.
   ...launchFlags,
   // Not built yet:
   // name: text("name", "Session display name", "n"),
@@ -112,7 +108,7 @@ const flags = {
 
 type Options = Command.Command.Config.Infer<typeof flags>;
 
-/** The system prompt the flags give: the prompt or its file, then the appended text or its file. */
+/** Returns the system prompt from the flags: the prompt or its file, then the appended text or its file. */
 const systemOf = (options: Options) =>
   Effect.gen(function* () {
     const read = (path: string | undefined) => (path === undefined ? Effect.undefined : Effect.promise(() => Bun.file(path).text()));
@@ -122,13 +118,13 @@ const systemOf = (options: Options) =>
     return parts.length === 0 ? undefined : parts.join("\n\n");
   });
 
-/** When it was, as a short local date and time. */
+/** Formats `at` as a short local date and time. */
 const shortly = (at: Date | undefined): string => (at === undefined ? "?" : at.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }));
 
 /**
- * The session `--resume` names, or with none, the one picked from the store's, the one written to
- * last first, each with its turns and the model it asks. A session whose file does not read is
- * listed as such.
+ * Returns the session `--resume` names; with no name, the one the user picks from a list of the saved
+ * sessions, newest first, each with its turn count and model. A session whose file cannot be read is
+ * listed as unreadable.
  */
 const resumed = (named: string, interactive: boolean) =>
   Effect.gen(function* () {
@@ -147,18 +143,14 @@ const resumed = (named: string, interactive: boolean) =>
     return yield* readSession(storeFolder, yield* Prompt.Select({ message: "Resume which session?", choices }));
   });
 
-/**
- * A session's configuration before the model it asks is found in the catalog: the model's name
- * (`named`), which is undefined when nothing names one.
- */
+/** A session's configuration before its model is looked up: the model's name (`named`), undefined when none is given. */
 type Unresolved = Omit<Config, "target"> & { readonly named: string | undefined };
 
 /**
- * The session's configuration, as the flags give it, with the name of the model to ask. A new
- * session asks the model that `--model` names, else the configuration's (`model:`). With
- * `--continue`, the session written to last, or with `--resume`, the one it names or the one picked,
- * asking the model `--model` names or the one it asked; the settings are the ones the flags name,
- * which change those it had.
+ * Returns the session's configuration from the flags, with the name of its model. A new session uses
+ * `--model`, else the configuration's `model:`. `--continue` continues the most recently written
+ * session and `--resume` the named or picked one, with `--model` or the session's own model; the
+ * settings the flags name change the session's settings.
  */
 const configOf = (options: Options, interactive: boolean) =>
   Effect.gen(function* () {
@@ -197,11 +189,10 @@ const configOf = (options: Options, interactive: boolean) =>
   );
 
 /**
- * Returns `config` when the model it asks takes each setting that the command line names
- * (`takenBy`): a new session's model as it opens, or a continued session's model with the settings it
- * has. What is known of models is what a session knows, with the configuration's overrides. A
- * setting the model does not take fails the run before the session opens, with or without `-p`:
- * the settings a run starts with are valid, or it does not start.
+ * Returns `config` when its model supports each setting given on the command line (`takenBy`),
+ * checked against what a session knows of models, with the configuration's overrides. A setting the
+ * model does not support fails the run before the session opens, with or without `-p`: a run starts
+ * with valid settings or not at all.
  */
 const checked = (config: Config) =>
   Effect.gen(function* () {
@@ -210,7 +201,7 @@ const checked = (config: Config) =>
     return config;
   });
 
-/** The CLI, called by `brand`'s name. */
+/** The CLI, as a command named after `brand`. */
 export const cliOf = (brand: Brand) =>
   Command.make(
     brand.name,
@@ -224,7 +215,7 @@ export const cliOf = (brand: Brand) =>
         view: yield* viewOf(unresolved.configuration.cli.view.thinking),
         commandLine: unresolved.settings,
       };
-      // At a terminal, a new session whose model cannot be asked opens the REPL without one, to pick one with /model.
+      // At a terminal, a new session whose model cannot be used opens the REPL without a model.
       if (interactive && !options.print && unresolved.continues === undefined) {
         const found = yield* Effect.result(askedOf(named, "/model"));
         const target = Result.isSuccess(found)
@@ -232,7 +223,7 @@ export const cliOf = (brand: Brand) =>
           : yield* withoutModel(found.failure, options.prompt, context, unresolved.configuration.layers).pipe(Effect.provide(knowledgeWith(unresolved.configuration.models)));
         if (target === undefined) return;
         const config: Config = yield* checked({ ...unresolved, target });
-        // The prompt the command line gave was refused, and not kept, when the REPL opened without a model.
+        // A prompt given on the command line was not sent when the REPL opened without a model, so it is dropped.
         const first = Result.isSuccess(found) ? options.prompt : undefined;
         return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), terminal(context.view), (session, mcp) => repl(session, config, first, interactive, context, mcp));
       }
@@ -242,7 +233,7 @@ export const cliOf = (brand: Brand) =>
       // Piped input is read only when no prompt was given: a shell that leaves stdin open would
       // otherwise keep a prompted run waiting for an end of input that never comes.
       const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));
-      // Said before the session opens, so a run with nothing to ask leaves no session behind.
+      // Checked before the session opens, so a run with no prompt saves no session.
       if (prompt === "") return yield* invalid("No prompt given.", "Pass the prompt as an argument, or pipe it to stdin.");
       yield* withSession(config, LogsToStderr, Headless, (session) => printOnce(session, config, prompt, options.outputFormat ?? "text", options.verbose));
     }),
@@ -255,7 +246,7 @@ export const cliOf = (brand: Brand) =>
       { command: `${brand.name} models`, description: "List the models you can use, one per line" },
     ]),
     Command.withSubcommands([
-      // The models on stdout, so that they can be piped; what would make more available on stderr.
+      // Models go to stdout so they can be piped; hints go to stderr.
       Command.make("models", {}, () =>
         Effect.gen(function* () {
           yield* Effect.forEach(yield* askable, ({ provider, model }) => Console.log(`${provider}/${model}`), { discard: true });
@@ -266,8 +257,8 @@ export const cliOf = (brand: Brand) =>
   );
 
 /**
- * `args` with an empty value after `--resume` (`-r`) where none was given, so that the flag alone
- * asks for a session to be picked: a flag's value cannot be left out otherwise.
+ * Returns `args` with an empty value added after a bare `--resume` (`-r`), so that the flag alone
+ * offers a session picker: effect/cli does not allow a flag's value to be omitted.
  */
 export const withResumeValue = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
   args.flatMap((arg, at) => {
@@ -276,9 +267,8 @@ export const withResumeValue = (args: ReadonlyArray<string>): ReadonlyArray<stri
   });
 
 /**
- * Runs the CLI with `args`, as `brand` (the one the environment names, else the default, when not
- * given); the model catalog is the well-known models whose provider has a key set, and the local
- * server's.
+ * Runs the CLI with `args` as `brand` (by default, the brand the environment names, else labkit). The
+ * usable models are the well-known models whose provider has an API key, and the local server's.
  */
 export const run = (args: ReadonlyArray<string>, brand: Brand = brandFrom(process.env)) =>
   Command.runWith(cliOf(brand), { version: brand.version })(withResumeValue(args)).pipe(
@@ -287,7 +277,7 @@ export const run = (args: ReadonlyArray<string>, brand: Brand = brandFrom(proces
     Effect.provideService(ConfigProvider.ConfigProvider, launchVariables(brand)),
   );
 
-/** Runs the CLI with this process's arguments, as `brand`: a package's bin gives its own. */
+/** Runs the CLI with this process's arguments, as `brand`; a package's bin passes its own brand. */
 export const main = (brand: Brand = brandFrom(process.env)) => run(process.argv.slice(2), brand).pipe(Effect.provide(BunServices.layer), BunRuntime.runMain);
 
 if (import.meta.main) main();

@@ -1,34 +1,34 @@
 /**
- * The model the CLI is told to ask (`--model`, `/model`), found in the host's catalog
- * (`agent-host/catalog.ts`), and what the catalog cannot find said in the CLI's words.
+ * Looks up the model the user names (`--model`, `/model`) in the host's catalog
+ * (`agent-host/catalog.ts`), and turns a failed lookup into a CLI error.
  */
 
 import { Data, Effect } from "effect";
 import { type CatalogSource, known, keyVariables, targetOf as catalogTargetOf } from "../../agent-host/catalog.ts";
 import { invalid } from "./invalid.ts";
 
-/** Where the user names a model: on the command line (`--model`), or in the REPL (`/model`). */
+/** Where the user named a model: on the command line (`--model`) or in the REPL (`/model`). */
 export type NamedBy = "--model" | "/model";
 
-/** Why the model named cannot be asked, and what the user can do about it. */
+/** Why the named model cannot be used, and what the user can do about it. */
 export class CannotAsk extends Data.TaggedError("CannotAsk")<{
   readonly message: string;
   readonly hint: string;
 }> {}
 
-/** The mistake `problem` is, as the CLI prints it: an `ERROR:` line and a `HINT:` line. */
+/** Returns `problem` as a CLI error: an `ERROR:` line and a `HINT:` line. */
 export const saidOf = (problem: CannotAsk) => invalid(problem.message, problem.hint);
 
-/** Names in a sentence: `a`, `a or b`, `a, b or c`. */
+/** Joins names for a sentence: `a`, `a or b`, `a, b or c`. */
 const either = (names: ReadonlyArray<string>): string => (names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`);
 
-/** How to name another model, from where the user is. */
+/** How to choose another model, for where the user named this one. */
 const another = (by: NamedBy): string => (by === "--model" ? "choose another model with --model" : "pick another model with /model");
 
 /**
- * Returns the provider and model that `model` names (`catalogTargetOf`), or fails with why it cannot
- * be asked, with a hint that says what to do from where the user named it (`by`): a hint for the
- * command line names no slash command.
+ * Returns the provider and model `model` names (`catalogTargetOf`), or fails with why it cannot be
+ * used and a hint suited to where it was named (`by`); a hint for the command line names no slash
+ * command.
  */
 export const askedOf = (model: string | undefined, by: NamedBy) =>
   model === undefined
@@ -43,7 +43,7 @@ export const askedOf = (model: string | undefined, by: NamedBy) =>
             Effect.fail(
               new CannotAsk({
                 message: `Unknown model: ${name}.`,
-                // At most three names: the rest are listed where the hint points.
+                // At most three names; the hint says where to see the rest.
                 hint: `${close.length === 0 ? "" : `Did you mean ${either(close.slice(0, 3))}? `}${by === "--model" ? "bun cli models lists the models you can use." : "Pick one with /model."}`,
               }),
             ),
@@ -59,13 +59,13 @@ export const askedOf = (model: string | undefined, by: NamedBy) =>
         }),
       );
 
-/** Returns the provider and model that `model` names, or the mistake as the CLI prints it (`saidOf`). */
+/** Returns the provider and model `model` names, or fails with the CLI error (`saidOf`). */
 export const targetOf = (model: string | undefined, by: NamedBy) => askedOf(model, by).pipe(Effect.mapError(saidOf));
 
 /**
- * What would make more models available, given the catalog's `sources`: one line for each well-known
- * provider whose key is not set, naming its variable, and one for each server that is not answering or
- * lists no models.
+ * Returns hints for making more models available, given the catalog's `sources`: one per well-known
+ * provider without an API key, naming its variable, and one per server that does not respond or
+ * serves no models.
  */
 export const unavailable = (sources: ReadonlyArray<CatalogSource>): ReadonlyArray<string> => [
   ...Object.keys(known).flatMap((provider) => (sources.some((source) => source.provider === provider) ? [] : [`Set ${keyVariables[provider] ?? `${provider}'s key`} to use ${provider} models.`])),

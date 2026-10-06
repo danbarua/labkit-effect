@@ -1,21 +1,21 @@
 /**
- * The REPL's input prompt: text of more than one line. Enter submits. A new line is Alt+Enter
- * (Option+Enter), or Ctrl+J; pasted text keeps its line breaks, and is not submitted by them.
+ * The REPL's input prompt, which takes text of more than one line. Enter submits. Alt+Enter
+ * (Option+Enter) or Ctrl+J inserts a new line; pasted text keeps its line breaks without submitting.
  *
- * - A paste is told from typing by bracketed paste mode, which `bracketedPaste` turns on for as long
- *   as its scope lasts: the terminal then marks where a paste starts and ends.
- * - Shift+Enter is a new line only where the terminal is set to send a line feed (`\n`) or
- *   Escape then Enter for it (iTerm2, VS Code, Ghostty and others can be). By default a terminal sends
- *   the same byte for Enter and Shift+Enter, and Effect's `Terminal` does not name the key that the
- *   kitty keyboard protocol sends for it.
- * - Editing is at the end of the text: typing adds, Backspace removes.
- * - Tab completes: the prompt is given a function from the text typed to the texts it could become.
- *   Tab makes the text what they all begin with; what each would add to the last word is shown
- *   after the text, dimmed, as far as the row has room.
- * - A key binding (Option+T) does what it is bound to, except during a paste, and its note is shown
- *   dimmed after the text, in place of the completions, until the next key.
- * - The frame is redrawn after each key: the rows it took are erased, a line wider than the terminal
- *   counted as the rows it wraps to. A paste is drawn once, when it ends.
+ * - Pastes are told apart from typing by bracketed paste mode, which `bracketedPaste` turns on for
+ *   its scope: the terminal then marks where a paste starts and ends.
+ * - Shift+Enter inserts a new line only in a terminal configured to send a line feed (`\n`) or
+ *   Escape then Enter for it (iTerm2, VS Code, Ghostty and others can be). By default terminals send
+ *   the same byte for Enter and Shift+Enter, and Effect's `Terminal` does not recognise the kitty
+ *   keyboard protocol's code for it.
+ * - Editing happens at the end of the text: typing appends, Backspace deletes.
+ * - Tab completes, using a function from the typed text to its possible completions: it extends the
+ *   text to their longest shared prefix. The rest of each completion's last word is shown dimmed
+ *   after the text, as far as the row has room.
+ * - A key binding (Option+T) runs its action, except during a paste, and its note is shown dimmed
+ *   after the text, in place of the completions, until the next key.
+ * - The prompt is redrawn after each key: its previous rows are erased, counting a line wider than
+ *   the terminal as the rows it wraps onto. A paste is drawn once, when it ends.
  */
 
 import { Effect, Option, Terminal } from "effect";
@@ -23,15 +23,15 @@ import { Prompt } from "effect/cli";
 
 export interface Typed {
   readonly text: string;
-  /** Between the terminal's marks of a paste's start and end. */
+  /** Whether a paste is in progress: between the terminal's paste-start and paste-end marks. */
   readonly pasting: boolean;
-  /** The text of the frame on the screen: `text`, except during a paste, which is drawn when it ends. */
+  /** The text currently drawn: `text`, except during a paste, which is drawn when it ends. */
   readonly drawn: string;
-  /** What a key binding did, shown after the text, dimmed, in place of the completions, until the next key. */
+  /** A key binding's note, shown dimmed after the text in place of the completions until the next key. */
   readonly note?: string;
 }
 
-/** A key that does something other than typing (Option+T), except during a paste: `run` does it, and returns a note of what it did. */
+/** A key that runs an action instead of typing (Option+T), except during a paste: `run` performs it and returns a note. */
 export interface KeyBinding {
   readonly matches: (input: Terminal.UserInput) => boolean;
   readonly run: Effect.Effect<string>;
@@ -46,8 +46,8 @@ const reset = "\x1b[0m";
 const bold = "\x1b[1m";
 
 /**
- * The frame for `text` in the colours and symbols of Effect's prompts (`Prompt.Theme`): while it is
- * typed, or once it is submitted. It takes the same columns as `frame`, whose rows are counted.
+ * Renders the prompt for `text` in the colours and symbols of Effect's prompts (`Prompt.Theme`),
+ * while typing or once submitted. It takes the same columns as `frame`, which is used to count rows.
  */
 const painted = (text: string, submitted: boolean) =>
   Effect.map(Prompt.Theme, (theme) => {
@@ -58,29 +58,29 @@ const painted = (text: string, submitted: boolean) =>
   });
 
 /**
- * How many rows of a terminal `columns` wide the frame for `text` takes: a line wider than the
- * terminal wraps. A terminal that says it has no columns (a pseudo-terminal with no size) wraps nothing.
+ * Returns the rows the prompt for `text` takes in a terminal `columns` wide, counting wrapped lines. A
+ * terminal reporting no columns (a pseudo-terminal with no size) is treated as never wrapping.
  */
 export const rowsOf = (text: string, columns: number): number =>
   frame(text)
     .split("\n")
     .reduce((rows, line) => rows + (columns > 0 ? Math.max(1, Math.ceil(Bun.stringWidth(line) / columns)) : 1), 0);
 
-/** Erases the frame drawn for `text`, leaving the cursor at the start of its first row. */
+/** Erases the prompt drawn for `text`, leaving the cursor at the start of its first row. */
 const erased = (text: string, columns: number): string => `\r\x1b[2K${"\x1b[1A\x1b[2K".repeat(rowsOf(text, columns) - 1)}`;
 
-/** Whether `text` starts with a control character: a key that types nothing. */
+/** Whether `text` starts with a control character, which types nothing. */
 const isControl = (text: string): boolean => {
   const code = text.charCodeAt(0);
   return code < 0x20 || code === 0x7f;
 };
 
-/** The texts that `text` could become. */
+/** A function from the typed text to its possible completions. */
 export type Complete = (text: string) => ReadonlyArray<string>;
 
 const nothing: Complete = () => [];
 
-/** What every one of `texts` begins with. */
+/** Returns the longest prefix all of `texts` share. */
 const sharedStart = (texts: ReadonlyArray<string>): string =>
   texts.reduce((shared, text) => {
     // By UTF-16 code unit, as the text is indexed.
@@ -89,8 +89,8 @@ const sharedStart = (texts: ReadonlyArray<string>): string =>
   });
 
 /**
- * What is shown after `text` of the texts it could become: each one's last word, in a row with
- * `room` columns left; nothing when there are none, or no room.
+ * Returns the completion hint shown after `text`: each completion's last word, cut to the `room`
+ * columns left in the row; empty when there are no completions or no room.
  */
 export function hinted(text: string, complete: Complete, room: number): string {
   const from = text.lastIndexOf(" ") + 1;
@@ -101,7 +101,7 @@ export function hinted(text: string, complete: Complete, room: number): string {
   return room < 8 ? "" : `${all.slice(0, room - 1)}…`;
 }
 
-/** What a key, or a piece of a paste, does to what is typed so far. */
+/** Returns the effect of a key, or a piece of a paste, on the text typed so far. */
 export function keyed(state: Typed, input: Terminal.UserInput, complete: Complete = nothing): Prompt.Action<Typed, string> {
   const next = (changed: Partial<Typed>): Prompt.Action<Typed, string> => {
     // A note is shown until the next key.
@@ -126,14 +126,14 @@ export function keyed(state: Typed, input: Terminal.UserInput, complete: Complet
   return { _tag: "Beep" };
 }
 
-/** `note` after two spaces, cut to `room` columns; nothing when there is no room. */
+/** Returns `note` after two spaces, cut to `room` columns; empty when there is no room. */
 const noted = (note: string, room: number): string => {
   const all = `  ${note}`;
   if (Bun.stringWidth(all) <= room) return all;
   return room < 8 ? "" : `${all.slice(0, room - 1)}…`;
 };
 
-/** The frame for `text`, and after it the note, or else the completions, dimmed; the cursor is left at the end of the text. */
+/** Renders the prompt for `text`, followed by the note or else the completions, dimmed, with the cursor left at the end of the text. */
 const drawn = (text: string, complete: Complete, note: string | undefined) =>
   Effect.gen(function* () {
     const columns = yield* (yield* Terminal.Terminal).columns;
@@ -144,7 +144,7 @@ const drawn = (text: string, complete: Complete, note: string | undefined) =>
     return hint === "" ? typed : `${typed}\x1b7\x1b[2m${hint}${reset}\x1b8`;
   });
 
-/** What is drawn for `action`. During a paste nothing is drawn: the frame from before it stays, and the whole paste is drawn when it ends. */
+/** Returns what to draw for `action`. During a paste nothing is drawn; the whole paste is drawn when it ends. */
 export const rendered = (state: Typed, action: Prompt.Action<Typed, string>, complete: Complete) => {
   switch (action._tag) {
     case "Submit":

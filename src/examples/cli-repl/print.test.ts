@@ -1,4 +1,4 @@
-/** Print mode (`-p`): whether the process succeeds is decided by how the turn ended. */
+/** Print mode (`-p`): the exit status follows how the turn ended. */
 
 import { expect } from "bun:test";
 import { Effect, Layer } from "effect";
@@ -21,7 +21,7 @@ const target = { provider: ProviderName.make("openai"), model: ModelName.make("g
 const answer = { _tag: "Text" as const, text: ModelText.make("Done.") };
 const thinking = { _tag: "Thinking" as const, text: ThinkingText.make("Hmm."), received: receivedJson({ thinking: "Hmm." }) };
 
-/** Print mode with one prompt, whose one response holds `parts` and ends `ending`: whether the process failed, and the turn's ending. */
+/** Runs print mode with one prompt whose response holds `parts` and ends `ending`; returns whether the process failed, and how the turn ended. */
 const printed = (parts: ReadonlyArray<typeof answer | typeof thinking>, ending: "Complete" | "CutShort") =>
   runTest(
     Effect.gen(function* () {
@@ -57,7 +57,7 @@ const printed = (parts: ReadonlyArray<typeof answer | typeof thinking>, ending: 
     ),
   );
 
-test("print mode succeeds only when the turn ended Completed; an Incomplete or CutShort turn fails the process", async () => {
+test("-p exits with success only when the turn completes; an incomplete or cut-short turn exits with failure", async () => {
   expect(await printed([answer], "Complete")).toEqual({ failed: false, subtype: "Completed" });
   expect(await printed([thinking], "Complete")).toEqual({ failed: true, subtype: "Incomplete" });
   expect(await printed([answer], "CutShort")).toEqual({ failed: true, subtype: "CutShort" });

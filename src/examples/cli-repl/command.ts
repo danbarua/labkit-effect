@@ -1,11 +1,11 @@
 /**
- * A REPL command: a line that starts with the command's name (`/model`), which the REPL runs instead
- * of sending the line to the model. The REPL's commands are a list (`commands.ts`). A command is
- * added by writing it in its own file in `commands/`, against this contract, and listing it there.
+ * A REPL command: a line starting with the command's name (`/model`), which the REPL runs instead of
+ * sending the line to the model. The commands are listed in `commands.ts`; each is written in its own
+ * file in `commands/` against this contract.
  *
  * A command runs in a session (`inSession`). Before a model is picked there is no session (the REPL
- * without a model, `repl.ts`), and a command runs there only when it says what it does without one
- * (`withoutModel`); any other command is refused until a model is picked.
+ * without a model, `repl.ts`): a command runs there only if it defines `withoutModel`, and any other
+ * command is refused until a model is picked.
  */
 
 import type { Effect, FileSystem, Path, Terminal } from "effect";
@@ -19,26 +19,26 @@ import type { SessionStoreFailed } from "../../agent-session/session-store.ts";
 import type { SettingOption } from "../../agent-session/configuration/options.ts";
 import type { View } from "./view.ts";
 
-/** What a command is run with besides its words. */
+/** What a command runs with besides its words. */
 export interface CommandContext {
-  /** The folder the CLI runs in: `/export` writes under it. */
+  /** The working folder; `/export` writes under it. */
   readonly folder: string;
-  /** The user's configuration folder: `/model` and `/settings` write the user's settings into it. */
+  /** The user's configuration folder; `/model` and `/settings` save settings into it. */
   readonly configFolder: string;
-  /** What the REPL shows, which `/settings` changes. */
+  /** What the REPL shows; `/settings` changes it. */
   readonly view: View;
-  /** The layers the session's configuration was read from, in order: a layer after the user's folder can set what a command writes into it. */
+  /** The configuration's layers, in order; a layer after the user's folder can override what a command saves there. */
   readonly layers: ReadonlyArray<LayerSource>;
   /**
-   * The settings the command line names. A session opened before a model is picked opens with them,
-   * so `/model` and `/switch` pick only a model that takes them.
+   * The settings given on the command line. A session opened before a model is picked opens with
+   * them, so `/model` and `/switch` pick only a model that supports them.
    */
   readonly commandLine: SettingsChange;
   /** The session's MCP servers; absent when the session has none. */
   readonly mcp?: McpServers;
 }
 
-/** What a line can be completed from: the models that can be asked, the settings to offer for the model being asked, and the session's MCP servers, by name. */
+/** What completion draws on: the usable models, the current model's settings, and the session's MCP server names. */
 export interface Offered {
   readonly models: ReadonlyArray<string>;
   readonly settings: ReadonlyArray<SettingOption>;
@@ -48,34 +48,31 @@ export interface Offered {
 /** What a command did: text for the REPL to print, nothing to print, or the REPL to end. */
 export type Done = { readonly _tag: "Said"; readonly text: string } | { readonly _tag: "Quiet" } | { readonly _tag: "Exit" };
 
-/** What a command did before a model is picked: as in a session, or the model that the session opens with, and what to print first. */
+/** What a command did before a model is picked: as in a session, or the picked model, with text to print first. */
 export type DoneWithoutModel = Done | { readonly _tag: "Picked"; readonly target: Asked; readonly text?: string };
 
-/** A command's outcome when it says `text`. */
+/** The outcome of a command that prints `text`. */
 export const said = (text: string): Done => ({ _tag: "Said", text });
 
-/** What the commands need to run: the terminal for a picker, the files, and the model catalog. In a session, the loop's services too. */
+/** The services commands need: the terminal for pickers, the file system, and the model catalog; in a session, also the loop's services. */
 export type Needs = Terminal.Terminal | FileSystem.FileSystem | Path.Path | ModelCatalog;
 
-/**
- * A mistake in a command, said to the user (`invalid.ts`); the user leaving a picker (Ctrl+C); or the
- * session's store failing to record what the command reported.
- */
+/** A command's error, shown to the user (`invalid.ts`); the user cancelling a picker (Ctrl+C); or the session store failing to record a change. */
 export type Failure = CliError.UserError | Terminal.QuitError | SessionStoreFailed;
 
 export interface ReplCommand {
-  /** The command's name, as it is typed. */
+  /** The command's name, as typed. */
   readonly name: `/${string}`;
-  /** Other names the command is typed as. */
+  /** Other names for the command. */
   readonly aliases?: ReadonlyArray<`/${string}`>;
-  /** What can follow the name, as `/help` shows it: `[name]`. Absent when nothing can. */
+  /** The arguments, as `/help` shows them (`[name]`); absent when the command takes none. */
   readonly args?: string;
-  /** What `/help` says the command does. */
+  /** The command's description in `/help`. */
   readonly says: string;
-  /** What the line's words (the name first) complete to, from what is offered; nothing when absent. */
+  /** Completions for the line's words (the name first); absent when the command completes nothing. */
   readonly complete?: (words: ReadonlyArray<string>, from: Offered) => ReadonlyArray<string>;
   /** Runs the command in `session` with the words after its name. */
   readonly inSession: (session: Session, words: ReadonlyArray<string>, context: CommandContext) => Effect.Effect<Done, Failure, Needs | Services>;
-  /** Runs the command before a model is picked; a command without it is refused until a model is picked. */
+  /** Runs the command before a model is picked; a command without it is refused until then. */
   readonly withoutModel?: (words: ReadonlyArray<string>, context: CommandContext) => Effect.Effect<DoneWithoutModel, Failure, Needs>;
 }

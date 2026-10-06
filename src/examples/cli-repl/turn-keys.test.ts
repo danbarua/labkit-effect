@@ -1,4 +1,4 @@
-/** The REPL's hold on the terminal's keys while a turn runs, over a terminal made for the test. */
+/** How the REPL reads the terminal's keys during a turn, using a fake terminal. */
 
 import { EventEmitter } from "node:events";
 import { expect } from "bun:test";
@@ -6,7 +6,7 @@ import { Effect } from "effect";
 import { test } from "../../../tests/support/test.ts";
 import { turnKeys } from "./turn-keys.ts";
 
-/** A terminal's input: raw mode as last set, and whether it flows. */
+/** A fake terminal input: whether it is in raw mode, and whether it is reading. */
 const terminal = () => {
   const stdin = Object.assign(new EventEmitter(), {
     isTTY: true,
@@ -28,7 +28,7 @@ const terminal = () => {
   return stdin;
 };
 
-test("while a turn runs the keys are held in raw mode: Ctrl+C interrupts it, Ctrl+D and other keys are dropped; a question is lent them; the turn's end gives them back", async () => {
+test("during a turn the terminal is in raw mode: Ctrl+C interrupts, Ctrl+D and other keys are ignored, a permission prompt borrows the keys, and the turn's end restores line mode", async () => {
   const stdin = terminal();
   const keys = turnKeys(stdin as unknown as NodeJS.ReadStream);
   let interrupts = 0;
@@ -39,18 +39,18 @@ test("while a turn runs the keys are held in raw mode: Ctrl+C interrupts it, Ctr
   expect(interrupts).toBe(0);
   stdin.emit("data", Buffer.from([0x03]));
   expect(interrupts).toBe(1);
-  // A question reads the terminal itself: while it is asked the turn's reader is off.
+  // A question reads the terminal itself, so the turn's key reader is off while it is asked.
   const during = await Effect.runPromise(keys.lend(Effect.sync(() => [stdin.raw, stdin.listenerCount("data")])));
   expect(during).toEqual([false, 0]);
   expect([stdin.raw, stdin.listenerCount("data")]).toEqual([true, 1]);
   keys.release();
   expect([stdin.raw, stdin.flowing, stdin.listenerCount("data")]).toEqual([false, false, 0]);
-  // With no turn held, a question lent the keys leaves them in line mode after.
+  // With no turn in progress, a question leaves the terminal in line mode afterwards.
   await Effect.runPromise(keys.lend(Effect.void));
   expect([stdin.raw, stdin.listenerCount("data")]).toEqual([false, 0]);
 });
 
-test("while a turn runs, a key other than Ctrl+C is passed on as the text the terminal sent; Ctrl+C is not", () => {
+test("during a turn, keys other than Ctrl+C go to the key handler as the text the terminal sent", () => {
   const stdin = terminal();
   const keys = turnKeys(stdin as unknown as NodeJS.ReadStream);
   const passed: Array<string> = [];

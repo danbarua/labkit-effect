@@ -1,4 +1,4 @@
-/** Picking a model, from the words of a command or from the models the catalog lists, and switching a session to it. */
+/** Picking a model, by name or from a list of usable models, and switching a session to it. */
 
 import { Effect } from "effect";
 import { Prompt } from "effect/cli";
@@ -7,13 +7,13 @@ import type { Session } from "../../agent-session/loop.ts";
 import { invalid } from "./invalid.ts";
 import { unavailable } from "./models.ts";
 
-/** The models the catalog lists (the known models whose provider has a key set, and the local server's), for picking. */
+/** The usable models (well-known models whose provider has an API key, and the local server's), as picker choices. */
 export const pickable = Effect.map(askable, (models) => models.map(({ provider, model }) => ({ title: `${provider}/${model}`, value: `${provider}/${model}` })));
 
 /**
- * The model `/model` names: its first word, or with none, the one the user picks from the models the
- * catalog lists, asked with `message`; undefined when the user leaves the pick (Ctrl+C). When the
- * catalog lists no model, fails saying what would make one available.
+ * Returns the model named by the command's first word, or with none, the one the user picks from the
+ * usable models (prompting with `message`); undefined when the user cancels (Ctrl+C). With no usable
+ * models, fails with hints for making one available.
  */
 export const modelNamed = (words: ReadonlyArray<string>, message: string) =>
   Effect.gen(function* () {
@@ -24,6 +24,6 @@ export const modelNamed = (words: ReadonlyArray<string>, message: string) =>
   });
 
 
-/** Reports `target` to `session` as the model to ask from the next turn on (`ModelChangeArrived`), and waits until the session has taken it. */
+/** Switches `session` to `target` from the next turn (`ModelChangeArrived`), and waits until the session is idle. */
 export const switchTo = (session: Session, target: Asked) =>
   session.observe({ _tag: "ModelChangeArrived", provider: target.provider, model: target.model }).pipe(Effect.andThen(session.idle));

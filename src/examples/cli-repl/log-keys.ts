@@ -6,19 +6,19 @@ export const logKeys = {
   settings: {
     /** The session's effective-settings.json was written; the details carry its path. */
     written: "cli.settings.written",
-    /** The session's effective-settings.json could not be written; the details carry the folder and the cause. The session goes on. */
+    /** The session's effective-settings.json could not be written; the details carry the folder and the cause. The session continues. */
     notWritten: "cli.settings.not_written",
   },
   session: {
-    /** The user stopped the CLI (Ctrl+C) while a turn ran, and the turn's interruption could not be recorded; the details carry the error's message. */
+    /** The user stopped the CLI (Ctrl+C) during a turn, and the interruption could not be recorded; the details carry the error message. */
     notInterrupted: "cli.session.not_interrupted",
   },
   mcp: {
-    /** A change of an MCP server's state could not be recorded; the details carry the server, its state and the cause. */
+    /** A change in an MCP server's state could not be recorded; the details carry the server, its state and the cause. */
     notRecorded: "cli.mcp.not_recorded",
   },
   follow: {
-    /** The REPL's follower could not take one input (a write to the terminal threw); the details carry the input's kind and the cause. It goes on with the next. */
+    /** The REPL failed to handle one session update (a terminal write threw); the details carry the update's kind and the cause. Following continues. */
     inputFailed: "cli.follow.input_failed",
   },
 } as const;

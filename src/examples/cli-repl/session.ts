@@ -1,13 +1,12 @@
 /**
  * A CLI session through the loop: its configuration, the services it runs with, and what its facts
- * say of a turn. Both ways of running the CLI (`print.ts`, `repl.ts`) are given the open session.
+ * say about a turn. Both ways of running the CLI (`print.ts`, `repl.ts`) are given the open session.
  *
- * The opening holds the model, its settings and the system prompt; each input is the user's,
- * through the CLI; the conversation is every turn of it. The tools work on the folder the CLI runs
- * in (`agent-tools/workspace.ts`): `read_file` and `list_dir` read it, `write_file` and `edit_file`
- * change it, and `run_command` runs a shell command in it; then the tools of the MCP servers the
- * configuration names (`configuration.ts`). Its policies and turn-end hooks are the configuration's
- * (`agent-config`): by default, permission as `--permission-mode` gives it.
+ * The tools work in the folder the CLI runs in (`agent-tools/workspace.ts`): `read_file` and
+ * `list_dir` read it, `write_file` and `edit_file` change it, and `run_command` runs a shell command
+ * in it; then come the tools of the MCP servers the configuration names (`configuration.ts`). The
+ * policies and turn-end hooks come from the configuration (`agent-config`); by default, permission
+ * follows `--permission-mode`.
  */
 
 import { basename } from "node:path";
@@ -42,43 +41,36 @@ import { logKeys } from "./log-keys.ts";
 export interface Config {
   readonly sessionId: string;
   readonly target: Asked;
-  /** The settings the command line names, as a change of the settings: a new session opens with them, and a continued one takes them as a change. */
+  /** The settings given on the command line: a new session opens with them, and a continued session applies them as a change. */
   readonly settings: SettingsChange;
   readonly system: string | undefined;
   /**
-   * The facts of the session this one goes on from (`--continue`, `--resume`), as read when it was
-   * chosen. The session keeps its opening; a model or settings in this configuration that differ
-   * from its own are taken as a change.
+   * The facts of the session being continued (`--continue`, `--resume`). The session keeps its
+   * opening; a model or settings here that differ from its own are applied as a change.
    */
   readonly continues?: ReadonlyArray<Fact>;
-  /**
-   * Whether the session's facts are kept in its file (the file-backed session store), or only in
-   * memory (`--no-session-persistence`: the ephemeral store, starting from `continues`).
-   */
+  /** Whether the session is saved to its file, or kept in memory only (`--no-session-persistence`, starting from `continues`). */
   readonly persist: boolean;
-  /** The session's policies, turn-end hooks and MCP servers, from its layers (`configuration.ts`), and the layers. */
+  /** The session's policies, turn-end hooks and MCP servers (`configuration.ts`), and the layers they came from. */
   readonly configuration: Configuration & { readonly layers: ReadonlyArray<LayerSource> };
-  /** Whether anyone is there to answer a question before a call runs: the REPL at a terminal. */
+  /** Whether someone can answer a permission question: true for the REPL at a terminal. */
   readonly canAsk: boolean;
   /**
-   * Whether a tool call whose input has properties its tool does not take is refused
-   * (`--strict-tool-input`); if not, it runs without them, and its result says which were ignored.
+   * Whether a tool call with input properties the tool does not define is refused
+   * (`--strict-tool-input`); otherwise it runs without them, and its result names the ones ignored.
    */
   readonly strictToolInput: boolean;
 }
 
-/**
- * Where the CLI keeps sessions (`agent-host/directory.ts`): `--continue` goes on from the session
- * written to last, `--resume <session>` from the one named.
- */
+/** The folder where the CLI saves sessions (`agent-host/directory.ts`). */
 export const storeFolder = "logs/cli";
 
-/** Where a session's log lines go when they go to a file: beside its facts. */
+/** The file a session's log is written to, beside its facts. */
 export const logFileOf = (sessionId: string): string => `${sessionFolderOf(storeFolder, sessionId)}/cli.log`;
 
 /**
- * The tools a session is offered: the workspace's, the folder the CLI runs in, its commands given the
- * environment the configuration composes (`commandEnvironment`).
+ * The workspace tools for the working folder; their commands run with the environment the
+ * configuration builds (`commandEnvironment`).
  */
 const workspaceOf = (config: Config) =>
   workspaceTools(process.cwd(), {
@@ -87,29 +79,29 @@ const workspaceOf = (config: Config) =>
   });
 
 /**
- * What the loop needs, for a CLI session: its tool sources, the workspace's then the MCP servers';
- * the notices of servers not running; its turns count on from those its store holds; and the
- * configuration's policies and turn-end hooks.
+ * The loop's services for a CLI session: the tool sources (the workspace's, then the MCP servers'),
+ * notices about servers that are not running, turn numbering that continues from the stored facts,
+ * and the configuration's policies and turn-end hooks.
  */
 const servicesOf = (config: Config, sources: ReadonlyArray<ToolSource>, mcp: McpServers) => {
-  // The configuration's tool sources are not offered by the CLI: its own are the workspace's and the MCP servers'.
+  // The CLI uses its own tool sources (the workspace's and the MCP servers'), not the configuration's.
   const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(config.configuration, { canAsk: config.canAsk });
-  // What is known of models is the catalog's, with the configuration's overrides (`models:`) over it.
+  // Model capabilities come from the catalog, with the configuration's `models:` overrides applied.
   const given = Layer.mergeAll(Layer.succeed(Notices, [mcp.notices]), Layer.succeed(ModelOverrides, config.configuration.models));
   return Layer.mergeAll(SessionServices(SourcedToolRunner).pipe(Layer.provide(given)), seamLayer(lists)).pipe(
     Layer.provideMerge(Layer.succeed(ToolSources, sources)),
   );
 };
 
-/** The MCP servers the configuration names, as `startMcpServers` takes them. */
+/** The configuration's MCP servers, in the form `startMcpServers` takes. */
 const givenOf = (configuration: Configuration): ReadonlyArray<GivenServer> =>
   configuration.mcpServers.map((server) => ({ server: "url" in server ? server : { ...server, cwd: server.cwd ?? process.cwd() }, connectTimeout: server.connectTimeout }));
 
 /**
- * Writes what the session's configuration resolved to (`effective-settings.json`, `agent-config`
- * `effective.ts`) to the session's folder, with what the CLI says beside its layers: the model and
- * its settings, whether anyone can be asked, and the variables its commands are given and those left
- * out, by name.
+ * Writes the session's resolved configuration (`effective-settings.json`, `agent-config`
+ * `effective.ts`) to its folder, with the CLI's own values: the model and its settings, whether
+ * permission questions can be answered, and the names of the environment variables commands get and
+ * those removed.
  */
 const written = (config: Config, environment: Readonly<Record<string, string>>) =>
   Effect.gen(function* () {
@@ -134,7 +126,7 @@ const written = (config: Config, environment: Readonly<Record<string, string>>) 
     );
   });
 
-/** Fails, saying why, when a server the configuration says is required is not running once the servers have settled. */
+/** Fails, saying why, when a required MCP server is not running once the servers have started or failed. */
 const requiredRunning = (configuration: Configuration, mcp: McpServers) =>
   Effect.gen(function* () {
     const states = yield* mcp.states;
@@ -146,10 +138,9 @@ const requiredRunning = (configuration: Configuration, mcp: McpServers) =>
   });
 
 /**
- * What a way of running the CLI does with a session as it opens: follows its facts from the start
- * (answering what is asked before a call runs, showing tool calls), for as long as the session
- * lasts; says what becomes of a turn the facts left running: go on with it, or end it; and shows
- * how it went once it has gone on.
+ * How a way of running the CLI handles a session: it follows the session from its opening (answering
+ * permission questions, showing tool calls); it chooses whether to resume or end a turn a previous run
+ * left unfinished; and it shows how a resumed turn ended.
  */
 export interface Host<R = never> {
   readonly follow: (session: Session) => Effect.Effect<void, never, Scope.Scope | R>;
@@ -157,13 +148,12 @@ export interface Host<R = never> {
   readonly wentOn: (session: Session) => Effect.Effect<void, never, R>;
 }
 
-/** Follows nothing, and goes on with a turn the facts left running: for print mode, where no one is there to ask. */
+/** Follows nothing and resumes an unfinished turn: for print mode, where no one can be asked. */
 export const Headless: Host = { follow: () => Effect.void, choose: () => Effect.succeed("go on"), wentOn: () => Effect.void };
 
 /**
- * Ends the turn under way, if one is, when the user stops the CLI (Ctrl+C): records that it was
- * interrupted, and waits while each request reports how far it got and the turn ends. A second
- * Ctrl+C meanwhile exits at once.
+ * When the user stops the CLI (Ctrl+C) during a turn, records the interruption and waits for the
+ * turn's requests to settle and the turn to end. A second Ctrl+C exits at once.
  */
 const interrupted = (session: Session) =>
   Effect.gen(function* () {
@@ -175,12 +165,12 @@ const interrupted = (session: Session) =>
   }).pipe(Effect.catchTag("SessionStoreFailed", (error) => Effect.logError(logKeys.session.notInterrupted, { message: error.message })));
 
 /**
- * Opens a session with `config`, or goes on from the one it continues, and runs `use` with it, with
- * the loop's services and `logs`. Its facts are kept in its store, which writes each one before the
- * session acts on it. The host follows the session from when it opens (`follow`), and a turn its
- * facts left running (the process ended while it ran) goes on, or ends, as it says (`choose`). Stopping the CLI while a turn runs ends the turn as interrupted
- * (`interrupted`). A store that cannot be opened or written to is said, and the session stops.
- * What `use` reports is the user's, through the CLI.
+ * Opens a new session with `config`, or continues the one it names, and runs `use` with it, the
+ * loop's services and `logs`. The store writes each fact before the session acts on it. The host
+ * follows the session from its opening (`follow`), and decides whether a turn left unfinished by a
+ * previous run is resumed or ended (`choose`). Stopping the CLI during a turn ends the turn as
+ * interrupted (`interrupted`). A store that cannot be opened or written stops the session with an
+ * error. What `use` records comes from the user, through the CLI.
  */
 export const withSession = <A, E, R, L, H>(
   config: Config,
@@ -208,7 +198,7 @@ export const withSession = <A, E, R, L, H>(
       const changed = now.provider !== config.target.provider || now.model !== config.target.model || Object.keys(config.settings).length > 0;
       if (changed) yield* session.observe({ _tag: "ModelChangeArrived", provider: config.target.provider, model: config.target.model, settings: config.settings });
     }
-    // Once the session's facts have their opening: its MCP servers' states, and each change of them.
+    // After the opening is recorded: the MCP servers' states, and each later change.
     yield* mcp.changes.pipe(
       Stream.runForEach((change) =>
         session.observe(change).pipe(
@@ -223,11 +213,11 @@ export const withSession = <A, E, R, L, H>(
   });
   return Effect.gen(function* () {
     yield* written(config, workspace.environment);
-    // The MCP servers start in the session's scope, before its services: their tools are among them.
+    // The MCP servers start in the session's scope, before its services, because their tools are among them.
     const mcp = yield* startMcpServers(givenOf(config.configuration), [{ uri: pathToFileURL(process.cwd()).href, name: basename(process.cwd()) }]);
     yield* requiredRunning(config.configuration, mcp);
     const sources = [yield* workspace.source, ...mcp.sources];
-    // The store logs as it opens (a lock taken over, a line cut off): to the session's log, as the rest does.
+    // The store logs while it opens (a lock taken over, a torn line cut off) to the session's log.
     return yield* opened(mcp).pipe(Effect.provide(Layer.mergeAll(servicesOf(config, sources, mcp), logs).pipe(Layer.provideMerge(store.pipe(Layer.provide(logs))))));
   }).pipe(
     reportedBy({ _tag: "User", via: Via.make("cli") }),
@@ -237,19 +227,19 @@ export const withSession = <A, E, R, L, H>(
   );
 };
 
-/** Sends `text` to the session as the user's input, and waits until nothing is under way. */
+/** Sends `text` to the session as the user's input, and waits until the session is idle. */
 export const ask = (session: Session, text: string) =>
   session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make(text) }).pipe(Effect.andThen(session.idle));
 
-/** The last turn the facts started. */
+/** Returns the last turn started. */
 export const lastTurn = (facts: ReadonlyArray<Fact>): TurnId | undefined =>
   facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "TurnStarted" ? [fact.observation.turn] : [])).at(-1);
 
-/** How `turn` ended, when it has. */
+/** Returns how `turn` ended, if it has. */
 export const endingOf = (facts: ReadonlyArray<Fact>, turn: TurnId | undefined): Ending | undefined =>
   facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" && fact.decision.turn === turn ? [fact.decision.ending] : [])).at(-1);
 
-/** The text of the last response to `turn`. */
+/** Returns the text of the last response in `turn`. */
 export const answerTo = (facts: ReadonlyArray<Fact>, turn: TurnId | undefined): string =>
   facts
     .flatMap((fact) =>

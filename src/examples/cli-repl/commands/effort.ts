@@ -1,10 +1,10 @@
 /**
- * `/effort <effort>` sets the effort of this session's requests: `default`, or an effort that the
- * model takes (`takenBy`). `/effort` alone sets the next value offered (`optionsOf`: `default`, then
- * the model's efforts, least first) after the one in force, and from the last goes back to
- * `default`. A model offered no effort is said so.
+ * `/effort <effort>` sets the reasoning effort for this session: `default`, or an effort the model
+ * supports (`takenBy`). `/effort` alone moves to the next value (`optionsOf`: `default`, then the
+ * model's efforts, lowest first), wrapping from the last back to `default`. For a model with no
+ * effort setting, it says so.
  *
- * The change is reported to the session (`ModelChangeArrived`), which takes it between turns.
+ * The change is reported to the session (`ModelChangeArrived`), which applies it between turns.
  */
 
 import { Effect } from "effect";
@@ -14,7 +14,7 @@ import { invalid } from "../invalid.ts";
 import { modelOf } from "../../../agent-session/configuration/session-setup.ts";
 import { inForce, settingsGiven, takenBy } from "../model-settings.ts";
 
-/** The effort offered, with its values, among `settings`; undefined when none is offered. */
+/** Returns the effort option among `settings`; undefined when the model has none. */
 const effortIn = (settings: ReadonlyArray<SettingOption>) => settings.find((each) => each._tag === "OneOf" && each.name === "effort");
 
 export const effort: ReplCommand = {

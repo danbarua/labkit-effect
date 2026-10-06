@@ -1,7 +1,6 @@
 /**
- * A mistake, said to the user as an `ERROR:` line and, for each thing the user can do about it, a
- * `HINT:` line. At the command line the process prints it and exits with a failure; in the REPL, the
- * REPL prints it and goes on.
+ * A user error: an `ERROR:` line, then a `HINT:` line for each thing the user can do about it. At the
+ * command line the CLI prints it and exits with failure; in the REPL, it prints it and continues.
  */
 
 import { CliError, CliOutput } from "effect/cli";
@@ -12,9 +11,9 @@ export const invalid = (message: string, ...hints: ReadonlyArray<string>) =>
 const effectFormatter = CliOutput.defaultFormatter();
 
 /**
- * Prints a mistake (`invalid`) as it is said, and the mistakes effect/cli finds in the command line (a
- * flag it does not know, a value a flag does not take) as an `ERROR:` line each; any other error as
- * effect/cli prints it. effect/cli prints the help before the mistakes it finds.
+ * Prints a user error (`invalid`) as written, and each command-line error effect/cli finds (an unknown
+ * flag, an invalid flag value) as one `ERROR:` line; any other error as effect/cli prints it.
+ * effect/cli prints the help before its own errors.
  */
 export const saidFormatter: CliOutput.Formatter = {
   formatHelpDoc: effectFormatter.formatHelpDoc,

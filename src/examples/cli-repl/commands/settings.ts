@@ -1,17 +1,17 @@
 /**
- * `/settings name=value …` changes the settings named; the rest stay as they were. `/settings`
- * alone shows the settings in force and offers each to change. The settings are:
+ * `/settings name=value …` changes the settings named and leaves the rest. `/settings` alone shows
+ * the current settings and a picker to change one. There are two kinds:
  *
- * - the model's (`effort`, `thinking`, `observe`, `cache`, `maxOutputTokens`), for this session.
- *   What is offered, and taken, is what the model takes beside the settings in force (`optionsOf`,
- *   `takenBy`), and `default`, which returns a setting to the provider's default. The output limit is
- *   taken when typed, and not offered: it defaults to the model's own. The change is reported to the
- *   session (`ModelChangeArrived`), which takes it between turns.
- * - the user's (`view.thinking`, `user-settings.ts`), which apply at once and are written into the
- *   user's configuration folder.
+ * - The model's settings (`effort`, `thinking`, `observe`, `cache`, `maxOutputTokens`), for this
+ *   session. Only values the model supports with the other current settings are offered and accepted
+ *   (`optionsOf`, `takenBy`), plus `default`, which returns a setting to the provider's default. The
+ *   output limit is accepted when typed but not offered, since it defaults to the model's own. The
+ *   change is reported to the session (`ModelChangeArrived`), which applies it between turns.
+ * - The CLI's own settings (`view.thinking`, `user-settings.ts`), which apply at once and are saved
+ *   to the user's configuration folder.
  *
- * Every setting named is read before any is changed, so a line with a mistake changes nothing.
- * Before a model is picked, only the user's settings are shown and changed.
+ * Every setting on the line is checked before any is changed, so a line with an error changes
+ * nothing. Before a model is picked, only the CLI's own settings can be shown and changed.
  */
 
 import { Effect, Ref } from "effect";
@@ -24,7 +24,7 @@ import { invalid } from "../invalid.ts";
 import { inForce, settingsFrom, takenBy } from "../model-settings.ts";
 import { applied, isUserWord, userChangeOf, userSettings, userSettingsLine } from "../user-settings.ts";
 
-/** A setting as the picker offers it: its name, its value in force, and its values; a number, from `min`, when it has none listed. */
+/** A setting in the picker: its name, current value, and values; a number from `min` when it has no listed values. */
 interface Pickable {
   readonly name: string;
   readonly now?: string | number;
@@ -32,13 +32,10 @@ interface Pickable {
   readonly min?: number;
 }
 
-/**
- * Whether a setting the model is offered is listed in completion and the picker. The output limit is
- * not: it defaults to the model's own, and a user need not choose it. Typed, it is taken.
- */
+/** Whether completion and the picker list a setting: all but the output limit, which defaults to the model's own (typed, it is accepted). */
 const listed = (option: SettingOption): boolean => option.name !== "maxOutputTokens";
 
-/** A setting the model is offered, as the picker offers it. */
+/** A model setting as the picker shows it. */
 const pickableOf = (option: SettingOption): Pickable => {
   const now = option.now === undefined ? {} : { now: option.now };
   if (option._tag === "OneOf") return { name: option.name, ...now, values: option.values };
@@ -47,7 +44,7 @@ const pickableOf = (option: SettingOption): Pickable => {
 
 const leave = "(leave)";
 
-/** Asks which of `settings` to change and to what; undefined when none is to change. */
+/** Asks which of `settings` to change and to what; undefined when the user leaves them unchanged. */
 const picked = (heading: string, settings: ReadonlyArray<Pickable>) =>
   Effect.gen(function* () {
     const option = yield* Prompt.Select<Pickable | typeof leave>({
@@ -62,11 +59,11 @@ const picked = (heading: string, settings: ReadonlyArray<Pickable>) =>
     return `${option.name}=${value}`;
   });
 
-/** The user's settings, as the picker offers them, with their values in force. */
+/** The CLI's own settings as the picker shows them, with their current values. */
 const userPickable = ({ view }: CommandContext) =>
   Effect.map(Ref.get(view.thinking), (now): ReadonlyArray<Pickable> => [{ name: "view.thinking", now, values: userSettings["view.thinking"] }]);
 
-/** Applies the user's settings that `words` name, and returns what to say of each. */
+/** Applies the CLI settings `words` name, and returns a line about each. */
 const appliedAll = (words: ReadonlyArray<string>, context: CommandContext) =>
   Effect.flatMap(
     Effect.forEach(words, userChangeOf),
@@ -77,7 +74,7 @@ export const settings: ReplCommand = {
   name: "/settings",
   args: "[name=value …]",
   says: "Change the settings named; with none, show them and pick one",
-  // A setting not yet named on the line, then one of its values.
+  // A setting not already on the line, then one of its values.
   complete: (words, from) => {
     const options = [...from.settings.filter(listed).map((each) => ({ name: each.name, values: each._tag === "OneOf" ? each.values : [] })), ...Object.entries(userSettings).map(([name, values]) => ({ name, values }))];
     const last = words.at(-1) ?? "";
@@ -97,7 +94,7 @@ export const settings: ReplCommand = {
       if (words.length === 0 && change === undefined) return said(shown);
       const given = change === undefined ? words : [change];
       const modelWords = given.filter((word) => !isUserWord(word));
-      // Every setting is read before any is changed, and the model's are taken only where the model takes them.
+      // Every setting is checked before any is changed, and model settings only where the model supports them.
       const modelSettings = modelWords.length === 0 ? undefined : yield* takenBy(yield* modelOf(yield* session.facts), yield* settingsFrom(modelWords));
       yield* Effect.forEach(given.filter(isUserWord), userChangeOf);
       const asking =

@@ -1,4 +1,4 @@
-/** What the REPL prints after a turn. */
+/** The REPL: what it prints, its keys, and the REPL without a model. */
 
 import { expect } from "bun:test";
 import { observe, open, opened } from "../../../tests/support/drive.ts";
@@ -29,7 +29,7 @@ import { type View, viewOf } from "./view.ts";
 import type { SettingsChange } from "../../agent-machine/settings.ts";
 import { ask, type Config } from "./session.ts";
 
-/** What is printed after a turn whose one response said `text` and ended `ending`; `printed`, whether it was printed as it arrived. */
+/** Returns what is printed after a turn whose response was `text` and ended `ending`; `printed` says whether it already streamed. */
 const replied = (text: string, ending: string, printed = false) => {
   const session = open();
   observe(session, opened);
@@ -39,20 +39,20 @@ const replied = (text: string, ending: string, printed = false) => {
   return replyOf(session.journal, () => printed);
 };
 
-test("an answer is printed after its turn; one cut short by its length limit, or interrupted, says so", () => {
+test("after a turn the answer is printed, with a note when it was cut short or interrupted", () => {
   expect(replied("1, 2, 3", "Complete")).toBe("1, 2, 3");
   expect(replied("1, 2, 3", "CutShort")).toBe("1, 2, 3\n(stopped: the response reached a length limit)");
   expect(replied("1, 2, 3", "Interrupted")).toBe("1, 2, 3\n(interrupted)");
 });
 
-test("an answer printed as it arrived is not printed again: only how it was cut short, if it was", () => {
+test("a streamed answer is not printed again after its turn; only the cut-short note is", () => {
   expect(replied("1, 2, 3", "Complete", true)).toBeUndefined();
   expect(replied("1, 2, 3", "CutShort", true)).toBe("(stopped: the response reached a length limit)");
 });
 
 /**
- * A model that responds with its thinking and its answer, streaming them first when `streams`; and
- * the requests it was asked. `before` runs before it streams.
+ * A model that responds with thinking and an answer, streaming them first when `streams`, and records
+ * each request. `before` runs before it streams.
  */
 const thinkingThenOk = (streams: boolean, before: Effect.Effect<void> = Effect.void) => {
   const asked: Array<string> = [];
@@ -102,9 +102,9 @@ const opening = openedWith({ session: SessionId.make("s1"), model: { provider: P
 const configFolder = () => join(testFolder(), "config");
 
 /**
- * The REPL, followed at a terminal, typed `lines` with `model`, showing what `view` shows (thinking
- * shown when not given) and reading the keys of `stdin` while a turn runs: what it wrote to stdout,
- * and the lines it logged after its banner. With `failFirstWrite`, the first write to stdout throws.
+ * Runs the REPL at a terminal that types `lines`, with `model`, `view` (thinking shown by default),
+ * and `stdin` for the keys during a turn. Returns what it wrote to stdout and the lines it logged
+ * after its banner. With `failFirstWrite`, the first write to stdout throws.
  */
 const typedTo = async (model: ReturnType<typeof thinkingThenOk>, lines: ReadonlyArray<string>, failFirstWrite = false, view?: View, stdin?: NodeJS.ReadStream) => {
   const written: Array<string> = [];
@@ -133,7 +133,7 @@ const typedTo = async (model: ReturnType<typeof thinkingThenOk>, lines: Readonly
   return { written: written.join(""), logged: logged.slice(1) };
 };
 
-test("the REPL: Enter on an empty line asks nothing, a line naming no command says so, /exit ends it; a streamed answer is printed as it arrives, its thinking dimmed, and not again after its turn", async () => {
+test("the REPL ignores an empty line, reports an unknown command, prints a streamed answer once with its thinking dimmed, and ends on /exit", async () => {
   const model = thinkingThenOk(true);
   const { written, logged } = await typedTo(model, ["hello", "", "/nope", "/exit"]);
   expect(model.asked).toHaveLength(1);
@@ -141,20 +141,20 @@ test("the REPL: Enter on an empty line asks nothing, a line naming no command sa
   expect(logged).toEqual(["ERROR: Unknown command: /nope.\nHINT: Type /help to list the commands."]);
 });
 
-test("the REPL: an answer that did not stream is printed once, from the response, when it arrives", async () => {
+test("the REPL prints an answer that did not stream once, when the response arrives", async () => {
   const { written, logged } = await typedTo(thinkingThenOk(false), ["hello", "/exit"]);
   expect(written).toBe("\x1b[2mthink\x1b[0m\nok\n");
   expect(logged).toEqual([]);
 });
 
-test("the REPL: a write to the terminal that fails is logged, and later turns are followed and answered", async () => {
+test("the REPL logs a failed terminal write and keeps answering later turns", async () => {
   const model = thinkingThenOk(true);
   const { written } = await typedTo(model, ["hello", "again", "/exit"], true);
   expect(model.asked).toHaveLength(2);
   expect(written).toContain("ok");
 });
 
-test("the REPL: after going on with a turn that ended before it followed the session, it does not wait for that turn's end", async () => {
+test("the REPL does not wait for the end of a resumed turn that had already ended", async () => {
   const logged = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
@@ -169,7 +169,7 @@ test("the REPL: after going on with a turn that ended before it followed the ses
   expect(logged).toEqual([]);
 });
 
-/** A catalog of `sources`, so that what can be asked depends on neither the environment nor a local server. */
+/** A catalog of `sources`, so that the usable models depend on neither the environment nor a local server. */
 const catalogOf = (sources: ReadonlyArray<CatalogSource>) => Layer.succeed(ModelCatalog, { sources: Effect.succeed(sources) });
 
 const openai: CatalogSource = { provider: ProviderName.make("openai"), models: [ModelName.make("gpt-5.5"), ModelName.make("gpt-5")] };
@@ -177,9 +177,9 @@ const notAnswering: CatalogSource = { provider: ProviderName.make("localhost"), 
 const noModel = new CannotAsk({ message: "No model selected.", hint: "Pick one with /model." });
 
 /**
- * The REPL before a model is picked, typed `lines`, with a catalog of `sources` and the settings the
- * command line names (`commandLine`): the model picked, what it logged, and whether it shows thinking
- * at the end.
+ * Runs the REPL without a model, typed `lines`, with a catalog of `sources` and the command-line
+ * settings `commandLine`. Returns the picked model, what it logged, and whether thinking is shown at
+ * the end.
  */
 const waited = (lines: ReadonlyArray<string>, first?: string, sources: ReadonlyArray<CatalogSource> = [openai], commandLine: SettingsChange = {}) =>
   runTest(
@@ -192,7 +192,7 @@ const waited = (lines: ReadonlyArray<string>, first?: string, sources: ReadonlyA
 
 const banner = "No model selected · /model to pick one · /help for commands · /exit to quit";
 
-test("before a model is picked: input for the model is not sent, the other commands are refused, and /model naming a model that can be asked returns that model", async () => {
+test("without a model, the REPL sends no input, refuses commands that need a model, and picks a usable model named with /model", async () => {
   const { picked, logged } = await waited(["hello", "/tools", "/nope", "/model grok-4.7", "/model gpt-99", "/model gpt-5.5", "never read"]);
   expect(picked as unknown).toEqual({ provider: "openai", model: "gpt-5.5" });
   expect(logged).toEqual([
@@ -208,19 +208,19 @@ test("before a model is picked: input for the model is not sent, the other comma
   expect(readFileSync(join(configFolder(), "models.yml"), "utf8")).toBe("model: openai/gpt-5.5\n");
 });
 
-test("before a model is picked: /model alone picks from the models that can be asked", async () => {
+test("without a model, /model with no name offers a picker of usable models", async () => {
   // Enter on the pick takes the first model listed.
   const { picked } = await waited(["/model", ""]);
   expect(picked as unknown).toEqual({ provider: "openai", model: "gpt-5.5" });
 });
 
-test("before a model is picked: the prompt the command line gave is said to be not sent, and /exit returns no model", async () => {
+test("without a model, a prompt given on the command line is reported as not sent, and /exit picks no model", async () => {
   const { picked, logged } = await waited(["/exit"], "hello");
   expect(picked).toBeUndefined();
   expect(logged).toEqual([banner, "ERROR: Message not sent. No model selected.\nHINT: Pick one with /model."]);
 });
 
-test("before a model is picked: /model alone, with no model that can be asked, says what would make one available", async () => {
+test("without a model and with no usable models, /model explains how to make one available", async () => {
   const { picked, logged } = await waited(["/model", "/exit"], undefined, [notAnswering]);
   expect(picked).toBeUndefined();
   expect(logged.slice(2)).toEqual([
@@ -234,15 +234,15 @@ test("before a model is picked: /model alone, with no model that can be asked, s
   ]);
 });
 
-test("before a model is picked: /switch names the model the session opens with, and writes nothing", async () => {
+test("without a model, /switch picks the session's model and saves nothing", async () => {
   const { picked, logged } = await waited(["/switch gpt-5.5"]);
   expect(picked as unknown).toEqual({ provider: "openai", model: "gpt-5.5" });
   expect(logged).toHaveLength(2);
   expect(existsSync(configFolder())).toBe(false);
 });
 
-test("before a model is picked: /settings changes the user's settings, and refuses the model's", async () => {
-  // `/settings` alone offers the user's settings to pick; Enter leaves them as they are, and shows them.
+test("without a model, /settings changes the CLI's settings and rejects model settings", async () => {
+  // `/settings` alone opens a picker of the CLI's settings; Enter leaves them unchanged and shows them.
   const { logged, thinking } = await waited(["/settings effort=high", "/settings view.thinking=off", "/settings", "", "/exit"]);
   expect(logged.slice(2)).toEqual([
     "ERROR: effort=high needs a model.\nHINT: Pick one with /model.",
@@ -252,12 +252,12 @@ test("before a model is picked: /settings changes the user's settings, and refus
   expect(thinking).toBe("off");
 });
 
-test("the REPL: with thinking hidden, the answer is printed and its thinking is not", async () => {
+test("with thinking hidden, the REPL prints the answer without the thinking", async () => {
   const { written } = await typedTo(thinkingThenOk(true), ["hello", "/exit"], false, await runTest(viewOf("off")));
   expect(written).toBe("ok\n");
 });
 
-test("the REPL: Option+T at the prompt hides the thinking, and is not typed", async () => {
+test("Option+T at the prompt hides thinking and inserts no character", async () => {
   const model = thinkingThenOk(true);
   // macOS sends † for Option+T where Option is not set to send Meta.
   const { written } = await typedTo(model, ["†hello", "/exit"]);
@@ -265,14 +265,14 @@ test("the REPL: Option+T at the prompt hides the thinking, and is not typed", as
   expect(model.asked).toHaveLength(1);
 });
 
-/** A terminal's input that is a terminal, for the keys the REPL reads itself while a turn runs. */
+/** A fake terminal input stream, for the keys the REPL reads itself during a turn. */
 const keyboard = () =>
   Object.assign(new EventEmitter(), { isTTY: true, setRawMode: () => undefined, resume: () => undefined, pause: () => undefined }) as unknown as NodeJS.ReadStream;
 
-test("the REPL: Option+T while a turn runs hides the thinking from then on, and says so", async () => {
+test("Option+T during a turn hides the rest of the thinking and prints a note", async () => {
   const stdin = keyboard();
   const view = await runTest(viewOf("on"));
-  // Option+T is pressed as the model starts, which waits until the REPL has taken it.
+  // Option+T is pressed when the model starts, and the model waits until the REPL has toggled the view.
   const pressed = Effect.sync(() => stdin.emit("data", Buffer.from("\x1bt"))).pipe(Effect.andThen(Effect.repeat(Effect.andThen(Effect.yieldNow, Ref.get(view.thinking)), { until: (now) => now === "off" })));
   const { written } = await typedTo(thinkingThenOk(true, Effect.asVoid(pressed)), ["hello", "/exit"], false, view, stdin);
   expect(written).not.toContain("think\x1b");
@@ -280,8 +280,8 @@ test("the REPL: Option+T while a turn runs hides the thinking from then on, and 
   expect(written).toContain("ok\n");
 });
 
-test("before a model is picked: a model that does not take the settings the command line names is not picked, and nothing is written; the REPL goes on", async () => {
-  // gpt-5 takes minimal to high; gpt-5.5 takes low to xhigh.
+test("without a model, a model that does not support the command-line settings is refused, nothing is saved, and the REPL keeps running", async () => {
+  // gpt-5 supports minimal to high; gpt-5.5 supports low to xhigh.
   const { picked, logged } = await waited(["/model gpt-5", "/switch gpt-5", "/model gpt-5.5"], undefined, [openai], { effort: "xhigh" });
   const refused = "ERROR: openai/gpt-5 does not support effort=xhigh (from the command line).\nHINT: Supported: default, minimal, low, medium, high.\nHINT: Pick another model, or start the CLI again without that setting.";
   expect(logged.slice(2)).toEqual([refused, refused, `Default model: openai/gpt-5.5 (saved to ${join(configFolder(), "models.yml")})`]);

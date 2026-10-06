@@ -20,7 +20,7 @@ const write = (path: string, text: string): string => {
 
 const none: ConfigFlags = { mcpConfig: [], strictMcpConfig: false };
 
-/** The configuration a CLI run in the test's `project` folder gets with `flags`, the user's home being the test's `home`. */
+/** Returns the configuration for a CLI run in the test's `project` folder with `flags`, using the test's `home` as the user's home. */
 const configured = (flags: Partial<ConfigFlags> = {}) =>
   runTest(cliConfiguration(join(testFolder(), "project"), { ...none, ...flags }, { home: join(testFolder(), "home") }).pipe(Effect.provide(BunServices.layer)));
 
@@ -36,7 +36,7 @@ const refused = (flags: Partial<ConfigFlags> = {}) =>
 const listed = (configuration: Configuration) =>
   Object.fromEntries(Object.entries(configuration.lists).map(([seam, entries]) => [seam, entries.map((entry) => [entry.name, entry.settings])]));
 
-test("with no file and no flag, the CLI's defaults: the loop breaker then permission on tool calls, the loop breaker on model requests, one retry of a turn with no answer", async () => {
+test("with no configuration file and no flag, tool calls go through the loop breaker then permission, model requests through the loop breaker, and a turn with no answer is retried once", async () => {
   const configuration = await configured();
   expect(listed(configuration)).toEqual({
     toolCalls: [
@@ -51,7 +51,7 @@ test("with no file and no flag, the CLI's defaults: the loop breaker then permis
   expect(configuration.mcpServers).toEqual([]);
 });
 
-test("the flags come last: --permission-mode sets permission's mode; --max-turns and --max-budget-usd set their plug-ins, adding them to the model requests' list when it does not have them", async () => {
+test("flags override the files: --permission-mode sets the permission mode, and --max-turns and --max-budget-usd add their limits to model requests", async () => {
   const configuration = await configured({ permissionMode: "acceptEdits", maxTurns: 3, maxBudgetUsd: 2.5 });
   expect(listed(configuration)["toolCalls"]?.[1]).toEqual(["permissions", { mode: "acceptEdits" }]);
   expect(listed(configuration)["modelRequests"]).toEqual([
@@ -59,7 +59,7 @@ test("the flags come last: --permission-mode sets permission's mode; --max-turns
     ["maxTurnRequests", { limit: 3 }],
     ["maxBudget", { usd: 2.5 }],
   ]);
-  // A file that lists the limit already keeps its place for it; the flag sets its limit.
+  // When a file already lists the limit, the flag sets its value and the limit keeps its position.
   write("project/.labkit/policies.yml", "modelRequests: [maxTurnRequests, loopBreaker]\n");
   expect(listed(await configured({ maxTurns: 7, settingSources: "user,project" }))["modelRequests"]).toEqual([
     ["maxTurnRequests", { limit: 7 }],
@@ -68,7 +68,7 @@ test("the flags come last: --permission-mode sets permission's mode; --max-turns
   expect(await refused({ maxTurns: 0 })).toBe('the command line: plugins.maxTurnRequests.limit: Expected a value greater than or equal to 1 at ["limit"]');
 });
 
-test("--settings is a layer over the files, JSON or a file of YAML or JSON; --setting-sources says which files are read, the user's alone unless it says", async () => {
+test("--settings (JSON, or a JSON or YAML file) overrides the files; --setting-sources chooses which files are read, only the user's by default", async () => {
   write("home/.config/labkit/policies.yml", "plugins:\n  loopBreaker:\n    nudgeAt: 4\n");
   write("project/.labkit/policies.yml", "plugins:\n  loopBreaker:\n    stopAt: 9\n");
   const both = listed(await configured({ settingSources: "user,project", settings: '{"plugins": {"loopBreaker": {"key": "toolAndInput", "nudgeAt": 2}}}' }));
@@ -77,13 +77,13 @@ test("--settings is a layer over the files, JSON or a file of YAML or JSON; --se
   expect(listed(await configured({ settings: yaml }))["toolCalls"]).toEqual([["permissions", { mode: "default" }]]);
   const json = write("settings.json", JSON.stringify({ toolCalls: ["loopBreaker"] }, null, 2));
   expect(listed(await configured({ settingSources: "user,project", settings: json }))["toolCalls"]).toEqual([["loopBreaker", { nudgeAt: 4, stopAt: 9, key: "toolAndInput" }]]);
-  // The project's file is not read unless named.
+  // The project's file is ignored unless --setting-sources names it.
   expect(listed(await configured())["toolCalls"]?.[0]).toEqual(["loopBreaker", { nudgeAt: 4, stopAt: 5, key: "toolAndInput" }]);
   expect(await refused({ settingSources: "user,team" })).toBe('--setting-sources: "team" is not a source; those are: user, project, local');
   expect(await refused({ settings: '{"toolCalls": ["nobody"]}' })).toStartWith('--settings: toolCalls[0]: "nobody" is neither in plugins nor a plug-in');
 });
 
-test("--mcp-config adds MCP servers, as Claude Code's .mcp.json; with --strict-mcp-config they are the only ones", async () => {
+test("--mcp-config adds MCP servers in Claude Code's .mcp.json format; with --strict-mcp-config they replace all others", async () => {
   write("home/.config/labkit/policies.yml", "mcpServers:\n  files:\n    command: files-mcp\n");
   const config = '{"mcpServers": {"github": {"type": "stdio", "command": "gh-mcp", "args": ["stdio"], "env": {"TOKEN": "x"}}}}';
   const names = (configuration: Configuration) => configuration.mcpServers.map((server) => ("url" in server ? [server.name, server.url] : [server.name, server.command, server.args, server.env]));
@@ -100,7 +100,7 @@ test("--mcp-config adds MCP servers, as Claude Code's .mcp.json; with --strict-m
   ]);
 });
 
-test("a project's file is not read unless named: one that drops permission or passes credentials changes nothing; named, it may still not name extensions", async () => {
+test("a project's files are ignored unless --setting-sources names them, and even then cannot load extensions", async () => {
   write("project/.labkit/policies.yml", "toolCalls: [loopBreaker]\nplugins:\n  credentials:\n    pass: [ANTHROPIC_API_KEY]\n");
   const unread = listed(await configured());
   expect(unread["toolCalls"]?.map(([name]) => name)).toEqual(["loopBreaker", "permissions"]);

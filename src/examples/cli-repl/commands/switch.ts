@@ -1,13 +1,12 @@
 /**
- * `/switch <name>` asks another model from the next turn on, in this session only: a well-known
- * model, or `provider/model`. `/switch` alone shows the model being asked and offers the models that
- * can be asked to pick; when there are none, it says what would make one available. Before a model
- * is picked, the model named or picked is the one the session opens with, unless it does not take
- * the settings the command line names. `/model` does the same and also makes the model the one new
- * sessions ask.
+ * `/switch <name>` switches the model for this session only, from the next turn. The name is a
+ * well-known model or `provider/model`. `/switch` alone shows the current model and a picker of
+ * usable models; when there are none, it says how to make one available. Before a model is picked,
+ * `/switch` picks the model the session opens with, unless it does not support the settings given
+ * on the command line. `/model` also saves the model as the default.
  *
- * The change is reported to the session (`ModelChangeArrived`), which takes it between turns; what a
- * model does not allow is adjusted, and recorded, when it is next asked.
+ * The change is reported to the session (`ModelChangeArrived`), which applies it between turns; a
+ * setting the new model does not support is translated, and recorded, at its next request.
  */
 
 import { Effect } from "effect";
@@ -34,7 +33,7 @@ export const switchCommand: ReplCommand = {
       const chosen = yield* modelNamed(words, "Which model, for this session?");
       if (chosen === undefined) return { _tag: "Quiet" } as const;
       const target = yield* targetOf(chosen, "/model");
-      // The session opens with the command line's settings: a model that does not take them is not picked.
+      // The session opens with the command-line settings, so a model that does not support them is refused.
       yield* takenBy(target, context.commandLine, "the command line", "Pick another model, or start the CLI again without that setting.");
       const done: DoneWithoutModel = { _tag: "Picked", target };
       return done;

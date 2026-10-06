@@ -1,16 +1,15 @@
 /**
- * `/model <name>` asks another model from the next turn on, and makes it the model new sessions ask:
- * a well-known model, or `provider/model`. `/model` alone shows the model being asked and offers the
- * models that can be asked to pick; when there are none, it says what would make one available.
- * Before a model is picked, the model named or picked is the one the session opens with, and the one
- * new sessions ask; a model that does not take the settings the command line names is not picked, and
- * nothing is written. `/switch` changes the model of this session only.
+ * `/model <name>` switches the session's model from the next turn and saves it as the default for new
+ * sessions. The name is a well-known model or `provider/model`. `/model` alone shows the current
+ * model and a picker of usable models; when there are none, it says how to make one available.
+ * Before a model is picked, `/model` picks the model the session opens with; a model that does not
+ * support the settings given on the command line is refused, and nothing is saved. `/switch` changes
+ * the model of this session only.
  *
- * The model new sessions ask is written as `model` into the user's configuration folder
- * (`agent-config` `write.ts`): into the file that sets it, else `models.yml`. A layer read after the
- * user's folder (a project's file, `--settings`) that sets `model` decides it for the sessions that
- * read that layer, and `/model` says so. When the file cannot be written, `/model` says so, and the
- * session still asks the model.
+ * The default is saved as `model` in the user's configuration folder (`agent-config` `write.ts`): in
+ * the file that sets it, else in `models.yml`. If a layer read after the user's folder (a project
+ * file, `--settings`) also sets `model`, it wins wherever it is read, and `/model` says so. If the
+ * file cannot be written, `/model` says so and still switches the session's model.
  */
 
 import { sep } from "node:path";
@@ -27,9 +26,8 @@ import { modelNamed, switchTo } from "../picking.ts";
 const isMapping = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
- * Writes `target` as the model new sessions ask, and returns what to say of it: the file written,
- * and a layer read after the user's folder that sets `model` too; or the error, when it could not be
- * written.
+ * Saves `target` as the default model and returns what to print: the file written, and a hint when a
+ * later layer also sets `model`; or the error when the file could not be written.
  */
 const madeDefault = (target: Asked, { configFolder, layers }: CommandContext) => {
   const name = `${target.provider}/${target.model}`;
@@ -63,7 +61,7 @@ export const model: ReplCommand = {
       const chosen = yield* modelNamed(words, "Which model? It becomes the default.");
       if (chosen === undefined) return { _tag: "Quiet" } as const;
       const target = yield* targetOf(chosen, "/model");
-      // The session opens with the command line's settings: a model that does not take them is not picked, and nothing is written.
+      // The session opens with the command-line settings, so a model that does not support them is refused before anything is saved.
       yield* takenBy(target, context.commandLine, "the command line", "Pick another model, or start the CLI again without that setting.");
       const done: DoneWithoutModel = { _tag: "Picked", target, text: yield* madeDefault(target, context) };
       return done;

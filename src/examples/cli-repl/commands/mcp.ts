@@ -1,5 +1,5 @@
 /**
- * `/mcp` says how the session's MCP servers are; `/mcp reconnect <server>` starts one again, as the
+ * `/mcp` shows the status of the session's MCP servers; `/mcp reconnect <server>` restarts one, as the
  * ACP host's `/mcp` does (`agent-mcp` `command.ts`).
  */
 
@@ -12,7 +12,7 @@ export const mcp: ReplCommand = {
   name: "/mcp",
   args: "[reconnect <server>]",
   says: "Show the MCP servers' status; reconnect one",
-  // `reconnect`, then a server's name.
+  // `reconnect`, then a server name.
   complete: (words, from) => {
     if (words.length === 2) return ["reconnect "];
     return words.length === 3 && words[1] === "reconnect" ? from.servers : [];

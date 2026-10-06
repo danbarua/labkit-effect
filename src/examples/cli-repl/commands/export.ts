@@ -1,6 +1,6 @@
 /**
  * `/export` writes the session's transcript (`markdownOf`) to `.<brand>/exports/<session>.md` in the
- * folder the CLI runs in (`.labkit/` for labkit's), as the ACP host's `/export` does.
+ * working folder (`.labkit/` for labkit), as the ACP host's `/export` does.
  */
 
 import { join } from "node:path";

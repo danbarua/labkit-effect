@@ -1,27 +1,23 @@
 /**
- * The REPL: a prompt, the user's input to the model, its answer, and again, until `/exit`. A line
- * that starts with `/` is one of the REPL's own commands (`commands.ts`) and does not go to the model;
- * Tab completes a command, a model's name and a setting, from what the session's model takes.
- * With input that is not a terminal there is nothing to prompt: it answers the first prompt, if one
- * was given, and ends. At a terminal, a new session whose model cannot be asked starts in the REPL
- * without a model (`withoutModel`), and the session opens once `/model` names one that can be asked.
+ * The REPL: it reads a line, sends it to the model, prints the answer, and repeats until `/exit`. A
+ * line that starts with `/` runs one of the REPL's commands (`commands.ts`) instead. Tab completes a
+ * command name, a model name, a setting, or a value the current model supports. When input is not a
+ * terminal, the REPL answers the prompt given on the command line, if any, and exits. At a terminal,
+ * a new session whose model cannot be used starts without a model (`withoutModel`); the session
+ * opens once `/model` or `/switch` picks a usable model.
  *
- * The REPL follows the session (`following`) as ACP's host does (`agent-acp/feed.ts`): the
- * session's facts and what its model requests pass on are merged as they come, and each goes
- * through ACP's projection (`agent-acp/projection.ts`, mode `live`). The projection gives each part
- * of a response's text once, whether its deltas or its `ModelResponded` arrive first; the REPL
- * prints the answer's text as it comes, and the thinking's dimmed. When a turn ends, the REPL waits
- * until the follower has taken the turn's end, and then prints what the text did not say: that the
- * answer was cut short or interrupted, or that the turn failed or gave no answer.
+ * The REPL follows the session as the ACP host does (`agent-acp/feed.ts`): it merges the session's
+ * recorded facts with the model's streamed deltas, and passes each through ACP's projection
+ * (`agent-acp/projection.ts`, live mode), which emits each piece of response text once, whichever
+ * arrives first. Answer text is printed as it streams, and thinking is printed dimmed. When a turn
+ * ends, the REPL waits until every update of the turn has been printed, then prints a note if the
+ * answer was cut short or interrupted, or if the turn failed or gave no answer.
  *
- * Each tool call is shown as it ends: the tool and its input, then what it returned or why it
- * failed. Before a tool call that needs permission runs, the question is recorded
- * (`PermissionAsked`), and the REPL asks it: the user picks an option, which is recorded as the
- * answer (`PermissionAnswered`). Ctrl+C at the question rejects the call. While a turn runs, Ctrl+C
- * interrupts it, and other keys are dropped (`turn-keys.ts`), except Option+T.
- *
- * Option+T, at the prompt or while a turn runs, shows or hides the model's thinking until the REPL
- * exits (`view.ts`), and the REPL says which.
+ * Each tool call is printed when it ends: the tool and its input, then its result or why it failed.
+ * Before a tool call that needs permission, the REPL asks the user and records the answer
+ * (`PermissionAsked`, `PermissionAnswered`); Ctrl+C at the question rejects the call. During a turn,
+ * Ctrl+C interrupts it and other keys are ignored (`turn-keys.ts`), except Option+T, which shows or
+ * hides thinking (`view.ts`).
  */
 
 import type { McpServers } from "../../agent-mcp/servers.ts";
@@ -48,28 +44,29 @@ import { type TurnKeys, turnKeys } from "./turn-keys.ts";
 import { logKeys } from "./log-keys.ts";
 import { isOptionT, optionT, toggleThinking, type View } from "./view.ts";
 
-/** What the REPL keeps of a session it follows at a terminal. */
+/** The REPL's state for a session it follows at a terminal. */
 interface Following {
-  /** Who holds the terminal's keys while a turn runs. */
+  /** The terminal's keys during a turn. */
   readonly keys: TurnKeys;
-  /** Completes once the follower has taken `turn`'s end: every update of the turn has been printed. */
+  /** Completes when every update of `turn` has been printed. */
   readonly turnEnded: (turn: TurnId) => Effect.Effect<void>;
-  /** Prints `note` dimmed, on a line of its own, between what the follower prints. */
+  /** Prints `note` dimmed, on its own line. */
   readonly noted: (note: string) => Effect.Effect<void>;
 }
 
-/** Of each session the REPL follows at a terminal: what it keeps of it. */
+/** The state of each session the REPL follows at a terminal. */
 const followers = Ref.makeUnsafe(HashMap.empty<Session, Following>());
 
-/** What a turn's ending adds to an answer: that it was cut short by a length limit, or interrupted. */
+/** The note printed after an answer that was cut short or interrupted. */
 const cutNote = (ending: ReturnType<typeof endingOf>): string | undefined => {
   if (ending?._tag === "CutShort") return "(stopped: the response reached a length limit)";
   return ending?._tag === "Interrupted" ? "(interrupted)" : undefined;
 };
 
 /**
- * What is printed after a turn: the answer, unless it was printed as it arrived (`printed`); saying
- * so when it was cut short; or how the turn ended when it gave none. Nothing, when the stream said it all.
+ * Returns what to print after a turn: the answer unless it already streamed (`printed`), with a note
+ * if it was cut short; or how the turn ended if it gave no answer. Undefined when there is nothing
+ * to add.
  */
 export const replyOf = (facts: ReadonlyArray<Fact>, printed: (turn: TurnId) => boolean): string | undefined => {
   const turn = lastTurn(facts);
@@ -77,16 +74,15 @@ export const replyOf = (facts: ReadonlyArray<Fact>, printed: (turn: TurnId) => b
   const answer = answerTo(facts, turn);
   if (ending?._tag === "Failed") return `(turn failed: ${ending.failure})`;
   if (answer === "") return ending?._tag === "Interrupted" ? "(interrupted)" : `(no answer: the turn ended ${ending?._tag ?? "with nothing recorded"})`;
-  // An answer cut short by a length limit (the output limit, or the context window), or by Ctrl+C, says so.
   const cut = cutNote(ending);
   if (turn !== undefined && printed(turn)) return cut;
   return cut === undefined ? answer : `${answer}\n${cut}`;
 };
 
 /**
- * Prints what follows the session's last turn. A session the REPL follows has printed the turn's
- * text: once the follower has taken the turn's end, only what the text did not say is printed. A
- * session it does not follow is printed the whole reply.
+ * Prints the end of the session's last turn. For a session the REPL follows, the text has already
+ * streamed: once the turn's updates are all printed, only the closing note is printed. For any other
+ * session, the whole reply is printed.
  */
 const printReply = (session: Session) =>
   Effect.gen(function* () {
@@ -99,9 +95,8 @@ const printReply = (session: Session) =>
   });
 
 /**
- * A turn: the input to the model, and what is printed once it ends. While it runs the REPL holds
- * the terminal's keys (`turn-keys.ts`): Ctrl+C interrupts the turn, which ends `Interrupted`, and
- * Option+T shows or hides the thinking (`view`), saying which.
+ * Sends `input` as a turn and prints its end. During the turn the REPL reads the keys itself
+ * (`turn-keys.ts`): Ctrl+C interrupts the turn, and Option+T shows or hides thinking.
  */
 const turn = (session: Session, input: string, view: View) =>
   Effect.scoped(
@@ -125,7 +120,7 @@ const turn = (session: Session, input: string, view: View) =>
     }),
   ).pipe(Effect.andThen(printReply(session)));
 
-/** The input `call` was given, as the facts hold it with the call. */
+/** Returns the input of tool call `call`, from the facts. */
 const inputOf = (facts: ReadonlyArray<Fact>, call: CallId): string => {
   const found = facts.flatMap((fact) => {
     if (fact._tag !== "Observed") return [];
@@ -137,10 +132,10 @@ const inputOf = (facts: ReadonlyArray<Fact>, call: CallId): string => {
   return found === undefined ? "" : asText(found);
 };
 
-/** The question as it is shown: the tool, its kind, and the call's input. */
+/** The permission question as shown: the tool, its kind, and the call's input. */
 const shown = (question: PermissionQuestion, input: string): string => `Run ${question.tool} (${question.kind})? ${input}`;
 
-/** Text in one line of at most `width` characters, with how many more lines it has. */
+/** Returns the first line of `text`, cut to `width` characters, and how many lines follow it. */
 const oneLine = (text: string, width = 200): string => {
   const [first = "", ...rest] = text.split("\n");
   const cut = first.length > width ? `${first.slice(0, width)}…` : first;
@@ -169,10 +164,10 @@ const endedAs = (outcome: ToolOutcome): string => {
   }
 };
 
-/** A tool call that ended, as it is shown: the tool and its input, then how it ended. */
+/** How an ended tool call is printed: the tool and its input, then how it ended. */
 const shownEnded = (tool: string, input: string, outcome: ToolOutcome): string => `● ${tool} ${oneLine(input)}\n  \x1b[2m⎿ ${endedAs(outcome)}\x1b[0m`;
 
-/** The tool a call asked for, as the facts hold it with the call. */
+/** Returns the tool that `call` names, from the facts. */
 const toolOf = (facts: ReadonlyArray<Fact>, call: CallId): string =>
   facts.flatMap((fact) => {
     if (fact._tag !== "Observed") return [];
@@ -182,7 +177,7 @@ const toolOf = (facts: ReadonlyArray<Fact>, call: CallId): string =>
     return [];
   })[0] ?? "(a tool)";
 
-/** The text of a chunk the projection gives, and whether it is thinking; nothing for any other update. */
+/** Returns the text of an answer or thinking chunk, and which it is; undefined for any other update. */
 const chunkOf = (update: SessionUpdate): { readonly kind: "answer" | "thinking"; readonly text: string } | undefined => {
   if (update.sessionUpdate !== "agent_message_chunk" && update.sessionUpdate !== "agent_thought_chunk") return undefined;
   if (update.content.type !== "text") return undefined;
@@ -190,12 +185,11 @@ const chunkOf = (update: SessionUpdate): { readonly kind: "answer" | "thinking";
 };
 
 /**
- * Follows the session, for as long as the scope lasts: its facts and what its model requests pass
- * on, merged into one inbox, each taken in turn through ACP's projection (`next`, mode `live`) from
- * the state of the facts before (`project`, mode `replay`), so nothing they showed is shown again.
- * Prints the text the projection gives, its thinking dimmed while `view` shows thinking; shows each
- * tool call as it ends; asks each question recorded before a call runs; and marks each turn's end
- * once it is taken.
+ * Follows the session while the scope lasts. New facts and streamed deltas go into one queue and
+ * through ACP's projection in live mode (`next`), starting from the projection of the facts already
+ * recorded (`project`, replay mode), so nothing is printed twice. Prints answer text, and thinking
+ * dimmed while `view` shows it; prints each tool call when it ends; asks each permission question;
+ * and marks each turn's end once all its updates are printed.
  */
 const following = (session: Session, view: View, stdin?: NodeJS.ReadStream) =>
   Effect.gen(function* () {
@@ -206,9 +200,9 @@ const following = (session: Session, view: View, stdin?: NodeJS.ReadStream) =>
     const present = presentFrom(yield* immutableToolCatalogOf(before));
     const replayed = (yield* project(before, { mode: "replay", present })).state;
     const state = yield* Ref.make(replayed);
-    // The turns whose end the follower has taken, every update printed: those that ended before it followed, then each it takes.
+    // The turns whose updates are all printed: those that ended before following began, then each one as it ends.
     const taken = yield* Ref.make<ReadonlySet<TurnId>>(replayed.ended);
-    // What completes when each turn's end is taken, by the turn: made when first asked for.
+    // For each turn, a Deferred that completes when its updates are all printed; created on first use.
     const ends = yield* Ref.make(HashMap.empty<TurnId, Deferred.Deferred<void>>());
     const endOf = (turn: TurnId): Effect.Effect<Deferred.Deferred<void>> =>
       Ref.modify(ends, (all) =>
@@ -222,7 +216,7 @@ const following = (session: Session, view: View, stdin?: NodeJS.ReadStream) =>
       );
     const keys = turnKeys(stdin);
     const turnEnded = (turn: TurnId) => Effect.flatMap(Ref.get(taken), (ended) => (ended.has(turn) ? Effect.void : Effect.flatMap(endOf(turn), Deferred.await)));
-    // The kind of text the line printed last holds, while it is not ended.
+    // The kind of text on the current unfinished line, if any.
     const open = yield* Ref.make<"answer" | "thinking" | undefined>(undefined);
     const write = (text: string) => Effect.sync(() => void process.stdout.write(text));
     const endLine = Effect.flatMap(Ref.getAndSet(open, undefined), (was) => (was === undefined ? Effect.void : write("\n")));
@@ -238,7 +232,7 @@ const following = (session: Session, view: View, stdin?: NodeJS.ReadStream) =>
         yield* Ref.set(open, chunk.kind);
         yield* write(chunk.kind === "thinking" ? `\x1b[2m${chunk.text}\x1b[0m` : chunk.text);
       });
-    /** What the REPL does on a fact besides printing its text: shows a call that ended, or asks a question. */
+    /** Handles a fact beyond printing text: prints an ended tool call, or asks a permission question. */
     const acted = (fact: Fact) =>
       Effect.gen(function* () {
         if (fact._tag === "Observed" && fact.observation._tag === "ToolEnded") {
@@ -272,7 +266,7 @@ const following = (session: Session, view: View, stdin?: NodeJS.ReadStream) =>
           yield* Deferred.succeed(yield* endOf(turn), undefined);
         }
       }).pipe(
-        // A defect in one input (a presentation or a write that throws) is logged; the follower goes on with the next.
+        // A defect in one input (a projection or a write that throws) is logged, and following continues.
         Effect.catchDefect((defect) => Effect.logError(logKeys.follow.inputFailed, { input: input._tag, cause: String(defect) })),
       );
     const forward = <A extends ProjectionInput>(subscription: PubSub.Subscription<A>) =>
@@ -282,7 +276,7 @@ const following = (session: Session, view: View, stdin?: NodeJS.ReadStream) =>
     yield* Effect.forkScoped(Effect.forever(Queue.take(inbox).pipe(Effect.flatMap(take))));
   });
 
-/** A request a turn left running, in words: a model request, or a tool call, and whether it began. */
+/** Describes a request an unfinished turn left running: a model request, a tool call and whether it started, or the turn-end review. */
 const shownLeft = (request: LeftRunning["requests"][number], began: ReadonlySet<CallId>): string => {
   switch (request._tag) {
     case "RequestModelResponse":
@@ -297,9 +291,9 @@ const shownLeft = (request: LeftRunning["requests"][number], began: ReadonlySet<
 };
 
 /**
- * The REPL at a terminal: it follows the session from when it opens (`following`), showing what
- * `view` shows and reading the keys of `stdin` (this process's) while a turn runs, and asks the user
- * whether to go on with a turn the session's facts left running, or end it.
+ * The REPL's host at a terminal: it follows the session from the moment it opens, shows what `view`
+ * allows, reads the keys of `stdin` (this process's by default) during a turn, and asks whether to
+ * resume or end a turn that a previous run left unfinished.
  */
 export const terminal = (view: View, stdin?: NodeJS.ReadStream): Host<Prompt.Environment | Services> => ({
   follow: (session) => following(session, view, stdin),
@@ -314,7 +308,7 @@ export const terminal = (view: View, stdin?: NodeJS.ReadStream): Host<Prompt.Env
   wentOn: printReply,
 });
 
-/** What the REPL is run with besides its session: where the user's settings are written, what it shows (`view`), and the settings the command line names. */
+/** What the REPL needs besides its session: the user's configuration folder, the view, and the settings given on the command line. */
 export interface ReplContext {
   /** The user's configuration folder: `/model` and `/settings` write into it. */
   readonly configFolder: string;
@@ -322,7 +316,7 @@ export interface ReplContext {
   readonly commandLine: SettingsChange;
 }
 
-/** The commands' context in the REPL: the folder the CLI runs in, and the session's layers and MCP servers. */
+/** Builds the commands' context: the working folder, the configuration layers, and the MCP servers. */
 const commandContext = (context: ReplContext, layers: CommandContext["layers"], mcp?: McpServers): CommandContext => ({
   folder: process.cwd(),
   configFolder: context.configFolder,
@@ -332,7 +326,7 @@ const commandContext = (context: ReplContext, layers: CommandContext["layers"], 
   ...(mcp === undefined ? {} : { mcp }),
 });
 
-/** Option+T at the prompt: shows or hides the thinking, and says which. */
+/** Option+T at the prompt: shows or hides thinking, with a note saying which. */
 const thinkingKey = (view: View): KeyBinding => ({ matches: isOptionT, run: toggleThinking(view) });
 
 export const repl = (session: Session, config: Config, first: string | undefined, interactive: boolean, context: ReplContext, mcp?: McpServers) =>
@@ -341,12 +335,12 @@ export const repl = (session: Session, config: Config, first: string | undefined
     if (first !== undefined) yield* turn(session, first, context.view);
     if (!interactive) return;
     yield* bracketedPaste;
-    /** Reads a line and does what it says; whether to read another. */
+    /** Reads and handles one line; returns whether to read another. */
     const step = Effect.gen(function* () {
       const input = yield* Multiline(completions(yield* offered(session, mcp)), [thinkingKey(context.view)]);
       if (input.trim() === "") return true;
       if (input.startsWith("/")) {
-        // A mistake in a command is said, and the REPL goes on.
+        // A command's error is printed, and the REPL continues.
         const done = yield* runInSession(session, input, commandContext(context, config.configuration.layers, mcp)).pipe(
           Effect.catchTag("UserError", (error) => Effect.succeed(said(String(error.userMessage)))),
         );
@@ -360,16 +354,16 @@ export const repl = (session: Session, config: Config, first: string | undefined
   }));
 
 /**
- * The REPL at a terminal before a model is picked, for a new session whose model cannot be asked
- * (`problem`): no model is set, the model's provider has no key set, or its server does not answer.
- * No session is open, so nothing is recorded. The REPL says the problem, then reads lines:
+ * The REPL at a terminal before a model is picked, for a new session whose model cannot be used
+ * (`problem`): none is set, its provider has no API key, or its server does not respond. No session
+ * is open, so nothing is recorded. The REPL prints the problem, then reads lines:
  *
- * - A command runs as it does without a model (`ReplCommand.withoutModel`): `/model <name>`, or
- *   `/model` and a pick, names a model. A model that can be asked is returned, and the session opens
- *   with it; one that cannot be asked is refused, saying why. `/exit` (or `/quit`) returns undefined.
- * - A command that does not run without a model is refused: it works once a model is picked.
- * - Input for the model is refused, saying that it was not sent and why. `first`, the prompt the
- *   command line gave, is refused in the same words.
+ * - A command that works without a model runs (`ReplCommand.withoutModel`). `/model` or `/switch`
+ *   with a usable model returns that model, and the session opens with it; an unusable model is
+ *   refused with the reason. `/exit` (or `/quit`) returns undefined.
+ * - Any other command is refused until a model is picked.
+ * - Any other input is not sent, and the REPL says why. `first`, a prompt given on the command line,
+ *   is treated the same way.
  */
 export const withoutModel = (problem: CannotAsk, first: string | undefined, context: ReplContext, layers: CommandContext["layers"]) =>
   Effect.scoped(
@@ -378,7 +372,7 @@ export const withoutModel = (problem: CannotAsk, first: string | undefined, cont
       yield* Console.log("No model selected · /model to pick one · /help for commands · /exit to quit");
       yield* Console.log(first === undefined ? String(saidOf(problem).userMessage) : notSent);
       yield* bracketedPaste;
-      /** Reads a line and does what it says: the model picked, `exit`, or `again` to read another line. */
+      /** Reads and handles one line; returns the picked model, `exit`, or `again`. */
       const step = Effect.gen(function* () {
         const input = yield* Multiline(completions(yield* offeredWithoutModel), [thinkingKey(context.view)]);
         if (input.trim() === "") return "again" as const;
@@ -386,7 +380,7 @@ export const withoutModel = (problem: CannotAsk, first: string | undefined, cont
           yield* Console.log(notSent);
           return "again" as const;
         }
-        // A mistake in a command is said, and the REPL goes on.
+        // A command's error is printed, and the REPL continues.
         const done = yield* runWithoutModel(input, commandContext(context, layers)).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(said(String(error.userMessage)))));
         if (done._tag === "Picked") {
           if (done.text !== undefined) yield* Console.log(done.text);

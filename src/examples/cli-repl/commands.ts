@@ -1,10 +1,10 @@
 /**
- * The REPL's own commands: lines that start with `/` and do not go to the model. Each command is in
- * its own file in `commands/`, written against `command.ts`, and listed in `commands` here, in the
- * order `/help` shows them. `/help` and `/exit`, which are about the REPL itself, are here.
+ * The REPL's commands: lines that start with `/` and are not sent to the model. Each command is in
+ * its own file in `commands/`, written against `command.ts`, and listed in `commands` here, in `/help`
+ * order. `/help` and `/exit`, which concern the REPL itself, are defined here.
  *
- * `completions` gives the prompt what a line that starts with `/` could become: a command's name,
- * then what that command completes its words to.
+ * `completions` completes a line that starts with `/`: first a command name, then that command's
+ * arguments.
  */
 
 import { Effect } from "effect";
@@ -22,7 +22,7 @@ import { tools } from "./commands/tools.ts";
 import { invalid } from "./invalid.ts";
 import { pickable } from "./picking.ts";
 
-/** The text of `/help`: each command, what can follow it, and what it does. */
+/** The text of `/help`: each command, its arguments, and what it does. */
 export const help = (): string => {
   const usages = commands.map((each) => [each.args === undefined ? each.name : `${each.name} ${each.args}`, each.says] as const);
   const width = Math.max(...usages.map(([usage]) => usage.length)) + 2;
@@ -44,20 +44,20 @@ const exit: ReplCommand = {
   withoutModel: () => Effect.succeed({ _tag: "Exit" } as const),
 };
 
-/** The REPL's commands, in the order `/help` shows them. */
+/** The REPL's commands, in `/help` order. */
 export const commands: ReadonlyArray<ReplCommand> = [model, switchCommand, effort, settings, tools, exportCommand, mcp, helpCommand, exit];
 
-/** What the REPL says of a line that starts with `/` and names none of its commands. */
+/** The error for a line that starts with `/` but names no command. */
 export const noCommand = (line: string) => invalid(`Unknown command: ${line.trim().split(/\s+/)[0] ?? line}.`, "Type /help to list the commands.");
 
-/** The command that `line` starts with, and the words after its name; undefined when `line` names none. */
+/** Returns the command `line` starts with and the words after it; undefined when it names none. */
 const commandIn = (line: string) => {
   const [name = "", ...words] = line.trim().split(/\s+/);
   const found = commands.find((each) => each.name === name || each.aliases?.some((alias) => alias === name) === true);
   return found === undefined ? undefined : { command: found, words };
 };
 
-/** Runs the command that `line` names in `session`; fails saying so when `line` names none. */
+/** Runs the command `line` names in `session`; fails when it names none. */
 export const runInSession = (session: Session, line: string, context: CommandContext) =>
   Effect.gen(function* () {
     const named = commandIn(line);
@@ -67,8 +67,8 @@ export const runInSession = (session: Session, line: string, context: CommandCon
   });
 
 /**
- * Runs the command that `line` names before a model is picked. A command that does not run without
- * a model is refused, saying to pick one; so is a line that names no command.
+ * Runs the command `line` names before a model is picked. A command that needs a model is refused
+ * with a hint to pick one; a line that names no command is refused too.
  */
 export const runWithoutModel = (line: string, context: CommandContext) =>
   Effect.gen(function* () {
@@ -85,15 +85,15 @@ export const offered = (session: Session, servers?: McpServers) =>
     return result;
   });
 
-/** What a line can be completed from before a model is picked: the models that can be asked; no settings, and no servers. */
+/** What completion draws on before a model is picked: the usable models only. */
 export const offeredWithoutModel = Effect.map(pickable, (models): Offered => ({ models: models.map((each) => each.value), settings: [], servers: [] }));
 
-/** The commands' names as they are typed: with a space after a name that words can follow. */
+/** The command names as completed: with a trailing space for a command that takes arguments. */
 const typedAs = commands.flatMap((each) => [each.args === undefined ? each.name : `${each.name} `, ...(each.aliases ?? [])]);
 
 /**
- * The lines that `text` could become, when it starts with `/`: its last word completed to a
- * command's name, or after a command's name, to what that command completes it to.
+ * Returns the completions of `text` when it starts with `/`: its last word completed to a command
+ * name, or, after a command name, to that command's completions.
  */
 export const completions =
   (from: Offered) =>

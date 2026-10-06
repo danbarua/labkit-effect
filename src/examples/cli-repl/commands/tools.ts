@@ -1,4 +1,4 @@
-/** `/tools` shows the tools every request offers the model: the session's, as it opened with them (ImmutableToolCatalog). */
+/** `/tools` lists the tools offered to the model with every request: those the session opened with. */
 
 import { Effect } from "effect";
 import { immutableToolCatalogOf } from "../../../agent-session/configuration/session-setup.ts";

@@ -1,25 +1,25 @@
 /**
- * The terminal while a turn runs. Effect's terminal holds raw mode only while a prompt reads; the
- * rest of the time the terminal is in line mode, where Ctrl+D at the start of a line ends the
- * process's input, and every prompt after it ends at once (the question before a tool call is then
- * taken as refused, and the REPL exits). So while a turn runs, and no question is being asked, the
- * REPL holds raw mode and reads the keys itself: Ctrl+C interrupts the turn, any other key is passed
- * to the turn's `key` (which acts on Option+T), and a key it does not act on is dropped. A question
- * is lent the terminal for as long as it is asked.
+ * The terminal during a turn. Effect's terminal is in raw mode only while a prompt is reading; the rest
+ * of the time it is in line mode, where Ctrl+D at the start of a line closes the process's input, and
+ * every later prompt ends at once (so a permission question is answered as refused, and the REPL
+ * exits). So during a turn, while no question is asked, the REPL puts the terminal in raw mode and
+ * reads the keys itself: Ctrl+C interrupts the turn, other keys go to the turn's `key` handler (which
+ * acts on Option+T), and keys it ignores are dropped. A permission question borrows the terminal while
+ * it is asked.
  */
 
 import { Effect } from "effect";
 
 export interface TurnKeys {
-  /** Holds the terminal for a turn: Ctrl+C calls `interrupt`; any other key is passed to `key`, as the text the terminal sent. */
+  /** Takes the terminal for a turn: Ctrl+C calls `interrupt`, and any other key goes to `key` as the text the terminal sent. */
   readonly hold: (interrupt: () => void, key?: (text: string) => void) => void;
-  /** Gives the terminal back at the turn's end, in line mode. */
+  /** Returns the terminal to line mode at the turn's end. */
   readonly release: () => void;
-  /** Lends the terminal to `asking` (a question at the terminal) while it runs, and holds it again after. */
+  /** Lets `asking` (a question at the terminal) use the terminal while it runs, then takes it back. */
   readonly lend: <A, E, R>(asking: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 }
 
-/** Ctrl+C, as raw mode passes it on. */
+/** The byte Ctrl+C sends in raw mode. */
 const ctrlC = 0x03;
 
 export const turnKeys = (stdin: NodeJS.ReadStream = process.stdin): TurnKeys => {
