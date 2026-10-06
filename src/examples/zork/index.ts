@@ -4,7 +4,7 @@
  * that starts with `claude-` and `xai` for one that starts with `grok-`. Each player is asked as the
  * CLI asks a model, with its provider's key from the provider's variable (`agent-host/catalog.ts`):
  * `ANTHROPIC_API_KEY` for Claude, `XAI_API_KEY` for Grok. By default the Engine is
- * claude-sonnet-4-5 and the Adventurer claude-haiku-4-5.
+ * claude-sonnet-5-5 and the Adventurer claude-haiku-4-5.
  *
  * A game's two sessions are saved in `~/.local/share/labkit/sessions/` and log to
  * `~/.local/share/labkit/logs/zork-<role>-<game>.log`; with `OTEL_EXPORTER_OTLP_ENDPOINT` set, their
@@ -20,12 +20,14 @@ import { OtlpSpansAndMetrics, otlpLogger } from "../../instrumentation/telemetry
 import { play, type Player } from "./scenario.ts";
 
 /**
- * The settings each provider's players ask with: short responses, and Claude's thinking off. Grok's
- * models cannot turn their reasoning off, so no thinking setting is given; xAI does not count the
- * reasoning against the output limit.
+ * The settings each provider's players ask with: short responses, and as little thinking as the
+ * model allows. A Claude model that can turn its thinking off (Haiku 4.5) does; one that cannot
+ * (Sonnet 5.5, whose adapter records that `disabled` was not sent) thinks at low effort, within an
+ * output limit that leaves room for it. Grok's models cannot turn their reasoning off, so no thinking
+ * setting is given; xAI does not count the reasoning against the output limit.
  */
 const settingsOf: Readonly<Record<string, ModelSettings>> = {
-  anthropic: { thinking: "disabled", maxOutputTokens: TokenCount.make(1024) },
+  anthropic: { thinking: "disabled", effort: "low", maxOutputTokens: TokenCount.make(4096) },
   xai: { maxOutputTokens: TokenCount.make(1024) },
 };
 
@@ -57,7 +59,7 @@ const playerFor = (named: string): Player => {
   return { target: { provider: ProviderName.make(provider), model: ModelName.make(model), settings } };
 };
 
-const [engineModel = "claude-sonnet-4-5", adventurerModel = "claude-haiku-4-5"] = process.argv.slice(2);
+const [engineModel = "claude-sonnet-5-5", adventurerModel = "claude-haiku-4-5"] = process.argv.slice(2);
 const game = await Effect.runPromise(
   play({ engine: playerFor(engineModel), adventurer: playerFor(adventurerModel) }).pipe(
     reportedBy({ _tag: "Test", name: TestName.make("zork") }),

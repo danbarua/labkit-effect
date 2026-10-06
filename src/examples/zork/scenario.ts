@@ -16,6 +16,7 @@ import { Brand, logsFolderOf, sessionsFolderOf } from "../../agent-host/brand.ts
 import { LogsToFile } from "../../agent-host/logs.ts";
 import { SessionServices } from "../../agent-host/services.ts";
 import { Headless, withSession } from "../../agent-host/with-session.ts";
+import type { Ending } from "../../agent-machine/decision.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
 import { InputText } from "../../agent-machine/names.ts";
 import type { ModelTarget } from "../../agent-machine/observation.ts";
@@ -107,19 +108,20 @@ const optionsOf = (
   };
 };
 
-/** Asks `session` `text` and returns the text it answered; a turn that does not complete fails the game. */
-const asked = (session: Session, id: string) => (text: string) => Effect.gen(function* () {
+/** Asks `session` `text`, and returns how the turn ended and the text it answered. */
+const asked = (session: Session) => (text: string) => Effect.gen(function* () {
   const before = (yield* session.facts).length;
   const ending = yield* session.prompt({ text: InputText.make(text) });
   yield* session.idle;
-  if (ending._tag !== "Completed") return yield* new ZorkResponseFailed({
-    message: `${id}: ${ending._tag}${ending._tag === "Failed" ? `: ${ending.failure}` : ""}`,
-  });
-  return (yield* session.facts).slice(before).flatMap((fact) =>
+  const answer = (yield* session.facts).slice(before).flatMap((fact) =>
     fact._tag === "Observed" && fact.observation._tag === "ModelResponded"
       ? fact.observation.parts.flatMap((part) => part._tag === "Text" ? [part.text] : []) : [],
   ).join("\n").trim();
+  return { ending, answer };
 });
+
+/** Says how a turn of the session `id` ended, when it did not complete. */
+const endedAs = (id: string, ending: Ending): string => `${id}: ${ending._tag}${ending._tag === "Failed" ? `: ${ending.failure}` : ""}`;
 
 const Scene = Schema.Struct({ narration: Schema.String, tools: Schema.Array(Schema.Literals(actionNames)) });
 const decodeScene = Schema.decodeUnknownResult(Scene, { onExcessProperty: "error" });
@@ -166,10 +168,11 @@ export const play = (setup: Setup) => {
     return yield* withSession(optionsOf(setup, id, "engine", setup.engine, enginePrompt(commands), brand), (engineSession) =>
       withSession(optionsOf(setup, id, "adventurer", setup.adventurer, adventurerPrompt(commands), brand, worldTools(state), offeredTools(state), feedback), (adventurerSession) =>
         Effect.gen(function* () {
-          const engine = asked(engineSession, `zork-engine-${id}`);
-          const adventurer = asked(adventurerSession, `zork-adventurer-${id}`);
+          const engine = asked(engineSession);
+          const adventurer = asked(adventurerSession);
+          // The engine's turn must complete: its answer is the scene.
           const narrate = (world: World, action?: Action) => engine(JSON.stringify({ world: view(world), action: action ?? null })).pipe(
-            Effect.flatMap((text) => sceneFrom(text, world)),
+            Effect.flatMap(({ ending, answer }) => ending._tag === "Completed" ? sceneFrom(answer, world) : Effect.fail(new ZorkResponseFailed({ message: endedAs(`zork-engine-${id}`, ending) }))),
           );
           const scene = yield* narrate(initialWorld());
           yield* Ref.update(state, (current) => ({ ...current, offered: scene.tools }));
@@ -179,9 +182,15 @@ export const play = (setup: Setup) => {
             (previous) => Effect.gen(function* () {
               const before = yield* Ref.get(state);
               if (before.world.outcome !== "Alive") return previous;
-              yield* adventurer(JSON.stringify({ narration: previous.at(-1)?.engine ?? scene.narration, world: view(before.world), offeredTools: before.offered }));
+              const played = yield* adventurer(JSON.stringify({ narration: previous.at(-1)?.engine ?? scene.narration, world: view(before.world), offeredTools: before.offered }));
               const after = yield* Ref.get(state);
-              if (after.action === undefined) return yield* new ZorkResponseFailed({ message: `Adventurer ended the turn without a successful world tool call (game turn ${before.world.turn + 1}).` });
+              // An action that succeeded plays the game turn, however the turn ended after it: the reply that follows an action is not needed.
+              if (after.action === undefined)
+                return yield* new ZorkResponseFailed({
+                  message: played.ending._tag === "Completed"
+                    ? `Adventurer ended the turn without a successful world tool call (game turn ${before.world.turn + 1}).`
+                    : `${endedAs(`zork-adventurer-${id}`, played.ending)}, without a successful world tool call (game turn ${before.world.turn + 1}).`,
+                });
               const next = yield* narrate(after.world, after.action);
               yield* Ref.update(state, (current) => ({ ...current, offered: next.tools, action: undefined }));
               return [...previous, { turn: after.world.turn, offered: before.offered, action: after.action, world: after.world, engine: next.narration }];

@@ -207,6 +207,21 @@ test.each([
   expect(adventurer.seen).toHaveLength(0);
 });
 
+test("Zork plays a game turn whose action succeeded on the last request it may make, though the reply after it is vetoed", async () => {
+  const engine = scriptedEngine((world) => (world.outcome === "Alive" ? ["move", "look"] : []));
+  // Each game turn: three moves with no exit, then a look that succeeds on the fourth request; the fifth, the reply, is over the limit.
+  const adventurer = model("adventurer", (context, n) => {
+    // The tool results since the game turn's input, the last message with text from the user.
+    const input = context.messages.reduce((found, message, index) => (message.role === "user" && message.parts.some((part) => part._tag === "Text") ? index : found), -1);
+    const results = context.messages.slice(input + 1).flatMap((message) => message.parts.filter((part) => part._tag === "ToolResult")).length;
+    if (results === 4) return say("Done.");
+    return call(results === 3 ? { tool: "look", input: {} } : move("up"), `try-${n}`);
+  });
+  const game = await runTest(played(setup(engine.player, adventurer.player)));
+  expect(game.exchanges.length).toBeGreaterThan(0);
+  expect(game.exchanges[0]?.action.tool).toBe("look");
+});
+
 test("Zork reports provider failures without writing a successful game", async () => {
   const result = await runTest(played(setup(model("engine", () => undefined).player, scriptedAdventurer(() => ({ tool: "look", input: {} })).player)).pipe(Effect.result));
   expect(result._tag).toBe("Failure");
