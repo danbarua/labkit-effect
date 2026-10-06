@@ -10,6 +10,7 @@ import { expect } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
+import * as git from "es-git";
 import { BunServices } from "@effect/platform-bun";
 import { Deferred, Effect, Fiber, Layer, Logger, References } from "effect";
 import * as Agent from "effective-acp/agent";
@@ -706,6 +707,31 @@ test("the editor world's system prompt names the working folder; no tool's descr
   expect(immutableSystemPromptOf(facts)).toBe(`The working folder is ${host.cwd}.`);
   expect(catalog.filter((tool) => JSON.stringify([tool.description, tool.input]).includes(host.cwd)).map((tool): string => tool.name)).toEqual([]);
   expect(catalog.flatMap((tool) => undescribedInputs(tool.input).map((input) => `${tool.name}: ${input}`))).toEqual([]);
+});
+
+test("in a working folder that is a git repository's root, the editor world also offers the git tools and says so in the system prompt; a git call is titled by its intent", async () => {
+  const host = startHost({
+    script: [answer({ _tag: "ToolCall", call: "git-1", tool: "git_status", input: { intent: "See what changed." } }), answer({ _tag: "Text", text: "Nothing changed." })],
+  });
+  mkdirSync(host.cwd, { recursive: true });
+  await git.initRepository(host.cwd, { initialHead: "main" });
+  const { app, log } = sdkClient();
+  const sessionId = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, { fs: { readTextFile: true, writeTextFile: true }, terminal: true });
+    const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "What changed?"));
+    return created.sessionId;
+  });
+  await host.stop();
+  const facts = await factsOn(storeFileOf(host.directory, sessionId));
+  const catalog = await Effect.runPromise(immutableToolCatalogOf(facts));
+  expect(catalog.map((tool): string => tool.name).filter((name) => name.startsWith("git_"))).toHaveLength(17);
+  expect(immutableSystemPromptOf(facts)).toBe(`The working folder is ${host.cwd}. The working folder is the root of a git repository, which the git tools work in.`);
+  expect(catalog.filter((tool) => JSON.stringify([tool.description, tool.input]).includes(host.cwd)).map((tool): string => tool.name)).toEqual([]);
+  expect(catalog.flatMap((tool) => undescribedInputs(tool.input).map((input) => `${tool.name}: ${input}`))).toEqual([]);
+  expect(log.updates.find((update) => update.sessionUpdate === "tool_call" && update.toolCallId === "git-1")).toMatchObject({ title: "See what changed." });
+  const ended = observed(facts).flatMap((fact) => (fact.observation._tag === "ToolEnded" ? [fact.observation] : []));
+  expect(ended).toEqual([expect.objectContaining({ call: "git-1", outcome: expect.objectContaining({ _tag: "Succeeded", output: expect.objectContaining({ body: { _tag: "Text", text: "[]" } }) }) })]);
 });
 
 test("edit_file replaces one occurrence through fs/*, shown as a diff; run_command runs in the editor's terminal, shown in its call, released however it ends; both ask first", async () => {

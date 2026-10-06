@@ -17,6 +17,13 @@
  *   `write_file`) on the local disk under the working folder, bypassing the editor and its unsaved
  *   buffers. A launcher chooses it explicitly.
  *
+ * In both worlds, when the working folder is the root of a git repository (it holds `.git`), the
+ * session is also offered the git tools of `agent-tools/git.ts`, bound to that repository, and the
+ * system text says so. The git tools work on the disk, not through the editor: `git_add` stages
+ * what is saved, not an unsaved buffer, and `git_restore`, `git_reset` and `git_checkout` change
+ * files without the editor being told. A working folder inside a repository, below its root, is
+ * offered no git tools.
+ *
  * A path given to a tool is relative to the working folder, or absolute. A path outside the working
  * folder is refused with a failure the model reads.
  */
@@ -33,6 +40,7 @@ import type { ToolSource } from "../agent-session/tool-sources.ts";
 import { decoderOf, ignoredNote, jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
 import { asText, parseJson, receivedText } from "../agent-session/received.ts";
+import { gitTools, isRepositoryRoot } from "../agent-tools/git.ts";
 import { inside, workspaceInput } from "../agent-tools/in-workspace.ts";
 import { FilePath } from "../agent-tools/paths.ts";
 import { commandSeconds, EditFile, maxReadBytes, maxReadText, ReadFile, RunCommand, workingFolderLine, workspaceTools } from "../agent-tools/workspace.ts";
@@ -136,6 +144,12 @@ const aboutOf = (input: Readonly<Record<string, unknown>>): string | undefined =
 /** Returns a description of a failed call to the editor, for the model to read. */
 const editorFailure = (method: string, path: string, error: { readonly _tag?: string; readonly message?: string; readonly reason?: string }): string =>
   `${method} ${path}: ${error._tag === "PeerClosed" ? `the editor's connection closed (${error.reason ?? ""})` : (error.message ?? error._tag ?? "the editor gave no reason")}`;
+
+/** The git tools bound to the working folder `cwd`, when it is the root of a git repository; undefined otherwise. */
+const gitToolsAt = (cwd: string, strictInput: boolean) => (isRepositoryRoot(cwd) ? gitTools(cwd, { strictInput }) : undefined);
+
+/** Returns the system text for the working folder `cwd`: the line that names it, and the git tools' line when it is a repository's root. */
+const systemFor = (cwd: string, git: ReturnType<typeof gitToolsAt>): string => [workingFolderLine(cwd), ...(git === undefined ? [] : [git.system])].join(" ");
 
 /**
  * The tools that go through the editor, for the methods the client advertised: `read_file` with
@@ -307,9 +321,11 @@ export const editorWorld: World = {
         },
       };
 
-      const plain = presentFrom(tools);
-      // The title names what the call is about, its command or its path, so a permission question
-      // shows what it asks about. A file's path is its location. An edit's change is shown as a diff
+      const git = gitToolsAt(cwd, strictInput);
+      const plain = presentFrom([...tools, ...(git?.catalog ?? [])]);
+      // A call that gives its intent is titled with it (`presentFrom`). Any other call's title names
+      // what the call is about, its command or its path, so a permission question shows what it
+      // asks about. A file's path is its location. An edit's change is shown as a diff
       // before it runs (when permission is asked) and once it succeeded. A command's terminal is shown
       // once the call has one.
       const present: Present = (call, outcome) =>
@@ -317,7 +333,8 @@ export const editorWorld: World = {
           const parsed = parseJson(call.input);
           const input = "value" in parsed && typeof parsed.value === "object" && parsed.value !== null ? (parsed.value as Record<string, unknown>) : {};
           const about = aboutOf(input);
-          const shown: Presented = { ...(yield* plain(call, outcome)), ...(about === undefined ? {} : { title: `${call.tool}: ${oneLine(about)}` }) };
+          const base = yield* plain(call, outcome);
+          const shown: Presented = { ...base, ...(about === undefined || base.title !== call.tool ? {} : { title: `${call.tool}: ${oneLine(about)}` }) };
           const terminalId = Option.getOrUndefined(HashMap.get(yield* Ref.get(terminals), call.call));
           if (call.tool === "run_command" && terminalId !== undefined) return { ...shown, content: [{ type: "terminal", terminalId }] } satisfies Presented;
           const at = typeof input["path"] === "string" ? inside(cwd, input["path"]) : undefined;
@@ -329,7 +346,7 @@ export const editorWorld: World = {
             : located;
         });
 
-      return { system: workingFolderLine(cwd), sources: [source], present };
+      return { system: systemFor(cwd, git), sources: [source, ...(git === undefined ? [] : [yield* git.source])], present };
     }),
 };
 
@@ -343,10 +360,11 @@ export const workspaceWorld: World<FileSystem.FileSystem> = {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const workspace = workspaceTools(cwd, { strictInput, ...(environment === undefined ? {} : { environment }) });
+      const git = gitToolsAt(cwd, strictInput);
       return {
-        system: workspace.system,
-        sources: [yield* workspace.source.pipe(Effect.provideService(FileSystem.FileSystem, fs))],
-        present: presentFrom(workspace.catalog),
+        system: systemFor(cwd, git),
+        sources: [yield* workspace.source.pipe(Effect.provideService(FileSystem.FileSystem, fs)), ...(git === undefined ? [] : [yield* git.source])],
+        present: presentFrom([...workspace.catalog, ...(git?.catalog ?? [])]),
       };
     }),
 };

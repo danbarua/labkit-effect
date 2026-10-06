@@ -240,6 +240,12 @@ compaction as a summary, for OpenAI and xAI (`openai-compaction.ts`, `xai-compac
 `provider-compaction.ts`), sent the session's system prompt and tools; a digest of a span made
 with no model, its attachments as pointers and one line for each tool call (`digest.ts`).
 
+- [ ] When to compact, as a setting (Dan, 2026-10-06): a global `autocompact` threshold, as a share
+      of the context window or as a number of tokens (`"60%"`, `"192k"`), that a configuration can
+      override for one model or for one provider, with models.dev's data as the defaults. A model
+      that loses accuracy late in a 1M window can compact at 60%; a provider that charges more above
+      a context size can compact below it; a small model (Claude Haiku 4.5, grok-build-0.1) can
+      keep enough context to write up what it found, at `"75%"` or `"192k"`.
 - [ ] The loop asks the compaction policy itself; today whoever runs the session asks it between
       turns.
 - [ ] An estimate of the next request's size (estimated context usage), for a policy that

@@ -422,6 +422,14 @@ uses, so no call meets a capability the client does not have.
   terminal however the call ends, which stops a command still running. Exit code 0 succeeds; any
   other end fails, with the output and how it ended for the model to read.
 - The editor has no method to list or search a folder, so `run_command` does both.
+- When the working folder is the root of a git repository (it holds `.git`), the session is also
+  offered the git tools of `agent-tools/git.ts` (`git_status`, `git_diff`, `git_add`, `git_commit`
+  and the others), bound to that repository, and the system prompt says that the working folder is
+  the repository's root. This holds in both worlds. The git tools work on the disk, not through the
+  editor: `git_add` stages what is saved, not an unsaved buffer, and `git_restore`, `git_reset` and
+  `git_checkout` change files without the editor being told. A working folder below a repository's
+  root is offered no git tools. `git_push` and `git_pull` are given no credential, so a remote that
+  needs one fails, and the call's result says why.
 - `update_plan` gives an entry the priority `medium` unless it gives one, and succeeds with the count
   of steps by status. Its kind is `think`, so it runs in every permission mode without asking.
 - `write_file`, `edit_file` and `run_command` ask permission in the default mode.
