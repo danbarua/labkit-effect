@@ -9,7 +9,7 @@
 import { BlobRef } from "./blob.ts";
 import { Schema } from "effect";
 import { Received } from "./received.ts";
-import { Adjusted, ModelSettings } from "./settings.ts";
+import { Adjusted, ModelSettings, SettingsChange } from "./settings.ts";
 import {
   AgentName,
   CallId,
@@ -187,13 +187,14 @@ export const Observation = Schema.Union([
   }),
   /**
    * The session is to ask `model` through `provider` from now on, with the `settings` given. A
-   * setting that is not given keeps its value. Once the core takes the change (`ModelChangeTaken`),
-   * the requests that follow go to the new model.
+   * setting that is not given keeps its value, and a setting given as `default` returns to the
+   * provider's default. Once the core takes the change (`ModelChangeTaken`), the requests that
+   * follow go to the new model.
    */
   Schema.TaggedStruct("ModelChangeArrived", {
     provider: ProviderName,
     model: ModelName,
-    settings: Schema.optionalKey(ModelSettings),
+    settings: Schema.optionalKey(SettingsChange),
   }),
   /** A turn started. The turn takes every input waiting in the agent's mailbox. */
   Schema.TaggedStruct("TurnStarted", { turn: TurnId }),
@@ -279,9 +280,9 @@ export const Observation = Schema.Union([
    */
   Schema.TaggedStruct("NoticeInserted", { turn: TurnId, text: NoticeText }),
   /**
-   * A request for a model response was sent with a setting other than the one asked for, because
-   * the model does not allow the value asked for. From then on, the value sent is the session's
-   * setting for that model.
+   * A request for a model response was sent with a setting other than the one given, because the
+   * model does not take the value given: the nearest value it takes, or nothing. From then on, the
+   * value sent is the session's setting for that model.
    */
   Schema.TaggedStruct("SettingAdjusted", {
     turn: TurnId,

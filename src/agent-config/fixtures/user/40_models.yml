@@ -7,7 +7,8 @@ model: anthropic/claude-sonnet-5-5
 
 # What is known of a model, by provider/model, over the catalog. A field given replaces the
 # catalog's field whole; a field not given stays as the catalog has it. The fields: context,
-# output, input (text, image, pdf), reasoning (true or false), efforts, and budget (min, max).
+# output, input (text, image, pdf), reasoning (true or false), efforts (none, minimal, low, medium,
+# high, xhigh, max), thinking (between_tools), and budget (min, max).
 models:
   # Measured on 2026-10-01: xAI's models take effort minimal, and grok-4.5 takes xhigh, which
   # models.dev does not list.

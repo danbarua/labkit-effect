@@ -11,20 +11,22 @@
  * - It caches every request for as long as the server keeps the entry, with no setting for how
  *   long. It accepts and ignores `prompt_cache_retention`, so that field is not sent.
  *
- * As for OpenAI, each model accepts its own reasoning efforts (`efforts`, from the well-known models:
- * grok-4.5 to 4.7 accept `minimal` to `xhigh`, with no `none` and no `max`). An effort that a model
- * does not accept, including thinking `off` (effort `none`), is sent as the nearest accepted effort
- * (`effortFor`), and returned as adjusted.
+ * - It has no setting for when a model thinks: thinking `between_tools` is not sent.
+ *
+ * As for OpenAI, each model accepts its own reasoning efforts (`efforts`, from models.dev, over which
+ * a user's configuration can list the `minimal` that xAI's models were measured to take). None of
+ * xAI's models lists `none`, so thinking `disabled` is not sent (`reasoningEffortFor`). An effort that
+ * a model does not accept is sent as the nearest accepted effort, and returned as adjusted.
  */
 
 import type { ModelSettings } from "../../agent-machine/settings.ts";
-import { type Adjustment, effortFor, type Settled } from "../configuration/settings.ts";
+import { type Adjustment, reasoningEffortFor, type Settled } from "../configuration/settings.ts";
 import type { Target } from "../contracts.ts";
 import { knownOf } from "../configuration/well-known-models.ts";
 
 export function xAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyArray<string>): Settled {
   const { thinking, observe, maxOutputTokens, cache } = settings;
-  const { sent: sentEffort, adjusted: effortAdjusted } = effortFor(settings, efforts);
+  const { sent: sentEffort, adjusted: effortAdjusted } = reasoningEffortFor(settings, efforts);
   const cacheAdjusted: ReadonlyArray<Adjustment> =
     cache === undefined
       ? []
@@ -44,14 +46,7 @@ export function xAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyArra
         ]
       : [];
   const thinkingAdjusted: ReadonlyArray<Adjustment> =
-    thinking === "before_answer" || thinking === "between_tools"
-      ? [
-          {
-            adjusted: { _tag: "Thinking", asked: thinking, used: "auto" },
-            reason: "xAI's Responses endpoint has no setting for when the model thinks",
-          },
-        ]
-      : [];
+    thinking === "between_tools" ? [{ adjusted: { _tag: "Thinking", asked: thinking }, reason: "xAI's Responses endpoint has no setting for thinking only between tool calls" }] : [];
   const adjusted = [...cacheAdjusted, ...observeAdjusted, ...thinkingAdjusted, ...effortAdjusted];
   return {
     fields: {

@@ -4,6 +4,8 @@ export const logKeys = {
   localServer: {
     /** Warning: the local server's model list could not be read. Details: its URL and the error. No local models are known. */
     modelsNotListed: "host.local_models.not_listed",
+    /** Warning: the local server lists a reasoning level that the core does not name. Details: the model, the level, and the efforts the core names. The model is not offered that level. */
+    levelNotNamed: "host.local_models.level_not_named",
   },
   record: {
     /** Warning: a session's record file could not be read. Details: the session, the file and the cause. The session is listed without its record. */

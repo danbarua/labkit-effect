@@ -57,41 +57,57 @@ export const reportAdjusted = (turn: TurnId, target: Target, settled: Settled): 
         );
       });
 
-/** Reasoning efforts in order, least first, as the Responses API names them. */
-const efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
-
-const isEffort = (effort: string): effort is Effort => Effort.literals.some((each) => each === effort);
-
 /**
- * Returns the reasoning effort to send for `settings` to a model that accepts `accepted`, and the
- * adjustments made.
- * - The effort sent is the effort asked, or `none` when thinking is `off`. When thinking is `off`
- *   and an effort was also given, that effort is returned as adjusted.
- * - An effort that the model does not accept is sent as the nearest accepted effort (the higher one
- *   when two are equally near), and returned as adjusted.
- * - With no `accepted` list, the effort asked is sent.
+ * Returns the effort to send for `asked` to a model that takes the efforts `taken` (least first, from
+ * `effortsTaken`), and what was adjusted:
+ *
+ * - With no `taken` (not known), the effort asked is sent.
+ * - An effort that the model takes is sent as asked.
+ * - An effort that it does not take is sent as the nearest effort that it takes (the higher one when
+ *   two are equally near), and returned as adjusted.
+ * - To a model that takes no effort (it takes a thinking budget, or does not reason), nothing is
+ *   sent, and the effort is returned as adjusted.
  */
 export function effortFor(
-  settings: ModelSettings,
-  accepted: ReadonlyArray<string> | undefined,
-): { readonly sent: string | undefined; readonly adjusted: ReadonlyArray<Adjustment> } {
-  const off = settings.thinking === "off";
-  const wanted = off ? "none" : settings.effort;
-  const set = (sent: string | undefined): ReadonlyArray<Adjustment> =>
-    off && settings.effort !== undefined
-      ? [{ adjusted: { _tag: "Effort", asked: settings.effort, ...(sent !== undefined && isEffort(sent) ? { used: sent } : {}) }, reason: `thinking is off, which is sent as reasoning effort ${sent ?? "none"}` }]
-      : [];
-  if (wanted === undefined || accepted === undefined || accepted.includes(wanted)) return { sent: wanted, adjusted: set(wanted) };
-  const at = efforts.indexOf(wanted);
-  const distance = (effort: string) => Math.abs(efforts.indexOf(effort) - at);
+  asked: Effort | undefined,
+  taken: ReadonlyArray<Effort> | undefined,
+): { readonly sent: Effort | undefined; readonly adjusted: ReadonlyArray<Adjustment> } {
+  if (asked === undefined || taken === undefined || taken.includes(asked)) return { sent: asked, adjusted: [] };
+  if (taken.length === 0) return { sent: undefined, adjusted: [{ adjusted: { _tag: "Effort", asked }, reason: "this model takes no reasoning effort" }] };
+  const at = Effort.literals.indexOf(asked);
+  const distance = (effort: Effort) => Math.abs(Effort.literals.indexOf(effort) - at);
   // The nearest first; of two equally near, the higher.
-  const nearest = Order.combine(Order.mapInput(Order.Number, distance), Order.mapInput(Order.flip(Order.Number), (effort: string) => efforts.indexOf(effort)));
-  const sent = Arr.sort(accepted, nearest)[0];
-  if (sent === undefined) return { sent: wanted, adjusted: [] };
-  const reason = `this model's reasoning efforts are ${accepted.join(", ")}; it is sent ${sent}`;
-  if (off) return { sent, adjusted: [{ adjusted: { _tag: "Thinking", asked: "off", used: "auto" }, reason }, ...set(sent)] };
-  const asked = settings.effort;
-  return { sent, adjusted: asked === undefined ? [] : [{ adjusted: { _tag: "Effort", asked, ...(isEffort(sent) ? { used: sent } : {}) }, reason }] };
+  const nearest = Order.combine(Order.mapInput(Order.Number, distance), Order.mapInput(Order.flip(Order.Number), (effort: Effort) => Effort.literals.indexOf(effort)));
+  const sent = Arr.sort(taken, nearest)[0] ?? asked;
+  return { sent, adjusted: [{ adjusted: { _tag: "Effort", asked, used: sent }, reason: `this model's reasoning efforts are ${taken.join(", ")}; it is sent ${sent}` }] };
+}
+
+/**
+ * Returns the reasoning effort to send, as the Responses and Chat Completions APIs take it, for
+ * `settings` to a model that takes the efforts `efforts` (from models.dev, `none` among them when it
+ * can turn its reasoning off), and what was adjusted:
+ *
+ * - `thinking: disabled` is sent as effort `none` to a model whose efforts list `none`, or whose
+ *   efforts are not known. An effort given with it is not sent, and is returned as adjusted. To a
+ *   model that cannot turn its reasoning off, nothing is sent for thinking, the thinking is returned
+ *   as adjusted, and the effort given is sent as `effortFor` says.
+ * - Otherwise the effort is sent as `effortFor` says.
+ */
+export function reasoningEffortFor(
+  settings: ModelSettings,
+  efforts: ReadonlyArray<string> | undefined,
+): { readonly sent: string | undefined; readonly adjusted: ReadonlyArray<Adjustment> } {
+  const taken = efforts?.filter((effort): effort is Effort => effort !== "none");
+  if (settings.thinking === "disabled") {
+    if (efforts === undefined || efforts.includes("none")) {
+      const unsent: ReadonlyArray<Adjustment> =
+        settings.effort === undefined ? [] : [{ adjusted: { _tag: "Effort", asked: settings.effort }, reason: "thinking is disabled, which is sent as reasoning effort none" }];
+      return { sent: "none", adjusted: unsent };
+    }
+    const { sent, adjusted } = effortFor(settings.effort, taken);
+    return { sent, adjusted: [{ adjusted: { _tag: "Thinking", asked: "disabled" }, reason: "this model cannot turn its reasoning off" }, ...adjusted] };
+  }
+  return effortFor(settings.effort, taken);
 }
 
 /** The setting an adjustment is about. */

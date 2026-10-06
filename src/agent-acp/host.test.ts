@@ -377,7 +377,8 @@ test("session/new answers a draft with an id and its config options, writes noth
     });
   await host.stop();
   const options = Object.fromEntries((result.configOptions ?? []).map((option) => [option.id, option.type === "select" ? option.currentValue : undefined]));
-  expect(options).toMatchObject({ model: "openai/gpt-6-sol", max_output_tokens: "32768" });
+  // The output limit is preset to the model's own.
+  expect(options).toMatchObject({ model: "openai/gpt-6-sol", max_output_tokens: "128000" });
   expect(Object.keys(options)).toContain("effort");
   expect(seen).toEqual([`response ${result.sessionId}`, `update available_commands_update for ${result.sessionId}`]);
   expect(existsSync(host.directory)).toBe(false);
@@ -418,7 +419,7 @@ test("the first prompt opens the draft; thinking and text stream, write_file goe
   const facts = await factsOn(storeFileOf(host.directory, sessionId));
   expect(facts[0]).toMatchObject({
     origin: { _tag: "User", via: "acp" },
-    observation: { _tag: "SessionOpened", session: sessionId, model: { provider: "openai", model: "gpt-6-sol", settings: { effort: "high", maxOutputTokens: 32768 } } },
+    observation: { _tag: "SessionOpened", session: sessionId, model: { provider: "openai", model: "gpt-6-sol", settings: { effort: "high", maxOutputTokens: 128000 } } },
   });
   expect(observed(facts).find((fact) => fact.observation._tag === "PermissionAnswered")?.origin).toMatchObject({ _tag: "User", via: "acp" });
   expect(observed(facts).find((fact) => fact.observation._tag === "InputArrived")?.origin).toMatchObject({ _tag: "User", via: "acp" });
@@ -2091,7 +2092,7 @@ test("session/new starts with the model the configuration names; its overrides d
   await host.stop();
   expect(created.configOptions?.find((option) => option.id === "model")).toMatchObject({ currentValue: "openai/gpt-6-luna" });
   const effort = created.configOptions?.find((option) => option.id === "effort");
-  expect(effort?.type === "select" ? effort.options.flatMap((each) => ("value" in each ? [each.value] : [])) : []).toEqual(["not_sent", "low", "high"]);
+  expect(effort?.type === "select" ? effort.options.flatMap((each) => ("value" in each ? [each.value] : [])) : []).toEqual(["default", "low", "high"]);
   expect(host.targets).toEqual(["openai/gpt-6-luna"]);
   // The session's own knowledge of the model has the override: its context window is the override's.
   expect(log.updates.find((update) => update.sessionUpdate === "usage_update")).toMatchObject({ size: 5000 });

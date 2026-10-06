@@ -13,7 +13,8 @@
     "claude-sonnet-5-5": {
       "price": {
         "cacheWrite1h": 4
-      }
+      },
+      "thinking": ["between_tools"]
     },
     "claude-haiku-4-5": {
       "price": {

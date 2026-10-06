@@ -51,18 +51,24 @@ export const settleFor = (provider: ProviderName): Effect.Effect<Settle | undefi
   });
 
 /**
- * A setting to offer: the value that the model will get (`now`), when a value is sent, and, for a
- * setting with a set of values, the values to offer. Where the adapter adjusts the value given, `now`
- * is the value it sends instead, so `now` is among `values` whenever the setting is offered.
+ * A setting to offer: the value that the model will get (`now`), when a value is sent, and the values
+ * that the model takes. A host offers, and takes, only those values, and `default`, which returns the
+ * setting to the provider's default.
+ *
+ * - `OneOf`: the values listed. `default` is the first of them.
+ * - `Number`: a number of tokens, at least `min` and at most `max` when they are given, or `default`.
+ *
+ * Where the adapter translates the value given, `now` is the value it sends instead, so `now` is
+ * among the values whenever the setting is offered; when nothing is sent, `now` is absent.
  */
 export type SettingOption =
   | { readonly _tag: "OneOf"; readonly name: keyof ModelSettings; readonly now?: string; readonly values: ReadonlyArray<string> }
-  | { readonly _tag: "Number"; readonly name: keyof ModelSettings; readonly now?: number };
+  | { readonly _tag: "Number"; readonly name: keyof ModelSettings; readonly now?: number; readonly min?: number; readonly max?: number };
 
 export interface Options {
   readonly provider: ProviderName;
   readonly model: ModelName;
-  /** The settings as given; the adapter adjusts them on the request, as each option's `now` shows. */
+  /** The settings as given; the adapter translates them on the request, as each option's `now` shows. */
   readonly settings: ModelSettings;
   /** The settings to offer. A setting for which the provider's adapter applies no value is omitted. */
   readonly offered: ReadonlyArray<SettingOption>;
@@ -88,7 +94,7 @@ export const optionsFor = (target: Target): Effect.Effect<Options> =>
     };
     const oneOf = (name: "effort" | "thinking" | "observe" | "cache"): ReadonlyArray<SettingOption> => {
       const value = got(name);
-      return listed[name].length === 0 ? [] : [{ _tag: "OneOf", name, values: listed[name], ...(value === undefined ? {} : { now: value }) }];
+      return listed[name].length === 0 ? [] : [{ _tag: "OneOf", name, values: ["default", ...listed[name]], ...(value === undefined ? {} : { now: value }) }];
     };
     const limit = got("maxOutputTokens");
     const options: Options = {
@@ -100,7 +106,9 @@ export const optionsFor = (target: Target): Effect.Effect<Options> =>
         ...oneOf("thinking"),
         ...oneOf("observe"),
         ...oneOf("cache"),
-        ...(maxOutputTokens ? [{ _tag: "Number" as const, name: "maxOutputTokens" as const, ...(limit === undefined ? {} : { now: limit }) }] : []),
+        ...(maxOutputTokens
+          ? [{ _tag: "Number" as const, name: "maxOutputTokens" as const, ...(limit === undefined ? {} : { now: limit }), ...(capabilities?.output === undefined ? {} : { max: capabilities.output }) }]
+          : []),
       ],
     };
     return options;

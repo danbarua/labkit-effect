@@ -61,6 +61,7 @@ import { SessionServices } from "../agent-host/services.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { leftRunning } from "../agent-machine/left-running.ts";
 import { InputText, SessionId, type TurnId } from "../agent-machine/names.ts";
+import { changed } from "../agent-machine/settings.ts";
 import type { Target, ToolRunner } from "../agent-session/contracts.ts";
 import { SourcedToolRunner, ToolSources, toolsOf } from "../agent-session/tool-sources.ts";
 import { FileBackedSessionStore } from "../agent-session/file-session-store.ts";
@@ -241,7 +242,7 @@ const mergedModel = (held: Change | undefined, next: Change | undefined): Change
 const withHeld = (configured: Target, held: HeldChange | undefined): Target => {
   const change = held?.model;
   if (change === undefined) return configured;
-  const settings = { ...configured.settings, ...change.settings };
+  const settings = changed(configured.settings ?? {}, change.settings ?? {});
   return { provider: change.provider, model: change.model, ...(Object.keys(settings).length === 0 ? {} : { settings }) };
 };
 
@@ -279,7 +280,7 @@ const configuredOf = (facts: ReadonlyArray<Fact>): Effect.Effect<Target> =>
     return facts.reduce<Target>((target, fact) => {
       if (fact._tag !== "Observed" || fact.observation._tag !== "ModelChangeArrived" || taken.has(fact.seq)) return target;
       const change = fact.observation;
-      const settings = { ...target.settings, ...change.settings };
+      const settings = changed(target.settings ?? {}, change.settings ?? {});
       return { provider: change.provider, model: change.model, ...(Object.keys(settings).length === 0 ? {} : { settings }) };
     }, now);
   });

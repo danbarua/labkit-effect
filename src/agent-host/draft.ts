@@ -9,7 +9,7 @@
 import { Effect } from "effect";
 import { type SessionId, TokenCount } from "../agent-machine/names.ts";
 import type { Observation } from "../agent-machine/observation.ts";
-import type { ModelSettings } from "../agent-machine/settings.ts";
+import { changed, type ModelSettings, type SettingsChange } from "../agent-machine/settings.ts";
 import { optionsFor, type Options } from "../agent-session/configuration/options.ts";
 import { openedWith } from "../agent-session/configuration/session-setup.ts";
 import type { Capabilities } from "../agent-session/configuration/well-known-models.ts";
@@ -38,7 +38,7 @@ export const draftOf = (draft: {
 export const chooseModel = (draft: Draft, model: Asked): Draft => ({ ...draft, model });
 
 /** Returns the draft with the settings named in `settings` replaced; a setting not named keeps its value. */
-export const withSettings = (draft: Draft, settings: ModelSettings): Draft => ({ ...draft, settings: { ...draft.settings, ...settings } });
+export const withSettings = (draft: Draft, settings: SettingsChange): Draft => ({ ...draft, settings: changed(draft.settings, settings) });
 
 /** Returns the model that the draft asks and its settings, in the form `optionsFor` and the loop accept. A draft with no settings has no `settings` field. */
 export const targetOfDraft = (draft: Draft): Target => ({
@@ -54,18 +54,17 @@ export const optionsOfDraft = (draft: Draft): Effect.Effect<Options> => optionsF
 export const opening = (draft: Draft, session: SessionId): Observation =>
   openedWith({ session, model: targetOfDraft(draft), system: draft.system, tools: draft.tools });
 
-/** The output limit that `withDefaults` gives a draft with none, unless the model's own limit is lower. */
+/** The output limit that `withDefaults` gives a draft with none, for a model whose own limit is not known. */
 const defaultOutputLimit = 32768;
 
 /**
- * Returns the draft with an output limit when it has none: 32768 tokens, or the model's own limit
- * (`capabilities.output`) when that is known and lower. A limit that was given stays. A host that
- * leaves the limit to the provider does not call this.
+ * Returns the draft with an output limit when it has none: the model's own limit
+ * (`capabilities.output`, from models.dev or the user's `models:` override) when that is known, else
+ * 32768 tokens. A limit that was given stays. A host that leaves the limit to the provider does not
+ * call this.
  */
 export const withDefaults = (draft: Draft, capabilities: Capabilities | undefined): Draft =>
-  draft.settings.maxOutputTokens !== undefined
-    ? draft
-    : withSettings(draft, { maxOutputTokens: TokenCount.make(Math.min(defaultOutputLimit, capabilities?.output ?? defaultOutputLimit)) });
+  draft.settings.maxOutputTokens !== undefined ? draft : withSettings(draft, { maxOutputTokens: TokenCount.make(capabilities?.output ?? defaultOutputLimit) });
 
 /** The model that a draft starts with: the first that the catalog lists, or none when it lists none, in which case a host has nothing to ask. */
 export const defaultModel: Effect.Effect<Asked | undefined, never, ModelCatalog> = Effect.map(askable, (models) => models[0]);

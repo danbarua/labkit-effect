@@ -9,7 +9,9 @@
  * against the providers (2026-10-01) and is not in the catalog:
  *
  * - PDF input for ten GPT-5 models the catalog lists as taking none (each read one when sent it);
- * - Anthropic's hour-long cache writes, at twice the input price (the catalog has the five-minute rate).
+ * - Anthropic's hour-long cache writes, at twice the input price (the catalog has the five-minute rate);
+ * - the thinking modes a model takes besides the provider's default and `disabled`: Claude Sonnet 5.5
+ *   thinks only between tool calls on request (`thinking: ["between_tools"]`).
  *
  * Where a provider takes efforts that the catalog does not list (xAI's models took `minimal` when
  * asked, 2026-10-01), a user's configuration overrides the catalog (`ModelOverrides`; the
@@ -25,7 +27,7 @@
 
 import { Context, Effect, Schema } from "effect";
 import type { ModelName, ProviderName } from "../../agent-machine/names.ts";
-import type { Effort, ModelSettings, ThinkingMode } from "../../agent-machine/settings.ts";
+import { Effort, type ModelSettings, type ThinkingMode } from "../../agent-machine/settings.ts";
 import { firstAnswer } from "../first-answer.ts";
 import { wellKnownModels } from "./well-known-models.gen.ts";
 
@@ -37,10 +39,18 @@ export interface Price {
   readonly cacheWrite1h?: number;
 }
 
+/** The efforts that models.dev names: `none`, which turns reasoning off, then the core's efforts. */
+export const KnownEffort = Schema.Literals(["none", ...Effort.literals]);
+export type KnownEffort = typeof KnownEffort.Type;
+
+/** A thinking mode that a model takes besides the provider's default and `disabled`, as measured: models.dev does not record it. */
+export const KnownThinking = Schema.Literals(["between_tools"]);
+export type KnownThinking = typeof KnownThinking.Type;
+
 /**
  * What is known of a model: what it accepts and what it costs. A request is shaped to it: a setting
  * outside what the model accepts is sent as the nearest value it does accept (an effort above its
- * highest, as its highest).
+ * highest, as its highest), or not sent.
  */
 export interface Capabilities {
   /** The maximum number of context tokens that the model accepts, when known. */
@@ -51,8 +61,10 @@ export interface Capabilities {
   readonly input: ReadonlyArray<string>;
   /** Whether it reasons, when known. */
   readonly reasoning?: boolean;
-  /** The reasoning efforts that it accepts, least first, when known. */
-  readonly efforts?: ReadonlyArray<string>;
+  /** The reasoning efforts that it accepts, least first, when known; `none` turns its reasoning off. */
+  readonly efforts?: ReadonlyArray<KnownEffort>;
+  /** The thinking modes that it takes besides the provider's default and `disabled`, as measured. */
+  readonly thinking?: ReadonlyArray<KnownThinking>;
   /** The budget of thinking tokens that it takes in place of efforts, when it takes one: at least `min`, and at most `max` when known. */
   readonly budget?: { readonly min: number; readonly max?: number };
   readonly price: Price & { readonly above?: Price & { readonly context: number } };
@@ -96,7 +108,8 @@ export const ModelOverride = Schema.Struct({
   output: Schema.optionalKey(Count),
   input: Schema.optionalKey(Schema.Array(Schema.String)),
   reasoning: Schema.optionalKey(Schema.Boolean),
-  efforts: Schema.optionalKey(Schema.Array(Schema.String)),
+  efforts: Schema.optionalKey(Schema.Array(KnownEffort)),
+  thinking: Schema.optionalKey(Schema.Array(KnownThinking)),
   budget: Schema.optionalKey(Schema.Struct({ min: Count, max: Schema.optionalKey(Count) })),
 });
 export type ModelOverride = typeof ModelOverride.Type;
@@ -127,6 +140,36 @@ export const knownCapabilities = (provider: ProviderName, model: ModelName): Eff
     return yield* firstAnswer(sources.map((source) => source(provider, model)));
   });
 
+/**
+ * The efforts that a model which takes a thinking budget in place of an effort (Claude Haiku 4.5)
+ * takes: its provider's adapter sends each as a budget, `low` as the least budget it takes.
+ */
+export const budgetEfforts: ReadonlyArray<Effort> = ["low", "medium", "high", "xhigh", "max"];
+
+/**
+ * Returns the efforts that a model with `capabilities` takes, least first, other than `none`: those
+ * models.dev lists; `budgetEfforts` for a model that takes a thinking budget instead; none for a
+ * model that does not reason; undefined when that is not known.
+ */
+export const effortsTaken = (capabilities: Capabilities | undefined): ReadonlyArray<Effort> | undefined => {
+  if (capabilities === undefined) return undefined;
+  if (capabilities.efforts !== undefined) return capabilities.efforts.filter((effort): effort is Effort => effort !== "none");
+  if (capabilities.budget !== undefined) return budgetEfforts;
+  return capabilities.reasoning === false ? [] : undefined;
+};
+
+/**
+ * Returns whether a model with `capabilities` can turn its thinking off: its efforts list `none`, or
+ * it takes a thinking budget (its thinking is off unless a budget turns it on). A model that does
+ * not reason cannot. Undefined when that is not known.
+ */
+export const turnsThinkingOff = (capabilities: Capabilities | undefined): boolean | undefined => {
+  if (capabilities === undefined) return undefined;
+  if (capabilities.budget !== undefined) return true;
+  if (capabilities.efforts !== undefined) return capabilities.efforts.includes("none");
+  return capabilities.reasoning === false ? false : undefined;
+};
+
 /** Returns what is known of the model that a request goes to: what its target carries, or the well-known model's entry. */
 export const knownOf = (target: { readonly provider: ProviderName; readonly model: ModelName; readonly capabilities?: Capabilities }): Capabilities | undefined =>
   target.capabilities ?? capabilitiesOf(target.provider, target.model);
@@ -146,14 +189,24 @@ type WellKnown = typeof wellKnownModels;
 export type WellKnownProvider = keyof WellKnown;
 export type WellKnownModel<P extends WellKnownProvider> = keyof WellKnown[P];
 
-/** The reasoning efforts that a well-known model accepts, as models.dev lists them; any effort where none are listed. */
-type EffortsOf<P extends WellKnownProvider, M extends WellKnownModel<P>> = WellKnown[P][M] extends { readonly efforts: ReadonlyArray<infer Taken> } ? Taken : string;
+/** Whether a well-known model takes a thinking budget. */
+type TakesBudget<P extends WellKnownProvider, M extends WellKnownModel<P>> = WellKnown[P][M] extends { readonly budget: unknown } ? true : false;
+
+/** The reasoning efforts that a well-known model accepts, as models.dev lists them: the budget efforts for a model that takes a budget instead (`budgetEfforts`); any effort where neither is listed. */
+type EffortsOf<P extends WellKnownProvider, M extends WellKnownModel<P>> =
+  WellKnown[P][M] extends { readonly efforts: ReadonlyArray<infer Taken> } ? Taken : TakesBudget<P, M> extends true ? Exclude<Effort, "minimal"> : string;
+
+/** The thinking modes that a well-known model takes: `disabled` where it can turn its thinking off, and the modes measured for it. */
+type ThinkingOf<P extends WellKnownProvider, M extends WellKnownModel<P>> =
+  | ("none" extends EffortsOf<P, M> ? "disabled" : TakesBudget<P, M> extends true ? "disabled" : never)
+  | (WellKnown[P][M] extends { readonly thinking: ReadonlyArray<infer Measured> } ? Extract<ThinkingMode, Measured> : never);
 
 /**
- * A session's settings for a well-known model: the efforts that it accepts, and thinking `off` only
- * where it accepts effort `none`. A UI bound to this type offers only what the model accepts.
+ * A session's settings for a well-known model: the efforts that it accepts, thinking `disabled`
+ * only where it can turn its thinking off, and the thinking modes measured for it. A UI bound to
+ * this type offers only what the model accepts.
  */
 export type SettingsFor<P extends WellKnownProvider, M extends WellKnownModel<P>> = Omit<ModelSettings, "effort" | "thinking"> & {
   readonly effort?: Extract<Effort, EffortsOf<P, M>>;
-  readonly thinking?: "none" extends EffortsOf<P, M> ? ThinkingMode : Exclude<ThinkingMode, "off">;
+  readonly thinking?: ThinkingOf<P, M>;
 };

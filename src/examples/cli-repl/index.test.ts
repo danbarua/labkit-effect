@@ -61,6 +61,13 @@ test("a flag value the flag does not take is said as an ERROR line on stderr", a
   expect(result.stderr.trim().split("\n")).toHaveLength(1);
 });
 
+test("a setting on the command line that the model does not take fails the run before a session opens, saying what the model takes", async () => {
+  const result = await invoke(["-p", "Hello", "--model", "gpt-5", "--effort", "max"], { OPENAI_API_KEY: "set" });
+  expect(result.code).not.toBe(0);
+  expect(result.stderr).toBe("ERROR: openai/gpt-5 does not take effort=max (from the command line).\nHINT: effort takes default, minimal, low, medium, high.\n");
+  expect(existsSync(join(testFolder(), "logs/cli"))).toBe(false);
+});
+
 test("with no --model, a new session asks the model the configuration names", async () => {
   mkdirSync(join(testFolder(), ".config", "labkit"), { recursive: true });
   writeFileSync(join(testFolder(), ".config", "labkit", "models.yml"), "model: openai/gpt-5.5\n");

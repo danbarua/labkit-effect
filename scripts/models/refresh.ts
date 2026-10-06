@@ -7,15 +7,20 @@
  * reasoning is set (`reasoning_options`): the efforts it takes, or a budget of thinking tokens.
  * `well-known-models.measured.json` names the models to include, by provider, and for each holds what
  * was measured against the provider and is not in the catalog: the kinds of input it took when sent
- * them, and the price of an hour-long cache write. What was measured wins. A measured difference in
- * reasoning is not kept here: a user's configuration overrides it (`models:`, as
+ * them, the price of an hour-long cache write, and the thinking modes it takes besides the provider's
+ * default and `disabled` (`thinking: ["between_tools"]`). What was measured wins. A measured
+ * difference in efforts is not kept here: a user's configuration overrides it (`models:`, as
  * `src/agent-config/fixtures/user/40_models.yml` shows).
+ *
+ * An effort that the catalog lists and the core does not name (`none`, then the core's `Effort`)
+ * fails the refresh, so that a new effort is named in the core before a model is offered it.
  *
  *   bun run models:refresh              # from models.dev
  *   bun run models:refresh <api.json>   # from a copy of the catalog
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { Effort } from "../../src/agent-machine/settings.ts";
 
 type Json = Record<string, unknown>;
 
@@ -35,7 +40,10 @@ const catalog = (from === undefined ? await fetch("https://models.dev/api.json")
     >;
   }
 >;
-const measured = JSON.parse(readFileSync(measuredPath, "utf8")) as Record<string, Record<string, { input?: Array<string>; price?: Json }>>;
+const measured = JSON.parse(readFileSync(measuredPath, "utf8")) as Record<string, Record<string, { input?: Array<string>; price?: Json; thinking?: Array<string> }>>;
+
+/** The efforts the core names: `none` (thinking disabled, as a provider's effort), then the core's `Effort`. */
+const namedEfforts: ReadonlyArray<string> = ["none", ...Effort.literals];
 
 /** The reasoning fields of a catalog entry: whether it reasons, its efforts, its thinking budget. An option of another kind fails the refresh, so that it is not dropped unseen. */
 function reasoningOf(name: string, reasoning: boolean | undefined, options: ReadonlyArray<ReasoningOption> | undefined): Json {
@@ -43,6 +51,8 @@ function reasoningOf(name: string, reasoning: boolean | undefined, options: Read
   const budget = options?.find((option): option is Extract<ReasoningOption, { type: "budget_tokens" }> => option.type === "budget_tokens");
   const unknown = options?.filter((option) => option.type !== "effort" && option.type !== "budget_tokens") ?? [];
   if (unknown.length > 0) throw new Error(`${name}: reasoning options of a kind this script does not read: ${unknown.map((option) => option.type).join(", ")}`);
+  const unnamed = efforts?.filter((effort) => !namedEfforts.includes(effort)) ?? [];
+  if (unnamed.length > 0) throw new Error(`${name}: efforts the core does not name: ${unnamed.join(", ")} (it names ${namedEfforts.join(", ")})`);
   return {
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(efforts === undefined ? {} : { efforts }),
@@ -82,6 +92,7 @@ const models = Object.fromEntries(
               output: theirs.limit.output,
               input: ours.input ?? theirs.modalities.input,
               ...reasoningOf(`${provider}/${model}`, theirs.reasoning, theirs.reasoning_options),
+              ...(ours.thinking === undefined ? {} : { thinking: ours.thinking }),
               price: { ...base, ...ours.price, ...(above === undefined ? {} : { above }) },
             },
           ],

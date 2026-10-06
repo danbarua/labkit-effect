@@ -37,29 +37,54 @@ The commands and the thinking key are built: each command is in its own file in
 setting into the user's folder is described in [agent-config.md](agent-config.md), Writing into the
 user's folder. Their limits:
 
-- `/effort` sets the efforts the provider's adapter offers today, not models.dev's, and it cannot
-  set `default`, because a setting that is set cannot yet be cleared (step 5).
 - Option+T shows or hides the model's thinking (`view.thinking`) until the REPL exits, and writes
-  nothing; `/settings view.thinking=…` writes it. A key that turns thinking off in the request
-  (`thinking: disabled`) waits for step 5.
+  nothing; `/settings view.thinking=…` writes it. No key turns thinking off in the request:
+  `/settings thinking=disabled` does.
 - The user's settings are `view.thinking` only.
 
-## Offering only what a model takes
+## Offering what a model takes, and translating intent
 
-A host offers only the values that a model takes. A value that a model does not take is refused when
-it is set; it is not adjusted when a request is made.
+Rulings of 2026-10-06, which revise "refusing values instead of adjusting them":
+
+- A host offers, and takes, only the values that the current model takes: the CLI's completion,
+  pickers, typed settings and flags, and ACP's selects. "The UI can configure itself to only show
+  the valid options to the user." What a model takes comes from models.dev, the measured entries,
+  and the user's `models:` overrides.
+- A setting is the intent of whoever set it. A model change, from a person or from a policy (a
+  headless run, a fallback model), carries the settings over and never refuses them, so that a run
+  can go on without anyone reconfiguring it. Dan: "not willing to turn the software into an
+  automated Refusal-Gate-Refuse factory".
+- At each request, the provider's adapter translates a value that the model does not take: to the
+  nearest value that it takes (an effort above the model's highest is sent as its highest; of two
+  equally near efforts, the higher), or to nothing when the model has no counterpart. Each
+  translation is recorded (`SettingAdjusted`).
+- Sessions recorded with the earlier values (thinking `auto`, `off`, `before_answer`) are not
+  migrated, and do not open.
+- A run's starting configuration is valid, or the run does not start: a setting on the command line
+  that the model does not take fails the run, with or without `-p`, and says what the model takes.
+  Dan: "When launching headless, either the config was valid and the run does the work until
+  completion or failure, or the config was not valid."
+- A setting is the user's intent; what a provider is sent is its effect, and the adapter maps one to
+  the other. A thinking budget is not a setting: Claude Haiku 4.5, which takes a budget in place of
+  an effort, is sent each effort as a budget, a multiple of its least budget (1,024 tokens): `low`
+  1x, `medium` 4x, `high` 16x, `xhigh` 32x, and `max` the largest the request allows. `minimal` is
+  sent as `low`.
+
+Built (step 5): the adapters read what a model takes from models.dev (`effortsTaken`,
+`turnsThinkingOff`, `src/agent-session/configuration/well-known-models.ts`) and the measured
+entries (`between_tools`); a host offers and takes those values and `default`; the CLI's flags,
+`/settings` and `/effort` refuse a value the model does not take; ACP's `not_sent` is `default`;
+the output limit defaults to the model's own.
 
 ## Settings the user sees
 
 | Setting | Values | Meaning |
 | --- | --- | --- |
 | model | `provider/model` | The model to ask. |
-| effort | the model's efforts, from models.dev; `default` | How much the model reasons. `default` sends nothing: the provider's default applies. |
-| thinking | `default`, `disabled` | `default` sends nothing. `disabled` turns the model's thinking off, offered only for a model that can turn it off. |
+| effort | `default`; the model's efforts, from models.dev, except `none` | How much the model reasons. `default` sends nothing: the provider's default applies. `none` is `thinking=disabled`. |
+| thinking | `default`, `disabled`, `between_tools` | `default` sends nothing. `disabled` turns the model's thinking off, offered for a model that can turn it off: its efforts list `none`, or it takes a budget. `between_tools` thinks only between tool calls, offered for a model measured to take it (Claude Sonnet 5.5). |
 | `view.thinking` | `on`, `off` | Whether the host shows the model's thinking. It changes nothing in the request. |
 
-- A model whose `reasoning_options` lists a thinking budget and no efforts (Claude Haiku 4.5) offers
-  its budget, not an effort.
 - The maximum number of output tokens is not a setting that a user must choose. It defaults to the
   model's output limit from models.dev, and a configuration file can override it. Later, the
   runtime may lower it near the end of the context window, to keep room for compaction. ACP's
@@ -107,5 +132,5 @@ Thinking is toggled with a key, as Claude Code does with Option+T and pi with Sh
 3. The REPL without a model; `bun cli models` and the error messages. Built, with the limits
    listed under Built.
 4. The commands, and the thinking key. Built, with the limits listed under Built.
-5. The adapters rebuilt on models.dev's reasoning data, offering and refusing values instead of
-   adjusting them.
+5. The adapters rebuilt on models.dev's reasoning data. Built: see Offering what a model takes,
+   which revises "offering and refusing values instead of adjusting them".

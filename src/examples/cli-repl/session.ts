@@ -27,7 +27,7 @@ import { SessionServices } from "../../agent-host/services.ts";
 import type { Ending } from "../../agent-machine/decision.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
 import { InputText, SessionId, type TurnId, Via } from "../../agent-machine/names.ts";
-import type { ModelSettings } from "../../agent-machine/settings.ts";
+import { changed, type SettingsChange } from "../../agent-machine/settings.ts";
 import { workspaceTools } from "../../agent-tools/workspace.ts";
 import { leftRunning, type LeftRunning } from "../../agent-machine/left-running.ts";
 import { endTurnLeftRunning, openSession, type Session } from "../../agent-session/loop.ts";
@@ -42,7 +42,8 @@ import { logKeys } from "./log-keys.ts";
 export interface Config {
   readonly sessionId: string;
   readonly target: Asked;
-  readonly settings: ModelSettings;
+  /** The settings the command line names, as a change of the settings: a new session opens with them, and a continued one takes them as a change. */
+  readonly settings: SettingsChange;
   readonly system: string | undefined;
   /**
    * The facts of the session this one goes on from (`--continue`, `--resume`), as read when it was
@@ -194,7 +195,7 @@ export const withSession = <A, E, R, L, H>(
     yield* host.follow(session);
     const facts = yield* session.facts;
     if (facts.length === 0)
-      yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: config.settings }, system: config.system, tools: yield* offeredTools }));
+      yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: changed({}, config.settings) }, system: config.system, tools: yield* offeredTools }));
     else {
       const left = leftRunning(facts);
       if (left === undefined) yield* session.goOn;

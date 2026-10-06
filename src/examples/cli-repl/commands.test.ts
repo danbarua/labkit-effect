@@ -113,9 +113,9 @@ test("/switch asks another model from the next turn on, in this session only, an
 test("/settings shows the settings in force, and changes the ones named", async () => {
   const { printed, asked } = await session(["/settings", "/settings effort=high maxOutputTokens=2000", "/settings", "hello"]);
   expect(printed).toEqual([
-    "openai/gpt-5.5 effort=low\nthis model takes effort: none, low, medium, high, xhigh",
-    "Asking openai/gpt-5.5 effort=high maxOutputTokens=2000\nthis model takes effort: none, low, medium, high, xhigh",
-    "openai/gpt-5.5 effort=high maxOutputTokens=2000\nthis model takes effort: none, low, medium, high, xhigh",
+    "openai/gpt-5.5 effort=low\nthis model takes effort: low, medium, high, xhigh",
+    "Asking openai/gpt-5.5 effort=high maxOutputTokens=2000\nthis model takes effort: low, medium, high, xhigh",
+    "openai/gpt-5.5 effort=high maxOutputTokens=2000\nthis model takes effort: low, medium, high, xhigh",
   ]);
   expect(asked[0]?.settings as unknown).toEqual({ effort: "high", maxOutputTokens: 2000 });
 });
@@ -149,7 +149,7 @@ test("a mistake in a command is said and changes nothing; a line that names no c
     "ERROR: No model is named gpt-99.\nHINT: Pick one with /model.",
     "ERROR: XAI_API_KEY is not set, so xai models cannot be asked.\nHINT: Pick another model with /model, or restart with XAI_API_KEY set.",
     "ERROR: No command /nope.\nHINT: /help lists them.",
-    "openai/gpt-5.5 effort=low\nthis model takes effort: none, low, medium, high, xhigh",
+    "openai/gpt-5.5 effort=low\nthis model takes effort: low, medium, high, xhigh",
   ]);
 });
 
@@ -162,20 +162,21 @@ test("a line that starts with / completes to a command, a model, a setting not y
   expect(complete("/model xai/")).toEqual([]);
   expect(complete("/settings ")).toEqual(["effort=", "thinking=", "observe=", "cache=", "maxOutputTokens=", "view.thinking="].map((each) => `/settings ${each}`));
   expect(complete("/settings view.thinking=")).toEqual(["/settings view.thinking=on", "/settings view.thinking=off"]);
-  expect(complete("/effort ")).toEqual(["low", "medium", "high", "xhigh"].map((each) => `/effort ${each}`));
+  expect(complete("/effort ")).toEqual(["default", "low", "medium", "high", "xhigh"].map((each) => `/effort ${each}`));
   expect(complete("/switch openai/gpt-6-s")).toEqual(["/switch openai/gpt-6-sol"]);
   expect(complete("/settings effort=high c")).toEqual(["/settings effort=high cache="]);
   expect(complete("/settings effort=high e")).toEqual([]);
-  // gpt-5.5 takes none to xhigh: no max, and thinking can be off.
-  expect(complete("/settings effort=")).toEqual(["low", "medium", "high", "xhigh"].map((each) => `/settings effort=${each}`));
-  expect(complete("/settings thinking=o")).toEqual(["/settings thinking=off"]);
+  // gpt-5.5 takes low to xhigh, no max, and can turn its thinking off (models.dev lists effort none for it).
+  expect(complete("/settings effort=")).toEqual(["default", "low", "medium", "high", "xhigh"].map((each) => `/settings effort=${each}`));
+  expect(complete("/settings thinking=")).toEqual(["/settings thinking=default", "/settings thinking=disabled"]);
   expect(complete("hello /se")).toEqual([]);
   // OpenAI caches for minutes whatever is asked, so `off` is not offered.
-  expect(complete("/settings cache=")).toEqual(["/settings cache=5m", "/settings cache=1h"]);
-  // The values follow the model being asked: no efforts are listed for claude-sonnet-5-5, so every one is offered.
+  expect(complete("/settings cache=")).toEqual(["/settings cache=default", "/settings cache=5m", "/settings cache=1h"]);
+  // The values follow the model being asked: claude-sonnet-5-5 takes low to max, and thinks only between tool calls on request.
   const later = completions(JSON.parse(printed[3] ?? "") as Parameters<typeof completions>[0]);
   expect(later("/settings effort=m")).toEqual(["/settings effort=medium", "/settings effort=max"]);
-  expect(later("/settings cache=")).toEqual(["off", "5m", "1h"].map((each) => `/settings cache=${each}`));
+  expect(later("/settings thinking=")).toEqual(["/settings thinking=default", "/settings thinking=between_tools"]);
+  expect(later("/settings cache=")).toEqual(["default", "off", "5m", "1h"].map((each) => `/settings cache=${each}`));
 });
 
 test("/mcp says how the MCP servers are, and completes to reconnect and then a server's name", async () => {
@@ -206,12 +207,23 @@ test("/mcp completes a server's name only after reconnect", () => {
   expect(complete("/mcp other ")).toEqual([]);
 });
 
-test("/settings takes effort=none as thinking=off, and refuses effort=none with another thinking mode", async () => {
-  const { printed, asked } = await session(["/settings effort=none", "hello", "/settings effort=none thinking=auto"]);
-  const off = await session(["/settings thinking=off", "hello"]);
-  expect(asked[0]?.settings as unknown).toEqual(off.asked[0]?.settings);
-  expect(asked[0]?.settings).toMatchObject({ thinking: "off" });
-  expect(printed[1]).toBe("ERROR: effort=none is thinking=off, and thinking=auto says otherwise.");
+test("/settings takes only what the model takes, refusing anything else with the values it takes; default returns a setting to the provider's default", async () => {
+  const { printed, asked } = await session([
+    "/settings effort=none",
+    "/settings effort=max",
+    "/settings thinking=between_tools",
+    "/settings budget=2048",
+    "/settings thinking=disabled",
+    "/settings effort=default",
+    "hello",
+  ]);
+  // A thinking budget is how a provider takes an effort, not a setting: the effort is.
+  for (const at of [0, 3]) expect(printed[at]).toStartWith("ERROR: Not settings the session takes:");
+  expect(printed.slice(1, 3)).toEqual([
+    "ERROR: openai/gpt-5.5 does not take effort=max.\nHINT: effort takes default, low, medium, high, xhigh.",
+    "ERROR: openai/gpt-5.5 does not take thinking=between_tools.\nHINT: thinking takes default, disabled.",
+  ]);
+  expect(asked.map((target) => target.settings) as unknown).toEqual([{ thinking: "disabled" }]);
 });
 
 test("/model asks another model in this session, and writes it into the user's folder as the model new sessions ask", async () => {
@@ -238,10 +250,15 @@ test("/model says so when the model new sessions ask could not be written, and t
   expect(asked[0]?.model as unknown).toBe("claude-sonnet-5-5");
 });
 
-test("/effort sets the effort; alone, it sets the next effort the model is offered, and after the last, the first", async () => {
-  // gpt-5.5 is offered low, medium, high and xhigh; the session starts at low.
+test("/effort sets the effort; alone, it sets the next value offered, and after the last, default", async () => {
+  // gpt-5.5 is offered default, then low, medium, high and xhigh; the session starts at low.
   const { asked } = await session(["/effort high", "hello", "/effort", "hello", "/effort", "hello", "/effort", "hello"]);
-  expect(asked.map((target) => target.settings) as unknown).toEqual([{ effort: "high" }, { effort: "xhigh" }, { effort: "low" }, { effort: "medium" }]);
+  expect(asked.map((target) => target.settings) as unknown).toEqual([{ effort: "high" }, { effort: "xhigh" }, undefined, { effort: "low" }]);
+});
+
+test("/effort refuses an effort the model does not take", async () => {
+  const { printed } = await session(["/effort max"]);
+  expect(printed).toEqual(["ERROR: openai/gpt-5.5 does not take effort=max.\nHINT: effort takes default, low, medium, high, xhigh."]);
 });
 
 test("/effort alone, with no effort in force, sets the first effort the model is offered", async () => {

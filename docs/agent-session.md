@@ -198,9 +198,11 @@ back into the core's observations:
 - `model-fallback.ts` tries the session's target, then each fallback, moving on only after a
   failure that means the provider cannot serve the request now. When a fallback answers, the chain
   records a change of model to it.
-- Each adapter's `*-settings.ts` maps the session's settings to the provider's fields. A setting
-  that a model does not accept is sent as the nearest one it does, and the difference is recorded
-  as adjusted before the request.
+- Each adapter's `*-settings.ts` maps the session's settings, the user's intent, to the provider's
+  fields, from what is known of the model (`well-known-models.ts`: models.dev, the measured entries,
+  the user's overrides). A setting that a model does not take is sent as the nearest one it does, or
+  not sent, and the difference is recorded as adjusted before the request. Claude Haiku 4.5, which
+  takes a thinking budget in place of an effort, is sent each effort as a budget.
 
 ## Design decisions
 

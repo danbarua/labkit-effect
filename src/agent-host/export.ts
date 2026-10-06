@@ -202,9 +202,9 @@ const response = (index: Index, responded: Observed<"ModelResponded">): Readonly
 /** Returns the models that the session asked, in order: the opening model, then each change taken. */
 const modelsOf = (facts: ReadonlyArray<Fact>, index: Index): ReadonlyArray<{ readonly provider: ProviderName; readonly model: ModelName }> =>
   facts.flatMap((fact) => {
-    if (fact._tag === "Observed") return fact.observation._tag === "SessionOpened" ? [fact.observation.model] : [];
+    if (fact._tag === "Observed") return fact.observation._tag === "SessionOpened" ? [{ provider: fact.observation.model.provider, model: fact.observation.model.model }] : [];
     const change = fact.decision._tag === "ModelChangeTaken" ? index.changes.get(fact.decision.change) : undefined;
-    return change === undefined ? [] : [change];
+    return change === undefined ? [] : [{ provider: change.provider, model: change.model }];
   });
 
 const footer = (facts: ReadonlyArray<Fact>, models: ReadonlyArray<{ readonly provider: ProviderName; readonly model: ModelName }>): ReadonlyArray<string> => {

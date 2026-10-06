@@ -9,9 +9,9 @@
  * | id | category | values |
  * |---|---|---|
  * | `model` | `model` | `provider/model` of each model offered, and the one asked now |
- * | `effort` | `thought_level` | the efforts the model takes |
- * | `thinking` | `model_config` | the values the model takes |
- * | `max_output_tokens` | `model_config` | the presets up to the model's limit, the limit, and the value in force |
+ * | `effort` | `thought_level` | `default`, and the efforts the model takes |
+ * | `thinking` | `model_config` | `default`, and the values the model takes |
+ * | `max_output_tokens` | `model_config` | `default`, the presets up to the model's limit, the limit, and the value in force |
  * | `permission_mode` | `mode` | the permission modes (`permissionOption`), which the host keeps, not the model |
  *
  * - A setting that the options do not offer has no option.
@@ -19,9 +19,9 @@
  *   caches a request) have no option: the editor shows each option as a select above the prompt,
  *   and a session keeps what it was configured with for those two.
  * - An option's current value is what the model will get (a `SettingOption`'s `now`). Where nothing
- *   is sent for a setting, the value is `not_sent`, which is offered only then.
+ *   is sent for a setting, the value is `default`.
  * - A change of a setting names that setting alone, because a change keeps the settings it does not
- *   name. Choosing `not_sent` while it is the current value changes nothing.
+ *   name. Choosing `default` returns the setting to the provider's default.
  */
 
 import { Array as Arr, Data, Order, Schema } from "effect";
@@ -29,7 +29,7 @@ import type { SessionConfigOption, SessionConfigOptionCategory, SessionConfigSel
 import { SessionConfigId, SessionConfigValueId } from "effective-acp/schema/v1";
 import { TokenCount } from "../agent-machine/names.ts";
 import type { Observation } from "../agent-machine/observation.ts";
-import type { ModelSettings } from "../agent-machine/settings.ts";
+import type { ModelSettings, SettingsChange } from "../agent-machine/settings.ts";
 import type { Options, SettingOption } from "../agent-session/configuration/options.ts";
 import type { Asked } from "../agent-host/catalog.ts";
 import { PermissionMode } from "../agent-policy/permissions.ts";
@@ -44,7 +44,7 @@ export class InvalidChange extends Data.TaggedError("InvalidChange")<{ readonly 
 const outputPresets: ReadonlyArray<number> = [4096, 8192, 16384, 32768, 65536, 128000];
 
 /** The value of an option for which nothing is sent: the setting is not given, or the adapter sends nothing for it. */
-const notSent = "not_sent";
+const unset = "default";
 
 /** The settings shown as options. */
 type Shown = Exclude<keyof ModelSettings, "observe" | "cache">;
@@ -62,15 +62,15 @@ const described: Readonly<Record<Shown, { readonly name: string; readonly descri
   effort: { name: "Reasoning effort", description: "How much effort the model puts into a response.", category: "thought_level" },
   thinking: {
     name: "Thinking",
-    description: "When the model thinks: as it sees fit, before every answer, only between tool calls, or not at all.",
+    description: "Whether the model thinks: as the provider decides, not at all, or only between tool calls.",
     category: "model_config",
   },
   maxOutputTokens: { name: "Maximum output tokens", description: "The most tokens a response may take, thinking and answer together.", category: "model_config" },
 };
 
 const valueNames: Readonly<Record<Listed, Readonly<Record<string, string>>>> = {
-  effort: { low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum" },
-  thinking: { auto: "As the model sees fit", before_answer: "Before every answer", between_tools: "Between tool calls", off: "Off" },
+  effort: { default: "The provider's default", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum" },
+  thinking: { default: "As the provider decides", disabled: "Off", between_tools: "Between tool calls" },
 };
 
 const value = (id: string, name: string, description?: string): SessionConfigSelectOption => ({
@@ -79,7 +79,7 @@ const value = (id: string, name: string, description?: string): SessionConfigSel
   ...(description === undefined ? {} : { description }),
 });
 
-const notSentValue = value(notSent, "Not set", "No value of this setting is sent to the model.");
+const unsetValue = value(unset, "Default", "Nothing is sent for this setting: the provider's default applies.");
 
 /** Returns the models to offer, each with its option value: `models`, then the model asked now when `models` does not list it. */
 const modelsOffered = (options: Options, models: ReadonlyArray<Asked>): ReadonlyArray<Asked & { readonly value: string }> => {
@@ -92,16 +92,15 @@ const modelsOffered = (options: Options, models: ReadonlyArray<Asked>): Readonly
 const outputLimits = (limit: number | undefined, now: number | undefined): ReadonlyArray<number> =>
   Arr.sort(new Set([...outputPresets.filter((tokens) => limit === undefined || tokens <= limit), ...(limit === undefined ? [] : [limit]), ...(now === undefined ? [] : [now])]), Order.Number);
 
-/** Returns the values of `setting` to offer, by id and name, and the current value; `not_sent` is among them when nothing is sent. */
+/** Returns the values of `setting` to offer, by id and name, `default` first, and the current value. */
 const valuesOf = (setting: SettingOption, limit: number | undefined): { readonly values: ReadonlyArray<SessionConfigSelectOption>; readonly now: string } => {
-  const unsent = setting.now === undefined ? [notSentValue] : [];
   if (setting._tag === "Number") {
     const values = outputLimits(limit, setting.now).map((tokens) => value(String(tokens), tokens.toLocaleString("en-US"), tokens === limit ? "The model's limit" : undefined));
-    return { values: [...unsent, ...values], now: setting.now === undefined ? notSent : String(setting.now) };
+    return { values: [unsetValue, ...values], now: setting.now === undefined ? unset : String(setting.now) };
   }
   const names = valueNames[setting.name as Listed];
   const listed = setting.now === undefined || setting.values.includes(setting.now) ? setting.values : [...setting.values, setting.now];
-  return { values: [...unsent, ...listed.map((each) => value(each, names[each] ?? each))], now: setting.now ?? notSent };
+  return { values: listed.map((each) => (each === unset ? unsetValue : value(each, names[each] ?? each))), now: setting.now ?? unset };
 };
 
 /**
@@ -148,8 +147,7 @@ export function changeOf(configId: string, value: string, options: Options, mode
   if (setting === undefined) return new InvalidChange({ reason: `No option has the id ${configId}.` });
   const offered = valuesOf(setting, limit).values.some((each) => each.value === value);
   if (!offered) return new InvalidChange({ reason: `${value} is not a value offered for ${described[setting.name].name.toLowerCase()}.` });
-  if (value === notSent) return unchanged;
-  const said: ModelSettings = setting._tag === "Number" ? { maxOutputTokens: TokenCount.make(Number(value)) } : { [setting.name]: value };
+  const said: SettingsChange = { [setting.name]: value === unset || setting._tag === "OneOf" ? value : TokenCount.make(Number(value)) };
   return { ...unchanged, settings: said };
 }
 

@@ -5,9 +5,9 @@ import { Effect, Fiber, Layer, Logger } from "effect";
 import { TestClock } from "effect/testing";
 import { test } from "../../tests/support/test.ts";
 import { ModelName, ProviderName } from "../agent-machine/names.ts";
-import { capabilitiesOf, knownCapabilities, ModelOverrides } from "../agent-session/configuration/well-known-models.ts";
+import { capabilitiesOf, knownCapabilities, type ModelOverride, ModelOverrides } from "../agent-session/configuration/well-known-models.ts";
 import { logKeys } from "./log-keys.ts";
-import { KnownWithLocalServer, localCapabilities, localModels } from "./local-server.ts";
+import { KnownWithLocalServer, localCapabilities, localModels, unnamedLevels } from "./local-server.ts";
 
 test("what the local server lists of a model is what is known of it: its context window, input and reasoning efforts", () => {
   const listed = {
@@ -28,6 +28,12 @@ test("what the local server lists of a model is what is known of it: its context
     ["bare", { input: ["text"], price: { input: 0, output: 0 } }],
   ]);
   expect(localCapabilities("not a list").size).toBe(0);
+});
+
+test("a reasoning level that the core does not name is not offered, and is named so the host can log it", () => {
+  const listed = { models: [{ slug: "qwen", supported_reasoning_levels: [{ effort: "low" }, { effort: "ultra" }, { effort: "high" }] }] };
+  expect([...localCapabilities(listed)]).toEqual([["qwen", { input: ["text"], efforts: ["low", "high"], price: { input: 0, output: 0 } }]]);
+  expect(unnamedLevels(listed)).toEqual([{ model: "qwen", level: "ultra" }]);
 });
 
 test("an entry written some other way drops only itself, and so does a value in it", () => {
@@ -105,7 +111,7 @@ test("KnownWithLocalServer applies the local server's list to localhost models o
 
 test("KnownWithLocalServer applies the user's overrides over what the local server lists and the well-known models", async () => {
   const listed = { models: [{ slug: "qwen", context_window: 999 }] };
-  const overrides = new Map([
+  const overrides = new Map<string, ModelOverride>([
     ["localhost/qwen", { context: 32768 }],
     ["xai/grok-4.7", { efforts: ["minimal", "low"] }],
   ]);

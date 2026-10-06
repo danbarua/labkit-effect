@@ -240,19 +240,22 @@ continues").
 
   | Setting | Values |
   | --- | --- |
-  | `thinking` | `auto`, `before_answer`, `between_tools`, `off` |
+  | `thinking` | `disabled`, `between_tools` |
   | `observe` | `all`, `progress_only`, `off` |
-  | `effort` | `low` to `max` |
+  | `effort` | `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
   | `maxOutputTokens` | a number of tokens |
   | `cache` | `off`, `5m`, `1h` |
 
-  Each is optional, given in the opening or in a change of model, and keeps its last value. A
-  setting that is not given is left to the provider.
-- Where a model does not allow a value, the provider's adapter sends the nearest value it allows and
-  reports `SettingAdjusted` on the first request. From then on the value used is the session's
-  setting for that model, so nothing more is adjusted. For any other model the value given still
-  applies, and giving the setting again discards the adjustment. An adjustment lets the request go
-  on; a request that the harness or an extension refuses is vetoed instead (`ModelVetoed`).
+  Each is optional, given in the opening or in a change of model (`SettingsChange`), and keeps its
+  last value. A setting that is not given is left to the provider. A change that gives a setting as
+  `default` removes it, so the provider's default applies again.
+- A setting is the intent of whoever set it, a person or a policy, and a change of model carries
+  the settings over. Where a model does not take a value, the provider's adapter sends the nearest
+  value it takes, or nothing, and reports `SettingAdjusted` on the first request. From then on the
+  value used is the session's setting for that model, so nothing more is adjusted. For any other
+  model the value given still applies, and giving the setting again discards the adjustment. An
+  adjustment lets the request go on; a request that the harness or an extension refuses is vetoed
+  instead (`ModelVetoed`).
 
 ## What is passed on and not recorded
 

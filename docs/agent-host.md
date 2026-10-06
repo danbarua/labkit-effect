@@ -129,8 +129,9 @@ It holds the model to ask, the settings as given, the system prompt and the tool
 - `opening(draft, session)` returns the `SessionOpened` observation that opens `session` with the
   draft's model, settings, system prompt and tools. A host opens the session at the first input and
   then drops the draft.
-- `withDefaults(draft, capabilities)` gives a draft with no output limit a limit of 32768 tokens, or
-  the model's own limit when it is known and lower. A limit that was given stays.
+- `withDefaults(draft, capabilities)` gives a draft with no output limit the model's own limit
+  (from models.dev, or the user's `models:` override), or 32768 tokens when that is not known. A
+  limit that was given stays.
 - `defaultModel` is the first model that the catalog lists (`askable`), or none when it lists none.
 
 ## Turn-end hook: incomplete responses

@@ -27,14 +27,14 @@ test("choosing another model keeps the settings as given, and the options follow
   const after = chooseModel(before, asked("openai", "gpt-5.5"));
   expect(after.settings).toEqual({ effort: "max", cache: "1h" });
   const [shownBefore, shownAfter] = await runTest(Effect.all([optionsOfDraft(before), optionsOfDraft(after)]));
-  expect(option(shownBefore, "effort") as unknown).toEqual({ _tag: "OneOf", name: "effort", now: "max", values: ["low", "medium", "high", "xhigh", "max"] });
+  expect(option(shownBefore, "effort") as unknown).toEqual({ _tag: "OneOf", name: "effort", now: "max", values: ["default", "low", "medium", "high", "xhigh", "max"] });
   expect([shownAfter.model, shownAfter.settings]).toEqual([ModelName.make("gpt-5.5"), { effort: "max", cache: "1h" }]);
-  expect(option(shownAfter, "effort") as unknown).toEqual({ _tag: "OneOf", name: "effort", now: "xhigh", values: ["low", "medium", "high", "xhigh"] });
+  expect(option(shownAfter, "effort") as unknown).toEqual({ _tag: "OneOf", name: "effort", now: "xhigh", values: ["default", "low", "medium", "high", "xhigh"] });
 });
 
-test("settings given anew replace the ones they name, and a setting not named keeps its value", () => {
-  const draft = draftOf({ model: asked("anthropic", "claude-opus-5-5"), settings: { effort: "high", thinking: "auto" } });
-  expect(withSettings(draft, { effort: "low", cache: "5m" }).settings).toEqual({ effort: "low", thinking: "auto", cache: "5m" });
+test("settings given anew replace the ones they name, default removes one, and a setting not named keeps its value", () => {
+  const draft = draftOf({ model: asked("anthropic", "claude-sonnet-5-5"), settings: { effort: "high", thinking: "between_tools", observe: "all" } });
+  expect(withSettings(draft, { effort: "low", cache: "5m", observe: "default" }).settings).toEqual({ effort: "low", thinking: "between_tools", cache: "5m" });
   // A draft made with nothing but its model says no setting, and has no system prompt and no tools.
   expect(draftOf({ model: asked("anthropic", "claude-opus-5-5") })).toEqual({ model: asked("anthropic", "claude-opus-5-5"), settings: {}, system: undefined, tools: [] });
 });
@@ -53,7 +53,7 @@ const look: ToolSpec = { name: ToolName.make("look"), description: "Reads a file
 test("a session opened with the draft asks its model with its settings, has its system prompt and tools, and shows the draft's options", async () => {
   const draft = draftOf({
     model: asked("anthropic", "claude-opus-5-5"),
-    settings: { thinking: "off", effort: "max", maxOutputTokens: TokenCount.make(4000) },
+    settings: { thinking: "disabled", effort: "max", maxOutputTokens: TokenCount.make(4000) },
     system: "Be brief.",
     tools: [look],
   });
@@ -85,11 +85,11 @@ test("a draft with no setting, system prompt or tool opens a session with none",
   expect([model, system, tools]).toEqual([draft.model, undefined, []]);
 });
 
-test("an output limit that is not given defaults to 32768 tokens, or the model's own when lower; a limit that is given stays", () => {
+test("an output limit that is not given defaults to the model's own, or 32768 tokens when that is not known; a limit that is given stays", () => {
   const limitOf = (provider: string, model: string, settings?: ModelSettings) =>
     withDefaults(draftOf({ model: asked(provider, model), settings: { effort: "high", ...settings } }), capabilitiesOf(provider, model)).settings;
   // claude-opus-5-5 writes up to 128000 tokens; gpt-5.2-chat-latest up to 16384; nothing is known of the local model.
-  expect(limitOf("anthropic", "claude-opus-5-5")).toEqual({ effort: "high", maxOutputTokens: TokenCount.make(32768) });
+  expect(limitOf("anthropic", "claude-opus-5-5")).toEqual({ effort: "high", maxOutputTokens: TokenCount.make(128_000) });
   expect(limitOf("openai", "gpt-5.2-chat-latest")).toEqual({ effort: "high", maxOutputTokens: TokenCount.make(16384) });
   expect(limitOf("localhost", "qwen")).toEqual({ effort: "high", maxOutputTokens: TokenCount.make(32768) });
   expect(limitOf("anthropic", "claude-opus-5-5", { maxOutputTokens: TokenCount.make(100000) })).toEqual({ effort: "high", maxOutputTokens: TokenCount.make(100000) });

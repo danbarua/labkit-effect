@@ -13,7 +13,7 @@ import { Effect, Schema } from "effect";
 import type { Fact } from "../../agent-machine/fact.ts";
 import type { SessionId } from "../../agent-machine/names.ts";
 import type { ModelTarget, Observation } from "../../agent-machine/observation.ts";
-import type { ModelSettings } from "../../agent-machine/settings.ts";
+import { changed, type ModelSettings } from "../../agent-machine/settings.ts";
 import { type Target, ToolSpec } from "../contracts.ts";
 import { asText, parseJson, receivedJson, receivedText } from "../received.ts";
 import { settingOf } from "./settings.ts";
@@ -89,7 +89,7 @@ export const modelOf = (facts: ReadonlyArray<Fact>): Effect.Effect<Target> => {
     return {
       provider: change.provider,
       model: change.model,
-      requested: { ...state.requested, ...change.settings },
+      requested: changed(state.requested, change.settings ?? {}),
       adjusted: state.adjusted.filter((each) => !restated.has(settingOf[each.adjusted._tag])),
     };
   }, start);

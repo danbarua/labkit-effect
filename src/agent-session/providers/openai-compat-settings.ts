@@ -1,10 +1,12 @@
 /**
  * A session's settings for a Chat Completions provider.
  * - **Reasoning effort** is sent as `reasoning_effort`, the standard Chat Completions parameter: the
- *   effort asked, or `none` when thinking is `off`. With neither an effort nor a thinking setting,
- *   nothing is sent and the server uses its default. An effort that the model is known not to accept
- *   (`efforts`) is sent as the nearest accepted effort (`effortFor`). For a model with no list, the
- *   effort asked is sent, and a server that does not accept it refuses the request in its own words.
+ *   effort asked, or `none` when thinking is `disabled` (`reasoningEffortFor`). With neither an
+ *   effort nor a thinking setting, nothing is sent and the server uses its default. An effort that
+ *   the model is known not to accept (`efforts`) is sent as the nearest accepted effort. For a model
+ *   with no list, the effort asked is sent, and a server that does not accept it refuses the request
+ *   in its own words.
+ * - **Thinking `between_tools`** has no Chat Completions parameter, and is not sent.
  * - **Output limit** is sent as `max_tokens`; the server ends a response that reaches it with
  *   `finish_reason: length`.
  * - **Other settings** are not sent, because each compatible provider accepts them differently;
@@ -16,18 +18,16 @@
  */
 
 import type { ModelSettings } from "../../agent-machine/settings.ts";
-import { type Adjustment, effortFor, type Settled } from "../configuration/settings.ts";
+import { type Adjustment, reasoningEffortFor, type Settled } from "../configuration/settings.ts";
 import type { Target } from "../contracts.ts";
 import { knownOf } from "../configuration/well-known-models.ts";
 
 const reason = "the Chat Completions adapter does not send this setting";
 
 export function openAiCompatSettings(settings: ModelSettings = {}, efforts?: ReadonlyArray<string>): Settled {
-  const { sent, adjusted: effortAdjusted } = effortFor(settings, efforts);
+  const { sent, adjusted: effortAdjusted } = reasoningEffortFor(settings, efforts);
   const adjusted: ReadonlyArray<Adjustment> = [
-    ...(settings.thinking === "before_answer" || settings.thinking === "between_tools"
-      ? [{ adjusted: { _tag: "Thinking" as const, asked: settings.thinking, used: "auto" as const }, reason: "Chat Completions has no setting for when the model thinks" }]
-      : []),
+    ...(settings.thinking === "between_tools" ? [{ adjusted: { _tag: "Thinking" as const, asked: settings.thinking }, reason: "Chat Completions has no setting for thinking only between tool calls" }] : []),
     ...effortAdjusted,
     ...(settings.observe === undefined ? [] : [{ adjusted: { _tag: "Observe" as const, asked: settings.observe }, reason }]),
     ...(settings.cache === undefined ? [] : [{ adjusted: { _tag: "Cache" as const, asked: settings.cache }, reason }]),

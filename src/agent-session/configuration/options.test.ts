@@ -43,15 +43,15 @@ test("the options are the model, the settings in force, and each setting to offe
     model: "gpt-5.5",
     settings: { effort: "low", maxOutputTokens: 2000 },
     offered: [
-      { _tag: "OneOf", name: "effort", now: "low", values: ["low", "medium", "high", "xhigh"] },
-      { _tag: "OneOf", name: "thinking", values: ["auto", "off"] },
-      { _tag: "OneOf", name: "observe", values: ["all", "progress_only", "off"] },
-      { _tag: "OneOf", name: "cache", values: ["5m", "1h"] },
-      { _tag: "Number", name: "maxOutputTokens", now: 2000 },
+      { _tag: "OneOf", name: "effort", now: "low", values: ["default", "low", "medium", "high", "xhigh"] },
+      { _tag: "OneOf", name: "thinking", values: ["default", "disabled"] },
+      { _tag: "OneOf", name: "observe", values: ["default", "all", "progress_only", "off"] },
+      { _tag: "OneOf", name: "cache", values: ["default", "5m", "1h"] },
+      { _tag: "Number", name: "maxOutputTokens", now: 2000, max: 128_000 },
     ],
   });
-  // The settings said stay for the other model; xAI has no setting for the cache.
-  expect(changed.offered.map((each) => each.name)).toEqual(["effort", "thinking", "observe", "maxOutputTokens"]);
+  // The settings said stay for the other model; xAI has no setting for the cache, and grok cannot turn its thinking off.
+  expect(changed.offered.map((each) => each.name)).toEqual(["effort", "observe", "maxOutputTokens"]);
   expect(changed).toMatchObject({ provider: "xai", model: "grok-4.7", settings: { effort: "low" } });
 });
 
@@ -65,11 +65,11 @@ test("the options of a model and its settings need no session: a well-known mode
     model: "gpt-5.5",
     settings: { effort: "medium", cache: "1h" },
     offered: [
-      { _tag: "OneOf", name: "effort", now: "medium", values: ["low", "medium", "high", "xhigh"] },
-      { _tag: "OneOf", name: "thinking", values: ["auto", "off"] },
-      { _tag: "OneOf", name: "observe", values: ["all", "progress_only", "off"] },
-      { _tag: "OneOf", name: "cache", now: "1h", values: ["5m", "1h"] },
-      { _tag: "Number", name: "maxOutputTokens" },
+      { _tag: "OneOf", name: "effort", now: "medium", values: ["default", "low", "medium", "high", "xhigh"] },
+      { _tag: "OneOf", name: "thinking", values: ["default", "disabled"] },
+      { _tag: "OneOf", name: "observe", values: ["default", "all", "progress_only", "off"] },
+      { _tag: "OneOf", name: "cache", now: "1h", values: ["default", "5m", "1h"] },
+      { _tag: "Number", name: "maxOutputTokens", max: 128_000 },
     ],
   });
 });
@@ -77,23 +77,29 @@ test("the options of a model and its settings need no session: a well-known mode
 test("an effort beyond the model's highest stays as said, and its value now is the nearest the model takes, among those offered", async () => {
   const options = await Effect.runPromise(optionsFor(draft("openai", "gpt-5.5", { effort: "max" })));
   expect(options.settings).toEqual({ effort: "max" });
-  expect(options.offered[0] as unknown).toEqual({ _tag: "OneOf", name: "effort", now: "xhigh", values: ["low", "medium", "high", "xhigh"] });
+  expect(options.offered[0] as unknown).toEqual({ _tag: "OneOf", name: "effort", now: "xhigh", values: ["default", "low", "medium", "high", "xhigh"] });
 });
 
-test("with thinking off, the effort said is not sent, so no effort is now", async () => {
-  const options = await Effect.runPromise(optionsFor(draft("openai", "gpt-5.5", { thinking: "off", effort: "high" })));
-  expect(options.settings).toEqual({ thinking: "off", effort: "high" });
+test("with thinking disabled, the effort said is not sent, so no effort is now", async () => {
+  const options = await Effect.runPromise(optionsFor(draft("openai", "gpt-5.5", { thinking: "disabled", effort: "high" })));
+  expect(options.settings).toEqual({ thinking: "disabled", effort: "high" });
   expect(nowOf(options, "effort")).toBeUndefined();
-  expect(nowOf(options, "thinking")).toBe("off");
+  expect(nowOf(options, "thinking")).toBe("disabled");
+});
+
+test("a model that takes a thinking budget is offered efforts, which its adapter sends as budgets", async () => {
+  const options = await Effect.runPromise(optionsFor(draft("anthropic", "claude-haiku-4-5", { effort: "medium" })));
+  expect(options.offered.map((each) => each.name)).toEqual(["effort", "thinking", "observe", "cache", "maxOutputTokens"]);
+  expect(options.offered[0] as unknown).toEqual({ _tag: "OneOf", name: "effort", now: "medium", values: ["default", "low", "medium", "high", "xhigh", "max"] });
 });
 
 test("a provider with no settings function offers every value, and each setting is now as said", async () => {
   const options = await Effect.runPromise(optionsFor(draft("nowhere", "m", { effort: "max", maxOutputTokens: TokenCount.make(10) })));
   expect(options.offered as unknown).toEqual([
-    { _tag: "OneOf", name: "effort", now: "max", values: ["low", "medium", "high", "xhigh", "max"] },
-    { _tag: "OneOf", name: "thinking", values: ["auto", "before_answer", "between_tools", "off"] },
-    { _tag: "OneOf", name: "observe", values: ["all", "progress_only", "off"] },
-    { _tag: "OneOf", name: "cache", values: ["off", "5m", "1h"] },
+    { _tag: "OneOf", name: "effort", now: "max", values: ["default", "minimal", "low", "medium", "high", "xhigh", "max"] },
+    { _tag: "OneOf", name: "thinking", values: ["default", "disabled", "between_tools"] },
+    { _tag: "OneOf", name: "observe", values: ["default", "all", "progress_only", "off"] },
+    { _tag: "OneOf", name: "cache", values: ["default", "off", "5m", "1h"] },
     { _tag: "Number", name: "maxOutputTokens", now: 10 },
   ]);
 });
@@ -108,7 +114,7 @@ const services = Layer.mergeAll(
 );
 
 test("a session opened with a model and settings, before any request, has the options of that model and settings alone", async () => {
-  const target = draft("anthropic", "claude-opus-5-5", { thinking: "off", effort: "max", maxOutputTokens: TokenCount.make(4000) });
+  const target = draft("anthropic", "claude-opus-5-5", { thinking: "disabled", effort: "max", maxOutputTokens: TokenCount.make(4000) });
   const [fromFacts, alone] = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
@@ -124,23 +130,22 @@ test("after a setting is adjusted, the session's options have the adjusted setti
   const options = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession;
-      const model = draft("anthropic", "claude-opus-5-5", { thinking: "off", effort: "high" });
+      const model = draft("anthropic", "claude-opus-5-5", { thinking: "disabled", effort: "high" });
       yield* session.observe(openedWith({ session: SessionId.make("s1"), model, system: undefined, tools: [] }));
       yield* session.observe({
         _tag: "SettingAdjusted",
         turn: TurnId.make("turn-1"),
         provider: model.provider,
         model: model.model,
-        adjusted: { _tag: "Thinking", asked: "off", used: "auto" },
-        reason: AdjustmentReason.make("this model does not allow thinking to be turned off"),
+        adjusted: { _tag: "Thinking", asked: "disabled" },
+        reason: AdjustmentReason.make("this model cannot turn its thinking off"),
       });
       yield* session.idle;
       return yield* optionsOf(yield* session.facts);
     }).pipe(Effect.provide(services)),
   );
-  expect(options.settings).toEqual({ thinking: "auto", effort: "high" });
-  expect(options.offered.slice(0, 2) as unknown).toEqual([
-    { _tag: "OneOf", name: "effort", now: "high", values: ["low", "medium", "high", "xhigh", "max"] },
-    { _tag: "OneOf", name: "thinking", now: "auto", values: ["auto"] },
-  ]);
+  // Opus cannot turn its thinking off: thinking is not offered for it.
+  expect(options.settings).toEqual({ effort: "high" });
+  expect(options.offered.map((each) => each.name)).toEqual(["effort", "observe", "cache", "maxOutputTokens"]);
+  expect(options.offered[0] as unknown).toEqual({ _tag: "OneOf", name: "effort", now: "high", values: ["default", "low", "medium", "high", "xhigh", "max"] });
 });

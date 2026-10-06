@@ -7,7 +7,7 @@
  */
 
 import { Effect, Layer, Option, Schema } from "effect";
-import { type Capabilities, KnownModels, type ModelKnowledge, ModelOverrides, wellKnown, withOverrides } from "../agent-session/configuration/well-known-models.ts";
+import { type Capabilities, KnownEffort, KnownModels, type ModelKnowledge, ModelOverrides, wellKnown, withOverrides } from "../agent-session/configuration/well-known-models.ts";
 import { Settling, type SettlingSource, wellKnownSettling } from "../agent-session/configuration/options.ts";
 import { openAiCompatSettle } from "../agent-session/providers/openai-compat-settings.ts";
 import { logKeys } from "./log-keys.ts";
@@ -40,14 +40,27 @@ const listedModels = itemsOf(
 const levels = itemsOf(Schema.Struct({ effort: Schema.String }));
 const strings = itemsOf(Schema.String);
 
+const isKnownEffort = Schema.is(KnownEffort);
+
+/**
+ * Returns the reasoning levels that the local server's model list names and the core does not
+ * (`KnownEffort`), by model: `localCapabilities` leaves them out, and the host logs them.
+ */
+export function unnamedLevels(listed: unknown): ReadonlyArray<{ readonly model: string; readonly level: string }> {
+  return Option.match(ModelList(listed), { onNone: () => [], onSome: (each) => listedModels(each.models) }).flatMap((model) =>
+    levels(model.supported_reasoning_levels).flatMap((level) => (isKnownEffort(level.effort) ? [] : [{ model: model.slug, level: level.effort }])),
+  );
+}
+
 /**
  * Returns what the local server's model list says of each model it serves, by the model's name:
- * the `models` entries give the context window, the kinds of input and the reasoning levels.
+ * the `models` entries give the context window, the kinds of input and the reasoning levels that the
+ * core names (`unnamedLevels` returns the others).
  */
 export function localCapabilities(listed: unknown): ReadonlyMap<string, Capabilities> {
   return new Map(
     Option.match(ModelList(listed), { onNone: () => [], onSome: (each) => listedModels(each.models) }).map((model) => {
-      const efforts = levels(model.supported_reasoning_levels).map((level) => level.effort);
+      const efforts = levels(model.supported_reasoning_levels).flatMap((level) => (isKnownEffort(level.effort) ? [level.effort] : []));
       const input = strings(model.input_modalities);
       const capabilities: Capabilities = {
         ...(typeof model.context_window === "number" ? { context: model.context_window } : {}),
@@ -84,6 +97,9 @@ export const KnownWithLocalServer = Layer.effect(
   Effect.gen(function* () {
     const local = yield* Effect.cached(
       Effect.tryPromise(() => fetch(`${localServer}/models`).then((response) => response.json() as Promise<unknown>)).pipe(
+        Effect.tap((listed) =>
+          Effect.forEach(unnamedLevels(listed), ({ model, level }) => Effect.logWarning(logKeys.localServer.levelNotNamed, { model, level, known: KnownEffort.literals.join(", ") }), { discard: true }),
+        ),
         Effect.map(localCapabilities),
         Effect.catch((error) =>
           Effect.logWarning(logKeys.localServer.modelsNotListed, { url: `${localServer}/models`, error: String(error) }).pipe(Effect.as(new Map<string, Capabilities>())),

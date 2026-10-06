@@ -18,7 +18,7 @@ export const anthropicSetup = (
     target: {
       provider: ProviderName.make("anthropic"),
       model: ModelName.make(model),
-      settings: { thinking: "off", maxOutputTokens: TokenCount.make(1024) },
+      settings: { thinking: "disabled", maxOutputTokens: TokenCount.make(1024) },
     },
     client,
   });

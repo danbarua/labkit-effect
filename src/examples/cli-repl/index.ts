@@ -52,7 +52,7 @@ import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { ConfigProvider, Console, Effect, Layer, Option, Result, Stdio, Stream } from "effect";
 import { Argument, CliOutput, Command, Flag, Prompt } from "effect/cli";
 import { Effort, ThinkingMode } from "../../agent-machine/settings.ts";
-import { settingsGiven } from "./model-settings.ts";
+import { knowledgeWith, settingsGiven, takenBy } from "./model-settings.ts";
 import { modelOf } from "../../agent-session/configuration/session-setup.ts";
 import { askable, KeyedAndLocalCatalog, ModelCatalog } from "../../agent-host/catalog.ts";
 import { latestSession, readSession, storedSessions, summaryOf } from "../../agent-host/directory.ts";
@@ -77,8 +77,8 @@ const arg = (name: string) => Argument.String(name).pipe(Argument.optional, Argu
 
 const flags = {
   print: toggle("print", "Ask once, print the answer and exit", "p"),
-  effort: choice("effort", [...Effort.literals, "none"], "Reasoning effort; a model that does not take it is sent the nearest it does; none is --thinking off"),
-  thinking: choice("thinking", ThinkingMode.literals, "When the model thinks"),
+  effort: choice("effort", ["default", ...Effort.literals], "Reasoning effort: default (the provider's), or an effort the model takes"),
+  thinking: choice("thinking", ["default", ...ThinkingMode.literals], "Whether the model thinks: default (as the provider decides), disabled, or between_tools, where the model takes it"),
   systemPrompt: text("system-prompt", "The system prompt"),
   systemPromptFile: text("system-prompt-file", "A file holding the system prompt"),
   appendSystemPrompt: text("append-system-prompt", "Text added after the system prompt"),
@@ -196,6 +196,20 @@ const configOf = (options: Options, interactive: boolean) =>
     }),
   );
 
+/**
+ * Returns `config` when the model it asks takes each setting that the command line names
+ * (`takenBy`): a new session's model as it opens, or a continued session's model with the settings it
+ * has. What is known of models is what a session knows, with the configuration's overrides. A
+ * setting the model does not take fails the run before the session opens, with or without `-p`:
+ * the settings a run starts with are valid, or it does not start.
+ */
+const checked = (config: Config) =>
+  Effect.gen(function* () {
+    const settings = config.continues === undefined ? undefined : (yield* modelOf(config.continues)).settings;
+    yield* takenBy({ ...config.target, ...(settings === undefined ? {} : { settings }) }, config.settings, "the command line").pipe(Effect.provide(knowledgeWith(config.configuration.models)));
+    return config;
+  });
+
 /** The CLI, called by `brand`'s name. */
 export const cliOf = (brand: Brand) =>
   Command.make(
@@ -211,12 +225,12 @@ export const cliOf = (brand: Brand) =>
         const found = yield* Effect.result(askedOf(named, "/model"));
         const target = Result.isSuccess(found) ? found.success : yield* withoutModel(found.failure, options.prompt, context, unresolved.configuration.layers);
         if (target === undefined) return;
-        const config: Config = { ...unresolved, target };
+        const config: Config = yield* checked({ ...unresolved, target });
         // The prompt the command line gave was refused, and not kept, when the REPL opened without a model.
         const first = Result.isSuccess(found) ? options.prompt : undefined;
         return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), terminal(context.view), (session, mcp) => repl(session, config, first, interactive, context, mcp));
       }
-      const config: Config = { ...unresolved, target: yield* targetOf(named, "--model") };
+      const config: Config = yield* checked({ ...unresolved, target: yield* targetOf(named, "--model") });
       if (!options.print)
         return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), interactive ? terminal(context.view) : Headless, (session, mcp) => repl(session, config, options.prompt, interactive, context, mcp));
       // Piped input is read only when no prompt was given: a shell that leaves stdin open would

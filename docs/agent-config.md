@@ -153,8 +153,10 @@ models:
     output: 8192
 ```
 
-- An override's fields are `context`, `output`, `input`, `reasoning`, `efforts` and `budget`
-  (`min`, `max`). Any other field is refused, and so is a name that is not `provider/model`.
+- An override's fields are `context`, `output`, `input`, `reasoning`, `efforts`, `thinking` and
+  `budget` (`min`, `max`). `efforts` takes the efforts the core names (`none`, `minimal`, `low`,
+  `medium`, `high`, `xhigh`, `max`), and `thinking` the measured modes (`between_tools`). Any other
+  field or value is refused, and so is a name that is not `provider/model`.
 - A field given replaces what is known of it whole; a field not given stays as known. Across
   layers, a model's overrides merge field by field, as any mapping does. `null` under a model removes
   its override, and `models: null` removes every earlier override.

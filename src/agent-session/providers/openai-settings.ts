@@ -1,26 +1,28 @@
 /**
  * A session's settings as the Responses API accepts them: `reasoning.effort`, `reasoning.summary`,
  * `max_output_tokens` and `prompt_cache_retention`.
- * - The API has no setting for when a model thinks, other than not at all (effort `none`).
+ * - The API has no setting for when a model thinks, other than not at all (effort `none`): thinking
+ *   `between_tools` is not sent.
  * - The API caches every long enough request in memory, for minutes. When the session asks for an
- *   hour, the request asks for the API's longer retention, 24 hours.
+ *   hour, the request asks for the API's longer retention, 24 hours. Cache `off` is sent as `5m`.
  * - A setting that the API cannot accept is returned as adjusted.
  *
- * Each model accepts its own reasoning efforts (`efforts`, from the well-known models): gpt-5 accepts
- * `minimal` to `high`, the pro models `medium` to `xhigh` (gpt-5-pro only `high`), and some accept no
- * `none`. An effort that a model does not accept, including thinking `off` (effort `none`), is sent
- * as the nearest accepted effort (the higher one when two are equally near), and returned as
- * adjusted. A model with no list is sent the effort asked.
+ * Each model accepts its own reasoning efforts (`efforts`, from models.dev): gpt-5 accepts `minimal`
+ * to `high`, the pro models `medium` to `xhigh` (gpt-5-pro only `high`), and some accept no `none`.
+ * Thinking `disabled` is sent as effort `none` to a model that lists it, and to no other
+ * (`reasoningEffortFor`). An effort that a model does not accept is sent as the nearest accepted
+ * effort (the higher one when two are equally near), and returned as adjusted. A model with no list
+ * is sent the effort asked.
  */
 
 import type { ModelSettings } from "../../agent-machine/settings.ts";
-import { type Adjustment, effortFor, type Settled } from "../configuration/settings.ts";
+import { type Adjustment, reasoningEffortFor, type Settled } from "../configuration/settings.ts";
 import type { Target } from "../contracts.ts";
 import { knownOf } from "../configuration/well-known-models.ts";
 
 export function openAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyArray<string>): Settled {
   const { thinking, observe, maxOutputTokens, cache } = settings;
-  const { sent, adjusted: effortAdjusted } = effortFor(settings, efforts);
+  const { sent, adjusted: effortAdjusted } = reasoningEffortFor(settings, efforts);
   const cacheAdjusted: ReadonlyArray<Adjustment> =
     cache === "off"
       ? [
@@ -31,14 +33,7 @@ export function openAiSettings(settings: ModelSettings = {}, efforts?: ReadonlyA
         ]
       : [];
   const thinkingAdjusted: ReadonlyArray<Adjustment> =
-    thinking === "before_answer" || thinking === "between_tools"
-      ? [
-          {
-            adjusted: { _tag: "Thinking", asked: thinking, used: "auto" },
-            reason: "the Responses API has no setting for when the model thinks",
-          },
-        ]
-      : [];
+    thinking === "between_tools" ? [{ adjusted: { _tag: "Thinking", asked: thinking }, reason: "the Responses API has no setting for thinking only between tool calls" }] : [];
   const adjusted = [...cacheAdjusted, ...thinkingAdjusted, ...effortAdjusted];
   const reasoning = {
     ...(sent === undefined ? {} : { effort: sent }),

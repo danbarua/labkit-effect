@@ -67,6 +67,9 @@ export const wellKnownModels = {
         "xhigh",
         "max"
       ],
+      "thinking": [
+        "between_tools"
+      ],
       "price": {
         "input": 2,
         "output": 10,

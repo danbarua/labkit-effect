@@ -2,9 +2,9 @@
  * `/settings name=value …` changes the settings named; the rest stay as they were. `/settings`
  * alone shows the settings in force and offers each to change. The settings are:
  *
- * - the model's (`thinking`, `observe`, `effort`, `maxOutputTokens`, `cache`), for this session.
- *   What is offered is what the provider's adapter applies as asked, beside the settings in force: a
- *   setting or value it would adjust is not offered. Typed out, it is still taken, and adjusted. The
+ * - the model's (`effort`, `budget`, `thinking`, `observe`, `cache`, `maxOutputTokens`), for this
+ *   session. What is offered, and taken, is what the model takes beside the settings in force
+ *   (`optionsOf`, `takenBy`), and `default`, which returns a setting to the provider's default. The
  *   change is reported to the session (`ModelChangeArrived`), which takes it between turns.
  * - the user's (`view.thinking`, `user-settings.ts`), which apply at once and are written into the
  *   user's configuration folder.
@@ -16,19 +16,27 @@
 import { Effect, Ref } from "effect";
 import { Prompt } from "effect/cli";
 import type { Session } from "../../../agent-session/loop.ts";
-import { optionsOf } from "../../../agent-session/configuration/options.ts";
+import { optionsOf, type SettingOption } from "../../../agent-session/configuration/options.ts";
 import { modelOf } from "../../../agent-session/configuration/session-setup.ts";
 import { type CommandContext, type ReplCommand, said } from "../command.ts";
 import { invalid } from "../invalid.ts";
-import { inForce, settingsFrom } from "../model-settings.ts";
+import { inForce, settingsFrom, takenBy } from "../model-settings.ts";
 import { applied, isUserWord, userChangeOf, userSettings, userSettingsLine } from "../user-settings.ts";
 
-/** A setting as the picker offers it: its name, its value in force, and its values; a number when it has none listed. */
+/** A setting as the picker offers it: its name, its value in force, and its values; a number, from `min`, when it has none listed. */
 interface Pickable {
   readonly name: string;
   readonly now?: string | number;
   readonly values?: ReadonlyArray<string>;
+  readonly min?: number;
 }
+
+/** A setting the model is offered, as the picker offers it. */
+const pickableOf = (option: SettingOption): Pickable => {
+  const now = option.now === undefined ? {} : { now: option.now };
+  if (option._tag === "OneOf") return { name: option.name, ...now, values: option.values };
+  return { name: option.name, ...now, ...(option.min === undefined ? {} : { min: option.min }) };
+};
 
 const leave = "(leave)";
 
@@ -42,7 +50,7 @@ const picked = (heading: string, settings: ReadonlyArray<Pickable>) =>
     if (option === leave) return undefined;
     const value =
       option.values === undefined
-        ? String(yield* Prompt.Int({ message: option.name, min: 1 }))
+        ? String(yield* Prompt.Int({ message: option.name, min: option.min ?? 1 }))
         : yield* Prompt.Select({ message: option.name, choices: option.values.map((each) => ({ title: each, value: each })) });
     return `${option.name}=${value}`;
   });
@@ -77,13 +85,13 @@ export const settings: ReplCommand = {
   inSession: (session: Session, words, context) =>
     Effect.gen(function* () {
       const shown = `${yield* inForce(session)}\n${yield* userSettingsLine(context)}`;
-      const offered = (yield* optionsOf(yield* session.facts)).offered.map((each): Pickable => ({ name: each.name, ...(each.now === undefined ? {} : { now: each.now }), ...(each._tag === "OneOf" ? { values: each.values } : {}) }));
+      const offered = (yield* optionsOf(yield* session.facts)).offered.map(pickableOf);
       const change = words.length === 0 ? yield* picked(shown.split("\n")[0] ?? "", [...offered, ...(yield* userPickable(context))]) : undefined;
       if (words.length === 0 && change === undefined) return said(shown);
       const given = change === undefined ? words : [change];
       const modelWords = given.filter((word) => !isUserWord(word));
-      // Every setting is read before any is changed.
-      const modelSettings = modelWords.length === 0 ? undefined : yield* settingsFrom(modelWords);
+      // Every setting is read before any is changed, and the model's are taken only where the model takes them.
+      const modelSettings = modelWords.length === 0 ? undefined : yield* takenBy(yield* modelOf(yield* session.facts), yield* settingsFrom(modelWords));
       yield* Effect.forEach(given.filter(isUserWord), userChangeOf);
       const asking =
         modelSettings === undefined

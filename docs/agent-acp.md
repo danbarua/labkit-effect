@@ -70,7 +70,7 @@ never gets a prompt leaves nothing on disk, so `session/list` lists only session
 - The session's configuration is read (see Configuration), the world is opened for `cwd`, and the
   MCP servers are started at once.
 - The draft holds the model, its settings, the system prompt and the tools. Its output limit is
-  defaulted (`withDefaults`).
+  defaulted to the model's own (`withDefaults`).
 - The answer carries the session's id and its config options. After the answer is written, the
   host sends `available_commands_update` with `/export` and `/mcp`.
 
@@ -231,9 +231,9 @@ catalog's (`askable`), and `limit` is the model's output limit (none known: ever
 | id | category | values |
 | --- | --- | --- |
 | `model` | `model` | `provider/model` of each model offered, and of the one asked now |
-| `effort` | `thought_level` | the efforts the model takes |
-| `thinking` | `model_config` | the thinking modes the model takes |
-| `max_output_tokens` | `model_config` | 4096, 8192, 16384, 32768, 65536, 128000 up to the model's limit; the limit; the value in force |
+| `effort` | `thought_level` | `default`, and the efforts the model takes |
+| `thinking` | `model_config` | `default`, and the thinking modes the model takes |
+| `max_output_tokens` | `model_config` | `default`; 4096, 8192, 16384, 32768, 65536, 128000 up to the model's limit; the limit; the value in force |
 | `permission_mode` | `mode` | `default`, `acceptEdits`, `bypassPermissions`, `dontAsk` |
 
 - `model` comes first, then one select for each setting the options offer, then `permission_mode`.
@@ -245,7 +245,7 @@ catalog's (`askable`), and `limit` is the model's output limit (none known: ever
 - A setting's current value is what the model will get (the option's `now`). For example, an effort
   above the model's highest shows the nearest effort the model takes, and the effort asked for is
   not offered.
-- Where nothing is sent for a setting, its value is `not_sent`, which is offered only then.
+- Where nothing is sent for a setting, its value is `default`, which every setting offers.
 - The output limit offers the presets up to the model's limit, the limit itself, and the value in
   force even when it is above the limit, smallest first.
 
@@ -254,7 +254,7 @@ catalog's (`askable`), and `limit` is the model's output limit (none known: ever
 - Each value offered, taken as a change, gives a configuration whose option has that value now.
 - A change names only what was chosen: the model, or the one setting. A change keeps the settings it
   does not name.
-- Choosing `not_sent` while it is the value now changes nothing.
+- Choosing `default` returns the setting to the provider's default.
 - A model value is found among the values offered, not split, because a local model's name can hold
   slashes.
 - A value that the option does not offer, or an id that no option has, is an `InvalidChange`, which
