@@ -4,7 +4,7 @@ import { expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
 import { Effect } from "effect";
 import { ModelName, ProviderName } from "../../agent-machine/names.ts";
-import { capabilitiesOf, effortsTaken, knownCapabilities, KnownModels, type ModelOverride, type SettingsFor, turnsThinkingOff, wellKnown, withOverrides } from "./well-known-models.ts";
+import { capabilitiesOf, effortsTaken, knownCapabilities, KnownModels, type ModelOverride, type SettingsFor, turnsThinkingOff, catalogued, withOverrides } from "./well-known-models.ts";
 
 test("a well-known model's settings type takes the efforts it takes, thinking disabled only where it can turn thinking off, and between_tools where it was measured", () => {
   // grok-4.7 takes low to xhigh, as models.dev lists it: no max, and no none, so thinking cannot be disabled.
@@ -53,9 +53,18 @@ test("a user's override of a model replaces the fields it gives and keeps the re
     ["localhost/qwen", { context: 32768, output: 8192 }],
   ]);
   const known = (provider: string, model: string) =>
-    Effect.runPromise(knownCapabilities(ProviderName.make(provider), ModelName.make(model)).pipe(Effect.provideService(KnownModels, withOverrides(overrides, [wellKnown]))));
+    Effect.runPromise(knownCapabilities(ProviderName.make(provider), ModelName.make(model)).pipe(Effect.provideService(KnownModels, withOverrides(overrides, [catalogued]))));
   expect((await known("xai", "grok-4.7")) as unknown).toEqual({ ...capabilitiesOf("xai", "grok-4.7"), efforts: ["minimal", "low", "medium", "high", "xhigh"] });
   expect(await known("localhost", "qwen")).toEqual({ input: [], price: { input: 0, output: 0 }, context: 32768, output: 8192 });
   expect(await known("xai", "grok-4.6")).toEqual(capabilitiesOf("xai", "grok-4.6"));
   expect(await known("localhost", "other")).toBeUndefined();
+});
+
+test("a model that is not well-known is known by what models.dev's catalog says of it; a model that neither lists is not known", () => {
+  expect(capabilitiesOf("anthropic", "claude-sonnet-4-5")).toMatchObject({ reasoning: true, budget: { min: 1024 }, output: 64000 });
+  expect(effortsTaken(capabilitiesOf("anthropic", "claude-sonnet-4-5"))).toEqual(["low", "medium", "high", "xhigh", "max"]);
+  // The catalog's toggle (reasoning switched off) is the effort none, so the model can turn its thinking off.
+  expect(capabilitiesOf("anthropic", "claude-sonnet-5")?.efforts).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
+  expect(turnsThinkingOff(capabilitiesOf("anthropic", "claude-sonnet-5"))).toBe(true);
+  expect(capabilitiesOf("anthropic", "claude-unknown-9")).toBeUndefined();
 });

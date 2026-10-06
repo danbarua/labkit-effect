@@ -22,15 +22,22 @@
  * Also measured: Anthropic refuses `max_tokens` above a model's output (Haiku 4.5: 64,000); OpenAI
  * accepts any `max_output_tokens`, so its limit cannot be read from a refusal.
  *
+ * A model that is not well-known is known by what models.dev's catalog says of it
+ * (`catalog-models.gen.ts`, which the same refresh writes for every other model of the same
+ * providers): `claude-sonnet-4-5` takes a thinking budget, as Claude Haiku 4.5 does. The well-known
+ * models are the ones offered (`bun cli models`); any model that the catalog lists is asked with what
+ * the catalog knows of it.
+ *
  * A model is found by its name or by its name with a release date after it
- * (`claude-haiku-4-5-20251001` is `claude-haiku-4-5`; `gpt-5-mini` is not `gpt-5`). A model that is
- * not well-known (a local server's) is known by what its host provides (`KnownModels`), at run time.
+ * (`claude-haiku-4-5-20251001` is `claude-haiku-4-5`; `gpt-5-mini` is not `gpt-5`). A model that
+ * neither lists (a local server's) is known by what its host provides (`KnownModels`), at run time.
  */
 
 import { Context, Effect, Schema } from "effect";
 import type { ModelName, ProviderName } from "../../agent-machine/names.ts";
 import { Effort, type ModelSettings, type ThinkingMode } from "../../agent-machine/settings.ts";
 import { firstAnswer } from "../first-answer.ts";
+import { catalogModels } from "./catalog-models.gen.ts";
 import { wellKnownModels } from "./well-known-models.gen.ts";
 
 export interface Price {
@@ -78,26 +85,34 @@ const known: Readonly<Record<string, Readonly<Record<string, Capabilities>>>> = 
 const datedFrom = (name: string, model: string): boolean =>
   model.startsWith(`${name}-`) && /^(\d{4}-\d{2}-\d{2}|\d{8})$/.test(model.slice(name.length + 1));
 
-/** Returns what is known of the well-known `model` of `provider`, found by its name or a dated name. */
-export function capabilitiesOf(provider: ProviderName | string, model: ModelName | string): Capabilities | undefined {
-  const models = known[provider] ?? {};
+/** Returns the entry of `model` of `provider` in `table`, found by its name or a dated name. */
+const entryIn = (table: Readonly<Record<string, Readonly<Record<string, Capabilities>>>>, provider: string, model: string): Capabilities | undefined => {
+  const models = table[provider] ?? {};
   const name = model in models ? model : Object.keys(models).find((each) => datedFrom(each, model));
   return name === undefined ? undefined : models[name];
+};
+
+/**
+ * Returns what is known of `model` of `provider`, found by its name or a dated name: its well-known
+ * entry, else what models.dev's catalog says of it.
+ */
+export function capabilitiesOf(provider: ProviderName | string, model: ModelName | string): Capabilities | undefined {
+  return entryIn(known, provider, model) ?? entryIn(catalogModels, provider, model);
 }
 
 /** One source's answer for a model: its capabilities, or `undefined` when the source does not know it. */
 export type ModelKnowledge = (provider: ProviderName, model: ModelName) => Effect.Effect<Capabilities | undefined>;
 
-/** The well-known models. */
-export const wellKnown: ModelKnowledge = (provider, model) => Effect.succeed(capabilitiesOf(provider, model));
+/** The well-known models, then every other model that models.dev's catalog lists (`capabilitiesOf`). */
+export const catalogued: ModelKnowledge = (provider, model) => Effect.succeed(capabilitiesOf(provider, model));
 
 /**
  * The sources of what is known of each model, asked in order; the first that knows a model answers
  * (`firstAnswer`). Whoever chooses the model for a request reads it (`ModelFromFacts` puts it on the
- * request's target). By default, the well-known models; a host that knows more (a local server that
+ * request's target). By default, the catalogued models; a host that knows more (a local server that
  * reports what its models accept) puts its own source first.
  */
-export const KnownModels = Context.Reference<ReadonlyArray<ModelKnowledge>>("agent-session/KnownModels", { defaultValue: () => [wellKnown] });
+export const KnownModels = Context.Reference<ReadonlyArray<ModelKnowledge>>("agent-session/KnownModels", { defaultValue: () => [catalogued] });
 
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 

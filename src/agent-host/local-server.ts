@@ -7,7 +7,7 @@
  */
 
 import { Effect, Layer, Option, Schema } from "effect";
-import { type Capabilities, KnownEffort, KnownModels, type ModelKnowledge, ModelOverrides, wellKnown, withOverrides } from "../agent-session/configuration/well-known-models.ts";
+import { type Capabilities, KnownEffort, KnownModels, type ModelKnowledge, ModelOverrides, catalogued, withOverrides } from "../agent-session/configuration/well-known-models.ts";
 import { Settling, type SettlingSource, wellKnownSettling } from "../agent-session/configuration/options.ts";
 import { openAiCompatSettle } from "../agent-session/providers/openai-compat-settings.ts";
 import { logKeys } from "./log-keys.ts";
@@ -107,7 +107,7 @@ export const KnownWithLocalServer = Layer.effect(
       ),
     );
     const localModels: ModelKnowledge = (provider, model) => (provider === "localhost" ? Effect.map(local, (models) => models.get(model)) : Effect.undefined);
-    return withOverrides(yield* ModelOverrides, [localModels, wellKnown]);
+    return withOverrides(yield* ModelOverrides, [localModels, catalogued]);
   }),
 );
 

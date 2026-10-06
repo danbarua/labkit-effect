@@ -13,7 +13,13 @@
  * `src/agent-config/fixtures/user/40_models.yml` shows).
  *
  * An effort that the catalog lists and the core does not name (`none`, then the core's `Effort`)
- * fails the refresh, so that a new effort is named in the core before a model is offered it.
+ * fails the refresh, so that a new effort is named in the core before a model is offered it. A
+ * `toggle` option (reasoning that can be switched off) is the effort `none`.
+ *
+ * It also writes `src/agent-session/configuration/catalog-models.gen.ts`: what models.dev's catalog
+ * says of every other model of the same providers, so that a model that is not well-known is asked
+ * with what is known of it (`capabilitiesOf`). A model whose reasoning options cannot be read is
+ * left out of it, and the refresh names it.
  *
  *   bun run models:refresh              # from models.dev
  *   bun run models:refresh <api.json>   # from a copy of the catalog
@@ -28,8 +34,8 @@ const measuredPath = "src/agent-session/configuration/well-known-models.measured
 const generatedPath = "src/agent-session/configuration/well-known-models.gen.ts";
 
 const [from] = process.argv.slice(2);
-/** One way models.dev says a model's reasoning is set: by effort, or by a budget of thinking tokens. */
-type ReasoningOption = { type: "effort"; values: Array<string> } | { type: "budget_tokens"; min: number; max?: number } | { type: string };
+/** One way models.dev says a model's reasoning is set: by effort, by a budget of thinking tokens, or switched on or off. */
+type ReasoningOption = { type: "effort"; values: Array<string> } | { type: "budget_tokens"; min: number; max?: number } | { type: "toggle" } | { type: string };
 
 const catalog = (from === undefined ? await fetch("https://models.dev/api.json").then((response) => response.json()) : JSON.parse(readFileSync(from, "utf8"))) as Record<
   string,
@@ -54,14 +60,17 @@ const namedEfforts: ReadonlyArray<string> = ["none", ...Effort.literals];
 function reasoningOf(name: string, reasoning: boolean | undefined, options: ReadonlyArray<ReasoningOption> | undefined): Json {
   const efforts = options?.find((option): option is Extract<ReasoningOption, { type: "effort" }> => option.type === "effort")?.values;
   const budget = options?.find((option): option is Extract<ReasoningOption, { type: "budget_tokens" }> => option.type === "budget_tokens");
-  const unknown = options?.filter((option) => option.type !== "effort" && option.type !== "budget_tokens") ?? [];
+  const toggles = options?.some((option) => option.type === "toggle") ?? false;
+  const unknown = options?.filter((option) => option.type !== "effort" && option.type !== "budget_tokens" && option.type !== "toggle") ?? [];
   if (unknown.length > 0) throw new Error(`${name}: reasoning options of a kind this script does not read: ${unknown.map((option) => option.type).join(", ")}`);
   const unnamed = efforts?.filter((effort) => !namedEfforts.includes(effort)) ?? [];
   if (unnamed.length > 0) throw new Error(`${name}: efforts the core does not name: ${unnamed.join(", ")} (it names ${namedEfforts.join(", ")})`);
   const none = options !== undefined && options.length === 0;
+  // A toggle switches the reasoning off, which the core names as the effort `none`.
+  const withNone = toggles ? ["none", ...(efforts ?? []).filter((effort) => effort !== "none")] : efforts;
   return {
     ...(reasoning === undefined ? {} : { reasoning }),
-    ...(efforts === undefined ? (none ? { efforts: [] } : {}) : { efforts }),
+    ...(withNone === undefined ? (none ? { efforts: [] } : {}) : { efforts: withNone }),
     ...(budget === undefined ? {} : { budget: { min: budget.min, ...(budget.max === undefined ? {} : { max: budget.max }) } }),
   };
 }
@@ -110,6 +119,58 @@ const models = Object.fromEntries(
 if (missing.length > 0) throw new Error(`The catalog does not list: ${missing.join(", ")}`);
 
 const counted = Object.entries(models).map(([provider, listed]) => `${provider} ${Object.keys(listed).length}`);
+
+/** Every other model of the same providers, from the catalog alone; a model whose reasoning options cannot be read is left out and named. */
+const leftOut: Array<string> = [];
+const others = Object.fromEntries(
+  Object.keys(measured).map((provider) => [
+    provider,
+    Object.fromEntries(
+      Object.entries(catalog[provider]?.models ?? {}).flatMap(([model, theirs]) => {
+        if (model in (measured[provider] ?? {})) return [];
+        // A price is what the session's cost is counted from; a model without one is left out rather than counted as free.
+        if (theirs.cost === undefined) {
+          leftOut.push(`${provider}/${model}: the catalog gives no price`);
+          return [];
+        }
+        try {
+          const { above, ...base } = price(theirs.cost) as Json & { above?: Json };
+          return [
+            [
+              model,
+              {
+                context: theirs.limit.context,
+                output: theirs.limit.output,
+                input: theirs.modalities.input,
+                ...reasoningOf(`${provider}/${model}`, theirs.reasoning, theirs.reasoning_options),
+                price: { ...base, ...(above === undefined ? {} : { above }) },
+              },
+            ],
+          ];
+        } catch (error) {
+          leftOut.push(error instanceof Error ? error.message : String(error));
+          return [];
+        }
+      }),
+    ),
+  ]),
+);
+const catalogPath = "src/agent-session/configuration/catalog-models.gen.ts";
+writeFileSync(
+  catalogPath,
+  [
+    "// Generated by `bun scripts/models/refresh.ts` from models.dev's catalog. Change that script, not this file.",
+    "",
+    'import type { Capabilities } from "./well-known-models.ts";',
+    "",
+    "/** What models.dev's catalog says of each model that is not well-known, by provider. */",
+    `export const catalogModels: Readonly<Record<string, Readonly<Record<string, Capabilities>>>> = ${JSON.stringify(others, null, 2)};`,
+    "",
+  ].join("\n"),
+);
+const catalogued = Object.entries(others).map(([provider, listed]) => `${provider} ${Object.keys(listed).length}`);
+console.log(`wrote ${catalogPath}: ${catalogued.join(", ")}`);
+for (const reason of leftOut) console.log(`left out of ${catalogPath}: ${reason}`);
 writeFileSync(
   generatedPath,
   [
