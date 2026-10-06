@@ -41,13 +41,13 @@ const replied = (text: string, ending: string, printed = false) => {
 
 test("an answer is printed after its turn; one cut short by its length limit, or interrupted, says so", () => {
   expect(replied("1, 2, 3", "Complete")).toBe("1, 2, 3");
-  expect(replied("1, 2, 3", "CutShort")).toBe("1, 2, 3\n(cut short: the response reached its length limit)");
+  expect(replied("1, 2, 3", "CutShort")).toBe("1, 2, 3\n(stopped: the response reached a length limit)");
   expect(replied("1, 2, 3", "Interrupted")).toBe("1, 2, 3\n(interrupted)");
 });
 
 test("an answer printed as it arrived is not printed again: only how it was cut short, if it was", () => {
   expect(replied("1, 2, 3", "Complete", true)).toBeUndefined();
-  expect(replied("1, 2, 3", "CutShort", true)).toBe("(cut short: the response reached its length limit)");
+  expect(replied("1, 2, 3", "CutShort", true)).toBe("(stopped: the response reached a length limit)");
 });
 
 /**
@@ -138,7 +138,7 @@ test("the REPL: Enter on an empty line asks nothing, a line naming no command sa
   const { written, logged } = await typedTo(model, ["hello", "", "/nope", "/exit"]);
   expect(model.asked).toHaveLength(1);
   expect(written).toBe("\x1b[2mthink\x1b[0m\nok\n");
-  expect(logged).toEqual(["ERROR: No command /nope.\nHINT: /help lists them."]);
+  expect(logged).toEqual(["ERROR: Unknown command: /nope.\nHINT: Type /help to list the commands."]);
 });
 
 test("the REPL: an answer that did not stream is printed once, from the response, when it arrives", async () => {
@@ -174,7 +174,7 @@ const catalogOf = (sources: ReadonlyArray<CatalogSource>) => Layer.succeed(Model
 
 const openai: CatalogSource = { provider: ProviderName.make("openai"), models: [ModelName.make("gpt-5.5"), ModelName.make("gpt-5")] };
 const notAnswering: CatalogSource = { provider: ProviderName.make("localhost"), models: undefined, at: "http://localhost:8000/v1" };
-const noModel = new CannotAsk({ message: "No model is set.", hint: "Pick one with /model." });
+const noModel = new CannotAsk({ message: "No model selected.", hint: "Pick one with /model." });
 
 /**
  * The REPL before a model is picked, typed `lines`, with a catalog of `sources` and the settings the
@@ -190,20 +190,20 @@ const waited = (lines: ReadonlyArray<string>, first?: string, sources: ReadonlyA
     }).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, catalogOf(sources), TestConsole.layer))),
   );
 
-const banner = "No model to ask · /model to pick one, /help for commands, /exit to quit.";
+const banner = "No model selected · /model to pick one · /help for commands · /exit to quit";
 
 test("before a model is picked: input for the model is not sent, the other commands are refused, and /model naming a model that can be asked returns that model", async () => {
   const { picked, logged } = await waited(["hello", "/tools", "/nope", "/model grok-4.7", "/model gpt-99", "/model gpt-5.5", "never read"]);
   expect(picked as unknown).toEqual({ provider: "openai", model: "gpt-5.5" });
   expect(logged).toEqual([
     banner,
-    "ERROR: No model is set.\nHINT: Pick one with /model.",
-    "ERROR: Not sent. No model is set.\nHINT: Pick one with /model.",
-    "ERROR: /tools works once a model is picked.\nHINT: Pick one with /model.",
-    "ERROR: No command /nope.\nHINT: /help lists them.",
-    "ERROR: XAI_API_KEY is not set, so xai models cannot be asked.\nHINT: Pick another model with /model, or restart with XAI_API_KEY set.",
-    "ERROR: No model is named gpt-99.\nHINT: Pick one with /model.",
-    `New sessions ask openai/gpt-5.5: written to ${join(configFolder(), "models.yml")}.`,
+    "ERROR: No model selected.\nHINT: Pick one with /model.",
+    "ERROR: Message not sent. No model selected.\nHINT: Pick one with /model.",
+    "ERROR: /tools needs a model.\nHINT: Pick one with /model.",
+    "ERROR: Unknown command: /nope.\nHINT: Type /help to list the commands.",
+    "ERROR: xai models are unavailable: XAI_API_KEY is not set.\nHINT: Pick another model with /model, or set XAI_API_KEY and restart.",
+    "ERROR: Unknown model: gpt-99.\nHINT: Pick one with /model.",
+    `Default model: openai/gpt-5.5 (saved to ${join(configFolder(), "models.yml")})`,
   ]);
   expect(readFileSync(join(configFolder(), "models.yml"), "utf8")).toBe("model: openai/gpt-5.5\n");
 });
@@ -217,7 +217,7 @@ test("before a model is picked: /model alone picks from the models that can be a
 test("before a model is picked: the prompt the command line gave is said to be not sent, and /exit returns no model", async () => {
   const { picked, logged } = await waited(["/exit"], "hello");
   expect(picked).toBeUndefined();
-  expect(logged).toEqual([banner, "ERROR: Not sent. No model is set.\nHINT: Pick one with /model."]);
+  expect(logged).toEqual([banner, "ERROR: Message not sent. No model selected.\nHINT: Pick one with /model."]);
 });
 
 test("before a model is picked: /model alone, with no model that can be asked, says what would make one available", async () => {
@@ -225,11 +225,11 @@ test("before a model is picked: /model alone, with no model that can be asked, s
   expect(picked).toBeUndefined();
   expect(logged.slice(2)).toEqual([
     [
-      "ERROR: No model can be asked.",
+      "ERROR: No models available.",
       "HINT: Set ANTHROPIC_API_KEY to use anthropic models.",
       "HINT: Set OPENAI_API_KEY to use openai models.",
       "HINT: Set XAI_API_KEY to use xai models.",
-      "HINT: The local server at http://localhost:8000/v1 is not answering; start it to use localhost models.",
+      "HINT: Start the local server at http://localhost:8000/v1 to use its models: it is not responding.",
     ].join("\n"),
   ]);
 });
@@ -245,8 +245,8 @@ test("before a model is picked: /settings changes the user's settings, and refus
   // `/settings` alone offers the user's settings to pick; Enter leaves them as they are, and shows them.
   const { logged, thinking } = await waited(["/settings effort=high", "/settings view.thinking=off", "/settings", "", "/exit"]);
   expect(logged.slice(2)).toEqual([
-    "ERROR: effort=high: the model's settings can be changed once a model is picked.\nHINT: Pick one with /model.",
-    `view.thinking=off: written to ${join(configFolder(), "settings.yml")}.`,
+    "ERROR: effort=high needs a model.\nHINT: Pick one with /model.",
+    `view.thinking=off (saved to ${join(configFolder(), "settings.yml")})`,
     "view.thinking=off",
   ]);
   expect(thinking).toBe("off");
@@ -283,7 +283,7 @@ test("the REPL: Option+T while a turn runs hides the thinking from then on, and 
 test("before a model is picked: a model that does not take the settings the command line names is not picked, and nothing is written; the REPL goes on", async () => {
   // gpt-5 takes minimal to high; gpt-5.5 takes low to xhigh.
   const { picked, logged } = await waited(["/model gpt-5", "/switch gpt-5", "/model gpt-5.5"], undefined, [openai], { effort: "xhigh" });
-  const refused = "ERROR: openai/gpt-5 does not take effort=xhigh (from the command line).\nHINT: effort takes default, minimal, low, medium, high.\nHINT: Pick another model, or start the CLI again without that setting.";
-  expect(logged.slice(2)).toEqual([refused, refused, `New sessions ask openai/gpt-5.5: written to ${join(configFolder(), "models.yml")}.`]);
+  const refused = "ERROR: openai/gpt-5 does not support effort=xhigh (from the command line).\nHINT: Supported: default, minimal, low, medium, high.\nHINT: Pick another model, or start the CLI again without that setting.";
+  expect(logged.slice(2)).toEqual([refused, refused, `Default model: openai/gpt-5.5 (saved to ${join(configFolder(), "models.yml")})`]);
   expect(picked as unknown).toEqual({ provider: "openai", model: "gpt-5.5" });
 });

@@ -19,7 +19,7 @@ export const modelNamed = (words: ReadonlyArray<string>, message: string) =>
   Effect.gen(function* () {
     if (words[0] !== undefined) return words[0];
     const choices = yield* pickable;
-    if (choices.length === 0) return yield* invalid("No model can be asked.", ...unavailable(yield* (yield* ModelCatalog).sources));
+    if (choices.length === 0) return yield* invalid("No models available.", ...unavailable(yield* (yield* ModelCatalog).sources));
     return yield* Prompt.Select({ message, choices }).pipe(Effect.catchTag("QuitError", () => Effect.undefined));
   });
 

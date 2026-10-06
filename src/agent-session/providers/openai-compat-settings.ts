@@ -22,12 +22,12 @@ import { type Adjustment, reasoningEffortFor, type Settled } from "../configurat
 import type { Target } from "../contracts.ts";
 import { type Capabilities, knownOf } from "../configuration/well-known-models.ts";
 
-const reason = "the Chat Completions adapter does not send this setting";
+const reason = "Chat Completions has no field for this setting";
 
 export function openAiCompatSettings(settings: ModelSettings = {}, capabilities?: Capabilities): Settled {
   const { sent, adjusted: effortAdjusted } = reasoningEffortFor(settings, capabilities);
   const adjusted: ReadonlyArray<Adjustment> = [
-    ...(settings.thinking === "between_tools" ? [{ adjusted: { _tag: "Thinking" as const, asked: settings.thinking }, reason: "Chat Completions has no setting for thinking only between tool calls" }] : []),
+    ...(settings.thinking === "between_tools" ? [{ adjusted: { _tag: "Thinking" as const, asked: settings.thinking }, reason: "Chat Completions has no between-tools thinking" }] : []),
     ...effortAdjusted,
     ...(settings.observe === undefined ? [] : [{ adjusted: { _tag: "Observe" as const, asked: settings.observe }, reason }]),
     ...(settings.cache === undefined ? [] : [{ adjusted: { _tag: "Cache" as const, asked: settings.cache }, reason }]),

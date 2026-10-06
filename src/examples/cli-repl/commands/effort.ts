@@ -20,7 +20,7 @@ const effortIn = (settings: ReadonlyArray<SettingOption>) => settings.find((each
 export const effort: ReplCommand = {
   name: "/effort",
   args: "[effort]",
-  says: "Set the effort; with none, the next effort this model takes",
+  says: "Set the reasoning effort; with no value, move to the next one",
   complete: (words, from) => {
     const offered = effortIn(from.settings);
     return words.length === 2 && offered?._tag === "OneOf" ? offered.values : [];
@@ -30,13 +30,13 @@ export const effort: ReplCommand = {
       const { provider, model, offered } = yield* optionsOf(yield* session.facts);
       const next = (): Effect.Effect<string, ReturnType<typeof invalid>> => {
         const option = effortIn(offered);
-        if (option?._tag !== "OneOf" || option.values.length === 0) return Effect.fail(invalid(`${provider}/${model} is offered no effort.`));
+        if (option?._tag !== "OneOf" || option.values.length === 0) return Effect.fail(invalid(`${provider}/${model} has no effort setting.`));
         const at = option.values.indexOf(option.now ?? "default");
         return Effect.succeed(option.values[(at + 1) % option.values.length] ?? "default");
       };
       const settings = yield* takenBy(yield* modelOf(yield* session.facts), yield* settingsGiven({ effort: words[0] ?? (yield* next()) }));
       yield* session.observe({ _tag: "ModelChangeArrived", provider, model, settings });
       yield* session.idle;
-      return said(`Asking ${yield* inForce(session)}`);
+      return said(`${yield* inForce(session)}`);
     }),
 };

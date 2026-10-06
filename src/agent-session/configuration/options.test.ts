@@ -138,7 +138,7 @@ test("after a setting is adjusted, the session's options have the adjusted setti
         provider: model.provider,
         model: model.model,
         adjusted: { _tag: "Thinking", asked: "disabled" },
-        reason: AdjustmentReason.make("this model cannot turn its thinking off"),
+        reason: AdjustmentReason.make("this model's thinking cannot be disabled"),
       });
       yield* session.idle;
       return yield* optionsOf(yield* session.facts);

@@ -11,7 +11,7 @@ import { type ReplCommand, said } from "../command.ts";
 export const mcp: ReplCommand = {
   name: "/mcp",
   args: "[reconnect <server>]",
-  says: "Say how the MCP servers are; start one again",
+  says: "Show the MCP servers' status; reconnect one",
   // `reconnect`, then a server's name.
   complete: (words, from) => {
     if (words.length === 2) return ["reconnect "];

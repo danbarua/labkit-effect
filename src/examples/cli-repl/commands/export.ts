@@ -21,7 +21,7 @@ export const exportCommand: ReplCommand = {
       const exports = join(folder, folderOf(yield* Brand), "exports");
       const path = join(exports, `${id}.md`);
       const fs = yield* FileSystem.FileSystem;
-      yield* fs.makeDirectory(exports, { recursive: true }).pipe(Effect.andThen(fs.writeFileString(path, markdownOf(facts))), Effect.mapError((error) => invalid(`The transcript could not be written to ${path}: ${error.message}`)));
+      yield* fs.makeDirectory(exports, { recursive: true }).pipe(Effect.andThen(fs.writeFileString(path, markdownOf(facts))), Effect.mapError((error) => invalid(`Could not write ${path}: ${error.message}`)));
       return said(`Exported this session to ${path}`);
     }),
 };

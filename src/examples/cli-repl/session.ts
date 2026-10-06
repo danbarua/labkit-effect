@@ -142,7 +142,7 @@ const requiredRunning = (configuration: Configuration, mcp: McpServers) =>
       const state = states.find((each) => each.name === server.name)?.state;
       return server.required && state !== undefined && state._tag !== "Ready" ? [`${server.name} (${describe(state)})`] : [];
     });
-    if (missing.length > 0) return yield* invalid(`The session needs MCP servers that are not running: ${missing.join("; ")}.`);
+    if (missing.length > 0) return yield* invalid(`Required MCP servers are not running: ${missing.join("; ")}.`);
   });
 
 /**

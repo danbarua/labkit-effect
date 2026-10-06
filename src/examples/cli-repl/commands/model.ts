@@ -38,29 +38,29 @@ const madeDefault = (target: Asked, { configFolder, layers }: CommandContext) =>
       const last = Arr.findLast(layers, (layer) => isMapping(layer.value) && layer.value["model"] !== undefined && layer.value["model"] !== null).pipe(Option.getOrUndefined);
       const later = last !== undefined && !last.name.startsWith(configFolder + sep) ? last : undefined;
       const value = later !== undefined && isMapping(later.value) ? String(later.value["model"]) : undefined;
-      return [`New sessions ask ${name}: written to ${file}.`, ...(later === undefined ? [] : [`${later.name} sets model too, and is read after ${configFolder}: new sessions that read it ask ${value}.`])].join("\n");
+      return [`Default model: ${name} (saved to ${file})`, ...(later === undefined ? [] : [`HINT: ${later.name} sets model: ${value}, which overrides this default where that file is read.`])].join("\n");
     }),
-    Effect.catch((error) => Effect.succeed(String(invalid(`${name} was not written as the model new sessions ask: ${error.message}`).userMessage))),
+    Effect.catch((error) => Effect.succeed(String(invalid(`Could not save ${name} as the default model: ${error.message}`).userMessage))),
   );
 };
 
 export const model: ReplCommand = {
   name: "/model",
   args: "[name]",
-  says: "Ask another model, in this session and new ones; with no name, pick one",
+  says: "Switch model and make it the default; with no name, pick one",
   complete: (words, from) => (words.length === 2 ? from.models : []),
   inSession: (session, words, context) =>
     Effect.gen(function* () {
       const now = yield* modelOf(yield* session.facts);
-      const chosen = yield* modelNamed(words, `Asking ${now.provider}/${now.model}. Ask which model, in this session and new ones?`);
-      if (chosen === undefined) return said(`Asking ${yield* inForce(session)}`);
+      const chosen = yield* modelNamed(words, `Current model: ${now.provider}/${now.model}. Switch to which model? It becomes the default.`);
+      if (chosen === undefined) return said(`${yield* inForce(session)}`);
       const target = yield* targetOf(chosen, "/model");
       yield* switchTo(session, target);
-      return said(`Asking ${yield* inForce(session)}\n${yield* madeDefault(target, context)}`);
+      return said(`${yield* inForce(session)}\n${yield* madeDefault(target, context)}`);
     }),
   withoutModel: (words, context) =>
     Effect.gen(function* () {
-      const chosen = yield* modelNamed(words, "Ask which model, in this session and new ones?");
+      const chosen = yield* modelNamed(words, "Which model? It becomes the default.");
       if (chosen === undefined) return { _tag: "Quiet" } as const;
       const target = yield* targetOf(chosen, "/model");
       // The session opens with the command line's settings: a model that does not take them is not picked, and nothing is written.

@@ -28,12 +28,12 @@ export function openAiSettings(settings: ModelSettings = {}, capabilities?: Capa
       ? [
           {
             adjusted: { _tag: "Cache", asked: cache, used: "5m" },
-            reason: "the Responses API caches every long enough request for minutes, and cannot be asked not to",
+            reason: "OpenAI always caches long requests for a few minutes",
           },
         ]
       : [];
   const thinkingAdjusted: ReadonlyArray<Adjustment> =
-    thinking === "between_tools" ? [{ adjusted: { _tag: "Thinking", asked: thinking }, reason: "the Responses API has no setting for thinking only between tool calls" }] : [];
+    thinking === "between_tools" ? [{ adjusted: { _tag: "Thinking", asked: thinking }, reason: "OpenAI has no between-tools thinking" }] : [];
   const adjusted = [...cacheAdjusted, ...thinkingAdjusted, ...effortAdjusted];
   const reasoning = {
     ...(sent === undefined ? {} : { effort: sent }),

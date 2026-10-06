@@ -26,7 +26,7 @@ import { pickable } from "./picking.ts";
 export const help = (): string => {
   const usages = commands.map((each) => [each.args === undefined ? each.name : `${each.name} ${each.args}`, each.says] as const);
   const width = Math.max(...usages.map(([usage]) => usage.length)) + 2;
-  return [...usages.map(([usage, says]) => `${usage.padEnd(width)}${says}`), "Anything else goes to the model."].join("\n");
+  return [...usages.map(([usage, says]) => `${usage.padEnd(width)}${says}`), "Anything else is sent to the model."].join("\n");
 };
 
 const helpCommand: ReplCommand = {
@@ -48,7 +48,7 @@ const exit: ReplCommand = {
 export const commands: ReadonlyArray<ReplCommand> = [model, switchCommand, effort, settings, tools, exportCommand, mcp, helpCommand, exit];
 
 /** What the REPL says of a line that starts with `/` and names none of its commands. */
-export const noCommand = (line: string) => invalid(`No command ${line.trim().split(/\s+/)[0] ?? line}.`, "/help lists them.");
+export const noCommand = (line: string) => invalid(`Unknown command: ${line.trim().split(/\s+/)[0] ?? line}.`, "Type /help to list the commands.");
 
 /** The command that `line` starts with, and the words after its name; undefined when `line` names none. */
 const commandIn = (line: string) => {
@@ -74,7 +74,7 @@ export const runWithoutModel = (line: string, context: CommandContext) =>
   Effect.gen(function* () {
     const named = commandIn(line);
     if (named === undefined) return yield* noCommand(line);
-    if (named.command.withoutModel === undefined) return yield* invalid(`${named.command.name} works once a model is picked.`, "Pick one with /model.");
+    if (named.command.withoutModel === undefined) return yield* invalid(`${named.command.name} needs a model.`, "Pick one with /model.");
     const done: DoneWithoutModel = yield* named.command.withoutModel(named.words, context);
     return done;
   });

@@ -61,12 +61,12 @@ test("Anthropic: a model that cannot turn its thinking off is sent nothing for d
     expect(anthropic(model, { thinking: "disabled" })).toEqual({
       fields: {},
       headers: {},
-      adjusted: [{ adjusted: { _tag: "Thinking", asked: "disabled" }, reason: "this model cannot turn its thinking off" }],
+      adjusted: [{ adjusted: { _tag: "Thinking", asked: "disabled" }, reason: "this model's thinking cannot be disabled" }],
     });
   expect(anthropic("claude-opus-5-5", { thinking: "between_tools" })).toEqual({
     fields: {},
     headers: {},
-    adjusted: [{ adjusted: { _tag: "Thinking", asked: "between_tools" }, reason: "this model does not think only between tool calls" }],
+    adjusted: [{ adjusted: { _tag: "Thinking", asked: "between_tools" }, reason: "this model has no between-tools thinking" }],
   });
 });
 
@@ -74,7 +74,7 @@ test("Anthropic: Sonnet 5.5 thinks between tool calls, which takes no display an
   expect(anthropic("claude-sonnet-5-5", { thinking: "between_tools", observe: "off" })).toEqual({
     fields: { thinking: { type: "between_tools" } },
     headers: {},
-    adjusted: [{ adjusted: { _tag: "Observe", asked: "off", used: "progress_only" }, reason: "between-tools thinking returns its progress updates as text" }],
+    adjusted: [{ adjusted: { _tag: "Observe", asked: "off", used: "progress_only" }, reason: "between-tools thinking always returns progress updates as text" }],
   });
   expect(anthropic("claude-sonnet-5-5", { thinking: "between_tools", observe: "all", effort: "high" })).toEqual({
     fields: { thinking: { type: "between_tools" }, output_config: { effort: "high" } },
@@ -84,7 +84,7 @@ test("Anthropic: Sonnet 5.5 thinks between tool calls, which takes no display an
   expect(anthropic("claude-sonnet-5-5", { thinking: "between_tools", effort: "max" })).toEqual({
     fields: { output_config: { effort: "max" } },
     headers: {},
-    adjusted: [{ adjusted: { _tag: "Thinking", asked: "between_tools" }, reason: "thinking only between tool calls is not taken at max effort" }],
+    adjusted: [{ adjusted: { _tag: "Thinking", asked: "between_tools" }, reason: "between-tools thinking is not available at max effort" }],
   });
 });
 
@@ -104,7 +104,7 @@ test("Anthropic: Haiku 4.5 takes a thinking budget in place of an effort: each e
   expect(anthropic("claude-haiku-4-5", { effort: "minimal" })).toEqual({
     fields: { thinking: { type: "enabled", budget_tokens: 1024 } },
     headers: {},
-    adjusted: [{ adjusted: { _tag: "Effort", asked: "minimal", used: "low" }, reason: "this model's reasoning efforts are low, medium, high, xhigh, max; it is sent low" }],
+    adjusted: [{ adjusted: { _tag: "Effort", asked: "minimal", used: "low" }, reason: "the nearest effort this model supports (low, medium, high, xhigh, max)" }],
   });
 });
 
@@ -112,7 +112,7 @@ test("Anthropic: Haiku 4.5 does not think when no budget fits below its output l
   expect(anthropic("claude-haiku-4-5", { effort: "low", maxOutputTokens: TokenCount.make(1024) })).toEqual({
     fields: {},
     headers: {},
-    adjusted: [{ adjusted: { _tag: "Effort", asked: "low" }, reason: "this model's least thinking budget, 1024 tokens, is not below its output limit, 1024 tokens" }],
+    adjusted: [{ adjusted: { _tag: "Effort", asked: "low" }, reason: "the smallest thinking budget (1024 tokens) does not fit under the output limit (1024 tokens)" }],
   });
 });
 
@@ -122,7 +122,7 @@ test("OpenAI: a model that does not reason is sent no effort, and no thinking of
     headers: {},
     adjusted: [
       { adjusted: { _tag: "Thinking", asked: "disabled" }, reason: "this model does not reason" },
-      { adjusted: { _tag: "Effort", asked: "high" }, reason: "this model takes no reasoning effort" },
+      { adjusted: { _tag: "Effort", asked: "high" }, reason: "this model has no effort setting" },
     ],
   });
 });
@@ -131,12 +131,12 @@ test("Anthropic: Haiku 4.5 can turn its thinking off, and thinks only when an ef
   expect(anthropic("claude-haiku-4-5", { thinking: "disabled", effort: "high" })).toEqual({
     fields: { thinking: { type: "disabled" } },
     headers: {},
-    adjusted: [{ adjusted: { _tag: "Effort", asked: "high" }, reason: "thinking is disabled" }],
+    adjusted: [{ adjusted: { _tag: "Effort", asked: "high" }, reason: "not sent while thinking is disabled" }],
   });
   expect(anthropic("claude-haiku-4-5", { observe: "all" })).toEqual({
     fields: {},
     headers: {},
-    adjusted: [{ adjusted: { _tag: "Observe", asked: "all" }, reason: "this model thinks only when an effort is given, and none is" }],
+    adjusted: [{ adjusted: { _tag: "Observe", asked: "all" }, reason: "this model thinks only when an effort is set" }],
   });
 });
 
@@ -160,25 +160,25 @@ test("OpenAI: effort and a summary go into reasoning; disabled is effort none wh
   expect(openAiSettings({ thinking: "disabled", effort: "high" }, gpt("gpt-5.5"))).toEqual({
     fields: { reasoning: { effort: "none" } },
     headers: {},
-    adjusted: [{ adjusted: { _tag: "Effort", asked: "high" }, reason: "thinking is disabled, which is sent as reasoning effort none" }],
+    adjusted: [{ adjusted: { _tag: "Effort", asked: "high" }, reason: "not sent while thinking is disabled" }],
   });
   // gpt-5 lists no none: thinking stays on, and the effort is sent as the nearest it takes.
   expect(openAiSettings({ thinking: "disabled", effort: "xhigh" }, gpt("gpt-5"))).toEqual({
     fields: { reasoning: { effort: "high" } },
     headers: {},
     adjusted: [
-      { adjusted: { _tag: "Thinking", asked: "disabled" }, reason: "this model cannot turn its reasoning off" },
-      { adjusted: { _tag: "Effort", asked: "xhigh", used: "high" }, reason: "this model's reasoning efforts are minimal, low, medium, high; it is sent high" },
+      { adjusted: { _tag: "Thinking", asked: "disabled" }, reason: "this model's reasoning cannot be disabled" },
+      { adjusted: { _tag: "Effort", asked: "xhigh", used: "high" }, reason: "the nearest effort this model supports (minimal, low, medium, high)" },
     ],
   });
   expect(openAiSettings({ thinking: "between_tools" }).adjusted).toEqual([
-    { adjusted: { _tag: "Thinking", asked: "between_tools" }, reason: "the Responses API has no setting for thinking only between tool calls" },
+    { adjusted: { _tag: "Thinking", asked: "between_tools" }, reason: "OpenAI has no between-tools thinking" },
   ]);
 });
 
 test("an effort the model does not take is sent as the nearest it takes, the higher of two as near", () => {
   expect(openAiSettings({ effort: "medium" }, taking(["low", "high"])).fields).toEqual({ reasoning: { effort: "high" } });
-  expect(effortFor("high", [])).toEqual({ sent: undefined, adjusted: [{ adjusted: { _tag: "Effort", asked: "high" }, reason: "this model takes no reasoning effort" }] });
+  expect(effortFor("high", [])).toEqual({ sent: undefined, adjusted: [{ adjusted: { _tag: "Effort", asked: "high" }, reason: "this model has no effort setting" }] });
   expect(effortFor("high", undefined)).toEqual({ sent: "high", adjusted: [] });
 });
 
@@ -196,11 +196,11 @@ test("the cache: Anthropic marks the request for five minutes or an hour, OpenAI
   expect(openAiSettings({ cache: "off" }).adjusted).toEqual([
     {
       adjusted: { _tag: "Cache", asked: "off", used: "5m" },
-      reason: "the Responses API caches every long enough request for minutes, and cannot be asked not to",
+      reason: "OpenAI always caches long requests for a few minutes",
     },
   ]);
   expect(openAiCompatSettings({ cache: "1h" }).adjusted).toEqual([
-    { adjusted: { _tag: "Cache", asked: "1h" }, reason: "the Chat Completions adapter does not send this setting" },
+    { adjusted: { _tag: "Cache", asked: "1h" }, reason: "Chat Completions has no field for this setting" },
   ]);
 });
 
@@ -218,15 +218,15 @@ test("xAI: effort goes into reasoning, max as xhigh, the nearest grok takes; the
     fields: { reasoning: { effort: "xhigh" } },
     headers: {},
     adjusted: [
-      { adjusted: { _tag: "Observe", asked: "off", used: "all" }, reason: "xAI returns the reasoning's summary with every response, and cannot be asked not to" },
-      { adjusted: { _tag: "Effort", asked: "max", used: "xhigh" }, reason: "this model's reasoning efforts are low, medium, high, xhigh; it is sent xhigh" },
+      { adjusted: { _tag: "Observe", asked: "off", used: "all" }, reason: "xAI always returns the reasoning summary" },
+      { adjusted: { _tag: "Effort", asked: "max", used: "xhigh" }, reason: "the nearest effort this model supports (low, medium, high, xhigh)" },
     ],
   });
   for (const cache of ["off", "5m", "1h"] as const)
     expect(xAiSettings({ cache }, grok)).toEqual({
       fields: {},
       headers: {},
-      adjusted: [{ adjusted: { _tag: "Cache", asked: cache }, reason: "xAI caches every request for as long as the server keeps it, and has no setting for how long" }],
+      adjusted: [{ adjusted: { _tag: "Cache", asked: cache }, reason: "xAI always caches requests, and has no cache setting" }],
     });
 });
 
@@ -234,7 +234,7 @@ test("xAI: grok lists no effort none, so disabled is not sent and recorded; an e
   expect(xAiSettings({ thinking: "disabled", effort: "high" }, grok)).toEqual({
     fields: { reasoning: { effort: "high" } },
     headers: {},
-    adjusted: [{ adjusted: { _tag: "Thinking", asked: "disabled" }, reason: "this model cannot turn its reasoning off" }],
+    adjusted: [{ adjusted: { _tag: "Thinking", asked: "disabled" }, reason: "this model's reasoning cannot be disabled" }],
   });
 });
 
@@ -242,7 +242,7 @@ test("OpenAI: an effort a model does not accept is sent as the nearest it does, 
   expect(openAiSettings({ effort: "xhigh" }, gpt("gpt-5")).fields).toEqual({ reasoning: { effort: "high" } });
   // gpt-5-pro takes only high; the 5.5 pro takes medium to xhigh, so low goes up to medium and max down to xhigh.
   expect(openAiSettings({ effort: "low" }, gpt("gpt-5-pro")).adjusted).toEqual([
-    { adjusted: { _tag: "Effort", asked: "low", used: "high" }, reason: "this model's reasoning efforts are high; it is sent high" },
+    { adjusted: { _tag: "Effort", asked: "low", used: "high" }, reason: "the nearest effort this model supports (high)" },
   ]);
   expect(openAiSettings({ effort: "low" }, gpt("gpt-5.5-pro")).fields).toEqual({ reasoning: { effort: "medium" } });
   expect(openAiSettings({ effort: "max" }, gpt("gpt-5.5")).fields).toEqual({ reasoning: { effort: "xhigh" } });
@@ -257,7 +257,7 @@ test("Chat Completions: the effort is sent as reasoning_effort, none for thinkin
   expect(openAiCompatSettings({ thinking: "disabled", effort: "low" })).toEqual({
     fields: { reasoning_effort: "none" },
     headers: {},
-    adjusted: [{ adjusted: { _tag: "Effort", asked: "low" }, reason: "thinking is disabled, which is sent as reasoning effort none" }],
+    adjusted: [{ adjusted: { _tag: "Effort", asked: "low" }, reason: "not sent while thinking is disabled" }],
   });
   // A model with no list of efforts is sent what was asked; one with a list, the nearest it takes.
   expect(openAiCompatSettings({ effort: "max" }).fields).toEqual({ reasoning_effort: "max" });
@@ -266,7 +266,7 @@ test("Chat Completions: the effort is sent as reasoning_effort, none for thinkin
   expect(openAiCompatSettings({ observe: "all", maxOutputTokens: TokenCount.make(2000) }) as unknown).toEqual({
     fields: { max_tokens: 2000 },
     headers: {},
-    adjusted: [{ adjusted: { _tag: "Observe", asked: "all" }, reason: "the Chat Completions adapter does not send this setting" }],
+    adjusted: [{ adjusted: { _tag: "Observe", asked: "all" }, reason: "Chat Completions has no field for this setting" }],
   });
 });
 
@@ -303,7 +303,7 @@ test("what a model adjusted is its setting from then on; what was said stands fo
     provider: "openai",
     model: "gpt-5",
     adjusted: { _tag: "Effort", asked: "max", used: "high" },
-    reason: "this model's reasoning efforts are minimal, low, medium, high; it is sent high",
+    reason: "the nearest effort this model supports (minimal, low, medium, high)",
   });
   expect(await settingsNow()).toEqual({ effort: "high", observe: "all" } as never);
   // Another model is asked what was said: max.
@@ -326,7 +326,7 @@ test("a setting adjusted with nothing used in its place is no longer sent to tha
     provider: "boring",
     model: "boring-1",
     adjusted: { _tag: "Effort", asked: "high" },
-    reason: "thinking is disabled",
+    reason: "not sent while thinking is disabled",
   });
   expect((await Effect.runPromise(modelOf(session.journal))).settings).toEqual({ thinking: "disabled" } as never);
 });
@@ -405,7 +405,7 @@ test("settings carried over a change of model are translated for each model, rec
     ["claude-haiku-4-5", { _tag: "MaxOutputTokens", asked: 128_000, used: 64_000 }],
     ["claude-haiku-4-5", { _tag: "Effort", asked: "high" }],
   ]);
-  expect(adjusted[0] as unknown).toMatchObject({ origin: { _tag: "Harness", part: "model settings" }, observation: { turn: "turn-1", reason: "this model cannot turn its thinking off" } });
+  expect(adjusted[0] as unknown).toMatchObject({ origin: { _tag: "Harness", part: "model settings" }, observation: { turn: "turn-1", reason: "this model's thinking cannot be disabled" } });
   const first = observed.findIndex((fact) => fact.observation._tag === "ModelRequestDispatched");
   expect(observed[first + 1]?.observation._tag).toBe("SettingAdjusted");
   // The request is recorded with what it carried.

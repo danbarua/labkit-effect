@@ -63,7 +63,7 @@ const followers = Ref.makeUnsafe(HashMap.empty<Session, Following>());
 
 /** What a turn's ending adds to an answer: that it was cut short by a length limit, or interrupted. */
 const cutNote = (ending: ReturnType<typeof endingOf>): string | undefined => {
-  if (ending?._tag === "CutShort") return "(cut short: the response reached its length limit)";
+  if (ending?._tag === "CutShort") return "(stopped: the response reached a length limit)";
   return ending?._tag === "Interrupted" ? "(interrupted)" : undefined;
 };
 
@@ -75,8 +75,8 @@ export const replyOf = (facts: ReadonlyArray<Fact>, printed: (turn: TurnId) => b
   const turn = lastTurn(facts);
   const ending = endingOf(facts, turn);
   const answer = answerTo(facts, turn);
-  if (ending?._tag === "Failed") return `(the turn failed: ${ending.failure})`;
-  if (answer === "") return ending?._tag === "Interrupted" ? "(interrupted)" : `(the turn ended ${ending?._tag ?? "with nothing recorded"}, with no answer)`;
+  if (ending?._tag === "Failed") return `(turn failed: ${ending.failure})`;
+  if (answer === "") return ending?._tag === "Interrupted" ? "(interrupted)" : `(no answer: the turn ended ${ending?._tag ?? "with nothing recorded"})`;
   // An answer cut short by a length limit (the output limit, or the context window), or by Ctrl+C, says so.
   const cut = cutNote(ending);
   if (turn !== undefined && printed(turn)) return cut;
@@ -337,7 +337,7 @@ const thinkingKey = (view: View): KeyBinding => ({ matches: isOptionT, run: togg
 
 export const repl = (session: Session, config: Config, first: string | undefined, interactive: boolean, context: ReplContext, mcp?: McpServers) =>
   Effect.scoped(Effect.gen(function* () {
-    yield* Console.log(`${config.target.provider}/${config.target.model} · /help for commands, /exit to quit. Log: ${logFileOf(config.sessionId)}`);
+    yield* Console.log(`${config.target.provider}/${config.target.model} · /help for commands · /exit to quit · log: ${logFileOf(config.sessionId)}`);
     if (first !== undefined) yield* turn(session, first, context.view);
     if (!interactive) return;
     yield* bracketedPaste;
@@ -374,8 +374,8 @@ export const repl = (session: Session, config: Config, first: string | undefined
 export const withoutModel = (problem: CannotAsk, first: string | undefined, context: ReplContext, layers: CommandContext["layers"]) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const notSent = String(invalid(`Not sent. ${problem.message}`, problem.hint).userMessage);
-      yield* Console.log("No model to ask · /model to pick one, /help for commands, /exit to quit.");
+      const notSent = String(invalid(`Message not sent. ${problem.message}`, problem.hint).userMessage);
+      yield* Console.log("No model selected · /model to pick one · /help for commands · /exit to quit");
       yield* Console.log(first === undefined ? String(saidOf(problem).userMessage) : notSent);
       yield* bracketedPaste;
       /** Reads a line and does what it says: the model picked, `exit`, or `again` to read another line. */

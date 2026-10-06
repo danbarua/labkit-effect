@@ -59,36 +59,36 @@ const permissionModes = ["default", "manual", "acceptEdits", "dontAsk", "bypassP
 
 /** The options that both hosts accept, each with a twin variable. */
 export const launchFlags = {
-  model: textFlag("model", "A well-known model, or provider/model"),
+  model: textFlag("model", "The model to use: a model name, or provider/model"),
   // `plan` and `auto` are not built.
   permissionMode: optional(
     Flag.Literals("permission-mode", permissionModes).pipe(
       Flag.withDescription(
-        "When a tool call that changes things runs: default asks (manual is the same), acceptEdits runs file edits, dontAsk refuses, bypassPermissions runs all",
+        "How tool calls that change things are allowed: default asks (manual is the same), acceptEdits allows file edits, dontAsk refuses, bypassPermissions allows all",
       ),
       Flag.withFallbackConfig(Config.Literals(permissionModes, keyOf("permission-mode"))),
     ),
   ),
-  strictToolInput: toggleFlag("strict-tool-input", "Refuse a tool call whose input has properties its tool does not take, rather than run it without them"),
-  maxTurns: intFlag("max-turns", "The most model requests one turn makes; the next ends it"),
+  strictToolInput: toggleFlag("strict-tool-input", "Refuse a tool call with input properties the tool does not define, instead of dropping them"),
+  maxTurns: intFlag("max-turns", "Maximum model requests per turn"),
   maxBudgetUsd: optional(
     Flag.Finite("max-budget-usd").pipe(
-      Flag.withDescription("The session's budget in US dollars: once it has cost that much, its next model request ends its turn"),
+      Flag.withDescription("Spending limit in US dollars: once the session has cost this much, the turn ends at its next model request"),
       Flag.withFallbackConfig(Config.Finite(keyOf("max-budget-usd"))),
     ),
   ),
   // At least one, so that when none is given, the variable is read.
   mcpConfig: Flag.String("mcp-config").pipe(
     Flag.atLeast(1),
-    Flag.withDescription("MCP servers, as JSON or a file of it, as Claude Code's .mcp.json; the flag may be given again"),
+    Flag.withDescription("MCP servers as JSON, or a JSON file, in Claude Code's .mcp.json format; repeatable"),
     Flag.withFallbackConfig(Config.String(keyOf("mcp-config")).pipe(Config.map((one): ReadonlyArray<string> => [one]))),
     Flag.optional,
     Flag.map(Option.getOrElse((): ReadonlyArray<string> => [])),
   ),
-  strictMcpConfig: toggleFlag("strict-mcp-config", "Use only the MCP servers --mcp-config names"),
-  settings: textFlag("settings", "Settings: JSON, or a file of JSON or YAML, over the files"),
-  configDir: textFlag("config-dir", "The folder of configuration files, each .yml file read in the order of their names (~/.config/<brand> when not given)"),
-  settingSources: textFlag("setting-sources", "Which settings files to read, comma-separated: user, project, local (only user when not given)"),
+  strictMcpConfig: toggleFlag("strict-mcp-config", "Use only the MCP servers from --mcp-config"),
+  settings: textFlag("settings", "Settings as JSON, or a JSON or YAML file, applied over the configuration files"),
+  configDir: textFlag("config-dir", "Configuration folder; its .yml files are read in name order (default ~/.config/<brand>)"),
+  settingSources: textFlag("setting-sources", "Settings files to read, comma-separated: user, project, local (default user)"),
 };
 
 /** The options a host was launched with. */

@@ -76,7 +76,7 @@ const appliedAll = (words: ReadonlyArray<string>, context: CommandContext) =>
 export const settings: ReplCommand = {
   name: "/settings",
   args: "[name=value …]",
-  says: "Change the settings named; with none, show them and pick one to change",
+  says: "Change the settings named; with none, show them and pick one",
   // A setting not yet named on the line, then one of its values.
   complete: (words, from) => {
     const options = [...from.settings.filter(listed).map((each) => ({ name: each.name, values: each._tag === "OneOf" ? each.values : [] })), ...Object.entries(userSettings).map(([name, values]) => ({ name, values }))];
@@ -108,7 +108,7 @@ export const settings: ReplCommand = {
                 const now = yield* modelOf(yield* session.facts);
                 yield* session.observe({ _tag: "ModelChangeArrived", provider: now.provider, model: now.model, settings: modelSettings });
                 yield* session.idle;
-                return `Asking ${yield* inForce(session)}`;
+                return `${yield* inForce(session)}`;
               }),
             ];
       return said([...asking, ...(yield* appliedAll(given.filter(isUserWord), context))].join("\n"));
@@ -119,7 +119,7 @@ export const settings: ReplCommand = {
       if (words.length === 0 && change === undefined) return said(yield* userSettingsLine(context));
       const given = change === undefined ? words : [change];
       const modelWords = given.filter((word) => !isUserWord(word));
-      if (modelWords.length > 0) return yield* invalid(`${modelWords.join(" ")}: the model's settings can be changed once a model is picked.`, "Pick one with /model.");
+      if (modelWords.length > 0) return yield* invalid(`${modelWords.join(" ")} needs a model.`, "Pick one with /model.");
       return said((yield* appliedAll(given, context)).join("\n"));
     }),
 };

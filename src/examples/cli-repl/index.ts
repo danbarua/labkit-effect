@@ -76,19 +76,19 @@ const choice = <const A extends ReadonlyArray<string>>(name: string, values: A, 
 const arg = (name: string) => Argument.String(name).pipe(Argument.optional, Argument.map(Option.getOrUndefined));
 
 const flags = {
-  print: toggle("print", "Ask once, print the answer and exit", "p"),
-  effort: choice("effort", ["default", ...Effort.literals], "Reasoning effort: default (the provider's), or an effort the model takes"),
-  thinking: choice("thinking", ["default", ...ThinkingMode.literals], "Whether the model thinks: default (as the provider decides), disabled, or between_tools, where the model takes it"),
+  print: toggle("print", "Answer one prompt, print the answer, and exit", "p"),
+  effort: choice("effort", ["default", ...Effort.literals], "Reasoning effort; default leaves it to the provider"),
+  thinking: choice("thinking", ["default", ...ThinkingMode.literals], "Thinking mode; default leaves it to the provider"),
   systemPrompt: text("system-prompt", "The system prompt"),
-  systemPromptFile: text("system-prompt-file", "A file holding the system prompt"),
-  appendSystemPrompt: text("append-system-prompt", "Text added after the system prompt"),
-  appendSystemPromptFile: text("append-system-prompt-file", "A file whose text is added after the system prompt"),
-  outputFormat: choice("output-format", ["text", "json", "stream-json"], "How the answer is printed (print mode)"),
-  verbose: toggle("verbose", "Print the session's facts as they are recorded"),
+  systemPromptFile: text("system-prompt-file", "Read the system prompt from a file"),
+  appendSystemPrompt: text("append-system-prompt", "Append text to the system prompt"),
+  appendSystemPromptFile: text("append-system-prompt-file", "Append a file's text to the system prompt"),
+  outputFormat: choice("output-format", ["text", "json", "stream-json"], "Output format with -p"),
+  verbose: toggle("verbose", "Print the session's events as they are recorded"),
   continue: toggle("continue", "Continue the latest conversation", "c"),
-  resume: text("resume", "Resume a session by its id; with none, pick one from a list", "r"),
-  noSessionPersistence: toggle("no-session-persistence", "Keep the session's facts in memory only, not in its file"),
-  sessionId: text("session-id", "The new session's id"),
+  resume: text("resume", "Resume a session by ID, or pick one from a list", "r"),
+  noSessionPersistence: toggle("no-session-persistence", "Do not save the session to disk"),
+  sessionId: text("session-id", "ID for the new session"),
   // The options the ACP launcher takes too, each with its variable as its twin.
   ...launchFlags,
   // Not built yet:
@@ -133,9 +133,9 @@ const shortly = (at: Date | undefined): string => (at === undefined ? "?" : at.t
 const resumed = (named: string, interactive: boolean) =>
   Effect.gen(function* () {
     if (named !== "") return yield* readSession(storeFolder, named);
-    if (!interactive) return yield* invalid("--resume needs a session id when there is no terminal to pick one at.");
+    if (!interactive) return yield* invalid("--resume needs a session ID when input is not a terminal.", "Pass --resume <session-id>.");
     const stored = yield* storedSessions(storeFolder);
-    if (stored.length === 0) return yield* invalid(`No session to resume: ${storeFolder} holds none.`);
+    if (stored.length === 0) return yield* invalid(`No saved sessions in ${storeFolder}.`);
     const choices = yield* Effect.forEach(stored, ({ sessionId, at }) =>
       readSession(storeFolder, sessionId).pipe(
         Effect.flatMap(({ facts }) => summaryOf(facts)),
@@ -175,24 +175,24 @@ const configOf = (options: Options, interactive: boolean) =>
       ...(options.thinking === undefined ? {} : { thinking: options.thinking }),
     });
     const system = yield* systemOf(options);
-    if (options.continue && options.resume !== undefined) return yield* invalid("Pass --continue or --resume, not both.");
+    if (options.continue && options.resume !== undefined) return yield* invalid("--continue and --resume cannot be used together.");
     if (!options.continue && options.resume === undefined) {
       const config: Unresolved = { sessionId: options.sessionId ?? crypto.randomUUID(), named: options.model ?? configuration.model, settings, system, ...permissions };
       return config;
     }
-    if (options.sessionId !== undefined) return yield* invalid("--session-id names a new session: a continued or resumed one keeps its own.");
-    if (system !== undefined) return yield* invalid("A continued session keeps the system prompt it opened with: all sessions have ImmutableSystemPrompt until further notice.");
+    if (options.sessionId !== undefined) return yield* invalid("--session-id cannot be used with --continue or --resume.", "A continued session keeps its own ID.");
+    if (system !== undefined) return yield* invalid("A continued session cannot change its system prompt.", "Start a new session to use another system prompt.");
     const latest = options.resume === undefined ? yield* latestSession(storeFolder) : yield* resumed(options.resume, interactive);
     const now = yield* modelOf(latest.facts);
     const config: Unresolved = { sessionId: latest.sessionId, named: options.model ?? `${now.provider}/${now.model}`, settings, system, continues: latest.facts, ...permissions };
     return config;
   }).pipe(
     Effect.catchTags({
-      DirectoryUnreadable: (error) => Effect.fail(invalid(`The session store could not be read: ${error.message}`)),
-      SessionNotFound: (error) => Effect.fail(invalid(`No session ${error.sessionId} in ${error.root}.`)),
-      NoSessionStored: (error) => Effect.fail(invalid(`No session to continue: ${error.root} holds none.`)),
+      DirectoryUnreadable: (error) => Effect.fail(invalid(`Could not read the saved sessions: ${error.message}`)),
+      SessionNotFound: (error) => Effect.fail(invalid(`Session ${error.sessionId} not found in ${error.root}.`, "--resume with no ID lists the saved sessions.")),
+      NoSessionStored: (error) => Effect.fail(invalid(`No saved sessions in ${error.root} to continue.`, "Start a new session without --continue.")),
       SessionStoreFailed: (error) => Effect.fail(invalid(error.message)),
-      ConfigInvalid: (error) => Effect.fail(invalid(`The configuration cannot be used: ${error.message}`)),
+      ConfigInvalid: (error) => Effect.fail(invalid(`Invalid configuration: ${error.message}`)),
     }),
   );
 
@@ -243,16 +243,16 @@ export const cliOf = (brand: Brand) =>
       // otherwise keep a prompted run waiting for an end of input that never comes.
       const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));
       // Said before the session opens, so a run with nothing to ask leaves no session behind.
-      if (prompt === "") return yield* invalid("No prompt.", "Pass one as an argument, or pipe it in.");
+      if (prompt === "") return yield* invalid("No prompt given.", "Pass the prompt as an argument, or pipe it to stdin.");
       yield* withSession(config, LogsToStderr, Headless, (session) => printOnce(session, config, prompt, options.outputFormat ?? "text", options.verbose));
     }),
   ).pipe(
-    Command.withDescription("An agent at the command line: a REPL, or -p to ask once."),
+    Command.withDescription("A coding agent: an interactive REPL, or -p to answer one prompt and exit."),
     Command.withExamples([
       { command: `${brand.name} -p "Hello" --model claude-sonnet-5-5`, description: "Ask once and print the answer" },
       { command: `${brand.name} -p "Hello" --model gpt-5.5 --output-format json`, description: "The answer with the session's figures" },
       { command: `${brand.name} --model localhost/mlx-community/Qwen3.5-9B-8bit`, description: "A REPL with a local model" },
-      { command: `${brand.name} models`, description: "The models that can be asked, one per line, as --model takes them" },
+      { command: `${brand.name} models`, description: "List the models you can use, one per line" },
     ]),
     Command.withSubcommands([
       // The models on stdout, so that they can be piped; what would make more available on stderr.
@@ -261,7 +261,7 @@ export const cliOf = (brand: Brand) =>
           yield* Effect.forEach(yield* askable, ({ provider, model }) => Console.log(`${provider}/${model}`), { discard: true });
           yield* Effect.forEach(unavailable(yield* (yield* ModelCatalog).sources), (hint) => Console.error(`HINT: ${hint}`), { discard: true });
         }),
-      ).pipe(Command.withDescription("The models that can be asked, one per line, as --model takes them")),
+      ).pipe(Command.withDescription("List the models you can use, one per line")),
     ]),
   );
 

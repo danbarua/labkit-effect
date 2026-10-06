@@ -75,23 +75,23 @@ const thinkingFor = (
   const range = capabilities?.budget;
   if (thinking === "disabled" && turnsThinkingOff(capabilities) !== false) {
     // A budget model's effort is its budget, which thinking off leaves unsent.
-    const unsent: ReadonlyArray<Adjustment> = range === undefined || settings.effort === undefined ? [] : [{ adjusted: { _tag: "Effort", asked: settings.effort }, reason: "thinking is disabled" }];
+    const unsent: ReadonlyArray<Adjustment> = range === undefined || settings.effort === undefined ? [] : [{ adjusted: { _tag: "Effort", asked: settings.effort }, reason: "not sent while thinking is disabled" }];
     return { thinking: { type: "disabled" }, adjusted: unsent };
   }
-  const notOff: ReadonlyArray<Adjustment> = thinking === "disabled" ? [{ adjusted: { _tag: "Thinking", asked: "disabled" }, reason: "this model cannot turn its thinking off" }] : [];
+  const notOff: ReadonlyArray<Adjustment> = thinking === "disabled" ? [{ adjusted: { _tag: "Thinking", asked: "disabled" }, reason: "this model's thinking cannot be disabled" }] : [];
   if (range !== undefined && effort !== undefined && effort !== "minimal") {
-    const between: ReadonlyArray<Adjustment> = thinking === "between_tools" ? [{ adjusted: { _tag: "Thinking", asked: "between_tools" }, reason: "this model does not think only between tool calls" }] : [];
+    const between: ReadonlyArray<Adjustment> = thinking === "between_tools" ? [{ adjusted: { _tag: "Thinking", asked: "between_tools" }, reason: "this model has no between-tools thinking" }] : [];
     const largest = largestBudget(range.max, limit);
     // No budget fits below an output limit at or under the least budget, so the model does not think.
     if (largest < range.min)
-      return { thinking: undefined, adjusted: [...notOff, ...between, { adjusted: { _tag: "Effort", asked: effort }, reason: `this model's least thinking budget, ${range.min} tokens, is not below its output limit, ${limit} tokens` }] };
+      return { thinking: undefined, adjusted: [...notOff, ...between, { adjusted: { _tag: "Effort", asked: effort }, reason: `the smallest thinking budget (${range.min} tokens) does not fit under the output limit (${limit} tokens)` }] };
     return { thinking: { type: "enabled", budget_tokens: budgetFor(effort, range.min, largest) }, adjusted: [...notOff, ...between] };
   }
   if (thinking === "between_tools") {
     if (capabilities !== undefined && capabilities.thinking?.includes("between_tools") !== true)
-      return { thinking: undefined, adjusted: [{ adjusted: { _tag: "Thinking", asked: "between_tools" }, reason: "this model does not think only between tool calls" }] };
+      return { thinking: undefined, adjusted: [{ adjusted: { _tag: "Thinking", asked: "between_tools" }, reason: "this model has no between-tools thinking" }] };
     if (effort === "xhigh" || effort === "max")
-      return { thinking: undefined, adjusted: [{ adjusted: { _tag: "Thinking", asked: "between_tools" }, reason: `thinking only between tool calls is not taken at ${effort} effort` }] };
+      return { thinking: undefined, adjusted: [{ adjusted: { _tag: "Thinking", asked: "between_tools" }, reason: `between-tools thinking is not available at ${effort} effort` }] };
     return { thinking: { type: "between_tools" }, adjusted: [] };
   }
   return { thinking: undefined, adjusted: notOff };
@@ -108,10 +108,10 @@ const displayFor = (
     return {
       display: undefined,
       thinking,
-      adjusted: observe === "off" ? [{ adjusted: { _tag: "Observe", asked: observe, used: "progress_only" }, reason: "between-tools thinking returns its progress updates as text" }] : [],
+      adjusted: observe === "off" ? [{ adjusted: { _tag: "Observe", asked: observe, used: "progress_only" }, reason: "between-tools thinking always returns progress updates as text" }] : [],
     };
   if (thinking !== undefined) return { display: displays[observe], thinking, adjusted: [] };
-  if (capabilities?.budget !== undefined) return { display: undefined, thinking, adjusted: [{ adjusted: { _tag: "Observe", asked: observe }, reason: "this model thinks only when an effort is given, and none is" }] };
+  if (capabilities?.budget !== undefined) return { display: undefined, thinking, adjusted: [{ adjusted: { _tag: "Observe", asked: observe }, reason: "this model thinks only when an effort is set" }] };
   return { display: displays[observe], thinking: { type: "adaptive" }, adjusted: [] };
 };
 

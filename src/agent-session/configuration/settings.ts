@@ -74,13 +74,13 @@ export function effortFor(
   taken: ReadonlyArray<Effort> | undefined,
 ): { readonly sent: Effort | undefined; readonly adjusted: ReadonlyArray<Adjustment> } {
   if (asked === undefined || taken === undefined || taken.includes(asked)) return { sent: asked, adjusted: [] };
-  if (taken.length === 0) return { sent: undefined, adjusted: [{ adjusted: { _tag: "Effort", asked }, reason: "this model takes no reasoning effort" }] };
+  if (taken.length === 0) return { sent: undefined, adjusted: [{ adjusted: { _tag: "Effort", asked }, reason: "this model has no effort setting" }] };
   const at = Effort.literals.indexOf(asked);
   const distance = (effort: Effort) => Math.abs(Effort.literals.indexOf(effort) - at);
   // The nearest first; of two equally near, the higher.
   const nearest = Order.combine(Order.mapInput(Order.Number, distance), Order.mapInput(Order.flip(Order.Number), (effort: Effort) => Effort.literals.indexOf(effort)));
   const sent = Arr.sort(taken, nearest)[0] ?? asked;
-  return { sent, adjusted: [{ adjusted: { _tag: "Effort", asked, used: sent }, reason: `this model's reasoning efforts are ${taken.join(", ")}; it is sent ${sent}` }] };
+  return { sent, adjusted: [{ adjusted: { _tag: "Effort", asked, used: sent }, reason: `the nearest effort this model supports (${taken.join(", ")})` }] };
 }
 
 /**
@@ -103,11 +103,11 @@ export function reasoningEffortFor(
   if (settings.thinking === "disabled") {
     if (turnsThinkingOff(capabilities) !== false) {
       const unsent: ReadonlyArray<Adjustment> =
-        settings.effort === undefined ? [] : [{ adjusted: { _tag: "Effort", asked: settings.effort }, reason: "thinking is disabled, which is sent as reasoning effort none" }];
+        settings.effort === undefined ? [] : [{ adjusted: { _tag: "Effort", asked: settings.effort }, reason: "not sent while thinking is disabled" }];
       return { sent: "none", adjusted: unsent };
     }
     const { sent, adjusted } = effortFor(settings.effort, taken);
-    const reason = capabilities?.reasoning === false ? "this model does not reason" : "this model cannot turn its reasoning off";
+    const reason = capabilities?.reasoning === false ? "this model does not reason" : "this model's reasoning cannot be disabled";
     return { sent, adjusted: [{ adjusted: { _tag: "Thinking", asked: "disabled" }, reason }, ...adjusted] };
   }
   return effortFor(settings.effort, taken);

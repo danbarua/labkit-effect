@@ -20,18 +20,18 @@ import { modelNamed, switchTo } from "../picking.ts";
 export const switchCommand: ReplCommand = {
   name: "/switch",
   args: "[name]",
-  says: "Ask another model in this session only; with no name, pick one",
+  says: "Switch model for this session only; with no name, pick one",
   complete: (words, from) => (words.length === 2 ? from.models : []),
   inSession: (session, words) =>
     Effect.gen(function* () {
       const now = yield* modelOf(yield* session.facts);
-      const chosen = yield* modelNamed(words, `Asking ${now.provider}/${now.model}. Ask which model in this session?`);
+      const chosen = yield* modelNamed(words, `Current model: ${now.provider}/${now.model}. Switch to which model for this session?`);
       if (chosen !== undefined) yield* switchTo(session, yield* targetOf(chosen, "/model"));
-      return said(`Asking ${yield* inForce(session)}`);
+      return said(`${yield* inForce(session)}`);
     }),
   withoutModel: (words, context) =>
     Effect.gen(function* () {
-      const chosen = yield* modelNamed(words, "Ask which model in this session?");
+      const chosen = yield* modelNamed(words, "Which model, for this session?");
       if (chosen === undefined) return { _tag: "Quiet" } as const;
       const target = yield* targetOf(chosen, "/model");
       // The session opens with the command line's settings: a model that does not take them is not picked.

@@ -33,7 +33,7 @@ export function xAiSettings(settings: ModelSettings = {}, capabilities?: Capabil
       : [
           {
             adjusted: { _tag: "Cache", asked: cache },
-            reason: "xAI caches every request for as long as the server keeps it, and has no setting for how long",
+            reason: "xAI always caches requests, and has no cache setting",
           },
         ];
   const observeAdjusted: ReadonlyArray<Adjustment> =
@@ -41,12 +41,12 @@ export function xAiSettings(settings: ModelSettings = {}, capabilities?: Capabil
       ? [
           {
             adjusted: { _tag: "Observe", asked: observe, used: "all" },
-            reason: "xAI returns the reasoning's summary with every response, and cannot be asked not to",
+            reason: "xAI always returns the reasoning summary",
           },
         ]
       : [];
   const thinkingAdjusted: ReadonlyArray<Adjustment> =
-    thinking === "between_tools" ? [{ adjusted: { _tag: "Thinking", asked: thinking }, reason: "xAI's Responses endpoint has no setting for thinking only between tool calls" }] : [];
+    thinking === "between_tools" ? [{ adjusted: { _tag: "Thinking", asked: thinking }, reason: "xAI has no between-tools thinking" }] : [];
   const adjusted = [...cacheAdjusted, ...observeAdjusted, ...thinkingAdjusted, ...effortAdjusted];
   return {
     fields: {

@@ -102,7 +102,7 @@ const session = (
 
 test("/switch asks another model from the next turn on, in this session only, and the settings said stay", async () => {
   const { printed, asked } = await session(["hello", "/switch claude-sonnet-5-5", "hello again"]);
-  expect(printed).toEqual(["Asking anthropic/claude-sonnet-5-5 effort=low\nthis model takes effort: low, medium, high, xhigh, max"]);
+  expect(printed).toEqual(["anthropic/claude-sonnet-5-5 · effort=low\nEfforts: low, medium, high, xhigh, max"]);
   expect(existsSync(configFolder())).toBe(false);
   expect(asked.map((target) => [target.provider, target.model, target.settings?.effort]) as unknown).toEqual([
     ["openai", "gpt-5.5", "low"],
@@ -113,9 +113,9 @@ test("/switch asks another model from the next turn on, in this session only, an
 test("/settings shows the settings in force, and changes the ones named", async () => {
   const { printed, asked } = await session(["/settings", "/settings effort=high maxOutputTokens=2000", "/settings", "hello"]);
   expect(printed).toEqual([
-    "openai/gpt-5.5 effort=low\nthis model takes effort: low, medium, high, xhigh",
-    "Asking openai/gpt-5.5 effort=high maxOutputTokens=2000\nthis model takes effort: low, medium, high, xhigh",
-    "openai/gpt-5.5 effort=high maxOutputTokens=2000\nthis model takes effort: low, medium, high, xhigh",
+    "openai/gpt-5.5 · effort=low\nEfforts: low, medium, high, xhigh",
+    "openai/gpt-5.5 · effort=high maxOutputTokens=2000\nEfforts: low, medium, high, xhigh",
+    "openai/gpt-5.5 · effort=high maxOutputTokens=2000\nEfforts: low, medium, high, xhigh",
   ]);
   expect(asked[0]?.settings as unknown).toEqual({ effort: "high", maxOutputTokens: 2000 });
 });
@@ -138,18 +138,18 @@ test("/export writes to the brand's folder: .acme/exports for acme's", async () 
 
 test("/tools shows the tools the session opened with: here, none", async () => {
   const { printed } = await session(["/tools"]);
-  expect(printed).toEqual(["No tools: the model is offered none."]);
+  expect(printed).toEqual(["This session has no tools."]);
 });
 
 test("a mistake in a command is said and changes nothing; a line that names no command is not one", async () => {
   const { printed } = await session(["/settings effort=loud", "/settings volume=11", "/model gpt-99", "/model grok-4.7", "/nope", "/settings"]);
-  expect(printed[0]).toStartWith("ERROR: Not settings the session takes:");
-  expect(printed[1]).toStartWith("ERROR: Not settings the session takes:");
+  expect(printed[0]).toBe("ERROR: Invalid value for effort: loud.\nHINT: Use one of: default, minimal, low, medium, high, xhigh, max.");
+  expect(printed[1]).toBe("ERROR: Unknown setting: volume.\nHINT: The settings are effort, thinking, observe, cache, maxOutputTokens, view.thinking.");
   expect(printed.slice(2)).toEqual([
-    "ERROR: No model is named gpt-99.\nHINT: Pick one with /model.",
-    "ERROR: XAI_API_KEY is not set, so xai models cannot be asked.\nHINT: Pick another model with /model, or restart with XAI_API_KEY set.",
-    "ERROR: No command /nope.\nHINT: /help lists them.",
-    "openai/gpt-5.5 effort=low\nthis model takes effort: low, medium, high, xhigh",
+    "ERROR: Unknown model: gpt-99.\nHINT: Pick one with /model.",
+    "ERROR: xai models are unavailable: XAI_API_KEY is not set.\nHINT: Pick another model with /model, or set XAI_API_KEY and restart.",
+    "ERROR: Unknown command: /nope.\nHINT: Type /help to list the commands.",
+    "openai/gpt-5.5 · effort=low\nEfforts: low, medium, high, xhigh",
   ]);
 });
 
@@ -191,7 +191,7 @@ test("/mcp says how the MCP servers are, and completes to reconnect and then a s
 
 test("/settings with no settings said says so; with none sent but some not sent to this model, it names those", async () => {
   const none = await session(["/settings"], defaultBrand, {});
-  expect(none.printed[0]).toStartWith("openai/gpt-5.5 (no settings said)");
+  expect(none.printed[0]).toStartWith("openai/gpt-5.5 · default settings");
   const adjusted = {
     _tag: "SettingAdjusted",
     provider: "openai",
@@ -200,7 +200,7 @@ test("/settings with no settings said says so; with none sent but some not sent 
     reason: "the adapter does not send this setting",
   };
   const notSent = await session(["/settings"], defaultBrand, {}, [adjusted]);
-  expect(notSent.printed[0]).toStartWith("openai/gpt-5.5\nnot sent to this model: cache=1h");
+  expect(notSent.printed[0]).toStartWith("openai/gpt-5.5\nNot sent to this model: cache=1h");
 });
 
 test("/mcp completes a server's name only after reconnect", () => {
@@ -219,10 +219,11 @@ test("/settings takes only what the model takes, refusing anything else with the
     "hello",
   ]);
   // A thinking budget is how a provider takes an effort, not a setting: the effort is.
-  for (const at of [0, 3]) expect(printed[at]).toStartWith("ERROR: Not settings the session takes:");
+  expect(printed[0]).toStartWith("ERROR: Invalid value for effort: none.");
+  expect(printed[3]).toStartWith("ERROR: Unknown setting: budget.");
   expect(printed.slice(1, 3)).toEqual([
-    "ERROR: openai/gpt-5.5 does not take effort=max.\nHINT: effort takes default, low, medium, high, xhigh.",
-    "ERROR: openai/gpt-5.5 does not take thinking=between_tools.\nHINT: thinking takes default, disabled.",
+    "ERROR: openai/gpt-5.5 does not support effort=max.\nHINT: Supported: default, low, medium, high, xhigh.",
+    "ERROR: openai/gpt-5.5 does not support thinking=between_tools.\nHINT: Supported: default, disabled.",
   ]);
   expect(asked.map((target) => target.settings) as unknown).toEqual([{ thinking: "disabled" }]);
 });
@@ -230,7 +231,7 @@ test("/settings takes only what the model takes, refusing anything else with the
 test("/model asks another model in this session, and writes it into the user's folder as the model new sessions ask", async () => {
   const { printed, asked } = await session(["/model claude-sonnet-5-5", "hello"]);
   const file = join(configFolder(), "models.yml");
-  expect(printed).toEqual([`Asking anthropic/claude-sonnet-5-5 effort=low\nthis model takes effort: low, medium, high, xhigh, max\nNew sessions ask anthropic/claude-sonnet-5-5: written to ${file}.`]);
+  expect(printed).toEqual([`anthropic/claude-sonnet-5-5 · effort=low\nEfforts: low, medium, high, xhigh, max\nDefault model: anthropic/claude-sonnet-5-5 (saved to ${file})`]);
   expect(asked.map((target) => `${target.provider}/${target.model}`)).toEqual(["anthropic/claude-sonnet-5-5"]);
   expect(readFileSync(file, "utf8")).toBe("model: anthropic/claude-sonnet-5-5\n");
 });
@@ -239,7 +240,7 @@ test("/model says so when a layer read after the user's folder sets the model to
   const user: LayerSource = { name: join(configFolder(), "models.yml"), trusted: true, value: { model: "openai/gpt-5.5" } };
   const project: LayerSource = { name: "/project/.labkit/models.yml", trusted: false, value: { model: "openai/gpt-5" } };
   const { printed } = await session(["/model claude-sonnet-5-5"], defaultBrand, { effort: "low" }, [], [user, project]);
-  expect(printed[0]?.split("\n").at(-1)).toBe(`/project/.labkit/models.yml sets model too, and is read after ${configFolder()}: new sessions that read it ask openai/gpt-5.`);
+  expect(printed[0]?.split("\n").at(-1)).toBe(`HINT: /project/.labkit/models.yml sets model: openai/gpt-5, which overrides this default where that file is read.`);
 });
 
 test("/model says so when the model new sessions ask could not be written, and the session asks the model all the same", async () => {
@@ -247,7 +248,7 @@ test("/model says so when the model new sessions ask could not be written, and t
   mkdirSync(testFolder(), { recursive: true });
   writeFileSync(configFolder(), "");
   const { printed, asked } = await session(["/model claude-sonnet-5-5", "hello"]);
-  expect(printed[0]?.split("\n").at(-1)).toStartWith("ERROR: anthropic/claude-sonnet-5-5 was not written as the model new sessions ask:");
+  expect(printed[0]?.split("\n").at(-1)).toStartWith("ERROR: Could not save anthropic/claude-sonnet-5-5 as the default model:");
   expect(asked[0]?.model as unknown).toBe("claude-sonnet-5-5");
 });
 
@@ -259,7 +260,7 @@ test("/effort sets the effort; alone, it sets the next value offered, and after 
 
 test("/effort refuses an effort the model does not take", async () => {
   const { printed } = await session(["/effort max"]);
-  expect(printed).toEqual(["ERROR: openai/gpt-5.5 does not take effort=max.\nHINT: effort takes default, low, medium, high, xhigh."]);
+  expect(printed).toEqual(["ERROR: openai/gpt-5.5 does not support effort=max.\nHINT: Supported: default, low, medium, high, xhigh."]);
 });
 
 test("/effort alone, with no effort in force, sets the first effort the model is offered", async () => {
@@ -270,16 +271,16 @@ test("/effort alone, with no effort in force, sets the first effort the model is
 test("/settings view.thinking=off hides the thinking at once, and writes it into the user's folder", async () => {
   const { printed, thinking } = await session(["/settings view.thinking=off"]);
   const file = join(configFolder(), "settings.yml");
-  expect(printed).toEqual([`view.thinking=off: written to ${file}.`]);
+  expect(printed).toEqual([`view.thinking=off (saved to ${file})`]);
   expect(thinking).toBe("off");
   expect(readFileSync(file, "utf8")).toBe("view:\n  thinking: off\n");
 });
 
 test("/settings with a mistake in any setting named changes none of them", async () => {
   const { printed, thinking, asked } = await session(["/settings view.thinking=off effort=loud", "/settings view.thinking=maybe effort=high", "/settings view.colour=red", "hello"]);
-  expect(printed[0]).toStartWith("ERROR: Not settings the session takes:");
-  expect(printed[1]).toBe('ERROR: view.thinking takes on or off, not "maybe".');
-  expect(printed[2]).toBe("ERROR: No setting is named view.colour.\nHINT: The CLI's settings are view.thinking.");
+  expect(printed[0]).toStartWith("ERROR: Invalid value for effort: loud.");
+  expect(printed[1]).toBe("ERROR: Invalid value for view.thinking: maybe.\nHINT: Use one of: on, off.");
+  expect(printed[2]).toBe("ERROR: Unknown setting: view.colour.\nHINT: The settings are effort, thinking, observe, cache, maxOutputTokens, view.thinking.");
   expect(thinking).toBe("on");
   expect(existsSync(configFolder())).toBe(false);
   expect(asked[0]?.settings as unknown).toEqual({ effort: "low" });
@@ -287,6 +288,12 @@ test("/settings with a mistake in any setting named changes none of them", async
 
 test("/settings reads the settings named together: Sonnet 5.5 thinks only between tool calls at high effort or below", async () => {
   const { printed } = await session(["/switch claude-sonnet-5-5", "/settings thinking=between_tools effort=xhigh", "/settings thinking=between_tools effort=high"]);
-  expect(printed[1]).toBe("ERROR: anthropic/claude-sonnet-5-5 does not take thinking=between_tools.\nHINT: thinking=between_tools is not taken with effort=xhigh.");
-  expect(printed[2]).toStartWith("Asking anthropic/claude-sonnet-5-5 thinking=between_tools effort=high");
+  expect(printed[1]).toBe("ERROR: anthropic/claude-sonnet-5-5 does not support thinking=between_tools.\nHINT: thinking=between_tools cannot be combined with effort=xhigh.");
+  expect(printed[2]).toStartWith("anthropic/claude-sonnet-5-5 · thinking=between_tools effort=high");
+});
+
+test("/settings names a setting the model has none of in one line", async () => {
+  // gpt-5 lists no effort none, and has no between-tools thinking: it has no thinking setting.
+  const { printed } = await session(["/switch gpt-5", "/settings thinking=disabled"]);
+  expect(printed[1]).toBe("ERROR: openai/gpt-5 has no thinking setting.");
 });

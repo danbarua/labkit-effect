@@ -23,7 +23,7 @@ export const saidOf = (problem: CannotAsk) => invalid(problem.message, problem.h
 const either = (names: ReadonlyArray<string>): string => (names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`);
 
 /** How to name another model, from where the user is. */
-const another = (by: NamedBy): string => (by === "--model" ? "name another model with --model" : "pick another model with /model");
+const another = (by: NamedBy): string => (by === "--model" ? "choose another model with --model" : "pick another model with /model");
 
 /**
  * Returns the provider and model that `model` names (`catalogTargetOf`), or fails with why it cannot
@@ -35,25 +35,25 @@ export const askedOf = (model: string | undefined, by: NamedBy) =>
     ? Effect.fail(
         by === "--model"
           ? new CannotAsk({ message: "--model is required.", hint: "bun cli models shows available models discovered from the environment." })
-          : new CannotAsk({ message: "No model is set.", hint: "Pick one with /model." }),
+          : new CannotAsk({ message: "No model selected.", hint: "Pick one with /model." }),
       )
     : catalogTargetOf(model).pipe(
         Effect.catchTags({
           ModelNotFound: ({ name, close }) =>
             Effect.fail(
               new CannotAsk({
-                message: `No model is named ${name}.`,
+                message: `Unknown model: ${name}.`,
                 // At most three names: the rest are listed where the hint points.
-                hint: `${close.length === 0 ? "" : `Did you mean ${either(close.slice(0, 3))}? `}${by === "--model" ? "bun cli models shows available models." : "Pick one with /model."}`,
+                hint: `${close.length === 0 ? "" : `Did you mean ${either(close.slice(0, 3))}? `}${by === "--model" ? "bun cli models lists the models you can use." : "Pick one with /model."}`,
               }),
             ),
           SourceNotAnswering: ({ provider, model: asked, at }) =>
-            Effect.fail(new CannotAsk({ message: `The local server${at === undefined ? "" : ` at ${at}`} is not answering, so ${provider}/${asked} cannot be asked.`, hint: `Start it, or ${another(by)}.` })),
+            Effect.fail(new CannotAsk({ message: `${provider}/${asked} is unavailable: the local server${at === undefined ? "" : ` at ${at}`} is not responding.`, hint: `Start the server, or ${another(by)}.` })),
           KeyNotSet: ({ provider, variable }) =>
             Effect.fail(
               new CannotAsk({
-                message: `${variable} is not set, so ${provider} models cannot be asked.`,
-                hint: by === "--model" ? `Set ${variable}, or ${another(by)}.` : `Pick another model with /model, or restart with ${variable} set.`,
+                message: `${provider} models are unavailable: ${variable} is not set.`,
+                hint: by === "--model" ? `Set ${variable}, or ${another(by)}.` : `Pick another model with /model, or set ${variable} and restart.`,
               }),
             ),
         }),
@@ -70,8 +70,8 @@ export const targetOf = (model: string | undefined, by: NamedBy) => askedOf(mode
 export const unavailable = (sources: ReadonlyArray<CatalogSource>): ReadonlyArray<string> => [
   ...Object.keys(known).flatMap((provider) => (sources.some((source) => source.provider === provider) ? [] : [`Set ${keyVariables[provider] ?? `${provider}'s key`} to use ${provider} models.`])),
   ...sources.flatMap(({ provider, models, at }) => {
-    const server = at === undefined ? `The ${provider} server` : `The local server at ${at}`;
-    if (models === undefined) return [`${server} is not answering; start it to use ${provider} models.`];
-    return models.length === 0 ? [`${server} lists no models.`] : [];
+    const server = at === undefined ? `the ${provider} server` : `the local server at ${at}`;
+    if (models === undefined) return [`Start ${server} to use its models: it is not responding.`];
+    return models.length === 0 ? [`${server.charAt(0).toUpperCase()}${server.slice(1)} serves no models.`] : [];
   }),
 ];

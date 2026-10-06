@@ -64,7 +64,7 @@ test("a flag value the flag does not take is said as an ERROR line on stderr", a
 test("a setting on the command line that the model does not take fails the run before a session opens, saying what the model takes", async () => {
   const result = await invoke(["-p", "Hello", "--model", "gpt-5", "--effort", "max"], { OPENAI_API_KEY: "set" });
   expect(result.code).not.toBe(0);
-  expect(result.stderr).toBe("ERROR: openai/gpt-5 does not take effort=max (from the command line).\nHINT: effort takes default, minimal, low, medium, high.\n");
+  expect(result.stderr).toBe("ERROR: openai/gpt-5 does not support effort=max (from the command line).\nHINT: Supported: default, minimal, low, medium, high.\n");
   expect(existsSync(join(testFolder(), "logs/cli"))).toBe(false);
 });
 
@@ -74,38 +74,38 @@ test("with no --model, a new session asks the model the configuration names", as
   // No key is set, so the model is not asked: the message shows which model was chosen.
   const result = await invoke(["-p", "Hello"]);
   expect(result.code).not.toBe(0);
-  expect(result.stderr).toStartWith("ERROR: OPENAI_API_KEY is not set, so openai models cannot be asked.\n");
+  expect(result.stderr).toStartWith("ERROR: openai models are unavailable: OPENAI_API_KEY is not set.\n");
 });
 
 test("a name that is no model is refused, with the names it is close to among the models that can be asked", async () => {
   const result = await invoke(["-p", "Hello", "--model", "GPT-5.5-PRO"], { OPENAI_API_KEY: "set" });
   expect(result.code).not.toBe(0);
-  expect(result.stderr).toBe("ERROR: No model is named GPT-5.5-PRO.\nHINT: Did you mean openai/gpt-5.5-pro? bun cli models shows available models.\n");
+  expect(result.stderr).toBe("ERROR: Unknown model: GPT-5.5-PRO.\nHINT: Did you mean openai/gpt-5.5-pro? bun cli models lists the models you can use.\n");
 });
 
 test("print mode with no prompt and nothing piped is refused", async () => {
   const result = await invoke(["-p", "--model", "gpt-5.5"], { OPENAI_API_KEY: "set" });
   expect(result.code).not.toBe(0);
-  expect(result.stderr).toBe("ERROR: No prompt.\nHINT: Pass one as an argument, or pipe it in.\n");
+  expect(result.stderr).toBe("ERROR: No prompt given.\nHINT: Pass the prompt as an argument, or pipe it to stdin.\n");
 });
 
 test("a model whose provider has no key set is not asked: it names the variable", async () => {
   const result = await invoke(["-p", "Hello", "--model", "gpt-5.5"]);
   expect(result.code).not.toBe(0);
-  expect(result.stderr).toBe("ERROR: OPENAI_API_KEY is not set, so openai models cannot be asked.\nHINT: Set OPENAI_API_KEY, or name another model with --model.\n");
+  expect(result.stderr).toBe("ERROR: openai models are unavailable: OPENAI_API_KEY is not set.\nHINT: Set OPENAI_API_KEY, or choose another model with --model.\n");
 });
 
 test("a configuration that cannot be used is said, naming the layer, before any model is asked", async () => {
   const result = await invoke(["-p", "Hello", "--settings", '{"toolCalls": ["loopBraker"]}']);
   expect(result.code).not.toBe(0);
-  expect(result.stdout + result.stderr).toContain('The configuration cannot be used: --settings: toolCalls[0]: "loopBraker" is neither in plugins nor a plug-in');
+  expect(result.stdout + result.stderr).toContain('Invalid configuration: --settings: toolCalls[0]: "loopBraker" is neither in plugins nor a plug-in');
 });
 
 test("an MCP server the configuration says is required, which does not start, keeps the session from opening, saying why", async () => {
   const servers = JSON.stringify({ mcpServers: { missing: { command: "/no/such/server", required: true } } });
   const result = await invoke(["-p", "Hello", "--model", "gpt-5.5", "--mcp-config", servers], { OPENAI_API_KEY: "set" });
   expect(result.code).not.toBe(0);
-  expect(result.stdout + result.stderr).toContain("The session needs MCP servers that are not running: missing (it failed: its process could not be started:");
+  expect(result.stdout + result.stderr).toContain("Required MCP servers are not running: missing (it failed: its process could not be started:");
   // What its configuration resolved to was written to the session's folder first.
   const sessions = join(testFolder(), "logs/cli");
   const [session] = readdirSync(sessions);
@@ -150,13 +150,13 @@ test("at a terminal with no model, the REPL opens without one, and /exit leaves 
   const id = crypto.randomUUID();
   const { exit, logged } = await atTerminal(["--session-id", id], ["/exit"]);
   expect(Exit.isSuccess(exit)).toBe(true);
-  expect(logged).toEqual(["No model to ask · /model to pick one, /help for commands, /exit to quit.", "ERROR: No model is set.\nHINT: Pick one with /model."]);
+  expect(logged).toEqual(["No model selected · /model to pick one · /help for commands · /exit to quit", "ERROR: No model selected.\nHINT: Pick one with /model."]);
   expect(existsSync(sessionFolderOf(storeFolder, id))).toBe(false);
 });
 
 test("at a terminal, a model whose provider has no key set opens the REPL without a model, saying what to do in the REPL", async () => {
   const { logged } = await atTerminal(["--model", "grok-4.7"], ["/exit"]);
-  expect(logged[1]).toBe("ERROR: XAI_API_KEY is not set, so xai models cannot be asked.\nHINT: Pick another model with /model, or restart with XAI_API_KEY set.");
+  expect(logged[1]).toBe("ERROR: xai models are unavailable: XAI_API_KEY is not set.\nHINT: Pick another model with /model, or set XAI_API_KEY and restart.");
 });
 
 test("print mode at a terminal with no model is refused at once, in the command line's words", async () => {
