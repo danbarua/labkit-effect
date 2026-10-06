@@ -5,8 +5,14 @@ Tool usage counted two ways, and OpenTelemetry. None of it changes what the loop
 - `tool-stats.ts`: counts per tool, worked out from a session's facts.
 - `tool-metrics.ts`: the same counts recorded while tools run, as Effect metrics (a counter and a
   timer), each with the session, the tool and how the run ended.
-- `telemetry.ts`: Effect's own tracer, logger and metrics, sent on. `OtlpFromEnv` sends spans, log
-  lines and metrics as OTLP (HTTP, JSON) to `OTEL_EXPORTER_OTLP_ENDPOINT` when it is set.
+- `telemetry.ts`: Effect's own tracer, logger and metrics, sent on. With
+  `OTEL_EXPORTER_OTLP_ENDPOINT` set, spans, log lines and metrics go to it as OTLP (HTTP, JSON):
+  - from the CLI (`labkit-cli`), the ACP launcher (`labkit-acp`), every `runTest` (`labkit-tests`),
+    zork (`labkit-zork`) and the probes (`labkit-probe`). `OTEL_SERVICE_NAME` overrides the name.
+  - Log lines are sent without the environment's secrets, as the log files are written.
+  - To send everything to a local collector (such as `grafana/otel-lgtm`), add
+    `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` to `.env`, which Bun reads for every
+    command run in this repository. The test suite then takes about 3 seconds longer.
   `SpansTo` passes each span to a function as it ends, as well as to the tracer already in place.
   `TelemetryToFiles` does both, and writes a run's spans to `<base>.spans.jsonl` and its log lines
   to `<base>.logs.jsonl`, one JSON object per line. The live probes in `scripts/probes/` write both

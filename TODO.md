@@ -222,6 +222,10 @@ model.
 - [ ] The system prompt belongs in context assembly, as configuration; it is to be designed and
       tried. A hard-coded one ("You are a helpful assistant") will do until the host's question
       of where a user's things live has an answer.
+- [ ] A current folder inside the working folder, so that a session works in one package of a
+      monorepo (Dan, 2026-10-06). The git tools then do what `git` does from that folder: they find
+      the repository above it. Where a path may go (inside the workspace, through a symbolic link)
+      is a policy of the workspace or editor wrapper, not of each tool.
 - [ ] `/allow env:NAME` passes one environment variable that the command environment removes (a
       credential such as `GITHUB_PAT`) through to the session's commands; its completion offers the
       variables set in the shell, so the user checks the shell's set-up where it matters.
@@ -267,6 +271,13 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 - [ ] A summarizer that asks a model to write a text summary with our own prompt.
 
 ### Sessions
+
+- [ ] Where a host keeps what it writes (Dan, 2026-10-06): `~/.local/share/<brand>/`, not the
+      working folder, where the CLI's `logs/cli/` lands in the user's repository today. Sessions go
+      in `sessions/v0.1.0/`; a change to their shape moves them to the next version's folder, so no
+      session store has to read an older shape. Large tool outputs spooled to disk, blobs (images,
+      audio, other binary content) and the application's logs go there too, with a human-readable
+      formatting of the logs beside the JSONL.
 
 - [ ] The session store. Built: `SessionStore`, which the loop requires (`EphemeralSessionStore`,
       `FileBackedSessionStore`); each fact written before anything is done on it; a failed write

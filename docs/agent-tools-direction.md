@@ -127,6 +127,12 @@ Constraints:
   each tool, or for each action of a tool with an `action` input. `agent-mcp/source.ts` already
   reads `readOnlyHint` into an MCP tool's kind and replay. The alternative is a tool for each
   action (`git_branch_list`, `git_branch_delete`).
+- Large tool outputs are handled in one place, the tool runner, for every tool and environment.
+  First: what ACP requires of an agent, and whether to adopt that generally. Explored, not decided:
+  a result over its limit is cut, and points to the whole output, which the model reads in pages
+  (`logs://tool_results/<call>`) or hands to a sub-agent to summarise. A session could also have
+  a SQLite scratch database, written beside the JSONL journal, which code mode queries with SQL (full
+  text search over the conversation, test reports gathered from tool calls).
 - Code mode: a tool's name is a function's name, so names use `_`, not `-` (`git.do_thing()`). The
   git tools could be a virtual file system (`ls git://branch/`, `mv git://branch/a git://branch/b`,
   `head -n 5 git://remote/origin/main/log`), as omp's `XD://` is. How far a command-line
