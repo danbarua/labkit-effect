@@ -7,7 +7,7 @@
  * labkit (`agent-host/brand.ts`). Its options are those both hosts take (`agent-host/launch.ts`:
  * `--model`, `--permission-mode`, `--strict-tool-input`, `--max-turns`, `--max-budget-usd`,
  * `--settings`, `--setting-sources`, `--mcp-config`, `--strict-mcp-config`) and its own:
- * `--sessions-dir` (where sessions are kept, default `~/.<brand>/sessions`), `--local-tools` (the
+ * `--sessions-dir` (where sessions are kept, default `~/.local/share/<brand>/sessions/<version>`), `--local-tools` (the
  * stopgap tools on the local disk) and `--retries` (how many times a turn with thinking and no answer
  * is asked again for it; 1). A flag not given is read from its variable: the brand's prefix, `ACP_`,
  * then the flag's name in capitals (`LABKIT_ACP_MODEL`, `LABKIT_ACP_SESSIONS_DIR`). The log's
@@ -20,13 +20,12 @@
  * written to stderr. What the command line prints (help, an option's error) goes to stderr.
  */
 
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { BunRuntime, BunServices, BunStdio } from "@effect/platform-bun";
 import { Console, ConfigProvider, Effect, Layer } from "effect";
 import { Command } from "effect/cli";
 import * as Agent from "effective-acp/agent";
-import { type Brand, brandFrom, folderOf } from "../agent-host/brand.ts";
+import { type Brand, brandFrom, sessionsFolderOf } from "../agent-host/brand.ts";
 import { KeyedAndLocalCatalog } from "../agent-host/catalog.ts";
 import { LauncherLogs, launcherLogOptionsFrom } from "../agent-host/launcher-logs.ts";
 import { OtlpSpansAndMetrics } from "../instrumentation/telemetry.ts";
@@ -37,15 +36,15 @@ import { logKeys } from "./log-keys.ts";
 /** The launcher's options: those both hosts take, and its own. */
 export const launcherFlags = {
   ...launchFlags,
-  sessionsDir: textFlag("sessions-dir", "Where sessions are kept (~/.<brand>/sessions when not given)"),
+  sessionsDir: textFlag("sessions-dir", "Where sessions are kept (~/.local/share/<brand>/sessions/<version> when not given)"),
   localTools: toggleFlag("local-tools", "The tools on the local disk instead of through the editor: a stopgap"),
   retries: intFlag("retries", "How many times a turn with thinking and no answer is asked again for it; 0 never (1 when not given)"),
 };
 
 export type LauncherOptions = Command.Command.Config.Infer<typeof launcherFlags>;
 
-/** Returns where sessions are kept: the folder given, else `~/.<brand>/sessions`. */
-export const sessionsDirectoryOf = (given: string | undefined, brand: Brand): string => (given ? resolve(given) : join(homedir(), folderOf(brand), "sessions"));
+/** Returns where sessions are kept: the folder given, else the brand's sessions folder (`sessionsFolderOf`). */
+export const sessionsDirectoryOf = (given: string | undefined, brand: Brand): string => (given ? resolve(given) : sessionsFolderOf(brand));
 
 /** Returns the host's options from the launcher's options. */
 export const hostOptionsOf = (options: LauncherOptions, brand: Brand, home?: string): HostOptions => ({

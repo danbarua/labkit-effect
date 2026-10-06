@@ -126,14 +126,14 @@ test("--retries (LABKIT_ACP_RETRIES) is how many times a turn with thinking and 
 
 test("sessions are kept in --sessions-dir (LABKIT_ACP_SESSIONS_DIR), else in ~/.labkit/sessions; for another brand, its variable and folder", async () => {
   const acme = { name: "acme", version: "1.0.0" };
-  expect(sessionsDirectoryOf(undefined, defaultBrand)).toBe(join(homedir(), ".labkit", "sessions"));
-  expect(sessionsDirectoryOf(undefined, acme)).toBe(join(homedir(), ".acme", "sessions"));
+  expect(sessionsDirectoryOf(undefined, defaultBrand)).toBe(join(homedir(), ".local", "share", "labkit", "sessions", "v0.1.0"));
+  expect(sessionsDirectoryOf(undefined, acme)).toBe(join(homedir(), ".local", "share", "acme", "sessions", "v0.1.0"));
   const directory = async (env: Readonly<Record<string, string>>, brand: Brand = defaultBrand, args: ReadonlyArray<string> = []) =>
     hostOptionsOf((await launcherOptions(args, env, brand))!, brand).directory;
-  expect(await directory({ LABKIT_ACP_SESSIONS_DIR: "" })).toBe(join(homedir(), ".labkit", "sessions"));
+  expect(await directory({ LABKIT_ACP_SESSIONS_DIR: "" })).toBe(join(homedir(), ".local", "share", "labkit", "sessions", "v0.1.0"));
   expect(await directory({ LABKIT_ACP_SESSIONS_DIR: "/tmp/elsewhere" })).toBe("/tmp/elsewhere");
   expect(await directory({ LABKIT_ACP_SESSIONS_DIR: "/tmp/elsewhere" }, defaultBrand, ["--sessions-dir", "/tmp/given"])).toBe("/tmp/given");
-  expect(await directory({ LABKIT_ACP_SESSIONS_DIR: "/tmp/elsewhere" }, acme)).toBe(join(homedir(), ".acme", "sessions"));
+  expect(await directory({ LABKIT_ACP_SESSIONS_DIR: "/tmp/elsewhere" }, acme)).toBe(join(homedir(), ".local", "share", "acme", "sessions", "v0.1.0"));
   expect(await directory({ ACME_ACP_SESSIONS_DIR: "/tmp/acme" }, acme)).toBe("/tmp/acme");
 });
 

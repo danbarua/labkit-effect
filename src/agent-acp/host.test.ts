@@ -1301,7 +1301,7 @@ test("the first prompt writes the session's record, its working folder and the p
   });
   await host.stop();
   expect(result.afterExport).toBe(false);
-  expect(JSON.parse(readFileSync(join(host.directory, result.sessionId, "host.json"), "utf8"))).toEqual({ cwd: host.cwd, title: "Plan the week: three goals" });
+  expect(JSON.parse(readFileSync(join(host.directory, result.sessionId, "host.json"), "utf8"))).toEqual({ host: "acp", cwd: host.cwd, title: "Plan the week: three goals" });
   expect(kinds(log.updates)).toEqual(["available_commands_update", "agent_message_chunk", "session_info_update", "agent_message_chunk", "usage_update"]);
   expect(log.updates.find((update) => update.sessionUpdate === "session_info_update")).toMatchObject({
     title: "Plan the week: three goals",
@@ -1626,7 +1626,7 @@ test("session/resume starts the stored session and replays nothing, then sends t
   expect(result.resumed.configOptions?.find((option) => option.id === "model")).toMatchObject({ currentValue: "openai/gpt-6-sol" });
   expect(kinds(log.updates.slice(result.beforePrompt))).toEqual(["agent_message_chunk", "usage_update"]);
   expect(JSON.stringify(host.contexts[0]?.messages)).toContain("Echoed.");
-  expect(JSON.parse(readFileSync(join(host.directory, stored.sessionId, "host.json"), "utf8"))).toEqual({ cwd: stored.cwd, title: "Echo ping" });
+  expect(JSON.parse(readFileSync(join(host.directory, stored.sessionId, "host.json"), "utf8"))).toEqual({ host: "acp", cwd: stored.cwd, title: "Echo ping" });
   // What its configuration resolved to is written when it is resumed.
   expect(existsSync(join(sessionFolderOf(host.directory, stored.sessionId), "effective-settings.json"))).toBe(true);
   expect(host.logged.find((each) => each.key === logKeys.session.resumed)).toMatchObject({
@@ -2004,7 +2004,7 @@ test("session/list gives at most 50 sessions a page unless the host says otherwi
     const folder = sessionFolderOf(host.directory, `s-${String(index).padStart(2, "0")}`);
     mkdirSync(folder, { recursive: true });
     writeFileSync(join(folder, "facts.jsonl"), "");
-    writeFileSync(join(folder, "host.json"), JSON.stringify({ cwd: host.cwd }));
+    writeFileSync(join(folder, "host.json"), JSON.stringify({ host: "acp", cwd: host.cwd }));
   }
   const page = await sdkClient().app.connectWith(host.stream, async (ctx) => {
     await initialize(ctx);

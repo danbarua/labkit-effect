@@ -195,7 +195,7 @@ sets the minimum log level. The file's path is written to stderr once, at start.
 
 | Variable (after the brand's prefix, `LABKIT_` for labkit) | Default |
 | --- | --- |
-| `ACP_LOG_DIR` | `~/.<brand>/logs` |
+| `ACP_LOG_DIR` | `~/.local/share/<brand>/logs` |
 | `ACP_LOG_LEVEL` | debug |
 | `ACP_LOG_MAX_BYTES` | 10 MiB |
 | `ACP_LOG_BACKUPS` | 4 |
@@ -241,7 +241,8 @@ brand at its entry point; the CLI's `main(brand)` and the ACP launcher's `launch
 - The brand is the one the program passes; otherwise the one that `LABKIT_BRAND` names (blank names
   none); otherwise labkit.
 - Named after the brand: the configuration folders (`~/.config/<name>/`, `<project>/.<name>/`), the
-  launcher's sessions and logs (`~/.<name>/sessions`, `~/.<name>/logs`) and variables
+  folder where the hosts keep what they write (`~/.local/share/<name>/`: every host's sessions in
+  `sessions/<version>/`, the log files in `logs/`; `brand.ts`), the launcher's variables
   (`<PREFIX>ACP_*`), where `/export` writes (`.<name>/exports`), the name the ACP host gives a client
   (`agentInfo`) and the MCP client a server (`clientInfo`), and the CLI's command.
 

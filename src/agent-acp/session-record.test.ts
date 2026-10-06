@@ -31,25 +31,27 @@ test("a title is the prompt's text trimmed, each run of whitespace one space, cu
   expect(titleOf(" \n\t ")).toBeUndefined();
 });
 
-test("a record holds the working folder and the first prompt's title, and decodes from JSON; a value that is not a record, or lacks a folder, decodes as none", () => {
-  expect(recordFor("/work/a", "  Explain the loop  ")).toEqual({ cwd: "/work/a", title: "Explain the loop" });
-  expect(recordFor("/work/a", "   ")).toEqual({ cwd: "/work/a" });
-  expect(readSessionRecord(JSON.parse(JSON.stringify(recordFor("/work/a", "Explain"))))).toEqual({ cwd: "/work/a", title: "Explain" });
-  expect(readSessionRecord({ cwd: "/work/a", other: 1 })).toEqual({ cwd: "/work/a" });
+test("a record names the ACP host and holds the working folder and the first prompt's title, and decodes from JSON; a value that is not a record, lacks a folder, or names another host (the CLI) decodes as none", () => {
+  expect(recordFor("/work/a", "  Explain the loop  ")).toEqual({ host: "acp", cwd: "/work/a", title: "Explain the loop" });
+  expect(recordFor("/work/a", "   ")).toEqual({ host: "acp", cwd: "/work/a" });
+  expect(readSessionRecord(JSON.parse(JSON.stringify(recordFor("/work/a", "Explain"))))).toEqual({ host: "acp", cwd: "/work/a", title: "Explain" });
+  expect(readSessionRecord({ host: "acp", cwd: "/work/a", other: 1 })).toEqual({ host: "acp", cwd: "/work/a" });
+  expect(readSessionRecord({ host: "cli", cwd: "/work/a" })).toBeUndefined();
   for (const notARecord of [undefined, null, "text", 3, [], {}, { title: "no folder" }, { cwd: 4 }, { cwd: "/w", title: 7 }]) {
     expect(readSessionRecord(notARecord)).toBeUndefined();
   }
 });
 
-test("a page lists the sessions whose record reads, latest first and by id among equals, filtered by working folder when asked, as session/list's info", () => {
+test("a page lists the sessions whose record reads as the ACP host's, latest first and by id among equals, filtered by working folder when asked, as session/list's info; a session the CLI recorded is not listed", () => {
   const sessions = [
-    stored("b", 100, { cwd: "/work/a", title: "Second" }),
-    stored("a", 100, { cwd: "/work/b" }),
-    stored("old", 50, { cwd: "/work/a", title: "Oldest" }),
+    stored("b", 100, { host: "acp", cwd: "/work/a", title: "Second" }),
+    stored("a", 100, { host: "acp", cwd: "/work/b" }),
+    stored("old", 50, { host: "acp", cwd: "/work/a", title: "Oldest" }),
     stored("cli-made", 300, undefined),
+    stored("cli-recorded", 350, { host: "cli", cwd: "/work/a" }),
     stored("garbled", 400, { cwd: 7 }),
-    stored("unknown-time", undefined, { cwd: "/work/a" }),
-    stored("newest", 200, { cwd: "/work/a", title: "Newest" }),
+    stored("unknown-time", undefined, { host: "acp", cwd: "/work/a" }),
+    stored("newest", 200, { host: "acp", cwd: "/work/a", title: "Newest" }),
   ];
   const all = pageOf(sessions, {}, 50);
   expect(plain(all)).toEqual({
@@ -68,14 +70,14 @@ test("a page lists the sessions whose record reads, latest first and by id among
 });
 
 test("pages of a size continue after the session the last one ended with, so each session comes once, in order, and the last page has no cursor; a session written to meanwhile is not repeated", () => {
-  const sessions = ["a", "b", "c", "d", "e"].map((id, at) => stored(id, (at + 1) * 10, { cwd: "/w" }));
+  const sessions = ["a", "b", "c", "d", "e"].map((id, at) => stored(id, (at + 1) * 10, { host: "acp", cwd: "/w" }));
   const first = pageRead(pageOf(sessions, {}, 2));
   expect(idsOf(first)).toEqual(["e", "d"]);
   expect(first.nextCursor).toBeString();
   const second = pageRead(pageOf(sessions, { cursor: first.nextCursor }, 2));
   expect(idsOf(second)).toEqual(["c", "b"]);
   // "c" is written to before the next page is asked for: it moves to the front and is not seen again.
-  const meanwhile = sessions.map((each) => (each.sessionId === "c" ? stored("c", 99, { cwd: "/w" }) : each));
+  const meanwhile = sessions.map((each) => (each.sessionId === "c" ? stored("c", 99, { host: "acp", cwd: "/w" }) : each));
   const third = pageRead(pageOf(meanwhile, { cursor: second.nextCursor }, 2));
   expect(idsOf(third)).toEqual(["a"]);
   expect(third.nextCursor).toBeUndefined();
@@ -86,7 +88,7 @@ test("pages of a size continue after the session the last one ended with, so eac
 });
 
 test("a cursor that was not given by pageOf is an InvalidCursor naming it", () => {
-  const sessions = [stored("a", 10, { cwd: "/w" })];
+  const sessions = [stored("a", 10, { host: "acp", cwd: "/w" })];
   const wrongShape = Buffer.from(JSON.stringify({ at: 1 })).toString("base64url");
   for (const cursor of ["", "not a cursor", "%%%", wrongShape]) {
     const response = pageOf(sessions, { cursor }, 10);

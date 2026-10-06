@@ -520,7 +520,7 @@ The host logs each event under `log-keys.ts`, with the ids it is about as log an
 
   | Flag | Default | Meaning |
   | --- | --- | --- |
-  | `--sessions-dir` | `~/.<brand>/sessions` | Where sessions are kept. |
+  | `--sessions-dir` | `~/.local/share/<brand>/sessions/<version>` | Where sessions are kept: a folder shared with the CLI, of which `session/list` lists the sessions that the ACP host made. |
   | `--local-tools` | off | The tools on the local disk instead of through the editor. |
   | `--retries` | 1 | How many times an incomplete turn is asked again for its answer; 0 never. |
 

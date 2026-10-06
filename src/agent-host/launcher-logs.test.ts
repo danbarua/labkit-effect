@@ -73,7 +73,7 @@ test.each([
 });
 
 test("launcherLogOptionsFrom reads the log folder, level, size limit and backup count from the environment, uses the defaults for unset variables, and collects credential values for redaction, listing credential values shorter than 8 characters separately", () => {
-  expect(launcherLogOptionsFrom({})).toMatchObject({ dir: join(homedir(), ".labkit", "logs"), level: "Debug", maxBytes: 10 * 1024 * 1024, backups: 4, keep: 20, secrets: { values: [], tooShort: [] } });
+  expect(launcherLogOptionsFrom({})).toMatchObject({ dir: join(homedir(), ".local", "share", "labkit", "logs"), level: "Debug", maxBytes: 10 * 1024 * 1024, backups: 4, keep: 20, secrets: { values: [], tooShort: [] } });
   const options = launcherLogOptionsFrom({
     LABKIT_ACP_LOG_DIR: "/tmp/acp-logs",
     LABKIT_ACP_LOG_LEVEL: "WARNING",

@@ -3,7 +3,8 @@
  * `runCli({ name: "labkit" })`), and everything named after the brand follows:
  *
  * - the configuration folders: `~/.config/<name>/` and `<project>/.<name>/`;
- * - where a launcher keeps sessions and logs: `~/.<name>/sessions`, `~/.<name>/logs`;
+ * - where the agent keeps what it writes (`dataFolderOf`): `~/.local/share/<name>/`, with the
+ *   sessions of every host in `sessions/<version>/` and the log files in `logs/`;
  * - where `/export` writes: `<folder>/.<name>/exports`;
  * - the environment variable prefix: `<NAME>_` (`<NAME>_ACP_` for the ACP launcher's);
  * - the name it gives an ACP client (`agentInfo`) and an MCP server (`clientInfo`).
@@ -13,6 +14,8 @@
  * build can run as another brand without code changes); otherwise the default.
  */
 
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { Context } from "effect";
 
 export interface Brand {
@@ -41,3 +44,19 @@ export const Brand = Context.Reference<Brand>("agent-host/Brand", { defaultValue
 
 /** Returns the folder that a brand uses in a home or a project: `.<name>`. */
 export const folderOf = (brand: Brand): string => `.${brand.name}`;
+
+/**
+ * The version of the sessions' shape: their facts and their folders. A change to the shape moves
+ * sessions to the next version's folder, so that no session store has to read an older shape. The
+ * sessions in an older version's folder are left where they are.
+ */
+export const sessionsVersion = "v0.1.0";
+
+/** The folder where the agent keeps what it writes: `<home>/.local/share/<name>/`, the home folder read from `HOME` when this is called. */
+export const dataFolderOf = (brand: Brand, home: string = homedir()): string => join(home, ".local", "share", brand.name);
+
+/** The folder of every host's sessions, for the current `sessionsVersion`. */
+export const sessionsFolderOf = (brand: Brand, home: string = homedir()): string => join(dataFolderOf(brand, home), "sessions", sessionsVersion);
+
+/** The folder of the agent's log files. */
+export const logsFolderOf = (brand: Brand, home: string = homedir()): string => join(dataFolderOf(brand, home), "logs");

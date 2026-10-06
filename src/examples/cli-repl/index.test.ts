@@ -20,7 +20,7 @@ import { typing } from "../../../tests/support/terminal.ts";
 import { test, testFolder } from "../../../tests/support/test.ts";
 import { cliOf, withResumeValue } from "./index.ts";
 import { saidFormatter } from "./invalid.ts";
-import { storeFolder } from "./session.ts";
+import { storeFolderOf } from "./session.ts";
 
 const invoke = async (args: ReadonlyArray<string>, env: Record<string, string> = {}) => {
   // Run in the test's folder, where the CLI writes its logs and sessions.
@@ -65,7 +65,7 @@ test("a command-line setting the model does not support fails before a session o
   const result = await invoke(["-p", "Hello", "--model", "gpt-5", "--effort", "max"], { OPENAI_API_KEY: "set" });
   expect(result.code).not.toBe(0);
   expect(result.stderr).toBe("ERROR: openai/gpt-5 does not support effort=max (from the command line).\nHINT: Supported: default, minimal, low, medium, high.\n");
-  expect(existsSync(join(testFolder(), "logs/cli"))).toBe(false);
+  expect(existsSync(join(testFolder(), ".local/share/labkit"))).toBe(false);
 });
 
 test("without --model, a new session uses the configured model", async () => {
@@ -107,7 +107,7 @@ test("a required MCP server that fails to start stops the session from opening, 
   expect(result.code).not.toBe(0);
   expect(result.stdout + result.stderr).toContain("Required MCP servers are not running: missing (it failed: its process could not be started:");
   // The resolved configuration was written to the session's folder before the failure.
-  const sessions = join(testFolder(), "logs/cli");
+  const sessions = join(testFolder(), ".local/share/labkit/sessions/v0.1.0");
   const [session] = readdirSync(sessions);
   const effective = JSON.parse(readFileSync(join(sessions, session ?? "", "effective-settings.json"), "utf8")) as { readonly layers: ReadonlyArray<{ readonly name: string }>; readonly host: { readonly model: string }; readonly mcpServers: ReadonlyArray<{ readonly required: boolean }> };
   expect(effective.layers.map((layer) => layer.name)).toEqual(["the CLI's defaults", "--mcp-config", "the command line"]);
@@ -151,7 +151,7 @@ test("at a terminal with no model, the REPL opens without a model, and /exit sav
   const { exit, logged } = await atTerminal(["--session-id", id], ["/exit"]);
   expect(Exit.isSuccess(exit)).toBe(true);
   expect(logged).toEqual(["No model selected · /model to pick one · /help for commands · /exit to quit", "ERROR: No model selected.\nHINT: Pick one with /model."]);
-  expect(existsSync(sessionFolderOf(storeFolder, id))).toBe(false);
+  expect(existsSync(sessionFolderOf(storeFolderOf(defaultBrand), id))).toBe(false);
 });
 
 test("at a terminal, a model without an API key opens the REPL without a model, with a hint to use /model", async () => {

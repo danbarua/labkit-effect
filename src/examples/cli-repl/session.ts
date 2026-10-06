@@ -15,7 +15,8 @@
 
 import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
-import { Array as Arr, Effect, Layer, Order, type Scope, Stream } from "effect";
+import { join } from "node:path";
+import { Array as Arr, Effect, Layer, Order, Predicate, type Scope, Stream } from "effect";
 import { Notices } from "../../agent-context/assemble.ts";
 import { ModelOverrides } from "../../agent-session/configuration/well-known-models.ts";
 import { writeEffectiveSettings } from "../../agent-config/effective.ts";
@@ -25,7 +26,9 @@ import { describe } from "../../agent-mcp/server-machine.ts";
 import { removeCredentials, processEnvironmentWith } from "../../agent-process/environment.ts";
 import { type GivenServer, type McpServers, startMcpServers } from "../../agent-mcp/servers.ts";
 import type { Asked } from "../../agent-host/catalog.ts";
+import { Brand, logsFolderOf, sessionsFolderOf } from "../../agent-host/brand.ts";
 import { sessionFolderOf, storeFileOf } from "../../agent-host/directory.ts";
+import { writeRecord } from "../../agent-host/record.ts";
 import { SessionServices } from "../../agent-host/services.ts";
 import type { Ending } from "../../agent-machine/decision.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
@@ -68,11 +71,24 @@ export interface Config {
   readonly strictToolInput: boolean;
 }
 
-/** The folder where the CLI saves sessions (`agent-host/directory.ts`). */
-export const storeFolder = "logs/cli";
+/**
+ * The folder where the CLI saves sessions (`agent-host/directory.ts`): the brand's sessions folder,
+ * which the ACP host shares (`agent-host/brand.ts`). A session's folder holds its facts, its record
+ * (`cliRecord`) and the settings it resolved to.
+ */
+export const storeFolderOf = (brand: Brand): string => sessionsFolderOf(brand);
 
-/** The file a session's log is written to, beside its facts. */
-export const logFileOf = (sessionId: string): string => `${sessionFolderOf(storeFolder, sessionId)}/cli.log`;
+/** The file a session's log is written to, in the brand's logs folder. */
+export const logFileOf = (brand: Brand, sessionId: string): string => join(logsFolderOf(brand), `cli-${sessionId}.log`);
+
+/** The host that a record names when the CLI made the session. */
+const cliHost = "cli";
+
+/** What the CLI records of a session besides its facts (`agent-host/record.ts`): that the CLI made it, and its working folder. */
+export const cliRecord = (cwd: string) => ({ host: cliHost, cwd });
+
+/** Whether a stored session's record says that the CLI made it in the working folder `cwd`. */
+export const madeIn = (record: unknown, cwd: string): boolean => Predicate.isReadonlyObject(record) && record["host"] === cliHost && record["cwd"] === cwd;
 
 /**
  * The workspace tools for the working folder; their commands run with the environment the
@@ -113,9 +129,14 @@ const givenOf = (configuration: Configuration): ReadonlyArray<GivenServer> =>
  * permission questions can be answered, and the names of the environment variables commands get and
  * those removed.
  */
-const written = (config: Config, environment: Readonly<Record<string, string>>) =>
+const written = (config: Config, environment: Readonly<Record<string, string>>, root: string) =>
   Effect.gen(function* () {
-    const folder = sessionFolderOf(storeFolder, config.sessionId);
+    const folder = sessionFolderOf(root, config.sessionId);
+    // A new session saved to disk is recorded as the CLI's, made in this working folder, so `--continue` finds it here.
+    if (config.persist && config.continues === undefined)
+      yield* writeRecord(root, config.sessionId, cliRecord(process.cwd())).pipe(
+        Effect.catch((error) => Effect.logWarning(logKeys.settings.notWritten, { folder, cause: error.message })),
+      );
     const host = {
       model: `${config.target.provider}/${config.target.model}`,
       settings: config.settings as Readonly<Record<string, string>>,
@@ -190,7 +211,6 @@ export const withSession = <A, E, R, L, H>(
 ) => {
   const workspace = workspaceOf(config);
   const git = gitOf(config);
-  const store = config.persist ? FileBackedSessionStore(storeFileOf(storeFolder, config.sessionId)) : ephemeralSessionStore(config.continues ?? []);
   const opened = (mcp: McpServers) => Effect.gen(function* () {
     const session = yield* openSession;
     yield* host.follow(session);
@@ -223,7 +243,9 @@ export const withSession = <A, E, R, L, H>(
     return yield* use(session, mcp).pipe(Effect.onInterrupt(() => interrupted(session)));
   });
   return Effect.gen(function* () {
-    yield* written(config, workspace.environment);
+    const root = storeFolderOf(yield* Brand);
+    const store = config.persist ? FileBackedSessionStore(storeFileOf(root, config.sessionId)) : ephemeralSessionStore(config.continues ?? []);
+    yield* written(config, workspace.environment, root);
     // The MCP servers start in the session's scope, before its services, because their tools are among them.
     const mcp = yield* startMcpServers(givenOf(config.configuration), [{ uri: pathToFileURL(process.cwd()).href, name: basename(process.cwd()) }]);
     yield* requiredRunning(config.configuration, mcp);

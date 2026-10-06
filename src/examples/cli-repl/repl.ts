@@ -22,6 +22,7 @@
 
 import type { McpServers } from "../../agent-mcp/servers.ts";
 import { Console, Deferred, Effect, HashMap, Option, PubSub, Queue, Ref } from "effect";
+import { Brand } from "../../agent-host/brand.ts";
 import type { SessionUpdate } from "effective-acp/schema/v1";
 import { next, presentFrom, type ProjectionInput, project } from "../../agent-acp/projection.ts";
 import { immutableToolCatalogOf } from "../../agent-session/configuration/session-setup.ts";
@@ -331,7 +332,7 @@ const thinkingKey = (view: View): KeyBinding => ({ matches: isOptionT, run: togg
 
 export const repl = (session: Session, config: Config, first: string | undefined, interactive: boolean, context: ReplContext, mcp?: McpServers) =>
   Effect.scoped(Effect.gen(function* () {
-    yield* Console.log(`${config.target.provider}/${config.target.model} · /help for commands · /exit to quit · log: ${logFileOf(config.sessionId)}`);
+    yield* Console.log(`${config.target.provider}/${config.target.model} · /help for commands · /exit to quit · log: ${logFileOf(yield* Brand, config.sessionId)}`);
     if (first !== undefined) yield* turn(session, first, context.view);
     if (!interactive) return;
     yield* bracketedPaste;

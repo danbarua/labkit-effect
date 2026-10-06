@@ -5,10 +5,9 @@
  * written, the lines go to stderr, so the launcher does not stop because of its log.
  */
 
-import { type Brand, brandFrom, envPrefixOf, folderOf } from "./brand.ts";
+import { type Brand, brandFrom, envPrefixOf, logsFolderOf } from "./brand.ts";
 import { redactedValue, redactorOf, type Secrets, withTooShortWarning, secretsOf } from "./redaction.ts";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { Array as Arr, Cause, Console, Effect, FileSystem, Layer, Logger, type LogLevel, Option, Order, Path, References } from "effect";
 import { otlpLogger } from "../instrumentation/telemetry.ts";
 import { logFile } from "./log-file.ts";
@@ -66,7 +65,7 @@ const wholeNumber = (value: string | undefined, least: number): number | undefin
 /**
  * Returns the options from the environment, each variable after the brand's prefix (`LABKIT_` for
  * labkit). Defaults are in parentheses:
- * - `ACP_LOG_DIR` (`~/.<brand>/logs`);
+ * - `ACP_LOG_DIR` (`~/.local/share/<brand>/logs`, `logsFolderOf`);
  * - `ACP_LOG_LEVEL` (`debug`; one of trace, debug, info, warning, error, fatal);
  * - `ACP_LOG_MAX_BYTES` (10 MiB);
  * - `ACP_LOG_BACKUPS` (4).
@@ -78,7 +77,7 @@ export const launcherLogOptionsFrom = (env: Readonly<Record<string, string | und
   const prefix = `${envPrefixOf(brand)}ACP_LOG_`;
   const [dir, levelName = "", maxBytes, backups] = [env[`${prefix}DIR`], env[`${prefix}LEVEL`], env[`${prefix}MAX_BYTES`], env[`${prefix}BACKUPS`]];
   return {
-    dir: dir ? resolve(dir) : join(homedir(), folderOf(brand), "logs"),
+    dir: dir ? resolve(dir) : logsFolderOf(brand),
     // `Object.hasOwn` keeps out names like `constructor`, which every object has.
     level: Object.hasOwn(levelsByName, levelName.toLowerCase()) ? levelsByName[levelName.toLowerCase()]! : "Debug",
     maxBytes: wholeNumber(maxBytes, 1) ?? 10 * 1024 * 1024,

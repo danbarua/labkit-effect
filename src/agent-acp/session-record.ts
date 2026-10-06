@@ -1,6 +1,8 @@
 /**
- * What the ACP host keeps of a session in its record (`agent-host/record.ts`): the working folder
- * it was made for and its title; and `session/list` over the stored sessions, a page at a time.
+ * What the ACP host keeps of a session in its record (`agent-host/record.ts`): that the ACP host
+ * made it, the working folder it was made for, and its title; and `session/list` over the stored
+ * sessions, a page at a time. The sessions folder is shared with the CLI, whose records name the
+ * CLI, so `session/list` lists only the sessions that the ACP host made.
  */
 
 import { Array as Arr, Data, Option, Order, Schema } from "effect";
@@ -10,8 +12,11 @@ import { SessionId } from "effective-acp/schema/v1";
 /** The maximum number of characters in a title. */
 const titleLength = 120;
 
+/** The host that a record names when the ACP host made the session. */
+export const acpHost = "acp";
+
 /** What the host records of a session. */
-export const SessionRecord = Schema.Struct({ cwd: Schema.String, title: Schema.optionalKey(Schema.String) });
+export const SessionRecord = Schema.Struct({ host: Schema.Literal(acpHost), cwd: Schema.String, title: Schema.optionalKey(Schema.String) });
 export type SessionRecord = typeof SessionRecord.Type;
 
 const decodeRecord = Schema.decodeUnknownOption(SessionRecord);
@@ -27,13 +32,13 @@ export const titleOf = (text: string): string | undefined => {
   return title === "" ? undefined : title;
 };
 
-/** Returns the record that turn zero writes: the working folder, and the title from the first prompt when it gives one. */
+/** Returns the record that turn zero writes: the ACP host, the working folder, and the title from the first prompt when it gives one. */
 export const recordFor = (cwd: string, firstPrompt: string): SessionRecord => {
   const title = titleOf(firstPrompt);
-  return title === undefined ? { cwd } : { cwd, title };
+  return title === undefined ? { host: acpHost, cwd } : { host: acpHost, cwd, title };
 };
 
-/** Returns a host record as a `SessionRecord`, or undefined when it is not one. Other fields of the record are dropped. */
+/** Returns a host record as a `SessionRecord`, or undefined when it is not one, such as a record that the CLI wrote. Other fields of the record are dropped. */
 export const readSessionRecord = (record: unknown): SessionRecord | undefined => Option.getOrUndefined(decodeRecord(record));
 
 /** A cursor that `pageOf` did not give. */
@@ -66,8 +71,8 @@ const latestFirst: Order.Order<{ readonly sessionId: string; readonly at: Date |
 /**
  * Returns one page of `session/list`.
  *
- * - Only sessions whose record reads are listed, and, when `request.cwd` is given, only those made
- *   for it.
+ * - Only sessions whose record reads as the ACP host's are listed, and, when `request.cwd` is given,
+ *   only those made for it.
  * - Sessions are ordered by when they were last written, the latest first, then by id.
  * - The page has at most `size` sessions (at least one), and `nextCursor` when more follow it.
  * - `request.cursor` continues after the session that its page ended with, so a session written to

@@ -99,8 +99,8 @@ model.
       `current_mode_update` (the host offers the permission mode as a config option instead). Open: live with no deltas (a server that answers whole) announces a call
       before its response's text, which is known only when the response ends.
 - [ ] The ACP host's sessions across processes. Built: each session's facts in a file
-      (`FileBackedSessionStore`, `~/.labkit/sessions`); the host's record of a session (`host.json`:
-      the working folder, a title from the first prompt), written at turn zero; `session/load` (the
+      (`FileBackedSessionStore`, `~/.local/share/labkit/sessions/v0.1.0`); the host's record of a
+      session (`host.json`: the ACP host, the working folder, a title from the first prompt), written at turn zero; `session/load` (the
       stored facts replayed before the answer), `session/resume` (no replay) and `session/list`
       (by working folder, newest first, paged), with `session_info_update`; a turn the facts left
       running is ended, not gone on with; `session/close`. To do: `session/fork` (it waits for the
@@ -272,12 +272,15 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 
 ### Sessions
 
-- [ ] Where a host keeps what it writes (Dan, 2026-10-06): `~/.local/share/<brand>/`, not the
-      working folder, where the CLI's `logs/cli/` lands in the user's repository today. Sessions go
-      in `sessions/v0.1.0/`; a change to their shape moves them to the next version's folder, so no
-      session store has to read an older shape. Large tool outputs spooled to disk, blobs (images,
-      audio, other binary content) and the application's logs go there too, with a human-readable
-      formatting of the logs beside the JSONL.
+- [ ] Where a host keeps what it writes (Dan, 2026-10-06): `~/.local/share/<brand>/`. Built:
+      every host's sessions in `sessions/v0.1.0/` (a change to their shape moves them to the next
+      version's folder, so no session store has to read an older shape), each with a record that
+      names the host that made it; the log files in `logs/`. To do: large tool outputs spooled to
+      disk, blobs (images, audio, other binary content), and a human-readable formatting of the logs
+      beside the JSONL. Continuing a session in another host than the one that made it waits for a
+      session's tools to change during it.
+- [ ] Provider usage as metrics (Dan, 2026-10-06): tokens, cost and request time for each provider
+      and model, sent with the tool metrics.
 
 - [ ] The session store. Built: `SessionStore`, which the loop requires (`EphemeralSessionStore`,
       `FileBackedSessionStore`); each fact written before anything is done on it; a failed write

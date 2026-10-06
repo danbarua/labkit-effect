@@ -29,7 +29,10 @@
  * `--max-budget-usd`). The resolved configuration, and the layer each value came from, is written to
  * the session's folder as `effective-settings.json`.
  *
- * Each session's facts and log are kept in `logs/cli/<session>/` (`agent-host/directory.ts`).
+ * Each session's facts are kept in `~/.local/share/<brand>/sessions/<version>/<session>/`, a folder
+ * that the ACP host shares, and its log in `~/.local/share/<brand>/logs/cli-<session>.log`
+ * (`agent-host/brand.ts`). `--continue` and the `--resume` picker offer the CLI's sessions made in
+ * the working folder.
  * `--continue` continues the most recently written session, and `--resume <session>` the one named
  * (with no ID, the user picks one from a list). `bun run cli:watch --continue` therefore restarts
  * on each code change and keeps the conversation.
@@ -51,7 +54,8 @@ import { Effort, ThinkingMode } from "../../agent-machine/settings.ts";
 import { knowledgeWith, settingsGiven, takenBy } from "./model-settings.ts";
 import { modelOf } from "../../agent-session/configuration/session-setup.ts";
 import { askable, KeyedAndLocalCatalog, ModelCatalog } from "../../agent-host/catalog.ts";
-import { latestSession, readSession, storedSessions, summaryOf } from "../../agent-host/directory.ts";
+import { NoSessionStored, readSession, summaryOf } from "../../agent-host/directory.ts";
+import { recordedSessions } from "../../agent-host/record.ts";
 import { LogsToFile, LogsToStderr } from "../../agent-host/logs.ts";
 import { OtlpSpansAndMetrics } from "../../instrumentation/telemetry.ts";
 import { Brand, brandFrom } from "../../agent-host/brand.ts";
@@ -61,7 +65,7 @@ import { askedOf, targetOf, unavailable } from "./models.ts";
 import { printOnce } from "./print.ts";
 import { repl, type ReplContext, terminal, withoutModel } from "./repl.ts";
 import { viewOf } from "./view.ts";
-import { type Config, Headless, logFileOf, storeFolder, withSession } from "./session.ts";
+import { type Config, Headless, logFileOf, madeIn, storeFolderOf, withSession } from "./session.ts";
 
 const optional = <A>(flag: Flag.Flag<A>) => flag.pipe(Flag.optional, Flag.map(Option.getOrUndefined));
 const text = (name: string, description: string, ...aliases: Array<string>) =>
@@ -127,21 +131,32 @@ const shortly = (at: Date | undefined): string => (at === undefined ? "?" : at.t
  * sessions, newest first, each with its turn count and model. A session whose file cannot be read is
  * listed as unreadable.
  */
-const resumed = (named: string, interactive: boolean) =>
+const resumed = (named: string, interactive: boolean, root: string) =>
   Effect.gen(function* () {
-    if (named !== "") return yield* readSession(storeFolder, named);
+    if (named !== "") return yield* readSession(root, named);
     if (!interactive) return yield* invalid("--resume needs a session ID when input is not a terminal.", "Pass --resume <session-id>.");
-    const stored = yield* storedSessions(storeFolder);
-    if (stored.length === 0) return yield* invalid(`No saved sessions in ${storeFolder}.`);
+    const stored = yield* savedHere(root);
+    if (stored.length === 0) return yield* invalid("No saved sessions for this folder.");
     const choices = yield* Effect.forEach(stored, ({ sessionId, at }) =>
-      readSession(storeFolder, sessionId).pipe(
+      readSession(root, sessionId).pipe(
         Effect.flatMap(({ facts }) => summaryOf(facts)),
         Effect.map(({ turns, model }) => `${shortly(at)}  ${turns} turn${turns === 1 ? "" : "s"}  ${model}  ${sessionId}`),
         Effect.orElseSucceed(() => `${shortly(at)}  (does not read)  ${sessionId}`),
         Effect.map((title) => ({ title, value: sessionId })),
       ),
     );
-    return yield* readSession(storeFolder, yield* Prompt.Select({ message: "Resume which session?", choices }));
+    return yield* readSession(root, yield* Prompt.Select({ message: "Resume which session?", choices }));
+  });
+
+/** The CLI's sessions made in this working folder (`madeIn`), the one written to last first. */
+const savedHere = (root: string) => Effect.map(recordedSessions(root), (stored) => stored.filter(({ record }) => madeIn(record, process.cwd())));
+
+/** The CLI's session made in this working folder that was written to last. */
+const latestHere = (root: string) =>
+  Effect.gen(function* () {
+    const latest = (yield* savedHere(root))[0];
+    if (latest === undefined) return yield* new NoSessionStored({ root });
+    return yield* readSession(root, latest.sessionId);
   });
 
 /** A session's configuration before its model is looked up: the model's name (`named`), undefined when none is given. */
@@ -175,7 +190,8 @@ const configOf = (options: Options, interactive: boolean) =>
     }
     if (options.sessionId !== undefined) return yield* invalid("--session-id cannot be used with --continue or --resume.", "A continued session keeps its own ID.");
     if (system !== undefined) return yield* invalid("A continued session cannot change its system prompt.", "Start a new session to use another system prompt.");
-    const latest = options.resume === undefined ? yield* latestSession(storeFolder) : yield* resumed(options.resume, interactive);
+    const root = storeFolderOf(yield* Brand);
+    const latest = options.resume === undefined ? yield* latestHere(root) : yield* resumed(options.resume, interactive, root);
     const now = yield* modelOf(latest.facts);
     const config: Unresolved = { sessionId: latest.sessionId, named: options.model ?? `${now.provider}/${now.model}`, settings, system, continues: latest.facts, ...permissions };
     return config;
@@ -183,7 +199,7 @@ const configOf = (options: Options, interactive: boolean) =>
     Effect.catchTags({
       DirectoryUnreadable: (error) => Effect.fail(invalid(`Could not read the saved sessions: ${error.message}`)),
       SessionNotFound: (error) => Effect.fail(invalid(`Session ${error.sessionId} not found in ${error.root}.`, "--resume with no ID lists the saved sessions.")),
-      NoSessionStored: (error) => Effect.fail(invalid(`No saved sessions in ${error.root} to continue.`, "Start a new session without --continue.")),
+      NoSessionStored: () => Effect.fail(invalid("No saved session for this folder to continue.", "Start a new session without --continue.")),
       SessionStoreFailed: (error) => Effect.fail(invalid(error.message)),
       ConfigInvalid: (error) => Effect.fail(invalid(`Invalid configuration: ${error.message}`)),
     }),
@@ -226,11 +242,11 @@ export const cliOf = (brand: Brand) =>
         const config: Config = yield* checked({ ...unresolved, target });
         // A prompt given on the command line was not sent when the REPL opened without a model, so it is dropped.
         const first = Result.isSuccess(found) ? options.prompt : undefined;
-        return yield* withSession(config, LogsToFile(logFileOf(config.sessionId), `${brand.name}-cli`), terminal(context.view), (session, mcp) => repl(session, config, first, interactive, context, mcp));
+        return yield* withSession(config, LogsToFile(logFileOf(brand, config.sessionId), `${brand.name}-cli`), terminal(context.view), (session, mcp) => repl(session, config, first, interactive, context, mcp));
       }
       const config: Config = yield* checked({ ...unresolved, target: yield* targetOf(named, "--model") });
       if (!options.print)
-        return yield* withSession(config, LogsToFile(logFileOf(config.sessionId), `${brand.name}-cli`), interactive ? terminal(context.view) : Headless, (session, mcp) => repl(session, config, options.prompt, interactive, context, mcp));
+        return yield* withSession(config, LogsToFile(logFileOf(brand, config.sessionId), `${brand.name}-cli`), interactive ? terminal(context.view) : Headless, (session, mcp) => repl(session, config, options.prompt, interactive, context, mcp));
       // Piped input is read only when no prompt was given: a shell that leaves stdin open would
       // otherwise keep a prompted run waiting for an end of input that never comes.
       const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));
