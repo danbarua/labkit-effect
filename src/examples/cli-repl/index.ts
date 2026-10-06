@@ -52,7 +52,7 @@ import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { ConfigProvider, Console, Effect, Layer, Option, Result, Stdio, Stream } from "effect";
 import { Argument, CliOutput, Command, Flag, Prompt } from "effect/cli";
 import { Effort, ThinkingMode } from "../../agent-machine/settings.ts";
-import { settingsGiven } from "./commands.ts";
+import { settingsGiven } from "./model-settings.ts";
 import { modelOf } from "../../agent-session/configuration/session-setup.ts";
 import { askable, KeyedAndLocalCatalog, ModelCatalog } from "../../agent-host/catalog.ts";
 import { latestSession, readSession, storedSessions, summaryOf } from "../../agent-host/directory.ts";

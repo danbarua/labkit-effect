@@ -1,175 +1,98 @@
 /**
- * The REPL's own commands: lines that start with `/` and do not go to the model.
+ * The REPL's own commands: lines that start with `/` and do not go to the model. Each command is in
+ * its own file in `commands/`, written against `command.ts`, and listed in `commands` here, in the
+ * order `/help` shows them. `/help` and `/exit`, which are about the REPL itself, are here.
  *
- * - `/model <name>` asks another model from the next turn on: a well-known model, or
- *   `provider/model`. `/model` alone shows the model being asked and offers the models that can be
- *   asked to pick; when there are none, it says what would make one available.
- * - `/settings name=value …` changes the settings named (`thinking`, `observe`, `effort`,
- *   `maxOutputTokens`, `cache`); the rest stay as they were. `/settings` alone shows the settings
- *   in force and offers each to change. What is offered is what the provider's adapter applies as
- *   asked, beside the settings in force: a setting or value it would adjust is not offered. Typed
- *   out, it is still taken, and adjusted.
- * - `/tools` shows the tools every request offers the model: the session's, as it opened with them
- *   (ImmutableToolCatalog).
- * - `/export` writes the session's transcript (`markdownOf`) to
- *   `.<brand>/exports/<session>.md` in the folder the CLI runs in (`.labkit/` for labkit's), as the
- *   ACP host's `/export` does.
- * - `/mcp` says how the session's MCP servers are; `/mcp reconnect <server>` starts one again, as
- *   the ACP host's `/mcp` does (`agent-mcp` `command.ts`).
- *
- * `completions` gives the prompt what a line that starts with `/` could become: a command, then a
- * model's name or a setting and its values.
- *
- * Both report a change of model to the session (`ModelChangeArrived`), which takes it between
- * turns; what a model does not allow is adjusted, and recorded, when it is next asked.
+ * `completions` gives the prompt what a line that starts with `/` could become: a command's name,
+ * then what that command completes its words to.
  */
 
-import { Brand, folderOf } from "../../agent-host/brand.ts";
-import { join } from "node:path";
-import { Effect, FileSystem, Schema } from "effect";
-import { markdownOf } from "../../agent-host/export.ts";
-import { Prompt } from "effect/cli";
-import { ModelSettings } from "../../agent-machine/settings.ts";
-import type { Session } from "../../agent-session/loop.ts";
-import { knownCapabilities } from "../../agent-session/configuration/well-known-models.ts";
-import { immutableToolCatalogOf, modelOf } from "../../agent-session/configuration/session-setup.ts";
-import { optionsOf, type SettingOption } from "../../agent-session/configuration/options.ts";
-import { askable, ModelCatalog } from "../../agent-host/catalog.ts";
-import { mcpCommand } from "../../agent-mcp/command.ts";
+import { Effect } from "effect";
 import type { McpServers } from "../../agent-mcp/servers.ts";
+import type { Session } from "../../agent-session/loop.ts";
+import { optionsOf } from "../../agent-session/configuration/options.ts";
+import { type CommandContext, type Done, type DoneWithoutModel, type Offered, type ReplCommand, said } from "./command.ts";
+import { exportCommand } from "./commands/export.ts";
+import { mcp } from "./commands/mcp.ts";
+import { model } from "./commands/model.ts";
+import { settings } from "./commands/settings.ts";
+import { tools } from "./commands/tools.ts";
 import { invalid } from "./invalid.ts";
-import { targetOf, unavailable } from "./models.ts";
+import { pickable } from "./picking.ts";
 
-/** Each command and what it says of itself in `/help`. */
-export const commands: ReadonlyArray<readonly [string, string]> = [
-  ["/model [name]", "Ask another model; with no name, pick one"],
-  ["/settings [name=value …]", "Change the settings named; with none, show them and pick one to change"],
-  ["/tools", "Show the tools the model is offered"],
-  ["/export", "Write this session's transcript as Markdown to .<brand>/exports/<session>.md"],
-  ["/mcp [reconnect <server>]", "Say how the MCP servers are; start one again"],
-  ["/help", "Show these commands"],
-  ["/exit", "Quit (also /quit)"],
-];
-
+/** The text of `/help`: each command, what can follow it, and what it does. */
 export const help = (): string => {
-  const width = Math.max(...commands.map(([name]) => name.length)) + 2;
-  return [...commands.map(([name, says]) => `${name.padEnd(width)}${says}`), "Anything else goes to the model."].join("\n");
+  const usages = commands.map((each) => [each.args === undefined ? each.name : `${each.name} ${each.args}`, each.says] as const);
+  const width = Math.max(...usages.map(([usage]) => usage.length)) + 2;
+  return [...usages.map(([usage, says]) => `${usage.padEnd(width)}${says}`), "Anything else goes to the model."].join("\n");
 };
 
-/**
- * The model and settings the session's next request goes with, in a line; then the settings that
- * were said and that this model was not sent, with the adapter's reason, so they are not taken for
- * never said.
- */
-/** The settings said after the model's name: those sent; when none are, saying so unless some were not sent to this model. */
-const settingsSaid = (sent: ReadonlyArray<string>, notSent: number): string => {
-  if (sent.length > 0) return ` ${sent.join(" ")}`;
-  return notSent === 0 ? " (no settings said)" : "";
+const helpCommand: ReplCommand = {
+  name: "/help",
+  says: "Show these commands",
+  inSession: () => Effect.succeed(said(help())),
+  withoutModel: () => Effect.succeed(said(help())),
 };
 
-export const inForce = (session: Session) =>
-  Effect.gen(function* () {
-    const facts = yield* session.facts;
-    const target = yield* modelOf(facts);
-    const sent = Object.entries(target.settings ?? {}).map(([name, value]) => `${name}=${String(value)}`);
-    const notSent = new Map(
-      facts.flatMap((fact) => {
-        if (fact._tag !== "Observed" || fact.observation._tag !== "SettingAdjusted") return [];
-        const { provider, model, adjusted, reason } = fact.observation;
-        const name = adjusted._tag.charAt(0).toLowerCase() + adjusted._tag.slice(1);
-        return provider === target.provider && model === target.model && adjusted.used === undefined && adjusted.asked !== undefined && !(name in (target.settings ?? {}))
-          ? [[name, `${name}=${String(adjusted.asked)} (${reason})`] as const]
-          : [];
-      }),
-    );
-    const known = yield* knownCapabilities(target.provider, target.model);
-    return [
-      `${target.provider}/${target.model}${settingsSaid(sent, notSent.size)}`,
-      ...(notSent.size === 0 ? [] : [`not sent to this model: ${[...notSent.values()].join(", ")}`]),
-      ...(known?.efforts === undefined ? [] : [`this model takes effort: ${known.efforts.join(", ")}`]),
-    ].join("\n");
-  });
+const exit: ReplCommand = {
+  name: "/exit",
+  aliases: ["/quit"],
+  says: "Quit (also /quit)",
+  inSession: () => Effect.succeed({ _tag: "Exit" } as const),
+  withoutModel: () => Effect.succeed({ _tag: "Exit" } as const),
+};
 
-/** The settings `name=value …` names, as `settingsGiven` reads them. */
-export const settingsFrom = (words: ReadonlyArray<string>) =>
-  settingsGiven(
-    Object.fromEntries(
-      words.map((word) => {
-        const [name = "", value = ""] = word.split("=");
-        return [name, /^\d+$/.test(value) ? Number(value) : value];
-      }),
-    ),
-  );
-
-/**
- * Settings as the CLI takes them (`/settings`, `--effort`, `--thinking`), read by the core's grammar
- * (`ModelSettings`); a name or value the grammar does not know is refused, saying why. The CLI
- * also takes `effort=none`, which is `thinking=off`: the core has no effort `none`, and a provider's
- * adapter sends thinking off as that provider says it (effort `none` to OpenAI and xAI, `thinking:
- * disabled` to Anthropic). `effort=none` with a thinking mode other than `off` is refused.
- */
-export const settingsGiven = (given: Readonly<Record<string, unknown>>) =>
-  Effect.gen(function* () {
-    const { effort, ...rest } = given;
-    const thinking = rest["thinking"];
-    if (effort === "none" && thinking !== undefined && thinking !== "off")
-      return yield* invalid(`effort=none is thinking=off, and thinking=${typeof thinking === "string" ? thinking : JSON.stringify(thinking)} says otherwise.`);
-    const said = effort === "none" ? { ...rest, thinking: "off" } : given;
-    return yield* Schema.decodeEffect(ModelSettings)(said, { onExcessProperty: "error" }).pipe(
-      Effect.mapError((error) => invalid(`Not settings the session takes: ${error.message}`)),
-    );
-  });
-
-/** The models the catalog lists (the known models whose provider has a key set, and the local server's), for picking. */
-const pickable = Effect.map(askable, (models) => models.map(({ provider, model }) => ({ title: `${provider}/${model}`, value: `${provider}/${model}` })));
-
-/**
- * The model `/model` names: its first word, or with none, the one the user picks from the models the
- * catalog lists, asked with `message`; undefined when the user leaves the pick (Ctrl+C). When the
- * catalog lists no model, fails saying what would make one available.
- */
-export const modelNamed = (words: ReadonlyArray<string>, message: string) =>
-  Effect.gen(function* () {
-    if (words[0] !== undefined) return words[0];
-    const choices = yield* pickable;
-    if (choices.length === 0) return yield* invalid("No model can be asked.", ...unavailable(yield* (yield* ModelCatalog).sources));
-    return yield* Prompt.Select({ message, choices }).pipe(Effect.catchTag("QuitError", () => Effect.undefined));
-  });
+/** The REPL's commands, in the order `/help` shows them. */
+export const commands: ReadonlyArray<ReplCommand> = [model, settings, tools, exportCommand, mcp, helpCommand, exit];
 
 /** What the REPL says of a line that starts with `/` and names none of its commands. */
 export const noCommand = (line: string) => invalid(`No command ${line.trim().split(/\s+/)[0] ?? line}.`, "/help lists them.");
 
-/** What a line can be completed from: the models that can be asked, and the settings to offer for the model being asked, as it is set now. */
-export interface Offered {
-  readonly models: ReadonlyArray<string>;
-  readonly settings: ReadonlyArray<SettingOption>;
-  /** The session's MCP servers, by name. */
-  readonly servers: ReadonlyArray<string>;
-}
+/** The command that `line` starts with, and the words after its name; undefined when `line` names none. */
+const commandIn = (line: string) => {
+  const [name = "", ...words] = line.trim().split(/\s+/);
+  const found = commands.find((each) => each.name === name || each.aliases?.some((alias) => alias === name) === true);
+  return found === undefined ? undefined : { command: found, words };
+};
 
-export const offered = (session: Session, mcp?: McpServers) =>
+/** Runs the command that `line` names in `session`; fails saying so when `line` names none. */
+export const runInSession = (session: Session, line: string, context: CommandContext) =>
   Effect.gen(function* () {
-    const result: Offered = { models: (yield* pickable).map((each) => each.value), settings: (yield* optionsOf(yield* session.facts)).offered, servers: mcp?.names ?? [] };
+    const named = commandIn(line);
+    if (named === undefined) return yield* noCommand(line);
+    const done: Done = yield* named.command.inSession(session, named.words, context);
+    return done;
+  });
+
+/**
+ * Runs the command that `line` names before a model is picked. A command that does not run without
+ * a model is refused, saying to pick one; so is a line that names no command.
+ */
+export const runWithoutModel = (line: string, context: CommandContext) =>
+  Effect.gen(function* () {
+    const named = commandIn(line);
+    if (named === undefined) return yield* noCommand(line);
+    if (named.command.withoutModel === undefined) return yield* invalid(`${named.command.name} works once a model is picked.`, "Pick one with /model.");
+    const done: DoneWithoutModel = yield* named.command.withoutModel(named.words, context);
+    return done;
+  });
+
+export const offered = (session: Session, servers?: McpServers) =>
+  Effect.gen(function* () {
+    const result: Offered = { models: (yield* pickable).map((each) => each.value), settings: (yield* optionsOf(yield* session.facts)).offered, servers: servers?.names ?? [] };
     return result;
   });
 
 /** What a line can be completed from before a model is picked: the models that can be asked; no settings, and no servers. */
 export const offeredWithoutModel = Effect.map(pickable, (models): Offered => ({ models: models.map((each) => each.value), settings: [], servers: [] }));
 
-/** A command's name as it is typed: with a space after it when words can follow. */
-const typedAs = [...commands.map(([usage]) => (usage.includes(" ") ? `${usage.slice(0, usage.indexOf(" "))} ` : usage)), "/quit"];
+/** The commands' names as they are typed: with a space after a name that words can follow. */
+const typedAs = commands.flatMap((each) => [each.args === undefined ? each.name : `${each.name} `, ...(each.aliases ?? [])]);
 
 /**
- * The lines that `text` could become, when it starts with `/`: its last word completed to a command,
- * to a model after `/model`, to `reconnect` and then a server after `/mcp`, or after `/settings` to a
- * setting not yet named on the line and then to one of its values.
+ * The lines that `text` could become, when it starts with `/`: its last word completed to a
+ * command's name, or after a command's name, to what that command completes it to.
  */
-/** What `/mcp` completes to: `reconnect`, then a server's name. */
-const mcpCompletions = (words: ReadonlyArray<string>, servers: ReadonlyArray<string>): ReadonlyArray<string> => {
-  if (words.length === 2) return ["reconnect "];
-  return words.length === 3 && words[1] === "reconnect" ? servers : [];
-};
-
 export const completions =
   (from: Offered) =>
   (text: string): ReadonlyArray<string> => {
@@ -177,92 +100,6 @@ export const completions =
     const words = text.split(" ");
     const last = words.at(-1) ?? "";
     const before = text.slice(0, text.length - last.length);
-    const candidates = (): ReadonlyArray<string> => {
-      if (words.length === 1) return typedAs;
-      if (words[0] === "/model") return words.length === 2 ? from.models : [];
-      if (words[0] === "/mcp") return mcpCompletions(words, from.servers);
-      if (words[0] !== "/settings") return [];
-      const equals = last.indexOf("=");
-      if (equals >= 0) {
-        const option = from.settings.find((each) => each.name === last.slice(0, equals));
-        return option?._tag === "OneOf" ? option.values.map((value) => `${option.name}=${value}`) : [];
-      }
-      const named = new Set(words.slice(1, -1).map((word) => word.split("=")[0]));
-      return from.settings.flatMap(({ name }) => (named.has(name) ? [] : [`${name}=`]));
-    };
-    return candidates().flatMap((each) => (each.startsWith(last) ? [before + each] : []));
+    const candidates = words.length === 1 ? typedAs : (commands.find((each) => each.name === words[0])?.complete?.(words, from) ?? []);
+    return candidates.flatMap((each) => (each.startsWith(last) ? [before + each] : []));
   };
-
-const leave = "(leave)";
-
-/** Asks which setting to change and to what, among the ones offered; undefined when none is to change. */
-const picked = (session: Session) =>
-  Effect.gen(function* () {
-    const { offered: settings } = yield* optionsOf(yield* session.facts);
-    const option = yield* Prompt.Select<SettingOption | typeof leave>({
-      message: `${(yield* inForce(session)).split("\n")[0] ?? ""}. Change which setting?`,
-      choices: [
-        { title: "Leave them as they are", value: leave },
-        ...settings.map((each) => ({ title: each.now === undefined ? each.name : `${each.name} (now ${each.now})`, value: each })),
-      ],
-    });
-    if (option === leave) return undefined;
-    const value =
-      option._tag === "Number"
-        ? String(yield* Prompt.Int({ message: option.name, min: 1 }))
-        : yield* Prompt.Select({ message: option.name, choices: option.values.map((each) => ({ title: each, value: each })) });
-    return `${option.name}=${value}`;
-  });
-
-/**
- * Runs the command `line` names, and returns what to print; undefined when `line` is not one of
- * these commands. `/export` writes under `folder`, the folder the CLI runs in.
- */
-export const command = (session: Session, line: string, folder: string = process.cwd(), mcp?: McpServers) =>
-  Effect.gen(function* () {
-    const [name = "", ...words] = line.trim().split(/\s+/);
-    switch (name) {
-      case "/help":
-        return help();
-      case "/mcp": {
-        if (mcp === undefined) return "This session has no MCP servers.";
-        const tools = yield* immutableToolCatalogOf(yield* session.facts);
-        return yield* mcpCommand(mcp, words, tools.map((tool) => tool.name));
-      }
-      case "/tools": {
-        const tools = yield* immutableToolCatalogOf(yield* session.facts);
-        return tools.length === 0 ? "No tools: the model is offered none." : tools.map((tool) => `${tool.name}: ${tool.description}`).join("\n");
-      }
-      case "/export": {
-        const facts = yield* session.facts;
-        const opened = facts[0];
-        const id = opened?._tag === "Observed" && opened.observation._tag === "SessionOpened" ? opened.observation.session : "session";
-        const exports = join(folder, folderOf(yield* Brand), "exports");
-        const path = join(exports, `${id}.md`);
-        const fs = yield* FileSystem.FileSystem;
-        yield* fs.makeDirectory(exports, { recursive: true }).pipe(Effect.andThen(fs.writeFileString(path, markdownOf(facts))), Effect.mapError((error) => invalid(`The transcript could not be written to ${path}: ${error.message}`)));
-        return `Exported this session to ${path}`;
-      }
-      case "/model": {
-        const now = yield* modelOf(yield* session.facts);
-        const chosen = yield* modelNamed(words, `Asking ${now.provider}/${now.model}. Ask which model?`);
-        if (chosen !== undefined) {
-          const target = yield* targetOf(chosen, "/model");
-          yield* session.observe({ _tag: "ModelChangeArrived", provider: target.provider, model: target.model });
-          yield* session.idle;
-        }
-        return `Asking ${yield* inForce(session)}`;
-      }
-      case "/settings": {
-        const change = words.length === 0 ? yield* picked(session) : undefined;
-        if (words.length === 0 && change === undefined) return yield* inForce(session);
-        const settings = yield* settingsFrom(change === undefined ? words : [change]);
-        const now = yield* modelOf(yield* session.facts);
-        yield* session.observe({ _tag: "ModelChangeArrived", provider: now.provider, model: now.model, settings });
-        yield* session.idle;
-        return `Asking ${yield* inForce(session)}`;
-      }
-      default:
-        return undefined;
-    }
-  });

@@ -33,9 +33,10 @@ import type { CallId, TurnId } from "../../agent-machine/names.ts";
 import type { ToolOutcome } from "../../agent-machine/observation.ts";
 import type { Services, Session } from "../../agent-session/loop.ts";
 import { asText } from "../../agent-session/received.ts";
-import { command, commands, completions, help, modelNamed, noCommand, offered, offeredWithoutModel } from "./commands.ts";
+import { said } from "./command.ts";
+import { completions, offered, offeredWithoutModel, runInSession, runWithoutModel } from "./commands.ts";
 import { invalid } from "./invalid.ts";
-import { type CannotAsk, saidOf, targetOf } from "./models.ts";
+import { type CannotAsk, saidOf } from "./models.ts";
 import { bracketedPaste, Multiline } from "./multiline.ts";
 import { answerTo, ask, type Config, endingOf, type Host, lastTurn, logFileOf } from "./session.ts";
 import type { LeftRunning } from "../../agent-machine/left-running.ts";
@@ -303,13 +304,14 @@ export const repl = (session: Session, config: Config, first: string | undefined
     /** Reads a line and does what it says; whether to read another. */
     const step = Effect.gen(function* () {
       const input = yield* Multiline(completions(yield* offered(session, mcp)));
-      if (input === "/exit" || input === "/quit") return false;
       if (input.trim() === "") return true;
       if (input.startsWith("/")) {
         // A mistake in a command is said, and the REPL goes on.
-        const said = yield* command(session, input, process.cwd(), mcp).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(String(error.userMessage))));
-        yield* Console.log(said ?? String(noCommand(input).userMessage));
-        return true;
+        const done = yield* runInSession(session, input, { folder: process.cwd(), ...(mcp === undefined ? {} : { mcp }) }).pipe(
+          Effect.catchTag("UserError", (error) => Effect.succeed(said(String(error.userMessage)))),
+        );
+        if (done._tag === "Said") yield* Console.log(done.text);
+        return done._tag !== "Exit";
       }
       yield* turn(session, input);
       return true;
@@ -317,18 +319,15 @@ export const repl = (session: Session, config: Config, first: string | undefined
     yield* step.pipe(Effect.repeat({ while: (again) => again }));
   }));
 
-/** The REPL's commands by name, as the first word of a line names them. */
-const commandNames = new Set([...commands.map(([usage]) => usage.split(" ")[0] ?? usage), "/quit"]);
-
 /**
  * The REPL at a terminal before a model is picked, for a new session whose model cannot be asked
  * (`problem`): no model is set, the model's provider has no key set, or its server does not answer.
  * No session is open, so nothing is recorded. The REPL says the problem, then reads lines:
  *
- * - `/model <name>`, or `/model` and a pick, names a model. A model that can be asked is returned,
- *   and the session opens with it; one that cannot be asked is refused, saying why.
- * - `/help` lists the commands; `/exit` (or `/quit`) returns undefined.
- * - The other commands are refused: they work once a model is picked.
+ * - A command runs as it does without a model (`ReplCommand.withoutModel`): `/model <name>`, or
+ *   `/model` and a pick, names a model. A model that can be asked is returned, and the session opens
+ *   with it; one that cannot be asked is refused, saying why. `/exit` (or `/quit`) returns undefined.
+ * - A command that does not run without a model is refused: it works once a model is picked.
  * - Input for the model is refused, saying that it was not sent and why. `first`, the prompt the
  *   command line gave, is refused in the same words.
  */
@@ -339,22 +338,19 @@ export const withoutModel = (problem: CannotAsk, first: string | undefined) =>
       yield* Console.log("No model to ask · /model to pick one, /help for commands, /exit to quit.");
       yield* Console.log(first === undefined ? String(saidOf(problem).userMessage) : notSent);
       yield* bracketedPaste;
-      const picked = (words: ReadonlyArray<string>) =>
-        Effect.gen(function* () {
-          const chosen = yield* modelNamed(words, "Ask which model?");
-          return chosen === undefined ? "again" : yield* targetOf(chosen, "/model");
-        }).pipe(Effect.catchTag("UserError", (error) => Effect.as(Console.log(String(error.userMessage)), "again" as const)));
       /** Reads a line and does what it says: the model picked, `exit`, or `again` to read another line. */
       const step = Effect.gen(function* () {
         const input = yield* Multiline(completions(yield* offeredWithoutModel));
-        if (input === "/exit" || input === "/quit") return "exit" as const;
         if (input.trim() === "") return "again" as const;
-        const [name = "", ...words] = input.trim().split(/\s+/);
-        if (name === "/model") return yield* picked(words);
-        if (name === "/help") yield* Console.log(help());
-        else if (commandNames.has(name)) yield* Console.log(String(invalid(`${name} works once a model is picked.`, "Pick one with /model.").userMessage));
-        else if (input.startsWith("/")) yield* Console.log(String(noCommand(input).userMessage));
-        else yield* Console.log(notSent);
+        if (!input.startsWith("/")) {
+          yield* Console.log(notSent);
+          return "again" as const;
+        }
+        // A mistake in a command is said, and the REPL goes on.
+        const done = yield* runWithoutModel(input, { folder: process.cwd() }).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(said(String(error.userMessage)))));
+        if (done._tag === "Picked") return done.target;
+        if (done._tag === "Exit") return "exit" as const;
+        if (done._tag === "Said") yield* Console.log(done.text);
         return "again" as const;
       });
       const ended = yield* step.pipe(Effect.repeat({ until: (outcome) => outcome !== "again" }));

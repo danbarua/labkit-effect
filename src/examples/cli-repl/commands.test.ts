@@ -17,7 +17,9 @@ import { ModelFromFacts } from "../../agent-session/configuration/model-choice.t
 import { receivedJson } from "../../agent-session/received.ts";
 import { openedWith } from "../../agent-session/configuration/session-setup.ts";
 import { CountingTurns } from "../../agent-session/turns.ts";
-import { command, completions, inForce, offered } from "./commands.ts";
+import { completions, offered, runInSession } from "./commands.ts";
+import { inForce } from "./model-settings.ts";
+import { said } from "./command.ts";
 import { ask } from "./session.ts";
 
 /**
@@ -57,7 +59,10 @@ const session = (lines: ReadonlyArray<string>, brand: Brand = defaultBrand, sett
         // `/settings` alone asks at the terminal which setting to change; here it stands for what it shows first.
         if (line === "/settings") printed.push(yield* inForce(opened));
         else if (line === "(offered)") printed.push(JSON.stringify(yield* offered(opened)));
-        else if (line.startsWith("/")) printed.push(yield* command(opened, line, testFolder()).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(String(error.userMessage)))));
+        else if (line.startsWith("/")) {
+          const done = yield* runInSession(opened, line, { folder: testFolder() }).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(said(String(error.userMessage)))));
+          printed.push(done._tag === "Said" ? done.text : `(${done._tag})`);
+        }
         else yield* ask(opened, line);
       }
       return { printed, asked };
@@ -127,7 +132,7 @@ test("a mistake in a command is said and changes nothing; a line that names no c
   expect(printed.slice(2)).toEqual([
     "ERROR: No model is named gpt-99.\nHINT: Pick one with /model.",
     "ERROR: XAI_API_KEY is not set, so xai models cannot be asked.\nHINT: Pick another model with /model, or restart with XAI_API_KEY set.",
-    undefined,
+    "ERROR: No command /nope.\nHINT: /help lists them.",
     "openai/gpt-5.5 effort=low\nthis model takes effort: none, low, medium, high, xhigh",
   ]);
 });
