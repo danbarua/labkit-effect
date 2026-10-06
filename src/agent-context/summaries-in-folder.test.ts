@@ -1,4 +1,4 @@
-/** `SummariesInFolder`: summaries kept as files, read back in the order they were written. */
+/** `SummariesInFolder`: summaries kept as files, listed in the order they were written. */
 
 import { expect } from "bun:test";
 import { join } from "node:path";
@@ -34,7 +34,7 @@ test("summaries of one kind written in the same millisecond are read in the orde
   expect(texts).toEqual(["first", "second"]);
 });
 
-test("a JSON summary, a provider's own compaction, is read back from its folder as JSON", async () => {
+test("a JSON summary, a provider's own compaction, is kept as a .json file and returned as JSON", async () => {
   const read = await Effect.gen(function* () {
     const summaries = yield* Summaries;
     yield* summaries.record({ ...summaryOf("", "2026-10-05T10:00:00.000Z"), summary: receivedJson([{ type: "compaction", encrypted_content: "abc" }]) });

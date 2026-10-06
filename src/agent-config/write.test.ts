@@ -1,4 +1,4 @@
-/** Writing one setting into the user's configuration folder, read back as the configuration reads it. */
+/** Writing one setting into the user's configuration folder. */
 
 import { expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -18,7 +18,7 @@ const folderWith = (files: Readonly<Record<string, string>>): string => {
   return folder;
 };
 
-/** Writes `path` as `value` into `folder`, then reads the folder's configuration: the file written, and the configuration. */
+/** Writes `path` as `value` into `folder`; returns the file written and the folder's configuration. */
 const written = (folder: string, path: ReadonlyArray<string>, value: string, fallback: string) =>
   runTest(
     Effect.gen(function* () {
@@ -64,7 +64,7 @@ test("a setting no file sets is written into the fallback file, which is created
   const { file, configuration } = await written(folder, ["view", "thinking"], "off", "settings.yml");
   expect(file).toBe(join(folder, "settings.yml"));
   expect(readFileSync(file, "utf8")).toBe("view:\n  thinking: off\n");
-  // `off` reads back as the text it was written as, not as a boolean.
+  // YAML 1.2 reads `off` as a string; YAML 1.1 would read it as false.
   expect(configuration.view).toEqual({ thinking: "off" });
 });
 

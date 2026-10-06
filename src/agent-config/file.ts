@@ -161,14 +161,12 @@ const expansionOf = (env: Readonly<Record<string, string | undefined>>, name: st
 const expandedIn = (text: string, env: Readonly<Record<string, string | undefined>>): { readonly value: string } | { readonly missing: string } => {
   const missing = [...text.matchAll(variable)].find(([, name = "", fallback]) => expansionOf(env, name, fallback) === undefined)?.[1];
   if (missing !== undefined) return { missing };
-  // Every variable has a value here, because the check above returned when one did not.
   return { value: text.replaceAll(variable, (whole, name: string, fallback: string | undefined) => expansionOf(env, name, fallback) ?? whole) };
 };
 
 /** Returns the problem that a Schema found, on one line. */
 const problemOf = (error: Schema.SchemaError): string => error.message.replaceAll(/\s*\n\s*/g, " ");
 
-/** Returns the value at `path` in `value`, or undefined. */
 const at = (value: unknown, path: ReadonlyArray<string>): unknown => path.reduce<unknown>((inner, key) => (isMapping(inner) ? inner[key] : undefined), value);
 
 /** Returns the name of the layer that last wrote `path`, or the deepest prefix of `path` that a layer wrote: the layer that an error at `path` names. */

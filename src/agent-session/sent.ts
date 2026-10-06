@@ -1,4 +1,4 @@
-/** What a request carried (the model context, as JSON), as it is recorded with the request and read back. */
+/** What a request carried (the model context, as JSON), recorded with the request. */
 
 import { Schema } from "effect";
 import type { Received } from "../agent-machine/received.ts";

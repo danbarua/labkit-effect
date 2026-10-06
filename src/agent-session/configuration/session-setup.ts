@@ -1,5 +1,5 @@
 /**
- * A session's set-up, recorded and read back.
+ * A session's set-up: the opening fact, and what the facts say of it.
  * - `openedWith` makes the `SessionOpened` observation from the model, system prompt and tools that
  *   a session starts with.
  * - The readers return, from a session's facts: the model that it asks now (the latest change of

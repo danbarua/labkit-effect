@@ -1,4 +1,4 @@
-/** A host's record of a session: what it writes and reads back, and the sessions listed with theirs. */
+/** A host's record of a session, and the sessions listed with their records. */
 
 import { expect } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
@@ -37,7 +37,7 @@ const run = <A, E>(program: Effect.Effect<A, E, BunServices.BunServices>) => {
   ).then((result) => ({ result, logged }));
 };
 
-test("a record is written whole and read back as the JSON it was; writing again replaces it; a session with none returns undefined", async () => {
+test("a record round-trips as JSON; writing again replaces it; a session with no record returns undefined", async () => {
   const root = `${testFolder()}/sessions`;
   expect((await run(readRecord(root, "s1"))).result).toBeUndefined();
   await run(writeRecord(root, "s1", { cwd: "/work/a", title: "First" }));

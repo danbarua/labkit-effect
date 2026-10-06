@@ -5,9 +5,9 @@
  *
  *   <folder>/<session>/<kind>/0001_2026-09-30T18-15-59.548Z_PlainTextFizzBuzzSummarizer_window-1.txt
  *
- * The file holds the summary as written: `.txt` for text, `.json` for JSON. Listing a kind's folder
- * in name order lists its summaries in the order written. A file that cannot be written or read is
- * a defect: the record of summaries cannot be kept.
+ * A summary is a `.txt` file for text, a `.json` file for JSON. Names sort in the order the summaries
+ * were written. A file that cannot be written or read is a defect: the record of summaries cannot be
+ * kept.
  */
 
 import { Array as Arr, DateTime, Effect, FileSystem, Layer, Order, Path } from "effect";

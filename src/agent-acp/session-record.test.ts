@@ -31,7 +31,7 @@ test("a title is the prompt's text trimmed, each run of whitespace one space, cu
   expect(titleOf(" \n\t ")).toBeUndefined();
 });
 
-test("a record holds the working folder and the title the first prompt gives, and reads back from JSON; what is not a record, or lacks a folder, reads as none", () => {
+test("a record holds the working folder and the first prompt's title, and decodes from JSON; a value that is not a record, or lacks a folder, decodes as none", () => {
   expect(recordFor("/work/a", "  Explain the loop  ")).toEqual({ cwd: "/work/a", title: "Explain the loop" });
   expect(recordFor("/work/a", "   ")).toEqual({ cwd: "/work/a" });
   expect(readSessionRecord(JSON.parse(JSON.stringify(recordFor("/work/a", "Explain"))))).toEqual({ cwd: "/work/a", title: "Explain" });

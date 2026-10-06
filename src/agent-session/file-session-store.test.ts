@@ -1,8 +1,7 @@
 /**
- * The session store, with the loop over it: each fact is written down before anything is done on
- * it; a file is read back as it was written; one process writes a file at a time; a write that
- * fails stops the session; a line whose write did not finish is cut off. Each test has a folder of
- * its own.
+ * The session store, with the loop over it: each fact is written before anything is done on it;
+ * facts decode to what was recorded; one process writes a file at a time; a write that fails stops
+ * the session; a line whose write did not finish is cut off. Each test has a folder of its own.
  */
 
 import { expect } from "bun:test";
@@ -62,7 +61,7 @@ const over = (store: Layer.Layer<SessionStore, SessionStoreFailed, FileSystem.Fi
 const ask = (session: Session, text: string) =>
   session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make(text) }).pipe(Effect.andThen(session.idle));
 
-test("every fact is in the file as it is recorded, once, in order, and reads back as it was", async () => {
+test("each fact is appended once, in order, and decodes to what was recorded", async () => {
   const file = fileIn();
   const { held, read } = await runTest(
     Effect.gen(function* () {
