@@ -129,7 +129,9 @@ that nailed and robust first."
    editor world takes its path descriptions and its path check from `in-workspace.ts`. Its tools are
    not wrapped yet, so they have no `intent` input, and their titles are still the tool's name
    and its command or path.
-2. `bound`: the git tools bound to the workspace's repository.
+2. `bound`: the git tools bound to the workspace's repository. Built: `src/agent-tools/bound.ts`.
+   Each git tool (`git.ts`) is a primitive that takes `repository`; `gitTools(root)` binds it to
+   `root` and adds `intent`.
 3. The git tools offered to sessions.
 
 Not ordered yet: replacing a tool by name, the built-in tools as a bundled plug-in, and the
