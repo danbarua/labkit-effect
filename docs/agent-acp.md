@@ -437,6 +437,8 @@ uses, so no call meets a capability the client does not have.
 A stopgap: the workspace tools of `agent-tools/workspace.ts` on the local disk under the working
 folder (`--local-tools`). It bypasses the editor, so the model does not see unsaved buffers and the
 editor is not told of writes.
+Each of its tools takes a `description` input (`agent-tools/described.ts`), and a call's title is
+that description.
 
 ## MCP servers
 

@@ -22,11 +22,11 @@ writeFileSync(join(root, "big.txt"), "x".repeat(300 * 1024));
 const { catalog, source, system } = workspaceTools(root);
 const runner = Layer.effect(ToolRunner, source);
 
-/** What a call of `tool` with `input` gives: its output, or its failure. */
-const call = (tool: string, input: unknown) =>
+/** What a call of `tool` with `input` and a description gives: its output, or its failure. */
+const call = (tool: string, input: object) =>
   runTest(
     Effect.gen(function* () {
-      const outcome = yield* (yield* ToolRunner).run(ToolName.make(tool), receivedJson(input as never), CallId.make("call-1"));
+      const outcome = yield* (yield* ToolRunner).run(ToolName.make(tool), receivedJson({ description: "A test call.", ...input } as never), CallId.make("call-1"));
       if (outcome._tag === "Succeeded") return asText(outcome.output);
       const reason = outcome.reason;
       return reason._tag === "InputRejected" ? `rejected: ${reason.problem}` : reason._tag === "Reported" ? `reported: ${asText(reason.error)}` : reason._tag;
@@ -55,8 +55,9 @@ test("a tool's input schema is its Schema's with a description for each input, c
       path: { type: "string", minLength: 1, description: "The file's path: relative to the working folder, or absolute inside it." },
       line: { type: "integer", minimum: 1, description: "Optional: the first line to read, 1-based. Default: 1." },
       limit: { type: "integer", minimum: 1, description: "Optional: the number of lines to read. Default: to the end of the file." },
+      description: { type: "string", minLength: 1, description: "What this call is for, in one sentence. The user sees it as the call's title." },
     },
-    required: ["path"],
+    required: ["path", "description"],
     additionalProperties: false,
   });
   expect(catalog.flatMap((tool) => undescribedInputs(tool.input).map((input) => `${tool.name}: ${input}`))).toEqual([]);
@@ -65,7 +66,7 @@ test("a tool's input schema is its Schema's with a description for each input, c
   const strict = workspaceTools(root, { strictInput: true });
   const refused = await runTest(
     Effect.gen(function* () {
-      const outcome = yield* (yield* ToolRunner).run(ToolName.make("read_file"), receivedJson({ path: "src/a.txt", lines: 2 }), CallId.make("call-1"));
+      const outcome = yield* (yield* ToolRunner).run(ToolName.make("read_file"), receivedJson({ path: "src/a.txt", lines: 2, description: "A test call." }), CallId.make("call-1"));
       return outcome._tag === "Failed" && outcome.reason._tag === "InputRejected" ? outcome.reason.problem : "not refused";
     }).pipe(Effect.provide(Layer.effect(ToolRunner, strict.source).pipe(Layer.provide(BunServices.layer)))),
   );
@@ -74,10 +75,10 @@ test("a tool's input schema is its Schema's with a description for each input, c
 
 test("edit_file replaces the one occurrence of a text; one that occurs never or more than once is refused, and nothing is written", async () => {
   writeFileSync(join(root, "src", "e.txt"), "alpha and a");
-  expect(await call("edit_file", { path: "src/e.txt", old_text: "alpha", new_text: "beta" })).toBe("Edited src/e.txt.");
+  expect(await call("edit_file", { path: "src/e.txt", old_text: "alpha", new_text: "beta" })).toBe(`Edited ${root}/src/e.txt.`);
   expect(await call("read_file", { path: "src/e.txt" })).toBe("beta and a");
-  expect(await call("edit_file", { path: "src/e.txt", old_text: "a", new_text: "b" })).toBe("rejected: old_text occurs 3 times in src/e.txt; include more of the lines around it so that it occurs once.");
-  expect(await call("edit_file", { path: "src/e.txt", old_text: "gamma", new_text: "b" })).toBe("rejected: old_text does not occur in src/e.txt.");
+  expect(await call("edit_file", { path: "src/e.txt", old_text: "a", new_text: "b" })).toBe(`rejected: old_text occurs 3 times in ${root}/src/e.txt; include more of the lines around it so that it occurs once.`);
+  expect(await call("edit_file", { path: "src/e.txt", old_text: "gamma", new_text: "b" })).toBe(`rejected: old_text does not occur in ${root}/src/e.txt.`);
   expect(await call("read_file", { path: "src/e.txt" })).toBe("beta and a");
   // The other tests list src: the file goes.
   rmSync(join(root, "src", "e.txt"));
@@ -139,20 +140,20 @@ test("read_file reads a file, or the lines asked for", async () => {
   expect(await call("read_file", { path: "src/a.txt", line: 2, limit: 2 })).toBe("two\nthree");
 });
 
-test("a call that cannot run says why", async () => {
-  expect(await call("read_file", { path: "../outside.txt" })).toStartWith("rejected: ../outside.txt is not inside the workspace");
-  expect(await call("read_file", { path: "/etc/hosts" })).toStartWith("rejected: /etc/hosts is not inside the workspace");
-  expect(await call("read_file", { path: "missing.txt" })).toStartWith("reported: missing.txt:");
-  expect(await call("read_file", { path: "big.txt" })).toBe('rejected: The result is over 256 KiB. Read fewer lines: {"path":"big.txt","line":1,"limit":100}.');
+test("a call that cannot run says why: a path outside the working folder, a missing file, a result over 256 KiB, input that does not fit, or no such tool", async () => {
+  expect(await call("read_file", { path: "../outside.txt" })).toBe(`rejected: ../outside.txt is not inside the working folder, ${root}.`);
+  expect(await call("read_file", { path: "/etc/hosts" })).toBe(`rejected: /etc/hosts is not inside the working folder, ${root}.`);
+  expect(await call("read_file", { path: "missing.txt" })).toStartWith(`reported: ${root}/missing.txt:`);
+  expect(await call("read_file", { path: "big.txt" })).toBe(`rejected: The result is over 256 KiB. Read fewer lines: {"path":"${root}/big.txt","line":1,"limit":100}.`);
   expect(await call("read_file", { line: 1 })).toStartWith("rejected: read_file does not take this input:");
   expect(await call("delete_file", { path: "a" })).toBe("NotFound");
 });
 
 test("write_file creates or replaces a file inside the workspace, whose folder exists", async () => {
-  expect(await call("write_file", { path: "src/b.txt", text: "hello" })).toBe("Wrote 5 bytes to src/b.txt.");
+  expect(await call("write_file", { path: "src/b.txt", text: "hello" })).toBe(`Wrote 5 bytes to ${root}/src/b.txt.`);
   expect(await call("read_file", { path: "src/b.txt" })).toBe("hello");
-  expect(await call("write_file", { path: "../escape.txt", text: "x" })).toStartWith("rejected: ../escape.txt is not inside the workspace");
-  expect(await call("write_file", { path: "nowhere/c.txt", text: "x" })).toStartWith("reported: nowhere/c.txt:");
+  expect(await call("write_file", { path: "../escape.txt", text: "x" })).toBe(`rejected: ../escape.txt is not inside the working folder, ${root}.`);
+  expect(await call("write_file", { path: "nowhere/c.txt", text: "x" })).toStartWith(`reported: ${root}/nowhere/c.txt:`);
 });
 
 test("run_command is given the environment its host composed; by default this process's when the tools were made, without the variables that hold credentials", async () => {
@@ -161,7 +162,7 @@ test("run_command is given the environment its host composed; by default this pr
   const envOf = (tools: ReturnType<typeof workspaceTools>) =>
     runTest(
       Effect.gen(function* () {
-        const outcome = yield* (yield* ToolRunner).run(ToolName.make("run_command"), receivedJson({ command: "env" }), CallId.make("call-1"));
+        const outcome = yield* (yield* ToolRunner).run(ToolName.make("run_command"), receivedJson({ command: "env", description: "A test call." }), CallId.make("call-1"));
         return outcome._tag === "Succeeded" ? asText(outcome.output) : outcome._tag;
       }).pipe(Effect.provide(Layer.effect(ToolRunner, tools.source).pipe(Layer.provide(BunServices.layer)))),
     );

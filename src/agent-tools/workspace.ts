@@ -1,18 +1,20 @@
 /**
- * Tools for a workspace, a folder on disk: `read_file` and `list_dir`, which read; `write_file` and
- * `edit_file`, which change it; and `run_command`, which runs a shell command in it. Each tool is its
- * catalog entry (what the model is offered, with its kind, which a permission policy reads) and the
- * function that runs it, defined together, so a tool offered is a tool that runs.
- * `workspaceTools(root)` returns the catalog, the tool source (`ToolSource`, the host's own tools,
- * with no namespace) that runs a call given the file system, and the system text that names the
- * root as the working folder.
+ * The workspace tools: `read_file` and `list_dir`, which read; `write_file` and `edit_file`, which
+ * change files; and `run_command`, which runs a shell command in the working folder.
  *
- * A tool's description states what the tool does and its limits; each input's description states
- * what the input means, whether it is optional, and its default. The descriptions call the root "the
- * working folder" and do not name it: the host sends the system text (`workingFolderLine`) that
- * names it once.
+ * The file tools are primitives (`tool.ts`): each takes a path as it is given, absolute or relative
+ * to the process's working folder, and checks nothing about where it is. `workspaceTools(root)`
+ * applies two wrappers:
+ * - `inWorkspace(root)` (`in-workspace.ts`) wraps the file tools: it resolves their paths against the
+ *   root, and refuses a path outside it.
+ * - `described` (`described.ts`) wraps every tool: it adds a required `description` input.
  *
- * A path is relative to the root, or absolute; one that is not inside the root is not accepted.
+ * `workspaceTools(root)` returns the catalog, the tool source that runs a call given the file
+ * system, the environment that `run_command` runs with, and the system text that names the root as
+ * the working folder (`workingFolderLine`). The descriptions call the root "the working folder" and
+ * do not name it. A tool's description states what the tool does and its limits; each input's
+ * description states what the input means, whether it is optional, and its default.
+ *
  * `read_file` reads UTF-8 text, at most 256 KiB in one result; `line` (1-based) and `limit` (a
  * count of lines) read part of a file. `list_dir` lists one folder, without recursion, a folder's
  * name followed by `/`. `write_file` creates or replaces a file with at most 256 KiB of text; the
@@ -23,25 +25,23 @@
  * occurs never or more than once is refused. `run_command` runs `sh -c <command>` in the root, and
  * gives its output (stdout, then stderr; the last 256 KiB, kept as it is read) and how it ended:
  * exit code 0 succeeds, any other end fails with the output. It runs as a process group of its own,
- * stopped whole, what it started included, after its time (`commandSeconds` unless the call says, at most
- * `maxCommandSeconds`) or when the call is interrupted; a command that ends by itself leaves what
- * it started in the background to run on. Neither runs again when a
- * session goes on (`"unsafe"`).
+ * stopped whole, what it started included, after its time (`commandSeconds` unless the call says,
+ * at most `maxCommandSeconds`) or when the call is interrupted; a command that ends by itself leaves
+ * what it started in the background to run on. Neither runs again when a session goes on
+ * (`"unsafe"`).
  *
  * A call that cannot run fails with the reason: no tool has the name (`NotFound`), the input does
  * not fit (`InputRejected`), or the file system reported an error (`Reported`, with its message).
  */
 
-import { isAbsolute, relative, resolve } from "node:path";
-import { Array as Arr, Chunk, Data, Duration, Effect, FileSystem, Option, Order, Schema, Stream } from "effect";
-import { FailureText, ToolName } from "../agent-machine/names.ts";
-import type { ToolOutcome } from "../agent-machine/observation.ts";
-import type { ToolSpec } from "../agent-session/contracts.ts";
-import type { ToolSource } from "../agent-session/tool-sources.ts";
+import { resolve } from "node:path";
+import { Array as Arr, Chunk, Duration, Effect, FileSystem, Option, Order, Schema, Stream } from "effect";
+import { ToolName } from "../agent-machine/names.ts";
 import { type Environment, withoutCredentials } from "../agent-process/environment.ts";
-import { type Decoded, decoderOf, ignoredNote, jsonSchemaOf } from "../agent-session/tool-input.ts";
-import { logKeys } from "../agent-session/log-keys.ts";
-import { parseJson, receivedText } from "../agent-session/received.ts";
+import { described } from "./described.ts";
+import { inWorkspace } from "./in-workspace.ts";
+import { FilePath, FolderPath } from "./paths.ts";
+import { anyTool, Rejected, Reported, sourceOf, type Tool } from "./tool.ts";
 
 /** The most bytes `read_file` returns in one result, `write_file` writes, and `run_command` returns. */
 export const maxReadBytes = 256 * 1024;
@@ -61,20 +61,15 @@ export const maxCommandSeconds = 600;
  */
 export const workingFolderLine = (folder: string): string => `The working folder is ${folder}.`;
 
-/** A path input of a tool that reads or changes one file. */
-export const filePath = Schema.NonEmptyString.annotate({ description: "The file's path: relative to the working folder, or absolute inside it." });
-
 export const ReadFile = Schema.Struct({
-  path: filePath,
+  path: FilePath,
   line: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).annotate({ description: "Optional: the first line to read, 1-based. Default: 1." })),
   limit: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).annotate({ description: "Optional: the number of lines to read. Default: to the end of the file." })),
 });
-const ListDir = Schema.Struct({
-  path: Schema.NonEmptyString.annotate({ description: 'The folder\'s path: relative to the working folder, or absolute inside it. "." is the working folder.' }),
-});
-const WriteFile = Schema.Struct({ path: filePath, text: Schema.String.annotate({ description: `The file's new text, at most ${maxReadText}.` }) });
+const ListDir = Schema.Struct({ path: FolderPath });
+const WriteFile = Schema.Struct({ path: FilePath, text: Schema.String.annotate({ description: `The file's new text, at most ${maxReadText}.` }) });
 export const EditFile = Schema.Struct({
-  path: filePath,
+  path: FilePath,
   old_text: Schema.NonEmptyString.annotate({ description: "The text to replace. It must occur exactly once in the file: include enough of the lines around it to make it so." }),
   new_text: Schema.String.annotate({ description: "The text to put in its place." }),
 });
@@ -133,17 +128,135 @@ const lastBytes = (text: string, max: number): { readonly kept: string; readonly
   return { kept: bytes.subarray(characterStart === -1 ? bytes.length : from + characterStart).toString("utf8"), cut: true };
 };
 
-interface WorkspaceTool<I> extends ToolSpec {
-  readonly decode: (input: unknown) => Effect.Effect<Decoded<I>, Schema.SchemaError>;
-  readonly run: (input: I) => Effect.Effect<string, Rejected | Reported, FileSystem.FileSystem>;
-}
+/** Returns the failure of a file system operation on `path`, with the file system's message. */
+const reported = (path: string) => (error: { readonly message: string }) => new Reported({ message: `${path}: ${error.message}` });
 
-/** The input names a path outside the workspace, or otherwise does not fit. */
-class Rejected extends Data.TaggedError("Rejected")<{ readonly problem: string }> {}
-/** The file system reported an error. */
-class Reported extends Data.TaggedError("Reported")<{ readonly message: string }> {}
+/** `read_file`: reads a UTF-8 file, or the lines that `line` and `limit` select. */
+export const readFile: Tool<typeof ReadFile.fields, FileSystem.FileSystem> = {
+  name: ToolName.make("read_file"),
+  kind: "read",
+  replay: "safe",
+  description: `Read a UTF-8 text file. A result is at most ${maxReadText}: read a larger file in parts with line and limit. If the file does not exist, list its folder with list_dir.`,
+  input: ReadFile,
+  run: ({ path, line, limit }) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const text = yield* fs.readFileString(path).pipe(Effect.mapError(reported(path)));
+      const whole = line === undefined && limit === undefined;
+      const start = (line ?? 1) - 1;
+      const part = whole ? text : text.split("\n").slice(start, limit === undefined ? undefined : start + limit).join("\n");
+      if (Buffer.byteLength(part) <= maxReadBytes) return part;
+      const fewer = { path, line: line ?? 1, limit: limit === undefined ? 100 : Math.max(1, Math.floor(limit / 2)) };
+      return yield* new Rejected({ problem: `The result is over ${maxReadText}. Read fewer lines: ${JSON.stringify(fewer)}.` });
+    }),
+};
 
-const tool = <I>(definition: WorkspaceTool<I>): WorkspaceTool<unknown> => definition as unknown as WorkspaceTool<unknown>;
+/** `list_dir`: lists one folder, without recursion. */
+export const listDir: Tool<typeof ListDir.fields, FileSystem.FileSystem> = {
+  name: ToolName.make("list_dir"),
+  kind: "search",
+  replay: "safe",
+  description: "List the files and folders in one folder, without recursion. A folder's name ends with /.",
+  input: ListDir,
+  run: ({ path }) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const names = yield* fs.readDirectory(path).pipe(Effect.mapError(reported(path)));
+      const listed = yield* Effect.forEach(Arr.sort(names, Order.String), (name) =>
+        fs.stat(resolve(path, name)).pipe(
+          Effect.map((info) => (info.type === "Directory" ? `${name}/` : name)),
+          Effect.mapError(reported(`${path}/${name}`)),
+        ),
+      );
+      return listed.join("\n");
+    }),
+};
+
+/** `write_file`: creates or replaces a file. */
+export const writeFile: Tool<typeof WriteFile.fields, FileSystem.FileSystem> = {
+  name: ToolName.make("write_file"),
+  kind: "edit",
+  replay: "idempotent",
+  description: "Create a UTF-8 text file, or replace one. The file's folder must exist.",
+  input: WriteFile,
+  run: ({ path, text }) =>
+    Effect.gen(function* () {
+      const bytes = Buffer.byteLength(text);
+      if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The text is over ${maxReadText} (${bytes} bytes). Write less.` });
+      yield* (yield* FileSystem.FileSystem).writeFileString(path, text).pipe(Effect.mapError(reported(path)));
+      return `Wrote ${bytes} bytes to ${path}.`;
+    }),
+};
+
+/** `edit_file`: replaces the one occurrence of a text in a file. */
+export const editFile: Tool<typeof EditFile.fields, FileSystem.FileSystem> = {
+  name: ToolName.make("edit_file"),
+  kind: "edit",
+  replay: "unsafe",
+  description: "Replace one occurrence of old_text with new_text in a UTF-8 text file.",
+  input: EditFile,
+  run: ({ path, old_text, new_text }) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const text = yield* fs.readFileString(path).pipe(Effect.mapError(reported(path)));
+      const count = text.split(old_text).length - 1;
+      if (count !== 1)
+        return yield* new Rejected({
+          problem: count === 0 ? `old_text does not occur in ${path}.` : `old_text occurs ${count} times in ${path}; include more of the lines around it so that it occurs once.`,
+        });
+      const changed = text.replace(old_text, () => new_text);
+      const bytes = Buffer.byteLength(changed);
+      if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The file would be over ${maxReadText} (${bytes} bytes).` });
+      yield* fs.writeFileString(path, changed).pipe(Effect.mapError(reported(path)));
+      return `Edited ${path}.`;
+    }),
+};
+
+/** `run_command`: runs a shell command in the folder `root`, with `environment`. */
+export const runCommand = (root: string, environment: Environment): Tool<typeof RunCommand.fields> => ({
+  name: ToolName.make("run_command"),
+  kind: "execute",
+  replay: "unsafe",
+  description: `Run a shell command in the working folder. The result is its output (stdout, then stderr) and its exit code; an output over ${maxReadText} is cut to its last ${maxReadText}. Use it to search files (grep, find), run tests and use git.`,
+  input: RunCommand,
+  run: ({ command, timeout_seconds }) => {
+    const seconds = timeout_seconds ?? commandSeconds;
+    // The command is a process group of its own (`detached`). Stopped (at its time, or when the
+    // call is interrupted), the whole group is killed, what it started included; a command that
+    // ends by itself leaves what it started to run on (`nohup server &`). It is given the
+    // environment the host composed, by default without this process's credentials
+    // (agent-process `environment.ts`): what it prints the model reads.
+    return Effect.acquireUseRelease(
+      Effect.sync(() =>
+        Bun.spawn(["/bin/sh", "-c", command], { cwd: root, env: { ...environment }, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true }),
+      ),
+      (child) =>
+        Effect.all([tailOf(child.stdout, maxReadBytes), tailOf(child.stderr, maxReadBytes), Effect.promise(() => child.exited)], { concurrency: "unbounded" }).pipe(
+          Effect.timeoutOption(Duration.seconds(seconds)),
+        ),
+      (child, exit) =>
+        Effect.sync(() => {
+          if (exit._tag === "Success" && Option.isSome(exit.value)) return;
+          try {
+            process.kill(-child.pid, "SIGKILL");
+          } catch {
+            // The group has ended already.
+          }
+        }),
+    ).pipe(
+      Effect.flatMap((ended) => {
+        if (Option.isNone(ended)) return Effect.fail(new Reported({ message: `[Still running after ${seconds} seconds: stopped.]` }));
+        const [out, err, code] = ended.value;
+        const [stdout, stderr] = [out.text, err.text];
+        const output = `${stdout}${stdout !== "" && stderr !== "" && !stdout.endsWith("\n") ? "\n" : ""}${stderr}`;
+        const last = lastBytes(output, maxReadBytes);
+        const [kept, cut] = [last.kept, last.cut || out.cut || err.cut];
+        const text = `${cut ? `[The output's beginning was cut: its last ${maxReadText} follow.]\n` : ""}${kept}${kept === "" || kept.endsWith("\n") ? "" : "\n"}[Exit code ${code}.]`;
+        return code === 0 ? Effect.succeed(text) : Effect.fail(new Reported({ message: text }));
+      }),
+    );
+  },
+});
 
 /**
  * The workspace tools for the folder `root`. With `strictInput`, a call whose input has properties
@@ -151,181 +264,20 @@ const tool = <I>(definition: WorkspaceTool<I>): WorkspaceTool<unknown> => defini
  * says which were ignored.
  */
 export function workspaceTools(root: string, options: { readonly strictInput?: boolean; readonly environment?: Environment } = {}) {
-  const strict = options.strictInput ?? false;
   // What `run_command` is given: what the host composed (`commandEnvironment`), else this process's without its credentials.
   const environment = options.environment ?? withoutCredentials(process.env).env;
-  const inside = (path: string) => {
-    const full = resolve(root, path);
-    const from = relative(root, full);
-    return from.startsWith("..") || isAbsolute(from)
-      ? Effect.fail(new Rejected({ problem: `${path} is not inside the workspace, ${root}.` }))
-      : Effect.succeed(full);
-  };
-  const reported = (path: string) => (error: { readonly message: string }) => new Reported({ message: `${path}: ${error.message}` });
-
-  const tools: ReadonlyArray<WorkspaceTool<unknown>> = [
-    tool({
-      name: ToolName.make("read_file"),
-      kind: "read",
-      replay: "safe",
-      description: `Read a UTF-8 text file in the working folder. A result is at most ${maxReadText}: read a larger file in parts with line and limit. If the file does not exist, list its folder with list_dir.`,
-      input: jsonSchemaOf(ReadFile),
-      decode: decoderOf(ReadFile, strict),
-      run: ({ path, line, limit }) =>
-        Effect.gen(function* () {
-          const full = yield* inside(path);
-          const fs = yield* FileSystem.FileSystem;
-          const text = yield* fs.readFileString(full).pipe(Effect.mapError(reported(path)));
-          const whole = line === undefined && limit === undefined;
-          const start = (line ?? 1) - 1;
-          const part = whole ? text : text.split("\n").slice(start, limit === undefined ? undefined : start + limit).join("\n");
-          if (Buffer.byteLength(part) <= maxReadBytes) return part;
-          const fewer = { path, line: line ?? 1, limit: limit === undefined ? 100 : Math.max(1, Math.floor(limit / 2)) };
-          return yield* new Rejected({ problem: `The result is over ${maxReadText}. Read fewer lines: ${JSON.stringify(fewer)}.` });
-        }),
-    } satisfies WorkspaceTool<typeof ReadFile.Type>),
-    tool({
-      name: ToolName.make("list_dir"),
-      kind: "search",
-      replay: "safe",
-      description: "List the files and folders in one folder of the working folder, without recursion. A folder's name ends with /.",
-      input: jsonSchemaOf(ListDir),
-      decode: decoderOf(ListDir, strict),
-      run: ({ path }) =>
-        Effect.gen(function* () {
-          const full = yield* inside(path);
-          const fs = yield* FileSystem.FileSystem;
-          const names = yield* fs.readDirectory(full).pipe(Effect.mapError(reported(path)));
-          const listed = yield* Effect.forEach(Arr.sort(names, Order.String), (name) =>
-            fs.stat(resolve(full, name)).pipe(
-              Effect.map((info) => (info.type === "Directory" ? `${name}/` : name)),
-              Effect.mapError(reported(`${path}/${name}`)),
-            ),
-          );
-          return listed.join("\n");
-        }),
-    } satisfies WorkspaceTool<typeof ListDir.Type>),
-    tool({
-      name: ToolName.make("write_file"),
-      kind: "edit",
-      replay: "idempotent",
-      description: "Create a UTF-8 text file in the working folder, or replace one. The file's folder must exist.",
-      input: jsonSchemaOf(WriteFile),
-      decode: decoderOf(WriteFile, strict),
-      run: ({ path, text }) =>
-        Effect.gen(function* () {
-          const full = yield* inside(path);
-          const bytes = Buffer.byteLength(text);
-          if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The text is over ${maxReadText} (${bytes} bytes). Write less.` });
-          yield* (yield* FileSystem.FileSystem).writeFileString(full, text).pipe(Effect.mapError(reported(path)));
-          return `Wrote ${bytes} bytes to ${path}.`;
-        }),
-    } satisfies WorkspaceTool<typeof WriteFile.Type>),
-    tool({
-      name: ToolName.make("edit_file"),
-      kind: "edit",
-      replay: "unsafe",
-      description: "Replace one occurrence of old_text with new_text in a UTF-8 text file in the working folder.",
-      input: jsonSchemaOf(EditFile),
-      decode: decoderOf(EditFile, strict),
-      run: ({ path, old_text, new_text }) =>
-        Effect.gen(function* () {
-          const full = yield* inside(path);
-          const fs = yield* FileSystem.FileSystem;
-          const text = yield* fs.readFileString(full).pipe(Effect.mapError(reported(path)));
-          const count = text.split(old_text).length - 1;
-          if (count !== 1)
-            return yield* new Rejected({
-              problem: count === 0 ? `old_text does not occur in ${path}.` : `old_text occurs ${count} times in ${path}; include more of the lines around it so that it occurs once.`,
-            });
-          const changed = text.replace(old_text, () => new_text);
-          const bytes = Buffer.byteLength(changed);
-          if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The file would be over ${maxReadText} (${bytes} bytes).` });
-          yield* fs.writeFileString(full, changed).pipe(Effect.mapError(reported(path)));
-          return `Edited ${path}.`;
-        }),
-    } satisfies WorkspaceTool<typeof EditFile.Type>),
-    tool({
-      name: ToolName.make("run_command"),
-      kind: "execute",
-      replay: "unsafe",
-      description: `Run a shell command in the working folder. The result is its output (stdout, then stderr) and its exit code; an output over ${maxReadText} is cut to its last ${maxReadText}. Use it to search files (grep, find), run tests and use git.`,
-      input: jsonSchemaOf(RunCommand),
-      decode: decoderOf(RunCommand, strict),
-      run: ({ command, timeout_seconds }) => {
-        const seconds = timeout_seconds ?? commandSeconds;
-        // The command is a process group of its own (`detached`). Stopped (at its time, or when the
-        // call is interrupted), the whole group is killed, what it started included; a command that
-        // ends by itself leaves what it started to run on (`nohup server &`). It is given the
-        // environment the host composed, by default without this process's credentials
-        // (agent-process `environment.ts`): what it prints the model reads.
-        return Effect.acquireUseRelease(
-          Effect.sync(() =>
-            Bun.spawn(["/bin/sh", "-c", command], { cwd: root, env: { ...environment }, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true }),
-          ),
-          (child) =>
-            Effect.all([tailOf(child.stdout, maxReadBytes), tailOf(child.stderr, maxReadBytes), Effect.promise(() => child.exited)], { concurrency: "unbounded" }).pipe(
-              Effect.timeoutOption(Duration.seconds(seconds)),
-            ),
-          (child, exit) =>
-            Effect.sync(() => {
-              if (exit._tag === "Success" && Option.isSome(exit.value)) return;
-              try {
-                process.kill(-child.pid, "SIGKILL");
-              } catch {
-                // The group has ended already.
-              }
-            }),
-        ).pipe(
-          Effect.flatMap((ended) => {
-            if (Option.isNone(ended)) return Effect.fail(new Reported({ message: `[Still running after ${seconds} seconds: stopped.]` }));
-            const [out, err, code] = ended.value;
-            const [stdout, stderr] = [out.text, err.text];
-            const output = `${stdout}${stdout !== "" && stderr !== "" && !stdout.endsWith("\n") ? "\n" : ""}${stderr}`;
-            const last = lastBytes(output, maxReadBytes);
-            const [kept, cut] = [last.kept, last.cut || out.cut || err.cut];
-            const text = `${cut ? `[The output's beginning was cut: its last ${maxReadText} follow.]\n` : ""}${kept}${kept === "" || kept.endsWith("\n") ? "" : "\n"}[Exit code ${code}.]`;
-            return code === 0 ? Effect.succeed(text) : Effect.fail(new Reported({ message: text }));
-          }),
-        );
-      },
-    } satisfies WorkspaceTool<typeof RunCommand.Type>),
+  const bound = inWorkspace(root);
+  const tools = [
+    anyTool(described(bound(readFile))),
+    anyTool(described(bound(listDir))),
+    anyTool(described(bound(writeFile))),
+    anyTool(described(bound(editFile))),
+    anyTool(described(runCommand(root, environment))),
   ];
-
-  const catalog: ReadonlyArray<ToolSpec> = tools.map(({ name, description, input, kind, replay }) => ({ name, description, input, kind, replay }));
-
-  const rejected = (problem: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "InputRejected", problem: FailureText.make(problem) } });
-
-  /** Runs the tool a call names on its input, with the file system it is given. */
-  const source: Effect.Effect<ToolSource, never, FileSystem.FileSystem> = Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    return {
-      tools: catalog,
-      run: (name, input) => {
-        const found = tools.find((each) => each.name === name);
-        if (found === undefined) return Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "NotFound" } });
-        const parsed = parseJson(input);
-        if ("reason" in parsed) return Effect.succeed(rejected(`The input could not be read: ${parsed.reason}.`));
-        return found.decode(parsed.value).pipe(
-          Effect.mapError((error) => new Rejected({ problem: `${name} does not take this input: ${error.message}` })),
-          Effect.flatMap(({ value, ignored }) => {
-            const note = ignoredNote(name, ignored);
-            const logged = ignored.length === 0 ? Effect.void : Effect.logWarning(logKeys.tools.inputIgnored, { tool: name, ignored });
-            return logged.pipe(
-              Effect.andThen(found.run(value)),
-              Effect.map((output): ToolOutcome => ({ _tag: "Succeeded", output: receivedText(`${output}${note}`) })),
-              Effect.catchTag("Reported", (error) => Effect.fail(new Reported({ message: `${error.message}${note}` }))),
-            );
-          }),
-          Effect.catchTags({
-            Rejected: (error) => Effect.succeed(rejected(error.problem)),
-            Reported: (error) => Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(error.message) } }),
-          }),
-          Effect.provideService(FileSystem.FileSystem, fs),
-        );
-      },
-    };
-  });
-
-  return { catalog, source, environment, system: workingFolderLine(root) };
+  return {
+    catalog: tools.map((tool) => tool.spec),
+    source: sourceOf(tools, { strictInput: options.strictInput ?? false }),
+    environment,
+    system: workingFolderLine(root),
+  };
 }

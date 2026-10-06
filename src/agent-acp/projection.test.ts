@@ -8,9 +8,10 @@ import { json } from "../../tests/support/received.ts";
 import { test } from "../../tests/support/test.ts";
 import type { SessionUpdate } from "effective-acp/schema/v1";
 import type { Fact } from "../agent-machine/fact.ts";
-import { ToolName } from "../agent-machine/names.ts";
+import { CallId, ToolName } from "../agent-machine/names.ts";
 import { CapturedObservation } from "../agent-machine/observation.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
+import { receivedJson } from "../agent-session/received.ts";
 import { next as nextIn, type Present, presentFrom, type ProjectionContext, type ProjectionInput, type ProjectionState, project as projectIn, start } from "./projection.ts";
 
 /** `project` and `next`, run: the presentations here read nothing. */
@@ -700,4 +701,11 @@ test("text of only whitespace that ends a request is not sent with the next requ
   stream(delta("Text", "Done."), ended());
   fact(responded([answer("Done.")]));
   expect(project(inputs, live).updates.filter((update) => update.sessionUpdate === "agent_message_chunk")).toEqual([said("Listing."), said("Done.")] as never);
+});
+
+test("the default presentation titles a call by the description it gives, and by its tool's name when it gives none", () => {
+  const titled = (input: object) => Effect.runSync(presentFrom(tools)({ call: CallId.make("c1"), tool: ToolName.make("ls"), input: receivedJson(input as never) })).title;
+  expect(titled({ path: ".", description: "List the working folder." })).toBe("List the working folder.");
+  expect(titled({ path: "." })).toBe("ls");
+  expect(titled({ path: ".", description: "" })).toBe("ls");
 });

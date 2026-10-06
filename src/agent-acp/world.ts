@@ -22,7 +22,6 @@
  */
 
 import type { Environment } from "../agent-process/environment.ts";
-import { isAbsolute, relative, resolve } from "node:path";
 import { Duration, Effect, FileSystem, HashMap, Option, Ref, Schema } from "effect";
 import type { AgentConnection } from "effective-acp/agent";
 import type { V1Version } from "effective-acp/protocol";
@@ -34,7 +33,9 @@ import type { ToolSource } from "../agent-session/tool-sources.ts";
 import { decoderOf, ignoredNote, jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
 import { asText, parseJson, receivedText } from "../agent-session/received.ts";
-import { commandSeconds, EditFile, filePath, maxReadBytes, maxReadText, ReadFile, RunCommand, workingFolderLine, workspaceTools } from "../agent-tools/workspace.ts";
+import { inside, workspaceInput } from "../agent-tools/in-workspace.ts";
+import { FilePath } from "../agent-tools/paths.ts";
+import { commandSeconds, EditFile, maxReadBytes, maxReadText, ReadFile, RunCommand, workingFolderLine, workspaceTools } from "../agent-tools/workspace.ts";
 import { type Present, type Presented, presentFrom } from "./projection.ts";
 
 /** What a world is given for one session, when the session is made. */
@@ -72,7 +73,7 @@ export interface World<R = never> {
 /** The maximum number of bytes that a tool reads or writes in one call. */
 export const maxFileBytes = maxReadBytes;
 
-const WriteFile = Schema.Struct({ path: filePath, content: Schema.String.annotate({ description: `The file's new text, at most ${maxReadText}.` }) });
+const WriteFile = Schema.Struct({ path: FilePath, content: Schema.String.annotate({ description: `The file's new text, at most ${maxReadText}.` }) });
 
 const PlanEntryInput = Schema.Struct({
   content: Schema.NonEmptyString.annotate({ description: "What the step does." }),
@@ -86,13 +87,6 @@ const UpdatePlan = Schema.Struct({
 const rejected = (problem: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "InputRejected", problem: FailureText.make(problem) } });
 const reported = (message: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(message) } });
 const succeeded = (output: string): ToolOutcome => ({ _tag: "Succeeded", output: receivedText(output) });
-
-/** Returns `path` resolved against `root`, or why it is refused: it leaves `root`. */
-const inside = (root: string, path: string): { readonly full: string } | { readonly problem: string } => {
-  const full = resolve(root, path);
-  const from = relative(root, full);
-  return from.startsWith("..") || isAbsolute(from) ? { problem: `${path} is not inside the working folder, ${root}.` } : { full };
-};
 
 /** Returns `text` cut to at most `max` bytes of UTF-8, never inside a character, and how many bytes were cut. */
 const cut = (text: string, max: number): { readonly kept: string; readonly omitted: number } => {
@@ -164,21 +158,21 @@ export const editorWorld: World = {
           kind: "read",
           replay: "safe",
           description: `Read a UTF-8 text file in the working folder as the editor has it, unsaved changes included. A result is at most ${maxReadText}: read a larger file in parts with line and limit.`,
-          input: jsonSchemaOf(ReadFile),
+          input: jsonSchemaOf(workspaceInput(ReadFile)),
         }),
         ...offeredIf(fs?.writeTextFile === true, {
           name: ToolName.make("write_file"),
           kind: "edit",
           replay: "idempotent",
           description: "Create a UTF-8 text file in the working folder, or replace one, through the editor.",
-          input: jsonSchemaOf(WriteFile),
+          input: jsonSchemaOf(workspaceInput(WriteFile)),
         }),
         ...offeredIf(fs?.readTextFile === true && fs.writeTextFile === true, {
           name: ToolName.make("edit_file"),
           kind: "edit",
           replay: "unsafe",
           description: "Replace one occurrence of old_text with new_text in a UTF-8 text file in the working folder, through the editor, its unsaved changes included.",
-          input: jsonSchemaOf(EditFile),
+          input: jsonSchemaOf(workspaceInput(EditFile)),
         }),
         {
           name: ToolName.make("update_plan"),

@@ -27,7 +27,8 @@ import type { CallId, ToolName, TurnId } from "../agent-machine/names.ts";
 import type { CapturedObservation, ModelPart, ToolFailure, ToolOutcome } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
-import { asText } from "../agent-session/received.ts";
+import { asText, parseJson } from "../agent-session/received.ts";
+import { callDescriptionOf } from "../agent-tools/described.ts";
 
 /** An input to the projection: a fact, or an item that a model request passed on while it ran. */
 export type ProjectionInput = Fact | CapturedObservation;
@@ -78,6 +79,12 @@ const failureText = (tool: ToolName, reason: ToolFailure): string => {
 
 const text = (value: string): ContentBlock => ({ type: "text", text: value });
 
+/** Returns a call's title: the description it gives, or its tool's name. */
+const titleOf = (call: Call): string => {
+  const parsed = parseJson(call.input);
+  return ("value" in parsed ? callDescriptionOf(parsed.value) : undefined) ?? call.tool;
+};
+
 /** Returns the text that a call's outcome shows: its output, or why it failed; undefined before it ends. */
 const shownOf = (tool: ToolName, outcome: ToolOutcome | undefined): string | undefined => {
   if (outcome === undefined) return undefined;
@@ -85,8 +92,9 @@ const shownOf = (tool: ToolName, outcome: ToolOutcome | undefined): string | und
 };
 
 /**
- * The default presentation over the session's tool catalog (`immutableToolCatalogOf`): the tool's
- * name as the title, its kind from the catalog (none for a tool the catalog does not have), and,
+ * The default presentation over the session's tool catalog (`immutableToolCatalogOf`): the call's
+ * description as the title (its `description` input, `agent-tools/described.ts`), or the tool's name
+ * when the call has none; its kind from the catalog (none for a tool the catalog does not have); and,
  * once it ends, its output, or why it failed, as text.
  */
 export const presentFrom =
@@ -95,7 +103,7 @@ export const presentFrom =
     const kind = catalog.find((tool) => tool.name === call.tool)?.kind;
     const shown = shownOf(call.tool, outcome);
     return Effect.succeed({
-      title: call.tool,
+      title: titleOf(call),
       ...(kind === undefined ? {} : { kind }),
       ...(shown === undefined ? {} : { content: [{ type: "content" as const, content: text(shown) }] }),
     });

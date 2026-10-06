@@ -115,6 +115,9 @@ Constraints:
 - `--tools my_tools.ts`: tools given as code on the command line.
 - `/preview`: the CLI shows what the next request would send, the system prompt included
   (`TODO.md`).
+- A workspace wrapper under which the model is offered and sends only paths relative to the working
+  folder, and the working folder's path is removed from results. The host (ACP) still sees absolute
+  paths. Dan: "not necessarily something I'd use, but I can see enterprise deployments wanting it."
 
 ## Order of work
 
@@ -122,6 +125,10 @@ Constraints:
 that nailed and robust first."
 
 1. A tool as a value, and wrappers: `inWorkspace` and `described`, applied to the workspace tools.
+   Built: `src/agent-tools/tool.ts`, `paths.ts`, `in-workspace.ts` and `described.ts`. ACP's
+   editor world takes its path descriptions and its path check from `in-workspace.ts`. Its tools are
+   not wrapped yet, so they have no `description` input, and their titles are still the tool's name
+   and its command or path.
 2. `bound`: the git tools bound to the workspace's repository.
 3. The git tools offered to sessions.
 
