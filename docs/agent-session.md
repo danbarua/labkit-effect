@@ -207,7 +207,9 @@ back into the core's observations:
   provider constrains the model to input that the tool's schema accepts. Only the Anthropic adapter
   sends them, as `tool_choice` `any` and `strict` on the tool. The other adapters leave them out and
   log a warning that names them (`untranslated` in `shaping.ts`). The Anthropic API refuses a
-  required tool call while thinking is on; the adapter sends the request as asked, and it fails.
+  required tool call while thinking is on, so the Anthropic adapter sends such a request with
+  thinking disabled and logs the thinking that the settings gave. A model that cannot turn its
+  thinking off refuses the request.
 
 ## Design decisions
 

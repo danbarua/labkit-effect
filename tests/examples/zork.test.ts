@@ -99,31 +99,50 @@ test("Zork records engine-selected tools, inventory changes and an early Grue de
   expect(game.transcriptPath).toMatch(/\d{4}-\d{2}-\d{2}T.*\.md$/);
 });
 
-test("Haiku's adventurer requests, as recorded, require a tool call while tools are offered, constrain each tool, and let move take only the open exits; the reply after an action is unchanged", async () => {
+test("Haiku's adventurer requests, as recorded, constrain each offered tool and let move take only the open exits; only a game turn's last chance requires a tool call; the reply after an action is unchanged", async () => {
   expect(adventurerCustomisations["anthropic/claude-haiku-4-5"]).toBe(haikuAdventurer);
   // The narrowed move is the catalog's move with fewer directions.
   expect(moveInputJson(["north", "south", "east", "west", "up", "down", "n", "s", "e", "w", "u", "d"])).toEqual(catalog.find((tool) => tool.name === "move")!.input);
-  const actions: ReadonlyArray<Action> = [move("north"), move("north"), target("open", "trapdoor"), move("down")];
+  // The world the latest game turn's message gave; the turn-end feedback after it is not JSON.
+  const latestWorld = (context: ModelContext): ReturnType<typeof view> => {
+    const texts = context.messages.filter((message) => message.role === "user").flatMap((message) => message.parts.flatMap((part) => part._tag === "Text" ? [part.text] : []));
+    const found = texts.reverse().find((text) => text.startsWith("{"));
+    if (found === undefined) throw new Error("no game turn's message");
+    return (JSON.parse(found) as { world: ReturnType<typeof view> }).world;
+  };
   const engine = scriptedEngine();
-  const adventurer = scriptedAdventurer((world) => actions[world.turn] ?? { tool: "look", input: {} });
+  // Game turn 1: answers in text until a tool call is required. Game turn 2: has its calls rejected until one is required.
+  const adventurer = model("adventurer", (context, n) => {
+    if (context.tools.length === 0) return say("Done.");
+    const required = context.toolChoice === "required";
+    const turn = latestWorld(context).turn;
+    if (turn === 0) return required ? call(move("north"), `action-${n}`) : say("Let me think about where to go.");
+    if (turn === 1) return call(required ? move("north") : target("examine", "nothing"), `action-${n}`);
+    return call(turn === 2 ? target("open", "trapdoor") : move("down"), `action-${n}`);
+  });
   const game = await runTest(played(setup(engine.player, { ...adventurer.player, customise: haikuAdventurer })));
-  expect(game.exchanges).toHaveLength(4);
+  expect(game.exchanges.map((exchange) => exchange.action.tool)).toEqual(["move", "move", "open", "move"]);
   const sent = game.facts.adventurer.flatMap((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelRequestDispatched" ? [sentIn(fact.observation.sent)] : []);
   const offering = sent.filter((context) => context.tools.length > 0);
   const replies = sent.filter((context) => context.tools.length === 0);
-  expect(offering).toHaveLength(4);
-  expect(offering.map((context) => context.toolChoice)).toEqual(["required", "required", "required", "required"]);
+  // Game turn 1: after two holds, the third request. Game turn 2: the fourth request, the last the limit allows.
+  expect(offering.map((context) => [latestWorld(context).turn, context.toolChoice ?? "auto"])).toEqual([
+    [0, "auto"], [0, "auto"], [0, "required"],
+    [1, "auto"], [1, "auto"], [1, "auto"], [1, "required"],
+    [2, "auto"],
+    [3, "auto"],
+  ]);
   expect(offering.every((context) => context.tools.every((tool) => tool.constrained === true))).toBe(true);
   const directions = (context: ModelContext): Array<string> => {
     const offered = context.tools.find((tool) => tool.name === "move");
     if (offered === undefined) throw new Error("move was not offered");
     return [...(offered.input as { readonly properties: { readonly direction: { readonly enum: ReadonlyArray<string> } } }).properties.direction.enum];
   };
-  // House, forest, the clearing with its trapdoor closed, then open.
-  expect(offering.map(directions)).toEqual([["north"], ["south", "north"], ["south"], ["south", "down"]]);
-  expect(offering.map((context) => Object.keys(userWorld(context).exits))).toEqual(offering.map(directions));
-  expect(replies).toHaveLength(4);
-  expect(replies.map((context) => context.toolChoice)).toEqual([undefined, undefined, undefined, undefined]);
+  expect(offering.map(directions)).toEqual(offering.map((context) => Object.keys(latestWorld(context).exits)));
+  // The house, the forest, the clearing with its trapdoor closed, then open.
+  expect([...new Set(offering.map((context) => directions(context).join(" ")))]).toEqual(["north", "south north", "south", "south down"]);
+  // Game turn 2's reply after its action was the fifth request, which the limit vetoed.
+  expect(replies.map((context) => context.toolChoice)).toEqual([undefined, undefined, undefined]);
 });
 
 test("Zork enforces thirty actions and runner-owned death even when narration disagrees", async () => {

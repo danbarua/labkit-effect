@@ -18,13 +18,15 @@ import { SessionServices } from "../../agent-host/services.ts";
 import { Headless, withSession } from "../../agent-host/with-session.ts";
 import type { Ending } from "../../agent-machine/decision.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
-import { InputText } from "../../agent-machine/names.ts";
+import { InputText, type TurnId } from "../../agent-machine/names.ts";
+import { requestsIn } from "../../agent-machine/turn-requests.ts";
 import type { ModelTarget } from "../../agent-machine/observation.ts";
 import { ContextAssembler, MaxHolds, ModelRequestPolicies, TurnEndHooks, type ModelClient, type ModelContext } from "../../agent-session/contracts.ts";
 import { maxTurnRequests } from "../../agent-policy/max-turn-requests.ts";
 import type { Session } from "../../agent-session/loop.ts";
 import { parseJson, receivedJsonText } from "../../agent-session/received.ts";
 import { SourcedToolRunner, type ToolSource } from "../../agent-session/tool-sources.ts";
+import { holdsOf } from "../../agent-session/turn-holds.ts";
 import type { Customisation } from "./customisations.ts";
 import { adventurerPrompt, enginePrompt } from "./prompt.ts";
 import { offeredIn, worldTools, type GameState } from "./tools.ts";
@@ -67,17 +69,25 @@ export interface Played {
   readonly transcriptPath: string;
 }
 
+/** The most model requests in a game turn. */
+const requestLimit = 4;
+/** The most times the turn-end feedback holds a game turn open. */
+const holdLimit = 2;
+
+/** Changes a request that the assembler built from `facts` for `turn`. */
+type Request = (context: ModelContext, facts: ReadonlyArray<Fact>, turn: TurnId) => Effect.Effect<ModelContext>;
+
 /**
  * The services of a zork session: `SessionServices` with the player's client when it has its own, at
- * most four model requests in a game turn, two turn-end holds with `feedback`, and, when `request` is
- * given, each request as `request` returns it.
+ * most `requestLimit` model requests in a game turn, `holdLimit` turn-end holds with `feedback`, and,
+ * when `request` is given, each request as `request` returns it.
  */
-const servicesOf = (player: Player, request?: (context: ModelContext) => Effect.Effect<ModelContext>, feedback: Effect.Effect<ReadonlyArray<string>> = Effect.succeed([])) => {
+const servicesOf = (player: Player, request?: Request, feedback: Effect.Effect<ReadonlyArray<string>> = Effect.succeed([])) => {
   const assembler = Layer.effect(ContextAssembler, Effect.gen(function* () {
     const base = yield* ContextAssembler;
     return { assemble: (facts, turn) => Effect.gen(function* () {
       const context = yield* base.assemble(facts, turn);
-      return request === undefined ? context : yield* request(context);
+      return request === undefined ? context : yield* request(context, facts, turn);
     }) } satisfies ContextAssembler["Service"];
   })).pipe(Layer.provide(AgentContextAssembler.pipe(Layer.provide(WholeConversation))));
   return Layer.mergeAll(
@@ -85,8 +95,8 @@ const servicesOf = (player: Player, request?: (context: ModelContext) => Effect.
     ...(request === undefined ? [] : [assembler]),
     ...(player.client === undefined ? [] : [player.client]),
     // Bound retries and tool follow-ups within each game turn.
-    Layer.succeed(ModelRequestPolicies, [{ name: "zork request limit", policy: (facts) => Effect.succeed(maxTurnRequests(facts, 4)) }]),
-    Layer.succeed(MaxHolds, 2),
+    Layer.succeed(ModelRequestPolicies, [{ name: "zork request limit", policy: (facts) => Effect.succeed(maxTurnRequests(facts, requestLimit)) }]),
+    Layer.succeed(MaxHolds, holdLimit),
     Layer.succeed(TurnEndHooks, [() => feedback]),
   );
 };
@@ -94,7 +104,7 @@ const servicesOf = (player: Player, request?: (context: ModelContext) => Effect.
 /** One of a game's two sessions, `zork-<role>-<game>`, as `withSession` runs it. `source` is the adventurer's bolt-on, the world's tools. */
 const optionsOf = (
   setup: Setup, game: string, role: "engine" | "adventurer", player: Player, prompt: string, brand: Brand,
-  source?: ToolSource, request?: (context: ModelContext) => Effect.Effect<ModelContext>, feedback?: Effect.Effect<ReadonlyArray<string>>,
+  source?: ToolSource, request?: Request, feedback?: Effect.Effect<ReadonlyArray<string>>,
 ) => {
   const sessionId = `zork-${role}-${game}`;
   const home = setup.home ?? homedir();
@@ -171,10 +181,12 @@ export const play = (setup: Setup) => {
       ? [`No action has succeeded yet. Call exactly one of the offered tools now: ${current.offered.join(", ")}. Use the world snapshot and correct any rejected arguments. Text alone does not act.`]
       : []));
     // Each of the adventurer's requests offers the engine's tools, as the adventurer's customisation changes it.
+    // The assembler runs after the request's step is recorded, so `requestsIn` counts this request.
     const customise = setup.adventurer.customise;
-    const request = (context: ModelContext) => Ref.get(state).pipe(Effect.map((current) => {
+    const request: Request = (context, facts, turn) => Ref.get(state).pipe(Effect.map((current) => {
       const offered = { ...context, tools: offeredIn(current) };
-      return customise === undefined ? offered : customise(current, offered);
+      const lastChance = holdsOf(facts, turn) >= holdLimit || requestsIn(facts, turn) >= requestLimit;
+      return customise === undefined ? offered : customise({ state: current, context: offered, lastChance });
     }));
     return yield* withSession(optionsOf(setup, id, "engine", setup.engine, enginePrompt(commands), brand), (engineSession) =>
       withSession(optionsOf(setup, id, "adventurer", setup.adventurer, adventurerPrompt(commands), brand, worldTools(state), request, feedback), (adventurerSession) =>

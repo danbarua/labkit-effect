@@ -9,26 +9,37 @@ import type { ModelContext } from "../../agent-session/contracts.ts";
 import { moveInputJson, type GameState } from "./tools.ts";
 import { view } from "./world.ts";
 
-export type Customisation = (state: GameState, context: ModelContext) => ModelContext;
+/** One request to the adventurer, as the game makes it. */
+export interface AdventurerRequest {
+  readonly state: GameState;
+  /** The request: it offers the engine's tools until an action succeeds in the game turn, then none. */
+  readonly context: ModelContext;
+  /**
+   * Whether the request may be the game turn's last without an action: the turn-end holds are used
+   * up, so an answer in text ends the turn, or it is the last request that the turn's limit allows.
+   */
+  readonly lastChance: boolean;
+}
+
+export type Customisation = (request: AdventurerRequest) => ModelContext;
 
 /**
  * Claude Haiku 4.5 as the adventurer. Haiku sometimes answers in text when an action is due, and
- * sometimes moves through an exit that is not open. So, while the engine offers tools (until an
- * action succeeds in the game turn):
+ * sometimes moves through an exit that is not open. So, while the engine offers tools:
  *
- * - each request requires a tool call (`toolChoice: "required"`);
  * - each offered tool is `constrained`, and `move` takes only the open exits, so Haiku cannot write a
- *   direction that the world rejects.
+ *   direction that the world rejects;
+ * - the request that is the game turn's last chance requires a tool call (`toolChoice: "required"`).
+ *   The Anthropic adapter sends it with thinking disabled, as the API requires.
  *
- * The reply after an action is offered no tools, and is sent unchanged. The Anthropic API refuses a
- * required tool call while thinking is on, so Haiku plays with its thinking disabled (`index.ts`).
+ * The reply after an action is offered no tools, and is sent unchanged.
  */
-export const haikuAdventurer: Customisation = (state, context) =>
+export const haikuAdventurer: Customisation = ({ state, context, lastChance }) =>
   context.tools.length === 0
     ? context
     : {
         ...context,
-        toolChoice: "required",
+        ...(lastChance ? { toolChoice: "required" as const } : {}),
         tools: context.tools.map((tool) => ({
           ...tool,
           ...(tool.name === "move" ? { input: moveInputJson(Object.keys(view(state.world).exits)) } : {}),

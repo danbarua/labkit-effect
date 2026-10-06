@@ -23,15 +23,15 @@ import { adventurerCustomisations } from "./customisations.ts";
 import { play, type Adventurer, type Player } from "./scenario.ts";
 
 /**
- * The settings each provider's players ask with: short responses, and as little thinking as the
- * model allows. A Claude or GPT model that can turn its thinking off (Haiku 4.5, gpt-6-luna) does;
- * one that cannot (Sonnet 5.5, gpt-6.1-sol, whose adapters record that `disabled` was not sent)
- * thinks at low effort, within an output limit that leaves room for it. Grok's models cannot turn
- * their reasoning off, so no thinking setting is given; xAI does not count the reasoning against the
- * output limit.
+ * The settings each provider's players ask with: short responses, and little thinking. Claude models
+ * think at low effort (Haiku 4.5 with a thinking budget of 1,024 tokens), within an output limit that
+ * leaves room for it. A GPT model that can turn its reasoning off (gpt-6-luna) does; one that cannot
+ * (gpt-6.1-sol, whose adapter records that `disabled` was not sent) reasons at low effort. Grok's
+ * models cannot turn their reasoning off, so no thinking setting is given; xAI does not count the
+ * reasoning against the output limit.
  */
 const settingsOf: Readonly<Record<string, ModelSettings>> = {
-  anthropic: { thinking: "disabled", effort: "low", maxOutputTokens: TokenCount.make(4096) },
+  anthropic: { effort: "low", maxOutputTokens: TokenCount.make(4096) },
   openai: { thinking: "disabled", effort: "low", maxOutputTokens: TokenCount.make(4096) },
   xai: { maxOutputTokens: TokenCount.make(1024) },
 };

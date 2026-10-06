@@ -64,15 +64,17 @@ selections and persistent failure to act fail the run. The CLI has a ten-minute
 timeout.
 
 An Adventurer's requests can be changed for its model (`customisations.ts`). A
-customisation is given the game's state and each request as the game makes it,
-and returns the request to send; the Adventurer's session records each request
-as it was sent. `index.ts` gives the Adventurer the customisation listed for its
-model, and the game itself is the same for every model. Claude Haiku 4.5 has one:
-while the Engine offers tools, each request requires a tool call, each offered
-tool is constrained (Anthropic's strict tool use), and `move` takes only the open
-exits. The reply after an action is sent unchanged. The Anthropic API refuses a
-required tool call while thinking is on, so the customisation depends on Haiku
-playing with its thinking disabled, as `index.ts` sets it. Other models play
+customisation is given the game's state, each request as the game makes it, and
+whether the request is the game turn's last chance: the turn-end feedback has
+held the turn twice, so an answer in text ends it, or the request is the fourth,
+the last the limit allows. It returns the request to send; the Adventurer's
+session records each request as it was sent. `index.ts` gives the Adventurer the
+customisation listed for its model, and the game itself is the same for every
+model. Claude Haiku 4.5 has one: while the Engine offers tools, each offered tool
+is constrained (Anthropic's strict tool use) and `move` takes only the open
+exits, and the last chance requires a tool call. The Anthropic adapter sends that
+request with thinking disabled, as the API requires; Haiku's other requests think
+at low effort. The reply after an action is sent unchanged. Other models play
 without a customisation.
 
 Completed games write `logs/zork/<UTC-date-and-time>-<unique-id>.md`, including

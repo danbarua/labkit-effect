@@ -71,6 +71,11 @@ export const logKeys = {
   anthropic: {
     /** The request carried the default `max_tokens`, because the session's settings gave no output limit. */
     maxTokensSupplied: "anthropic.request.max_tokens_supplied",
+    /**
+     * A request that requires a tool call was sent with thinking disabled, because the API refuses a
+     * forced tool choice while thinking is on. The details hold the thinking that the settings asked for.
+     */
+    thinkingDisabledForToolCall: "anthropic.request.thinking_disabled_for_tool_call",
     /** A stream's delta was of a type the adapter does not know; the block is recorded without it. */
     deltaNotApplied: "anthropic.response.delta_not_applied",
     /**

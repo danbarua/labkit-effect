@@ -6,8 +6,9 @@
  * - The context's messages, tools and tool outcomes become Anthropic blocks.
  * - A tool that is `constrained` is sent with `strict: true`. A context with `toolChoice: "required"`
  *   is sent with `tool_choice: {type: "any"}`. The API refuses a forced tool choice while thinking is
- *   on (HTTP 400, "Thinking may not be enabled when tool_choice forces tool use."); the request is
- *   sent as asked, and fails.
+ *   on (HTTP 400, "Thinking may not be enabled when tool_choice forces tool use."), so such a request
+ *   is sent with `thinking: {type: "disabled"}` in place of the thinking its settings give, and the
+ *   thinking given is logged (`toolCallFields`). A model that cannot turn its thinking off refuses it.
  * - A failed tool call becomes an error `tool_result` whose content tells the model what to do next:
  *   for a tool that does not exist, the tools that do; for input that does not fit, the tool's input
  *   schema and the input given.
@@ -56,7 +57,7 @@ import {
 import { logKeys } from "../log-keys.ts";
 import { ModelStream, type Streamed } from "../model-stream.ts";
 import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEvents, type Retries, withRetries } from "../provider-call.ts";
-import { reportAdjusted } from "../configuration/settings.ts";
+import { reportAdjusted, type Settled } from "../configuration/settings.ts";
 import { anthropicSettle } from "./anthropic-settings.ts";
 import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
 import { receivedJson, receivedText } from "../received.ts";
@@ -71,6 +72,7 @@ import {
   type RenderedResult,
   renderToolResult,
   type Shaped,
+  type Supplied,
   sentBack,
   numberAt,
   toolInputObject,
@@ -363,6 +365,20 @@ const respondOnce = (
   });
 
 /**
+ * Returns the settings' `fields` for a request with `context`: when the context requires a tool call
+ * and the fields turn thinking on, the fields with `thinking: {type: "disabled"}`, and a warning that
+ * holds the thinking the settings gave. Otherwise the fields as given.
+ */
+export function toolCallFields(context: ModelContext, fields: Settled["fields"]): { readonly fields: Settled["fields"]; readonly supplied: ReadonlyArray<Supplied> } {
+  const thinking = fields["thinking"];
+  if (context.toolChoice !== "required" || thinking === undefined || (isObject(thinking) && thinking["type"] === "disabled")) return { fields, supplied: [] };
+  return {
+    fields: { ...fields, thinking: { type: "disabled" } },
+    supplied: [{ level: "warning", event: logKeys.anthropic.thinkingDisabledForToolCall, details: { asked: thinking, sent: { type: "disabled" } } }],
+  };
+}
+
+/**
  * Requests go through the configured `AnthropicClient` (its address, key and API version). The
  * client's typed response decoding is not used, so a block type that it does not know is kept as
  * `Unrecognised` instead of failing the response. A failure is an `AiError`; retryable failures are
@@ -379,13 +395,14 @@ export const anthropicRequests = (
       return filesIn(context).pipe(
         Effect.flatMap((files) => {
         const sent = body(target, context, files);
+        const fields = toolCallFields(context, settled.fields);
         const post: Post = {
           path: "/v1/messages",
           headers: settled.headers,
-          body: { ...(sent.json as Record<string, Json>), ...settled.fields, stream: true },
+          body: { ...(sent.json as Record<string, Json>), ...fields.fields, stream: true },
         };
         return reportAdjusted(turn, target, settled).pipe(
-          Effect.andThen(logSupplied(sent.supplied, target, turn, omittedLogged)),
+          Effect.andThen(logSupplied([...fields.supplied, ...sent.supplied], target, turn, omittedLogged)),
           Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
         );
         }),

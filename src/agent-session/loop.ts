@@ -55,6 +55,7 @@ import { logKeys } from "./log-keys.ts";
 import { asText, receivedJson, receivedText } from "./received.ts";
 import { ModelStream, ModelStreamInterval, type Streamed } from "./model-stream.ts";
 import { CurrentOrigin, harnessParts, policyPart, reportedBy } from "./origin.ts";
+import { holdsOf } from "./turn-holds.ts";
 import { Report } from "./report.ts";
 import { sentAs } from "./sent.ts";
 import { immutableToolCatalogOf, modelOf } from "./configuration/session-setup.ts";
@@ -125,23 +126,6 @@ interface Started {
 /** Takes facts from `facts` until `pick` returns a value for one, and returns that value. */
 const firstMatching = <A>(facts: PubSub.Subscription<Fact>, pick: (fact: Fact) => Option.Option<A>): Effect.Effect<A> =>
   Effect.flatMap(PubSub.take(facts), (fact) => Option.match(pick(fact), { onNone: () => firstMatching(facts, pick), onSome: Effect.succeed }));
-
-/**
- * Returns how many times the turn-end hooks have held `turn` open: the reviews of the turn in which
- * the hooks gave feedback. Each hold is recorded as the hooks' feedback (input from the hooks)
- * followed by the review.
- */
-const holdsOf = (facts: ReadonlyArray<Fact>, turn: TurnId): number =>
-  facts.reduce(
-    (state, fact) => {
-      if (fact._tag !== "Observed") return state;
-      const fromHooks = fact.origin._tag === "Harness" && fact.origin.part === harnessParts.turnEndHooks.part;
-      if (fact.observation._tag === "InputArrived" && fromHooks) return { ...state, feedback: true };
-      if (fact.observation._tag !== "TurnEndReviewed" || fact.observation.turn !== turn) return state;
-      return { holds: state.feedback ? state.holds + 1 : state.holds, feedback: false };
-    },
-    { holds: 0, feedback: false },
-  ).holds;
 
 /** What the loop needs to carry out requests. */
 export type Services = ModelProvider | ContextAssembler | ModelClient | Turns | ToolRunner;

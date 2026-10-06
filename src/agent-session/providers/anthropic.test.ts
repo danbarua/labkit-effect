@@ -440,3 +440,29 @@ test("a constrained tool is posted with strict, and a required tool choice as to
   expect(plain).not.toHaveProperty("tool_choice");
   expect(plain?.tools.every((tool) => !("strict" in tool))).toBe(true);
 });
+
+test("a request that requires a tool call is posted with thinking disabled, and the thinking its settings gave is logged; a request that does not keeps its thinking", async () => {
+  const logged: Array<{ readonly level: string; readonly message: unknown }> = [];
+  const capture = Logger.make((options) => {
+    logged.push({ level: options.logLevel, message: options.message });
+  });
+  const haiku = { provider: ProviderName.make("anthropic"), model: ModelName.make("claude-haiku-4-5"), settings: { effort: "low" as const } };
+  const messages: ModelContext["messages"] = [{ role: "user", parts: [{ _tag: "Text", text: "Add 2 and 3." }] }];
+  const answer = { content: [{ type: "text", text: "5." }], stop_reason: "end_turn" };
+  const provider = recording([answer, answer]);
+  await runTest(
+    Effect.gen(function* () {
+      const client = yield* ModelClient;
+      yield* client.respond(haiku, { system: undefined, tools: smolCatalog, messages, toolChoice: "required" }, TurnId.make("turn-1"));
+      yield* client.respond(haiku, { system: undefined, tools: smolCatalog, messages }, TurnId.make("turn-2"));
+    }).pipe(Effect.provide(Layer.mergeAll(AnthropicModelClient.pipe(Layer.provide(anthropicAt(provider.url))), Logger.layer([capture], { mergeWithExisting: true })))),
+  );
+  const [forced, free] = provider.bodies as ReadonlyArray<{ readonly thinking?: unknown; readonly tool_choice?: unknown }>;
+  expect(forced?.tool_choice).toEqual({ type: "any" });
+  expect(forced?.thinking).toEqual({ type: "disabled" });
+  expect(free?.thinking).toEqual({ type: "enabled", budget_tokens: 1024 });
+  const warnings = logged.filter(({ message }) => Array.isArray(message) && message[0] === logKeys.anthropic.thinkingDisabledForToolCall);
+  expect(warnings.map(({ level, message }) => [level, (message as [string, Record<string, unknown>])[1]])).toEqual([
+    ["Warn", expect.objectContaining({ asked: { type: "enabled", budget_tokens: 1024 }, sent: { type: "disabled" } })],
+  ]);
+});
