@@ -61,17 +61,17 @@ test("a file written keeps a long value on one line, and a quoted value quoted",
 
 test("a setting no file sets is written into the fallback file, which is created, with the folder, when it does not exist", async () => {
   const folder = join(testFolder(), "new");
-  const { file, configuration } = await written(folder, ["view", "thinking"], "off", "settings.yml");
+  const { file, configuration } = await written(folder, ["cli", "view", "thinking"], "off", "settings.yml");
   expect(file).toBe(join(folder, "settings.yml"));
-  expect(readFileSync(file, "utf8")).toBe("view:\n  thinking: off\n");
+  expect(readFileSync(file, "utf8")).toBe("cli:\n  view:\n    thinking: off\n");
   // YAML 1.2 reads `off` as a string; YAML 1.1 would read it as false.
-  expect(configuration.view).toEqual({ thinking: "off" });
+  expect(configuration.cli).toEqual({ view: { thinking: "off" } });
 });
 
 test("a fallback file that exists keeps what it holds", async () => {
   const folder = folderWith({ "settings.yml": "# Mine.\nmaxHolds: 2\n" });
-  const { configuration } = await written(folder, ["view", "thinking"], "off", "settings.yml");
-  expect(readFileSync(join(folder, "settings.yml"), "utf8")).toBe("# Mine.\nmaxHolds: 2\nview:\n  thinking: off\n");
+  const { configuration } = await written(folder, ["cli", "view", "thinking"], "off", "settings.yml");
+  expect(readFileSync(join(folder, "settings.yml"), "utf8")).toBe("# Mine.\nmaxHolds: 2\ncli:\n  view:\n    thinking: off\n");
   expect(configuration.maxHolds).toBe(2);
 });
 

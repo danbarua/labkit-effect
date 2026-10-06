@@ -273,7 +273,7 @@ test("/settings view.thinking=off hides the thinking at once, and writes it into
   const file = join(configFolder(), "settings.yml");
   expect(printed).toEqual([`view.thinking=off (saved to ${file})`]);
   expect(thinking).toBe("off");
-  expect(readFileSync(file, "utf8")).toBe("view:\n  thinking: off\n");
+  expect(readFileSync(file, "utf8")).toBe("cli:\n  view:\n    thinking: off\n");
 });
 
 test("/settings with a mistake in any setting named changes none of them", async () => {

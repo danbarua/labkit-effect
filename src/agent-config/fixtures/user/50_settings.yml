@@ -1,8 +1,8 @@
 # yaml-language-server: $schema=../../../../schemas/config.schema.json
 #
-# The user's settings: what the CLI shows the user. The CLI's /settings writes a change of one of them
-# into the file that sets it, else into settings.yml.
-
-# Whether the CLI shows the model's thinking: on or off. It changes nothing in a request.
-view:
-  thinking: off
+# The CLI's own settings. The CLI's /settings writes a change of one of them into the file that sets
+# it, else into settings.yml.
+cli:
+  # Whether the CLI shows the model's thinking: on or off. It changes nothing in a request.
+  view:
+    thinking: off

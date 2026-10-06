@@ -83,7 +83,7 @@ the output limit defaults to the model's own.
 | model | `provider/model` | The model to ask. |
 | effort | `default`; the model's efforts, from models.dev, except `none` | How much the model reasons. `default` sends nothing: the provider's default applies. `none` is `thinking=disabled`. |
 | thinking | `default`, `disabled`, `between_tools` | `default` sends nothing. `disabled` turns the model's thinking off, offered for a model that can turn it off: its efforts list `none`, or it takes a budget. `between_tools` thinks only between tool calls, offered for a model measured to take it (Claude Sonnet 5.5). |
-| `view.thinking` | `on`, `off` | Whether the host shows the model's thinking. It changes nothing in the request. |
+| `cli.view.thinking` | `on`, `off` | Whether the CLI shows the model's thinking. It changes nothing in the request. In the CLI's `/settings`, it is `view.thinking`. |
 
 - The maximum number of output tokens is not a setting that a user must choose. It defaults to the
   model's output limit from models.dev, and a configuration file can override it. Later, the

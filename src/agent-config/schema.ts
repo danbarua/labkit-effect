@@ -12,7 +12,7 @@
 import { Schema } from "effect";
 import { jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { builtins } from "./builtins.ts";
-import { McpServerSchema, View } from "./file.ts";
+import { CliSettings, McpServerSchema } from "./file.ts";
 import { type AnyPlugin, seams } from "./plugin.ts";
 import { ModelOverride } from "../agent-session/configuration/well-known-models.ts";
 
@@ -34,8 +34,8 @@ export const configJsonSchema = (registry: ReadonlyArray<AnyPlugin> = builtins):
       model: Schema.optionalKey(Schema.NonEmptyString),
       // What is known of models, by provider/model, over the catalog; `null` removes the overrides of the layers before it.
       models: Schema.optionalKey(Schema.NullOr(Schema.Record(Schema.String, Schema.NullOr(ModelOverride)))),
-      // What the CLI shows the user: thinking on or off.
-      view: Schema.optionalKey(Schema.NullOr(View)),
+      // The CLI's own settings.
+      cli: Schema.optionalKey(Schema.NullOr(CliSettings)),
     }),
   ) as { readonly properties: Readonly<Record<string, Schema.Json>> };
   const plugins: Schema.Json = {

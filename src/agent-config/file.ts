@@ -93,15 +93,15 @@ export type McpServerConfig = (McpServerStdio | McpServerRemote) & {
   readonly connectTimeout?: Duration.Input | undefined;
 };
 
-/** What the CLI shows the user: whether it shows the model's thinking (`thinking`, `on` when no layer sets it). It changes nothing in a request; the ACP host does not read it. */
-export const View = Schema.Struct({ thinking: Schema.optionalKey(Schema.Literals(["on", "off"])) });
-export type View = typeof View.Type;
+/** The CLI's own settings: what it shows the user (`view`): whether it shows the model's thinking (`thinking`, `on` when no layer sets it). */
+export const CliSettings = Schema.Struct({ view: Schema.optionalKey(Schema.Struct({ thinking: Schema.optionalKey(Schema.Literals(["on", "off"])) })) });
+export type CliSettings = typeof CliSettings.Type;
 
 /**
  * The decoded configuration: each seam that the layers list, in order; `maxHolds` when they give it;
  * the MCP servers; the model that sessions start with, when the layers name one; the user's
- * overrides of what is known of models, by `provider/model`; and what the CLI shows the user. A seam
- * that no layer lists is absent.
+ * overrides of what is known of models, by `provider/model`; and the CLI's own settings. A seam that
+ * no layer lists is absent.
  */
 export interface Configuration {
   readonly lists: Partial<Record<Seam, ReadonlyArray<Entry>>>;
@@ -109,12 +109,12 @@ export interface Configuration {
   readonly mcpServers: ReadonlyArray<McpServerConfig>;
   readonly model?: string;
   readonly models: ReadonlyMap<string, ModelOverride>;
-  readonly view: { readonly thinking: "on" | "off" };
+  readonly cli: { readonly view: { readonly thinking: "on" | "off" } };
 }
 
 const isMapping = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-const topKeys: ReadonlyArray<string> = ["plugins", ...seams, "maxHolds", "mcpServers", "extensions", "model", "models", "view"];
+const topKeys: ReadonlyArray<string> = ["plugins", ...seams, "maxHolds", "mcpServers", "extensions", "model", "models", "cli"];
 
 const MaxHolds = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
@@ -358,8 +358,8 @@ export const decodeLayers = (
         : yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(all["model"]).pipe(
             Effect.mapError((error) => new ConfigInvalid({ file: layerThatWrote(layers, ["model"]), path: "model", problem: problemOf(error) })),
           );
-    const view = yield* Schema.decodeUnknownEffect(Schema.UndefinedOr(Schema.NullOr(View)))(all["view"], { onExcessProperty: "error" }).pipe(
-      Effect.mapError((error) => new ConfigInvalid({ file: layerThatWrote(layers, ["view"]), path: "view", problem: problemOf(error) })),
+    const cli = yield* Schema.decodeUnknownEffect(Schema.UndefinedOr(Schema.NullOr(CliSettings)))(all["cli"], { onExcessProperty: "error" }).pipe(
+      Effect.mapError((error) => new ConfigInvalid({ file: layerThatWrote(layers, ["cli"]), path: "cli", problem: problemOf(error) })),
     );
     return {
       lists,
@@ -367,7 +367,7 @@ export const decodeLayers = (
       mcpServers: yield* mcpServersOf(layers, all["mcpServers"], env),
       ...(model === undefined ? {} : { model }),
       models: yield* modelsOf(layers, all["models"]),
-      view: { thinking: view?.thinking ?? "on" },
+      cli: { view: { thinking: cli?.view?.thinking ?? "on" } },
     };
   });
 

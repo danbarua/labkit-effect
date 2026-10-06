@@ -501,17 +501,23 @@
         }
       ]
     },
-    "view": {
+    "cli": {
       "anyOf": [
         {
           "type": "object",
           "properties": {
-            "thinking": {
-              "type": "string",
-              "enum": [
-                "on",
-                "off"
-              ]
+            "view": {
+              "type": "object",
+              "properties": {
+                "thinking": {
+                  "type": "string",
+                  "enum": [
+                    "on",
+                    "off"
+                  ]
+                }
+              },
+              "additionalProperties": false
             }
           },
           "additionalProperties": false

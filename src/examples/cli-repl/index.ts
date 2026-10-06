@@ -221,7 +221,7 @@ export const cliOf = (brand: Brand) =>
       const { named, ...unresolved } = yield* configOf(options, interactive);
       const context: ReplContext = {
         configFolder: userFolderOf(options, { name: (yield* Brand).name }),
-        view: yield* viewOf(unresolved.configuration.view.thinking),
+        view: yield* viewOf(unresolved.configuration.cli.view.thinking),
         commandLine: unresolved.settings,
       };
       // At a terminal, a new session whose model cannot be asked opens the REPL without one, to pick one with /model.

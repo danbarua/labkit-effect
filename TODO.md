@@ -31,8 +31,6 @@ the first input, stream thinking, the model calls a tool, the user is asked for 
 tool runs, the model answers, and `/export` writes the session to Markdown without going to the
 model.
 
-- [ ] The ACP host reads `view.thinking`: with `off`, it does not send the model's thinking
-      (`agent_thought_chunk`). The CLI reads it (`docs/agent-config.md`, `view`).
 - [ ] Configuration comes from the host, and is assembled before a request is made; a change
       applies between turn N and turn N + 1. A new session is configuring until it is ready to
       start turn zero: a UI with no default model, thinking level or output limit has nothing to

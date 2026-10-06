@@ -45,7 +45,8 @@ export const applied = (change: UserChange, { view, configFolder }: CommandConte
   Effect.gen(function* () {
     yield* Ref.set(view.thinking, change.value);
     const said = `${change.name}=${change.value}`;
-    return yield* writeSetting(configFolder, change.name.split("."), change.value, "settings.yml").pipe(
+    // In the configuration, the CLI's settings are under `cli`.
+    return yield* writeSetting(configFolder, ["cli", ...change.name.split(".")], change.value, "settings.yml").pipe(
       Effect.map((file) => `${said} (saved to ${file})`),
       Effect.catch((error) => Effect.succeed(String(invalid(`Could not save ${said}: ${error.message}`, "It applies until the REPL exits.").userMessage))),
     );
