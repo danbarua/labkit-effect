@@ -706,18 +706,18 @@ test("text of only whitespace that ends a request is not sent with the next requ
   expect(project(inputs, live).updates.filter((update) => update.sessionUpdate === "agent_message_chunk")).toEqual([said("Listing."), said("Done.")] as never);
 });
 
-test("the default presentation titles a call to a described tool by its description, on one line; a call to any other tool, or with no description, by its tool's name", () => {
+test("the default presentation titles a call to a described tool by its intent, on one line; a call to any other tool, or with no intent, by its tool's name", () => {
   const look: Tool<{ readonly path: typeof Schema.String }> = { name: ToolName.make("look"), kind: "read", replay: "safe", description: "Looks.", input: Schema.Struct({ path: Schema.String }), run: () => Effect.succeed("") };
   const issue: ToolSpec = {
     name: ToolName.make("create_issue"),
     description: "Creates an issue.",
-    input: jsonSchemaOf(Schema.Struct({ description: Schema.String.annotate({ description: "The issue's body." }) })),
+    input: jsonSchemaOf(Schema.Struct({ intent: Schema.String.annotate({ description: "Why the issue is filed." }) })),
     kind: "edit",
     replay: "unsafe",
   };
   const catalog = [anyTool(described(look)).spec, issue];
   const titled = (tool: string, input: object) => Effect.runSync(presentFrom(catalog)({ call: CallId.make("c1"), tool: ToolName.make(tool), input: receivedJson(input as never) })).title;
-  expect(titled("look", { path: ".", description: "Look at\n  the working folder." })).toBe("Look at the working folder.");
+  expect(titled("look", { path: ".", intent: "Look at\n  the working folder." })).toBe("Look at the working folder.");
   expect(titled("look", { path: "." })).toBe("look");
-  expect(titled("create_issue", { description: "A body of several paragraphs." })).toBe("create_issue");
+  expect(titled("create_issue", { intent: "A reason of several paragraphs." })).toBe("create_issue");
 });

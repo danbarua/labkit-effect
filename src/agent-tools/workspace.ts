@@ -7,7 +7,7 @@
  * applies two wrappers:
  * - `inWorkspace(root)` (`in-workspace.ts`) wraps the file tools: it resolves their paths against the
  *   root, and refuses a path outside it.
- * - `described` (`described.ts`) wraps every tool: it adds a required `description` input.
+ * - `described` (`described.ts`) wraps every tool: it adds a required `intent` input.
  *
  * `workspaceTools(root)` returns the catalog, the tool source that runs a call given the file
  * system, the environment that `run_command` runs with, and the system text that names the root as

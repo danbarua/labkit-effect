@@ -22,11 +22,11 @@ writeFileSync(join(root, "big.txt"), "x".repeat(300 * 1024));
 const { catalog, source, system } = workspaceTools(root);
 const runner = Layer.effect(ToolRunner, source);
 
-/** What a call of `tool` with `input` and a description gives: its output, or its failure. */
+/** What a call of `tool` with `input` and an intent gives: its output, or its failure. */
 const call = (tool: string, input: object) =>
   runTest(
     Effect.gen(function* () {
-      const outcome = yield* (yield* ToolRunner).run(ToolName.make(tool), receivedJson({ description: "A test call.", ...input } as never), CallId.make("call-1"));
+      const outcome = yield* (yield* ToolRunner).run(ToolName.make(tool), receivedJson({ intent: "A test call.", ...input } as never), CallId.make("call-1"));
       if (outcome._tag === "Succeeded") return asText(outcome.output);
       const reason = outcome.reason;
       return reason._tag === "InputRejected" ? `rejected: ${reason.problem}` : reason._tag === "Reported" ? `reported: ${asText(reason.error)}` : reason._tag;
@@ -55,9 +55,9 @@ test("a tool's input schema is its Schema's with a description for each input, c
       path: { type: "string", minLength: 1, description: "The file's path: relative to the working folder, or absolute inside it." },
       line: { type: "integer", minimum: 1, description: "Optional: the first line to read, 1-based. Default: 1." },
       limit: { type: "integer", minimum: 1, description: "Optional: the number of lines to read. Default: to the end of the file." },
-      description: { type: "string", minLength: 1, description: "What this call is for, in one sentence. The user sees it as the call's title." },
+      intent: { type: "string", minLength: 1, description: "What this call is for, in one sentence. The user sees it as the call's title." },
     },
-    required: ["path", "description"],
+    required: ["path", "intent"],
     additionalProperties: false,
   });
   expect(catalog.flatMap((tool) => undescribedInputs(tool.input).map((input) => `${tool.name}: ${input}`))).toEqual([]);
@@ -66,7 +66,7 @@ test("a tool's input schema is its Schema's with a description for each input, c
   const strict = workspaceTools(root, { strictInput: true });
   const refused = await runTest(
     Effect.gen(function* () {
-      const outcome = yield* (yield* ToolRunner).run(ToolName.make("read_file"), receivedJson({ path: "src/a.txt", lines: 2, description: "A test call." }), CallId.make("call-1"));
+      const outcome = yield* (yield* ToolRunner).run(ToolName.make("read_file"), receivedJson({ path: "src/a.txt", lines: 2, intent: "A test call." }), CallId.make("call-1"));
       return outcome._tag === "Failed" && outcome.reason._tag === "InputRejected" ? outcome.reason.problem : "not refused";
     }).pipe(Effect.provide(Layer.effect(ToolRunner, strict.source).pipe(Layer.provide(BunServices.layer)))),
   );
@@ -162,7 +162,7 @@ test("run_command is given the environment its host composed; by default this pr
   const envOf = (tools: ReturnType<typeof workspaceTools>) =>
     runTest(
       Effect.gen(function* () {
-        const outcome = yield* (yield* ToolRunner).run(ToolName.make("run_command"), receivedJson({ command: "env", description: "A test call." }), CallId.make("call-1"));
+        const outcome = yield* (yield* ToolRunner).run(ToolName.make("run_command"), receivedJson({ command: "env", intent: "A test call." }), CallId.make("call-1"));
         return outcome._tag === "Succeeded" ? asText(outcome.output) : outcome._tag;
       }).pipe(Effect.provide(Layer.effect(ToolRunner, tools.source).pipe(Layer.provide(BunServices.layer)))),
     );

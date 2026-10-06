@@ -28,7 +28,7 @@ import type { CapturedObservation, ModelPart, ToolFailure, ToolOutcome } from ".
 import type { Received } from "../agent-machine/received.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
 import { asText, parseJson } from "../agent-session/received.ts";
-import { callDescriptionOf, isDescribed } from "../agent-tools/described.ts";
+import { intentOf, isDescribed } from "../agent-tools/described.ts";
 
 /** An input to the projection: a fact, or an item that a model request passed on while it ran. */
 export type ProjectionInput = Fact | CapturedObservation;
@@ -85,12 +85,12 @@ export const oneLine = (text: string): string => {
   return line.length <= 120 ? line : `${line.slice(0, 119)}…`;
 };
 
-/** Returns a call's title: the description it gives, on one line, when its tool is `spec` and `described` added that input; otherwise its tool's name. */
+/** Returns a call's title: the intent it gives, on one line, when its tool is `spec` and `described` added that input; otherwise its tool's name. */
 const titleOf = (call: Call, spec: ToolSpec | undefined): string => {
   if (spec === undefined || !isDescribed(spec)) return call.tool;
   const parsed = parseJson(call.input);
-  const description = "value" in parsed ? callDescriptionOf(parsed.value) : undefined;
-  return description === undefined ? call.tool : oneLine(description);
+  const intent = "value" in parsed ? intentOf(parsed.value) : undefined;
+  return intent === undefined ? call.tool : oneLine(intent);
 };
 
 /** Returns the text that a call's outcome shows: its output, or why it failed; undefined before it ends. */
@@ -101,8 +101,8 @@ const shownOf = (tool: ToolName, outcome: ToolOutcome | undefined): string | und
 
 /**
  * The default presentation over the session's tool catalog (`immutableToolCatalogOf`): as the title,
- * the call's description, on one line, when `described` (`agent-tools/described.ts`) added that
- * input to its tool, and the tool's name otherwise; its kind from the catalog (none for a tool the
+ * the call's intent, on one line, when `described` (`agent-tools/described.ts`) added that input to
+ * its tool, and the tool's name otherwise; its kind from the catalog (none for a tool the
  * catalog does not have); and, once it ends, its output, or why it failed, as text.
  */
 export const presentFrom =

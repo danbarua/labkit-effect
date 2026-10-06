@@ -33,7 +33,7 @@ work is listed in order at the end. Text in quotation marks is Dan's, verbatim.
   | Wrapper | What it does |
   | --- | --- |
   | `inWorkspace` | Resolves relative paths against the working folder, and refuses a path outside it. |
-  | `described` | Adds a `description` input: one sentence that says what the call is for. A UI shows it as the call's title. |
+  | `described` | Adds an `intent` input: one sentence that says what the call is for. A UI shows it as the call's title. The input is named `intent`, not `description`, because many tools (MCP tools among them) have a `description` input of their own. |
   | `bound` | Removes an input from what the model is offered, and supplies its value itself. The git tool bound to a workspace supplies `repository`: the model never sees that input. |
   | A permission check, a classifier | Decides whether a call runs. |
   | Where the tool runs (a container, a sandbox, a host over SSH) | Runs the call somewhere else. |
@@ -41,10 +41,10 @@ work is listed in order at the end. Text in quotation marks is Dan's, verbatim.
 
 - A call can go through several wrappers of the same shape. "What if you want to require a user's
   permission **and** apply a classifier? (eg. enterprise deployment)?"
-- `described`: when `described` wraps a tool, its `description` input is required. When it does
-  not, the tool has no `description` input. A UI shows a call's description when the call has
+- `described`: when `described` wraps a tool, its `intent` input is required. When it does not,
+  the tool has no `intent` input. A UI shows a call's intent when the call has
   one, and shows nothing for it when the call has none.
-- MCP tools have no `description` input for now. The MCP tools could later run through one generic
+- MCP tools have no `intent` input for now. The MCP tools could later run through one generic
   runner, which a wrapper can wrap.
 
 ### Recorded facts are data
@@ -127,7 +127,7 @@ that nailed and robust first."
 1. A tool as a value, and wrappers: `inWorkspace` and `described`, applied to the workspace tools.
    Built: `src/agent-tools/tool.ts`, `paths.ts`, `in-workspace.ts` and `described.ts`. ACP's
    editor world takes its path descriptions and its path check from `in-workspace.ts`. Its tools are
-   not wrapped yet, so they have no `description` input, and their titles are still the tool's name
+   not wrapped yet, so they have no `intent` input, and their titles are still the tool's name
    and its command or path.
 2. `bound`: the git tools bound to the workspace's repository.
 3. The git tools offered to sessions.
