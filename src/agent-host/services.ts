@@ -12,6 +12,7 @@ import { immutableToolCatalogOf } from "../agent-session/configuration/session-s
 import { CountingTurnsInStore } from "../agent-session/turns.ts";
 import { costIn } from "../agent-session/accounting.ts";
 import { receivedJson } from "../agent-session/received.ts";
+import { TimedModelClient } from "../instrumentation/model-timing.ts";
 import { CountedToolRunner } from "../instrumentation/tool-metrics.ts";
 import { Clients } from "./clients.ts";
 import { KnownWithLocalServer, SettlingWithLocalServer } from "./local-server.ts";
@@ -29,7 +30,8 @@ export const SessionServices = <E, R>(runner: Layer.Layer<ToolRunner, E, R>) =>
     KnownWithLocalServer,
     SettlingWithLocalServer,
     AgentContextAssembler.pipe(Layer.provide(WholeConversation)),
-    Clients,
+    // Each response's arrival is timed and its token use counted (`instrumentation/model-timing.ts`).
+    TimedModelClient(Clients),
     CountingTurnsInStore,
     // Each tool run is counted and timed (`instrumentation/tool-metrics.ts`), which OTLP sends when it is set up.
     CountedToolRunner(runner),
