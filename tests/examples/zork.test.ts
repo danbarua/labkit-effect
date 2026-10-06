@@ -1,12 +1,13 @@
 import { expect } from "bun:test";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Ref } from "effect";
 import { CallId, FailureText, ModelName, ModelText, ProviderName, StopReason, ToolName } from "../../src/agent-machine/names.ts";
 import type { ModelPart } from "../../src/agent-machine/observation.ts";
 import { ModelClient, type ModelContext } from "../../src/agent-session/contracts.ts";
 import { receivedJson } from "../../src/agent-session/received.ts";
-import { play, type Player } from "../../src/examples/zork/scenario.ts";
+import { play, type Player, type Setup } from "../../src/examples/zork/scenario.ts";
 import { catalog, offeredTools, worldTools, type GameState } from "../../src/examples/zork/tools.ts";
 import { applyAction, availableTools, grueEnding, initialWorld, inventory, maxTurns, view, type Action, type World } from "../../src/examples/zork/world.ts";
 import { runTest } from "../support/run.ts";
@@ -51,7 +52,9 @@ const scriptedAdventurer = (choose: (world: ReturnType<typeof view>, context: Mo
   if (context.messages.at(-1)?.parts.some((part) => part._tag === "ToolResult")) return say("Done.");
   return call(choose(userWorld(context), context), `action-${n}`);
 });
-const setup = (engine: Player, adventurer: Player) => ({ engine, adventurer, directory: join(testFolder(), "zork") });
+const setup = (engine: Player, adventurer: Player): Setup => ({ engine, adventurer, directory: join(testFolder(), "zork"), home: testFolder() });
+/** Plays a game with the platform's file system, which its saved sessions and logs are written with. */
+const played = (given: Setup) => play(given).pipe(Effect.provide(BunServices.layer));
 const act = (world: World, action: Action): World => {
   const result = applyAction(world, action);
   if ("problem" in result) throw new Error(result.problem);
@@ -64,7 +67,7 @@ test("Zork records engine-selected tools, inventory changes and an early Grue de
   const actions: ReadonlyArray<Action> = [target("open", "mailbox"), target("take", "leaflet"), target("drop", "leaflet"), move("n"), move("n"), target("open", "trapdoor"), move("d")];
   const engine = scriptedEngine((world) => [actions[world.turn]?.tool ?? "look"]);
   const adventurer = scriptedAdventurer((world) => actions[world.turn] ?? { tool: "look", input: {} });
-  const game = await runTest(play(setup(engine.player, adventurer.player)));
+  const game = await runTest(played(setup(engine.player, adventurer.player)));
   expect(game.exchanges).toHaveLength(7);
   expect(game.world.outcome).toBe("EatenByGrue");
   expect(game.epilogue).toBeUndefined();
@@ -95,7 +98,7 @@ test("Zork records engine-selected tools, inventory changes and an early Grue de
 test("Zork enforces thirty actions and runner-owned death even when narration disagrees", async () => {
   const engine = scriptedEngine(() => ["inventory"], () => "You are carrying a diamond and are perfectly safe.", true);
   const adventurer = scriptedAdventurer(() => ({ tool: "inventory", input: {} }));
-  const game = await runTest(play(setup(engine.player, adventurer.player)));
+  const game = await runTest(played(setup(engine.player, adventurer.player)));
   expect(maxTurns).toBe(30);
   expect(game.exchanges).toHaveLength(30);
   expect(game.world.turn).toBe(30);
@@ -160,7 +163,7 @@ test("Zork tool runner rejects unoffered and malformed calls and atomically perm
 });
 
 test("Zork rejects prose-only Adventurer actions", async () => {
-  const result = await runTest(play(setup(scriptedEngine().player, model("adventurer", () => say("take lantern")).player)).pipe(Effect.result));
+  const result = await runTest(played(setup(scriptedEngine().player, model("adventurer", () => say("take lantern")).player)).pipe(Effect.result));
   expect(result._tag).toBe("Failure");
   if (result._tag === "Failure") expect(String(result.failure)).toContain("without a successful world tool call");
   expect(await readdir(testFolder())).not.toContain("zork");
@@ -174,7 +177,7 @@ test("Zork asks for a real action when the Adventurer first replies with prose",
     if (context.messages.at(-1)?.parts.some((part) => part._tag === "ToolResult")) return say("Done.");
     return call(actions[userWorld(context).turn] ?? move("down"), `action-${n}`);
   });
-  const game = await runTest(play(setup(scriptedEngine().player, adventurer.player)));
+  const game = await runTest(played(setup(scriptedEngine().player, adventurer.player)));
   expect(game.exchanges).toHaveLength(4);
   expect(game.exchanges[0]?.world.turn).toBe(1);
   expect(game.world.outcome).toBe("EatenByGrue");
@@ -185,7 +188,7 @@ test("Zork asks for a real action when the Adventurer first replies with prose",
 test("Zork bounds a model that repeatedly calls an unoffered tool", async () => {
   const engine = scriptedEngine(() => ["inventory"]);
   const adventurer = model("adventurer", (_, n) => call(move("north"), `bad-${n}`));
-  const result = await runTest(play(setup(engine.player, adventurer.player)).pipe(Effect.result));
+  const result = await runTest(played(setup(engine.player, adventurer.player)).pipe(Effect.result));
   expect(result._tag).toBe("Failure");
   expect(adventurer.seen).toHaveLength(4);
   expect(engine.seen).toHaveLength(1);
@@ -199,13 +202,13 @@ test.each([
   JSON.stringify({ narration: "Hello", tools: ["look", "look"] }),
 ])("Zork rejects an invalid engine scene: %s", async (scene) => {
   const adventurer = scriptedAdventurer(() => ({ tool: "look", input: {} }));
-  const result = await runTest(play(setup(model("engine", () => say(scene)).player, adventurer.player)).pipe(Effect.result));
+  const result = await runTest(played(setup(model("engine", () => say(scene)).player, adventurer.player)).pipe(Effect.result));
   expect(result._tag).toBe("Failure");
   expect(adventurer.seen).toHaveLength(0);
 });
 
 test("Zork reports provider failures without writing a successful game", async () => {
-  const result = await runTest(play(setup(model("engine", () => undefined).player, scriptedAdventurer(() => ({ tool: "look", input: {} })).player)).pipe(Effect.result));
+  const result = await runTest(played(setup(model("engine", () => undefined).player, scriptedAdventurer(() => ({ tool: "look", input: {} })).player)).pipe(Effect.result));
   expect(result._tag).toBe("Failure");
   expect(await readdir(testFolder())).not.toContain("zork");
 });

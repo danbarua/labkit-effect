@@ -3,18 +3,26 @@
 Run a text adventure with two AI models using the agent harness:
 
 ```sh
-# Set LABKIT_ANTHROPIC_API_KEY in your environment, then:
+# Set ANTHROPIC_API_KEY in your environment, then:
 bun run zork
 ```
 
 The Game Engine uses `claude-sonnet-4-5`; the Adventurer uses `claude-haiku-4-5`.
-Override them with positional arguments: any Claude or Grok model that `bun cli models` lists. A
-Grok model reads its key from `LABKIT_XAI_API_KEY`, and the two may be of different providers:
+Override them with positional arguments: any Claude or Grok model that `bun cli models` lists. Each
+model is asked as the CLI asks it, with its provider's key: a Grok model reads `XAI_API_KEY`, and
+the two may be of different providers:
 
 ```sh
 bun run zork claude-sonnet-4-5 claude-sonnet-4-5
 bun run zork grok-4.7 grok-build-0.1
 ```
+
+Each game is two sessions, each run as any host runs a session (`agent-host/with-session.ts`):
+`zork-engine-<game>` and `zork-adventurer-<game>`, saved in `~/.local/share/labkit/sessions/`
+with a record that names zork, the game and the role, and logging to
+`~/.local/share/labkit/logs/zork-<role>-<game>.log`. With `OTEL_EXPORTER_OTLP_ENDPOINT` set, a
+game is one trace (`zork.game`, with both sessions under it), and its log lines carry the game's
+id and the session's.
 
 The runner owns a small world: six connected locations, a mailbox, a trapdoor,
 a leaflet, a lantern, a sword and treasure. Inventory, item locations, open exits,

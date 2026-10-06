@@ -1,6 +1,8 @@
 /**
  * A CLI session through the loop: its configuration, the services it runs with, and what its facts
  * say about a turn. Both ways of running the CLI (`print.ts`, `repl.ts`) are given the open session.
+ * The session's machinery (its store, record, opening and continuing) is `withSession`
+ * (`agent-host/with-session.ts`); what this module adds are the CLI's bolt-ons.
  *
  * The tools work in the folder the CLI runs in (`agent-tools/workspace.ts`): `read_file` and
  * `list_dir` read it, `write_file` and `edit_file` change it, and `run_command` runs a shell command
@@ -16,8 +18,7 @@
 import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
-import { Array as Arr, Effect, Layer, Order, Predicate, type Scope, Stream } from "effect";
-import { Notices } from "../../agent-context/assemble.ts";
+import { Array as Arr, Effect, type FileSystem, Layer, Order, Predicate, Stream } from "effect";
 import { ModelOverrides } from "../../agent-session/configuration/well-known-models.ts";
 import { writeEffectiveSettings } from "../../agent-config/effective.ts";
 import type { Configuration, LayerSource } from "../../agent-config/file.ts";
@@ -27,22 +28,19 @@ import { removeCredentials, processEnvironmentWith } from "../../agent-process/e
 import { type GivenServer, type McpServers, startMcpServers } from "../../agent-mcp/servers.ts";
 import type { Asked } from "../../agent-host/catalog.ts";
 import { Brand, logsFolderOf, sessionsFolderOf } from "../../agent-host/brand.ts";
-import { sessionFolderOf, storeFileOf } from "../../agent-host/directory.ts";
-import { writeRecord } from "../../agent-host/record.ts";
+import { sessionFolderOf } from "../../agent-host/directory.ts";
 import { SessionServices } from "../../agent-host/services.ts";
+import { type BoltOn, type Host, withSession } from "../../agent-host/with-session.ts";
 import type { Ending } from "../../agent-machine/decision.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
-import { InputText, SessionId, type TurnId, Via } from "../../agent-machine/names.ts";
-import { changed, type SettingsChange } from "../../agent-machine/settings.ts";
+import { InputText, type TurnId, Via } from "../../agent-machine/names.ts";
+import type { SettingsChange } from "../../agent-machine/settings.ts";
 import { gitTools, isRepositoryRoot } from "../../agent-tools/git.ts";
 import { workspaceTools } from "../../agent-tools/workspace.ts";
-import { leftRunning, type LeftRunning } from "../../agent-machine/left-running.ts";
-import { endTurnLeftRunning, openSession, type Session } from "../../agent-session/loop.ts";
-import { offeredTools, SourcedToolRunner, type ToolSource, ToolSources } from "../../agent-session/tool-sources.ts";
-import { FileBackedSessionStore } from "../../agent-session/file-session-store.ts";
-import { ephemeralSessionStore, SessionStoreFailed } from "../../agent-session/session-store.ts";
+import type { Session } from "../../agent-session/loop.ts";
+import { SourcedToolRunner } from "../../agent-session/tool-sources.ts";
+import { SessionStoreFailed } from "../../agent-session/session-store.ts";
 import { harnessParts, reportedBy } from "../../agent-session/origin.ts";
-import { modelOf, openedWith } from "../../agent-session/configuration/session-setup.ts";
 import { invalid } from "./invalid.ts";
 import { logKeys } from "./log-keys.ts";
 
@@ -104,19 +102,14 @@ const workspaceOf = (config: Config) =>
 const gitOf = (config: Config) => (isRepositoryRoot(process.cwd()) ? gitTools(process.cwd(), { strictInput: config.strictToolInput }) : undefined);
 
 /**
- * The loop's services for a CLI session: the tool sources (the workspace's, the git tools' when the
- * working folder is a repository's root, then the MCP servers'),
- * notices about servers that are not running, turn numbering that continues from the stored facts,
- * and the configuration's policies and turn-end hooks.
+ * The loop's services for a CLI session, besides its tool sources and notices, which its bolt-ons
+ * give: `SessionServices` with the configuration's `models:` overrides, and the configuration's
+ * policies and turn-end hooks.
  */
-const servicesOf = (config: Config, sources: ReadonlyArray<ToolSource>, mcp: McpServers) => {
+const servicesOf = (config: Config) => {
   // The CLI uses its own tool sources (the workspace's and the MCP servers'), not the configuration's.
   const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(config.configuration, { canAsk: config.canAsk });
-  // Model capabilities come from the catalog, with the configuration's `models:` overrides applied.
-  const given = Layer.mergeAll(Layer.succeed(Notices, [mcp.notices]), Layer.succeed(ModelOverrides, config.configuration.models));
-  return Layer.mergeAll(SessionServices(SourcedToolRunner).pipe(Layer.provide(given)), seamLayer(lists)).pipe(
-    Layer.provideMerge(Layer.succeed(ToolSources, sources)),
-  );
+  return Layer.mergeAll(SessionServices(SourcedToolRunner).pipe(Layer.provide(Layer.succeed(ModelOverrides, config.configuration.models))), seamLayer(lists));
 };
 
 /** The configuration's MCP servers, in the form `startMcpServers` takes. */
@@ -132,11 +125,6 @@ const givenOf = (configuration: Configuration): ReadonlyArray<GivenServer> =>
 const written = (config: Config, environment: Readonly<Record<string, string>>, root: string) =>
   Effect.gen(function* () {
     const folder = sessionFolderOf(root, config.sessionId);
-    // A new session saved to disk is recorded as the CLI's, made in this working folder, so `--continue` finds it here.
-    if (config.persist && config.continues === undefined)
-      yield* writeRecord(root, config.sessionId, cliRecord(process.cwd())).pipe(
-        Effect.catch((error) => Effect.logWarning(logKeys.settings.notWritten, { folder, cause: error.message })),
-      );
     const host = {
       model: `${config.target.provider}/${config.target.model}`,
       settings: config.settings as Readonly<Record<string, string>>,
@@ -169,70 +157,23 @@ const requiredRunning = (configuration: Configuration, mcp: McpServers) =>
   });
 
 /**
- * How a way of running the CLI handles a session: it follows the session from its opening (answering
- * permission questions, showing tool calls); it chooses whether to resume or end a turn a previous run
- * left unfinished; and it shows how a resumed turn ended.
+ * The working folder's bolt-on: the workspace tools, the git tools when the folder is a repository's
+ * root, and the system text that names the folder (and says it is a repository's root).
  */
-export interface Host<R = never> {
-  readonly follow: (session: Session) => Effect.Effect<void, never, Scope.Scope | R>;
-  readonly choose: (left: LeftRunning) => Effect.Effect<"go on" | "end", never, R>;
-  readonly wentOn: (session: Session) => Effect.Effect<void, never, R>;
-}
+const folderBoltOn = (workspace: ReturnType<typeof workspaceOf>, git: ReturnType<typeof gitOf>) =>
+  Effect.gen(function* (): Effect.fn.Return<BoltOn, never, FileSystem.FileSystem> {
+    return {
+      sources: [yield* workspace.source, ...(git === undefined ? [] : [yield* git.source])],
+      system: [workspace.system, ...(git === undefined ? [] : [yield* git.system])].join(" "),
+    };
+  });
 
-/** Follows nothing and resumes an unfinished turn: for print mode, where no one can be asked. */
-export const Headless: Host = { follow: () => Effect.void, choose: () => Effect.succeed("go on"), wentOn: () => Effect.void };
-
-/**
- * When the user stops the CLI (Ctrl+C) during a turn, records the interruption and waits for the
- * turn's requests to settle and the turn to end. A second Ctrl+C exits at once.
- */
-const interrupted = (session: Session) =>
-  Effect.gen(function* () {
-    const left = leftRunning(yield* session.facts);
-    if (left === undefined || left.stopping) return;
-    process.once("SIGINT", () => process.exit(130));
-    yield* session.observe({ _tag: "TurnInterrupted", turn: left.turn });
-    yield* session.idle;
-  }).pipe(Effect.catchTag("SessionStoreFailed", (error) => Effect.logError(logKeys.session.notInterrupted, { message: error.message })));
-
-/**
- * Opens a new session with `config`, or continues the one it names, and runs `use` with it, the
- * loop's services and `logs`. The store writes each fact before the session acts on it. The host
- * follows the session from its opening (`follow`), and decides whether a turn left unfinished by a
- * previous run is resumed or ended (`choose`). Stopping the CLI during a turn ends the turn as
- * interrupted (`interrupted`). A store that cannot be opened or written stops the session with an
- * error. What `use` records comes from the user, through the CLI.
- */
-export const withSession = <A, E, R, L, H>(
-  config: Config,
-  logs: Layer.Layer<never, never, L>,
-  host: Host<H>,
-  use: (session: Session, mcp: McpServers) => Effect.Effect<A, E, R>,
-) => {
-  const workspace = workspaceOf(config);
-  const git = gitOf(config);
-  const opened = (mcp: McpServers) => Effect.gen(function* () {
-    const session = yield* openSession;
-    yield* host.follow(session);
-    const facts = yield* session.facts;
-    if (facts.length === 0) {
-      const folder = [workspace.system, ...(git === undefined ? [] : [yield* git.system])].join(" ");
-      yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: changed({}, config.settings) }, system: [folder, ...(config.system === undefined ? [] : [config.system])].join("\n\n"), tools: yield* offeredTools }));
-    }
-    else {
-      const left = leftRunning(facts);
-      if (left === undefined) yield* session.goOn;
-      else if ((yield* host.choose(left)) === "go on") {
-        yield* session.goOn;
-        yield* session.idle;
-        yield* host.wentOn(session);
-      } else yield* endTurnLeftRunning(session);
-      const now = yield* modelOf(facts);
-      const changed = now.provider !== config.target.provider || now.model !== config.target.model || Object.keys(config.settings).length > 0;
-      if (changed) yield* session.observe({ _tag: "ModelChangeArrived", provider: config.target.provider, model: config.target.model, settings: config.settings });
-    }
-    // After the opening is recorded: the MCP servers' states, and each later change.
-    yield* mcp.changes.pipe(
+/** The MCP servers' bolt-on: their tools, a notice about servers that are not running, and, once the session is open, each change in a server's state, recorded. */
+const serversBoltOn = (mcp: McpServers): BoltOn => ({
+  sources: mcp.sources,
+  notices: [mcp.notices],
+  opened: (session) =>
+    mcp.changes.pipe(
       Stream.runForEach((change) =>
         session.observe(change).pipe(
           reportedBy(harnessParts.mcpServers),
@@ -240,27 +181,50 @@ export const withSession = <A, E, R, L, H>(
         ),
       ),
       Effect.forkScoped,
-    );
-    yield* session.idle;
-    return yield* use(session, mcp).pipe(Effect.onInterrupt(() => interrupted(session)));
-  });
-  return Effect.gen(function* () {
+      Effect.asVoid,
+    ),
+});
+
+/**
+ * Opens a new CLI session with `config`, or continues the one it names, and runs `use` with it and
+ * its MCP servers, through `withSession` (`agent-host/with-session.ts`), with the CLI's bolt-ons:
+ * the working folder's tools and the MCP servers. The session is saved in the brand's sessions
+ * folder, recorded as the CLI's, made in this working folder (`cliRecord`). A store that cannot be
+ * opened or written stops the session with an error. What `use` records comes from the user,
+ * through the CLI.
+ */
+export const withCliSession = <A, E, R, L, H>(config: Config, logs: Layer.Layer<never, never, L>, host: Host<H>, use: (session: Session, mcp: McpServers) => Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
     const root = storeFolderOf(yield* Brand);
-    const store = config.persist ? FileBackedSessionStore(storeFileOf(root, config.sessionId)) : ephemeralSessionStore(config.continues ?? []);
+    const workspace = workspaceOf(config);
     yield* written(config, workspace.environment, root);
     // The MCP servers start in the session's scope, before its services, because their tools are among them.
     const mcp = yield* startMcpServers(givenOf(config.configuration), [{ uri: pathToFileURL(process.cwd()).href, name: basename(process.cwd()) }]);
     yield* requiredRunning(config.configuration, mcp);
-    const sources = [yield* workspace.source, ...(git === undefined ? [] : [yield* git.source]), ...mcp.sources];
-    // The store logs while it opens (a lock taken over, a torn line cut off) to the session's log.
-    return yield* opened(mcp).pipe(Effect.provide(Layer.mergeAll(servicesOf(config, sources, mcp), logs).pipe(Layer.provideMerge(store.pipe(Layer.provide(logs))))));
+    const folder = yield* folderBoltOn(workspace, gitOf(config));
+    return yield* withSession(
+      {
+        sessionId: config.sessionId,
+        target: config.target,
+        settings: config.settings,
+        system: config.system,
+        continues: config.continues,
+        persist: config.persist,
+        root,
+        record: cliRecord(process.cwd()),
+        services: servicesOf(config),
+        boltOns: [folder, serversBoltOn(mcp)],
+        logs,
+        host,
+      },
+      (session) => use(session, mcp),
+    );
   }).pipe(
     reportedBy({ _tag: "User", via: Via.make("cli") }),
     Effect.scoped,
     Effect.provide(logs),
     Effect.mapError((error) => (error instanceof SessionStoreFailed ? invalid(error.message) : error)),
   );
-};
 
 /** Sends `text` to the session as the user's input, and waits until the session is idle. */
 export const ask = (session: Session, text: string) =>

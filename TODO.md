@@ -284,6 +284,10 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       session's tools to change during it.
 - [ ] Provider usage as metrics (Dan, 2026-10-06): tokens, cost and request time for each provider
       and model, sent with the tool metrics.
+- [ ] Each model request's HTTP request and response bodies in the telemetry, linked to the
+      request's span (as related log lines, not span attributes), so that a trace reads from the
+      session down through the machines' transitions to what the model was sent and what it
+      answered (Dan, 2026-10-06). For compaction, caching and usage work.
 
 - [ ] The session store. Built: `SessionStore`, which the loop requires (`EphemeralSessionStore`,
       `FileBackedSessionStore`); each fact written before anything is done on it; a failed write

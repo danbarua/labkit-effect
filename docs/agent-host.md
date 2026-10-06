@@ -17,6 +17,7 @@ about them are in [agent-host-direction.md](agent-host-direction.md).
 | `local-server.ts` | The local server's models and what is known of them; `KnownWithLocalServer`, `SettlingWithLocalServer`. |
 | `clients.ts` | `Clients`: one model client per provider whose key is set, and the local server. |
 | `services.ts` | `SessionServices`, `permissionsFor`, `loopBreaker`, `turnRequestLimit`, `budgetLimit`. |
+| `with-session.ts` | `withSession`: a session as a host runs it, with the host's bolt-ons. |
 | `directory.ts` | The folder of sessions. |
 | `record.ts` | `host.json`: a host's own record of a session. |
 | `draft.ts` | A draft: a session before its first turn. |
@@ -70,6 +71,29 @@ own (`localCapabilities`).
   `localhost` models.
 - `SettlingWithLocalServer` puts the Chat Completions adapter's settings function first in
   `Settling`, for `localhost`.
+
+## A session as a host runs it
+
+`withSession(options, use)` opens a new session, or continues one from its facts, and runs `use`
+with it. It is the session's machinery; what a host's own machinery adds is a list of bolt-ons.
+
+- The facts are in a store: `facts.jsonl` in the session's folder under `root` when the session is
+  saved, else in memory, starting from the facts it continues.
+- A new saved session's record (`host.json`) names the host that made it, with what else the host
+  keeps of it, such as its working folder.
+- The services are the host's (`SessionServices` and its own), built with a memo map of their own,
+  so that a session opened inside another's does not reuse the other's tool runner or turn
+  numbering. The store and the tool sources are `withSession`'s.
+- A bolt-on (`BoltOn`) adds tool sources, a part of the opening system text, notice providers, and
+  work that starts once the session is open. The CLI's bolt-ons are its working folder's tools (the
+  workspace's and the git tools) and its MCP servers. Zork's adventurer's bolt-on is the game's
+  world tools.
+- The host (`Host`) follows the session from its opening, and chooses whether a turn that a
+  previous run left unfinished is gone on with or ended. `Headless` follows nothing and goes on.
+- When the run is interrupted during a turn, the interruption is recorded and the turn is waited
+  for; a second Ctrl+C exits at once.
+- The session that `use` is given carries its own services, so a host can hold two sessions at
+  once: zork's game asks its engine and its adventurer in turn.
 
 ## Session services
 

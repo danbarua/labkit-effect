@@ -10,6 +10,12 @@ export const logKeys = {
   record: {
     /** Warning: a session's record file could not be read. Details: the session, the file and the cause. The session is listed without its record. */
     unreadable: "host_record.unreadable",
+    /** Warning: a new saved session's record could not be written. Details: the session's folder and the cause. The session runs; listing by host and folder does not find it. */
+    notWritten: "host_record.not_written",
+  },
+  session: {
+    /** Error: the interruption of a turn could not be recorded when the run was stopped. Details: the store's message. */
+    notInterrupted: "host_session.not_interrupted",
   },
   logs: {
     /**

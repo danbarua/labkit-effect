@@ -9,10 +9,6 @@ export const logKeys = {
     /** The session's effective-settings.json could not be written; the details carry the folder and the cause. The session continues. */
     notWritten: "cli.settings.not_written",
   },
-  session: {
-    /** The user stopped the CLI (Ctrl+C) during a turn, and the interruption could not be recorded; the details carry the error message. */
-    notInterrupted: "cli.session.not_interrupted",
-  },
   mcp: {
     /** A change in an MCP server's state could not be recorded; the details carry the server, its state and the cause. */
     notRecorded: "cli.mcp.not_recorded",

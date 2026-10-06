@@ -39,7 +39,8 @@ import { completions, offered, offeredWithoutModel, runInSession, runWithoutMode
 import { invalid } from "./invalid.ts";
 import { type CannotAsk, saidOf } from "./models.ts";
 import { bracketedPaste, type KeyBinding, Multiline } from "./multiline.ts";
-import { answerTo, ask, type Config, endingOf, type Host, lastTurn, logFileOf } from "./session.ts";
+import type { Host } from "../../agent-host/with-session.ts";
+import { answerTo, ask, type Config, endingOf, lastTurn, logFileOf } from "./session.ts";
 import type { LeftRunning } from "../../agent-machine/left-running.ts";
 import { type TurnKeys, turnKeys } from "./turn-keys.ts";
 import { logKeys } from "./log-keys.ts";
