@@ -20,13 +20,14 @@ import type { Environment } from "../agent-process/environment.ts";
 import { type CatalogSource, ModelCatalog } from "../agent-host/catalog.ts";
 import { sessionFolderOf, storeFileOf } from "../agent-host/directory.ts";
 import { startFakeHttpServer } from "../../tests/support/mcp-http-server.ts";
+import { undescribedInputs } from "../../tests/support/tool-input.ts";
 import { answerNow } from "../agent-host/incomplete.ts";
 import { SessionServices } from "../agent-host/services.ts";
 import { CallId, FailureText, Millis, ModelName, ModelText, ProviderName, ThinkingText, TokenCount, ToolName, type TurnId } from "../agent-machine/names.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { ModelPart, Observation, ToolOutcome } from "../agent-machine/observation.ts";
 import { ModelClient, type ModelContext, type Target, ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
-import { immutableToolCatalogOf } from "../agent-session/configuration/session-setup.ts";
+import { immutableSystemPromptOf, immutableToolCatalogOf } from "../agent-session/configuration/session-setup.ts";
 import { readFacts } from "../agent-session/file-session-store.ts";
 import type { Services } from "../agent-session/loop.ts";
 import { ModelStream, ModelStreamInterval } from "../agent-session/model-stream.ts";
@@ -688,6 +689,23 @@ test("a client that closes the connection mid-turn leaves the turn running in th
   expect(tags).not.toContain("TurnInterrupted");
   expect(endings(facts)).toEqual([]);
   expect(host.logged.find((each) => each.key === logKeys.prompt.interrupted)).toMatchObject({ details: { by: "the end of the connection" } });
+});
+
+test("the editor world's system prompt names the working folder; no tool's description or input schema names it, and every tool input has a description", async () => {
+  const host = startHost({ script: [answer({ _tag: "Text", text: "Hello." })] });
+  const sessionId = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, { fs: { readTextFile: true, writeTextFile: true }, terminal: true });
+    const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "Hi"));
+    return created.sessionId;
+  });
+  await host.stop();
+  const facts = await factsOn(storeFileOf(host.directory, sessionId));
+  const catalog = await Effect.runPromise(immutableToolCatalogOf(facts));
+  expect(catalog.map((tool): string => tool.name)).toEqual(["read_file", "write_file", "edit_file", "update_plan", "run_command"]);
+  expect(immutableSystemPromptOf(facts)).toBe(`The working folder is ${host.cwd}.`);
+  expect(catalog.filter((tool) => JSON.stringify([tool.description, tool.input]).includes(host.cwd)).map((tool): string => tool.name)).toEqual([]);
+  expect(catalog.flatMap((tool) => undescribedInputs(tool.input).map((input) => `${tool.name}: ${input}`))).toEqual([]);
 });
 
 test("edit_file replaces one occurrence through fs/*, shown as a diff; run_command runs in the editor's terminal, shown in its call, released however it ends; both ask first", async () => {

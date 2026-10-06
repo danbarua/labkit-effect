@@ -8,6 +8,7 @@ import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
+import { undescribedInputs } from "../../tests/support/tool-input.ts";
 import { CallId, ToolName } from "../agent-machine/names.ts";
 import { ToolRunner } from "../agent-session/contracts.ts";
 import { asText, receivedJson } from "../agent-session/received.ts";
@@ -58,8 +59,7 @@ test("a tool's input schema is its Schema's with a description for each input, c
     required: ["path"],
     additionalProperties: false,
   });
-  const described = catalog.flatMap((tool) => Object.entries((tool.input as { readonly properties: Record<string, { readonly description?: string }> }).properties).map(([name, input]) => [tool.name, name, input.description !== undefined]));
-  expect(described.filter(([, , has]) => has !== true)).toEqual([]);
+  expect(catalog.flatMap((tool) => undescribedInputs(tool.input).map((input) => `${tool.name}: ${input}`))).toEqual([]);
   expect(catalog.find((tool) => tool.name === "run_command")?.input).toMatchObject({ properties: { timeout_seconds: { minimum: 1, maximum: 600 } } });
   expect(await call("read_file", { path: "src/a.txt", lines: 2, extra: { a: 1 } })).toBe("one\ntwo\nthree\nfour\n[Not inputs of read_file, so ignored: lines, extra.]");
   const strict = workspaceTools(root, { strictInput: true });

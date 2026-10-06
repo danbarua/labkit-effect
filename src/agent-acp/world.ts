@@ -75,11 +75,13 @@ export const maxFileBytes = maxReadBytes;
 const WriteFile = Schema.Struct({ path: filePath, content: Schema.String.annotate({ description: `The file's new text, at most ${maxReadText}.` }) });
 
 const PlanEntryInput = Schema.Struct({
-  content: Schema.NonEmptyString,
-  status: Schema.Literals(["pending", "in_progress", "completed"]),
-  priority: Schema.optionalKey(Schema.Literals(["high", "medium", "low"])),
+  content: Schema.NonEmptyString.annotate({ description: "What the step does." }),
+  status: Schema.Literals(["pending", "in_progress", "completed"]).annotate({ description: "The step's status. Keep one step in_progress while you work on it." }),
+  priority: Schema.optionalKey(Schema.Literals(["high", "medium", "low"]).annotate({ description: "Optional: the step's priority. Default: medium." })),
 });
-const UpdatePlan = Schema.Struct({ entries: Schema.Array(PlanEntryInput) });
+const UpdatePlan = Schema.Struct({
+  entries: Schema.Array(PlanEntryInput).annotate({ description: "Every step of the plan, in order. Send the whole list each time it changes." }),
+});
 
 const rejected = (problem: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "InputRejected", problem: FailureText.make(problem) } });
 const reported = (message: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(message) } });
@@ -182,8 +184,7 @@ export const editorWorld: World = {
           name: ToolName.make("update_plan"),
           kind: "think",
           replay: "safe",
-          description:
-            "Record your plan for the task as a list of steps, each pending, in_progress or completed, with an optional priority (high, medium, low); the user sees it in the editor. Send the whole list each time it changes; keep one step in_progress while you work on it.",
+          description: "Record your plan for the task as a list of steps. The user sees the plan in the editor.",
           input: jsonSchemaOf(UpdatePlan),
         },
         ...offeredIf(connection.profile.client.capabilities.terminal === true, {
