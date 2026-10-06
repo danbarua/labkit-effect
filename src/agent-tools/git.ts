@@ -5,7 +5,7 @@
  *
  * `gitTools(root)` binds every tool to the repository at `root` (`bound.ts`), so the model is not
  * offered `repository`, and adds an `intent` input (`described.ts`). It also returns the system text
- * that says the working folder is the repository's root.
+ * that says the working folder is the root of a repository, or of a linked worktree.
  *
  * - A path in a tool's input is a pathspec relative to the repository's root. An absolute path, `..`
  *   or `.git` is refused.
@@ -17,9 +17,9 @@
  *   tool's input.
  */
 
-import { existsSync, mkdtempSync, readFileSync, readlinkSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import * as git from "es-git";
 import { Effect, Schema } from "effect";
 import { ToolName } from "../agent-machine/names.ts";
@@ -644,19 +644,33 @@ export const gitToolsWith = <T>(
   ),
 ];
 
-/** The system text that says the working folder is the root of the repository that the git tools work in. */
-export const repositoryLine = "The working folder is the root of a git repository, which the git tools work in.";
+/** The system text that says the working folder is the root of the repository, or of the linked worktree, that the git tools work in. */
+export const repositoryLine = (worktree: boolean): string => `The working folder is the root of a git ${worktree ? "worktree" : "repository"}, which the git tools work in.`;
 
 /** Whether `folder` is the root of a git repository: it holds `.git`, a folder or a file. */
 export const isRepositoryRoot = (folder: string): boolean => existsSync(join(folder, ".git"));
 
 /**
+ * Whether `folder` is the root of a linked worktree (`git worktree add`), as git decides it: its
+ * `.git` is a file that names a git directory, and that directory has a `commondir` file, which
+ * points to the main repository's. A submodule's `.git` is a file too, and its git directory has no
+ * `commondir`.
+ */
+export const isWorktreeRoot = (folder: string): boolean => {
+  const dotGit = join(folder, ".git");
+  if (!existsSync(dotGit) || statSync(dotGit).isDirectory()) return false;
+  const named = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"))?.[1]?.trim();
+  return named !== undefined && existsSync(join(resolve(folder, named), "commondir"));
+};
+
+/**
  * The git tools bound to the repository at `root`: the catalog, the tool source that runs a call,
- * and the system text that says the working folder is the repository's root (`repositoryLine`).
+ * and the system text that says the working folder is the root of a repository or of a linked
+ * worktree (`repositoryLine`).
  * With `strictInput`, a call whose input has properties its tool does not take is refused; without
  * (the default), it runs without them, and its result says which were ignored.
  */
 export function gitTools(root: string, options: { readonly strictInput?: boolean; readonly credential?: git.Credential } = {}) {
   const tools = gitToolsWith((tool) => anyTool(described(bound({ repository: root })(tool))), options);
-  return { catalog: tools.map((tool) => tool.spec), source: sourceOf(tools, { strictInput: options.strictInput ?? false }), system: repositoryLine };
+  return { catalog: tools.map((tool) => tool.spec), source: sourceOf(tools, { strictInput: options.strictInput ?? false }), system: repositoryLine(isWorktreeRoot(root)) };
 }

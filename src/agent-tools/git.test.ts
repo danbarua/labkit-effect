@@ -1,6 +1,6 @@
 /** Exercise the tools through their source against real repositories, without invoking git. */
 import {expect} from "bun:test";
-import {mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import * as git from "es-git";
@@ -11,7 +11,7 @@ import {CallId, ToolName} from "../agent-machine/names.ts";
 import {asText, receivedJson} from "../agent-session/received.ts";
 import {undescribedInputs} from "../../tests/support/tool-input.ts";
 import {described} from "./described.ts";
-import {gitTools, gitToolsWith} from "./git.ts";
+import {gitTools, gitToolsWith, isWorktreeRoot} from "./git.ts";
 import {inWorkspace} from "./in-workspace.ts";
 import {anyTool} from "./tool.ts";
 
@@ -268,5 +268,23 @@ test("a git tool with an action refuses a call without an input that the action 
         expect(await f.call("git_remote", {action: "list"})).toBe("[]");
     } finally {
         f.dispose();
+    }
+});
+
+test("a folder whose .git file names a git directory with a commondir is a linked worktree, and the system line says so; a submodule's .git file and a repository's .git folder are not", () => {
+    const root = mkdtempSync(join(tmpdir(), "git-worktree-test-"));
+    try {
+        mkdirSync(join(root, "main", ".git", "worktrees", "wt"), {recursive: true});
+        writeFileSync(join(root, "main", ".git", "worktrees", "wt", "commondir"), "../..\n");
+        mkdirSync(join(root, "main", ".git", "modules", "sub"), {recursive: true});
+        mkdirSync(join(root, "wt"));
+        writeFileSync(join(root, "wt", ".git"), `gitdir: ${join(root, "main", ".git", "worktrees", "wt")}\n`);
+        mkdirSync(join(root, "sub"));
+        writeFileSync(join(root, "sub", ".git"), "gitdir: ../main/.git/modules/sub\n");
+        expect([isWorktreeRoot(join(root, "wt")), isWorktreeRoot(join(root, "sub")), isWorktreeRoot(join(root, "main"))]).toEqual([true, false, false]);
+        expect(gitTools(join(root, "wt")).system).toBe("The working folder is the root of a git worktree, which the git tools work in.");
+        expect(gitTools(join(root, "main")).system).toBe("The working folder is the root of a git repository, which the git tools work in.");
+    } finally {
+        rmSync(root, {recursive: true, force: true});
     }
 });
