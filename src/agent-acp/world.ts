@@ -89,7 +89,8 @@ const aboutOf = (input: Readonly<Record<string, unknown>>): string | undefined =
 const gitToolsAt = (cwd: string, strictInput: boolean) => (isRepositoryRoot(cwd) ? gitTools(cwd, { strictInput }) : undefined);
 
 /** Returns the system text for the working folder `cwd`: the line that names it, and the git tools' line when it is a repository's root. */
-const systemFor = (cwd: string, git: ReturnType<typeof gitToolsAt>): string => [workingFolderLine(cwd), ...(git === undefined ? [] : [git.system])].join(" ");
+const systemFor = (cwd: string, git: ReturnType<typeof gitToolsAt>): Effect.Effect<string> =>
+  Effect.map(git === undefined ? Effect.succeed("") : Effect.map(git.system, (line) => ` ${line}`), (line) => `${workingFolderLine(cwd)}${line}`);
 
 /**
  * The tools that go through the editor (`editor-tools.ts`), for the methods the client advertised:
@@ -140,7 +141,7 @@ export const editorWorld: World = {
             : located;
         });
 
-      return { system: systemFor(cwd, git), sources: [source, ...(git === undefined ? [] : [yield* git.source])], present };
+      return { system: yield* systemFor(cwd, git), sources: [source, ...(git === undefined ? [] : [yield* git.source])], present };
     }),
 };
 
@@ -156,7 +157,7 @@ export const workspaceWorld: World<FileSystem.FileSystem> = {
       const workspace = workspaceTools(cwd, { strictInput, ...(environment === undefined ? {} : { environment }) });
       const git = gitToolsAt(cwd, strictInput);
       return {
-        system: systemFor(cwd, git),
+        system: yield* systemFor(cwd, git),
         sources: [yield* workspace.source.pipe(Effect.provideService(FileSystem.FileSystem, fs)), ...(git === undefined ? [] : [yield* git.source])],
         present: presentFrom([...workspace.catalog, ...(git?.catalog ?? [])]),
       };

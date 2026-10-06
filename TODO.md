@@ -222,6 +222,9 @@ model.
 - [ ] The system prompt belongs in context assembly, as configuration; it is to be designed and
       tried. A hard-coded one ("You are a helpful assistant") will do until the host's question
       of where a user's things live has an answer.
+- [ ] `list_dir` in a git repository says what git knows of each entry: ignored
+      (`Repository.isPathIgnored`) or its status (`Repository.findStatusFile`, which includes
+      ignored) (Dan, 2026-10-06).
 - [ ] A current folder inside the working folder, so that a session works in one package of a
       monorepo (Dan, 2026-10-06). The git tools then do what `git` does from that folder: they find
       the repository above it. Where a path may go (inside the workspace, through a symbolic link)

@@ -4,6 +4,8 @@ export const logKeys = {
   tools: {
     /** A tool call's input had properties its tool does not take; the call ran without them (strict input off). */
     inputIgnored: "tool.input.ignored",
+    /** The git tools' repository could not be opened to say whether it is a linked worktree; the system text calls it a repository. */
+    repositoryNotOpened: "tool.git.repository_not_opened",
   },
   blobs: {
     /** A blob's file holds bytes whose hash is not its id; the store finds nothing for it. */

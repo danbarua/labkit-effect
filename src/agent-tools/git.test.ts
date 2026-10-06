@@ -1,8 +1,8 @@
 /** Exercise the tools through their source against real repositories, without invoking git. */
 import {expect} from "bun:test";
-import {mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {basename, join} from "node:path";
 import * as git from "es-git";
 import {Effect} from "effect";
 import {test} from "../../tests/support/test.ts";
@@ -11,7 +11,7 @@ import {CallId, ToolName} from "../agent-machine/names.ts";
 import {asText, receivedJson} from "../agent-session/received.ts";
 import {undescribedInputs} from "../../tests/support/tool-input.ts";
 import {described} from "./described.ts";
-import {gitTools, gitToolsWith, isWorktreeRoot} from "./git.ts";
+import {gitTools, gitToolsWith} from "./git.ts";
 import {inWorkspace} from "./in-workspace.ts";
 import {anyTool} from "./tool.ts";
 
@@ -242,12 +242,11 @@ test("git diff reports binary and symlink changes, and staged restore preserves 
 });
 
 test("bound to a repository, the git tools are not offered repository, every input has a description, and no description or input schema names the repository's folder", () => {
-    const {catalog, system} = gitTools("/work/project");
+    const {catalog} = gitTools("/work/project");
     expect(catalog.filter((tool) => JSON.stringify(tool.input).includes('"repository"')).map((tool) => tool.name as string)).toEqual([]);
     expect(catalog.flatMap((tool) => undescribedInputs(tool.input).map((input) => `${tool.name}: ${input}`))).toEqual([]);
     expect(catalog.filter((tool) => JSON.stringify([tool.description, tool.input]).includes("/work/project")).map((tool) => tool.name as string)).toEqual([]);
     expect(catalog.every((tool) => JSON.stringify(tool.input).includes('"intent"'))).toBe(true);
-    expect(system).toBe("The working folder is the root of a git repository, which the git tools work in.");
 });
 
 test("an unbound git tool is offered repository as a folder path, which inWorkspace describes as relative to the working folder", () => {
@@ -271,20 +270,19 @@ test("a git tool with an action refuses a call without an input that the action 
     }
 });
 
-test("a folder whose .git file names a git directory with a commondir is a linked worktree, and the system line says so; a submodule's .git file and a repository's .git folder are not", () => {
-    const root = mkdtempSync(join(tmpdir(), "git-worktree-test-"));
+test("the system line says that the working folder is a git worktree for a linked worktree, and a git repository for the main checkout", async () => {
+    const f = await fixture();
     try {
-        mkdirSync(join(root, "main", ".git", "worktrees", "wt"), {recursive: true});
-        writeFileSync(join(root, "main", ".git", "worktrees", "wt", "commondir"), "../..\n");
-        mkdirSync(join(root, "main", ".git", "modules", "sub"), {recursive: true});
-        mkdirSync(join(root, "wt"));
-        writeFileSync(join(root, "wt", ".git"), `gitdir: ${join(root, "main", ".git", "worktrees", "wt")}\n`);
-        mkdirSync(join(root, "sub"));
-        writeFileSync(join(root, "sub", ".git"), "gitdir: ../main/.git/modules/sub\n");
-        expect([isWorktreeRoot(join(root, "wt")), isWorktreeRoot(join(root, "sub")), isWorktreeRoot(join(root, "main"))]).toEqual([true, false, false]);
-        expect(gitTools(join(root, "wt")).system).toBe("The working folder is the root of a git worktree, which the git tools work in.");
-        expect(gitTools(join(root, "main")).system).toBe("The working folder is the root of a git repository, which the git tools work in.");
+        await f.seed();
+        const linked = join(f.root, "..", `${basename(f.root)}-worktree`);
+        f.repo.worktree("linked", linked);
+        try {
+            expect(await Effect.runPromise(gitTools(linked).system)).toBe("The working folder is the root of a git worktree, which the git tools work in.");
+            expect(await Effect.runPromise(gitTools(f.root).system)).toBe("The working folder is the root of a git repository, which the git tools work in.");
+        } finally {
+            rmSync(linked, {recursive: true, force: true});
+        }
     } finally {
-        rmSync(root, {recursive: true, force: true});
+        f.dispose();
     }
 });

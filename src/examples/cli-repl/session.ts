@@ -215,8 +215,10 @@ export const withSession = <A, E, R, L, H>(
     const session = yield* openSession;
     yield* host.follow(session);
     const facts = yield* session.facts;
-    if (facts.length === 0)
-      yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: changed({}, config.settings) }, system: [[workspace.system, ...(git === undefined ? [] : [git.system])].join(" "), ...(config.system === undefined ? [] : [config.system])].join("\n\n"), tools: yield* offeredTools }));
+    if (facts.length === 0) {
+      const folder = [workspace.system, ...(git === undefined ? [] : [yield* git.system])].join(" ");
+      yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: changed({}, config.settings) }, system: [folder, ...(config.system === undefined ? [] : [config.system])].join("\n\n"), tools: yield* offeredTools }));
+    }
     else {
       const left = leftRunning(facts);
       if (left === undefined) yield* session.goOn;
