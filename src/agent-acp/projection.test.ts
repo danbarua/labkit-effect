@@ -12,6 +12,9 @@ import { CallId, ToolName } from "../agent-machine/names.ts";
 import { CapturedObservation } from "../agent-machine/observation.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
 import { receivedJson } from "../agent-session/received.ts";
+import { jsonSchemaOf } from "../agent-session/tool-input.ts";
+import { described } from "../agent-tools/described.ts";
+import { anyTool, type Tool } from "../agent-tools/tool.ts";
 import { next as nextIn, type Present, presentFrom, type ProjectionContext, type ProjectionInput, type ProjectionState, project as projectIn, start } from "./projection.ts";
 
 /** `project` and `next`, run: the presentations here read nothing. */
@@ -703,9 +706,18 @@ test("text of only whitespace that ends a request is not sent with the next requ
   expect(project(inputs, live).updates.filter((update) => update.sessionUpdate === "agent_message_chunk")).toEqual([said("Listing."), said("Done.")] as never);
 });
 
-test("the default presentation titles a call by the description it gives, and by its tool's name when it gives none", () => {
-  const titled = (input: object) => Effect.runSync(presentFrom(tools)({ call: CallId.make("c1"), tool: ToolName.make("ls"), input: receivedJson(input as never) })).title;
-  expect(titled({ path: ".", description: "List the working folder." })).toBe("List the working folder.");
-  expect(titled({ path: "." })).toBe("ls");
-  expect(titled({ path: ".", description: "" })).toBe("ls");
+test("the default presentation titles a call to a described tool by its description, on one line; a call to any other tool, or with no description, by its tool's name", () => {
+  const look: Tool<{ readonly path: typeof Schema.String }> = { name: ToolName.make("look"), kind: "read", replay: "safe", description: "Looks.", input: Schema.Struct({ path: Schema.String }), run: () => Effect.succeed("") };
+  const issue: ToolSpec = {
+    name: ToolName.make("create_issue"),
+    description: "Creates an issue.",
+    input: jsonSchemaOf(Schema.Struct({ description: Schema.String.annotate({ description: "The issue's body." }) })),
+    kind: "edit",
+    replay: "unsafe",
+  };
+  const catalog = [anyTool(described(look)).spec, issue];
+  const titled = (tool: string, input: object) => Effect.runSync(presentFrom(catalog)({ call: CallId.make("c1"), tool: ToolName.make(tool), input: receivedJson(input as never) })).title;
+  expect(titled("look", { path: ".", description: "Look at\n  the working folder." })).toBe("Look at the working folder.");
+  expect(titled("look", { path: "." })).toBe("look");
+  expect(titled("create_issue", { description: "A body of several paragraphs." })).toBe("create_issue");
 });

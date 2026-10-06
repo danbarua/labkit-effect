@@ -36,7 +36,7 @@ import { asText, parseJson, receivedText } from "../agent-session/received.ts";
 import { inside, workspaceInput } from "../agent-tools/in-workspace.ts";
 import { FilePath } from "../agent-tools/paths.ts";
 import { commandSeconds, EditFile, maxReadBytes, maxReadText, ReadFile, RunCommand, workingFolderLine, workspaceTools } from "../agent-tools/workspace.ts";
-import { type Present, type Presented, presentFrom } from "./projection.ts";
+import { oneLine, type Present, type Presented, presentFrom } from "./projection.ts";
 
 /** What a world is given for one session, when the session is made. */
 export interface WorldOpening {
@@ -119,12 +119,6 @@ const commandOutcome = (
   });
   const text = `${truncated ? `[The output's beginning was cut: its last ${maxReadText} follow.]\n` : ""}${output}${output.endsWith("\n") || output === "" ? "" : "\n"}${ending}`;
   return Option.isSome(exited) && exited.value.exitCode === 0 ? succeeded(text) : reported(text);
-};
-
-/** Returns `text` on one line of at most 120 characters, for a title. */
-const oneLine = (text: string): string => {
-  const line = text.replace(/\s+/g, " ").trim();
-  return line.length <= 120 ? line : `${line.slice(0, 119)}…`;
 };
 
 /** Returns `outcome` with `note` after its output, or after the error it reported. */

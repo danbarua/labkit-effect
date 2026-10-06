@@ -28,7 +28,7 @@ import type { CapturedObservation, ModelPart, ToolFailure, ToolOutcome } from ".
 import type { Received } from "../agent-machine/received.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
 import { asText, parseJson } from "../agent-session/received.ts";
-import { callDescriptionOf } from "../agent-tools/described.ts";
+import { callDescriptionOf, isDescribed } from "../agent-tools/described.ts";
 
 /** An input to the projection: a fact, or an item that a model request passed on while it ran. */
 export type ProjectionInput = Fact | CapturedObservation;
@@ -79,10 +79,18 @@ const failureText = (tool: ToolName, reason: ToolFailure): string => {
 
 const text = (value: string): ContentBlock => ({ type: "text", text: value });
 
-/** Returns a call's title: the description it gives, or its tool's name. */
-const titleOf = (call: Call): string => {
+/** Returns `text` on one line of at most 120 characters, for a title. */
+export const oneLine = (text: string): string => {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length <= 120 ? line : `${line.slice(0, 119)}…`;
+};
+
+/** Returns a call's title: the description it gives, on one line, when its tool is `spec` and `described` added that input; otherwise its tool's name. */
+const titleOf = (call: Call, spec: ToolSpec | undefined): string => {
+  if (spec === undefined || !isDescribed(spec)) return call.tool;
   const parsed = parseJson(call.input);
-  return ("value" in parsed ? callDescriptionOf(parsed.value) : undefined) ?? call.tool;
+  const description = "value" in parsed ? callDescriptionOf(parsed.value) : undefined;
+  return description === undefined ? call.tool : oneLine(description);
 };
 
 /** Returns the text that a call's outcome shows: its output, or why it failed; undefined before it ends. */
@@ -92,18 +100,19 @@ const shownOf = (tool: ToolName, outcome: ToolOutcome | undefined): string | und
 };
 
 /**
- * The default presentation over the session's tool catalog (`immutableToolCatalogOf`): the call's
- * description as the title (its `description` input, `agent-tools/described.ts`), or the tool's name
- * when the call has none; its kind from the catalog (none for a tool the catalog does not have); and,
- * once it ends, its output, or why it failed, as text.
+ * The default presentation over the session's tool catalog (`immutableToolCatalogOf`): as the title,
+ * the call's description, on one line, when `described` (`agent-tools/described.ts`) added that
+ * input to its tool, and the tool's name otherwise; its kind from the catalog (none for a tool the
+ * catalog does not have); and, once it ends, its output, or why it failed, as text.
  */
 export const presentFrom =
   (catalog: ReadonlyArray<ToolSpec>): Present =>
   (call, outcome) => {
-    const kind = catalog.find((tool) => tool.name === call.tool)?.kind;
+    const spec = catalog.find((tool) => tool.name === call.tool);
+    const kind = spec?.kind;
     const shown = shownOf(call.tool, outcome);
     return Effect.succeed({
-      title: titleOf(call),
+      title: titleOf(call, spec),
       ...(kind === undefined ? {} : { kind }),
       ...(shown === undefined ? {} : { content: [{ type: "content" as const, content: text(shown) }] }),
     });

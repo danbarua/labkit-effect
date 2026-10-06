@@ -4,7 +4,9 @@
  * the call's title (`callDescriptionOf`). The tool that `described` wraps runs without it.
  */
 
-import { Schema, Struct } from "effect";
+import { Predicate, Schema, Struct } from "effect";
+import type { ToolSpec } from "../agent-session/contracts.ts";
+import { jsonSchemaOf } from "../agent-session/tool-input.ts";
 import type { Fields, Tool } from "./tool.ts";
 
 /** The input that `described` adds. */
@@ -23,6 +25,19 @@ export const described = <F extends Fields & { readonly description?: never }, R
     return tool.run(Object.fromEntries(Object.entries(given).filter(([name]) => name !== "description")) as Schema.Struct<F>["Type"]);
   },
 });
+
+/** The `description` input as the model is offered it. */
+const offered = JSON.stringify(jsonSchemaOf(callDescription));
+
+/**
+ * Whether `spec`, a tool as the model is offered it, has the `description` input that `described`
+ * adds. Another tool's input named `description` (an MCP tool's issue body, for example) is not it.
+ */
+export const isDescribed = (spec: ToolSpec): boolean => {
+  const properties = Predicate.isReadonlyObject(spec.input) ? spec.input["properties"] : undefined;
+  const added = Predicate.isReadonlyObject(properties) ? properties["description"] : undefined;
+  return added !== undefined && JSON.stringify(added) === offered;
+};
 
 /** Returns the description that a call's `input` gives, when it gives one. */
 export const callDescriptionOf = (input: unknown): string | undefined => {

@@ -146,8 +146,8 @@ export const readFile: Tool<typeof ReadFile.fields, FileSystem.FileSystem> = {
       const start = (line ?? 1) - 1;
       const part = whole ? text : text.split("\n").slice(start, limit === undefined ? undefined : start + limit).join("\n");
       if (Buffer.byteLength(part) <= maxReadBytes) return part;
-      const fewer = { path, line: line ?? 1, limit: limit === undefined ? 100 : Math.max(1, Math.floor(limit / 2)) };
-      return yield* new Rejected({ problem: `The result is over ${maxReadText}. Read fewer lines: ${JSON.stringify(fewer)}.` });
+      const fewer = limit === undefined ? 100 : Math.max(1, Math.floor(limit / 2));
+      return yield* new Rejected({ problem: `The result is over ${maxReadText}. Read fewer lines, for example line ${line ?? 1} and limit ${fewer}.` });
     }),
 };
 

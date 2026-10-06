@@ -144,7 +144,7 @@ test("a call that cannot run says why: a path outside the working folder, a miss
   expect(await call("read_file", { path: "../outside.txt" })).toBe(`rejected: ../outside.txt is not inside the working folder, ${root}.`);
   expect(await call("read_file", { path: "/etc/hosts" })).toBe(`rejected: /etc/hosts is not inside the working folder, ${root}.`);
   expect(await call("read_file", { path: "missing.txt" })).toStartWith(`reported: ${root}/missing.txt:`);
-  expect(await call("read_file", { path: "big.txt" })).toBe(`rejected: The result is over 256 KiB. Read fewer lines: {"path":"${root}/big.txt","line":1,"limit":100}.`);
+  expect(await call("read_file", { path: "big.txt" })).toBe("rejected: The result is over 256 KiB. Read fewer lines, for example line 1 and limit 100.");
   expect(await call("read_file", { line: 1 })).toStartWith("rejected: read_file does not take this input:");
   expect(await call("delete_file", { path: "a" })).toBe("NotFound");
 });
