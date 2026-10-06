@@ -261,7 +261,7 @@ export const gitToolsWith = <T>(
     actionTool(
       "git_branch",
       "edit",
-      "List, create, rename or delete local branches.",
+      "List, create, rename or delete local branches. The list marks the current branch.",
       branchActions,
       {
         action: Schema.Literals(["list", "create", "delete", "rename"]).annotate({ description: "What to do." }),
@@ -272,7 +272,11 @@ export const gitToolsWith = <T>(
         new_name: optionalText("For rename: the branch's new name."),
       },
       (repo, input) => {
-        if (input.action === "list") return json(collect(repo.branches(input.type === undefined ? {} : { type: input.type })));
+        if (input.action === "list") {
+          // As `git branch` marks the current branch with `*`, the list marks it `current`.
+          const head = repo.getReference("HEAD").symbolicTarget();
+          return json(collect(repo.branches(input.type === undefined ? {} : { type: input.type })).map((branch) => ({ ...branch, ...(branch.type === "Local" && head === `refs/heads/${branch.name}` ? { current: true } : {}) })));
+        }
         const name = needed(input.name);
         if (input.action === "create") {
           repo.createBranch(name, commit(repo, input.start));

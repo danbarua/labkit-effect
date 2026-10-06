@@ -4,9 +4,11 @@
  *
  * The tools work in the folder the CLI runs in (`agent-tools/workspace.ts`): `read_file` and
  * `list_dir` read it, `write_file` and `edit_file` change it, and `run_command` runs a shell command
- * in it; then come the tools of the MCP servers the configuration names (`configuration.ts`). The
- * system prompt starts with the line that names that folder as the working folder, which the tool
- * descriptions refer to; the `--system-prompt` and `--append-system-prompt` text follows it. The
+ * in it. When the folder is the root of a git repository, the git tools (`agent-tools/git.ts`) come
+ * next, bound to it. Then come the tools of the MCP servers the configuration names
+ * (`configuration.ts`). The system prompt starts with the line that names that folder as the working
+ * folder, which the tool descriptions refer to, and the line that says it is a repository's root
+ * when it is one; the `--system-prompt` and `--append-system-prompt` text follows. The
  * policies and turn-end hooks come from the configuration (`agent-config`); by default, permission
  * follows `--permission-mode`.
  */
@@ -29,6 +31,7 @@ import type { Ending } from "../../agent-machine/decision.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
 import { InputText, SessionId, type TurnId, Via } from "../../agent-machine/names.ts";
 import { changed, type SettingsChange } from "../../agent-machine/settings.ts";
+import { gitTools, isRepositoryRoot } from "../../agent-tools/git.ts";
 import { workspaceTools } from "../../agent-tools/workspace.ts";
 import { leftRunning, type LeftRunning } from "../../agent-machine/left-running.ts";
 import { endTurnLeftRunning, openSession, type Session } from "../../agent-session/loop.ts";
@@ -81,8 +84,12 @@ const workspaceOf = (config: Config) =>
     environment: processEnvironmentWith(seamListsOf(config.configuration, { canAsk: config.canAsk }).commandEnvironment ?? [removeCredentials()]),
   });
 
+/** The git tools bound to the working folder, when it is the root of a git repository; undefined otherwise. */
+const gitOf = (config: Config) => (isRepositoryRoot(process.cwd()) ? gitTools(process.cwd(), { strictInput: config.strictToolInput }) : undefined);
+
 /**
- * The loop's services for a CLI session: the tool sources (the workspace's, then the MCP servers'),
+ * The loop's services for a CLI session: the tool sources (the workspace's, the git tools' when the
+ * working folder is a repository's root, then the MCP servers'),
  * notices about servers that are not running, turn numbering that continues from the stored facts,
  * and the configuration's policies and turn-end hooks.
  */
@@ -182,13 +189,14 @@ export const withSession = <A, E, R, L, H>(
   use: (session: Session, mcp: McpServers) => Effect.Effect<A, E, R>,
 ) => {
   const workspace = workspaceOf(config);
+  const git = gitOf(config);
   const store = config.persist ? FileBackedSessionStore(storeFileOf(storeFolder, config.sessionId)) : ephemeralSessionStore(config.continues ?? []);
   const opened = (mcp: McpServers) => Effect.gen(function* () {
     const session = yield* openSession;
     yield* host.follow(session);
     const facts = yield* session.facts;
     if (facts.length === 0)
-      yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: changed({}, config.settings) }, system: [workspace.system, ...(config.system === undefined ? [] : [config.system])].join("\n\n"), tools: yield* offeredTools }));
+      yield* session.observe(openedWith({ session: SessionId.make(config.sessionId), model: { ...config.target, settings: changed({}, config.settings) }, system: [[workspace.system, ...(git === undefined ? [] : [git.system])].join(" "), ...(config.system === undefined ? [] : [config.system])].join("\n\n"), tools: yield* offeredTools }));
     else {
       const left = leftRunning(facts);
       if (left === undefined) yield* session.goOn;
@@ -219,7 +227,7 @@ export const withSession = <A, E, R, L, H>(
     // The MCP servers start in the session's scope, before its services, because their tools are among them.
     const mcp = yield* startMcpServers(givenOf(config.configuration), [{ uri: pathToFileURL(process.cwd()).href, name: basename(process.cwd()) }]);
     yield* requiredRunning(config.configuration, mcp);
-    const sources = [yield* workspace.source, ...mcp.sources];
+    const sources = [yield* workspace.source, ...(git === undefined ? [] : [yield* git.source]), ...mcp.sources];
     // The store logs while it opens (a lock taken over, a torn line cut off) to the session's log.
     return yield* opened(mcp).pipe(Effect.provide(Layer.mergeAll(servicesOf(config, sources, mcp), logs).pipe(Layer.provideMerge(store.pipe(Layer.provide(logs))))));
   }).pipe(

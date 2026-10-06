@@ -193,7 +193,7 @@ export const editorWorld: World = {
           name: ToolName.make("run_command"),
           kind: "execute",
           replay: "unsafe",
-          description: `Run a shell command in the editor's terminal, in the working folder. The result is its output and its exit code; an output over ${maxReadText} is cut to its last ${maxReadText}. Use it to list and search files (ls, find, grep), run tests and use git.`,
+          description: `Run a shell command in the editor's terminal, in the working folder. The result is its output and its exit code; an output over ${maxReadText} is cut to its last ${maxReadText}. Use it to list and search files (ls, find, grep) and run tests.`,
           input: jsonSchemaOf(RunCommand),
         }),
       ];

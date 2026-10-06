@@ -217,7 +217,7 @@ export const runCommand = (root: string, environment: Environment): Tool<typeof 
   name: ToolName.make("run_command"),
   kind: "execute",
   replay: "unsafe",
-  description: `Run a shell command in the working folder. The result is its output (stdout, then stderr) and its exit code; an output over ${maxReadText} is cut to its last ${maxReadText}. Use it to search files (grep, find), run tests and use git.`,
+  description: `Run a shell command in the working folder. The result is its output (stdout, then stderr) and its exit code; an output over ${maxReadText} is cut to its last ${maxReadText}. Use it to search files (grep, find) and run tests.`,
   input: RunCommand,
   run: ({ command, timeout_seconds }) => {
     const seconds = timeout_seconds ?? commandSeconds;

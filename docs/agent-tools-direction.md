@@ -132,8 +132,10 @@ that nailed and robust first."
 2. `bound`: the git tools bound to the workspace's repository. Built: `src/agent-tools/bound.ts`.
    Each git tool (`git.ts`) is a primitive that takes `repository`; `gitTools(root)` binds it to
    `root` and adds `intent`.
-3. The git tools offered to sessions. Built for ACP (`src/agent-acp/world.ts`): both worlds offer
-   them when the working folder is a repository's root. The CLI does not offer them yet.
+3. The git tools offered to sessions. Built: ACP's two worlds (`src/agent-acp/world.ts`) and the CLI
+   (`src/examples/cli-repl/session.ts`) offer them when the working folder is a repository's root.
+   In ACP they are a proof of concept of tools scoped to the host's environment: they work on the
+   disk, not through the editor.
 
 Not ordered yet: replacing a tool by name, the built-in tools as a bundled plug-in, and the
 execution context as a module of its own.

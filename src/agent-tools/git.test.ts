@@ -92,7 +92,7 @@ test("git add, commit, status, diff, log, show, and revParse preserve staged ver
     }
 });
 
-test("git branch, switch, checkout and tags handle refs and refuse conflicting checkout", async () => {
+test("git branch, switch, checkout and tags handle refs and refuse conflicting checkout; the branch list marks the current branch", async () => {
     const f = await fixture();
     try {
         const first = await f.seed();
@@ -108,6 +108,7 @@ test("git branch, switch, checkout and tags handle refs and refuse conflicting c
         expect(await f.call("git_branch", {action: "delete", name: "feature"})).toStartWith("rejected:");
         expect(await f.call("git_branch", {action: "rename", name: "feature", new_name: "renamed"})).toContain("Renamed");
         expect(await f.call("git_branch", {action: "list"})).toContain("renamed");
+        expect(JSON.parse(await f.call("git_branch", {action: "list", type: "Local"}))).toEqual([{type: "Local", name: "main", current: true}, {type: "Local", name: "renamed"}]);
         expect(await f.call("git_branch", {action: "delete", name: "renamed", force: true})).toContain("Deleted");
         expect(await f.call("git_checkout", {target: first, detach: true})).toContain('"branch": null');
         expect(await f.call("git_switch", {target: "new", create: true})).toContain('"branch": "new"');
