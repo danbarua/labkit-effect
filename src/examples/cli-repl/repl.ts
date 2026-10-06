@@ -36,6 +36,7 @@ import type { CallId, TurnId } from "../../agent-machine/names.ts";
 import type { ToolOutcome } from "../../agent-machine/observation.ts";
 import type { Services, Session } from "../../agent-session/loop.ts";
 import { asText } from "../../agent-session/received.ts";
+import type { SettingsChange } from "../../agent-machine/settings.ts";
 import { type CommandContext, said } from "./command.ts";
 import { completions, offered, offeredWithoutModel, runInSession, runWithoutModel } from "./commands.ts";
 import { invalid } from "./invalid.ts";
@@ -313,11 +314,12 @@ export const terminal = (view: View, stdin?: NodeJS.ReadStream): Host<Prompt.Env
   wentOn: printReply,
 });
 
-/** What the REPL is run with besides its session: where the user's settings are written, and what it shows (`view`). */
+/** What the REPL is run with besides its session: where the user's settings are written, what it shows (`view`), and the settings the command line names. */
 export interface ReplContext {
   /** The user's configuration folder: `/model` and `/settings` write into it. */
   readonly configFolder: string;
   readonly view: View;
+  readonly commandLine: SettingsChange;
 }
 
 /** The commands' context in the REPL: the folder the CLI runs in, and the session's layers and MCP servers. */
@@ -326,6 +328,7 @@ const commandContext = (context: ReplContext, layers: CommandContext["layers"], 
   configFolder: context.configFolder,
   view: context.view,
   layers,
+  commandLine: context.commandLine,
   ...(mcp === undefined ? {} : { mcp }),
 });
 

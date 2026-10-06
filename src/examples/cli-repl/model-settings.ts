@@ -86,9 +86,10 @@ const notTaken = (options: Options, name: string, value: SettingsChange[keyof Se
  * fails otherwise, saying which value the model does not take and the values it does, or, where the
  * model takes the value alone, the other settings named that it is not taken with. `default` is taken
  * for every setting. The CLI takes only what the model takes, as it offers only that. `from`, when
- * given, names where the settings came from (`the command line`), and the error names it too.
+ * given, names where the settings came from (`the command line`), and the error names it too, with
+ * `hints` after its own.
  */
-export const takenBy = (target: Target, change: SettingsChange, from?: string) =>
+export const takenBy = (target: Target, change: SettingsChange, from?: string, ...hints: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const applying = (named: SettingsChange) => optionsFor({ provider: target.provider, model: target.model, settings: changed(target.settings ?? {}, named) });
     const together = yield* applying(change);
@@ -100,7 +101,7 @@ export const takenBy = (target: Target, change: SettingsChange, from?: string) =
         const others = entries.flatMap(([other, given]) => (other === name ? [] : [`${other}=${String(given)}`]));
         const alone = others.length === 0 ? hint : notTaken(yield* applying({ [name]: value }), name, value);
         const said = alone === undefined ? `${name}=${String(value)} is not taken with ${others.join(" ")}.` : hint;
-        return [invalid(`${target.provider}/${target.model} does not take ${name}=${String(value)}${from === undefined ? "" : ` (from ${from})`}.`, said)];
+        return [invalid(`${target.provider}/${target.model} does not take ${name}=${String(value)}${from === undefined ? "" : ` (from ${from})`}.`, said, ...hints)];
       }),
     );
     const refused = refusals.flat()[0];

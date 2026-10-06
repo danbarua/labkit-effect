@@ -19,6 +19,9 @@ export class CannotAsk extends Data.TaggedError("CannotAsk")<{
 /** The mistake `problem` is, as the CLI prints it: an `ERROR:` line and a `HINT:` line. */
 export const saidOf = (problem: CannotAsk) => invalid(problem.message, problem.hint);
 
+/** Names in a sentence: `a`, `a or b`, `a, b or c`. */
+const either = (names: ReadonlyArray<string>): string => (names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`);
+
 /** How to name another model, from where the user is. */
 const another = (by: NamedBy): string => (by === "--model" ? "name another model with --model" : "pick another model with /model");
 
@@ -40,7 +43,8 @@ export const askedOf = (model: string | undefined, by: NamedBy) =>
             Effect.fail(
               new CannotAsk({
                 message: `No model is named ${name}.`,
-                hint: `${close.length === 0 ? "" : `Did you mean ${close.join(" or ")}? `}${by === "--model" ? "bun cli models shows available models." : "Pick one with /model."}`,
+                // At most three names: the rest are listed where the hint points.
+                hint: `${close.length === 0 ? "" : `Did you mean ${either(close.slice(0, 3))}? `}${by === "--model" ? "bun cli models shows available models." : "Pick one with /model."}`,
               }),
             ),
           SourceNotAnswering: ({ provider, model: asked, at }) =>

@@ -11,6 +11,7 @@
 import type { Effect, FileSystem, Path, Terminal } from "effect";
 import type { CliError } from "effect/cli";
 import type { LayerSource } from "../../agent-config/file.ts";
+import type { SettingsChange } from "../../agent-machine/settings.ts";
 import type { Asked, ModelCatalog } from "../../agent-host/catalog.ts";
 import type { McpServers } from "../../agent-mcp/servers.ts";
 import type { Services, Session } from "../../agent-session/loop.ts";
@@ -28,6 +29,11 @@ export interface CommandContext {
   readonly view: View;
   /** The layers the session's configuration was read from, in order: a layer after the user's folder can set what a command writes into it. */
   readonly layers: ReadonlyArray<LayerSource>;
+  /**
+   * The settings the command line names. A session opened before a model is picked opens with them,
+   * so `/model` and `/switch` pick only a model that takes them.
+   */
+  readonly commandLine: SettingsChange;
   /** The session's MCP servers; absent when the session has none. */
   readonly mcp?: McpServers;
 }

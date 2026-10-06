@@ -3,7 +3,8 @@
  * a well-known model, or `provider/model`. `/model` alone shows the model being asked and offers the
  * models that can be asked to pick; when there are none, it says what would make one available.
  * Before a model is picked, the model named or picked is the one the session opens with, and the one
- * new sessions ask. `/switch` changes the model of this session only.
+ * new sessions ask; a model that does not take the settings the command line names is not picked, and
+ * nothing is written. `/switch` changes the model of this session only.
  *
  * The model new sessions ask is written as `model` into the user's configuration folder
  * (`agent-config` `write.ts`): into the file that sets it, else `models.yml`. A layer read after the
@@ -19,7 +20,7 @@ import { modelOf } from "../../../agent-session/configuration/session-setup.ts";
 import { writeSetting } from "../../../agent-config/write.ts";
 import { type CommandContext, type DoneWithoutModel, type ReplCommand, said } from "../command.ts";
 import { invalid } from "../invalid.ts";
-import { inForce } from "../model-settings.ts";
+import { inForce, takenBy } from "../model-settings.ts";
 import { targetOf } from "../models.ts";
 import { modelNamed, switchTo } from "../picking.ts";
 
@@ -62,6 +63,8 @@ export const model: ReplCommand = {
       const chosen = yield* modelNamed(words, "Ask which model, in this session and new ones?");
       if (chosen === undefined) return { _tag: "Quiet" } as const;
       const target = yield* targetOf(chosen, "/model");
+      // The session opens with the command line's settings: a model that does not take them is not picked, and nothing is written.
+      yield* takenBy(target, context.commandLine, "the command line", "Pick another model, or start the CLI again without that setting.");
       const done: DoneWithoutModel = { _tag: "Picked", target, text: yield* madeDefault(target, context) };
       return done;
     }),

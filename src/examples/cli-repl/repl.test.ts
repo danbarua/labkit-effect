@@ -26,6 +26,7 @@ import { typing } from "../../../tests/support/terminal.ts";
 import { CannotAsk } from "./models.ts";
 import { replyOf, repl, terminal, withoutModel } from "./repl.ts";
 import { type View, viewOf } from "./view.ts";
+import type { SettingsChange } from "../../agent-machine/settings.ts";
 import { ask, type Config } from "./session.ts";
 
 /** What is printed after a turn whose one response said `text` and ended `ending`; `printed`, whether it was printed as it arrived. */
@@ -123,7 +124,7 @@ const typedTo = async (model: ReturnType<typeof thinkingThenOk>, lines: Readonly
       const shown = view ?? (yield* viewOf("on"));
       yield* terminal(shown, stdin).follow(session);
       const config = { sessionId: "s1", target: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") }, configuration: { layers: [] } } as unknown as Config;
-      yield* repl(session, config, undefined, true, { configFolder: configFolder(), view: shown }).pipe(Effect.provideService(EffectTerminal.Terminal, yield* typing(lines)));
+      yield* repl(session, config, undefined, true, { configFolder: configFolder(), view: shown, commandLine: {} }).pipe(Effect.provideService(EffectTerminal.Terminal, yield* typing(lines)));
       return yield* TestConsole.logLines;
     }).pipe(Effect.provide(services(model)), Effect.provideService(ModelStreamInterval, Millis.make(0))),
   ).finally(() => {
@@ -175,12 +176,16 @@ const openai: CatalogSource = { provider: ProviderName.make("openai"), models: [
 const notAnswering: CatalogSource = { provider: ProviderName.make("localhost"), models: undefined, at: "http://localhost:8000/v1" };
 const noModel = new CannotAsk({ message: "No model is set.", hint: "Pick one with /model." });
 
-/** The REPL before a model is picked, typed `lines`, with a catalog of `sources`: the model picked, what it logged, and whether it shows thinking at the end. */
-const waited = (lines: ReadonlyArray<string>, first?: string, sources: ReadonlyArray<CatalogSource> = [openai]) =>
+/**
+ * The REPL before a model is picked, typed `lines`, with a catalog of `sources` and the settings the
+ * command line names (`commandLine`): the model picked, what it logged, and whether it shows thinking
+ * at the end.
+ */
+const waited = (lines: ReadonlyArray<string>, first?: string, sources: ReadonlyArray<CatalogSource> = [openai], commandLine: SettingsChange = {}) =>
   runTest(
     Effect.gen(function* () {
       const view = yield* viewOf("on");
-      const picked = yield* withoutModel(noModel, first, { configFolder: configFolder(), view }, []).pipe(Effect.provideService(EffectTerminal.Terminal, yield* typing(lines)));
+      const picked = yield* withoutModel(noModel, first, { configFolder: configFolder(), view, commandLine }, []).pipe(Effect.provideService(EffectTerminal.Terminal, yield* typing(lines)));
       return { picked, logged: yield* TestConsole.logLines, thinking: yield* Ref.get(view.thinking) };
     }).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, catalogOf(sources), TestConsole.layer))),
   );
@@ -273,4 +278,12 @@ test("the REPL: Option+T while a turn runs hides the thinking from then on, and 
   expect(written).not.toContain("think\x1b");
   expect(written).toContain("\x1b[2m(thinking hidden (Option+T shows it))\x1b[0m\n");
   expect(written).toContain("ok\n");
+});
+
+test("before a model is picked: a model that does not take the settings the command line names is not picked, and nothing is written; the REPL goes on", async () => {
+  // gpt-5 takes minimal to high; gpt-5.5 takes low to xhigh.
+  const { picked, logged } = await waited(["/model gpt-5", "/switch gpt-5", "/model gpt-5.5"], undefined, [openai], { effort: "xhigh" });
+  const refused = "ERROR: openai/gpt-5 does not take effort=xhigh (from the command line).\nHINT: effort takes default, minimal, low, medium, high.\nHINT: Pick another model, or start the CLI again without that setting.";
+  expect(logged.slice(2)).toEqual([refused, refused, `New sessions ask openai/gpt-5.5: written to ${join(configFolder(), "models.yml")}.`]);
+  expect(picked as unknown).toEqual({ provider: "openai", model: "gpt-5.5" });
 });

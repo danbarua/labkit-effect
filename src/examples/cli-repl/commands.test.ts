@@ -68,7 +68,7 @@ const session = (
       );
       for (const observation of after) yield* opened.observe(observation as Parameters<typeof opened.observe>[0]);
       const view = yield* viewOf("on");
-      const context = { folder: testFolder(), configFolder: configFolder(), view, layers };
+      const context = { folder: testFolder(), configFolder: configFolder(), view, layers, commandLine: {} };
       const printed: Array<string | undefined> = [];
       for (const line of lines) {
         // `/settings` alone asks at the terminal which setting to change; here it stands for what it shows first.

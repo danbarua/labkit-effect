@@ -72,10 +72,14 @@ test("a name resolves to a well-known provider's model, as provider/model or by 
   expect(await resolved("localhost/org/model", sources)).toBe("localhost/org/model");
 });
 
-test("a name that no source has fails with the names it is close to; another source accepts only the models it lists", async () => {
-  const sources = [source("openai", ["gpt-5.5"]), source("localhost", ["qwen"])];
+test("a name that no source has fails with the names it is close to among the models that can be asked; another source accepts only the models it lists", async () => {
+  const sources = [source("openai", ["gpt-5.5", "gpt-5.5-pro"]), source("localhost", ["qwen", "qwen-coder"])];
   expect(await resolved("GPT-5.5-PRO", sources)).toEqual({ notFound: ["openai/gpt-5.5-pro"] });
-  expect(await resolved("localhost/QWEN", sources)).toEqual({ notFound: ["localhost/qwen"] });
+  // xai has no key set here, so none of its models is suggested.
+  expect(await resolved("grok-9", sources)).toEqual({ notFound: [] });
+  // A source named with no model suggests that source's models.
+  expect(await resolved("localhost/", sources)).toEqual({ notFound: ["localhost/qwen", "localhost/qwen-coder"] });
+  expect(await resolved("localhost/QWEN", sources)).toEqual({ notFound: ["localhost/qwen", "localhost/qwen-coder"] });
   expect(await resolved("nothing-like-it", sources)).toEqual({ notFound: [] });
 });
 

@@ -95,10 +95,10 @@ export class KeyNotSet extends Data.TaggedError("KeyNotSet")<{
   readonly variable: string;
 }> {}
 
-/** Returns the names among `names` that `wanted` is close to: equal apart from case, or one containing the other. */
+/** Returns the names among `names` that `wanted` is close to: equal apart from case, or one containing the other. An empty name is close to none. */
 const closeTo = (wanted: string, names: ReadonlyArray<string>): ReadonlyArray<string> => {
   const lower = wanted.toLowerCase();
-  return names.filter((name) => name.toLowerCase() === lower || name.toLowerCase().includes(lower) || lower.includes(name.toLowerCase()));
+  return lower === "" ? [] : names.filter((name) => name.toLowerCase() === lower || name.toLowerCase().includes(lower) || lower.includes(name.toLowerCase()));
 };
 
 /**
@@ -108,9 +108,10 @@ const closeTo = (wanted: string, names: ReadonlyArray<string>): ReadonlyArray<st
  * - `<other source>/…`: a model that the source lists (`localhost/…`: the local server's).
  * - A name alone: the well-known model of that name, or else another source's model of that name.
  *
- * Failures: a name that is not found fails with `ModelNotFound` and the names it is close to; a
- * model of a source that did not answer fails with `SourceNotAnswering`; a model of a well-known
- * provider whose key is not set fails with `KeyNotSet`, naming the variable.
+ * Failures: a name that is not found fails with `ModelNotFound` and the names of the models that can
+ * be asked that it is close to (`<source>/` alone: that source's models); a model of a source that
+ * did not answer fails with `SourceNotAnswering`; a model of a well-known provider whose key is not
+ * set fails with `KeyNotSet`, naming the variable.
  */
 export const targetOf = (name: string) =>
   Effect.gen(function* () {
@@ -132,11 +133,11 @@ export const targetOf = (name: string) =>
       return source === undefined ? undefined : { provider: source.provider, model: name, source };
     })();
     if (found === undefined) {
-      const names = [
-        ...Object.entries(known).flatMap(([provider, models]) => Object.keys(models).map((each) => `${provider}/${each}`)),
-        ...listing.flatMap(({ provider, models }) => (models ?? []).map((each) => `${provider}/${each}`)),
-      ];
-      return yield* new ModelNotFound({ name, close: closeTo(named === undefined ? name : name.slice(slash + 1), names) });
+      // The models that can be asked: the well-known models whose provider has a key set, and the sources' that answer.
+      const names = sources.flatMap(({ provider, models }) => (models ?? []).map((each) => `${provider}/${each}`));
+      const wanted = named === undefined ? name : name.slice(slash + 1);
+      const close = named !== undefined && wanted === "" ? names.filter((each) => each.startsWith(`${named.provider}/`)) : closeTo(wanted, names);
+      return yield* new ModelNotFound({ name, close });
     }
     const asked: Asked = { provider: ProviderName.make(found.provider), model: ModelName.make(found.model) };
     if (found.source !== undefined && found.source.models === undefined) return yield* new SourceNotAnswering({ ...asked, at: found.source.at });

@@ -219,11 +219,17 @@ export const cliOf = (brand: Brand) =>
       const stdio = yield* Stdio.Stdio;
       const interactive = yield* stdio.stdinIsTerminal;
       const { named, ...unresolved } = yield* configOf(options, interactive);
-      const context: ReplContext = { configFolder: userFolderOf(options, { name: (yield* Brand).name }), view: yield* viewOf(unresolved.configuration.view.thinking) };
+      const context: ReplContext = {
+        configFolder: userFolderOf(options, { name: (yield* Brand).name }),
+        view: yield* viewOf(unresolved.configuration.view.thinking),
+        commandLine: unresolved.settings,
+      };
       // At a terminal, a new session whose model cannot be asked opens the REPL without one, to pick one with /model.
       if (interactive && !options.print && unresolved.continues === undefined) {
         const found = yield* Effect.result(askedOf(named, "/model"));
-        const target = Result.isSuccess(found) ? found.success : yield* withoutModel(found.failure, options.prompt, context, unresolved.configuration.layers);
+        const target = Result.isSuccess(found)
+          ? found.success
+          : yield* withoutModel(found.failure, options.prompt, context, unresolved.configuration.layers).pipe(Effect.provide(knowledgeWith(unresolved.configuration.models)));
         if (target === undefined) return;
         const config: Config = yield* checked({ ...unresolved, target });
         // The prompt the command line gave was refused, and not kept, when the REPL opened without a model.

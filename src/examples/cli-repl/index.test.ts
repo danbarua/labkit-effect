@@ -77,8 +77,8 @@ test("with no --model, a new session asks the model the configuration names", as
   expect(result.stderr).toStartWith("ERROR: OPENAI_API_KEY is not set, so openai models cannot be asked.\n");
 });
 
-test("a name that is no model is refused, with the names it is close to", async () => {
-  const result = await invoke(["-p", "Hello", "--model", "GPT-5.5-PRO"]);
+test("a name that is no model is refused, with the names it is close to among the models that can be asked", async () => {
+  const result = await invoke(["-p", "Hello", "--model", "GPT-5.5-PRO"], { OPENAI_API_KEY: "set" });
   expect(result.code).not.toBe(0);
   expect(result.stderr).toBe("ERROR: No model is named GPT-5.5-PRO.\nHINT: Did you mean openai/gpt-5.5-pro? bun cli models shows available models.\n");
 });
