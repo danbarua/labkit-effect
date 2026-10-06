@@ -478,6 +478,26 @@
           "type": "null"
         }
       ]
+    },
+    "view": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "thinking": {
+              "type": "string",
+              "enum": [
+                "on",
+                "off"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "additionalProperties": false

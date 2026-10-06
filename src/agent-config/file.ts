@@ -93,10 +93,15 @@ export type McpServerConfig = (McpServerStdio | McpServerRemote) & {
   readonly connectTimeout?: Duration.Input | undefined;
 };
 
+/** What a host shows the user: whether it shows the model's thinking (`thinking`, `on` when no layer sets it). It changes nothing in a request. */
+export const View = Schema.Struct({ thinking: Schema.optionalKey(Schema.Literals(["on", "off"])) });
+export type View = typeof View.Type;
+
 /**
  * The decoded configuration: each seam that the layers list, in order; `maxHolds` when they give it;
- * the MCP servers; the model that sessions start with, when the layers name one; and the user's
- * overrides of what is known of models, by `provider/model`. A seam that no layer lists is absent.
+ * the MCP servers; the model that sessions start with, when the layers name one; the user's
+ * overrides of what is known of models, by `provider/model`; and what a host shows the user. A seam
+ * that no layer lists is absent.
  */
 export interface Configuration {
   readonly lists: Partial<Record<Seam, ReadonlyArray<Entry>>>;
@@ -104,11 +109,12 @@ export interface Configuration {
   readonly mcpServers: ReadonlyArray<McpServerConfig>;
   readonly model?: string;
   readonly models: ReadonlyMap<string, ModelOverride>;
+  readonly view: { readonly thinking: "on" | "off" };
 }
 
 const isMapping = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-const topKeys: ReadonlyArray<string> = ["plugins", ...seams, "maxHolds", "mcpServers", "extensions", "model", "models"];
+const topKeys: ReadonlyArray<string> = ["plugins", ...seams, "maxHolds", "mcpServers", "extensions", "model", "models", "view"];
 
 const MaxHolds = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
@@ -354,12 +360,16 @@ export const decodeLayers = (
         : yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(all["model"]).pipe(
             Effect.mapError((error) => new ConfigInvalid({ file: layerThatWrote(layers, ["model"]), path: "model", problem: problemOf(error) })),
           );
+    const view = yield* Schema.decodeUnknownEffect(Schema.UndefinedOr(Schema.NullOr(View)))(all["view"], { onExcessProperty: "error" }).pipe(
+      Effect.mapError((error) => new ConfigInvalid({ file: layerThatWrote(layers, ["view"]), path: "view", problem: problemOf(error) })),
+    );
     return {
       lists,
       ...(maxHolds === undefined ? {} : { maxHolds }),
       mcpServers: yield* mcpServersOf(layers, all["mcpServers"], env),
       ...(model === undefined ? {} : { model }),
       models: yield* modelsOf(layers, all["models"]),
+      view: { thinking: view?.thinking ?? "on" },
     };
   });
 
@@ -379,7 +389,7 @@ export const fileLayer = (file: string, trusted: boolean): Effect.Effect<LayerSo
   });
 
 /** Returns the configuration files in `folder` that `wanted` selects, in the order of their names; none when the folder does not exist. */
-const filesIn = (folder: string, wanted: (file: string) => boolean): Effect.Effect<ReadonlyArray<string>, ConfigInvalid, FileSystem.FileSystem> =>
+export const filesIn = (folder: string, wanted: (file: string) => boolean = () => true): Effect.Effect<ReadonlyArray<string>, ConfigInvalid, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const unreadable = (cause: unknown) => new ConfigInvalid({ file: folder, path: "", problem: `Could not be read: ${String(cause)}` });

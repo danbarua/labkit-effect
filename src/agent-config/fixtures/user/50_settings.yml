@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../../../../schemas/config.schema.json
+#
+# The user's settings: what a host shows the user. The CLI's /settings writes a change of one of them
+# into the file that sets it, else into settings.yml.
+
+# Whether a host shows the model's thinking: on or off. It changes nothing in a request.
+view:
+  thinking: off

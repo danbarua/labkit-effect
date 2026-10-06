@@ -1,8 +1,9 @@
-/** Picking a model: from the words of a command, or from the models the catalog lists. */
+/** Picking a model, from the words of a command or from the models the catalog lists, and switching a session to it. */
 
 import { Effect } from "effect";
 import { Prompt } from "effect/cli";
-import { askable, ModelCatalog } from "../../agent-host/catalog.ts";
+import { type Asked, askable, ModelCatalog } from "../../agent-host/catalog.ts";
+import type { Session } from "../../agent-session/loop.ts";
 import { invalid } from "./invalid.ts";
 import { unavailable } from "./models.ts";
 
@@ -22,3 +23,7 @@ export const modelNamed = (words: ReadonlyArray<string>, message: string) =>
     return yield* Prompt.Select({ message, choices }).pipe(Effect.catchTag("QuitError", () => Effect.undefined));
   });
 
+
+/** Reports `target` to `session` as the model to ask from the next turn on (`ModelChangeArrived`), and waits until the session has taken it. */
+export const switchTo = (session: Session, target: Asked) =>
+  session.observe({ _tag: "ModelChangeArrived", provider: target.provider, model: target.model }).pipe(Effect.andThen(session.idle));

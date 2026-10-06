@@ -180,7 +180,7 @@ test("a mistake is refused with an error naming the layer that wrote it, the pat
   );
   expect(await refusal([at("plugins:\n  mine:\n    use: loopBraker\n")])).toEndWith('plugins.mine.use: "loopBraker" is not a plug-in; those are: loopBreaker, permissions, maxTurnRequests, retryIncomplete, maxBudget, credentials');
   expect(await refusal([at("toolcalls: [permissions]\n")])).toEndWith(
-    "toolcalls: Not a key of the configuration; those are: plugins, toolCalls, modelRequests, turnEnd, knownModels, settling, toolSources, commandEnvironment, maxHolds, mcpServers, extensions, model, models",
+    "toolcalls: Not a key of the configuration; those are: plugins, toolCalls, modelRequests, turnEnd, knownModels, settling, toolSources, commandEnvironment, maxHolds, mcpServers, extensions, model, models, view",
   );
   expect(await refusal([at("toolCalls:\n  use: permissions\n")])).toEndWith("toolCalls: Expected a list of names, each one in plugins or a plug-in's own");
 });
@@ -296,7 +296,7 @@ test("merging is a fold in order: a layer that writes nothing changes nothing, a
 
 test("a file that is not there is an empty layer; a seam no layer lists is not provided, so the host's own list or the default stands", async () => {
   const configuration = await load([join(testFolder(), "nowhere.yml")]);
-  expect(configuration).toEqual({ lists: {}, mcpServers: [], models: new Map() });
+  expect(configuration).toEqual({ lists: {}, mcpServers: [], models: new Map(), view: { thinking: "on" } });
   const lists = seamListsOf(configuration, { canAsk: true });
   expect(lists).toEqual({});
   const provided = Effect.gen(function* () {
@@ -556,6 +556,7 @@ test("the example configuration folders load: the user's files in the order of t
     ["20_mcp.yml", true],
     ["30_extensions.yml", true],
     ["40_models.yml", true],
+    ["50_settings.yml", true],
     ["policies.yml", false],
     ["policies.local.yml", false],
   ]);
@@ -579,6 +580,7 @@ test("the example configuration folders load: the user's files in the order of t
     { name: "docs", url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer none" } },
   ]);
   expect(configuration.model).toBe("anthropic/claude-sonnet-5-5");
+  expect(configuration.view).toEqual({ thinking: "off" });
   expect(Object.fromEntries(configuration.models)).toEqual({
     "xai/grok-4.7": { efforts: ["minimal", "low", "medium", "high", "xhigh"] },
     "xai/grok-4.6": { efforts: ["minimal", "low", "medium", "high", "xhigh"] },
@@ -629,4 +631,16 @@ test("a variable set to the empty string counts as not set: ${VAR:-default} take
   const strict = [{ name: "user", trusted: true, value: { mcpServers: { s: { command: "${BIN}" } } } }];
   const refused = await runTest(loadConfiguration(strict, undefined, { BIN: "" }).pipe(Effect.flip, Effect.map((error) => error.message)));
   expect(refused).toBe("user: mcpServers.s.command: ${BIN} is not set, and has no default (${BIN:-default})");
+});
+
+test("view.thinking is on unless a layer sets it; a value it does not take, or a key view does not have, is refused, naming the layer", async () => {
+  const loaded = (value: unknown) => runTest(loadConfiguration([{ name: "settings.yml", trusted: true, value }], undefined, {}).pipe(Effect.result));
+  const none = await loaded({});
+  expect(none._tag === "Success" ? none.success.view : undefined).toEqual({ thinking: "on" });
+  const off = await loaded({ view: { thinking: "off" } });
+  expect(off._tag === "Success" ? off.success.view : undefined).toEqual({ thinking: "off" });
+  for (const view of [{ thinking: "maybe" }, { colour: "red" }]) {
+    const refused = await loaded({ view });
+    expect(refused._tag === "Failure" ? refused.failure.message : undefined).toStartWith("settings.yml: view: ");
+  }
 });

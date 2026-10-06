@@ -1,0 +1,67 @@
+/** Writing one setting into the user's configuration folder, read back as the configuration reads it. */
+
+import { expect } from "bun:test";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { BunServices } from "@effect/platform-bun";
+import { Effect } from "effect";
+import { runTest } from "../../tests/support/run.ts";
+import { test, testFolder } from "../../tests/support/test.ts";
+import { fileLayers, loadConfiguration } from "./file.ts";
+import { writeSetting } from "./write.ts";
+
+/** The user's folder of this test, holding `files` (by name, their text). */
+const folderWith = (files: Readonly<Record<string, string>>): string => {
+  const folder = join(testFolder(), "config");
+  mkdirSync(folder, { recursive: true });
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(folder, name), text);
+  return folder;
+};
+
+/** Writes `path` as `value` into `folder`, then reads the folder's configuration: the file written, and the configuration. */
+const written = (folder: string, path: ReadonlyArray<string>, value: string, fallback: string) =>
+  runTest(
+    Effect.gen(function* () {
+      const file = yield* writeSetting(folder, path, value, fallback);
+      const configuration = yield* loadConfiguration(yield* fileLayers(testFolder(), { configDir: folder }));
+      return { file, configuration };
+    }).pipe(Effect.provide(BunServices.layer)),
+  );
+
+test("a setting is written into the last of the folder's files that sets it, keeping its comments, and the folder's configuration reads it", async () => {
+  const folder = folderWith({
+    "10_first.yml": "model: openai/gpt-5\n",
+    "40_models.yml": "# Models.\n\n# The model a new session asks.\nmodel: anthropic/claude-sonnet-5-5 # chosen 2026-10-01\n\nmodels:\n  # Measured.\n  xai/grok-4.7:\n    efforts: [minimal, low]\n",
+  });
+  const { file, configuration } = await written(folder, ["model"], "openai/gpt-5.5", "models.yml");
+  expect(file).toBe(join(folder, "40_models.yml"));
+  expect(configuration.model).toBe("openai/gpt-5.5");
+  const text = readFileSync(file, "utf8");
+  expect(text).toBe("# Models.\n\n# The model a new session asks.\nmodel: openai/gpt-5.5 # chosen 2026-10-01\n\nmodels:\n  # Measured.\n  xai/grok-4.7:\n    efforts: [minimal, low]\n");
+  expect(readFileSync(join(folder, "10_first.yml"), "utf8")).toBe("model: openai/gpt-5\n");
+  expect(existsSync(join(folder, "models.yml"))).toBe(false);
+});
+
+test("a setting no file sets is written into the fallback file, which is created, with the folder, when it does not exist", async () => {
+  const folder = join(testFolder(), "new");
+  const { file, configuration } = await written(folder, ["view", "thinking"], "off", "settings.yml");
+  expect(file).toBe(join(folder, "settings.yml"));
+  expect(readFileSync(file, "utf8")).toBe("view:\n  thinking: off\n");
+  // `off` reads back as the text it was written as, not as a boolean.
+  expect(configuration.view).toEqual({ thinking: "off" });
+});
+
+test("a fallback file that exists keeps what it holds", async () => {
+  const folder = folderWith({ "settings.yml": "# Mine.\nmaxHolds: 2\n" });
+  const { configuration } = await written(folder, ["view", "thinking"], "off", "settings.yml");
+  expect(readFileSync(join(folder, "settings.yml"), "utf8")).toBe("# Mine.\nmaxHolds: 2\nview:\n  thinking: off\n");
+  expect(configuration.maxHolds).toBe(2);
+});
+
+test("a file of the folder that does not parse is not written, and the error names it", async () => {
+  const folder = folderWith({ "models.yml": "model: [unclosed\n" });
+  const error = await runTest(writeSetting(folder, ["model"], "openai/gpt-5.5", "models.yml").pipe(Effect.flip, Effect.provide(BunServices.layer)));
+  expect(error.file).toBe(join(folder, "models.yml"));
+  expect(error.problem).toStartWith("Not YAML:");
+  expect(readFileSync(join(folder, "models.yml"), "utf8")).toBe("model: [unclosed\n");
+});

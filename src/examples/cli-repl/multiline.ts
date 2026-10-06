@@ -12,6 +12,8 @@
  * - Tab completes: the prompt is given a function from the text typed to the texts it could become.
  *   Tab makes the text what they all begin with; what each would add to the last word is shown
  *   after the text, dimmed, as far as the row has room.
+ * - A key binding (Option+T) does what it is bound to, except during a paste, and its note is shown
+ *   dimmed after the text, in place of the completions, until the next key.
  * - The frame is redrawn after each key: the rows it took are erased, a line wider than the terminal
  *   counted as the rows it wraps to. A paste is drawn once, when it ends.
  */
@@ -25,6 +27,14 @@ export interface Typed {
   readonly pasting: boolean;
   /** The text of the frame on the screen: `text`, except during a paste, which is drawn when it ends. */
   readonly drawn: string;
+  /** What a key binding did, shown after the text, dimmed, in place of the completions, until the next key. */
+  readonly note?: string;
+}
+
+/** A key that does something other than typing (Option+T), except during a paste: `run` does it, and returns a note of what it did. */
+export interface KeyBinding {
+  readonly matches: (input: Terminal.UserInput) => boolean;
+  readonly run: Effect.Effect<string>;
 }
 
 const lead = "? You › ";
@@ -94,7 +104,9 @@ export function hinted(text: string, complete: Complete, room: number): string {
 /** What a key, or a piece of a paste, does to what is typed so far. */
 export function keyed(state: Typed, input: Terminal.UserInput, complete: Complete = nothing): Prompt.Action<Typed, string> {
   const next = (changed: Partial<Typed>): Prompt.Action<Typed, string> => {
-    const to = { ...state, ...changed };
+    // A note is shown until the next key.
+    const { note: _, ...before } = state;
+    const to = { ...before, ...changed };
     return { _tag: "NextFrame", state: { ...to, drawn: to.pasting ? state.drawn : to.text } };
   };
   const { name, ctrl, meta } = input.key;
@@ -114,12 +126,20 @@ export function keyed(state: Typed, input: Terminal.UserInput, complete: Complet
   return { _tag: "Beep" };
 }
 
-/** The frame for `text`, and after it the hint, dimmed; the cursor is left at the end of the text. */
-const drawn = (text: string, complete: Complete) =>
+/** `note` after two spaces, cut to `room` columns; nothing when there is no room. */
+const noted = (note: string, room: number): string => {
+  const all = `  ${note}`;
+  if (Bun.stringWidth(all) <= room) return all;
+  return room < 8 ? "" : `${all.slice(0, room - 1)}…`;
+};
+
+/** The frame for `text`, and after it the note, or else the completions, dimmed; the cursor is left at the end of the text. */
+const drawn = (text: string, complete: Complete, note: string | undefined) =>
   Effect.gen(function* () {
     const columns = yield* (yield* Terminal.Terminal).columns;
     const last = frame(text).split("\n").at(-1) ?? "";
-    const hint = hinted(text, complete, columns - 1 - (Bun.stringWidth(last) % columns));
+    const room = columns - 1 - (Bun.stringWidth(last) % columns);
+    const hint = note === undefined ? hinted(text, complete, room) : noted(note, room);
     const typed = yield* painted(text, false);
     return hint === "" ? typed : `${typed}\x1b7\x1b[2m${hint}${reset}\x1b8`;
   });
@@ -132,13 +152,13 @@ export const rendered = (state: Typed, action: Prompt.Action<Typed, string>, com
     case "Beep":
       return Effect.succeed("\x07");
     case "NextFrame":
-      return state.pasting ? Effect.succeed("") : drawn(state.text, complete);
+      return state.pasting ? Effect.succeed("") : drawn(state.text, complete, state.note);
     default:
       return action satisfies never;
   }
 };
 
-export const Multiline = (complete: Complete = nothing): Prompt.Prompt<string> =>
+export const Multiline = (complete: Complete = nothing, bindings: ReadonlyArray<KeyBinding> = []): Prompt.Prompt<string> =>
   Prompt.Custom<Typed, string>(
     { text: "", pasting: false, drawn: "" },
     {
@@ -149,7 +169,10 @@ export const Multiline = (complete: Complete = nothing): Prompt.Prompt<string> =
           : Effect.gen(function* () {
               return erased(state.drawn, yield* (yield* Terminal.Terminal).columns);
             }),
-      process: (input, state) => Effect.succeed(keyed(state, input, complete)),
+      process: (input, state) => {
+        const bound = state.pasting ? undefined : bindings.find((binding) => binding.matches(input));
+        return bound === undefined ? Effect.succeed(keyed(state, input, complete)) : Effect.map(bound.run, (note): Prompt.Action<Typed, string> => ({ _tag: "NextFrame", state: { ...state, note } }));
+      },
     },
   );
 

@@ -49,3 +49,22 @@ test("while a turn runs the keys are held in raw mode: Ctrl+C interrupts it, Ctr
   await Effect.runPromise(keys.lend(Effect.void));
   expect([stdin.raw, stdin.listenerCount("data")]).toEqual([false, 0]);
 });
+
+test("while a turn runs, a key other than Ctrl+C is passed on as the text the terminal sent; Ctrl+C is not", () => {
+  const stdin = terminal();
+  const keys = turnKeys(stdin as unknown as NodeJS.ReadStream);
+  const passed: Array<string> = [];
+  let interrupts = 0;
+  keys.hold(
+    () => (interrupts += 1),
+    (text) => passed.push(text),
+  );
+  stdin.emit("data", Buffer.from("\x1bt"));
+  stdin.emit("data", Buffer.from("†"));
+  stdin.emit("data", Buffer.from([0x03]));
+  expect(passed).toEqual(["\x1bt", "†"]);
+  expect(interrupts).toBe(1);
+  keys.release();
+  stdin.emit("data", Buffer.from("\x1bt"));
+  expect(passed).toHaveLength(2);
+});

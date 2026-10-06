@@ -58,11 +58,12 @@ import { askable, KeyedAndLocalCatalog, ModelCatalog } from "../../agent-host/ca
 import { latestSession, readSession, storedSessions, summaryOf } from "../../agent-host/directory.ts";
 import { LogsToFile, LogsToStderr } from "../../agent-host/logs.ts";
 import { Brand, brandFrom } from "../../agent-host/brand.ts";
-import { launchFlags, launchVariables } from "../../agent-host/launch.ts";
+import { launchFlags, launchVariables, userFolderOf } from "../../agent-host/launch.ts";
 import { invalid, saidFormatter } from "./invalid.ts";
 import { askedOf, targetOf, unavailable } from "./models.ts";
 import { printOnce } from "./print.ts";
-import { repl, Terminal, withoutModel } from "./repl.ts";
+import { repl, type ReplContext, terminal, withoutModel } from "./repl.ts";
+import { viewOf } from "./view.ts";
 import { type Config, Headless, logFileOf, storeFolder, withSession } from "./session.ts";
 
 const optional = <A>(flag: Flag.Flag<A>) => flag.pipe(Flag.optional, Flag.map(Option.getOrUndefined));
@@ -204,19 +205,20 @@ export const cliOf = (brand: Brand) =>
       const stdio = yield* Stdio.Stdio;
       const interactive = yield* stdio.stdinIsTerminal;
       const { named, ...unresolved } = yield* configOf(options, interactive);
+      const context: ReplContext = { configFolder: userFolderOf(options, { name: (yield* Brand).name }), view: yield* viewOf(unresolved.configuration.view.thinking) };
       // At a terminal, a new session whose model cannot be asked opens the REPL without one, to pick one with /model.
       if (interactive && !options.print && unresolved.continues === undefined) {
         const found = yield* Effect.result(askedOf(named, "/model"));
-        const target = Result.isSuccess(found) ? found.success : yield* withoutModel(found.failure, options.prompt);
+        const target = Result.isSuccess(found) ? found.success : yield* withoutModel(found.failure, options.prompt, context, unresolved.configuration.layers);
         if (target === undefined) return;
         const config: Config = { ...unresolved, target };
         // The prompt the command line gave was refused, and not kept, when the REPL opened without a model.
         const first = Result.isSuccess(found) ? options.prompt : undefined;
-        return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), Terminal, (session, mcp) => repl(session, config, first, interactive, mcp));
+        return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), terminal(context.view), (session, mcp) => repl(session, config, first, interactive, context, mcp));
       }
       const config: Config = { ...unresolved, target: yield* targetOf(named, "--model") };
       if (!options.print)
-        return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), interactive ? Terminal : Headless, (session, mcp) => repl(session, config, options.prompt, interactive, mcp));
+        return yield* withSession(config, LogsToFile(logFileOf(config.sessionId)), interactive ? terminal(context.view) : Headless, (session, mcp) => repl(session, config, options.prompt, interactive, context, mcp));
       // Piped input is read only when no prompt was given: a shell that leaves stdin open would
       // otherwise keep a prompted run waiting for an end of input that never comes.
       const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));

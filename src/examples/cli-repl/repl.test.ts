@@ -3,9 +3,12 @@
 import { expect } from "bun:test";
 import { observe, open, opened } from "../../../tests/support/drive.ts";
 import { json } from "../../../tests/support/received.ts";
-import { test } from "../../../tests/support/test.ts";
+import { test, testFolder } from "../../../tests/support/test.ts";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, Layer, Terminal as EffectTerminal } from "effect";
+import { existsSync, readFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import { join } from "node:path";
+import { Effect, Layer, Ref, Terminal as EffectTerminal } from "effect";
 import { TestConsole } from "effect/testing";
 import { type CatalogSource, KeyedAndLocalCatalog, ModelCatalog } from "../../agent-host/catalog.ts";
 import { Millis, ModelName, ModelText, ProviderName, SessionId, ThinkingText } from "../../agent-machine/names.ts";
@@ -21,7 +24,8 @@ import { BoringContextAssembler } from "../../../tests/support/boring.ts";
 import { runTest } from "../../../tests/support/run.ts";
 import { typing } from "../../../tests/support/terminal.ts";
 import { CannotAsk } from "./models.ts";
-import { replyOf, repl, Terminal, withoutModel } from "./repl.ts";
+import { replyOf, repl, terminal, withoutModel } from "./repl.ts";
+import { type View, viewOf } from "./view.ts";
 import { ask, type Config } from "./session.ts";
 
 /** What is printed after a turn whose one response said `text` and ended `ending`; `printed`, whether it was printed as it arrived. */
@@ -45,13 +49,17 @@ test("an answer printed as it arrived is not printed again: only how it was cut 
   expect(replied("1, 2, 3", "CutShort", true)).toBe("(cut short: the response reached its length limit)");
 });
 
-/** A model that responds with its thinking and its answer, streaming them first when `streams`; and the requests it was asked. */
-const thinkingThenOk = (streams: boolean) => {
+/**
+ * A model that responds with its thinking and its answer, streaming them first when `streams`; and
+ * the requests it was asked. `before` runs before it streams.
+ */
+const thinkingThenOk = (streams: boolean, before: Effect.Effect<void> = Effect.void) => {
   const asked: Array<string> = [];
   const layer = Layer.succeed(ModelClient, {
     respond: (target, _context, turn) =>
       Effect.gen(function* () {
         asked.push(turn);
+        yield* before;
         const sink = yield* ModelStream;
         if (streams) {
           yield* sink({ _tag: "Delta", kind: "Thinking", text: "think" });
@@ -89,11 +97,15 @@ const services = (model: ReturnType<typeof thinkingThenOk>) =>
 
 const opening = openedWith({ session: SessionId.make("s1"), model: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") }, system: undefined, tools: [] });
 
+/** The user's configuration folder of the test. */
+const configFolder = () => join(testFolder(), "config");
+
 /**
- * The REPL, followed at a terminal, typed `lines` with `model`: what it wrote to stdout, and the
- * lines it logged after its banner. With `failFirstWrite`, the first write to stdout throws.
+ * The REPL, followed at a terminal, typed `lines` with `model`, showing what `view` shows (thinking
+ * shown when not given) and reading the keys of `stdin` while a turn runs: what it wrote to stdout,
+ * and the lines it logged after its banner. With `failFirstWrite`, the first write to stdout throws.
  */
-const typedTo = async (model: ReturnType<typeof thinkingThenOk>, lines: ReadonlyArray<string>, failFirstWrite = false) => {
+const typedTo = async (model: ReturnType<typeof thinkingThenOk>, lines: ReadonlyArray<string>, failFirstWrite = false, view?: View, stdin?: NodeJS.ReadStream) => {
   const written: Array<string> = [];
   const write = process.stdout.write.bind(process.stdout);
   process.stdout.write = ((chunk: string | Uint8Array) => {
@@ -108,9 +120,10 @@ const typedTo = async (model: ReturnType<typeof thinkingThenOk>, lines: Readonly
     Effect.gen(function* () {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(opening);
-      yield* Terminal.follow(session);
-      const config = { sessionId: "s1", target: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") } } as unknown as Config;
-      yield* repl(session, config, undefined, true).pipe(Effect.provideService(EffectTerminal.Terminal, yield* typing(lines)));
+      const shown = view ?? (yield* viewOf("on"));
+      yield* terminal(shown, stdin).follow(session);
+      const config = { sessionId: "s1", target: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") }, configuration: { layers: [] } } as unknown as Config;
+      yield* repl(session, config, undefined, true, { configFolder: configFolder(), view: shown }).pipe(Effect.provideService(EffectTerminal.Terminal, yield* typing(lines)));
       return yield* TestConsole.logLines;
     }).pipe(Effect.provide(services(model)), Effect.provideService(ModelStreamInterval, Millis.make(0))),
   ).finally(() => {
@@ -146,8 +159,9 @@ test("the REPL: after going on with a turn that ended before it followed the ses
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(opening);
       yield* ask(session, "hello");
-      yield* Terminal.follow(session);
-      yield* Terminal.wentOn(session).pipe(Effect.timeoutOrElse({ duration: "2 seconds", orElse: () => Effect.die(new Error("the REPL waited for a turn that had ended")) }));
+      const host = terminal(yield* viewOf("on"));
+      yield* host.follow(session);
+      yield* host.wentOn(session).pipe(Effect.timeoutOrElse({ duration: "2 seconds", orElse: () => Effect.die(new Error("the REPL waited for a turn that had ended")) }));
       return yield* TestConsole.logLines;
     }).pipe(Effect.provide(services(thinkingThenOk(false)))),
   );
@@ -161,12 +175,13 @@ const openai: CatalogSource = { provider: ProviderName.make("openai"), models: [
 const notAnswering: CatalogSource = { provider: ProviderName.make("localhost"), models: undefined, at: "http://localhost:8000/v1" };
 const noModel = new CannotAsk({ message: "No model is set.", hint: "Pick one with /model." });
 
-/** The REPL before a model is picked, typed `lines`, with a catalog of `sources`: the model picked, and what it logged. */
+/** The REPL before a model is picked, typed `lines`, with a catalog of `sources`: the model picked, what it logged, and whether it shows thinking at the end. */
 const waited = (lines: ReadonlyArray<string>, first?: string, sources: ReadonlyArray<CatalogSource> = [openai]) =>
   runTest(
     Effect.gen(function* () {
-      const picked = yield* withoutModel(noModel, first).pipe(Effect.provideService(EffectTerminal.Terminal, yield* typing(lines)));
-      return { picked, logged: yield* TestConsole.logLines };
+      const view = yield* viewOf("on");
+      const picked = yield* withoutModel(noModel, first, { configFolder: configFolder(), view }, []).pipe(Effect.provideService(EffectTerminal.Terminal, yield* typing(lines)));
+      return { picked, logged: yield* TestConsole.logLines, thinking: yield* Ref.get(view.thinking) };
     }).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, catalogOf(sources), TestConsole.layer))),
   );
 
@@ -183,7 +198,9 @@ test("before a model is picked: input for the model is not sent, the other comma
     "ERROR: No command /nope.\nHINT: /help lists them.",
     "ERROR: XAI_API_KEY is not set, so xai models cannot be asked.\nHINT: Pick another model with /model, or restart with XAI_API_KEY set.",
     "ERROR: No model is named gpt-99.\nHINT: Pick one with /model.",
+    `New sessions ask openai/gpt-5.5: written to ${join(configFolder(), "models.yml")}.`,
   ]);
+  expect(readFileSync(join(configFolder(), "models.yml"), "utf8")).toBe("model: openai/gpt-5.5\n");
 });
 
 test("before a model is picked: /model alone picks from the models that can be asked", async () => {
@@ -210,4 +227,50 @@ test("before a model is picked: /model alone, with no model that can be asked, s
       "HINT: The local server at http://localhost:8000/v1 is not answering; start it to use localhost models.",
     ].join("\n"),
   ]);
+});
+
+test("before a model is picked: /switch names the model the session opens with, and writes nothing", async () => {
+  const { picked, logged } = await waited(["/switch gpt-5.5"]);
+  expect(picked as unknown).toEqual({ provider: "openai", model: "gpt-5.5" });
+  expect(logged).toHaveLength(2);
+  expect(existsSync(configFolder())).toBe(false);
+});
+
+test("before a model is picked: /settings changes the user's settings, and refuses the model's", async () => {
+  // `/settings` alone offers the user's settings to pick; Enter leaves them as they are, and shows them.
+  const { logged, thinking } = await waited(["/settings effort=high", "/settings view.thinking=off", "/settings", "", "/exit"]);
+  expect(logged.slice(2)).toEqual([
+    "ERROR: effort=high: the model's settings can be changed once a model is picked.\nHINT: Pick one with /model.",
+    `view.thinking=off: written to ${join(configFolder(), "settings.yml")}.`,
+    "view.thinking=off",
+  ]);
+  expect(thinking).toBe("off");
+});
+
+test("the REPL: with thinking hidden, the answer is printed and its thinking is not", async () => {
+  const { written } = await typedTo(thinkingThenOk(true), ["hello", "/exit"], false, await runTest(viewOf("off")));
+  expect(written).toBe("ok\n");
+});
+
+test("the REPL: Option+T at the prompt hides the thinking, and is not typed", async () => {
+  const model = thinkingThenOk(true);
+  // macOS sends † for Option+T where Option is not set to send Meta.
+  const { written } = await typedTo(model, ["†hello", "/exit"]);
+  expect(written).toBe("ok\n");
+  expect(model.asked).toHaveLength(1);
+});
+
+/** A terminal's input that is a terminal, for the keys the REPL reads itself while a turn runs. */
+const keyboard = () =>
+  Object.assign(new EventEmitter(), { isTTY: true, setRawMode: () => undefined, resume: () => undefined, pause: () => undefined }) as unknown as NodeJS.ReadStream;
+
+test("the REPL: Option+T while a turn runs hides the thinking from then on, and says so", async () => {
+  const stdin = keyboard();
+  const view = await runTest(viewOf("on"));
+  // Option+T is pressed as the model starts, which waits until the REPL has taken it.
+  const pressed = Effect.sync(() => stdin.emit("data", Buffer.from("\x1bt"))).pipe(Effect.andThen(Effect.repeat(Effect.andThen(Effect.yieldNow, Ref.get(view.thinking)), { until: (now) => now === "off" })));
+  const { written } = await typedTo(thinkingThenOk(true, Effect.asVoid(pressed)), ["hello", "/exit"], false, view, stdin);
+  expect(written).not.toContain("think\x1b");
+  expect(written).toContain("\x1b[2m(thinking hidden (Option+T shows it))\x1b[0m\n");
+  expect(written).toContain("ok\n");
 });

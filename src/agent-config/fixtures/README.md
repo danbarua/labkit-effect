@@ -26,3 +26,4 @@ The user's folder here:
 | `20_mcp.yml` | MCP servers. |
 | `30_extensions.yml` | An extension, the plug-in it adds, and a seam list restated to use it. |
 | `40_models.yml` | The model that a new session asks, and what is known of models over models.dev's catalog. |
+| `50_settings.yml` | The user's settings: whether a host shows the model's thinking. |

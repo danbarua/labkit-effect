@@ -24,14 +24,25 @@ built: see [agent-config.md](agent-config.md), Layers and Models.
 The CLI's start without a model, `bun cli models` and its `ERROR:` and `HINT:` messages are built,
 as the header of `src/examples/cli-repl/index.ts` describes, with these limits:
 
-- Before a model is picked, the REPL takes `/model`, `/help` and `/exit`. It refuses the other
-  commands, `/settings` among them, so the settings cannot be tried before a model is picked until
-  `/settings` holds the user's settings (step 4).
+- Before a model is picked, the REPL takes `/model`, `/switch`, `/settings` (the user's settings
+  only), `/help` and `/exit`, and Option+T. It refuses the other commands.
 - A continued or resumed session whose model cannot be asked is refused at start, saying what to do;
   it does not open the REPL without a model.
 - `bun cli models` prints its `HINT:` lines to stderr, so that its stdout is only the models.
 - A mistake in a flag (a flag the CLI does not know, a value the flag does not take) is printed as
   an `ERROR:` line, but effect/cli first prints the whole help to stdout.
+
+The commands and the thinking key are built: each command is in its own file in
+`src/examples/cli-repl/commands/`, which describes it, and Option+T is in `view.ts`. Writing a
+setting into the user's folder is described in [agent-config.md](agent-config.md), Writing into the
+user's folder. Their limits:
+
+- `/effort` sets the efforts the provider's adapter offers today, not models.dev's, and it cannot
+  set `default`, because a setting that is set cannot yet be cleared (step 5).
+- Option+T shows or hides the model's thinking (`view.thinking`) until the REPL exits, and writes
+  nothing; `/settings view.thinking=…` writes it. A key that turns thinking off in the request
+  (`thinking: disabled`) waits for step 5.
+- The user's settings are `view.thinking` only.
 
 ## Offering only what a model takes
 
@@ -95,6 +106,6 @@ Thinking is toggled with a key, as Claude Code does with Option+T and pi with Sh
 2. `models.yml`: models.dev's data as the defaults, and the user's overrides. Built.
 3. The REPL without a model; `bun cli models` and the error messages. Built, with the limits
    listed under Built.
-4. The commands, and the thinking key.
+4. The commands, and the thinking key. Built, with the limits listed under Built.
 5. The adapters rebuilt on models.dev's reasoning data, offering and refusing values instead of
    adjusting them.

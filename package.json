@@ -38,6 +38,7 @@
     "@logtape/logtape": "^2.3.9",
     "effect": "^4.0.0",
     "effective-acp": "0.2.1",
-    "es-git": "^0.7.0"
+    "es-git": "^0.7.0",
+    "yaml": "2.9.1"
   }
 }

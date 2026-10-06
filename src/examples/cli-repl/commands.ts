@@ -12,10 +12,12 @@ import type { McpServers } from "../../agent-mcp/servers.ts";
 import type { Session } from "../../agent-session/loop.ts";
 import { optionsOf } from "../../agent-session/configuration/options.ts";
 import { type CommandContext, type Done, type DoneWithoutModel, type Offered, type ReplCommand, said } from "./command.ts";
+import { effort } from "./commands/effort.ts";
 import { exportCommand } from "./commands/export.ts";
 import { mcp } from "./commands/mcp.ts";
 import { model } from "./commands/model.ts";
 import { settings } from "./commands/settings.ts";
+import { switchCommand } from "./commands/switch.ts";
 import { tools } from "./commands/tools.ts";
 import { invalid } from "./invalid.ts";
 import { pickable } from "./picking.ts";
@@ -43,7 +45,7 @@ const exit: ReplCommand = {
 };
 
 /** The REPL's commands, in the order `/help` shows them. */
-export const commands: ReadonlyArray<ReplCommand> = [model, settings, tools, exportCommand, mcp, helpCommand, exit];
+export const commands: ReadonlyArray<ReplCommand> = [model, switchCommand, effort, settings, tools, exportCommand, mcp, helpCommand, exit];
 
 /** What the REPL says of a line that starts with `/` and names none of its commands. */
 export const noCommand = (line: string) => invalid(`No command ${line.trim().split(/\s+/)[0] ?? line}.`, "/help lists them.");

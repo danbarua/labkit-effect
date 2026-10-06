@@ -4,7 +4,7 @@
 from, the lists ("seams") that each plug-in is placed on, and the MCP servers that a session starts.
 The configuration comes from layers, merged in order; the last write wins.
 
-Direction that is not built yet (models and their settings, the CLI's model picking) is in
+Direction that is not built yet (the model's settings, and the adapters that apply them) is in
 [agent-config-direction.md](agent-config-direction.md). Example configuration folders, which a test
 loads, are in `src/agent-config/fixtures/`.
 
@@ -75,6 +75,7 @@ that names either is refused.
 | `extensions` | Module paths, absolute or relative to the file's folder. |
 | `model` | The model that a new session asks unless the command line names another, as `provider/model`. |
 | `models` | What is known of models, by `provider/model`, over models.dev's catalog (see Models). |
+| `view` | What a host shows the user: `thinking` (`on`, `off`), whether it shows the model's thinking; `on` when no layer sets it. It changes nothing in a request. |
 
 - A seam's entries become the session's list for that seam, in the same order. Each entry is made by
   its plug-in from its settings, which are the same on every list the entry is on.
@@ -164,6 +165,21 @@ models:
 - `model` is the model a new session asks when `--model` (or its variable) names none. In the CLI a
   continued or resumed session keeps the model it asked. In the ACP host, with neither, a session
   starts with the catalog's first model.
+
+## Writing into the user's folder
+
+A host writes the user's settings into the user's folder (`write.ts`): the CLI's `/model` writes
+`model`, and its `/settings` writes `view.thinking`. A setting is written where it decides the
+folder's value:
+
+- into the last of the folder's files, in name order, that sets it;
+- when no file sets it, into a file that the host names (`models.yml` for `model`, `settings.yml`
+  for `view.thinking`), which is created, with the folder, when it does not exist.
+
+The file keeps its comments and its layout; a flow list is written without padding (`[low, high]`).
+A file of the folder that does not parse is not written, and the error (`SettingNotWritten`) names
+it. A layer read after the user's folder (a project's file, `--settings`) that sets the same key
+still decides it for a session that reads that layer.
 
 ## Command environment
 

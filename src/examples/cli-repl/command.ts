@@ -10,16 +10,24 @@
 
 import type { Effect, FileSystem, Path, Terminal } from "effect";
 import type { CliError } from "effect/cli";
+import type { LayerSource } from "../../agent-config/file.ts";
 import type { Asked, ModelCatalog } from "../../agent-host/catalog.ts";
 import type { McpServers } from "../../agent-mcp/servers.ts";
 import type { Services, Session } from "../../agent-session/loop.ts";
 import type { SessionStoreFailed } from "../../agent-session/session-store.ts";
 import type { SettingOption } from "../../agent-session/configuration/options.ts";
+import type { View } from "./view.ts";
 
 /** What a command is run with besides its words. */
 export interface CommandContext {
   /** The folder the CLI runs in: `/export` writes under it. */
   readonly folder: string;
+  /** The user's configuration folder: `/model` and `/settings` write the user's settings into it. */
+  readonly configFolder: string;
+  /** What the REPL shows, which `/settings` changes. */
+  readonly view: View;
+  /** The layers the session's configuration was read from, in order: a layer after the user's folder can set what a command writes into it. */
+  readonly layers: ReadonlyArray<LayerSource>;
   /** The session's MCP servers; absent when the session has none. */
   readonly mcp?: McpServers;
 }
@@ -34,8 +42,8 @@ export interface Offered {
 /** What a command did: text for the REPL to print, nothing to print, or the REPL to end. */
 export type Done = { readonly _tag: "Said"; readonly text: string } | { readonly _tag: "Quiet" } | { readonly _tag: "Exit" };
 
-/** What a command did before a model is picked: as in a session, or the model that the session opens with. */
-export type DoneWithoutModel = Done | { readonly _tag: "Picked"; readonly target: Asked };
+/** What a command did before a model is picked: as in a session, or the model that the session opens with, and what to print first. */
+export type DoneWithoutModel = Done | { readonly _tag: "Picked"; readonly target: Asked; readonly text?: string };
 
 /** A command's outcome when it says `text`. */
 export const said = (text: string): Done => ({ _tag: "Said", text });

@@ -31,7 +31,7 @@
 import { resolve } from "node:path";
 import { Config, ConfigProvider, Effect, FileSystem, Option } from "effect";
 import { Command, Flag } from "effect/cli";
-import { ConfigInvalid, type Configuration, fileLayer, fileLayers, type FileSource, fileSources, type LayerSource, loadConfiguration } from "../agent-config/file.ts";
+import { ConfigInvalid, type Configuration, configFolders, fileLayer, fileLayers, type FileSource, fileSources, type LayerSource, loadConfiguration } from "../agent-config/file.ts";
 import { merged } from "../agent-config/merge.ts";
 import type { PermissionMode } from "../agent-policy/permissions.ts";
 import { type Brand, envPrefixOf } from "./brand.ts";
@@ -177,6 +177,20 @@ const flagLayer = (flags: ConfigFlags, before: ReadonlyArray<LayerSource>): Laye
   };
 };
 
+/** The folders' options for a host whose flags are `flags`: the user's folder is `--config-dir` (or its variable) when given. */
+const folderOptionsOf = (flags: ConfigFlags, options: { readonly home?: string; readonly name?: string }) => ({
+  ...options,
+  ...(flags.configDir === undefined ? {} : { configDir: resolve(flags.configDir) }),
+});
+
+/**
+ * Returns the user's configuration folder for a host whose flags are `flags`: `--config-dir` (or its
+ * variable), else `~/.config/<name>`. Its files are the first files read (`launchLayers`), and a host
+ * writes the user's settings into it.
+ */
+export const userFolderOf = (flags: ConfigFlags, options: { readonly home?: string; readonly name?: string } = {}): string =>
+  configFolders("", folderOptionsOf(flags, options)).user;
+
 /**
  * Returns the layers, in order, for a host run in `project` whose own defaults are `defaults`. With
  * no project (a launcher before any session has one), the user's file is the only file read.
@@ -190,8 +204,7 @@ export const launchLayers = (
   Effect.gen(function* () {
     const sources = yield* sourcesOf(flags.settingSources);
     const files = yield* fileLayers(project ?? "", {
-      ...options,
-      ...(flags.configDir === undefined ? {} : { configDir: resolve(flags.configDir) }),
+      ...folderOptionsOf(flags, options),
       sources: project === undefined ? sources.filter((source) => source === "user") : sources,
     });
     const settings = flags.settings === undefined ? [] : [yield* layerFromFlag("--settings", flags.settings)];

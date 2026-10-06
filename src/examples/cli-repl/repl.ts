@@ -18,7 +18,10 @@
  * failed. Before a tool call that needs permission runs, the question is recorded
  * (`PermissionAsked`), and the REPL asks it: the user picks an option, which is recorded as the
  * answer (`PermissionAnswered`). Ctrl+C at the question rejects the call. While a turn runs, Ctrl+C
- * interrupts it, and other keys are dropped (`turn-keys.ts`).
+ * interrupts it, and other keys are dropped (`turn-keys.ts`), except Option+T.
+ *
+ * Option+T, at the prompt or while a turn runs, shows or hides the model's thinking until the REPL
+ * exits (`view.ts`), and the REPL says which.
  */
 
 import type { McpServers } from "../../agent-mcp/servers.ts";
@@ -33,15 +36,16 @@ import type { CallId, TurnId } from "../../agent-machine/names.ts";
 import type { ToolOutcome } from "../../agent-machine/observation.ts";
 import type { Services, Session } from "../../agent-session/loop.ts";
 import { asText } from "../../agent-session/received.ts";
-import { said } from "./command.ts";
+import { type CommandContext, said } from "./command.ts";
 import { completions, offered, offeredWithoutModel, runInSession, runWithoutModel } from "./commands.ts";
 import { invalid } from "./invalid.ts";
 import { type CannotAsk, saidOf } from "./models.ts";
-import { bracketedPaste, Multiline } from "./multiline.ts";
+import { bracketedPaste, type KeyBinding, Multiline } from "./multiline.ts";
 import { answerTo, ask, type Config, endingOf, type Host, lastTurn, logFileOf } from "./session.ts";
 import type { LeftRunning } from "../../agent-machine/left-running.ts";
 import { type TurnKeys, turnKeys } from "./turn-keys.ts";
 import { logKeys } from "./log-keys.ts";
+import { isOptionT, optionT, toggleThinking, type View } from "./view.ts";
 
 /** What the REPL keeps of a session it follows at a terminal. */
 interface Following {
@@ -49,6 +53,8 @@ interface Following {
   readonly keys: TurnKeys;
   /** Completes once the follower has taken `turn`'s end: every update of the turn has been printed. */
   readonly turnEnded: (turn: TurnId) => Effect.Effect<void>;
+  /** Prints `note` dimmed, on a line of its own, between what the follower prints. */
+  readonly noted: (note: string) => Effect.Effect<void>;
 }
 
 /** Of each session the REPL follows at a terminal: what it keeps of it. */
@@ -93,19 +99,26 @@ const printReply = (session: Session) =>
 
 /**
  * A turn: the input to the model, and what is printed once it ends. While it runs the REPL holds
- * the terminal's keys (`turn-keys.ts`): Ctrl+C interrupts the turn, which ends `Interrupted`.
+ * the terminal's keys (`turn-keys.ts`): Ctrl+C interrupts the turn, which ends `Interrupted`, and
+ * Option+T shows or hides the thinking (`view`), saying which.
  */
-const turn = (session: Session, input: string) =>
+const turn = (session: Session, input: string, view: View) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const keys = Option.getOrUndefined(HashMap.get(yield* Ref.get(followers), session))?.keys;
-      if (keys !== undefined) {
+      const follower = Option.getOrUndefined(HashMap.get(yield* Ref.get(followers), session));
+      if (follower !== undefined) {
+        const { keys } = follower;
         const interrupted = yield* Deferred.make<void>();
+        const toggled = yield* Queue.unbounded<void>();
+        const key = (text: string) => {
+          if (optionT.includes(text)) Queue.offerUnsafe(toggled, undefined);
+        };
         yield* Effect.acquireRelease(
-          Effect.sync(() => keys.hold(() => Deferred.doneUnsafe(interrupted, Effect.void))),
+          Effect.sync(() => keys.hold(() => Deferred.doneUnsafe(interrupted, Effect.void), key)),
           () => Effect.sync(keys.release),
         );
         yield* Effect.forkScoped(Deferred.await(interrupted).pipe(Effect.andThen(session.cancel), Effect.ignore));
+        yield* Effect.forkScoped(Effect.forever(Queue.take(toggled).pipe(Effect.andThen(toggleThinking(view)), Effect.flatMap(follower.noted))));
       }
       yield* ask(session, input);
     }),
@@ -179,10 +192,11 @@ const chunkOf = (update: SessionUpdate): { readonly kind: "answer" | "thinking";
  * Follows the session, for as long as the scope lasts: its facts and what its model requests pass
  * on, merged into one inbox, each taken in turn through ACP's projection (`next`, mode `live`) from
  * the state of the facts before (`project`, mode `replay`), so nothing they showed is shown again.
- * Prints the text the projection gives, its thinking dimmed; shows each tool call as it ends; asks
- * each question recorded before a call runs; and marks each turn's end once it is taken.
+ * Prints the text the projection gives, its thinking dimmed while `view` shows thinking; shows each
+ * tool call as it ends; asks each question recorded before a call runs; and marks each turn's end
+ * once it is taken.
  */
-const following = (session: Session) =>
+const following = (session: Session, view: View, stdin?: NodeJS.ReadStream) =>
   Effect.gen(function* () {
     const recorded = yield* session.subscribe;
     const streamed = yield* session.streamed;
@@ -205,17 +219,20 @@ const following = (session: Session) =>
           },
         }),
       );
-    const keys = turnKeys();
+    const keys = turnKeys(stdin);
     const turnEnded = (turn: TurnId) => Effect.flatMap(Ref.get(taken), (ended) => (ended.has(turn) ? Effect.void : Effect.flatMap(endOf(turn), Deferred.await)));
-    yield* Ref.update(followers, HashMap.set(session, { keys, turnEnded }));
     // The kind of text the line printed last holds, while it is not ended.
     const open = yield* Ref.make<"answer" | "thinking" | undefined>(undefined);
     const write = (text: string) => Effect.sync(() => void process.stdout.write(text));
     const endLine = Effect.flatMap(Ref.getAndSet(open, undefined), (was) => (was === undefined ? Effect.void : write("\n")));
+    const noted = (note: string): Effect.Effect<void> => Effect.andThen(endLine, write(`\x1b[2m(${note})\x1b[0m\n`));
+    const follower: Following = { keys, turnEnded, noted };
+    yield* Ref.update(followers, HashMap.set(session, follower));
     const printed = (update: SessionUpdate) =>
       Effect.gen(function* () {
         const chunk = chunkOf(update);
         if (chunk === undefined || chunk.text === "") return;
+        if (chunk.kind === "thinking" && (yield* Ref.get(view.thinking)) === "off") return;
         if ((yield* Ref.get(open)) !== chunk.kind) yield* endLine;
         yield* Ref.set(open, chunk.kind);
         yield* write(chunk.kind === "thinking" ? `\x1b[2m${chunk.text}\x1b[0m` : chunk.text);
@@ -279,11 +296,12 @@ const shownLeft = (request: LeftRunning["requests"][number], began: ReadonlySet<
 };
 
 /**
- * The REPL at a terminal: it follows the session from when it opens (`following`), and asks the
- * user whether to go on with a turn the session's facts left running, or end it.
+ * The REPL at a terminal: it follows the session from when it opens (`following`), showing what
+ * `view` shows and reading the keys of `stdin` (this process's) while a turn runs, and asks the user
+ * whether to go on with a turn the session's facts left running, or end it.
  */
-export const Terminal: Host<Prompt.Environment | Services> = {
-  follow: following,
+export const terminal = (view: View, stdin?: NodeJS.ReadStream): Host<Prompt.Environment | Services> => ({
+  follow: (session) => following(session, view, stdin),
   choose: (left) =>
     Prompt.Select({
       message: `The last session stopped while ${left.turn} ran${left.stopping ? ", being interrupted" : ""}, with ${left.requests.map((request) => shownLeft(request, left.began)).join("; ") || "nothing under way"}. Go on with it?`,
@@ -293,27 +311,46 @@ export const Terminal: Host<Prompt.Environment | Services> = {
       ],
     }).pipe(Effect.orElseSucceed(() => "end" as const)),
   wentOn: printReply,
-};
+});
 
-export const repl = (session: Session, config: Config, first: string | undefined, interactive: boolean, mcp?: McpServers) =>
+/** What the REPL is run with besides its session: where the user's settings are written, and what it shows (`view`). */
+export interface ReplContext {
+  /** The user's configuration folder: `/model` and `/settings` write into it. */
+  readonly configFolder: string;
+  readonly view: View;
+}
+
+/** The commands' context in the REPL: the folder the CLI runs in, and the session's layers and MCP servers. */
+const commandContext = (context: ReplContext, layers: CommandContext["layers"], mcp?: McpServers): CommandContext => ({
+  folder: process.cwd(),
+  configFolder: context.configFolder,
+  view: context.view,
+  layers,
+  ...(mcp === undefined ? {} : { mcp }),
+});
+
+/** Option+T at the prompt: shows or hides the thinking, and says which. */
+const thinkingKey = (view: View): KeyBinding => ({ matches: isOptionT, run: toggleThinking(view) });
+
+export const repl = (session: Session, config: Config, first: string | undefined, interactive: boolean, context: ReplContext, mcp?: McpServers) =>
   Effect.scoped(Effect.gen(function* () {
     yield* Console.log(`${config.target.provider}/${config.target.model} · /help for commands, /exit to quit. Log: ${logFileOf(config.sessionId)}`);
-    if (first !== undefined) yield* turn(session, first);
+    if (first !== undefined) yield* turn(session, first, context.view);
     if (!interactive) return;
     yield* bracketedPaste;
     /** Reads a line and does what it says; whether to read another. */
     const step = Effect.gen(function* () {
-      const input = yield* Multiline(completions(yield* offered(session, mcp)));
+      const input = yield* Multiline(completions(yield* offered(session, mcp)), [thinkingKey(context.view)]);
       if (input.trim() === "") return true;
       if (input.startsWith("/")) {
         // A mistake in a command is said, and the REPL goes on.
-        const done = yield* runInSession(session, input, { folder: process.cwd(), ...(mcp === undefined ? {} : { mcp }) }).pipe(
+        const done = yield* runInSession(session, input, commandContext(context, config.configuration.layers, mcp)).pipe(
           Effect.catchTag("UserError", (error) => Effect.succeed(said(String(error.userMessage)))),
         );
         if (done._tag === "Said") yield* Console.log(done.text);
         return done._tag !== "Exit";
       }
-      yield* turn(session, input);
+      yield* turn(session, input, context.view);
       return true;
     });
     yield* step.pipe(Effect.repeat({ while: (again) => again }));
@@ -331,7 +368,7 @@ export const repl = (session: Session, config: Config, first: string | undefined
  * - Input for the model is refused, saying that it was not sent and why. `first`, the prompt the
  *   command line gave, is refused in the same words.
  */
-export const withoutModel = (problem: CannotAsk, first: string | undefined) =>
+export const withoutModel = (problem: CannotAsk, first: string | undefined, context: ReplContext, layers: CommandContext["layers"]) =>
   Effect.scoped(
     Effect.gen(function* () {
       const notSent = String(invalid(`Not sent. ${problem.message}`, problem.hint).userMessage);
@@ -340,15 +377,18 @@ export const withoutModel = (problem: CannotAsk, first: string | undefined) =>
       yield* bracketedPaste;
       /** Reads a line and does what it says: the model picked, `exit`, or `again` to read another line. */
       const step = Effect.gen(function* () {
-        const input = yield* Multiline(completions(yield* offeredWithoutModel));
+        const input = yield* Multiline(completions(yield* offeredWithoutModel), [thinkingKey(context.view)]);
         if (input.trim() === "") return "again" as const;
         if (!input.startsWith("/")) {
           yield* Console.log(notSent);
           return "again" as const;
         }
         // A mistake in a command is said, and the REPL goes on.
-        const done = yield* runWithoutModel(input, { folder: process.cwd() }).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(said(String(error.userMessage)))));
-        if (done._tag === "Picked") return done.target;
+        const done = yield* runWithoutModel(input, commandContext(context, layers)).pipe(Effect.catchTag("UserError", (error) => Effect.succeed(said(String(error.userMessage)))));
+        if (done._tag === "Picked") {
+          if (done.text !== undefined) yield* Console.log(done.text);
+          return done.target;
+        }
         if (done._tag === "Exit") return "exit" as const;
         if (done._tag === "Said") yield* Console.log(done.text);
         return "again" as const;
