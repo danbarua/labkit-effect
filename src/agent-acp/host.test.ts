@@ -358,7 +358,7 @@ const kinds = (updates: ReadonlyArray<Update>) =>
   updates.map((update) => ("status" in update && update.status !== undefined ? `${update.sessionUpdate}:${update.status}` : update.sessionUpdate));
 
 /** The tool call the model makes in the main scenario: `write_file`, which asks permission under the default mode. */
-const writeNotes = (call = "call-1"): Piece => ({ _tag: "ToolCall", call, tool: "write_file", input: { path: "notes.txt", content: "hello" } });
+const writeNotes = (call = "call-1"): Piece => ({ _tag: "ToolCall", call, tool: "write_file", input: { path: "notes.txt", content: "hello", intent: "Write the notes." } });
 
 test("session/new answers a draft with an id and its config options, writes nothing, and announces /export only after its response", async () => {
   const host = startHost();
@@ -416,7 +416,7 @@ test("the first prompt opens the draft; thinking and text stream, write_file goe
   const texts = log.updates.flatMap((update) => (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text" ? [update.content.text] : []));
   expect(texts.join("")).toBe("Writing.Done.");
   expect(log.asked).toHaveLength(1);
-  expect(log.asked[0]?.toolCall).toMatchObject({ toolCallId: "call-1", title: "write_file: notes.txt", kind: "edit", locations: [{ path: join(host.cwd, "notes.txt") }] });
+  expect(log.asked[0]?.toolCall).toMatchObject({ toolCallId: "call-1", title: "Write the notes.", kind: "edit", locations: [{ path: join(host.cwd, "notes.txt") }] });
   expect(log.files).toEqual([{ method: "fs/write_text_file", path: join(host.cwd, "notes.txt"), sessionId, content: "hello" }]);
   const facts = await factsOn(storeFileOf(host.directory, sessionId));
   expect(facts[0]).toMatchObject({
@@ -511,7 +511,7 @@ test("update_plan sends the whole plan to the editor as a plan update, without a
     { content: "Read the tests", status: "completed" },
     { content: "Fix the bug", status: "in_progress", priority: "high" },
   ];
-  const host = startHost({ script: [answer({ _tag: "ToolCall", call: "plan-1", tool: "update_plan", input: { entries } as never }), answer({ _tag: "Text", text: "Planned." })] });
+  const host = startHost({ script: [answer({ _tag: "ToolCall", call: "plan-1", tool: "update_plan", input: { entries, intent: "Plan the work." } as never }), answer({ _tag: "Text", text: "Planned." })] });
   const { app, log } = sdkClient();
   const sessionId = await app.connectWith(host.stream, async (ctx) => {
     await initialize(ctx);
@@ -536,7 +536,7 @@ test("update_plan sends the whole plan to the editor as a plan update, without a
 });
 
 test("the permission mode is an option of category mode; changed between turns, it applies at once: a write runs without asking, then is asked about again", async () => {
-  const write = (call: string) => answer({ _tag: "ToolCall", call, tool: "write_file", input: { path: "a.txt", content: call } });
+  const write = (call: string) => answer({ _tag: "ToolCall", call, tool: "write_file", input: { path: "a.txt", content: call, intent: "Write a.txt." } });
   const host = startHost({ script: [write("w-1"), answer({ _tag: "Text", text: "One." }), write("w-2"), answer({ _tag: "Text", text: "Two." })] });
   const { app, log } = sdkClient();
   const result = await app.connectWith(host.stream, async (ctx) => {
@@ -738,11 +738,11 @@ test("edit_file replaces one occurrence through fs/*, shown as a diff; run_comma
   const host = startHost({
     script: [
       answer(
-        { _tag: "ToolCall", call: "edit-1", tool: "edit_file", input: { path: "a.txt", old_text: "alpha", new_text: "beta" } },
-        { _tag: "ToolCall", call: "edit-2", tool: "edit_file", input: { path: "a.txt", old_text: "a", new_text: "b" } },
-        { _tag: "ToolCall", call: "run-1", tool: "run_command", input: { command: "ls" } },
-        { _tag: "ToolCall", call: "run-2", tool: "run_command", input: { command: "false" } },
-        { _tag: "ToolCall", call: "run-3", tool: "run_command", input: { command: "sleep 100", timeout_seconds: 1 } },
+        { _tag: "ToolCall", call: "edit-1", tool: "edit_file", input: { path: "a.txt", old_text: "alpha", new_text: "beta", intent: "Rename alpha." } },
+        { _tag: "ToolCall", call: "edit-2", tool: "edit_file", input: { path: "a.txt", old_text: "a", new_text: "b", intent: "Change a to b." } },
+        { _tag: "ToolCall", call: "run-1", tool: "run_command", input: { command: "ls", intent: "List the files." } },
+        { _tag: "ToolCall", call: "run-2", tool: "run_command", input: { command: "false", intent: "Run a failing command." } },
+        { _tag: "ToolCall", call: "run-3", tool: "run_command", input: { command: "sleep 100", timeout_seconds: 1, intent: "Wait." } },
       ),
       answer({ _tag: "Text", text: "Done." }),
     ],
@@ -782,9 +782,9 @@ test("edit_file replaces one occurrence through fs/*, shown as a diff; run_comma
   expect(text("run-3")).toContain("started\\n[Still running after 1 seconds: stopped.]");
   // The edit's change is shown as a diff when permission is asked; a command's terminal is shown in
   // its call once it has one, and still when it has ended.
-  // A call's title names its command or its path, so the question says what it asks about.
-  expect(log.asked.find((asked) => asked.toolCall.toolCallId === "run-1")?.toolCall.title).toBe("run_command: ls");
-  expect(log.asked.find((asked) => asked.toolCall.toolCallId === "edit-1")?.toolCall.title).toBe("edit_file: a.txt");
+  // A call's title is its intent; the question also carries the call's whole input, the command included.
+  expect(log.asked.find((asked) => asked.toolCall.toolCallId === "run-1")?.toolCall).toMatchObject({ title: "List the files.", rawInput: { command: "ls" } });
+  expect(log.asked.find((asked) => asked.toolCall.toolCallId === "edit-1")?.toolCall.title).toBe("Rename alpha.");
   expect(log.asked.find((asked) => asked.toolCall.toolCallId === "edit-1")?.toolCall.content).toEqual([
     { type: "diff", path: join(host.cwd, "a.txt"), oldText: "alpha", newText: "beta" },
   ]);
@@ -798,7 +798,7 @@ test("edit_file replaces one occurrence through fs/*, shown as a diff; run_comma
 test("the editor world offers read_file and write_file as the client advertised fs; read_file reads through fs/read_text_file, a path outside the working folder is refused, and a client with no fs has no file tools", async () => {
   const host = startHost({
     script: [
-      answer({ _tag: "ToolCall", call: "read-1", tool: "read_file", input: { path: "a.txt" } }, { _tag: "ToolCall", call: "read-2", tool: "read_file", input: { path: "../outside.txt" } }),
+      answer({ _tag: "ToolCall", call: "read-1", tool: "read_file", input: { path: "a.txt", intent: "Read a.txt." } }, { _tag: "ToolCall", call: "read-2", tool: "read_file", input: { path: "../outside.txt", intent: "Read a file outside." } }),
       answer({ _tag: "Text", text: "Read." }),
     ],
   });
@@ -1376,7 +1376,7 @@ test("session/load in a new process replays the stored turn in order before its 
 });
 
 test("a session started by session/load or by session/resume offers permission_mode at the launcher's mode, not the mode it had when it was closed, and a mode set after it decides its next tool call", async () => {
-  const write = (call: string) => answer({ _tag: "ToolCall", call, tool: "write_file", input: { path: "a.txt", content: call } });
+  const write = (call: string) => answer({ _tag: "ToolCall", call, tool: "write_file", input: { path: "a.txt", content: call, intent: "Write a.txt." } });
   const first = startHost({ script: [write("w-1"), answer({ _tag: "Text", text: "One." })] });
   const stored = await sdkClient().app.connectWith(first.stream, async (ctx) => {
     await initialize(ctx);
@@ -1775,7 +1775,7 @@ test("a file read over 256 KiB is cut before a character, not inside it; a call'
   const host = startHost({
     script: [
       answer(
-        { _tag: "ToolCall", call: "read-1", tool: "read_file", input: { path: "big.txt" } },
+        { _tag: "ToolCall", call: "read-1", tool: "read_file", input: { path: "big.txt", intent: "Read big.txt." } },
         { _tag: "ToolCall", call: "plan-1", tool: "update_plan", input: { command: "ls", path: "a.txt" } },
       ),
       answer({ _tag: "Text", text: "Done." }),
@@ -1800,7 +1800,7 @@ test("a file read over 256 KiB is cut before a character, not inside it; a call'
 
 test("a call that ends while its permission request is out, its turn cancelled, has the request cancelled at the client", async () => {
   const host = startHost({
-    script: [answer({ _tag: "ToolCall", call: "write-1", tool: "write_file", input: { path: "a.txt", content: "hi" } }), answer({ _tag: "Text", text: "Done." })],
+    script: [answer({ _tag: "ToolCall", call: "write-1", tool: "write_file", input: { path: "a.txt", content: "hi", intent: "Write a.txt." } }), answer({ _tag: "Text", text: "Done." })],
   });
   const asked = Promise.withResolvers<void>();
   const aborted = Promise.withResolvers<void>();
@@ -2099,7 +2099,7 @@ test("a permission mode set while a turn runs applies when the turn ends: the tu
 });
 
 test("a call with properties its tool does not take runs without them and says which; with strict tool input it is refused", async () => {
-  const call: Piece = { _tag: "ToolCall", call: "call-1", tool: "write_file", input: { path: "notes.txt", content: "hello", mode: "0644" } };
+  const call: Piece = { _tag: "ToolCall", call: "call-1", tool: "write_file", input: { path: "notes.txt", content: "hello", mode: "0644", intent: "Write the notes." } };
   const run = async (strictToolInput: boolean) => {
     const host = startHost({ strictToolInput, script: [answer(call), answer({ _tag: "Text", text: "Done." })] });
     const { app, log } = sdkClient();

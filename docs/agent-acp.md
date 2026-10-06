@@ -404,11 +404,14 @@ is optional, and its default. The descriptions and limits shared with the worksp
 ### `editorWorld`, the default
 
 The tools go through the editor. Each is offered only when the client advertised the methods it
-uses, so no call meets a capability the client does not have.
+uses, so no call meets a capability the client does not have. Each tool is a value
+(`editor-tools.ts`) that asks for the `Editor` service, which the world provides: the editor is the
+environment the tools run in. Every tool takes an `intent` input (`agent-tools/described.ts`), and
+the file tools' paths are resolved against the working folder (`agent-tools/in-workspace.ts`).
 
 | Tool | Kind | Offered when the client advertised | What it does |
 | --- | --- | --- | --- |
-| `read_file { path, line?, limit? }` | `read` | `fs.readTextFile` | Reads with `fs/read_text_file`, so the model sees the editor's unsaved buffers; at most 256 KiB. |
+| `read_file { path, line?, limit? }` | `read` | `fs.readTextFile` | Reads with `fs/read_text_file`, so the model sees the editor's unsaved buffers. A result over 256 KiB is cut there, with a note. |
 | `write_file { path, content }` | `edit` | `fs.writeTextFile` | Writes with `fs/write_text_file`; at most 256 KiB. |
 | `edit_file { path, old_text, new_text }` | `edit` | both `fs` methods | Reads the file, replaces the one occurrence of `old_text`, and writes it back. |
 | `run_command { command, timeout_seconds? }` | `execute` | `terminal` | Runs `sh -c <command>` in an editor terminal in the working folder. |
@@ -435,10 +438,13 @@ uses, so no call meets a capability the client does not have.
 - `write_file`, `edit_file` and `run_command` ask permission in the default mode.
 - A call whose input has properties its tool does not take runs without them, and its result names
   them; with `--strict-tool-input` it is refused.
-- A call's title names its command or its path (`run_command: ls`, `edit_file: a.txt`), so a
-  permission question says what it asks about. A path is the call's location. An edit's call shows
-  its change as a `diff`, from when permission is asked; a command's call shows its `terminal` from
-  when it has one, and when it has ended.
+- A call's title is its intent. A call without one, recorded before its tool took an intent, is
+  titled with its command or its path (`run_command: ls`, `edit_file: a.txt`). A permission question
+  also carries the call's whole input as `rawInput`, so the command or the path that will be used is
+  in the question whatever the title says; whether the editor shows `rawInput` is the editor's
+  choice. A path is the call's location. An edit's call shows its change as a `diff`, from when
+  permission is asked; a command's call shows its `terminal` from when it has one, and when it has
+  ended.
 
 ### `workspaceWorld`
 

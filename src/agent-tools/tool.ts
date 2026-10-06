@@ -9,8 +9,8 @@
  * decoded input, and gives the tool it wraps a decoded input in turn.
  */
 
-import { Data, Effect, Schema } from "effect";
-import { FailureText, type ToolName } from "../agent-machine/names.ts";
+import { Context, Data, Effect, Schema } from "effect";
+import { type CallId, FailureText, type ToolName } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
@@ -23,6 +23,12 @@ export class Rejected extends Data.TaggedError("Rejected")<{ readonly problem: s
 
 /** The tool ran and failed, for example with an error the file system reported: the model reads the message. */
 export class Reported extends Data.TaggedError("Reported")<{ readonly message: string }> {}
+
+/**
+ * The call that a tool runs for. `sourceOf` provides it to each call. A tool that reports on its
+ * call while it runs asks for it: the editor's `run_command` shows its terminal in the call.
+ */
+export class CurrentCall extends Context.Service<CurrentCall, CallId>()("agent-tools/CurrentCall") {}
 
 /** The fields of a tool's input: each decodes and encodes without services. */
 export type Fields = { readonly [name: string]: Schema.Top & { readonly DecodingServices: never; readonly EncodingServices: never } };
@@ -56,18 +62,18 @@ const rejected = (problem: string): ToolOutcome => ({ _tag: "Failed", reason: { 
 
 /**
  * Returns the tool source (the host's own tools, with no namespace) that runs calls to `tools`, with
- * the services `R` that it is built with.
+ * the services `R` that it is built with, and the call (`CurrentCall`).
  * - With `strictInput`, a call whose input has properties that its tool does not take is refused.
  *   Without it, the call runs without them, a WARN is logged, and the result says which were ignored.
  * - A call to a name that no tool has ends `NotFound`.
  */
-export const sourceOf = <R>(tools: ReadonlyArray<AnyTool<R>>, options: { readonly strictInput?: boolean } = {}): Effect.Effect<ToolSource, never, R> =>
+export const sourceOf = <R>(tools: ReadonlyArray<AnyTool<R>>, options: { readonly strictInput?: boolean } = {}): Effect.Effect<ToolSource, never, Exclude<R, CurrentCall>> =>
   Effect.gen(function* () {
-    const services = yield* Effect.context<R>();
+    const services = yield* Effect.context<Exclude<R, CurrentCall>>();
     const strict = options.strictInput ?? false;
     return {
       tools: tools.map((tool) => tool.spec),
-      run: (name, input) => {
+      run: (name, input, call) => {
         const found = tools.find((tool) => tool.spec.name === name);
         if (found === undefined) return Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "NotFound" } });
         const parsed = parseJson(input);
@@ -87,6 +93,7 @@ export const sourceOf = <R>(tools: ReadonlyArray<AnyTool<R>>, options: { readonl
             Rejected: (error) => Effect.succeed(rejected(error.problem)),
             Reported: (error) => Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(error.message) } }),
           }),
+          Effect.provideService(CurrentCall, call),
           Effect.provideContext(services),
         );
       },

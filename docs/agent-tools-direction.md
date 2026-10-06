@@ -118,6 +118,19 @@ Constraints:
 - A workspace wrapper under which the model is offered and sends only paths relative to the working
   folder, and the working folder's path is removed from results. The host (ACP) still sees absolute
   paths. Dan: "not necessarily something I'd use, but I can see enterprise deployments wanting it."
+- Where a tool runs is a service that the tool asks for and the environment provides. The editor's
+  tools already ask for `Editor`. `run_command` in the editor is a bare shell tool, run in the
+  editor's terminal as its environment: "Run this bash command, but not over here, over *there*, in
+  the editor's terminal shell".
+- What a tool, or one action of a tool, does to the world, as data that the permission policy reads:
+  MCP's tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) for
+  each tool, or for each action of a tool with an `action` input. `agent-mcp/source.ts` already
+  reads `readOnlyHint` into an MCP tool's kind and replay. The alternative is a tool for each
+  action (`git_branch_list`, `git_branch_delete`).
+- Code mode: a tool's name is a function's name, so names use `_`, not `-` (`git.do_thing()`). The
+  git tools could be a virtual file system (`ls git://branch/`, `mv git://branch/a git://branch/b`,
+  `head -n 5 git://remote/origin/main/log`), as omp's `XD://` is. How far a command-line
+  experience maps onto "everything is a file" is not known; code mode is where to design it.
 
 ## Order of work
 
@@ -126,9 +139,9 @@ that nailed and robust first."
 
 1. A tool as a value, and wrappers: `inWorkspace` and `described`, applied to the workspace tools.
    Built: `src/agent-tools/tool.ts`, `paths.ts`, `in-workspace.ts` and `described.ts`. ACP's
-   editor world takes its path descriptions and its path check from `in-workspace.ts`. Its tools are
-   not wrapped yet, so they have no `intent` input, and their titles are still the tool's name
-   and its command or path.
+   editor tools are values too (`src/agent-acp/editor-tools.ts`), which ask for the `Editor`
+   service that the world provides, and are wrapped the same way. A tool that reports on its call
+   while it runs asks for `CurrentCall`, which `sourceOf` provides.
 2. `bound`: the git tools bound to the workspace's repository. Built: `src/agent-tools/bound.ts`.
    Each git tool (`git.ts`) is a primitive that takes `repository`; `gitTools(root)` binds it to
    `root` and adds `intent`.
