@@ -64,7 +64,7 @@ test("an attempt's span marks its first event, first thinking, first text and ea
   expect(Object.keys(attempt?.attributes ?? {})).toEqual(expect.arrayContaining(["first_event_ms", "first_thinking_ms", "first_text_ms", "ttft_ms", "tool_calls"]));
   expect(attempt?.attributes["ttft_ms"]).toBe(attempt?.attributes["first_thinking_ms"]);
   expect(attempt?.attributes["tool_calls"]).toBe(1);
-  expect(spans.find((span) => span.name === "agent.model.request")?.attributes).toMatchObject({ input_tokens: 120, output_tokens: 30, cache_read_tokens: 100 });
+  expect(spans.find((span) => span.name === "agent.model.request")?.attributes).toMatchObject({ provider: "scripted", model: "streamer", input_tokens: 120, output_tokens: 30, cache_read_tokens: 100 });
   const counted = (id: string) => snapshot.filter((metric) => metric.id === id).map((metric) => ({ attributes: metric.attributes, state: metric.state }));
   expect(counted("agent.model.time_to_first_token")).toEqual([{ attributes: expect.objectContaining({ provider: "scripted", model: "streamer" }), state: expect.objectContaining({ count: 1 }) }]);
   expect(counted("agent.model.tokens").map((metric) => [metric.attributes?.["kind"], Number((metric.state as { readonly count: number }).count)])).toEqual(

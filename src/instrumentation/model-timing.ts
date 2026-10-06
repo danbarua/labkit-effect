@@ -11,9 +11,10 @@
  *   (`tool call parsed`, with the tool's name). The span's attributes hold the same times as
  *   milliseconds from the attempt's start (`first_event_ms`, `first_thinking_ms`, `first_text_ms`,
  *   `ttft_ms` for the first of thinking and text), and the number of tool calls (`tool_calls`).
- * - A response's token use is put on the request's span (`input_tokens`, `output_tokens`,
- *   `thinking_tokens`, `cache_read_tokens`, `cache_write_tokens`) and counted
- *   (`agent.model.tokens`, by provider, model and kind).
+ * - A response's provider, model and token use are put on the request's span (`provider`, `model`,
+ *   `input_tokens`, `output_tokens`, `thinking_tokens`, `cache_read_tokens`, `cache_write_tokens`),
+ *   so that Tempo's TraceQL metrics can sum tokens by model, and counted (`agent.model.tokens`, by
+ *   provider, model and kind).
  * - The time to the first token is recorded (`agent.model.time_to_first_token`, by provider and
  *   model).
  *
@@ -83,11 +84,12 @@ const mark = (span: Tracer.Span, streamed: Streamed, now: bigint, marked: Marked
 const recordFirstToken = (span: Tracer.Span, since: number) =>
   Metric.update(Metric.withAttributes(timeToFirstToken, { provider: String(span.attributes.get("provider")), model: String(span.attributes.get("model")) }), Duration.millis(since));
 
-/** Puts a response's token use on the current span (the request's), and counts it by provider, model and kind. */
+/** Puts a response's provider, model and token use on the current span (the request's), and counts the tokens by provider, model and kind. */
 const recordUsage = (response: Observation) =>
   Effect.gen(function* () {
     if (response._tag !== "ModelResponded" || response.usage === undefined) return;
     const { usage, provider, model } = response;
+    yield* Effect.annotateCurrentSpan({ provider, model });
     const used = { input: usage.input, output: usage.output, thinking: usage.thinking, cache_read: usage.cacheRead, cache_write: usage.cacheWrite };
     yield* Effect.forEach(Object.entries(used), ([kind, count]) =>
       count === undefined

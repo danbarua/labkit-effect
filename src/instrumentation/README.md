@@ -11,8 +11,19 @@ Tool usage counted two ways, and OpenTelemetry. None of it changes what the loop
     zork (`labkit-zork`) and the probes (`labkit-probe`). `OTEL_SERVICE_NAME` overrides the name.
   - Log lines are sent without the environment's secrets, as the log files are written.
   - To send everything to a local collector (such as `grafana/otel-lgtm`), add
-    `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` to `.env`, which Bun reads for every
-    command run in this repository. The test suite then takes about 3 seconds longer.
+    `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` to `.env`. Bun reads `.env` from the folder
+    a command runs in, so it covers the commands run in this repository. A CLI run from another
+    folder needs the variable in the shell's environment. The test suite takes about 3 seconds
+    longer with it.
+- `model-timing.ts`: `TimedModelClient`, which marks on each model attempt's span the first stream
+  event, the first thinking, the first text and each tool call parsed, with their times from the
+  attempt's start as attributes (`ttft_ms` among them); puts each response's model and tokens on
+  its request's span; and records `agent.model.time_to_first_token` and `agent.model.tokens`.
+- `scripts/observability/labkit-dashboard.json`: a Grafana dashboard of time to first token,
+  attempt duration, tokens and tool runs by model and tool (Tempo's TraceQL metrics over the spans,
+  which work for processes as short as one CLI run), span durations, the latest sessions and games,
+  and warnings. `bun scripts/observability/import-dashboard.ts` imports it into `GRAFANA_URL`
+  (`http://localhost:3000` by default).
   `SpansTo` passes each span to a function as it ends, as well as to the tracer already in place.
   `TelemetryToFiles` does both, and writes a run's spans to `<base>.spans.jsonl` and its log lines
   to `<base>.logs.jsonl`, one JSON object per line. The live probes in `scripts/probes/` write both

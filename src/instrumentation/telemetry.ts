@@ -8,6 +8,7 @@
  *   `Otlp.layerFromConfig` also asks for `OTEL_TRACES_EXPORTER=otlp` and its kin, which this does not.
  *   - The service is named `OTEL_SERVICE_NAME` when it is set, else the name its caller gives
  *     (`labkit-cli`, `labkit-acp`, `labkit-tests`); `OTEL_RESOURCE_ATTRIBUTES` adds attributes.
+ *     Each process is an instance of its service (`service.instance.id`, a random id).
  *   - A log line's body is one JSON object: its text parts joined as `message`, and the fields of
  *     the objects logged with it (`Effect.logInfo(logKeys.x, { … })`), so that Loki shows the fields.
  *   - A log line is sent without the environment's secrets (`agent-host/redaction.ts`) in its
@@ -21,12 +22,16 @@
  *   `<base>.logs.jsonl`, one JSON object per line, for reading without a collector.
  */
 
+import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { Cause, Config, Context, Effect, Exit, type Fiber, Layer, Logger, Option, References, type Scope, Tracer } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { OtlpExporter, OtlpLogger, OtlpMetrics, OtlpSerialization, OtlpTracer } from "effect/observability";
 import { redactedValue, redactorOf, secretsOf } from "../agent-host/redaction.ts";
+
+/** This process's instance of its service (`service.instance.id`). */
+const instance = randomUUID();
 
 /** Where OTLP goes and as which service: undefined when `OTEL_EXPORTER_OTLP_ENDPOINT` is not set. */
 const otlpTarget = (service: string) =>
@@ -35,7 +40,8 @@ const otlpTarget = (service: string) =>
     if (Option.isNone(endpoint)) return undefined;
     const named = yield* Config.option(Config.String("OTEL_SERVICE_NAME"));
     const base = endpoint.value.replace(/\/$/, "");
-    return { url: (path: string) => `${base}${path}`, resource: { serviceName: Option.getOrElse(named, () => service) } };
+    // Each process is an instance of its service, so that the counts of two runs are two series, not one that restarts.
+    return { url: (path: string) => `${base}${path}`, resource: { serviceName: Option.getOrElse(named, () => service), attributes: { "service.instance.id": instance } } };
   }).pipe(Effect.orDie);
 
 /** What the OTLP exporters need besides their options: an HTTP client, JSON, and a flusher. */
