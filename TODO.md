@@ -222,6 +222,11 @@ model.
 - [ ] The system prompt belongs in context assembly, as configuration; it is to be designed and
       tried. A hard-coded one ("You are a helpful assistant") will do until the host's question
       of where a user's things live has an answer.
+- [ ] `/preview` (or `/system`): the CLI shows what the next model request would send, the system
+      prompt included. `/tools` shows the tools; nothing in the CLI shows the system prompt (Dan,
+      2026-10-06).
+- [ ] Tools as primitives and wrappers, and an execution context that both hosts use: Dan's
+      direction and its order of work are in `docs/agent-tools-direction.md`.
 
 ### Compaction
 
