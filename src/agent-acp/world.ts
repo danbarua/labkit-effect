@@ -7,7 +7,7 @@
  *
  * - `editorWorld`, the default: the tools go through the editor. `read_file` reads with the client's
  *   `fs/read_text_file`, so the model sees the editor's unsaved buffers; `write_file` writes with
- *   `fs/write_text_file`; `edit_file` replaces one occurrence of a text with both; `run_command`
+ *   `fs/write_text_file`; `edit_file` replaces one occurrence of a text with both; `terminal_command`
  *   runs a shell command in the editor's terminal (`terminal/create`), which is how a folder is
  *   listed or searched, since the editor has no method for either. Each is offered only when the
  *   client advertised the methods it uses (`clientCapabilities.fs.readTextFile`, `.writeTextFile`,
@@ -95,7 +95,7 @@ const systemFor = (cwd: string, git: ReturnType<typeof gitToolsAt>): Effect.Effe
 /**
  * The tools that go through the editor (`editor-tools.ts`), for the methods the client advertised:
  * `read_file` with `fs/read_text_file`, `write_file` with `fs/write_text_file`, `edit_file` with
- * both, `run_command` with `terminal/*`; and `update_plan` for every client. Every tool takes an
+ * both, `terminal_command` with `terminal/*`; and `update_plan` for every client. Every tool takes an
  * `intent` (`described`), and the file tools' paths are resolved against the working folder
  * (`inWorkspace`). The world provides the editor (`Editor`) to the tools.
  */
@@ -131,7 +131,7 @@ export const editorWorld: World = {
           const base = yield* plain(call, outcome);
           const shown: Presented = { ...base, ...(about === undefined || base.title !== call.tool ? {} : { title: `${call.tool}: ${oneLine(about)}` }) };
           const terminalId = Option.getOrUndefined(HashMap.get(yield* Ref.get(terminals), call.call));
-          if (call.tool === "run_command" && terminalId !== undefined) return { ...shown, content: [{ type: "terminal", terminalId }] } satisfies Presented;
+          if (call.tool === "terminal_command" && terminalId !== undefined) return { ...shown, content: [{ type: "terminal", terminalId }] } satisfies Presented;
           const at = typeof input["path"] === "string" ? inside(cwd, input["path"]) : undefined;
           if (at === undefined || "problem" in at) return shown;
           const located: Presented = { ...shown, locations: [{ path: at.full }] };

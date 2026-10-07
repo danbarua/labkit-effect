@@ -704,7 +704,7 @@ test("the editor world's system prompt names the working folder; no tool's descr
   await host.stop();
   const facts = await factsOn(storeFileOf(host.directory, sessionId));
   const catalog = await Effect.runPromise(immutableToolCatalogOf(facts));
-  expect(catalog.map((tool): string => tool.name)).toEqual(["read_file", "write_file", "edit_file", "update_plan", "run_command"]);
+  expect(catalog.map((tool): string => tool.name)).toEqual(["read_file", "write_file", "edit_file", "update_plan", "terminal_command"]);
   expect(immutableSystemPromptOf(facts)).toBe(`The working folder is ${host.cwd}.`);
   expect(catalog.filter((tool) => JSON.stringify([tool.description, tool.input]).includes(host.cwd)).map((tool): string => tool.name)).toEqual([]);
   expect(catalog.flatMap((tool) => undescribedInputs(tool.input).map((input) => `${tool.name}: ${input}`))).toEqual([]);
@@ -735,15 +735,15 @@ test("in a working folder that is a git repository's root, the editor world also
   expect(ended).toEqual([expect.objectContaining({ call: "git-1", outcome: expect.objectContaining({ _tag: "Succeeded", output: expect.objectContaining({ body: { _tag: "Text", text: "[]" } }) }) })]);
 });
 
-test("edit_file replaces one occurrence through fs/*, shown as a diff; run_command runs in the editor's terminal, shown in its call, released however it ends; both ask first", async () => {
+test("edit_file replaces one occurrence through fs/*, shown as a diff; terminal_command runs in the editor's terminal, shown in its call, released however it ends; both ask first", async () => {
   const host = startHost({
     script: [
       answer(
         { _tag: "ToolCall", call: "edit-1", tool: "edit_file", input: { path: "a.txt", old_text: "alpha", new_text: "beta", intent: "Rename alpha." } },
         { _tag: "ToolCall", call: "edit-2", tool: "edit_file", input: { path: "a.txt", old_text: "a", new_text: "b", intent: "Change a to b." } },
-        { _tag: "ToolCall", call: "run-1", tool: "run_command", input: { command: "ls", intent: "List the files." } },
-        { _tag: "ToolCall", call: "run-2", tool: "run_command", input: { command: "false", intent: "Run a failing command." } },
-        { _tag: "ToolCall", call: "run-3", tool: "run_command", input: { command: "sleep 100", timeout_seconds: 1, intent: "Wait." } },
+        { _tag: "ToolCall", call: "run-1", tool: "terminal_command", input: { command: "ls", intent: "List the files." } },
+        { _tag: "ToolCall", call: "run-2", tool: "terminal_command", input: { command: "false", intent: "Run a failing command." } },
+        { _tag: "ToolCall", call: "run-3", tool: "terminal_command", input: { command: "sleep 100", timeout_seconds: 1, intent: "Wait." } },
       ),
       answer({ _tag: "Text", text: "Done." }),
     ],
@@ -758,7 +758,7 @@ test("edit_file replaces one occurrence through fs/*, shown as a diff; run_comma
   });
   await host.stop();
   const facts = await factsOn(storeFileOf(host.directory, sessionId));
-  expect((await Effect.runPromise(immutableToolCatalogOf(facts))).map((tool): string => tool.name)).toEqual(["read_file", "write_file", "edit_file", "update_plan", "run_command"]);
+  expect((await Effect.runPromise(immutableToolCatalogOf(facts))).map((tool): string => tool.name)).toEqual(["read_file", "write_file", "edit_file", "update_plan", "terminal_command"]);
   // The default permission mode asks before an edit and before a command, except a read-only one (ls).
   expect(log.asked).toHaveLength(4);
   expect(log.asked.map((asked) => asked.toolCall.toolCallId)).not.toContain("run-1");

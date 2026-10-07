@@ -59,8 +59,8 @@ model.
         - The JSON Schema does not carry the rules' pattern; a rule that is not valid is refused when
           the configuration is read.
         - The ask rate over exo-project's corpus is not measured.
-      - The ACP host's `run_command` runs in the editor's terminal (`terminal/create`), with the
-        environment the editor gives it. It is to be named `terminal_command`.
+      - The ACP host's command tool, `terminal_command`, runs in the editor's terminal
+        (`terminal/create`), with the environment the editor gives it.
       - Later (Dan, 2026-10-07):
         - Git subcommands that can lose uncommitted work (`git stash`, `git reset`,
           `git checkout`, `git rebase`), which today are `edit` tools and run unasked under

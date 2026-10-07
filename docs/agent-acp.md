@@ -417,17 +417,17 @@ the file tools' paths are resolved against the working folder (`agent-tools/in-w
 | `read_file { path, line?, limit? }` | `read` | `fs.readTextFile` | Reads with `fs/read_text_file`, so the model sees the editor's unsaved buffers. A result over 256 KiB is cut there, with a note. |
 | `write_file { path, content }` | `edit` | `fs.writeTextFile` | Writes with `fs/write_text_file`; at most 256 KiB. |
 | `edit_file { path, old_text, new_text }` | `edit` | both `fs` methods | Reads the file, replaces the one occurrence of `old_text`, and writes it back. |
-| `run_command { command, timeout_seconds? }` | `execute` | `terminal` | Runs `sh -c <command>` in an editor terminal in the working folder. |
+| `terminal_command { command, timeout_seconds? }` | `execute` | `terminal` | Runs `sh -c <command>` in an editor terminal in the working folder. |
 | `update_plan { entries }` | `think` | always | Sends the whole plan as a `plan` update. |
 
 - A path is relative to the working folder, or absolute. A path outside the working folder is
   refused with a failure the model reads, and the editor is not asked.
 - `edit_file` refuses `old_text` that occurs never or more than once, and writes nothing.
-- `run_command` waits for the command's exit until its time runs out (120 seconds unless the call
+- `terminal_command` waits for the command's exit until its time runs out (120 seconds unless the call
   gives `timeout_seconds`, at most 600), reads its output (the last 256 KiB), and releases the
   terminal however the call ends, which stops a command still running. Exit code 0 succeeds; any
   other end fails, with the output and how it ended for the model to read.
-- The editor has no method to list or search a folder, so `run_command` does both.
+- The editor has no method to list or search a folder, so `terminal_command` does both.
 - When the working folder is the root of a git repository (it holds `.git`), the session is also
   offered the git tools of `agent-tools/git.ts` (`git_status`, `git_diff`, `git_add`, `git_commit`
   and the others), bound to that repository, and the system prompt says that the working folder is
@@ -438,11 +438,13 @@ the file tools' paths are resolved against the working folder (`agent-tools/in-w
   needs one fails, and the call's result says why.
 - `update_plan` gives an entry the priority `medium` unless it gives one, and succeeds with the count
   of steps by status. Its kind is `think`, so it runs in every permission mode without asking.
-- `write_file`, `edit_file` and `run_command` ask permission in the default mode.
+- `write_file` and `edit_file` ask permission in the default mode. `terminal_command` is a command
+  tool: each program its command runs is judged, and a read-only one such as `ls` runs without a
+  question (`docs/agent-policy.md`, Command tools).
 - A call whose input has properties its tool does not take runs without them, and its result names
   them; with `--strict-tool-input` it is refused.
 - A call's title is its intent. A call without one, recorded before its tool took an intent, is
-  titled with its command or its path (`run_command: ls`, `edit_file: a.txt`). A permission question
+  titled with its command or its path (`terminal_command: ls`, `edit_file: a.txt`). A permission question
   also carries the call's whole input as `rawInput`, so the command or the path that will be used is
   in the question whatever the title says; whether the editor shows `rawInput` is the editor's
   choice. A path is the call's location. An edit's call shows its change as a `diff`, from when

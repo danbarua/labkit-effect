@@ -1,6 +1,6 @@
 /**
  * The tools that go through the editor, ACP's client: `read_file` with `fs/read_text_file`,
- * `write_file` with `fs/write_text_file`, `edit_file` with both, `run_command` in a terminal of the
+ * `write_file` with `fs/write_text_file`, `edit_file` with both, `terminal_command` in a terminal of the
  * editor's (`terminal/*`), and `update_plan`, which sends the model's plan to the editor (a `plan`
  * update). Each is a primitive tool (`agent-tools/tool.ts`) that asks for the `Editor` service: the
  * editor is the environment the tools run in, and the world provides it. A file tool takes the path
@@ -8,7 +8,7 @@
  *
  * - `read_file` reads the file as the editor has it, unsaved changes included. A result over 256 KiB
  *   is cut there, with a note that says how many bytes were left out.
- * - `run_command` waits for the command's exit until its time runs out, reads its output (the last
+ * - `terminal_command` waits for the command's exit until its time runs out, reads its output (the last
  *   256 KiB), and releases the terminal however the call ends, which stops a command still running.
  *   The terminal is shown in the call (`CurrentCall`) from when it is made.
  * - A failure the editor reports is the call's failure, naming the method and the path or command.
@@ -145,9 +145,9 @@ export const updatePlan: Tool<typeof UpdatePlan.fields, Editor> = {
     }),
 };
 
-/** `run_command`: runs a shell command in a terminal of the editor's, in the working folder. */
+/** `terminal_command`: runs a shell command in a terminal of the editor's, in the working folder. */
 export const runCommand: Tool<typeof RunCommand.fields, Editor | CurrentCall> = {
-  name: ToolName.make("run_command"),
+  name: ToolName.make("terminal_command"),
   kind: "execute",
   replay: "unsafe",
   description: `Run a shell command in the editor's terminal, in the working folder. The result is its output and its exit code; an output over ${maxReadText} is cut to its last ${maxReadText}. Use it to list and search files (ls, find, grep) and run tests.`,
@@ -171,7 +171,7 @@ export const runCommand: Tool<typeof RunCommand.fields, Editor | CurrentCall> = 
             Effect.flatMap((ended) => connection.client["terminal/output"]({ sessionId, terminalId }).pipe(Effect.map(({ output, truncated }) => ({ output, truncated, exited: ended })))),
           ),
         ({ terminalId }) => connection.client["terminal/release"]({ sessionId, terminalId }).pipe(Effect.ignore),
-      ).pipe(Effect.mapError((error) => failed("run_command", input.command)(error as never)));
+      ).pipe(Effect.mapError((error) => failed("terminal_command", input.command)(error as never)));
       const ending = Option.match(exited, {
         onNone: () => `[Still running after ${seconds} seconds: stopped.]`,
         onSome: ({ exitCode, signal }) => (typeof exitCode === "number" ? `[Exit code ${exitCode}.]` : `[Stopped by signal ${signal ?? "unknown"}.]`),
