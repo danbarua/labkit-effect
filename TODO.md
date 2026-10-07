@@ -2,7 +2,7 @@
 
 What is to be built, by capability. What is built is described in `docs/<module>.md`; direction that
 is not yet work is in `docs/<module>-direction.md`. Delete an item when it is done or dropped. As of
-2026-10-02.
+2026-10-07.
 
 ## Build
 
@@ -16,11 +16,11 @@ ACP: the protocol is built, as a package of its own (`effective-acp`,
 github.com/danbarua/effective-acp: schemas, the peer, stdio and Streamable HTTP, negotiation; its
 `src/MODEL.md`, and `src/EFFECT-FIT.md` for where Effect fits). The host, which joins it to the
 session, is built for protocol v1 over stdio (`src/agent-acp`, `bun src/agent-acp/main.ts`;
-`docs/agent-acp.md`) and has run the scenario below against the local Qwen with the SDK's client. It has not
-yet been seen in an editor. VS Code comes first, then the JetBrains AI extension (PyCharm,
-WebStorm). The protocol versions and features are those of the labkit monorepo's ACP host, for
-parity; what `session/load` sends back is the ACP side's to decide. In ACP, tools go through the
-editor.
+`docs/agent-acp.md`). It runs in VS Code with labkit-web's client (`bun run vscode:dev`), and has
+run the scenario below against the local Qwen with the SDK's client. The JetBrains AI extension
+(PyCharm, WebStorm) comes next. The protocol versions and features are those of the labkit
+monorepo's ACP host, for parity; what `session/load` sends back is the ACP side's to decide. In ACP,
+tools go through the editor.
 
 Dan's rulings about the hosts and the order of work are in `docs/agent-host-direction.md`.
 
@@ -31,18 +31,6 @@ the first input, stream thinking, the model calls a tool, the user is asked for 
 tool runs, the model answers, and `/export` writes the session to Markdown without going to the
 model.
 
-- [ ] Configuration comes from the host, and is assembled before a request is made; a change
-      applies between turn N and turn N + 1. A new session is configuring until it is ready to
-      start turn zero: a UI with no default model, thinking level or output limit has nothing to
-      launch, and its submit is not enabled until it has (the same machines can run in the UI).
-      In the log: the providers on offer are a model catalog (models.dev) filtered by which
-      credentials are set, plus a local server; the user changes the model, thinking and output
-      limit with ACP's `session/set_config_option`. Here: the opening is the configuration, a
-      change is `ModelChangeArrived` from `User { via: acp }`, taken between turns; the
-      log's configuration versions are our host's numbering (labkit-agent), ours to change, as
-      `Seq` is the session's.
-      Built: ACP's config options, and `session/set_config_option` as the change it asks, served by
-      the ACP host for a draft and for an open session.
 - [ ] Tool permission. Built: each tool call goes through `ToolCallPolicies` in the loop; the
       permission modes (`default`, `acceptEdits`, `dontAsk`, `bypassPermissions`) by each tool's
       kind; what is asked and answered recorded (`PermissionAsked`, `PermissionAnswered`); allow
@@ -84,10 +72,13 @@ model.
       client half (sending, drawing, resolving `blob://`), labkit-web's.
 - [ ] The host's services, shared by the CLI and the ACP host (`src/agent-host`). Built: the model
       catalog, the provider clients, the services a session runs with, the permission policy for a
-      mode, the folder sessions are kept in, log lines to a file or to stderr, the ACP launcher's
-      log file (JSONL, rotated, secrets redacted; `bun run acp:logs`), and the host's own record of a
-      session in its folder (`host.json`, stored and returned as JSON) (`docs/agent-host.md`). To do: a
-      hand-written `models.yml` as one more source of the catalog.
+      mode, where a host keeps its sessions and logs (`~/.local/share/<brand>/`), log lines to a file
+      or to stderr and, with `OTEL_EXPORTER_OTLP_ENDPOINT` set, as OTLP with the spans and metrics,
+      the ACP launcher's log file (JSONL, rotated, secrets redacted; `bun run acp:logs`), the host's
+      own record of a session in its folder (`host.json`, stored and returned as JSON), and
+      `withSession`, which runs a session with what a host adds to it (the CLI's tools and MCP
+      servers, zork's game) (`docs/agent-host.md`). To do: a hand-written `models.yml` as one more
+      source of the catalog. Open: the ACP host opens its sessions itself, not through `withSession`.
 - [ ] `session/update`. Built: the projection of a session's facts and of the core's captured items
       (`ModelDelta`, `ModelPartArrived`, `ModelResponseEnded`), merged in any order, to the client's
       updates, one function for the live view and for `session/load` (`src/agent-acp/projection.ts`),
@@ -108,8 +99,10 @@ model.
       mode is not in the host's record, so a reopened session starts at the launcher's mode; ACP has
       no update for how a turn ended, so a replay of a turn that ended without an answer
       (interrupted, failed) shows what its finished requests sent and nothing of how it ended.
-- [ ] The ACP host in an editor: the launch command, and VS Code's behaviour with what it sends and
-      draws (config options as selects, thinking, permission, tool call content). Then JetBrains.
+- [ ] The ACP host in JetBrains. In VS Code (labkit-web's client, `bun run vscode:dev`; 2026-10-07):
+      the session's config options as selects (permission mode, model, effort), its title from the
+      first prompt, a tool call and how it ended, the answer, and the context gauge and cost from
+      `usage_update`.
 - [ ] MCP servers. Built (`src/agent-mcp`, on `src/agent-process`): the client over stdio, Streamable
       HTTP and HTTP+SSE (`type: http`, `sse`, with `url` and `headers`; `${VAR}` in a server's
       configuration); each server a machine over its runs (a process, or a session at its URL, made
@@ -146,40 +139,44 @@ model.
 ### Configuration
 
 - [ ] Trusted folders (Dan, 2026-10-04): a project's configuration is not read until its folder is
-      trusted. Until then a project's layer may not name extensions or MCP servers (both run code;
-      see `docs/agent-config.md`); once a folder is trusted, its layers may. A folder's `.env` is the
-      folder's too: Bun reads it by itself where the agent runs, and the options' variables
-      (the launch variables: `LABKIT_PERMISSION_MODE`, `LABKIT_SETTING_SOURCES`, `LABKIT_MCP_CONFIG`,
-      and `LABKIT_CONFIG_DIR`, which names the folder whose files are trusted) can loosen permission or
-      start MCP servers; until the folder is trusted they are not to be read from it.
+      trusted; once a folder is trusted, its layers may name extensions and MCP servers. Built
+      (`docs/agent-config.md`): a project's files are read only when named
+      (`--setting-sources project`, `local`), and a layer that is not the user's own may not name
+      extensions or MCP servers (both run code). To do: trusting a folder, and reading nothing of a
+      project's until it is trusted. A folder's `.env` is the folder's too: Bun reads it by itself
+      where the agent runs, and the options' variables (the launch variables:
+      `LABKIT_PERMISSION_MODE`, `LABKIT_SETTING_SOURCES`, `LABKIT_MCP_CONFIG`, and `LABKIT_CONFIG_DIR`,
+      which names the folder whose files are trusted) can loosen permission or start MCP servers;
+      until the folder is trusted they are not to be read from it.
 - [ ] Turn-end hooks by name, as policies are: a hold recorded from the hook that made it, so
-      `retryIncomplete` counts its own holds, not every hook's.
+      `retryIncomplete` counts its own holds, not every hook's. Today `holdsOf`
+      (`agent-session/turn-holds.ts`) counts every hook's holds, for the loop and for zork's
+      adventurer.
 - [ ] The product's name (Dan is thinking of `whitelabel-agent`): the default brand
       (`agent-host/brand.ts`) is still `labkit`, and with it the meta variable
       (`LABKIT_BRAND`).
 
-- [ ] Plug-ins and `policies.yml`. Dan's decisions (2026-10-03):
-      - A plug-in declares a Schema for its settings, with a default for each, and the entries it
-        adds to the seams it knows (policies, turn-end hooks, tool sources, information providers);
-        the file is decoded against the registry's Schemas: `use` first, against the names
-        registered, then the entry with its plug-in's own Schema, refusing properties it does not
-        have. A JSON Schema made from the same Schemas is what an editor checks the file with while
-        it is typed. An extension is a module the file names, loaded before the entries are
-        decoded, registered as a built-in is.
-      - One ordered list per seam (`toolCalls:`, `modelRequests:`, ...), each entry `use: <name>`
-        and its settings; a plug-in on two seams is listed in each.
-      - A setting that is a function is named in the file: the loop breaker's `key` is a name
-        (`toolAndInput`) its plug-in maps to the function.
-      - The file is read with Effect's YAML (`effect/encoding/Yaml`), not `Bun.YAML`. Effect's
-        `Config.schema` drops a property it does not know without a word, so it does not read it.
-      - A session's plug-ins and settings are recorded when it opens; the file is what new sessions
-        start with. A change is observed (a draft) and taken (admitted) only between turns, when the
-        machines have settled: always, a model's change too and the permission mode's too. A user
-        who wants it sooner cancels the turn.
-      - The name an entry is used by (`use`) says which entry vetoed (`every` reports it, into the
-        origin and the log) and which turn-end hook held a turn, so a hook counts its own holds.
-      Decided (Dan, 2026-10-05): every `.yml` file in the configuration folder, in name order
-      (`docs/agent-config-direction.md`); built.
+- [ ] Plug-ins and their configuration (Dan's decisions, 2026-10-03 and 2026-10-05;
+      `docs/agent-config.md`). Built: a plug-in declares a Schema for its settings, with a default
+      for each, and the seams it adds entries to (`toolCalls`, `modelRequests`, `turnEnd`,
+      `knownModels`, `settling`, `toolSources`, `commandEnvironment`); one ordered list per seam, each
+      entry a plug-in's name or `use: <name>` with its settings, decoded against the plug-in's
+      Schema, refusing properties it does not have, and a plug-in on two seams listed in each; a
+      setting that is a function named in the file (the loop breaker's `key: toolAndInput`);
+      extensions, modules the user's file names, loaded before the entries are decoded; the files
+      read with Effect's YAML; every `.yml` file in the configuration folder, in name order; a JSON
+      Schema made from the same Schemas, for editors; the entry that vetoed named in the origin and
+      the log. To do:
+      - A session's plug-ins and settings recorded in its facts when it opens; the file is what new
+        sessions start with. Today the CLI writes what its configuration resolved to beside the
+        facts (`effective-settings.json`).
+      - A change to them observed (a draft) and taken (admitted) only between turns, when the
+        machines have settled. A user who wants it sooner cancels the turn. Today the configuration
+        is read when a session opens; a change of model, and the ACP host's permission mode, are
+        already taken between turns.
+      - The entry that held a turn named (turn-end hooks by name, above).
+      - Information providers (the notices a request carries, `Notices`) as a seam that a plug-in
+        adds to.
 - [ ] Later (Dan, 2026-10-03): a change that tightens the permission mode taken between the steps
       of a turn, delivered through the inbox as steering is.
 - [ ] Parked (Dan, 2026-10-03): permission in headless mode (`-p`), where no one can answer a
@@ -195,9 +192,10 @@ model.
 ### The coding agent
 
 - [ ] The CLI does what the ACP host does. Built: `/export` (`markdownOf`); `retryIncomplete`; the
-      REPL shows text and thinking as they arrive (`session.streamed`). To do: open its session from
-      a draft at the first input (`src/agent-host/draft.ts`, turn zero), so a CLI quit before any
-      input leaves no session.
+      REPL shows text and thinking as they arrive (`session.streamed`); at a terminal, a new session
+      whose model cannot be used opens the REPL without a model, and the session opens once one is
+      picked. To do: open its session from a draft at the first input (`src/agent-host/draft.ts`,
+      turn zero), so a CLI quit before any input leaves no session.
 - [ ] Code mode: the model writes a script that calls the session's tools as functions and composes
       them (map, filter, chain), and the harness runs it as one tool call. Dan's decisions
       (2026-10-03):
@@ -238,7 +236,9 @@ model.
       prompt included. `/tools` shows the tools; nothing in the CLI shows the system prompt (Dan,
       2026-10-06).
 - [ ] Tools as primitives and wrappers, and an execution context that both hosts use: Dan's
-      direction and its order of work are in `docs/agent-tools-direction.md`.
+      direction and its order of work are in `docs/agent-tools-direction.md`. Its steps 1 to 3 are
+      built; replacing a tool by name, the built-in tools as a bundled plug-in, and the execution
+      context as a module of its own are not ordered yet.
 
 ### Compaction
 
@@ -283,18 +283,15 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       beside the JSONL. Continuing a session in another host than the one that made it waits for a
       session's tools to change during it.
 - [ ] Provider usage as metrics (Dan, 2026-10-06): tokens, cost and request time for each provider
-      and model, sent with the tool metrics.
+      and model, sent with the tool metrics. Built: tokens by provider, model and kind
+      (`agent.model.tokens`), the time to the first token (`agent.model.time_to_first_token`), each
+      request's time in the span metrics, and a Grafana dashboard of them
+      (`scripts/observability/`; `src/instrumentation/README.md`). To do: cost.
 - [ ] Each model request's HTTP request and response bodies in the telemetry, linked to the
       request's span (as related log lines, not span attributes), so that a trace reads from the
       session down through the machines' transitions to what the model was sent and what it
       answered (Dan, 2026-10-06). For compaction, caching and usage work.
 
-- [ ] The session store. Built: `SessionStore`, which the loop requires (`EphemeralSessionStore`,
-      `FileBackedSessionStore`); each fact written before anything is done on it; a failed write
-      stops the session; a turn left running goes on (`goOn`: a model request made again, only
-      `safe` tool calls run) or ends, as the host chooses (the REPL asks; `-p` goes on); Ctrl+C records
-      the turn as interrupted; the ACP host keeps its sessions in files too, and ends that turn
-      when it reopens one (`session/load`, `resume`).
 - [ ] Forks as sessions, and the turn pointer (`session/turn`; turn zero of a root points at
       itself). A fact is addressed by its session and its position. In the CLI,
       `--fork-session` (commented out): go on from an earlier turn of a session, as a new one, to
@@ -366,10 +363,12 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 - [ ] Models. Built: the well-known models as generated `const` data (`bun run models:refresh`:
       models.dev's catalog merged with `well-known-models.measured.json`); a settings type per
       well-known model (`SettingsFor`); the values to offer for each setting of a model as it is
-      set now, which are the ones its provider's adapter applies as asked (`choicesFor`); what is
-      known of a model travels on each request's target, from `KnownModels`, whose sources a host
-      can put in front (the CLI gives a `localhost` model what its server lists); the CLI's `/settings`
-      picks among the choices, and its prompt completes commands, models and settings with Tab.
+      set now, which are the ones its provider's adapter applies as asked (`choicesFor`); a model
+      that is not well-known is asked with what models.dev's catalog says of it
+      (`catalog-models.gen.ts`); what is known of a model travels on each request's target, from
+      `KnownModels`, whose sources a host can put in front (the CLI gives a `localhost` model what
+      its server lists); the CLI's `/settings` picks among the choices, and its prompt completes
+      commands, models and settings with Tab.
       To do: when a setting is changed, `/settings` says what this provider does with the value
       (OpenAI caches for minutes whatever is asked; xAI has no cache setting), so the user knows
       before a request is sent; measure the efforts of Anthropic's models.
@@ -410,7 +409,9 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 - [ ] `prompt_cache_key` (OpenAI, xAI) for cache-aware work.
 - [ ] Changes to the system prompt or tools after the session opens, as facts of their own: the
       counterparts of `ImmutableSystemPrompt` and `ImmutableToolCatalog` (the readers
-      `immutableSystemPromptOf`, `immutableToolCatalogOf`), which read only the opening now.
+      `immutableSystemPromptOf`, `immutableToolCatalogOf`), which read only the opening now. Zork's
+      adventurer is offered a different part of its catalog in each request; only each request's
+      recorded context shows which.
       Anthropic takes tool changes mid-conversation as `tool_addition` and `tool_removal` blocks;
       Codex records settings changes as `thread_settings_applied`.
 - [ ] Returning to the first provider after a fallback by itself; today it is the user's to switch.
@@ -429,9 +430,9 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 
 ## Trajectories
 
-Run both sweeps after a change to a core machine, and read the counts of sessions with
-observations not expected or undelivered. On 2026-10-02: Codex 0 of 171 files; Claude Code 3 of
-783.
+Run both sweeps after a change to a core machine (`bun scripts/trajectories/sweep.ts codex`, then
+`claude-code`), and read the counts of sessions with observations not expected or undelivered. On
+2026-10-07: Codex 0 of 180 files; Claude Code 3 of 805.
 
 - [ ] Claude Code: the 3 sessions. On 2026-09-30 such observations were errors Claude Code reported
       after a response the core had already taken as the step's outcome (after a refusal, or an
