@@ -82,6 +82,21 @@ The permissions plug-in's settings hold rules (`permission-rules.ts`):
 | `<tool>` | every call to the tool |
 | `<tool>(<words>)` | a command tool's program that is exactly these words |
 | `<tool>(<words>:*)` | a command tool's program whose words start with these |
+| `Read(<path>)` | the paths a command reads that match the pattern |
+| `Edit(<path>)` | the paths a command writes, deletes, moves or changes that match the pattern |
+
+Path rules are Claude Code's (`path-patterns.ts`): `//` from the root, `~/` from the home folder,
+anything else from the working folder, then gitignore's matching; a pattern from a single `/` is
+refused. Each path a unit reads or changes (`Unit.paths`) is resolved by `path-resolver.ts`, the one
+place a path as written becomes a full path. A path deny rule vetoes a read that a `Read` pattern
+matches, or a change that reaches an `Edit` pattern (`changeReaches`: the path matches, or it is a
+folder holding the folder an anchored pattern starts from). A path allow rule lifts a read outside
+the working folder that a `Read` or `Edit` pattern matches, a change outside it, or a write inside
+it, that an `Edit` pattern matches; the paths it does not match are still named. When path deny
+rules exist, a path they cannot see (not written out, another user's `~`, given on a program's
+input) is `unseen`. A program rule decides which programs run; only path rules lift reads and
+changes outside the working folder, as in Claude Code, whose path checks come before its program
+allow rules.
 
 `command` in place of a tool's name names every command tool. A deny rule (`deny`) vetoes the call
 in every mode, `bypassPermissions` included. An allow rule (`allow`) lets it run without a question.
@@ -143,10 +158,10 @@ their grants name the host or the container (`ssh build-box`, `docker exec web`)
 A program runs without a question when an allow rule names it, a read-only prefix names it and it is
 not opaque (`readOnly`: `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `echo`, `grep`, `rg`, `which`, `cd`,
 `git status`, `git log`, `git diff`, `git show`), or the session has allowed its grant and it is not
-opaque. A program that writes files inside the working folder also needs the `acceptEdits` mode. A
-program that reads outside the working folder needs permission unless an allow rule names it (a
-session grant does not lift it). A program that changes paths outside the working folder needs
-permission unless an allow rule names it: neither a session grant nor `acceptEdits` lifts it. An
+opaque. A program that writes files inside the working folder also needs the `acceptEdits` mode,
+or an `Edit` rule matching them. A program that reads outside the working folder needs permission
+unless a `Read` or `Edit` rule matches the paths; a program that changes paths outside it, unless an
+`Edit` rule matches them. Neither a session grant, a program rule nor `acceptEdits` lifts them. An
 allow rule for the whole tool (`command`) runs every command, as it does for every other need but
 `unseen`. The working folder is the boundary that a trusted folder draws. A command that
 cannot be split needs permission.
@@ -160,7 +175,7 @@ judged by its grant alone.
 | every program runs without a question | runs | runs | runs | runs |
 | a program writes files inside the working folder, the others run without a question | asks | runs | vetoed | runs |
 | a program reads outside the working folder | asks | asks | vetoed | runs |
-| a program writes, deletes, moves or changes paths outside the working folder (no allow rule names it) | asks | asks | vetoed | runs |
+| a program writes, deletes, moves or changes paths outside the working folder (no `Edit` rule matches them) | asks | asks | vetoed | runs |
 | a program needs permission | asks | asks | vetoed | runs |
 | a deny rule or a rejected grant names a program | vetoed | vetoed | vetoed | vetoed |
 

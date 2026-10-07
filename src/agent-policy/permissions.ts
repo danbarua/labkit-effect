@@ -49,11 +49,13 @@ import { Schema } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 import { FailureText, ToolKind, ToolName } from "../agent-machine/names.ts";
 import { MediaType, type Received, ReceivedText } from "../agent-machine/received.ts";
-import { type SegmentsOf, ShellCommand, WordText } from "./command-segments.ts";
+import { type SegmentsOf, ShellCommand, type Word, WordText } from "./command-segments.ts";
 import { commandNotes, notesOf } from "./command-explainers.ts";
-import { Detail, type Folders, NeedText, type OutsideChange, type Unit, unitsOf } from "./command-units.ts";
+import { Detail, type Folders, NeedText, type OutsideChange, type Unit, type UnitPath, unitsOf } from "./command-units.ts";
 import { Explanation } from "./sed-script.ts";
-import { defaultReadOnly, namesProgram, namesTool, type ParsedRule, parseRule, pathRuleOf, PermissionRule, type ReadOnlyPrefix, readOnlyNames, ruleNamesProgram } from "./permission-rules.ts";
+import { defaultReadOnly, namesProgram, namesTool, type ParsedRule, parseRule, type PathRule, pathRuleOf, PermissionRule, type ReadOnlyPrefix, readOnlyNames, ruleNamesProgram } from "./permission-rules.ts";
+import { changeReaches, matchesPath } from "./path-patterns.ts";
+import { leavesFolder, resolvePath } from "./path-resolver.ts";
 import type { Policy, PolicyStep } from "./policy.ts";
 
 export const PermissionMode = Schema.Literals(["default", "acceptEdits", "dontAsk", "bypassPermissions"]);
@@ -82,9 +84,9 @@ export type PermissionOption = typeof PermissionOption.Type;
  * | --- | --- | --- |
  * | `notAllowed` | it is not allowed yet | an allow rule naming it, a read-only prefix, or its grant allowed for the session |
  * | `opaque` | its words do not show what it runs | an allow rule naming it |
- * | `writes` | it writes files inside the working folder | `acceptEdits` |
- * | `readsOutside` | it reads outside the working folder | an allow rule naming it |
- * | `changesOutside` | it writes, deletes, moves or changes paths outside the working folder | an allow rule naming it |
+ * | `writes` | it writes files inside the working folder | `acceptEdits`, or an `Edit` rule matching the files |
+ * | `readsOutside` | it reads outside the working folder | a `Read` or `Edit` rule matching the paths |
+ * | `changesOutside` | it writes, deletes, moves or changes paths outside the working folder | an `Edit` rule matching the paths |
  * | `unseen` | deny rules cannot see what it runs | nothing |
  * | `unparsed` | the command does not parse, or the call has no command | nothing |
  */
@@ -292,6 +294,55 @@ export interface CommandJudging {
   readonly folders?: Folders;
 }
 
+/**
+ * The path rules of `judging`'s settings, applied to a unit's paths (`UnitPath`), each resolved
+ * against the working and home folders (`path-resolver.ts`):
+ * - `deniedBy`: the deny rule a path is refused by: a read by a `Read(...)` rule it matches, a change
+ *   by an `Edit(...)` rule whose paths it reaches (`changeReaches`: `rm -rf ~` reaches `~/.ssh/**`);
+ * - `unseen`: why deny rules of its kind cannot see the path: it is not written out, it names
+ *   another user's home folder, or it is given on the program's input;
+ * - `allows`: whether an allow rule matches the path: a read by a `Read(...)` or an `Edit(...)` rule
+ *   (an allowed edit is an allowed read), a change by an `Edit(...)` rule;
+ * - `leaves`: whether a path may lead outside the working folder.
+ */
+const pathJudging = (judging: CommandJudging) => {
+  const folders = judging.folders;
+  const allow = judging.settings.allow.flatMap((rule) => present(pathRuleOf(rule)));
+  const deny = judging.settings.deny.flatMap((rule) => present(pathRuleOf(rule)));
+  const fullOf = (word: Word): WordText | undefined => {
+    const resolved = resolvePath(word, folders);
+    return resolved._tag === "Local" ? resolved.full : undefined;
+  };
+  return {
+    deny,
+    leaves: (word: Word): boolean => leavesFolder(word, folders),
+    deniedBy: (path: UnitPath): PathRule | undefined => {
+      const full = path.word === undefined ? undefined : fullOf(path.word);
+      if (full === undefined || folders === undefined) return undefined;
+      return path.access === "reads"
+        ? deny.find((rule) => rule.access === "read" && matchesPath(rule.pattern, full, folders))
+        : deny.find((rule) => rule.access === "edit" && changeReaches(rule.pattern, full, folders));
+    },
+    unseen: (path: UnitPath): NeedText | undefined => {
+      const kind = path.access === "reads" ? "read" : "edit";
+      if (!deny.some((rule) => rule.access === kind)) return undefined;
+      const verb = path.access === "reads" ? "reads" : "changes";
+      if (path.word === undefined) return NeedText.make(`deny rules cannot see which files it ${path.access}: it gets them from its input`);
+      const resolved = resolvePath(path.word, folders);
+      if (resolved._tag === "Unresolved") return NeedText.make(`deny rules cannot see which file it ${verb}: ${path.word.text} is ${resolved.why === "not written out" ? "not written out" : "in another user's home folder"}`);
+      return resolved.full === undefined || folders === undefined ? NeedText.make(`deny rules cannot see which file it ${verb}: the working folder is not known`) : undefined;
+    },
+    allows: (path: UnitPath): boolean => {
+      const full = path.word === undefined ? undefined : fullOf(path.word);
+      if (full === undefined || folders === undefined) return false;
+      return allow.some((rule) => (path.access === "reads" || rule.access === "edit") && matchesPath(rule.pattern, full, folders));
+    },
+  };
+};
+
+const present = <A>(value: A | undefined): ReadonlyArray<A> => (value === undefined ? [] : [value]);
+const wordText = (word: Word): WordText => word.literal ?? word.text;
+
 /** The rules in `list` about tools and programs, read; path rules (`Read(...)`, `Edit(...)`) are not among them. */
 const programRules = (list: ReadonlyArray<PermissionRule>): ReadonlyArray<ParsedRule> => list.filter((rule) => pathRuleOf(rule) === undefined).map(parseRule);
 
@@ -313,22 +364,31 @@ const commandStep = (
   const command = commandIn(request.input);
   const split = command === undefined ? undefined : unitsOf(command, judging.segmentsOf, judging.folders);
   const units = split?._tag === "Units" ? split.units : [];
+  // Path rules (`Read(...)`, `Edit(...)`): a deny rule refuses a read or a change of a path it
+  // matches, in every mode; an allow rule lifts a path outside the working folder that it matches.
+  // Program rules say which programs run, not where they read and change files.
+  const paths = pathJudging(judging);
   const denied = units.flatMap((unit) => {
     const rule = deny.find((each) => denies(each, unit));
     if (rule !== undefined) return [`${programOf(unit)} is denied by the rule ${rule.rule}`];
+    const pathRule = unit.paths.map(paths.deniedBy).find((each) => each !== undefined);
+    if (pathRule !== undefined) return [`${programOf(unit)} is denied by the rule ${pathRule.rule}`];
     const grant = unit.grant;
     return grant !== undefined && session.rejected.some((rejected) => sameGrant(rejected, grant)) ? [`${shownGrant(grant)} was rejected for the rest of the session`] : [];
   });
   if (denied.length > 0) return veto(`${denied.join("; ")}.`);
   // Deny rules with words cannot see a command that does not parse, or a program whose name is not
   // written out; when there are such rules, those run only after a question, even in bypassPermissions.
-  const unseen: ReadonlyArray<CommandNeed> = !deny.some((rule) => rule.words !== undefined)
+  const unseen: ReadonlyArray<CommandNeed> = !deny.some((rule) => rule.words !== undefined) && paths.deny.length === 0
     ? []
     : split === undefined || split._tag === "Unparsed"
       ? [{ program: WordText.make(command ?? "the command"), kind: "unseen", why: NeedText.make("deny rules cannot see what it runs: it does not parse") }]
-      : units.flatMap((unit): ReadonlyArray<CommandNeed> =>
-          unit.words.length > 0 && unit.words[0]?.literal === undefined ? [{ program: programOf(unit), kind: "unseen", why: NeedText.make("deny rules cannot see what it runs: its program's name is not written out") }] : [],
-        );
+      : units.flatMap((unit): ReadonlyArray<CommandNeed> => [
+          ...(deny.some((rule) => rule.words !== undefined) && unit.words.length > 0 && unit.words[0]?.literal === undefined
+            ? [{ program: programOf(unit), kind: "unseen" as const, why: NeedText.make("deny rules cannot see what it runs: its program's name is not written out") }]
+            : []),
+          ...unit.paths.flatMap((path) => present(paths.unseen(path)).map((why) => ({ program: programOf(unit), kind: "unseen" as const, why }))),
+        ]);
   if ((allow.some((rule) => rule.words === undefined) || mode === "bypassPermissions") && unseen.length === 0) return proceed;
   if (mode === "bypassPermissions" || allow.some((rule) => rule.words === undefined)) return asked(unseen, [], tool, kind, mode, canAsk, command);
   const allowed = (unit: Unit): boolean => {
@@ -337,20 +397,25 @@ const commandStep = (
     const grant = unit.grant;
     return judging.settings.readOnly.some((prefix) => readOnlyNames(prefix, unit)) || (grant !== undefined && session.allowed.some((each) => sameGrant(each, grant)));
   };
-  const ruleAllows = (unit: Unit): boolean => allow.some((rule) => ruleNamesProgram(rule, unit, false));
   const needs: ReadonlyArray<CommandNeed> =
     split === undefined || split._tag === "Unparsed"
       ? [{ program: WordText.make(command ?? "the command"), kind: "unparsed", why: NeedText.make(split?._tag === "Unparsed" ? `it does not parse: ${split.reason}` : "the call's input has no command") }]
       : units.flatMap((unit) => {
           const program = programOf(unit);
+          // A path that a path allow rule matches needs no permission; the others are named.
+          const unallowed = unit.paths.filter((path) => !paths.allows(path));
+          const writes = unallowed.flatMap((path) => (path.access === "writes" && path.word !== undefined && !paths.leaves(path.word) ? [wordText(path.word)] : []));
+          const readsOutside = unallowed.flatMap((path) => (path.access === "reads" && path.word !== undefined && paths.leaves(path.word) ? [wordText(path.word)] : []));
+          const changesOutside = unallowed.flatMap((path): ReadonlyArray<OutsideChange> => {
+            if (path.access === "reads") return [];
+            if (path.word === undefined) return [{ verb: path.access, path: undefined }];
+            return paths.leaves(path.word) ? [{ verb: path.access, path: wordText(path.word) }] : [];
+          });
           const own: ReadonlyArray<CommandNeed> = [
             ...(allowed(unit) ? [] : [unit.opaque === undefined ? { program, kind: "notAllowed" as const, why: NeedText.make("it is not allowed yet") } : { program, kind: "opaque" as const, why: unit.opaque }]),
-            ...(unit.writes.length === 0 || mode === "acceptEdits" ? [] : [{ program, kind: "writes" as const, why: NeedText.make(`it writes ${listed(unit.writes)}`) }]),
-            // Reading or changing paths outside the working folder is lifted only by an allow rule that names the program.
-            ...(unit.outside.length === 0 || ruleAllows(unit)
-              ? []
-              : [{ program, kind: "readsOutside" as const, why: NeedText.make(`it reads outside the working folder: ${listed(unit.outside)}`) }]),
-            ...(ruleAllows(unit) ? [] : changesOutsideNeeds(program, unit.changesOutside)),
+            ...(writes.length === 0 || mode === "acceptEdits" ? [] : [{ program, kind: "writes" as const, why: NeedText.make(`it writes ${listed(writes)}`) }]),
+            ...(readsOutside.length === 0 ? [] : [{ program, kind: "readsOutside" as const, why: NeedText.make(`it reads outside the working folder: ${listed(readsOutside)}`) }]),
+            ...changesOutsideNeeds(program, changesOutside),
           ];
           return own;
         });

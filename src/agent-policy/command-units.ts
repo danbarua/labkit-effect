@@ -55,6 +55,7 @@
 
 import { Schema } from "effect";
 import { type Segment, type SegmentsOf, ShellCommand, type UnparsedReason, type Word, WordText } from "./command-segments.ts";
+import { leavesFolder, resolvePath } from "./path-resolver.ts";
 import { effectsOf, explain as explainSed, ExplanationLine, parse as parseSed, SedFile, SedScript } from "./sed-script.ts";
 
 /** Why a unit's words do not show what it runs. */
@@ -107,8 +108,16 @@ export interface Unit {
   readonly opaque: NeedText | undefined;
   /** The paths it reads outside the working folder, as written: absolute, through `..` or `~`, or not written out. */
   readonly outside: ReadonlyArray<WordText>;
+  /** Every path it reads or changes, inside the working folder or outside it, with how: what path rules (`Read(...)`, `Edit(...)`) are matched against. */
+  readonly paths: ReadonlyArray<UnitPath>;
   /** What it does in plain English, or the code it runs; for showing to the person asked. */
   readonly detail: Detail | undefined;
+}
+
+/** A path a unit reads or changes, as written, and how; `word` is undefined for the paths a program is given on its input (`xargs rm`). */
+export interface UnitPath {
+  readonly access: "reads" | ChangeVerb;
+  readonly word: Word | undefined;
 }
 
 export type Units = { readonly _tag: "Units"; readonly units: ReadonlyArray<Unit> } | { readonly _tag: "Unparsed"; readonly reason: UnparsedReason };
@@ -143,14 +152,15 @@ interface Touches {
   readonly changes?: ReadonlyArray<{ readonly verb: ChangeVerb; readonly word: Word }>;
   /** What it does to the paths it is given on its input (`xargs rm`), when it changes them. */
   readonly fed?: ChangeVerb | undefined;
-  /** The paths outside the working folder that it reads, as written. */
-  readonly reads?: ReadonlyArray<WordText>;
+  /** The paths it reads: those outside the working folder are its reads outside. */
+  readonly reads?: ReadonlyArray<Word>;
   readonly detail?: Detail;
 }
 
 const unit = (words: ReadonlyArray<Word>, grant: ReadonlyArray<WordText> | undefined, touches: Touches = {}): Unit => {
   const written = touches.writes ?? [];
   const outside = (word: Word): boolean => escapes(word, touches.folders);
+  const reads = touches.reads ?? [];
   return {
     words,
     grant,
@@ -161,11 +171,17 @@ const unit = (words: ReadonlyArray<Word>, grant: ReadonlyArray<WordText> | undef
       ...(touches.fed === undefined ? [] : [{ verb: touches.fed, path: undefined }]),
     ],
     opaque: undefined,
-    outside: touches.reads ?? [],
+    outside: reads.filter(outside).map(textOf),
+    paths: [
+      ...reads.map((word): UnitPath => ({ access: "reads", word })),
+      ...written.map((word): UnitPath => ({ access: "writes", word })),
+      ...(touches.changes ?? []).map((change): UnitPath => ({ access: change.verb, word: change.word })),
+      ...(touches.fed === undefined ? [] : [{ access: touches.fed, word: undefined }]),
+    ],
     detail: touches.detail,
   };
 };
-const opaque = (words: ReadonlyArray<Word>, why: NeedText, detail?: Detail): Unit => ({ words, grant: undefined, writes: [], changesOutside: [], opaque: why, outside: [], detail });
+const opaque = (words: ReadonlyArray<Word>, why: NeedText, detail?: Detail): Unit => ({ words, grant: undefined, writes: [], changesOutside: [], opaque: why, outside: [], paths: [], detail });
 
 /** The code `code` in `language`, as a detail, without the line break that ends a here-document; undefined when there is no code to show. */
 const codeOf = (language: CodeLanguage, code: WordText | undefined): Detail | undefined => {
@@ -426,7 +442,8 @@ const changers: ReadonlyMap<WordText, Changer> = new Map([
   [WordText.make("mv"), changer("moves", "every", { valued: named("-S", "--suffix"), outputs: targetDirectory })],
   [WordText.make("cp"), changer("writes", "last", { valued: named("-S", "--suffix"), othersRead: true, outputs: targetDirectory })],
   [WordText.make("install"), changer("writes", "last", { valued: named("-m", "--mode", "-o", "--owner", "-g", "--group", "-S", "--suffix"), othersRead: true, outputs: targetDirectory })],
-  [WordText.make("ln"), changer("writes", "last", { valued: named("-S", "--suffix"), outputs: targetDirectory })],
+  // ln's targets count as read: a link to a file outside the folder lets it be read from inside.
+  [WordText.make("ln"), changer("writes", "last", { valued: named("-S", "--suffix"), othersRead: true, outputs: targetDirectory })],
   [
     WordText.make("rsync"),
     changer("writes", "last", {
@@ -477,40 +494,14 @@ const changesOf = (base: WordText, words: ReadonlyArray<Word>, fed: boolean): Pi
 
 // —— Paths outside the working folder ——
 
-/** Returns `path`'s parts with `.` and `..` resolved; a relative path that climbs above its start keeps its leading `..`. */
-const normalised = (path: WordText): ReadonlyArray<WordText> =>
-  path.split("/").reduce<ReadonlyArray<WordText>>((parts, part) => {
-    if (part === "" || part === ".") return parts;
-    if (part === ".." && parts.length > 0 && parts.at(-1) !== WordText.make("..")) return parts.slice(0, -1);
-    return part === ".." && path.startsWith("/") ? parts : [...parts, WordText.make(part)];
-  }, []);
-
-/** `path`, as written, resolved against `folders`: absolute, with `~`, `.` and `..` resolved; undefined for another user's `~`. */
+/** `path`, as written, resolved against `folders` (`path-resolver.ts`); undefined when it is not resolved, as for another user's `~`. */
 export const fullPathOf = (path: WordText, folders: Folders): WordText | undefined => {
-  const fromHome = path === "~" || path.startsWith("~/");
-  if (path.startsWith("~") && !fromHome) return undefined;
-  const absolute = fromHome ? `${folders.home}${path.slice(1)}` : path.startsWith("/") ? path : `${folders.working}/${path}`;
-  return WordText.make(`/${normalised(WordText.make(absolute)).join("/")}`);
+  const resolved = resolvePath(literalWord(path), folders);
+  return resolved._tag === "Local" ? resolved.full : undefined;
 };
 
-/**
- * Whether `word`, a path, may be outside the working folder: an absolute path (or one from `~`) not
- * inside `folders.working`, a relative path whose `..` climb above it, a path from another user's `~`,
- * or one not written out. Without `folders`, every absolute path and `~` is outside.
- */
-const escapes = (word: Word, folders: Folders | undefined): boolean => {
-  if (word.literal === undefined && /[$`]/.test(word.text)) return true;
-  const value = word.literal ?? word.text;
-  const fromHome = value === "~" || value.startsWith("~/");
-  if (value.startsWith("~") && !fromHome) return true;
-  if (fromHome || value.startsWith("/")) {
-    if (folders === undefined) return true;
-    const path = normalised(WordText.make(fromHome ? `${folders.home}${value.slice(1)}` : value));
-    const working = normalised(folders.working);
-    return path.length < working.length || working.some((part, at) => path[at] !== part);
-  }
-  return normalised(value)[0] === WordText.make("..");
-};
+/** Whether `word`, a path, may be outside the working folder (`leavesFolder`, `path-resolver.ts`). */
+const escapes = leavesFolder;
 
 /** For each read-only program whose arguments are paths, its options that take the next word as a value. */
 const pathPrograms: ReadonlyMap<WordText, ReadonlySet<WordText>> = new Map([
@@ -560,27 +551,24 @@ export const judgesPathsOf = (program: WordText): boolean => {
   return pathPrograms.has(base) || changers.has(base) || seds.has(base) || base === WordText.make("find");
 };
 
-/** The paths outside the working folder that a read-only program reads, as written. `cd` with no folder, or to `-`, leaves it; so does `pushd` to a folder outside it. */
-const outsideOf = (base: WordText, words: ReadonlyArray<Word>, folders: Folders | undefined): ReadonlyArray<WordText> => {
-  const home: Word = { text: WordText.make("~"), literal: WordText.make("~") };
+/** The paths a read-only program reads, as written. `cd` with no folder goes to `~`, and `cd -` to the folder before, which is not written out. */
+const readsOf = (base: WordText, words: ReadonlyArray<Word>): ReadonlyArray<Word> => {
   if (base === WordText.make("cd")) {
-    if (words.slice(1).some((word) => is(word, "-"))) return [WordText.make("-")];
-    if (words.slice(1).every(isOption)) return escapes(home, folders) ? [WordText.make("~")] : [];
+    if (words.slice(1).some((word) => is(word, "-"))) return [{ text: WordText.make("$OLDPWD") }];
+    if (words.slice(1).every(isOption)) return [literalWord("~")];
   }
-  return pathsOf(base, words)
-    .filter((word) => escapes(word, folders))
-    .map((word) => word.text);
+  return pathsOf(base, words);
 };
 
-/** The paths outside the working folder that a git command reads: its `-C`, `--git-dir` and `--work-tree`, and the operands of `diff --no-index`. */
-const gitOutside = (words: ReadonlyArray<Word>, normal: ReadonlyArray<Word>, folders: Folders | undefined): ReadonlyArray<WordText> => {
+/** The paths a git command reads: its `-C`, `--git-dir` and `--work-tree`, and the operands of `diff --no-index`. */
+const gitReads = (words: ReadonlyArray<Word>, normal: ReadonlyArray<Word>): ReadonlyArray<Word> => {
   const named = words.slice(1).flatMap((word, at, all) => {
     if (is(word, "-C", "--git-dir", "--work-tree")) return present(all[at + 1]);
     const attached = /^--(git-dir|work-tree)=(.*)$/.exec(word.literal ?? "");
-    return attached === null ? [] : [{ text: WordText.make(attached[2] ?? ""), literal: WordText.make(attached[2] ?? "") }];
+    return attached === null ? [] : [literalWord(attached[2] ?? "")];
   });
   const noIndex = normal.some((word) => is(word, "--no-index")) ? normal.slice(2).filter((word) => !isOption(word)) : [];
-  return [...named, ...noIndex].filter((word) => escapes(word, folders)).map((word) => word.text);
+  return [...named, ...noIndex];
 };
 
 // —— sed ——
@@ -631,7 +619,7 @@ const sedUnits = (words: ReadonlyArray<Word>, folders: Folders | undefined): Rea
     unit(words, [WordText.make("sed")], {
       folders,
       writes: [...known.flatMap((each) => each.writes).map(literalWord), ...(read.inPlace ? operands : [])],
-      reads: [...operands, ...named].filter((word) => escapes(word, folders)).map((word) => word.text),
+      reads: [...operands, ...named],
       detail: explained,
     }),
   ];
@@ -725,7 +713,7 @@ const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> =>
     const normal = gitWords(words);
     if (typeof normal === "string") return [opaque(words, normal)];
     const running = gitRunning(normal);
-    return running === undefined ? [unit(normal, grantOf(normal), { folders: seen.folders, writes: ownWrites(base, normal), reads: gitOutside(words, normal, seen.folders) })] : [opaque(normal, running)];
+    return running === undefined ? [unit(normal, grantOf(normal), { folders: seen.folders, writes: ownWrites(base, normal), reads: gitReads(words, normal) })] : [opaque(normal, running)];
   }
   if (base === WordText.make("trap")) {
     const past = rest.filter((word, at) => !(at === 0 && is(word, "-p", "-l", "--")));
@@ -750,7 +738,7 @@ const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> =>
   const exported = declaring.has(base) ? steeringNeed(rest.flatMap((word) => present(word.literal).filter((value) => value.includes("=")))) : undefined;
   if (exported !== undefined) return [opaque(words, exported)];
   const changed = changesOf(base, words, seen.fedArgs);
-  const reads = [...outsideOf(base, words, seen.folders), ...(changed?.reads ?? []).filter((word) => escapes(word, seen.folders)).map(textOf)];
+  const reads = [...readsOf(base, words), ...(changed?.reads ?? [])];
   return [unit(words, grantOf(words), { folders: seen.folders, writes: ownWrites(base, words), changes: changed?.changes ?? [], fed: changed?.fed, reads })];
 };
 
@@ -838,12 +826,13 @@ const findStarts = (rest: ReadonlyArray<Word>): ReadonlyArray<Word> => {
  * files its `-fprint` options name.
  */
 const findUnits = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> => {
-  const outsideStarts = findStarts(words.slice(1)).filter((word) => escapes(word, seen.folders));
+  const starts = findStarts(words.slice(1));
+  const outsideStarts = starts.filter((word) => escapes(word, seen.folders));
   const scan = (remaining: ReadonlyArray<Word>, own: ReadonlyArray<Word>, inner: ReadonlyArray<Unit>, writes: ReadonlyArray<Word>, deletes: boolean): ReadonlyArray<Unit> => {
     const [next, ...after] = remaining;
     if (next === undefined) {
-      const changes = deletes ? outsideStarts.map((word) => ({ verb: "deletes" as const, word })) : [];
-      return [unit(own, grantOf(own), { folders: seen.folders, writes, changes, reads: deletes ? [] : outsideStarts.map(textOf) }), ...inner];
+      const changes = deletes ? starts.map((word) => ({ verb: "deletes" as const, word })) : [];
+      return [unit(own, grantOf(own), { folders: seen.folders, writes, changes, reads: deletes ? [] : starts }), ...inner];
     }
     const option = next.literal;
     if (option !== undefined && execOptions.has(option)) {
@@ -913,12 +902,12 @@ const teeWrites = (words: ReadonlyArray<Word>, fed: ReturnType<typeof fedTextOf>
 /** Returns the units of `segment`. A call to a function in `functions` is not a unit. */
 const segmentUnits = (segment: Segment, functions: ReadonlySet<WordText>, seen: Seen): ReadonlyArray<Unit> => {
   const writes = redirectWrites(segment);
-  const reads = segment.redirects.flatMap((redirect) => (redirect.op === "<" ? present(fileOf(redirect.target)) : [])).filter((word) => escapes(word, seen.folders));
+  const reads = segment.redirects.flatMap((redirect) => (redirect.op === "<" ? present(fileOf(redirect.target)) : []));
   const fed = fedTextOf(segment);
   const printed = segment.kind === "simple" ? printedTextOf(segment, fed) : undefined;
   const output = printed === undefined ? undefined : outputFileOf(segment);
   const detail: Writes | undefined = printed === undefined || output === undefined ? undefined : { _tag: "Writes", ...output, text: CodeText.make(printed.text), expands: printed.expands };
-  const written = writes.length === 0 && reads.length === 0 ? [] : [unit([], undefined, { folders: seen.folders, writes, reads: reads.map(textOf), ...(detail === undefined ? {} : { detail }) })];
+  const written = writes.length === 0 && reads.length === 0 ? [] : [unit([], undefined, { folders: seen.folders, writes, reads, ...(detail === undefined ? {} : { detail }) })];
   if (segment.kind !== "simple") return written;
   const steered = steeringNeed(segment.assignments);
   if (steered !== undefined) return [opaque(segment.words, steered), ...written];

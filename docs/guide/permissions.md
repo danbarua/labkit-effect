@@ -43,16 +43,14 @@ labkit asks, and says why, when a command:
 `npx eslint`. A later command that runs only allowed programs runs without a question.
 
 Reading outside your folder is asked about every time, even after you allowed the program for the
-session: allowing `cat` for the session lets `cat` read files in your folder without a question,
-not `~/.aws/credentials`. An allow rule in your settings that names the program
-(`command(cat:*)`) lets it read anywhere without a question.
+session or in your settings: allowing `cat` lets `cat` read files in your folder without a
+question, not `~/.aws/credentials`. A path rule in your settings lets a read run: `Read(~/.aws/**)`.
 
 Changing files outside your folder is asked about every time, in every mode but
-`bypassPermissions`: allowing `rm` for the session lets `rm -rf build` run, not
-`rm -rf ~/Code/other`. An allow rule in your settings that names the program lets it change files
-anywhere: `command(rm:*)` lets `rm -rf ~` run without a question. A rule cannot yet name paths
-(`command(rm:/tmp/*)`); such a rule is refused when the settings are read. An allow rule for the
-whole tool (`command`) runs every command. This covers redirects, `tee`, `sed -i`,
+`bypassPermissions`: allowing `rm` lets `rm -rf build` run, not `rm -rf ~/Code/other`. A path rule
+lets a change run: `Edit(//tmp/**)` lets `rm -rf /tmp/build` run once `rm` is allowed. A rule
+that allows a program says which programs run; a path rule says where they read and change files.
+An allow rule for the whole tool (`command`) runs every command. This covers redirects, `tee`, `sed -i`,
 `rm`, `mv`, `cp`, `rsync`, `ln`, `touch`, `mkdir`, `chmod`, `chown`, `curl -o`, `wget -O` and
 `find -delete`. A path labkit cannot read (`rm -rf "$DIR"`, or `xargs rm`, whose paths come from its
 input) counts as outside your folder. Other programs write where their own arguments say
@@ -117,9 +115,13 @@ plugins:
     allow:
       - "command(bun test:*)"      # every command tool, a program starting `bun test`
       - "command(make build)"      # exactly `make build`
+      - "Edit(//tmp/labkit/**)"    # change files under /tmp/labkit
+      - "Read(~/Code/**)"          # read your other projects
     deny:
       - "command(git push:*)"      # never, in any mode
       - git_push                   # a tool, every call
+      - "Read(./.env)"             # never read a .env file in your folder
+      - "Edit(~/.ssh/**)"          # never change ~/.ssh, nor delete a folder that holds it
 ```
 
 | Rule | What it names |
@@ -127,16 +129,26 @@ plugins:
 | `tool` | every call to the tool |
 | `tool(words)` | a command's program that is exactly these words |
 | `tool(words:*)` | a command's program that starts with these words |
+| `Read(path)` | the files a command reads that match the path |
+| `Edit(path)` | the files a command writes, changes or deletes that match the path; an allowed edit is an allowed read |
 
+Paths are Claude Code's: `//tmp/**` is from the root of the file system, `~/notes/**` from your home
+folder, and anything else from your folder (`./.env`, `src/**`). After that, a path is matched as a
+line of a `.gitignore` is: `*` within a folder, `**` across folders, and a name without a `/` at any
+depth (`.env`, `*.pem`). A path starting with a single `/` is refused: in Claude Code it is
+relative to the settings file, and labkit does not know which file a rule came from. Write `//` for
+the root.
 `command` stands for both command tools: `run_command` at the terminal and `terminal_command` in an
 editor.
 
 - **A deny rule** refuses the call in every mode, `bypassPermissions` included, wherever the program
-  is in the command, including after `sudo`. When a deny rule names programs and labkit cannot read
-  a command (it does not parse, or a program's name is not written out), labkit asks even in
-  `bypassPermissions`.
-- **An allow rule** runs the program without a question, and lets it read and change files outside
-  your folder.
+  is in the command, including after `sudo`. A path deny rule refuses a read or a change of a path
+  it matches, in your folder or outside it; deleting or moving a folder that holds a denied path is
+  refused too (`rm -rf ~` with `Edit(~/.ssh/**)`). When deny rules name programs or paths and labkit
+  cannot see them (a command that does not parse, a name or path not written out, paths `xargs`
+  reads from its input), labkit asks even in `bypassPermissions`.
+- **An allow rule** runs the program without a question. A path allow rule lets a command read or
+  change the files it matches outside your folder; the program must still be allowed.
 
 `readOnly` replaces the list of programs that run without a question.
 

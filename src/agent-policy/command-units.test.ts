@@ -128,7 +128,7 @@ test("a read-only program's paths outside the working folder are found: absolute
   expect(outside("grep -f /etc/patterns src")).toEqual(["grep outside: /etc/patterns"]);
   expect(outside("ls src ../other; head -n 5 a.txt; echo /etc/passwd")).toEqual(["ls outside: ../other", "head", "echo"]);
   expect(outside('cat "$HOME/x" src/*.ts')).toEqual(['cat outside: "$HOME/x"']);
-  expect(outside("cd; cd -; cd src/../..; cd src")).toEqual(["cd outside: ~", "cd outside: -", "cd outside: src/../..", "cd"]);
+  expect(outside("cd; cd -; cd src/../..; cd src")).toEqual(["cd outside: ~", "cd outside: $OLDPWD", "cd outside: src/../..", "cd"]);
   expect(outside("git -C ~/other log && git diff --no-index /tmp/a b")).toEqual(["git outside: ~/other", "git outside: /tmp/a"]);
 });
 
@@ -207,12 +207,13 @@ test("rm, mv, chmod and the programs like them change each operand; only operand
   expect(touched("touch /tmp/marker && mkdir -p /tmp/out build")).toEqual(["touch writes /tmp/marker", "mkdir writes /tmp/out"]);
 });
 
-test("cp, install and rsync write their last operand or -t's folder and read the others; ln writes the link it makes; curl and wget write the files their options name", () => {
+test("cp, install and rsync write their last operand or -t's folder and read the others; ln writes the link it makes and reads its target; curl and wget write the files their options name", () => {
   expect(touched("cp ~/.ssh/id_rsa .")).toEqual(["cp reads ~/.ssh/id_rsa"]);
   expect(touched("cp -r src /tmp/backup")).toEqual(["cp writes /tmp/backup"]);
   expect(touched("cp -t /tmp a b")).toEqual(["cp writes /tmp"]);
   expect(touched("rsync -av --exclude node_modules src/ ~/backup/")).toEqual(["rsync writes ~/backup/"]);
-  expect(touched("ln -s /etc/hosts hosts && ln -s tool ~/bin/tool")).toEqual(["ln", "ln writes ~/bin/tool"]);
+  // A link's target counts as read: a link inside the folder to a file outside it lets the file be read from inside.
+  expect(touched("ln -s /etc/hosts hosts && ln -s tool ~/bin/tool")).toEqual(["ln reads /etc/hosts", "ln writes ~/bin/tool"]);
   expect(touched("curl -o ~/bin/x https://example.com/x && curl https://example.com/a/b")).toEqual(["curl writes ~/bin/x", "curl"]);
   expect(touched("wget -O /tmp/page.html https://example.com")).toEqual(["wget writes /tmp/page.html"]);
   expect(touched("curl -s -o /dev/null -w '%{http_code}' https://example.com && cp /dev/null empty.txt")).toEqual(["curl", "cp"]);

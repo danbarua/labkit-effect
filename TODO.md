@@ -54,10 +54,15 @@ model.
         files needing `acceptEdits`. Session answers apply in `dontAsk` and headless mode. A question
         shows what a `sed` script does, in plain English, and code written in the command in its
         language. To do:
-        - Changes outside the working folder (built: writes, `rm`, `mv`, `cp`, `chmod`, `touch`,
-          `curl -o`, `find -delete`, `xargs rm`, and the like) are lifted by an allow rule naming
-          the program. To do: rules that name paths (`command(rm:/tmp/*)`, Dan, 2026-10-07), refused
-          until then; the programs the guide lists as not checked (`docs/guide/permissions.md`).
+        - Reads and changes outside the working folder (built: writes, `rm`, `mv`, `cp`, `chmod`,
+          `touch`, `curl -o`, `find -delete`, `xargs rm`, and the like) are lifted only by path
+          rules, `Read(...)` and `Edit(...)`, as in Claude Code (2026-10-08). To do: path
+          rules for the file tools, and additional directories (`permissions/path-rules`); the
+          programs the guide lists as not checked (`docs/guide/permissions.md`).
+        - The harness tells the agent of changes to files it has read (Dan, 2026-10-08): with every
+          path going through one place (`path-resolver.ts`), the harness knows what the agent read
+          and when, so it can say at the start of a turn that a file changed since (the user edited
+          it, a build rewrote it) before the agent spends turns finding out.
         - Jev classifies what the rules cannot decide, from the exo-project skeleton (`01_3`).
         - Models are told to use the write and edit tools instead of `python -c` and heredocs.
         - A here-document's body fed to a shell (`bash <<'EOF'`) is opaque; it could be split as
