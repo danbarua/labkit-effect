@@ -1,0 +1,20 @@
+[package]
+name = "bash-segments"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Splits a shell command into the programs it would run, for labkit's permission policy (src/agent-policy/command-segments.ts)."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The revision exo-project's spikes (01_2, 01_3) parsed their corpus with.
+brush-parser = { git = "https://github.com/reubeno/brush.git", rev = "ae35b6dd09f394c66fd805bea747e35a013ee978" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"

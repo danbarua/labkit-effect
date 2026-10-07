@@ -62,6 +62,8 @@ const imperativeBoundaries: ReadonlyArray<string> = [
   "src/examples/cli-repl/turn-keys.ts",
   // A span that keeps its events, as Effect's Tracer.Span, whose methods Effect calls synchronously.
   "src/instrumentation/telemetry.ts",
+  // The command parser's WebAssembly module: loaded once, its memory written and read in place.
+  "src/agent-host/command-parser.ts",
 ];
 
 export default defineConfig({
