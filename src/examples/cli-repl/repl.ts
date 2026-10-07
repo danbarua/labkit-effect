@@ -28,13 +28,14 @@ import { terminalOf } from "../../agent-host/command-detail.ts";
 import { currentOnDisk, type ShownWrite, shownWrites } from "../../agent-host/command-writes.ts";
 import { unifiedDiff } from "../../agent-host/line-diff.ts";
 import { WordText } from "../../agent-policy/command-segments.ts";
-import type { Folders } from "../../agent-policy/command-units.ts";
+import type { Detail, Folders } from "../../agent-policy/command-units.ts";
 import type { SessionUpdate } from "effective-acp/schema/v1";
 import { next, presentFrom, type ProjectionInput, project } from "../../agent-acp/projection.ts";
 import { immutableToolCatalogOf } from "../../agent-session/configuration/session-setup.ts";
 import { Prompt } from "effect/cli";
 import type { Fact } from "../../agent-machine/fact.ts";
-import { answerPicking, type CommandNeed, OptionId, type PermissionQuestion, questionIn } from "../../agent-policy/permissions.ts";
+import { segmentsOf } from "../../agent-host/command-parser.ts";
+import { answerPicking, type Explained, explainedAt, explainedOf, OptionId, type PermissionQuestion, questionIn } from "../../agent-policy/permissions.ts";
 import type { CallId, TurnId } from "../../agent-machine/names.ts";
 import type { ToolOutcome } from "../../agent-machine/observation.ts";
 import type { Services, Session } from "../../agent-session/loop.ts";
@@ -149,9 +150,8 @@ const coloured = (line: string): string => {
   return line.startsWith("+") ? `\x1b[32m${line}\x1b[0m` : line;
 };
 
-/** The diff of the file that a need's write names, among `writes`; undefined when it is not shown as one. */
-const diffFor = (need: CommandNeed, writes: ReadonlyArray<ShownWrite>): ReadonlyArray<string> | undefined => {
-  const detail = need.detail;
+/** The diff of the file that a write detail names, among `writes`; undefined when it is not shown as one. */
+const diffFor = (detail: Detail | undefined, writes: ReadonlyArray<ShownWrite>): ReadonlyArray<string> | undefined => {
   if (detail?._tag !== "Writes") return undefined;
   const write = writes.find((each) => each._tag === "Diff" && each.writes.path === detail.path);
   return write?._tag === "Diff" ? unifiedDiff(detail.path, write.before, write.after) : undefined;
@@ -159,26 +159,29 @@ const diffFor = (need: CommandNeed, writes: ReadonlyArray<ShownWrite>): Readonly
 
 /**
  * The permission question as shown. About a command: the command, then each of its programs that
- * needs permission and why, with what a `sed` script does, the code a runtime is given, or the diff
- * of a file it writes (`writes`, read before the command runs) indented under it. About a tool: the
- * tool, its kind, and the call's input.
+ * needs permission and why, with what `explained` says of it (`explainedOf`: what a `sed` script
+ * does, the code a runtime is given, notes) and the diff of a file it writes (`writes`, read before
+ * the command runs) indented under it, then the notes about the command. About a tool: the tool, its
+ * kind, and the call's input.
  */
-const shown = (question: PermissionQuestion, input: string, writes: ReadonlyArray<ShownWrite>): string =>
+const shown = (question: PermissionQuestion, input: string, writes: ReadonlyArray<ShownWrite>, explained: Explained): string =>
   question._tag === "Command"
     ? [
         `Run this command? ${question.command}`,
-        ...question.needs.flatMap((each) => {
-          const diff = diffFor(each, writes);
-          const why = writes.find((write) => write._tag === "NoDiff" && each.detail?._tag === "Writes" && write.writes.path === each.detail.path);
+        ...question.needs.flatMap((each, at, needs) => {
+          const own = explainedAt(explained, needs, at);
+          const detail = own?.detail;
+          const diff = diffFor(detail, writes);
+          const why = writes.find((write) => write._tag === "NoDiff" && detail?._tag === "Writes" && write.writes.path === detail.path);
           return [
             `  ${each.program}: ${each.why}`,
-            ...(each.detail === undefined ? [] : terminalOf(each.detail, diff !== undefined).map((line) => `    ${line}`)),
+            ...(detail === undefined ? [] : terminalOf(detail, diff !== undefined).map((line) => `    ${line}`)),
             ...(diff ?? []).map((line) => `    ${coloured(line)}`),
             ...(why?._tag === "NoDiff" ? [`    (No diff: ${why.reason}.)`] : []),
-            ...(each.notes ?? []).map((note) => `    ${note}`),
+            ...(own?.notes ?? []).map((note) => `    ${note}`),
           ];
         }),
-        ...(question.notes ?? []).map((note) => `  \x1b[2m${note}\x1b[0m`),
+        ...explained.notes.map((note) => `  \x1b[2m${note}\x1b[0m`),
       ].join("\n")
     : `Run ${question.tool} (${question.kind})? ${input}`;
 
@@ -297,7 +300,8 @@ const following = (session: Session, view: View, stdin?: NodeJS.ReadStream) =>
         yield* endLine;
         // The command waits for the answer, so its files are read before it runs.
         const writes = question._tag === "Command" ? yield* shownWrites(question.command, folders, (full, path) => currentOnDisk(disk, full, path)) : [];
-        const message = shown(question, inputOf(yield* session.facts, call), writes);
+        const explained = question._tag === "Command" ? explainedOf(question, segmentsOf, folders) : { programs: [], notes: [] };
+        const message = shown(question, inputOf(yield* session.facts, call), writes, explained);
         const picked = yield* keys
           .lend(Prompt.Select({ message, choices: question.options.map((option) => ({ title: option.name, value: option.optionId })) }))
           .pipe(Effect.catchTag("QuitError", () => Effect.succeed(rejecting)));

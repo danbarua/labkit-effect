@@ -12,7 +12,7 @@ import { segmentsOf } from "../agent-host/command-parser.ts";
 import { WordText } from "./command-segments.ts";
 import type { Folders } from "./command-units.ts";
 import { PermissionRule } from "./permission-rules.ts";
-import { answerPicking, defaultPermissionSettings, OptionId, type PermissionMode, permissions, type PermissionQuestion, questionIn } from "./permissions.ts";
+import { answerPicking, defaultPermissionSettings, explainedAt, explainedOf, OptionId, type PermissionMode, permissions, type PermissionQuestion, questionIn } from "./permissions.ts";
 
 const kindOf = (tool: ToolName): ToolKind | undefined => (tool === "run_command" ? "execute" : tool === "write_file" ? "edit" : "execute");
 const run = (command: string, id = "c1"): EffectRequest => ({ _tag: "RunTool", call: CallId.make(id), tool: ToolName.make("run_command"), input: receivedJson({ command, intent: "x" }) });
@@ -165,26 +165,23 @@ test("sed is asked about once and can then be allowed for the session; a script 
   expect(judged("sed -i 's/a/b/' b.txt", { facts: allowed }).question).toMatchObject({ needs: [{ program: "sed -i 's/a/b/' b.txt", why: "it writes b.txt" }] });
 });
 
-/** What the question about `command` names as needed, when the policy asks about a command. */
-const needsOf = (command: string) => {
+/** What the question about `command` shows besides its needs, worked out from its command. */
+const explainedFor = (command: string) => {
   const question = judged(command).question;
-  return question?._tag === "Command" ? question.needs : undefined;
+  return question?._tag === "Command" ? { needs: question.needs, explained: explainedOf(question, segmentsOf, undefined) } : undefined;
 };
 
-test("a program's first need carries what helps judge it: the code a runtime is given, or what a sed script does; a program allowed by its grant shows nothing", () => {
-  expect(needsOf("python3 -c 'print(1)' > out.txt") as unknown).toEqual([
-    { program: "python3 -c 'print(1)'", kind: "opaque", why: "it runs code written in the command", detail: { _tag: "Code", language: "python", code: "print(1)" } },
+test("a question stores why each program needs permission; what helps judge a program is worked out from the command when the question is shown", () => {
+  const python = explainedFor("python3 -c 'print(1)' > out.txt");
+  expect(python?.needs as unknown).toEqual([
+    { program: "python3 -c 'print(1)'", kind: "opaque", why: "it runs code written in the command" },
     { program: "a redirect", kind: "writes", why: "it writes out.txt" },
   ]);
-  expect(needsOf("sed -i 's/a/b/' f.txt") as unknown).toEqual([
-    {
-      program: "sed -i 's/a/b/' f.txt",
-      kind: "notAllowed",
-      why: "it is not allowed yet",
-      detail: { _tag: "Explained", lines: [{ depth: 0, text: "Edits f.txt in place:" }, { depth: 1, text: "Replaces the first match of `a` with `b`, on every line." }, { depth: 1, text: "Saves every line, after these changes." }] },
-    },
-    { program: "sed -i 's/a/b/' f.txt", kind: "writes", why: "it writes f.txt" },
-  ]);
+  expect((python === undefined ? undefined : explainedAt(python.explained, python.needs, 0)?.detail) as unknown).toEqual({ _tag: "Code", language: "python", code: "print(1)" });
+  const sed = explainedFor("sed -i 's/a/b/' f.txt");
+  expect(sed === undefined ? undefined : [0, 1].map((at) => explainedAt(sed.explained, sed.needs, at)?.detail?._tag)).toEqual(["Explained", undefined]);
+  const rm = explainedFor("rm -rf build");
+  expect(rm?.explained.notes as unknown).toEqual(["Allowing rm for the rest of the session lets later rm commands run without a question inside the working folder. Outside it, they are still asked about."]);
   expect(judged("sed -n 1p f", { facts: answered("sed -n 2p f", "allow-session") }).step).toBe("runs");
 });
 

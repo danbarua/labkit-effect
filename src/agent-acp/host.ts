@@ -35,7 +35,9 @@
  * The end of the connection closes every session's scope.
  */
 
+import { homedir } from "node:os";
 import { type Brand, defaultBrand, envPrefixOf, folderOf } from "../agent-host/brand.ts";
+import { WordText } from "../agent-policy/command-segments.ts";
 import { type ConfigFlags, launchLayers } from "../agent-host/launch.ts";
 import { writeEffectiveSettings } from "../agent-config/effective.ts";
 import { type Configuration, type LayerSource, loadConfiguration } from "../agent-config/file.ts";
@@ -623,7 +625,16 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const session = yield* openSession.pipe(Effect.provideContext(context), Effect.annotateSpans({ host: acpHost, cwd: parent.cwd }), Scope.provide(scope));
 
               const follow = (initial: ProjectionState) =>
-                startFeed({ sessionId: id, session, context, present: world.present, connection, annotations: { connection: connectionId, session: id }, initial }).pipe(
+                startFeed({
+                  sessionId: id,
+                  session,
+                  context,
+                  present: world.present,
+                  folders: { working: WordText.make(parent.cwd), home: WordText.make(homedir()) },
+                  connection,
+                  annotations: { connection: connectionId, session: id },
+                  initial,
+                }).pipe(
                   Scope.provide(scope),
                 );
 

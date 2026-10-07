@@ -165,9 +165,12 @@ judged by its grant alone.
 | a deny rule or a rejected grant names a program | vetoed | vetoed | vetoed | vetoed |
 
 The question (`Command`) names the command and each program that needs permission, with why and its
-kind (`NeedKind`: what lets it run); a program's first need carries its detail and its notes
-(`command-explainers.ts`). The question's own notes say that only a pipeline's last program's exit
-status counts (unless `set -o pipefail` comes first), and what the session grants it offers cover. It
+kind (`NeedKind`: what lets it run). That is what the session's facts record of it. What a host shows
+besides (`explainedOf`) is worked out from the command when the question is shown, not stored: each
+program's detail and notes (`command-explainers.ts`), shown under its first need, and the notes about
+the command as a whole, which say that only a pipeline's last program's exit status counts (unless
+`set -o pipefail` comes first) and what the session grants the question offers cover. The command
+is the fact; an explanation is how it is shown, so a better explainer applies to past questions too. It
 offers `allow_once` and `reject_once`; and, when every program it asks about is one that is not
 allowed yet and has a grant, `allow_always` and `reject_always` for those grants. Session answers
 apply in every mode: `dontAsk` and print mode are autonomy.

@@ -5,7 +5,7 @@ import { test } from "../../tests/support/test.ts";
 import { TerminalId, PermissionOptionId, SessionId } from "effective-acp/schema/v1";
 import { CallId, ToolName } from "../agent-machine/names.ts";
 import type { Received } from "../agent-machine/received.ts";
-import { OptionId, OptionName, type PermissionQuestion, permissions, questionIn } from "../agent-policy/permissions.ts";
+import { type Explained, OptionId, OptionName, type PermissionQuestion, permissions, questionIn } from "../agent-policy/permissions.ts";
 import { receivedJson } from "../agent-session/received.ts";
 import { ShellCommand, WordText } from "../agent-policy/command-segments.ts";
 import { CodeText, NeedText } from "../agent-policy/command-units.ts";
@@ -100,17 +100,23 @@ test("a need's detail is Markdown indented under its item: code in a fence that 
     options: [],
     command: ShellCommand.make("python3 -c 'print(1)'; sed -n /x/p f"),
     needs: [
-      { program: WordText.make("python3 -c print(1)"), kind: "opaque", why: NeedText.make("it runs code written in the command"), detail: { _tag: "Code", language: "python", code: CodeText.make("import sys\nprint(1)") } },
-      {
-        program: WordText.make("sed -n /x/p f"),
-        kind: "notAllowed",
-        why: NeedText.make("it is not allowed yet"),
-        detail: { _tag: "Explained", lines: [{ depth: 0, text: Explanation.make("Reads f:") }, { depth: 1, text: Explanation.make("Prints lines matching `x`.") }] },
-      },
+      { program: WordText.make("python3 -c print(1)"), kind: "opaque", why: NeedText.make("it runs code written in the command") },
+      { program: WordText.make("sed -n /x/p f"), kind: "notAllowed", why: NeedText.make("it is not allowed yet") },
     ],
     grants: [],
   };
-  const content = requestOf(SessionId.make("s1"), call, command, { title: "Run" }).toolCall.content;
+  const explained: Explained = {
+    programs: [
+      { program: WordText.make("python3 -c print(1)"), detail: { _tag: "Code", language: "python", code: CodeText.make("import sys\nprint(1)") }, notes: [] },
+      {
+        program: WordText.make("sed -n /x/p f"),
+        detail: { _tag: "Explained", lines: [{ depth: 0, text: Explanation.make("Reads f:") }, { depth: 1, text: Explanation.make("Prints lines matching `x`.") }] },
+        notes: [],
+      },
+    ],
+    notes: [],
+  };
+  const content = requestOf(SessionId.make("s1"), call, command, { title: "Run" }, explained).toolCall.content;
   expect(content as unknown).toEqual([
     {
       type: "content",
@@ -142,21 +148,18 @@ test("a write that the call shows as a diff is named in the question, not repeat
     kind: "execute",
     options: [],
     command: ShellCommand.make("cat > config.yml <<'EOF' …"),
-    needs: [
-      {
-        program: WordText.make("a redirect"),
-        kind: "writes",
-        why: NeedText.make("it writes config.yml"),
-        detail: { _tag: "Writes", path: WordText.make("config.yml"), text: CodeText.make("name: x\n"), append: false, expands: false },
-      },
-    ],
+    needs: [{ program: WordText.make("a redirect"), kind: "writes", why: NeedText.make("it writes config.yml") }],
     grants: [],
+  };
+  const explained: Explained = {
+    programs: [{ program: WordText.make("a redirect"), detail: { _tag: "Writes", path: WordText.make("config.yml"), text: CodeText.make("name: x\n"), append: false, expands: false }, notes: [] }],
+    notes: [],
   };
   const diff = { type: "diff" as const, path: "/w/config.yml", oldText: "name: old\n", newText: "name: x\n" };
   const textOf = (content: ReadonlyArray<unknown> | null | undefined) => JSON.stringify(content?.at(-1));
-  expect(requestOf(SessionId.make("s1"), call, writing, { title: "Write", content: [diff] }).toolCall.content?.[0]).toEqual(diff);
-  expect(textOf(requestOf(SessionId.make("s1"), call, writing, { title: "Write", content: [diff] }).toolCall.content)).toContain("The diff shows what it writes to config.yml.");
-  expect(textOf(requestOf(SessionId.make("s1"), call, writing, { title: "Write" }).toolCall.content)).toContain("It writes this text to config.yml:\\n  ```\\n  name: x\\n  ```");
+  expect(requestOf(SessionId.make("s1"), call, writing, { title: "Write", content: [diff] }, explained).toolCall.content?.[0]).toEqual(diff);
+  expect(textOf(requestOf(SessionId.make("s1"), call, writing, { title: "Write", content: [diff] }, explained).toolCall.content)).toContain("The diff shows what it writes to config.yml.");
+  expect(textOf(requestOf(SessionId.make("s1"), call, writing, { title: "Write" }, explained).toolCall.content)).toContain("It writes this text to config.yml:\\n  ```\\n  name: x\\n  ```");
 });
 
 test("a need's notes are a list under its item, and the question's notes are paragraphs after the list", () => {
@@ -166,11 +169,14 @@ test("a need's notes are a list under its item, and the question's notes are par
     kind: "execute",
     options: [],
     command: ShellCommand.make("rm -rf build"),
-    needs: [{ program: WordText.make("rm -rf build"), kind: "notAllowed", why: NeedText.make("it is not allowed yet"), notes: [Explanation.make("It deletes the files and folders it names.")] }],
+    needs: [{ program: WordText.make("rm -rf build"), kind: "notAllowed", why: NeedText.make("it is not allowed yet") }],
     grants: [],
+  };
+  const explained: Explained = {
+    programs: [{ program: WordText.make("rm -rf build"), detail: undefined, notes: [Explanation.make("It deletes the files and folders it names.")] }],
     notes: [Explanation.make("Allowing rm for the rest of the session lets later rm commands run without a question inside the working folder.")],
   };
-  expect(requestOf(SessionId.make("s1"), call, noted, { title: "Clean" }).toolCall.content as unknown).toEqual([
+  expect(requestOf(SessionId.make("s1"), call, noted, { title: "Clean" }, explained).toolCall.content as unknown).toEqual([
     {
       type: "content",
       content: {

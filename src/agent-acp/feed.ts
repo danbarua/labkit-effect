@@ -31,7 +31,9 @@ import type { SessionId, SessionUpdate } from "effective-acp/schema/v1";
 import type { Fact } from "../agent-machine/fact.ts";
 import { type CallId, type TurnId, Via } from "../agent-machine/names.ts";
 import type { Origin } from "../agent-machine/origin.ts";
-import { answerPicking, OptionId, type PermissionQuestion, questionIn } from "../agent-policy/permissions.ts";
+import { segmentsOf } from "../agent-host/command-parser.ts";
+import type { Folders } from "../agent-policy/command-units.ts";
+import { answerPicking, explainedOf, OptionId, type PermissionQuestion, questionIn } from "../agent-policy/permissions.ts";
 import type { Services, Session } from "../agent-session/loop.ts";
 import { reportedBy } from "../agent-session/origin.ts";
 import { logKeys } from "./log-keys.ts";
@@ -48,6 +50,8 @@ export interface FeedOptions {
   /** What the session's operations run with. */
   readonly context: Context.Context<Services>;
   readonly present: Present;
+  /** The working and home folders that a question's command is judged against when it is explained (`explainedOf`). */
+  readonly folders: Folders;
   readonly connection: AgentConnection<V1Version>;
   /** The log annotations of everything the feed logs (the connection and the session). */
   readonly annotations: Readonly<Record<string, unknown>>;
@@ -111,7 +115,8 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
             return rejectOnce(question);
           }
           yield* Effect.logInfo(logKeys.permission.asked, { tool: question.tool, options: question.options.map((option) => option.optionId) });
-          const asked = yield* connection.client["session/request_permission"](requestOf(sessionId, known.call, question, known.shown)).pipe(Effect.result);
+          const explained = question._tag === "Command" ? explainedOf(question, segmentsOf, options.folders) : undefined;
+          const asked = yield* connection.client["session/request_permission"](requestOf(sessionId, known.call, question, known.shown, explained)).pipe(Effect.result);
           if (asked._tag === "Failure") {
             const error = asked.failure;
             yield* Effect.logWarning(logKeys.permission.failed, {
