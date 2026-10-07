@@ -49,6 +49,30 @@
                     "dontAsk",
                     "bypassPermissions"
                   ]
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "deny": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "readOnly": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "commandTools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               },
               "additionalProperties": false
@@ -184,6 +208,30 @@
                   "dontAsk",
                   "bypassPermissions"
                 ]
+              },
+              "allow": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "deny": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "readOnly": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "commandTools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [

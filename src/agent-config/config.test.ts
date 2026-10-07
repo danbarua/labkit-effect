@@ -23,6 +23,10 @@ import { type Configuration, fileLayer, type LayerSource, loadConfiguration, fil
 import { merged, over } from "./merge.ts";
 import { configJsonSchema } from "./schema.ts";
 import { seamLayer, seamListsOf } from "./seams.ts";
+import { defaultPermissionSettings } from "../agent-policy/permissions.ts";
+
+/** The permissions plug-in's settings in `mode`, the others at their defaults. */
+const permissionSettings = (mode: string) => ({ mode, ...defaultPermissionSettings });
 
 /** Writes `text` to `path` under the test's folder, making its folders; gives the full path. */
 const write = (path: string, text: string): string => {
@@ -95,7 +99,7 @@ maxHolds: 2
   expect(listed(configuration)).toEqual({
     toolCalls: [
       ["loopBreaker", "loopBreaker", { nudgeAt: 2, stopAt: 5, key: "toolAndInput" }],
-      ["permissions", "permissions", { mode: "dontAsk" }],
+      ["permissions", "permissions", permissionSettings("dontAsk")],
     ],
     // The loop breaker's settings are the same on both lists: they are said once.
     modelRequests: [
@@ -208,7 +212,7 @@ test("layers merge in order, the last write winning: mappings key by key, deeply
   );
   // The project's toolCalls replace the user's; the user's modelRequests stand, with the local file's limit.
   expect(listed(configuration)).toEqual({
-    toolCalls: [["permissions", "permissions", { mode: "default" }]],
+    toolCalls: [["permissions", "permissions", permissionSettings("default")]],
     modelRequests: [["maxTurnRequests", "maxTurnRequests", { limit: 20 }]],
   });
   const userOnly = await runTest(
@@ -438,7 +442,7 @@ test("the resolved configuration lists each entry's settings, defaults included,
     lists: {
       toolCalls: [
         { name: "loopBreaker", use: "loopBreaker", settings: { nudgeAt: 4, stopAt: 5, key: "toolAndInput" } },
-        { name: "permissions", use: "permissions", settings: { mode: "acceptEdits" } },
+        { name: "permissions", use: "permissions", settings: permissionSettings("acceptEdits") },
       ],
     },
     mcpServers: [{ name: "gh", command: "gh-mcp", args: [], env: ["GITHUB_TOKEN"], required: false }],
@@ -565,7 +569,7 @@ test("the example configuration folders load: the user's files in the order of t
     toolCalls: [
       ["denyTools", "denyTools", { tools: ["run_command"] }],
       ["loopBreaker", "loopBreaker", { nudgeAt: 3, stopAt: 5, key: "toolAndInput" }],
-      ["permissions", "permissions", { mode: "acceptEdits" }],
+      ["permissions", "permissions", permissionSettings("acceptEdits")],
     ],
     modelRequests: [
       ["strictLoops", "loopBreaker", { nudgeAt: 3, stopAt: 3, key: "toolAndInput" }],

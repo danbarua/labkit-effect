@@ -38,39 +38,27 @@ model.
       for ACP, the `session/request_permission` request and its answer, where the client's
       cancelled outcome is a refusal (`src/agent-acp/permission.ts`), asked by the host's feed; the
       mode as an ACP option the user changes (`permission_mode`), from the next turn. To do: `plan`
-      and `auto`; allow and deny rules by tool and argument; resetting permissions; a change of
+      and `auto`; rules by other tools' arguments (`write_file`'s path); resetting permissions; a change of
       mode recorded in the session's facts (the ACP host keeps it only while the session is open).
       - `run_command` (the CLI's and the ACP host's) runs any shell command, and permission is
         given per tool: "Allow for the rest of the session" on one call allows every command
         after it (`rm`, `git push`, `curl … | sh`), and `bypassPermissions` runs them all
         unasked.
-      - Permission by command (Dan's decisions, 2026-10-07):
-        - **Parsing.** A command is parsed into segments: every program it would run, in
-          pipelines, `;` and `&&` lists, subshells and `$(…)`, and each redirect's target.
-          - The parser comes from Dan's exo-project spikes (`~/Code/ai/exo-project`, Rust:
-            rust-bash's parser and brush-parser's words). labkit-effect is exo-project's v0.
-          - It can run as WASM in Bun, as a binary called once per command, or as a TypeScript
-            port. The policy sees only `segmentsOf(command)`, so the route can change.
-        - **When it asks.**
-          - Code handed to another program asks: `sh -c`, `eval`, `xargs`, `find -exec`, and a
-            runtime fed a heredoc or `-c`.
-          - A command that does not parse asks.
-          - When no one can answer, these are vetoed.
-        - **Rules**, as Claude Code's `Bash(git log:*)`.
-          - Deny rules come from any layer and hold in every mode.
-          - Allow rules come only from trusted layers.
-          - A command runs unasked only when every segment is allowed.
-        - **Session answers.**
-          - "Allow for the rest of the session" grants the program and its subcommand
-            (`git log`, `bun test`), or the program alone when it has no subcommands.
-          - The answer records the rule it granted and the policy that asked.
-          - Session answers apply in `dontAsk` and headless mode too: those modes are autonomy.
-          - Answers recorded before this change need not be read the old way; no stored session
-            needs to be kept.
-        - **Later:**
-          - Jev classifies what the rules cannot decide, from the exo-project skeleton
-            (`01_3`).
-          - Models are told to use the write and edit tools instead of `python -c` and heredocs.
+      - Permission by command. Built (`docs/agent-policy.md`, Rules and Command tools): the Rust
+        crate `native/bash-segments` (brush-parser, adapted from exo-project's spike 01_2) splits a
+        command into every program it would run, as WebAssembly the host loads
+        (`agent-host/command-parser.ts`); `command-units.ts` reads past wrappers, follows code
+        written out for `bash -c` and `eval`, and marks what is opaque; allow and deny rules
+        (`<tool>(<words>:*)`, `command(…)` for every command tool), the read-only programs, grants
+        for the rest of the session (program and subcommand, script or package), and redirects to
+        files needing `acceptEdits`. Session answers apply in `dontAsk` and headless mode. To do:
+        - Jev classifies what the rules cannot decide, from the exo-project skeleton (`01_3`).
+        - Models are told to use the write and edit tools instead of `python -c` and heredocs.
+        - A here-document's body fed to a shell (`bash <<'EOF'`) is opaque; it could be split as
+          `bash -c` is.
+        - The JSON Schema does not carry the rules' pattern; a rule that is not valid is refused when
+          the configuration is read.
+        - The ask rate over exo-project's corpus is not measured.
       - The ACP host's `run_command` runs in the editor's terminal (`terminal/create`), with the
         environment the editor gives it. It is to be named `terminal_command`.
       - Later (Dan, 2026-10-07):

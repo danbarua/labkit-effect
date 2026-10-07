@@ -136,8 +136,14 @@ const inputOf = (facts: ReadonlyArray<Fact>, call: CallId): string => {
   return found === undefined ? "" : asText(found);
 };
 
-/** The permission question as shown: the tool, its kind, and the call's input. */
-const shown = (question: PermissionQuestion, input: string): string => `Run ${question.tool} (${question.kind})? ${input}`;
+/**
+ * The permission question as shown. About a command: the command, then each of its programs that
+ * needs permission and why. About a tool: the tool, its kind, and the call's input.
+ */
+const shown = (question: PermissionQuestion, input: string): string =>
+  question._tag === "Command"
+    ? [`Run this command? ${question.command}`, ...question.needs.map((each) => `  ${each.program}: ${each.why}`)].join("\n")
+    : `Run ${question.tool} (${question.kind})? ${input}`;
 
 /** Returns the first line of `text`, cut to `width` characters, and how many lines follow it. */
 const oneLine = (text: string, width = 200): string => {

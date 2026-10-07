@@ -2,7 +2,8 @@
 
 import { Effect, Layer } from "effect";
 import { AgentContextAssembler, WholeConversation } from "../agent-context/assembler.ts";
-import { type PermissionMode, permissions } from "../agent-policy/permissions.ts";
+import { defaultPermissionSettings, type PermissionMode, type PermissionSettings, permissions } from "../agent-policy/permissions.ts";
+import { segmentsOf } from "./command-parser.ts";
 import { type LoopBreakerSettings, loopBreakerDefaults, repeatedCalls, repeatingTurns } from "../agent-policy/loop-breaker.ts";
 import { maxTurnRequests } from "../agent-policy/max-turn-requests.ts";
 import type { Policy } from "../agent-policy/policy.ts";
@@ -39,17 +40,18 @@ export const SessionServices = <E, R>(runner: Layer.Layer<ToolRunner, E, R>) =>
 
 /**
  * The permission policy for `mode`, over the tools that the session opened with: each call is judged
- * by its tool's kind. `canAsk` is whether anyone can answer a question before a call runs. `mode` is
- * read at each call, so a host that lets the user change it applies the change from the next call.
- * A tool call policy (`ToolCallPolicies`).
+ * by its tool's kind, and a call to a command tool by the programs its command runs, split by the
+ * host's command parser (`command-parser.ts`), with `settings`' rules. `canAsk` is whether anyone can
+ * answer a question before a call runs. `mode` is read at each call, so a host that lets the user
+ * change it applies the change from the next call. A tool call policy (`ToolCallPolicies`).
  */
 export const permissionsFor =
-  (mode: PermissionMode | Effect.Effect<PermissionMode>, canAsk: boolean): PolicyOfFacts =>
+  (mode: PermissionMode | Effect.Effect<PermissionMode>, canAsk: boolean, settings: PermissionSettings = defaultPermissionSettings): PolicyOfFacts =>
   (facts) =>
     Effect.flatMap(immutableToolCatalogOf(facts), (tools) =>
       Effect.map(
         Effect.isEffect(mode) ? mode : Effect.succeed(mode),
-        (now) => permissions(now, canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts) as Policy<unknown>,
+        (now) => permissions(now, canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts, { settings, segmentsOf }) as Policy<unknown>,
       ),
     );
 

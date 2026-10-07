@@ -15,7 +15,10 @@ extensions:            # the user's own file only
 plugins:
   loopBreaker: { nudgeAt: 3, stopAt: 5 }
   strict: { use: loopBreaker, stopAt: 3 }   # a second loop breaker, with its own settings
-  permissions: { mode: default }
+  permissions:
+    mode: default
+    allow: ["command(bun test:*)", "command(make build)"]   # docs/agent-policy.md, Rules
+    deny: ["command(git push:*)", git_push]
 toolCalls: [loopBreaker, permissions]
 modelRequests: [loopBreaker, maxTurnRequests]   # maxTurnRequests: its defaults
 turnEnd: [retryIncomplete]

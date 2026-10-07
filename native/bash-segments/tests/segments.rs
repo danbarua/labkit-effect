@@ -97,6 +97,8 @@ fn a_word_is_literal_only_without_expansions_and_with_its_quotes_removed() {
     assert_eq!(programs("$CMD x"), ["?"]);
     assert_eq!(programs("${CMD} x"), ["?"]);
     assert_eq!(programs("~/bin/x"), ["?"]);
+    assert_eq!(programs("a~b"), ["a~b"]);
+    assert_eq!(programs("find . -exec rm {} ;"), ["find"]);
     assert_eq!(programs("r* x"), ["?"]);
     assert_eq!(programs("{rm,x}"), ["?"]);
     match segments_of("git log -- 'a b' \"$X\" *.ts") {
@@ -135,4 +137,16 @@ fn a_command_that_cannot_be_followed_in_full_is_unparsed() {
     assert!(unparsed("echo ${x:-$(rm x)}").starts_with("A command substitution inside a parameter expansion is not followed"));
     assert!(unparsed("echo $(fi)").starts_with("A command substitution does not parse"));
     assert_eq!(segments_of(""), Segments::Parsed { segments: vec![] });
+}
+
+#[test]
+fn an_assignment_after_the_commands_name_is_an_argument_and_one_before_it_sets_a_variable() {
+    match segments_of("X=1 env LD_PRELOAD=x.so make A=b {}") {
+        Segments::Parsed { segments } => {
+            let words: Vec<_> = segments[0].words.iter().map(|word| word.literal.clone()).collect();
+            assert_eq!(words, [Some("env".into()), Some("LD_PRELOAD=x.so".into()), Some("make".into()), Some("A=b".into()), Some("{}".into())]);
+            assert_eq!(segments[0].assignments, ["X=1"]);
+        }
+        Segments::Unparsed { reason } => panic!("{reason}"),
+    }
 }

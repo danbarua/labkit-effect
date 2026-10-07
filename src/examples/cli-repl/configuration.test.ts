@@ -10,6 +10,10 @@ import { test, testFolder } from "../../../tests/support/test.ts";
 import type { Configuration } from "../../agent-config/file.ts";
 import type { ConfigFlags } from "../../agent-host/launch.ts";
 import { cliConfiguration } from "./configuration.ts";
+import { defaultPermissionSettings } from "../../agent-policy/permissions.ts";
+
+/** The permissions plug-in's settings in `mode`, the others at their defaults. */
+const permissionSettings = (mode: string) => ({ mode, ...defaultPermissionSettings });
 
 const write = (path: string, text: string): string => {
   const full = join(testFolder(), path);
@@ -44,7 +48,7 @@ test("with no configuration file and no flag, tool calls go through the loop bre
   expect(listed(configuration)).toEqual({
     toolCalls: [
       ["loopBreaker", { nudgeAt: 3, stopAt: 5, key: "toolAndInput" }],
-      ["permissions", { mode: "default" }],
+      ["permissions", permissionSettings("default")],
     ],
     modelRequests: [["loopBreaker", { nudgeAt: 3, stopAt: 5, key: "toolAndInput" }]],
     turnEnd: [["retryIncomplete", { retries: 1 }]],
@@ -56,7 +60,7 @@ test("with no configuration file and no flag, tool calls go through the loop bre
 
 test("flags override the files: --permission-mode sets the permission mode, and --max-turns and --max-budget-usd add their limits to model requests", async () => {
   const configuration = await configured({ permissionMode: "acceptEdits", maxTurns: 3, maxBudgetUsd: 2.5 });
-  expect(listed(configuration)["toolCalls"]?.[1]).toEqual(["permissions", { mode: "acceptEdits" }]);
+  expect(listed(configuration)["toolCalls"]?.[1]).toEqual(["permissions", permissionSettings("acceptEdits")]);
   expect(listed(configuration)["modelRequests"]).toEqual([
     ["loopBreaker", { nudgeAt: 3, stopAt: 5, key: "toolAndInput" }],
     ["maxTurnRequests", { limit: 3 }],
@@ -79,7 +83,7 @@ test("--settings (JSON, or a JSON or YAML file) overrides the files; --setting-s
   const both = listed(await configured({ settingSources: "user,project", settings: '{"plugins": {"loopBreaker": {"key": "toolAndInput", "nudgeAt": 2}}}' }));
   expect(both["toolCalls"]?.[0]).toEqual(["loopBreaker", { nudgeAt: 2, stopAt: 9, key: "toolAndInput" }]);
   const yaml = write("settings.yml", "toolCalls: [permissions]\n");
-  expect(listed(await configured({ settings: yaml }))["toolCalls"]).toEqual([["permissions", { mode: "default" }]]);
+  expect(listed(await configured({ settings: yaml }))["toolCalls"]).toEqual([["permissions", permissionSettings("default")]]);
   const json = write("settings.json", JSON.stringify({ toolCalls: ["loopBreaker"] }, null, 2));
   expect(listed(await configured({ settingSources: "user,project", settings: json }))["toolCalls"]).toEqual([["loopBreaker", { nudgeAt: 4, stopAt: 9, key: "toolAndInput" }]]);
   // The project's file is ignored unless --setting-sources names it.
@@ -118,7 +122,7 @@ test("a project's files are read only when --setting-sources names them and the 
   write("project/.labkit/policies.yml", `extensions:\n  - ${extension}\nplugins:\n  denyTools:\n    tools: [change]\ntoolCalls: [denyTools, permissions]\n`);
   expect(listed(await configured({ settingSources: "user,project" }))["toolCalls"]).toEqual([
     ["denyTools", { tools: ["change"] }],
-    ["permissions", { mode: "default" }],
+    ["permissions", permissionSettings("default")],
   ]);
 });
 

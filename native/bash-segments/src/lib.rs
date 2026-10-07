@@ -281,28 +281,34 @@ impl Walker {
             if let CommandPrefixOrSuffixItem::Word(word) = item {
                 self.fail(format!("A word before the command's name is not followed: {}", word.value));
             }
-            self.item(item, &mut words, &mut assignments, &mut redirects);
+            self.item(item, true, &mut words, &mut assignments, &mut redirects);
         }
         if let Some(name) = &simple.word_or_name {
             let name = self.word(name);
             words.insert(0, name);
         }
         for item in simple.suffix.iter().flat_map(|suffix| suffix.0.iter()) {
-            self.item(item, &mut words, &mut assignments, &mut redirects);
+            self.item(item, false, &mut words, &mut assignments, &mut redirects);
         }
         self.emit(SegmentKind::Simple, words, assignments, redirects);
     }
 
-    /// Adds a simple command's `item` to its words, assignments or redirects.
-    fn item(&mut self, item: &CommandPrefixOrSuffixItem, words: &mut Vec<WordOut>, assignments: &mut Vec<String>, redirects: &mut Vec<Redirect>) {
+    /// Adds a simple command's `item` to its words, assignments or redirects. An assignment before the
+    /// command's name sets a variable for it; one after the name is an argument (`env X=1`, `make A=b`).
+    fn item(&mut self, item: &CommandPrefixOrSuffixItem, before_name: bool, words: &mut Vec<WordOut>, assignments: &mut Vec<String>, redirects: &mut Vec<Redirect>) {
         match item {
             CommandPrefixOrSuffixItem::Word(word) => {
                 let word = self.word(word);
                 words.push(word);
             }
             CommandPrefixOrSuffixItem::AssignmentWord(assignment, written) => {
-                self.assignment_value(&assignment.value);
-                assignments.push(written.value.clone());
+                if before_name {
+                    self.assignment_value(&assignment.value);
+                    assignments.push(written.value.clone());
+                } else {
+                    let word = self.word(written);
+                    words.push(word);
+                }
             }
             CommandPrefixOrSuffixItem::IoRedirect(redirect) => {
                 let own = self.redirects(std::slice::from_ref(redirect));
@@ -436,7 +442,7 @@ fn literal_of(pieces: &[WordPieceWithSource]) -> Option<String> {
     for piece in pieces {
         match &piece.piece {
             WordPiece::Text(text) => {
-                if text.chars().any(|character| matches!(character, '*' | '?' | '[' | '{' | '}' | '~')) {
+                if text.chars().any(|character| matches!(character, '*' | '?' | '[')) || braces_expand(text) {
                     return None;
                 }
                 value.push_str(text);
@@ -456,6 +462,15 @@ fn literal_of(pieces: &[WordPieceWithSource]) -> Option<String> {
         }
     }
     Some(value)
+}
+
+/// Whether unquoted `text` has a brace expansion: `{` with a `,` or `..` before its `}`. A lone `{`, `}`
+/// or `{}` is literal.
+fn braces_expand(text: &str) -> bool {
+    text.match_indices('{').any(|(open, _)| {
+        let rest = &text[open + 1..];
+        rest.find('}').is_some_and(|close| rest[..close].contains(',') || rest[..close].contains(".."))
+    })
 }
 
 /// Allocates `len` bytes in this module's memory, for the caller to write a command into.

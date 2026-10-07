@@ -23,8 +23,9 @@ import { retryIncomplete as retryIncompleteHook } from "../agent-host/incomplete
 import { budgetLimit, loopBreaker as loopBreakerPolicies, permissionsFor, turnRequestLimit } from "../agent-host/services.ts";
 import { type CallKey, sameToolAndInput } from "../agent-policy/loop-breaker.ts";
 import { defaultMaxTurnRequests } from "../agent-policy/max-turn-requests.ts";
-import { PermissionMode } from "../agent-policy/permissions.ts";
-import type { ToolName } from "../agent-machine/names.ts";
+import { defaultPermissionSettings, PermissionMode } from "../agent-policy/permissions.ts";
+import { PermissionRule, ReadOnlyPrefix } from "../agent-policy/permission-rules.ts";
+import { ToolName } from "../agent-machine/names.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { type AnyPlugin, plugin } from "./plugin.ts";
 
@@ -47,9 +48,25 @@ export const loopBreaker = plugin(
   ({ nudgeAt, stopAt, key }) => loopBreakerPolicies({ nudgeAt, stopAt, key: keys[key] }),
 );
 
-export const permissions = plugin("permissions", Schema.Struct({ mode: defaulted(PermissionMode, "default") }), ["toolCalls"], ({ mode }, host) => ({
-  toolCalls: permissionsFor(host.permissionMode ?? mode, host.canAsk),
-}));
+/**
+ * The permission policy (`agent-policy/permissions.ts`): its mode; its allow and deny rules
+ * (`<tool>`, `<tool>(<words>)`, `<tool>(<words>:*)`, with `command` for every command tool); the
+ * read-only programs that command tools run without a question; and which tools run shell commands.
+ */
+export const permissions = plugin(
+  "permissions",
+  Schema.Struct({
+    mode: defaulted(PermissionMode, "default"),
+    allow: defaulted(Schema.Array(PermissionRule), []),
+    deny: defaulted(Schema.Array(PermissionRule), []),
+    readOnly: defaulted(Schema.Array(ReadOnlyPrefix), defaultPermissionSettings.readOnly),
+    commandTools: defaulted(Schema.Array(ToolName), defaultPermissionSettings.commandTools),
+  }),
+  ["toolCalls"],
+  ({ mode, ...settings }, host) => ({
+    toolCalls: permissionsFor(host.permissionMode ?? mode, host.canAsk, settings),
+  }),
+);
 
 export const maxTurnRequests = plugin("maxTurnRequests", Schema.Struct({ limit: defaulted(atLeast(1), defaultMaxTurnRequests) }), ["modelRequests"], ({ limit }) => ({
   modelRequests: turnRequestLimit(limit),

@@ -11,7 +11,10 @@ exist: it receives a veto as an observation, like any other outcome.
 | File | Responsibility |
 | --- | --- |
 | `policy.ts` | The `Policy` interface and `every`, which applies several policies in order. |
-| `permissions.ts` | The permission policy, by Claude Code's permission modes. |
+| `permissions.ts` | The permission policy, by Claude Code's permission modes, by allow and deny rules, and, for a command tool, by each program its command runs. |
+| `permission-rules.ts` | The rules (`<tool>`, `<tool>(<words>)`, `<tool>(<words>:*)`) and the read-only programs. |
+| `command-segments.ts` | A shell command's segments, as the host's parser (`agent-host/command-parser.ts`, the Rust crate `native/bash-segments`) returns them. |
+| `command-units.ts` | The programs a command runs, past wrappers; what a session grant names; the files they write; which are opaque. |
 | `loop-breaker.ts` | `repeatedCalls` and `repeatingTurns`: they stop a model that makes the same tool call again and again. |
 | `max-turn-requests.ts` | `maxTurnRequests`: a limit on the number of model requests in one turn (ACP's `max_turn_requests`). |
 
@@ -38,8 +41,9 @@ person.
 
 ## Permissions
 
-`permissions(mode, canAsk, kindOf, facts)` decides by the tool's kind (`kindOf`) and the permission
-mode. A tool whose kind is not known is treated as `other`.
+`permissions(mode, canAsk, kindOf, facts, commands)` decides by the tool's kind (`kindOf`) and the
+permission mode; a call to a command tool, by the programs its command runs (below). A tool whose
+kind is not known is treated as `other`.
 
 | Mode | Tool that only reads (`read`, `search`, `think`, `fetch`) | Tool that changes files (`edit`, `delete`, `move`) | Any other tool |
 | --- | --- | --- | --- |
@@ -66,6 +70,57 @@ When no one can answer (`canAsk` is false, as in the CLI's print mode), a call t
 about is vetoed. The veto's reason names the permission modes that let the call run:
 `acceptEdits or bypassPermissions` for a tool that changes files, and `bypassPermissions` for any
 other tool.
+
+### Rules
+
+The permissions plug-in's settings hold rules (`permission-rules.ts`):
+
+| Rule | Names |
+| --- | --- |
+| `<tool>` | every call to the tool |
+| `<tool>(<words>)` | a command tool's program that is exactly these words |
+| `<tool>(<words>:*)` | a command tool's program whose words start with these |
+
+`command` in place of a tool's name names every command tool. A deny rule (`deny`) vetoes the call
+in every mode, `bypassPermissions` included. An allow rule (`allow`) lets it run without a question.
+A deny rule compares a program by the last part of its path (`rm:*` names `/bin/rm`); an allow rule
+compares it as written (`ls:*` does not name `./ls`). Every layer a host builds is trusted
+(`docs/agent-config.md`), so rules come only from the user's own configuration and the folders they
+trust.
+
+### Command tools
+
+A command tool (`commandTools`: `run_command` and `terminal_command` unless the settings name
+others) has a shell command in its input's `command`. The host splits the command into its segments
+(`agent-host/command-parser.ts`), and `command-units.ts` reads each segment past the programs that
+only run another one (`env`, `timeout`, `xargs`, `uv run`, `bash -c '…'`, `find -exec`), down to the
+programs that run. Each program, its unit, has:
+
+- its words, from the program on;
+- a grant: what "allow for the rest of the session" names (`git log`, `bun run build`, `npx eslint`,
+  `python3 -m pytest`), or none when only the call can be allowed;
+- the files it writes (a redirect to a file, `tee`, `dd of=`, `sort -o`, `git --output`,
+  `find -delete`);
+- whether it is opaque: its words do not show what it runs (`python3 -c`, `curl … | sh`, `sudo`,
+  `awk`, `sed`, a variable such as `PATH` set for it), with why.
+
+A program runs without a question when an allow rule names it, a read-only prefix names it and it is
+not opaque (`readOnly`: `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `echo`, `grep`, `rg`, `which`, `cd`,
+`git status`, `git log`, `git diff`, `git show`), or the session has allowed its grant and it is not
+opaque. A program that writes files also needs the `acceptEdits` mode. A command that cannot be split
+needs permission.
+
+| Command | `default` | `acceptEdits` | `dontAsk` | `bypassPermissions` |
+| --- | --- | --- | --- | --- |
+| every program runs without a question | runs | runs | runs | runs |
+| a program writes files, the others run without a question | asks | runs | vetoed | runs |
+| a program needs permission | asks | asks | vetoed | runs |
+| a deny rule or a rejected grant names a program | vetoed | vetoed | vetoed | vetoed |
+
+The question (`Command`) names the command and each program that needs permission, with why. It
+offers `allow_once` and `reject_once`; and, when every program it asks about is one that is not
+allowed yet and has a grant, `allow_always` and `reject_always` for those grants. Session answers
+apply in every mode: `dontAsk` and print mode are autonomy.
 
 ## Loop breaker
 
@@ -144,7 +199,9 @@ Each decision is recorded with the deciding policy's name in its origin (`tool c
 
 ## Tests
 
-- `src/agent-policy`: `permissions.test.ts`, `loop-breaker.test.ts`, `max-turn-requests.test.ts`.
+- `src/agent-policy`: `permissions.test.ts`, `command-permissions.test.ts`, `command-units.test.ts`,
+  `loop-breaker.test.ts`, `max-turn-requests.test.ts`.
+- `native/bash-segments/tests`: how a command splits into segments (`bun run native:test`).
 - `src/agent-session`: how the loop applies policies (`permission.test.ts`,
   `model-request-policy.test.ts`, `loop-breaker.test.ts`, `resume.test.ts`).
 - `tests/examples/policies.test.ts`: `every`, waiting, answers and clock ticks, with the example

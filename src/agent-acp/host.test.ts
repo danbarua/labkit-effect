@@ -40,6 +40,7 @@ import { makeHost } from "./host.ts";
 import { logKeys } from "./log-keys.ts";
 import { presentFrom, project } from "./projection.ts";
 import { maxFileBytes, type World } from "./world.ts";
+import { defaultPermissionSettings } from "../agent-policy/permissions.ts";
 
 const info = { name: "labkit-effect-test", version: "0.0.0" };
 const clientInfo = { name: "an-sdk-client", version: "1.0.0" };
@@ -758,8 +759,9 @@ test("edit_file replaces one occurrence through fs/*, shown as a diff; run_comma
   await host.stop();
   const facts = await factsOn(storeFileOf(host.directory, sessionId));
   expect((await Effect.runPromise(immutableToolCatalogOf(facts))).map((tool): string => tool.name)).toEqual(["read_file", "write_file", "edit_file", "update_plan", "run_command"]);
-  // The default permission mode asks before an edit and before a command.
-  expect(log.asked).toHaveLength(5);
+  // The default permission mode asks before an edit and before a command, except a read-only one (ls).
+  expect(log.asked).toHaveLength(4);
+  expect(log.asked.map((asked) => asked.toolCall.toolCallId)).not.toContain("run-1");
   expect(log.files.filter((each) => each.method === "fs/write_text_file")).toEqual([
     { method: "fs/write_text_file", path: join(host.cwd, "a.txt"), sessionId, content: "beta and a" },
   ]);
@@ -783,7 +785,7 @@ test("edit_file replaces one occurrence through fs/*, shown as a diff; run_comma
   // The edit's change is shown as a diff when permission is asked; a command's terminal is shown in
   // its call once it has one, and still when it has ended.
   // A call's title is its intent; the question also carries the call's whole input, the command included.
-  expect(log.asked.find((asked) => asked.toolCall.toolCallId === "run-1")?.toolCall).toMatchObject({ title: "List the files.", rawInput: { command: "ls" } });
+  expect(log.asked.find((asked) => asked.toolCall.toolCallId === "run-2")?.toolCall).toMatchObject({ title: "Run a failing command.", rawInput: { command: "false" } });
   expect(log.asked.find((asked) => asked.toolCall.toolCallId === "edit-1")?.toolCall.title).toBe("Rename alpha.");
   expect(log.asked.find((asked) => asked.toolCall.toolCallId === "edit-1")?.toolCall.content).toEqual([
     { type: "diff", path: join(host.cwd, "a.txt"), oldText: "alpha", newText: "beta" },
@@ -1093,7 +1095,7 @@ test("a session's configuration is read when it is made: the user's file's MCP s
     { name: "extra", command: process.execPath, required: false },
   ]);
   expect(written.from["mcpServers.fake.command"]).toBe("the client's MCP servers");
-  expect(written.lists.toolCalls).toEqual([{ name: "permissions", use: "permissions", settings: { mode: "acceptEdits" } }]);
+  expect(written.lists.toolCalls).toEqual([{ name: "permissions", use: "permissions", settings: { mode: "acceptEdits", ...defaultPermissionSettings } }]);
   expect(written.host).toMatchObject({ permissionMode: "acceptEdits", canAsk: true, world: "the host's own" });
 });
 

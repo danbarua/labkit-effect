@@ -34,6 +34,7 @@ const call = (id: string, tool: string, input: unknown) => ({ _tag: "ToolCall", 
 const succeeded = (id: string, output: unknown) => ({ _tag: "ToolEnded", call: id, outcome: { _tag: "Succeeded", output } });
 /** What the permission policy asks before `rm` runs (`questionIn` reads it). */
 const question = json({
+  _tag: "Tool",
   tool: "rm",
   kind: "delete",
   options: [

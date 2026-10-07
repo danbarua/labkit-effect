@@ -11,6 +11,10 @@ import { test, testFolder } from "../../tests/support/test.ts";
 import type { LayerSource } from "../agent-config/file.ts";
 import { type Brand, defaultBrand } from "./brand.ts";
 import { launchConfiguration, launchFlags, type LaunchOptions, launchVariables } from "./launch.ts";
+import { defaultPermissionSettings } from "../agent-policy/permissions.ts";
+
+/** The permissions plug-in's settings in `mode`, the others at their defaults. */
+const permissionSettings = (mode: string) => ({ mode, ...defaultPermissionSettings });
 
 /** The options `args` give, the variables being `env`'s for `brand` and `host`; and what a plain variable reads as beside them. */
 const launched = (args: ReadonlyArray<string>, env: Readonly<Record<string, string>>, host: ReadonlyArray<string> = [], brand: Brand = defaultBrand) => {
@@ -115,7 +119,7 @@ test("the host's defaults are the first layer and the flags the last; manual is 
   );
   expect(configuration.layers.map((layer) => layer.name)).toEqual(["the host's defaults", "the command line"]);
   expect(Object.fromEntries(Object.entries(configuration.lists).map(([seam, entries]) => [seam, entries.map((entry) => [entry.name, entry.settings])]))).toMatchObject({
-    toolCalls: [["permissions", { mode: "default" }]],
+    toolCalls: [["permissions", permissionSettings("default")]],
     modelRequests: [["maxTurnRequests", { limit: 4 }]],
   });
 });
