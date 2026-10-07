@@ -831,7 +831,7 @@ test("a command that writes text to a file shows the file's diff in its call: be
   expect(updates.at(-1) as unknown).toMatchObject({ status: "completed", content: [...diffs, { type: "terminal" }] });
 });
 
-test("a loaded session shows no diff for the writes it replays: their files were read after the commands ran", async () => {
+test("a loaded session shows no diff for the writes it replays, whose files were read after the commands ran: it says what each wrote", async () => {
   const first = startHost({
     script: [answer({ _tag: "ToolCall", call: "append-1", tool: "terminal_command", input: { command: "echo two >> log.txt", intent: "Append." } }), answer({ _tag: "Text", text: "Appended." })],
   });
@@ -859,6 +859,7 @@ test("a loaded session shows no diff for the writes it replays: their files were
   await second.stop();
   expect(reloaded.log.updates.some((update) => "toolCallId" in update && update.toolCallId === "append-1")).toBe(true);
   expect(contentOf(reloaded.log.updates).filter((content) => content.type === "diff")).toEqual([]);
+  expect(contentOf(reloaded.log.updates)).toContainEqual({ type: "content", content: { type: "text", text: "Added to the end of log.txt." } });
 });
 
 test("the editor world offers read_file and write_file as the client advertised fs; read_file reads through fs/read_text_file, a path outside the working folder is refused, and a client with no fs has no file tools", async () => {

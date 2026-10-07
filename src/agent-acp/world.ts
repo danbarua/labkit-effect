@@ -31,7 +31,7 @@
 import type { Environment } from "../agent-process/environment.ts";
 import { Effect, FileSystem, HashMap, Option, Ref } from "effect";
 import { homedir } from "node:os";
-import { type Current, currentOnDisk, type ShownWrite, shownWrites } from "../agent-host/command-writes.ts";
+import { type Current, currentOnDisk, type PlannedWrite, plannedWrites, type ShownWrite, shownWrites } from "../agent-host/command-writes.ts";
 import { logKeys as hostLogKeys } from "../agent-host/log-keys.ts";
 import { ShellCommand, WordText } from "../agent-policy/command-segments.ts";
 import type { Folders } from "../agent-policy/command-units.ts";
@@ -114,6 +114,12 @@ const writeContent = (write: ShownWrite): ReadonlyArray<ToolCallContent> => {
   return write.writes.expands ? [diff, { type: "content", content: { type: "text", text: `When the command runs, the shell replaces \`$…\` and backquoted commands in the text it writes to ${write.writes.path}, so the file may differ from this diff.` } }] : [diff];
 };
 
+/** A write a replayed call made, in words: `Wrote config.yml.`, or `Added to the end of notes.md.` for `>>`. */
+const wroteContent = (planned: PlannedWrite): ToolCallContent => ({
+  type: "content",
+  content: { type: "text", text: `${planned.writes.append ? "Added to the end of" : "Wrote"} ${planned.writes.path}.` },
+});
+
 export const editorWorld: World<FileSystem.FileSystem> = {
   open: ({ sessionId, cwd, connection, strictInput }) =>
     Effect.gen(function* () {
@@ -187,7 +193,13 @@ export const editorWorld: World<FileSystem.FileSystem> = {
             // Before the command runs, its writes are read; once it has ended, the writes read before it ran are shown, after a success.
             const command = typeof input["command"] === "string" ? ShellCommand.make(input["command"]) : undefined;
             const before = yield* writesShown(call.call, command, outcome === undefined && mode === "live");
-            const content = [...(outcome === undefined || outcome._tag === "Succeeded" ? before.flatMap(writeContent) : []), ...(terminalId === undefined ? [] : [{ type: "terminal" as const, terminalId }])];
+            // A replayed call's files were not read before it ran, so it says what it wrote instead of showing a diff.
+            const written = mode === "replay" && before.length === 0 && command !== undefined && outcome?._tag === "Succeeded" ? plannedWrites(command, folders).map(wroteContent) : [];
+            const content = [
+              ...(outcome === undefined || outcome._tag === "Succeeded" ? before.flatMap(writeContent) : []),
+              ...written,
+              ...(terminalId === undefined ? [] : [{ type: "terminal" as const, terminalId }]),
+            ];
             return content.length === 0 ? shown : ({ ...shown, content } satisfies Presented);
           }
           const at = typeof input["path"] === "string" ? inside(cwd, input["path"]) : undefined;

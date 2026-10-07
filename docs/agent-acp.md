@@ -474,7 +474,9 @@ the file tools' paths are resolved against the working folder (`agent-tools/in-w
   file is over 256 KiB, a `cd` comes first in the command), the call says why no diff is shown, and
   the permission question shows the text the command writes. A note follows a diff whose text the
   shell expands (`$…`) before writing it. A session that is loaded shows no diff for the calls it
-  replays: their text before was not read.
+  replays, since their files were read after the commands ran: each says what it wrote
+  (`Wrote config.yml.`, `Added to the end of notes.md.`). A file's text before is not recorded in
+  the session's facts.
 
 ### `workspaceWorld`
 
@@ -570,7 +572,9 @@ The host logs each event under `log-keys.ts`, with the ids it is about as log an
 - **A turn left running is ended at load, not continued.** The editor that closed mid-turn is not
   watching, and what the turn had begun should not run unseen.
 - **One projection for live and replay.** The two differ only in the mode, so a loaded session and a
-  live one show the same text, and the live feed continues from the replay's state.
+  live one show the same text, and the live feed continues from the replay's state. A command's write
+  is the exception: live, it shows the file's diff, read from the disk before the command runs; on a
+  replay it says what it wrote, as other harnesses do, rather than keeping files' texts in the facts.
 - **Tool calls go through the editor.** The model then sees unsaved buffers, and the editor shows and
   controls what changes. `workspaceWorld` is a stopgap that bypasses it.
 - **A cancelled permission request refuses the call once.** The turn goes on, and the model asks
