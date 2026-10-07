@@ -125,6 +125,23 @@ The prompt is then the turn's input, from the same origin. A prompt's input is:
 
 A turn that has not ended has no stop. After a failed turn the session takes the next prompt.
 
+A stop of `max_tokens` or `refusal` is explained by a `notice` (`noticeOf`, `stop-reason.ts`), sent
+after every other update of the turn, its `usage_update` included, and before the answer. It is
+built from the turn's last response and the session's settings, and says only what they record:
+
+| Stop | `title` | `description` |
+| --- | --- | --- |
+| `max_tokens` | The reply was cut short | The model; `stopped at a length limit` when the response's ending was `CutShort`, otherwise (not classified, not observed) `stopped before finishing its reply`; the output tokens the response used, when reported; the output limit the request was sent with, when the session's settings for that model give one (an adapter's own default is not recorded, and is not stated); the provider's stop reason. |
+| `refusal` | The model declined to continue | The model; the provider's stop reason; each refusal text the response carries (a field named `refusal`, as OpenAI's APIs send it), quoted. |
+
+For example: `openai/gpt-6-sol stopped at a length limit after 4,096 output tokens. The request set
+the output limit to 4,096 tokens. The provider's stop reason: max_tokens.`
+
+Its `severity` is `warning`. ACP lets an agent send a notice only to a client that advertised
+`clientCapabilities.session.notices` (`effective-acp` refuses one otherwise): a client that did not
+is sent none, logged at DEBUG, and gets the same answer. A notice is a live event, not history:
+`session/load` replays none. No other stop, and no turn that ends with an error, has a notice.
+
 ### Cancel and close
 
 - `session/cancel` records `TurnInterrupted` for the turn under way (`Session.cancel`). The turn ends
@@ -167,10 +184,11 @@ A turn that has not ended has no stop. After a failed turn the session takes the
 A loaded session's permission mode starts at the configuration's mode, as a new session's does. The
 mode a session had when it was closed is not kept.
 
-The replay shows the requests that were answered as live showed them, with each call left running
-`failed`. A request that was in flight adds only the calls that had arrived in it, because the text
-and thinking it streamed were never recorded. ACP has no update for how a turn ended, so a turn whose
-only request was in flight, with no call arrived, shows its input alone.
+The replay shows the requests that were answered as live showed them, with the message ids and the
+calls' names, inputs and outputs that live sent, and each call left running `failed`. A request that
+was in flight adds only the calls that had arrived in it, because the text and thinking it streamed
+were never recorded. ACP has no update for how a turn ended, so a turn whose only request was in
+flight, with no call arrived, shows its input alone.
 
 ### `session/list`
 
@@ -309,11 +327,13 @@ runs (`session.streamed`): `ModelDelta`, `ModelPartArrived` and `ModelResponseEn
 | `ModelDelta` of `Thinking`, live | `agent_thought_chunk` with the delta's text |
 | `ModelResponded`: a `Text` or `Commentary` part | `agent_message_chunk` with the part's text that no delta of its request sent |
 | `ModelResponded`: a `Thinking` part | `agent_thought_chunk` with the part's text that no delta of its request sent |
-| `ToolCallArrived`; a `ToolCall` part of `ModelPartArrived` or `ModelResponded` | `tool_call`, `pending`, with the presentation's title, kind, locations and content; once for each call |
+| `ToolCallArrived`; a `ToolCall` part of `ModelPartArrived` or `ModelResponded` | `tool_call`, `pending`, with the presentation's title, kind, locations and content, the tool's name (`name`) and the call's input (`rawInput`); once for each call |
 | `PermissionAsked` | `tool_call_update`, `pending` |
 | `ToolCallDispatched` | `tool_call_update`, `in_progress` |
-| `ToolEnded` | `tool_call_update`, `completed` when it succeeded and `failed` otherwise, with the presentation's content and locations, and its title and kind where they changed |
+| `ToolEnded` | `tool_call_update`, `completed` when it succeeded and `failed` otherwise, with the presentation's content and locations, its title and kind where they changed, and what it returned or why it failed (`rawOutput`) |
 | anything else | nothing |
+
+Each text chunk carries the id of its message (`messageId`, Message ids).
 
 ### Text is sent once
 
@@ -330,9 +350,15 @@ runs (`session.streamed`): `ModelDelta`, `ModelPartArrived` and `ModelResponseEn
   is sent again.
 - A failed request has no `ModelResponded`. What its deltas sent stays sent, and the projection
   forgets it when the turn ends.
-- Text of only whitespace is held, and sent with the next text of its kind. When a call or the
-  response's end comes first, it is not sent, live or on replay, so a client shows no blank message.
-  It counts as sent.
+- Text of only whitespace is held until it is known whose it is, then sent in its own message. Text
+  after it in the same message is sent with it. The end of its part (`ModelPartArrived`), a call, or
+  another message beginning sends it as the end of the open message, under that message's id. Still
+  held when its request ends or its response is taken, it is sent from the response's parts. A part
+  of only whitespace is not sent, live or on replay, so a client shows no blank message. Each
+  message's text is the same live and on replay.
+- A streamed item taken before its request's `ModelRequestDispatched` (or its `ModelResponded`)
+  waits in the state, and is taken once that fact is, because its message's id comes from it. The
+  loop records the dispatch before the request goes out, so live, items seldom wait.
 
 ### The order of the two feeds
 
@@ -340,6 +366,39 @@ The facts and the streamed items have no order between them: a request's deltas 
 after its `ModelResponded`, and either feed can be any number of requests or turns ahead. Each feed
 keeps a turn's requests in order, so the projection pairs a request's `ModelResponseEnded` with its
 `ModelResponded` by position in the turn. Every merge of the two sends each response's text once.
+
+### Message ids
+
+Each text chunk carries `messageId`, the id of the message it belongs to. ACP: "All chunks belonging
+to the same message share the same `messageId`. A change in `messageId` indicates a new message has
+started." An id the provider does not give, labkit gives; for messages, the projection derives it from
+the session's journal, so it is the same every time the journal is read: `session/load` sends the ids
+that live sent, and a reloaded session's later turns take ids that no earlier message has, from the
+journal's later seqs. An id generated in the projection (Effect's `IdGenerator` makes random ones)
+would differ on each replay, and keeping one would need a fact of its own. The providers' ids are not
+used: Effect's Anthropic adapter numbers a response's blocks from "0" in every response, and OpenAI's
+item ids are global.
+
+| Message | Id |
+| --- | --- |
+| A user's input (`InputArrived`), on replay | its seq: `"7"` |
+| A run of text of one kind (`Text`, `Commentary` or `Thinking`) in one response, until a call or text of another kind | `"<seq of the request's first ModelRequestDispatched>:<the run's place among the response's runs>"`: `"12:0"` |
+
+- A response's thinking and its text are two messages; so are its text before a call and its text
+  after it, and two responses with nothing between them (a turn asked again after an unfinished
+  response). Consecutive parts of one kind (a response's text in several blocks) are one message.
+- A part with nothing to show (blank text, or a part the decoder did not recognise) neither begins
+  nor ends a message.
+- A request is dispatched before it streams, so its deltas, the rest of a part that its response
+  sends, and the part on replay have the same id, in every merge of the feeds.
+- A fallback (`model-fallback.ts`) records a dispatch for each attempt, and the request keeps its first
+  dispatch's seq. When the attempt that failed streamed nothing (an HTTP 503 or 429 before the
+  response began), live and replay give the same ids. When it had streamed text, the streamed items
+  have no end for that attempt: live, its text and the fallback's are taken as one response, in the
+  text sent and in the ids, and replay has the fallback's alone (TODO.md).
+- A response with no `ModelRequestDispatched` before it, which the loop does not record, is named by
+  its own seq, and a warning says so.
+- What `/export` and `/mcp` say (`agent_message_chunk`) is not in the journal and carries no id.
 
 ### Replay order
 
@@ -367,6 +426,19 @@ the load showed is not shown again, and a later request's deltas are sent once.
   and kind where they changed.
 - The default presentation (`presentFrom(catalog)`) is the tool's name as the title, its kind from
   the session's catalog, and, once it ends, its output as text, or why it failed in words.
+- A call's `tool_call` carries the tool's name as the model called it (`name`) and the call's input
+  (`rawInput`). A later source that holds another input sends it as `rawInput` on a
+  `tool_call_update`, and the call keeps it.
+- A call's end carries `rawOutput`: what the tool returned; for a failure, its recorded reason (the
+  tool's error, the policy's veto, why its input was rejected). A call that named no tool, was not
+  run, or whose end was not observed has none: nothing more is recorded than its content says.
+- `rawInput` and `rawOutput` are the content as the facts hold it (`rawOf`): JSON, by its media type,
+  as its value; other text as its text. Bytes (a tool's image in the blob store) have none: JSON
+  cannot carry them, and the content names them. Content that claims JSON and does not parse is
+  carried as its text, and a warning says so.
+- `rawOutput` repeats what the default presentation's content gives as text, so a large output is
+  sent twice in its call's end: a `read_file` of 256 KiB makes an update of about 512 KiB. Neither is
+  cut.
 
 ## The feed
 
@@ -392,8 +464,8 @@ the load showed is not shown again, and a later request's deltas are sent once.
 ### Permission
 
 - The request (`requestOf`) is the call as the host presents it, `pending`, with its input as
-  `rawInput` and, where the presentation has no kind, the question's kind. Its options are exactly
-  the question's, by id, name and kind.
+  `rawInput`, as the call's `tool_call` carried it (`rawOf`), and, where the presentation has no
+  kind, the question's kind. Its options are exactly the question's, by id, name and kind.
 - A selected option is the answer that picks it (`answerOf`).
 - `cancelled` is the question's reject-once option: the call is refused, nothing is remembered for
   the session, and the turn goes on. The model then decides what to do next.
@@ -521,6 +593,7 @@ The projection does not make these; the host sends them:
 | `usage_update` | Sent by the feed when its numbers can change: after each response, a change of model taken and a turn's end (before the prompt's answer), and after a load or a resume; never twice in a row with the same numbers. The gauge of the model the session asks now (`contextGauge`), with the model's window as `KnownModels` knows it, and the cost so far: the priced responses' total. While no response of the session was priced (a local model's are not), it has no `cost`, because a cost not known is not nothing spent. None for a model whose window is not known. |
 | `config_option_update` | After each `session/set_config_option`. |
 | `plan` | From `update_plan`. |
+| `notice` | Before the answer to a prompt that stops with `max_tokens` or `refusal`, to a client that advertised notices (A turn's stop). |
 
 ## Logs
 
@@ -529,11 +602,12 @@ The host logs each event under `log-keys.ts`, with the ids it is about as log an
 
 - Logged at INFO: a session created, opened, loaded, resumed, listed and closed; a record written; a
   turn left running ended; a prompt received, admitted and settled (its stop reason, and its
-  duration); a cancel requested; a permission asked and answered; a change of configuration; an
-  export written.
+  duration); a notice sent (its stop reason and title); a cancel requested; a permission asked and
+  answered; a change of configuration; an export written.
 - A routine turn and a routine load log no warning or error.
 - Logged as a warning, with the cause: a refused request; a session not stored; a bad cursor; a
-  permission request that failed; a settled prompt that answers with an error.
+  permission request that failed; a settled prompt that answers with an error; a call's input or
+  output that claims JSON and does not parse; a response whose request has no dispatch.
 - Logged as an error, with the cause: a store that cannot be opened; a session directory that cannot
   be read; a draft that cannot be opened; an export that cannot be written.
 
@@ -586,10 +660,10 @@ The host logs each event under `log-keys.ts`, with the ids it is about as log an
 | File | Covers |
 | --- | --- |
 | `host.test.ts` | The handlers, against the SDK's client: sessions, prompts, cancel, close, load, resume, list, config options, permission, MCP servers, the editor's tools, logs. |
-| `projection.test.ts` | The projection, live and replay, and every merge of the two feeds. |
+| `projection.test.ts` | The projection, live and replay, every merge of the two feeds, message ids, and each call's name, input and raw output. |
 | `config-options.test.ts` | Config options and changes. |
 | `permission.test.ts` | Permission requests and answers. |
-| `stop-reason.test.ts` | Stop reasons. |
+| `stop-reason.test.ts` | Stop reasons, and the notices that explain `max_tokens` and `refusal`. |
 | `usage.test.ts` | `usage_update`. |
 | `session-record.test.ts` | Titles, records, and the pages of `session/list`. |
 | `main.test.ts` | The launcher: stdout, the log file, flags and variables, refused configurations. |

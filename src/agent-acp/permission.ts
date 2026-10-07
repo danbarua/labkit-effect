@@ -12,8 +12,7 @@ import { PermissionOptionId, ToolCallId } from "effective-acp/schema/v1";
 import type { Received } from "../agent-machine/received.ts";
 import { markdownOf } from "../agent-host/command-detail.ts";
 import { answerPicking, type CommandNeed, type Explained, explainedAt, type PermissionQuestion } from "../agent-policy/permissions.ts";
-import { parseJson } from "../agent-session/received.ts";
-import type { Call, Presented } from "./projection.ts";
+import { type Call, type Presented, rawOf } from "./projection.ts";
 
 /** A response that picks no option the question offered; the host answers -32602. */
 export class InvalidAnswer extends Data.TaggedError("InvalidAnswer")<{ readonly reason: string }> {}
@@ -51,13 +50,14 @@ const nothingExplained: Explained = { programs: [], notes: [] };
 
 /**
  * Returns the `session/request_permission` for `call` in session `sessionId`: the call as the host
- * presents it, `pending`, with its input as `rawInput`, and the options that `question` offers. A
- * question about a command adds to the call's content a text block naming each program that needs
- * permission and why, so that a client shows why it is asked, with what `explained` (`explainedOf`,
- * worked out from the command) says of each program and of the command.
+ * presents it, `pending`, with its input as `rawInput`, as the call's `tool_call` carried it
+ * (`rawOf`), and the options that `question` offers. A question about a command adds to the call's
+ * content a text block naming each program that needs permission and why, so that a client shows why
+ * it is asked, with what `explained` (`explainedOf`, worked out from the command) says of each
+ * program and of the command.
  */
 export function requestOf(sessionId: SessionId, call: Call, question: PermissionQuestion, presented: Presented, explained: Explained = nothingExplained): RequestPermissionRequest {
-  const input = parseJson(call.input);
+  const input = rawOf(call.input);
   const content = [...(presented.content ?? []), ...needsBlock(question, presented.content ?? [], explained)];
   return {
     sessionId,
@@ -68,7 +68,7 @@ export function requestOf(sessionId: SessionId, call: Call, question: Permission
       status: "pending",
       ...(presented.locations === undefined ? {} : { locations: presented.locations }),
       ...(content.length === 0 ? {} : { content }),
-      ...("value" in input ? { rawInput: input.value } : {}),
+      ...(input === undefined ? {} : { rawInput: input.value }),
     },
     options: question.options.map((option) => ({ optionId: PermissionOptionId.make(option.optionId), name: option.name, kind: option.kind })),
   };

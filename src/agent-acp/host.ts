@@ -19,7 +19,9 @@
  *   services; `SessionOpened`; then `session_info_update` with the title) and runs the turn with
  *   `Session.prompt`. The session's feed (`feed.ts`) sends the turn's updates, `usage_update` among
  *   them, and asks permission. Once the feed has taken the turn's facts, the host answers with the
- *   turn's stop (`stopOf`). `/export` and `/mcp` are answered without the model.
+ *   turn's stop (`stopOf`), after a `notice` that explains a stop of `max_tokens` or `refusal`
+ *   (`noticeOf`) to a client that advertised notices. `/export` and `/mcp` are answered without the
+ *   model.
  * - `session/load` starts a stored session on this connection from its facts file, with the world
  *   opened for the `cwd` and the MCP servers asked. A turn that its facts left running is ended, not
  *   continued. Its facts are replayed through the projection (`replay`) before the answer, and the
@@ -51,7 +53,7 @@ import { Clock, Context, type Duration, Effect, Exit, Fiber, FileSystem, HashMap
 import * as Agent from "effective-acp/agent";
 import { ErrorCode, type JsonRpcErrorObject } from "effective-acp/json-rpc";
 import * as Protocol from "effective-acp/protocol";
-import type { ContentBlock, McpServer, SessionConfigOption, SessionUpdate } from "effective-acp/schema/v1";
+import type { ContentBlock, McpServer, SessionConfigOption, SessionUpdate, StopReason } from "effective-acp/schema/v1";
 import { SessionId as AcpSessionId } from "effective-acp/schema/v1";
 import { type Asked, askable, keyVariables, ModelCatalog, targetOf } from "../agent-host/catalog.ts";
 import { sessionFolderOf, storeFileOf } from "../agent-host/directory.ts";
@@ -88,7 +90,7 @@ import { acpUser, type Feed, startFeed } from "./feed.ts";
 import { logKeys } from "./log-keys.ts";
 import { presentFrom, type ProjectionState, project, start } from "./projection.ts";
 import { acpHost, InvalidCursor, pageOf, readSessionRecord, recordFor } from "./session-record.ts";
-import { stopOf } from "./stop-reason.ts";
+import { noticeOf, stopOf } from "./stop-reason.ts";
 import { editorWorld, type World, type WorldSession, workspaceWorld } from "./world.ts";
 
 export interface HostOptions<R = never> {
@@ -414,6 +416,27 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           connection
             .notify("session/update", { sessionId, update })
             .pipe(Effect.catch((error) => Effect.logWarning(logKeys.update.notSent, { kind: update.sessionUpdate, cause: error.message })));
+
+        /**
+         * Whether the client advertised notices (`clientCapabilities.session.notices`; omitted or
+         * null: not). ACP lets an agent send a `notice` only to a client that did, and
+         * `effective-acp` refuses one to a client that did not.
+         */
+        const noticesAdvertised = connection.profile.client.capabilities.session?.notices != null;
+
+        /**
+         * Sends the notice that explains the stop of `turn`'s prompt (`noticeOf`), after every other
+         * update of the turn and before the prompt's answer. A notice is a live event, not history:
+         * `session/load` replays none. A client that did not advertise notices is sent none.
+         */
+        const stopNotice = (sessionId: AcpSessionId, facts: ReadonlyArray<Fact>, turn: TurnId, stopReason: StopReason) =>
+          Effect.gen(function* () {
+            const notice = yield* noticeOf(facts, turn, stopReason);
+            if (notice === undefined) return;
+            if (!noticesAdvertised) return yield* Effect.logDebug(logKeys.notice.notAdvertised, { stopReason });
+            yield* send(sessionId, notice);
+            yield* Effect.logInfo(logKeys.notice.sent, { stopReason, title: notice.title });
+          }).pipe(Effect.annotateLogs({ turn }));
 
         /** What is known of models for a session configured as `configuration`: the connection's knowledge, with the configuration's overrides (`models:`) over it. */
         const knowledgeOf = (configuration: Configured) =>
@@ -773,6 +796,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               yield* Effect.logWarning(logKeys.prompt.settled, { error: stop.error.message, code: stop.error.code, ms: took }).pipe(Effect.annotateLogs({ turn }));
               return yield* Effect.fail(stop.error);
             }
+            yield* stopNotice(entry.id, facts, turn, stop.stopReason);
             yield* Effect.logInfo(logKeys.prompt.settled, { stopReason: stop.stopReason, ms: took }).pipe(Effect.annotateLogs({ turn }));
             return { stopReason: stop.stopReason };
           });

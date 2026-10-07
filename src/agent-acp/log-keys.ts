@@ -98,8 +98,26 @@ export const logKeys = {
     /** A `usage_update` sent: the session's first on the connection, or one whose numbers differ from the last sent. */
     sent: "acp_host.usage.sent",
   },
+  notice: {
+    /** A `notice` explaining a prompt's stop (`max_tokens` or `refusal`) was sent before the prompt's answer: the stop reason and the notice's title. */
+    sent: "acp_host.notice.sent",
+    /** A `notice` explaining a prompt's stop was not sent, because the client did not advertise notices (`clientCapabilities.session.notices`): the stop reason. */
+    notAdvertised: "acp_host.notice.not_advertised",
+  },
   update: {
     /** A `session/update` could not be sent: its kind, and the cause. */
     notSent: "acp_host.update.not_sent",
+    /**
+     * A tool call's input or output claims JSON (its media type) and does not parse, so its `rawInput`
+     * or `rawOutput` carries its text: the field, the tool, the media type, why it does not parse, and
+     * the text's length and first 300 characters.
+     */
+    rawNotJson: "acp_host.update.raw_not_json",
+    /**
+     * A model response whose request has no `ModelRequestDispatched` in the facts (the loop records
+     * one before each request): its messages' ids are made from the response's own seq, and what its
+     * request streamed waits for it. The response's seq.
+     */
+    noDispatch: "acp_host.update.no_dispatch",
   },
 } as const;

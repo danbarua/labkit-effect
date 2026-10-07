@@ -146,7 +146,10 @@ model.
       `src/agent-machine/turn-requests.ts`); prices with the well-known models; `maxTurnRequests` as
       an example host policy; for ACP, `usage_update` and a turn's stop reason, where a vetoed
       request is `max_turn_requests` and a cut-short response `max_tokens` (`src/agent-acp/usage.ts`,
-      `stop-reason.ts`). The session's feed sends `usage_update` when the numbers change (after a
+      `stop-reason.ts`), with a `notice` that explains a stop of `max_tokens` or `refusal` (the
+      model, the output tokens used and the output limit sent, or the provider's stop reason and its
+      refusal text), sent before the answer to a client that advertised `session.notices`, never
+      replayed. The session's feed sends `usage_update` when the numbers change (after a
       response, a change of model taken, a turn's end, before the prompt's answer) and after
       `session/load` and `resume`, never twice in a row with the same numbers, and with no `cost`
       while no response of the session was priced. Open: after a compaction `used` is the last
@@ -178,10 +181,14 @@ model.
       which the ACP host's feed sends: text and thinking as they arrive, tool calls and how they
       end; `session/load` sends the projection of the stored facts before its answer, each response
       before the calls it made, as live sent them, and the feed goes on from the state they leave;
-      the model's plan (`update_plan`) as a `plan` update. To do: the last plan sent again on
-      `session/load`; an input's attachments sent on `session/load`; `messageId` on chunks;
-      `current_mode_update` (the host offers the permission mode as a config option instead). Open: live with no deltas (a server that answers whole) announces a call
-      before its response's text, which is known only when the response ends.
+      the model's plan (`update_plan`) as a `plan` update; each text chunk's message (`messageId`: a
+      user's input by its seq; a run of one kind of text in a response by its request's first
+      dispatch and the run's place), the same live and on `session/load`; each call's tool name,
+      input and raw output (`name`, `rawInput`, `rawOutput`). To do: the last plan sent again on
+      `session/load`; an input's attachments sent on `session/load`; `current_mode_update` (the host
+      offers the permission mode as a config option instead). Open: live with no deltas (a server
+      that answers whole) announces a call before its response's text, which is known only when the
+      response ends; the host's own replies to `/export` and `/mcp` carry no `messageId`.
 - [ ] The ACP host's sessions across processes. Built: each session's facts in a file
       (`FileBackedSessionStore`, `~/.local/share/labkit/sessions/v0.1.0`); the host's record of a
       session (`host.json`: the ACP host, the working folder, a title from the first prompt), written at turn zero; `session/load` (the
@@ -471,11 +478,22 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       - OpenAI, when a host sends its Chat Completions there: the output limit as
         `max_completion_tokens` (it refuses `max_tokens` for its o-series models).
 - [ ] An end for each attempt of a model request on `streamed`. A fallback (`model-fallback.ts`)
-      makes several attempts in one request, which has one `ModelResponseEnded`. An attempt that
-      fails after it streamed text leaves that text on a client's screen, which cannot take it
-      back, and the next attempt's text is sent after it; the host counts both as sent, so
-      `ModelResponded` sends nothing more. An end item for each attempt, which the host reads as
-      "what was streamed so far is not this response's", would let it say so.
+      makes several attempts in one request, which has one `ModelResponseEnded`, and `passingOn`'s
+      throttle holds an attempt's last deltas until the next attempt's first item. An attempt that
+      fails after it streamed text leaves that text on a client's screen, which cannot take it back,
+      and the next attempt's text is sent after it. The host counts both as sent, so `ModelResponded`
+      sends nothing more, and names both by the request's first dispatch (`messageId`), so a client
+      joins them into one message, while `session/load` replays the fallback's text alone. (An
+      attempt that fails before it streams, such as on a 503 or a 429, gives the same text and ids
+      live and on load.) Fix: the fallback chain passes on an end for the attempt before it tries
+      the next target (a `Streamed` item through `ModelStream`, published as a captured item such as
+      `ModelAttemptEnded`), and `passingOn` releases what it holds there. The projection then starts
+      the request's response again: what the failed attempt sent is not counted against the next
+      attempt's parts, and the next attempt's messages are named by its own dispatch.
+- [ ] A tool call without an id from the Anthropic adapter (`tool_use` without `id`) or the
+      Responses and xAI adapters (`function_call` without `call_id`) is `Unrecognised`: it does not
+      run, and nothing is logged. Their APIs always send the id; give one as the Chat Completions
+      adapter does (`IdGenerator`, a warning) if a server that omits it turns up.
 - [ ] Models. Built: the well-known models as generated `const` data (`bun run models:refresh`:
       models.dev's catalog merged with `well-known-models.measured.json`); a settings type per
       well-known model (`SettingsFor`); the values to offer for each setting of a model as it is

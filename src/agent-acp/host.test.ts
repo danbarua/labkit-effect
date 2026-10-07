@@ -24,7 +24,7 @@ import { startFakeHttpServer } from "../../tests/support/mcp-http-server.ts";
 import { undescribedInputs } from "../../tests/support/tool-input.ts";
 import { answerNow } from "../agent-host/incomplete.ts";
 import { SessionServices } from "../agent-host/services.ts";
-import { CallId, FailureText, Millis, ModelName, ModelText, ProviderName, ThinkingText, TokenCount, ToolName, type TurnId } from "../agent-machine/names.ts";
+import { CallId, FailureText, Millis, ModelName, ModelText, ProviderName, StopReason, ThinkingText, TokenCount, ToolName, type TurnId } from "../agent-machine/names.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { ModelPart, Observation, ToolOutcome } from "../agent-machine/observation.ts";
 import { ModelClient, type ModelContext, type Target, ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
@@ -1569,6 +1569,41 @@ test("session/load in a new process replays the stored turn in order before its 
   });
 });
 
+test("session/load replays a turn's messages with the ids that live sent them, and its call with its tool's name, its input and its raw output", async () => {
+  const first = startHost({ world: echoWorld, script: echoTurn.map((pieces) => answer(...pieces)) });
+  const live = sdkClient();
+  const sessionId = await live.app.connectWith(first.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const created = await ctx.request("session/new", { cwd: first.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "Echo ping"));
+    return created.sessionId;
+  });
+  await first.stop();
+  const host = startHost({ world: echoWorld });
+  await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    await ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] });
+  });
+  await host.stop();
+  const replayed = updatesBeforeAnswer(host);
+  /** Each message the updates begin, in order: its kind and its id. */
+  const messagesIn = (updates: ReadonlyArray<Update>) => [
+    ...new Set(updates.flatMap((update) => ("messageId" in update ? [`${update.sessionUpdate} ${update.messageId}`] : []))),
+  ];
+  /** A call's announcement and its end. */
+  const callIn = (updates: ReadonlyArray<Update>) =>
+    updates.filter((update) => update.sessionUpdate === "tool_call" || (update.sessionUpdate === "tool_call_update" && update.status === "completed"));
+  const agent = messagesIn(live.log.updates);
+  expect(agent).toEqual([expect.stringMatching(/^agent_thought_chunk \d+:0$/), expect.stringMatching(/^agent_message_chunk \d+:0$/)]);
+  expect(agent[0]?.split(" ")[1]).not.toBe(agent[1]?.split(" ")[1]);
+  expect(messagesIn(replayed)).toEqual([expect.stringMatching(/^user_message_chunk \d+$/), ...agent]);
+  expect(callIn(live.log.updates)).toMatchObject([
+    { sessionUpdate: "tool_call", toolCallId: "echo-1", name: "echo", rawInput: { say: "ping" } },
+    { sessionUpdate: "tool_call_update", toolCallId: "echo-1", rawOutput: { say: "ping" } },
+  ]);
+  expect(callIn(replayed)).toEqual(callIn(live.log.updates));
+});
+
 test("a session started by session/load or by session/resume offers permission_mode at the launcher's mode, not the mode it had when it was closed, and a mode set after it decides its next tool call", async () => {
   const write = (call: string) => answer({ _tag: "ToolCall", call, tool: "write_file", input: { path: "a.txt", content: call, intent: "Write a.txt." } });
   const first = startHost({ script: [write("w-1"), answer({ _tag: "Text", text: "One." })] });
@@ -2189,7 +2224,7 @@ test("loading a session whose facts end with input that no turn took starts its 
   await host.stop();
   expect(endings(await factsOn(stored.file))).toEqual(["Completed", "Completed"]);
   expect(host.targets).toHaveLength(1);
-  expect(log.updates).toContainEqual({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Yes." } });
+  expect(log.updates).toContainEqual(expect.objectContaining({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Yes." } }));
 });
 
 test("session/list gives at most 50 sessions a page unless the host says otherwise, and a cursor for the rest", async () => {
@@ -2334,4 +2369,128 @@ test("session/new starts with the model the configuration names; its overrides d
   expect(host.targets).toEqual(["openai/gpt-6-luna"]);
   // The session's own knowledge of the model has the override: its context window is the override's.
   expect(log.updates.find((update) => update.sessionUpdate === "usage_update")).toMatchObject({ size: 5000 });
+});
+
+/** The capabilities labkit-web's client advertises (`packages/acp-client/session.ts`): notices among its session capabilities. */
+const noticesCapabilities: acp.ClientCapabilities = { ...editorCapabilities, session: { notices: {}, compaction: {}, configOptions: { boolean: {} } } };
+
+/** `reply`, ended as `ending` for the provider's reason `stop`, having used `output` output tokens. */
+const stopped = (ending: "CutShort" | "Refused", stop: string, output: number, reply: Reply): Reply => (turn, target) =>
+  Effect.map(reply(turn, target), (responded) =>
+    responded._tag === "ModelResponded" ? { ...responded, ending: { _tag: ending }, stop: StopReason.make(stop), usage: { input: TokenCount.make(900), output: TokenCount.make(output) } } : responded,
+  );
+
+const cutShortReply = () => stopped("CutShort", "max_tokens", 4096, answer({ _tag: "Text", text: "The report, first half" }));
+
+/** Where the agent wrote the notice and the prompt's answer: a client's handlers may run a tick after its request resolves, so the wire is the witness of "before". */
+const noticeAndAnswer = (host: HostRun) => ({
+  notice: host.wire.findIndex((message) => isUpdateNotification(message) && message.params.update.sessionUpdate === "notice"),
+  answer: host.wire.findIndex((message) => typeof message["result"] === "object" && message["result"] !== null && "stopReason" in message["result"]),
+});
+
+test("a reply cut short, to a client that advertised notices, sends a warning notice with the model, the output tokens used and the output limit the request was sent with, after its usage_update and before the answer max_tokens", async () => {
+  const host = startHost({ script: [cutShortReply()] });
+  const { app, log } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, noticesCapabilities);
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/set_config_option", { sessionId, configId: "max_output_tokens", value: "4096" });
+    return ctx.request("session/prompt", say(sessionId, "Write the report"));
+  });
+  await host.stop();
+  expect(result.stopReason).toBe("max_tokens");
+  expect(kinds(log.updates).slice(-3)).toEqual(["agent_message_chunk", "usage_update", "notice"]);
+  expect(log.updates.at(-1)).toEqual({
+    sessionUpdate: "notice",
+    severity: "warning",
+    title: "The reply was cut short",
+    description: "openai/gpt-6-sol stopped at a length limit after 4,096 output tokens. The request set the output limit to 4,096 tokens. The provider's stop reason: max_tokens.",
+  });
+  const written = noticeAndAnswer(host);
+  expect(written.notice).toBeGreaterThan(0);
+  expect(written.notice).toBeLessThan(written.answer);
+  expect(host.logged.find((each) => each.key === logKeys.notice.sent)).toMatchObject({ level: "Info", details: { stopReason: "max_tokens", title: "The reply was cut short" } });
+  expect(host.logged.filter((each) => each.level === "Warn" || each.level === "Error" || each.level === "Fatal")).toEqual([]);
+});
+
+test("a refused reply, to a client that advertised notices, sends a warning notice with the provider's stop reason and the refusal text quoted, before the answer refusal", async () => {
+  const refusal: ModelPart = { _tag: "Unrecognised", received: receivedJson({ type: "message", role: "assistant", content: [{ type: "refusal", refusal: "I can't help with that." }] }) };
+  const refused: Reply = (turn, target) =>
+    Effect.map(stopped("Refused", "incomplete: content_filter", 7, answer())(turn, target), (responded) => (responded._tag === "ModelResponded" ? { ...responded, parts: [refusal] } : responded));
+  const host = startHost({ script: [refused] });
+  const { app, log } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, noticesCapabilities);
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    return ctx.request("session/prompt", say(sessionId, "Do the thing"));
+  });
+  await host.stop();
+  expect(result.stopReason).toBe("refusal");
+  expect(log.updates.filter((update) => update.sessionUpdate === "notice")).toEqual([
+    {
+      sessionUpdate: "notice",
+      severity: "warning",
+      title: "The model declined to continue",
+      description: `openai/gpt-6-sol declined to continue. The provider's stop reason: incomplete: content_filter. It said: "I can't help with that."`,
+    },
+  ]);
+  expect(kinds(log.updates).slice(-2)).toEqual(["usage_update", "notice"]);
+  const written = noticeAndAnswer(host);
+  expect(written.notice).toBeLessThan(written.answer);
+});
+
+test("a client that did not advertise notices, with no session capabilities or with session: {}, gets no notice for a reply cut short and the same answer max_tokens; the host logs at debug that it sent none", async () => {
+  for (const clientCapabilities of [editorCapabilities, { ...editorCapabilities, session: {} }]) {
+    const host = startHost({ script: [cutShortReply()] });
+    const { app, log } = sdkClient();
+    const result = await app.connectWith(host.stream, async (ctx) => {
+      await initialize(ctx, clientCapabilities);
+      const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+      return ctx.request("session/prompt", say(sessionId, "Write the report"));
+    });
+    await host.stop();
+    expect(result.stopReason).toBe("max_tokens");
+    expect(kinds(log.updates)).not.toContain("notice");
+    expect(host.wire.some((message) => isUpdateNotification(message) && message.params.update.sessionUpdate === "notice")).toBe(false);
+    expect(host.logged.find((each) => each.key === logKeys.notice.notAdvertised)).toMatchObject({ level: "Debug", details: { stopReason: "max_tokens" } });
+    expect(host.logged.filter((each) => each.level === "Warn" || each.level === "Error" || each.level === "Fatal")).toEqual([]);
+  }
+});
+
+test("a turn that ends end_turn sends no notice to a client that advertised notices", async () => {
+  const host = startHost({ script: [answer({ _tag: "Text", text: "Done." })] });
+  const { app, log } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, noticesCapabilities);
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    return ctx.request("session/prompt", say(sessionId, "Hello"));
+  });
+  await host.stop();
+  expect(result.stopReason).toBe("end_turn");
+  expect(kinds(log.updates)).not.toContain("notice");
+  expect(host.logged.some((each) => each.key === logKeys.notice.sent || each.key === logKeys.notice.notAdvertised)).toBe(false);
+});
+
+test("session/load of a session whose turn was cut short replays no notice: a notice is a live event, not history", async () => {
+  const first = startHost({ world: echoWorld, script: [cutShortReply()] });
+  const firstClient = sdkClient();
+  const sessionId = await firstClient.app.connectWith(first.stream, async (ctx) => {
+    await initialize(ctx, noticesCapabilities);
+    const created = await ctx.request("session/new", { cwd: first.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "Write the report"));
+    return created.sessionId;
+  });
+  await first.stop();
+  // Live, the turn's notice was sent.
+  expect(kinds(firstClient.log.updates)).toContain("notice");
+  const host = startHost({ world: echoWorld });
+  const { app, log, until } = sdkClient();
+  await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, noticesCapabilities);
+    await ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] });
+    await until((updates) => updates.some((update) => update.sessionUpdate === "usage_update"));
+  });
+  await host.stop();
+  expect(kinds(log.updates)).toContain("agent_message_chunk");
+  expect(kinds(log.updates)).not.toContain("notice");
 });

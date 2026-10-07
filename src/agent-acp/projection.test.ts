@@ -1,12 +1,12 @@
 /** The projection of a session's facts and streamed items to ACP's `session/update`, live and on load. */
 
 import { expect } from "bun:test";
-import { Effect, Schema } from "effect";
+import { Effect, Logger, References, Schema } from "effect";
 import { boringOpening } from "../../tests/support/boring.ts";
 import { observe, open } from "../../tests/support/drive.ts";
 import { json } from "../../tests/support/received.ts";
 import { test } from "../../tests/support/test.ts";
-import type { SessionUpdate } from "effective-acp/schema/v1";
+import { MessageId, type SessionUpdate } from "effective-acp/schema/v1";
 import type { Fact } from "../agent-machine/fact.ts";
 import { CallId, ToolName } from "../agent-machine/names.ts";
 import { CapturedObservation } from "../agent-machine/observation.ts";
@@ -16,10 +16,21 @@ import { jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { described } from "../agent-tools/described.ts";
 import { anyTool, type Tool } from "../agent-tools/tool.ts";
 import { next as nextIn, type Present, presentFrom, type ProjectionContext, type ProjectionInput, type ProjectionState, project as projectIn, start } from "./projection.ts";
+import { logKeys } from "./log-keys.ts";
 
-/** `project` and `next`, run: the presentations here read nothing. */
+/** `project` and `next`, run: the presentations here read nothing. `next` drops its log: the tests that read a log use `projectLogged`. */
 const project = (...given: Parameters<typeof projectIn>) => Effect.runSync(projectIn(...given));
-const next = (...given: Parameters<typeof nextIn>) => Effect.runSync(nextIn(...given));
+const next = (...given: Parameters<typeof nextIn>) => Effect.runSync(nextIn(...given).pipe(Effect.provide(Logger.layer([]))));
+
+/** `project`, run with its log taken: each line's level, key, details and annotations. */
+const projectLogged = (...given: Parameters<typeof projectIn>) => {
+  const logged: Array<{ readonly level: string; readonly key: unknown; readonly details: unknown; readonly annotations: Readonly<Record<string, unknown>> }> = [];
+  const capture = Logger.make((log) => {
+    const [key, details] = Array.isArray(log.message) ? log.message : [log.message];
+    logged.push({ level: log.logLevel, key, details, annotations: { ...log.fiber.getRef(References.CurrentLogAnnotations) } });
+  });
+  return { ...Effect.runSync(projectIn(...given).pipe(Effect.provide(Logger.layer([capture])))), logged };
+};
 
 const tools: ReadonlyArray<ToolSpec> = [
   { name: ToolName.make("ls"), description: "Lists files.", input: { type: "object" }, kind: "read", replay: "safe" },
@@ -74,12 +85,50 @@ const thinking = (text: string) => ({ _tag: "Thinking", text, received: json({ t
 const answer = (text: string) => ({ _tag: "Text", text });
 const ls = { call: "c1", tool: "ls", input: json({ path: "." }) };
 
-const user = (text: string): SessionUpdate => ({ sessionUpdate: "user_message_chunk", content: { type: "text", text } });
-const said = (text: string): SessionUpdate => ({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
-const thought = (text: string): SessionUpdate => ({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text } });
+/** A tool call as a test writes it: its id, its tool, and its input as JSON content. */
+type TestCall = { readonly call: string; readonly tool: string; readonly input: { readonly body: { readonly text: string } } };
+
+/** A text chunk of `sessionUpdate`; with `id`, the id of the message it belongs to. */
+const chunk = (sessionUpdate: "user_message_chunk" | "agent_message_chunk" | "agent_thought_chunk", text: string, id: string | undefined) =>
+  ({ sessionUpdate, content: { type: "text", text }, ...(id === undefined ? {} : { messageId: MessageId.make(id) }) }) as SessionUpdate;
+const user = (text: string, id?: string) => chunk("user_message_chunk", text, id);
+const said = (text: string, id?: string) => chunk("agent_message_chunk", text, id);
+const thought = (text: string, id?: string) => chunk("agent_thought_chunk", text, id);
 const output = (text: string) => [{ type: "content", content: { type: "text", text } }];
-const announced = (call: string, title: string, kind?: string) => ({ sessionUpdate: "tool_call", toolCallId: call, title, status: "pending", ...(kind === undefined ? {} : { kind }) });
+/** `call` announced: its title and kind as presented, its tool's name, and its input as given. */
+const announced = (call: TestCall, title: string, kind?: string) => ({
+  sessionUpdate: "tool_call",
+  toolCallId: call.call,
+  title,
+  name: call.tool,
+  status: "pending",
+  ...(kind === undefined ? {} : { kind }),
+  rawInput: JSON.parse(call.input.body.text),
+});
 const updated = (call: string, status: string, more: object = {}) => ({ sessionUpdate: "tool_call_update", toolCallId: call, status, ...more });
+
+/** The updates without their message ids: for what a test defends of text and order, which the ids do not change. */
+const unnamed = (updates: ReadonlyArray<SessionUpdate>): ReadonlyArray<SessionUpdate> =>
+  updates.map((update) => {
+    if (!("messageId" in update)) return update;
+    const { messageId: _named, ...rest } = update;
+    return rest as SessionUpdate;
+  });
+
+/** The seq of each of `facts` that observes `tag`, in order: what names a message (`InputArrived`, `ModelRequestDispatched`). */
+const seqsOf = (facts: ReadonlyArray<Fact>, tag: string): ReadonlyArray<number> =>
+  facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === tag ? [fact.seq] : []));
+
+/** Each model message's text, by its kind and its id, in the order they began: what a client that keeps one message per id shows. */
+const messages = (updates: ReadonlyArray<SessionUpdate>): ReadonlyArray<readonly [string, string]> => {
+  const found = new Map<string, string>();
+  for (const update of updates)
+    if ((update.sessionUpdate === "agent_message_chunk" || update.sessionUpdate === "agent_thought_chunk") && update.content.type === "text") {
+      const key = `${update.sessionUpdate} ${update.messageId}`;
+      found.set(key, (found.get(key) ?? "") + update.content.text);
+    }
+  return [...found];
+};
 
 /** All the text of the updates of `kind`, joined. */
 const joined = (updates: ReadonlyArray<SessionUpdate>, kind: "agent_message_chunk" | "agent_thought_chunk") =>
@@ -133,16 +182,18 @@ const deltas = (stream: Stream, step: 1 | 2) =>
       )
     : stream(delta("Text", "One file"), delta("Text", ": a.ts."), arrived(answer("One file: a.ts.")));
 
-test("replay of a recorded turn sends the input, then each response's parts, then each call as it went", () => {
+test("replay of a recorded turn sends the input, then each response's parts, then each call as it went; each message names its input or its request and its place in the response", () => {
   const { session } = listing();
+  const [input] = seqsOf(session.journal, "InputArrived");
+  const [first, second] = seqsOf(session.journal, "ModelRequestDispatched");
   expect(project(session.journal, replay).updates).toEqual([
-    user("list the files"),
-    thought("I should list them."),
-    said("Listing."),
-    announced("c1", "ls", "read"),
+    user("list the files", `${input}`),
+    thought("I should list them.", `${first}:0`),
+    said("Listing.", `${first}:1`),
+    announced(ls, "ls", "read"),
     updated("c1", "in_progress"),
-    updated("c1", "completed", { content: output('["a.ts"]') }),
-    said("One file: a.ts."),
+    updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
+    said("One file: a.ts.", `${second}:0`),
   ] as never);
 });
 
@@ -155,34 +206,36 @@ test("on replay only the user's inputs are echoed: what a turn-end hook gave, fr
   fact(dispatched());
   fact(responded([answer("One file: a.ts.")]));
   const updates = project(session.journal, replay).updates;
-  expect(updates.filter((update) => update.sessionUpdate === "user_message_chunk")).toEqual([user("list the files")] as never);
+  expect(updates.filter((update) => update.sessionUpdate === "user_message_chunk")).toEqual([user("list the files", `${seqsOf(session.journal, "InputArrived")[0]}`)] as never);
   expect(joined(updates, "agent_thought_chunk")).toBe("The files are a.ts.");
   expect(joined(updates, "agent_message_chunk")).toBe("One file: a.ts.");
 });
 
-test("live with deltas, each request's end item before its ModelResponded: no echo of the input, each delta once as it comes, and nothing at ModelResponded", () => {
-  const { inputs } = listing(deltas);
+test("live with deltas, each request's end item before its ModelResponded: no echo of the input, each delta once as it comes with the id that replay gives its message, and nothing at ModelResponded", () => {
+  const { inputs, session } = listing(deltas);
+  const [first, second] = seqsOf(session.journal, "ModelRequestDispatched");
   expect(project(inputs, live).updates).toEqual([
-    thought("I should "),
-    thought("list them."),
-    said("List"),
-    said("ing."),
-    announced("c1", "ls", "read"),
+    thought("I should ", `${first}:0`),
+    thought("list them.", `${first}:0`),
+    said("List", `${first}:1`),
+    said("ing.", `${first}:1`),
+    announced(ls, "ls", "read"),
     updated("c1", "in_progress"),
-    updated("c1", "completed", { content: output('["a.ts"]') }),
-    said("One file"),
-    said(": a.ts."),
+    updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
+    said("One file", `${second}:0`),
+    said(": a.ts.", `${second}:0`),
   ] as never);
 });
 
-test("ModelResponded taken before its end item and before the last deltas: the rest of the text from it, and the late deltas dropped", () => {
-  const { inputs, stream, fact } = recording();
+test("ModelResponded taken before its end item and before the last deltas: the rest of the text from it, in the message its deltas began, and the late deltas dropped", () => {
+  const { inputs, stream, fact, session } = recording();
   fact(asked("hello"));
   fact(dispatched());
   stream(delta("Thinking", "A greet"), delta("Text", "Hel"));
   fact(responded([thinking("A greeting."), answer("Hello there.")]));
   stream(delta("Thinking", "ing."), delta("Text", "lo there."), ended());
-  expect(project(inputs, live).updates).toEqual([thought("A greet"), said("Hel"), thought("ing."), said("lo there.")]);
+  const [request] = seqsOf(session.journal, "ModelRequestDispatched");
+  expect(project(inputs, live).updates).toEqual([thought("A greet", `${request}:0`), said("Hel", `${request}:1`), thought("ing.", `${request}:0`), said("lo there.", `${request}:1`)]);
 });
 
 test("two requests in a turn, the first's ModelResponded taken after the second's deltas began: each is reconciled against its own deltas", () => {
@@ -201,8 +254,8 @@ test("two requests in a turn, the first's ModelResponded taken after the second'
     ...facts.slice(secondDispatched + 1),
   ];
   const updates = project(inputs, live).updates;
-  expect(updates.filter((update) => update.sessionUpdate !== "tool_call_update")).toEqual([
-    announced("c1", "ls", "read"),
+  expect(unnamed(updates.filter((update) => update.sessionUpdate !== "tool_call_update"))).toEqual([
+    announced(ls, "ls", "read"),
     thought("I should "),
     thought("list them."),
     said("List"),
@@ -215,7 +268,7 @@ test("two requests in a turn, the first's ModelResponded taken after the second'
 test("live with no deltas, from a scripted client or a whole answer: each part whole when ModelResponded is taken, the same updates as on replay, which takes the response before its call", () => {
   const scripted = listing();
   expect(encoded(project(scripted.inputs, live).updates)).toEqual(encoded(project(scripted.session.journal, replay).updates.slice(1)));
-  expect(project(scripted.inputs, live).updates.at(-1)).toEqual(said("One file: a.ts."));
+  expect(project(scripted.inputs, live).updates.at(-1)).toEqual(said("One file: a.ts.", `${seqsOf(scripted.session.journal, "ModelRequestDispatched")[1]}:0`));
   const whole = listing((stream, step) => (step === 1 ? stream(arrived(thinking("I should list them.")), arrived(answer("Listing."))) : stream(arrived(answer("One file: a.ts.")))));
   expect(encoded(project(whole.inputs, live).updates)).toEqual(encoded(project(whole.session.journal, replay).updates.slice(1)));
   expect(joined(project(whole.inputs, live).updates, "agent_message_chunk")).toBe("Listing.One file: a.ts.");
@@ -225,6 +278,7 @@ test("text of only whitespace is sent with the next text of its kind, and not at
   const call = { _tag: "ToolCall", ...ls };
   const live1 = recording();
   live1.fact(asked("hi"));
+  live1.fact(dispatched());
   live1.stream(delta("Text", "\n\n"), arrived(answer("\n\n")), arrived(call), delta("Text", "\n"), delta("Text", "Done."), arrived(answer("\nDone.")), ended());
   live1.fact(responded([answer("\n\n"), call, answer("\nDone.")], "Complete"));
   const updates = project(live1.inputs, live).updates;
@@ -241,16 +295,18 @@ test("several Text parts in one response, each with its deltas: the deltas cover
   const streamed = [delta("Text", "Hel"), delta("Text", "lo. "), arrived(answer("Hello. ")), delta("Text", "By"), delta("Text", "e."), arrived(answer("Bye.")), ended()];
   const usual = recording();
   usual.fact(asked("hi"));
+  usual.fact(dispatched());
   usual.stream(...streamed);
   usual.fact(responded(parts));
-  expect(project(usual.inputs, live).updates).toEqual([said("Hel"), said("lo. "), said("By"), said("e.")]);
+  expect(unnamed(project(usual.inputs, live).updates)).toEqual([said("Hel"), said("lo. "), said("By"), said("e.")]);
   // Taken after "By": the rest of the second part from ModelResponded, and the late delta dropped.
   const early = recording();
   early.fact(asked("hi"));
+  early.fact(dispatched());
   early.stream(...streamed.slice(0, 4));
   early.fact(responded(parts));
   early.stream(...streamed.slice(4));
-  expect(project(early.inputs, live).updates).toEqual([said("Hel"), said("lo. "), said("By"), said("e.")]);
+  expect(unnamed(project(early.inputs, live).updates)).toEqual([said("Hel"), said("lo. "), said("By"), said("e.")]);
 });
 
 test("a stopped response: what was streamed stays, nothing is sent again, and the parts its ModelResponded holds are not lost", () => {
@@ -261,13 +317,13 @@ test("a stopped response: what was streamed stays, nothing is sent again, and th
   fact({ _tag: "TurnInterrupted", turn: "turn-1" });
   stream(ended());
   fact(responded([answer("Here is the plan.")], "Interrupted"));
-  expect(project(inputs, live).updates).toEqual([said("Here is"), said(" the plan."), said("Step one: ")]);
+  expect(unnamed(project(inputs, live).updates)).toEqual([said("Here is"), said(" the plan."), said("Step one: ")]);
   // The facts taken after the first delta only: the rest of the whole part from ModelResponded, the
   // late deltas dropped, and the cut part, never streamed here, not on screen, as on replay.
   const interrupted = session.journal.findIndex((input) => input._tag === "Observed" && input.observation._tag === "TurnInterrupted");
   const early = [...session.journal.slice(0, interrupted), ...items.slice(0, 1), ...session.journal.slice(interrupted), ...items.slice(1)];
-  expect(project(early, live).updates).toEqual([said("Here is"), said(" the plan.")]);
-  expect(project(session.journal, replay).updates).toEqual([user("plan it"), said("Here is the plan.")]);
+  expect(unnamed(project(early, live).updates)).toEqual([said("Here is"), said(" the plan.")]);
+  expect(unnamed(project(session.journal, replay).updates)).toEqual([user("plan it"), said("Here is the plan.")]);
 });
 
 test("a failed request, its turn's end and the next turn: the failed request's deltas stay, and the next turn's text is sent once", () => {
@@ -280,10 +336,10 @@ test("a failed request, its turn's end and the next turn: the failed request's d
   fact(dispatched("turn-2"));
   stream(delta("Text", "Hel", "turn-2"), delta("Text", "lo.", "turn-2"), ended("turn-2"));
   fact(responded([answer("Hello.")], "Complete", "turn-2"));
-  expect(project(inputs, live).updates).toEqual([said("Hal"), said("Hel"), said("lo.")]);
+  expect(unnamed(project(inputs, live).updates)).toEqual([said("Hal"), said("Hel"), said("lo.")]);
   // The feed of items a turn ahead: the failed request's delta stays, and the next turn's is sent once.
   const failed = session.journal.findIndex((input) => input._tag === "Observed" && input.observation._tag === "ModelFailed");
-  expect(project([...session.journal.slice(0, failed), ...items, ...session.journal.slice(failed)], live).updates).toEqual([said("Hal"), said("Hel"), said("lo.")]);
+  expect(unnamed(project([...session.journal.slice(0, failed), ...items, ...session.journal.slice(failed)], live).updates)).toEqual([said("Hal"), said("Hel"), said("lo.")]);
   // The facts a turn ahead: what is captured of an ended turn is dropped, and its text comes from its facts.
   expect(joined(project([...session.journal, ...items], live).updates, "agent_message_chunk")).toBe("Hello.");
 });
@@ -291,8 +347,8 @@ test("a failed request, its turn's end and the next turn: the failed request's d
 test("what is captured of a turn after its TurnEnded is dropped: its text was sent from its facts", () => {
   const { session, items } = listing(deltas);
   const updates = project([...session.journal, ...items], live).updates;
-  expect(updates.filter((update) => update.sessionUpdate !== "tool_call_update")).toEqual([
-    announced("c1", "ls", "read"),
+  expect(unnamed(updates.filter((update) => update.sessionUpdate !== "tool_call_update"))).toEqual([
+    announced(ls, "ls", "read"),
     thought("I should list them."),
     said("Listing."),
     said("One file: a.ts."),
@@ -306,7 +362,7 @@ test("a captured item that overtakes its turn's TurnStarted is not lost, and its
   fact(dispatched());
   stream(delta("Text", "Hel"), delta("Text", "lo."), ended());
   fact(responded([answer("Hello.")]));
-  expect(project([...session.journal.slice(0, opening), ...items, ...session.journal.slice(opening)], live).updates).toEqual([said("Hel"), said("lo.")]);
+  expect(unnamed(project([...session.journal.slice(0, opening), ...items, ...session.journal.slice(opening)], live).updates)).toEqual([said("Hel"), said("lo.")]);
 });
 
 test("replay of the stored facts and live with deltas send the same text, joined", () => {
@@ -335,7 +391,7 @@ test("a thinking summary whose blank-line separator is a delta of its own joins 
 const everyMerge = (before: ReadonlyArray<Fact>, facts: ReadonlyArray<Fact>, items: ReadonlyArray<CapturedObservation>) =>
   Array.from(merges<ProjectionInput>(facts, items), (merged) => project([...before, ...merged], live).updates);
 
-test("every merge of one response's facts and its streamed items sends the same text, once", () => {
+test("every merge of one response's facts and its streamed items sends the same text, once, in the messages that replay names", () => {
   const { session, fact, stream } = recording();
   fact(asked("hi"));
   const from = session.journal.findIndex((input) => input._tag === "Observed" && input.observation._tag === "TurnStarted");
@@ -343,27 +399,31 @@ test("every merge of one response's facts and its streamed items sends the same 
   fact(dispatched());
   stream(...items);
   fact(responded([thinking("I should greet."), answer("Hello.")]));
+  const [request] = seqsOf(session.journal, "ModelRequestDispatched");
+  const loaded = messages(project(session.journal, replay).updates);
+  expect(loaded).toEqual([
+    [`agent_thought_chunk ${request}:0`, "I should greet."],
+    [`agent_message_chunk ${request}:1`, "Hello."],
+  ]);
   const all = everyMerge(session.journal.slice(0, from), session.journal.slice(from), items);
   expect(all).toHaveLength(1287);
-  for (const updates of all) {
-    expect(joined(updates, "agent_thought_chunk")).toBe("I should greet.");
-    expect(joined(updates, "agent_message_chunk")).toBe("Hello.");
-  }
+  for (const updates of all) expect(messages(updates)).toEqual(loaded);
 });
 
-test("every merge of a two-request turn's facts and its streamed items sends the same text once, and announces the call once", () => {
+test("every merge of a two-request turn's facts and its streamed items sends the same text once, in the messages that replay names, and announces the call once", () => {
   const { session, items } = listing((stream, step) =>
     step === 1 ? stream(delta("Thinking", "I should list them."), delta("Text", "List"), delta("Text", "ing.")) : stream(delta("Text", "One file: a.ts.")),
   );
   const from = session.journal.findIndex((input) => input._tag === "Observed" && input.observation._tag === "TurnStarted");
+  const loaded = messages(project(session.journal, replay).updates);
+  expect(loaded.map(([, text]) => text)).toEqual(["I should list them.", "Listing.", "One file: a.ts."]);
   for (const updates of everyMerge(session.journal.slice(0, from), session.journal.slice(from), items)) {
-    expect(joined(updates, "agent_thought_chunk")).toBe("I should list them.");
-    expect(joined(updates, "agent_message_chunk")).toBe("Listing.One file: a.ts.");
+    expect(messages(updates)).toEqual(loaded);
     expect(updates.filter((update) => update.sessionUpdate === "tool_call")).toHaveLength(1);
   }
 });
 
-test("every merge of two turns' facts and their streamed items sends each turn's text once, either feed a turn ahead", () => {
+test("every merge of two turns' facts and their streamed items sends each turn's text once, in the messages that replay names, either feed a turn ahead", () => {
   const { session, fact, stream, items } = recording();
   const from = session.journal.length;
   fact(asked("hi"));
@@ -374,42 +434,47 @@ test("every merge of two turns' facts and their streamed items sends each turn's
   fact(dispatched("turn-2"));
   stream(delta("Text", "Hi", "turn-2"), delta("Text", " again.", "turn-2"), ended("turn-2"));
   fact(responded([answer("Hi again.")], "Complete", "turn-2"));
-  for (const updates of everyMerge(session.journal.slice(0, from), session.journal.slice(from), items))
-    expect(joined(updates, "agent_message_chunk")).toBe("Hello.Hi again.");
+  const loaded = messages(project(session.journal, replay).updates);
+  expect(loaded.map(([, text]) => text)).toEqual(["Hello.", "Hi again."]);
+  for (const updates of everyMerge(session.journal.slice(0, from), session.journal.slice(from), items)) expect(messages(updates)).toEqual(loaded);
 });
 
-test("a call that fails: failed, with the tool's error as its content", () => {
+test("a call that fails: failed, with the tool's error as its content and, as recorded, its raw output", () => {
+  const rm = { call: "c1", tool: "rm", input: json({ path: "a.ts" }) };
   const { inputs, fact } = recording();
   fact(asked("remove a.ts"));
-  fact(responded([{ _tag: "ToolCall", call: "c1", tool: "rm", input: json({ path: "a.ts" }) }]));
+  fact(dispatched());
+  fact(responded([{ _tag: "ToolCall", ...rm }]));
   fact({ _tag: "ToolCallDispatched", call: "c1" });
   fact({ _tag: "ToolEnded", call: "c1", outcome: { _tag: "Failed", reason: { _tag: "Reported", error: json({ error: "no such file" }) } } });
   expect(project(inputs, live).updates).toEqual([
-    announced("c1", "rm", "delete"),
+    announced(rm, "rm", "delete"),
     updated("c1", "in_progress"),
-    updated("c1", "failed", { content: output('{"error":"no such file"}') }),
+    updated("c1", "failed", { content: output('{"error":"no such file"}'), rawOutput: { error: "no such file" } }),
   ] as never);
 });
 
-test("a call a policy vetoed: pending while asked, then failed with the reason, and never in progress", () => {
+test("a call a policy vetoed: pending while asked, then failed with the reason, as its content and its raw output, and never in progress", () => {
+  const rm = { call: "c1", tool: "rm", input: json({ path: "a.ts" }) };
   const { inputs, fact } = recording();
   fact(asked("remove a.ts"));
-  fact(responded([{ _tag: "ToolCall", call: "c1", tool: "rm", input: json({ path: "a.ts" }) }]));
+  fact(dispatched());
+  fact(responded([{ _tag: "ToolCall", ...rm }]));
   fact({ _tag: "PermissionAsked", call: "c1", asks: json({ tool: "rm" }) });
   fact({ _tag: "PermissionAnswered", call: "c1", answer: json({ optionId: "reject-once" }) });
   fact({ _tag: "ToolEnded", call: "c1", outcome: { _tag: "Failed", reason: { _tag: "Vetoed", reason: { mediaType: "text/plain", body: { _tag: "Text", text: "The user said no." } } } } });
   expect(project(inputs, live).updates).toEqual([
-    announced("c1", "rm", "delete"),
+    announced(rm, "rm", "delete"),
     updated("c1", "pending"),
-    updated("c1", "failed", { content: output("Not run: The user said no.") }),
+    updated("c1", "failed", { content: output("Not run: The user said no."), rawOutput: "The user said no." }),
   ] as never);
 });
 
 test("a call announced by ToolCallArrived is not announced again by its part or its response, even after it ended", () => {
   const { inputs } = listing();
   const updates = project(inputs, live).updates;
-  expect(updates.filter((update) => update.sessionUpdate === "tool_call")).toEqual([announced("c1", "ls", "read")] as never);
-  expect(updates.at(-1)).toEqual(said("One file: a.ts."));
+  expect(updates.filter((update) => update.sessionUpdate === "tool_call")).toEqual([announced(ls, "ls", "read")] as never);
+  expect(updates.at(-1)).toMatchObject(said("One file: a.ts."));
 });
 
 test("a host's presentation is shown in place of the default: title, kind and locations when announced, its content and what changed when ended", () => {
@@ -422,15 +487,16 @@ test("a host's presentation is shown in place of the default: title, kind and lo
     });
   const { inputs } = listing();
   expect(project(inputs, { mode: "live", present }).updates.slice(0, 3)).toEqual([
-    { ...announced("c1", "List ls", "search"), locations: [{ path: "/work" }], content: output("listing /work") },
+    { ...announced(ls, "List ls", "search"), locations: [{ path: "/work" }], content: output("listing /work") },
     updated("c1", "in_progress"),
-    updated("c1", "completed", { title: "Listed", kind: "read", locations: [{ path: "/work" }], content: output("1 file") }),
+    updated("c1", "completed", { title: "Listed", kind: "read", locations: [{ path: "/work" }], content: output("1 file"), rawOutput: ["a.ts"] }),
   ] as never);
 });
 
 test("projecting stored facts gives the state to go on from live: a call already shown is not shown again, and the next turn's deltas are sent once", () => {
   const { session, fact, stream, inputs } = recording();
   fact(asked("list the files"));
+  fact(dispatched());
   fact({ _tag: "ToolCallArrived", turn: "turn-1", ...ls });
   const loaded = project(session.journal, replay);
   const from = inputs.length;
@@ -441,10 +507,10 @@ test("projecting stored facts gives the state to go on from live: a call already
   fact(dispatched());
   stream(delta("Text", "One "), delta("Text", "file."), ended());
   fact(responded([answer("One file.")]));
-  expect(project(inputs.slice(from), live, loaded.state).updates).toEqual([
+  expect(unnamed(project(inputs.slice(from), live, loaded.state).updates)).toEqual([
     said("Listing."),
     updated("c1", "in_progress"),
-    updated("c1", "completed", { content: output('["a.ts"]') }),
+    updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
     said("One "),
     said("file."),
   ] as never);
@@ -479,12 +545,12 @@ test("a call that arrived, ran and ended before its response was recorded is rep
   // As the loop records them: the call's facts, its end included, before the ModelResponded that holds it.
   expect(ahead(session.journal, "ToolEnded", "ModelResponded")).toBe(true);
   const loaded = project(session.journal, replay).updates;
-  expect(loaded.slice(1, 6)).toEqual([
+  expect(unnamed(loaded.slice(1, 6))).toEqual([
     thought("I should list them."),
     said("Listing."),
-    announced("c1", "ls", "read"),
+    announced(ls, "ls", "read"),
     updated("c1", "in_progress"),
-    updated("c1", "completed", { content: output('["a.ts"]') }),
+    updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
   ] as never);
   expect(kinds(withoutInputs(loaded))).toEqual(kinds(project(inputs, live).updates));
   expect(kinds(withoutInputs(inStoredOrder(session.journal, replay).updates))).not.toEqual(kinds(project(inputs, live).updates));
@@ -507,17 +573,17 @@ test("several requests in a turn: each response is taken before its own request'
   fact(dispatched());
   fact(responded([answer("Two files.")]));
   const loaded = project(session.journal, replay);
-  expect(loaded.updates).toEqual([
+  expect(unnamed(loaded.updates)).toEqual([
     user("list the files"),
     thought("I should list them."),
     said("Listing."),
-    announced("c1", "ls", "read"),
+    announced(ls, "ls", "read"),
     updated("c1", "in_progress"),
-    updated("c1", "completed", { content: output('["a.ts"]') }),
+    updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
     said("And src."),
-    announced("c2", "ls", "read"),
+    announced(cat, "ls", "read"),
     updated("c2", "in_progress"),
-    updated("c2", "completed", { content: output('["b.ts"]') }),
+    updated("c2", "completed", { content: output('["b.ts"]'), rawOutput: ["b.ts"] }),
     said("Two files."),
   ] as never);
   expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
@@ -537,32 +603,44 @@ test("a response with two calls and text between them: each call is announced at
   fact(responded([answer("Listing."), { _tag: "ToolCall", ...ls }, answer("Removing."), { _tag: "ToolCall", ...rm }]));
   // The whole response comes first, its calls announced in part order; then the calls' facts as recorded,
   // whose ToolCallArrived announce nothing more.
-  expect(project(session.journal, replay).updates).toEqual([
+  expect(unnamed(project(session.journal, replay).updates)).toEqual([
     user("list, then remove a.ts"),
     said("Listing."),
-    announced("c1", "ls", "read"),
+    announced(ls, "ls", "read"),
     said("Removing."),
-    announced("c2", "rm", "delete"),
+    announced(rm, "rm", "delete"),
     updated("c1", "in_progress"),
     updated("c2", "in_progress"),
-    updated("c1", "completed", { content: output('["a.ts"]') }),
-    updated("c2", "completed", { content: output('"removed"') }),
+    updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
+    updated("c2", "completed", { content: output('"removed"'), rawOutput: "removed" }),
   ] as never);
 });
 
-test("what has no call in its request is left in place: a request without calls, a request with no response, and a response with no request", () => {
+test("what has no call in its request is left in place: a request without calls, a request with no response, and a response with no request, whose messages its own seq names, with a warning", () => {
+  const rm = { call: "c2", tool: "rm", input: json({ path: "a.ts" }) };
   const { session, fact } = recording();
   fact(asked("hi"));
   fact(dispatched());
   fact(responded([thinking("Greet."), answer("Hello.")]));
   fact(asked("remove a.ts"));
   // No ModelRequestDispatched: the response is not paired with a request, and stays after the call.
-  fact({ _tag: "ToolCallArrived", turn: "turn-2", call: "c2", tool: "rm", input: json({ path: "a.ts" }) });
+  fact({ _tag: "ToolCallArrived", turn: "turn-2", ...rm });
   fact(responded([answer("Removing.")], "Complete", "turn-2"));
   fact(dispatched("turn-2"));
-  const loaded = project(session.journal, replay);
+  const loaded = projectLogged(session.journal, replay);
+  const [hi, remove] = seqsOf(session.journal, "InputArrived");
+  const [request] = seqsOf(session.journal, "ModelRequestDispatched");
+  const [, unpaired] = seqsOf(session.journal, "ModelResponded");
   expect(loaded.updates).toEqual(inStoredOrder(session.journal, replay).updates);
-  expect(loaded.updates).toEqual([user("hi"), thought("Greet."), said("Hello."), user("remove a.ts"), announced("c2", "rm", "delete"), said("Removing.")] as never);
+  expect(loaded.updates).toEqual([
+    user("hi", `${hi}`),
+    thought("Greet.", `${request}:0`),
+    said("Hello.", `${request}:1`),
+    user("remove a.ts", `${remove}`),
+    announced(rm, "rm", "delete"),
+    said("Removing.", `${unpaired}:0`),
+  ] as never);
+  expect(loaded.logged).toEqual([{ level: "Warn", key: logKeys.update.noDispatch, details: { response: unpaired }, annotations: { turn: "turn-2" } }]);
   expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
 });
 
@@ -582,9 +660,9 @@ test("a request the harness answered as interrupted, as the core records it: the
   const loaded = project(session.journal, replay);
   // The response moves before the arrival and announces the call from its part; the arrival then announces nothing, as a call is announced once, so the updates are those of the stored order.
   expect(loaded.updates).toEqual(inStoredOrder(session.journal, replay).updates);
-  expect(loaded.updates).toEqual([
+  expect(unnamed(loaded.updates)).toEqual([
     user("remove a.ts"),
-    announced("c1", "rm", "delete"),
+    announced(rm, "rm", "delete"),
     updated("c1", "in_progress"),
     updated("c1", "failed", { content: output("How it ended was not observed") }),
   ] as never);
@@ -605,11 +683,11 @@ test("a request the harness answered as interrupted whose call had ended before 
   fact(responded([{ _tag: "ToolCall", ...rm }], "Indeterminate"));
   const loaded = project(session.journal, replay);
   expect(loaded.updates).toEqual(inStoredOrder(session.journal, replay).updates);
-  expect(loaded.updates).toEqual([
+  expect(unnamed(loaded.updates)).toEqual([
     user("remove a.ts"),
-    announced("c1", "rm", "delete"),
+    announced(rm, "rm", "delete"),
     updated("c1", "in_progress"),
-    updated("c1", "completed", { content: output('["a.ts"]') }),
+    updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
   ] as never);
   expect(loaded.updates.filter((update) => update.sessionUpdate === "tool_call")).toHaveLength(1);
   expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
@@ -628,7 +706,12 @@ test("captured items mixed into a replay keep their place and change nothing it 
 test("live does not reorder: a call recorded before its response is sent at its fact", () => {
   const { session } = listing();
   const updates = project(session.journal, live).updates;
-  expect(updates.slice(0, 4)).toEqual([announced("c1", "ls", "read"), updated("c1", "in_progress"), updated("c1", "completed", { content: output('["a.ts"]') }), thought("I should list them.")] as never);
+  expect(unnamed(updates.slice(0, 4))).toEqual([
+    announced(ls, "ls", "read"),
+    updated("c1", "in_progress"),
+    updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
+    thought("I should list them."),
+  ] as never);
 });
 
 test("a part its deltas sent only some of: the rest of it is sent, and each part of that kind after it whole", () => {
@@ -637,7 +720,7 @@ test("a part its deltas sent only some of: the rest of it is sent, and each part
   fact(dispatched());
   stream(delta("Text", "Hel"));
   fact(responded([answer("Hello."), answer("Bye.")]));
-  expect(project(inputs, live).updates).toEqual([said("Hel"), said("lo."), said("Bye.")]);
+  expect(unnamed(project(inputs, live).updates)).toEqual([said("Hel"), said("lo."), said("Bye.")]);
 });
 
 test("a turn that ended keeps no text in the state", () => {
@@ -662,7 +745,8 @@ test("a request ends at its response: a second response with no request between 
   fact(responded([{ _tag: "ToolCall", ...rm("c1") }]));
   fact({ _tag: "ToolCallArrived", turn: "turn-1", ...rm("c2") });
   fact(responded([answer("Removed.")]));
-  expect(project(session.journal, replay).updates).toEqual([user("remove a.ts"), announced("c1", "rm", "delete"), announced("c2", "rm", "delete"), said("Removed.")] as never);
+  // The second response has no request, which logs a warning: taken here, not printed.
+  expect(unnamed(projectLogged(session.journal, replay).updates)).toEqual([user("remove a.ts"), announced(rm("c1"), "rm", "delete"), announced(rm("c2"), "rm", "delete"), said("Removed.")] as never);
 });
 
 test("a call whose part arrives on the streamed feed before its ToolCallArrived is announced at its place, before the text that streams after it", () => {
@@ -671,7 +755,7 @@ test("a call whose part arrives on the streamed feed before its ToolCallArrived 
   fact(dispatched());
   stream(arrived({ _tag: "ToolCall", ...ls }), delta("Text", "Listing."));
   fact({ _tag: "ToolCallArrived", turn: "turn-1", ...ls });
-  expect(project(inputs, live).updates).toEqual([announced("c1", "ls", "read"), said("Listing.")] as never);
+  expect(unnamed(project(inputs, live).updates)).toEqual([announced(ls, "ls", "read"), said("Listing.")] as never);
 });
 
 test("after a request answered before its end item, the next request of the turn sends its deltas as they come", () => {
@@ -689,11 +773,11 @@ test("after a request answered before its end item, the next request of the turn
     ...facts.slice(secondDispatched + 1),
   ];
   const updates = project(inputs, live).updates;
-  expect(updates.filter((update) => update.sessionUpdate === "agent_message_chunk")).toEqual([said("List"), said("ing."), said("One file"), said(": a.ts.")] as never);
+  expect(unnamed(updates.filter((update) => update.sessionUpdate === "agent_message_chunk"))).toEqual([said("List"), said("ing."), said("One file"), said(": a.ts.")] as never);
 });
 
-test("text of only whitespace that ends a request is not sent with the next request's text", () => {
-  const { inputs, fact, stream } = recording();
+test("whitespace that ends a request's text is sent in that request's message, from its response, and not with the next request's text", () => {
+  const { session, inputs, fact, stream } = recording();
   fact(asked("list the files"));
   fact(dispatched());
   stream(delta("Text", "Listing."), delta("Text", "\n"), ended());
@@ -703,7 +787,32 @@ test("text of only whitespace that ends a request is not sent with the next requ
   fact(dispatched());
   stream(delta("Text", "Done."), ended());
   fact(responded([answer("Done.")]));
-  expect(project(inputs, live).updates.filter((update) => update.sessionUpdate === "agent_message_chunk")).toEqual([said("Listing."), said("Done.")] as never);
+  const [first, second] = seqsOf(session.journal, "ModelRequestDispatched");
+  const updates = project(inputs, live).updates;
+  expect(updates.filter((update) => update.sessionUpdate === "agent_message_chunk")).toEqual([said("Listing.", `${first}:0`), said("\n", `${first}:0`), said("Done.", `${second}:0`)] as never);
+  expect(messages(updates)).toEqual(messages(project(session.journal, replay).updates));
+});
+
+test("a thought streamed with a trailing newline as a delta of its own, then a call: the thought's message has the newline, in every merge of the feeds and on replay, its part passed on before the call or after it", () => {
+  const call = { _tag: "ToolCall", ...ls };
+  // As the Anthropic adapter passes them on, each part when it is whole; and as the Chat Completions adapter does, a call when it is whole and the text's parts after the last delta.
+  const orders = [
+    [delta("Thinking", "Plan."), delta("Thinking", "\n"), arrived(thinking("Plan.\n")), arrived(call), ended()],
+    [delta("Thinking", "Plan."), delta("Thinking", "\n"), arrived(call), arrived(thinking("Plan.\n")), ended()],
+  ];
+  for (const items of orders) {
+    const { session, fact, stream } = recording();
+    fact(asked("list the files"));
+    const from = session.journal.findIndex((input) => input._tag === "Observed" && input.observation._tag === "TurnStarted");
+    fact(dispatched());
+    stream(...items);
+    fact({ _tag: "ToolCallArrived", turn: "turn-1", ...ls });
+    fact(responded([thinking("Plan.\n"), call]));
+    const [request] = seqsOf(session.journal, "ModelRequestDispatched");
+    const loaded = messages(project(session.journal, replay).updates);
+    expect(loaded).toEqual([[`agent_thought_chunk ${request}:0`, "Plan.\n"]]);
+    for (const updates of everyMerge(session.journal.slice(0, from), session.journal.slice(from), items)) expect(messages(updates)).toEqual(loaded);
+  }
 });
 
 test("the default presentation titles a call to a described tool by its intent, on one line; a call to any other tool, or with no intent, by its tool's name", () => {
@@ -720,4 +829,145 @@ test("the default presentation titles a call to a described tool by its intent, 
   expect(titled("look", { path: ".", intent: "Look at\n  the working folder." })).toBe("Look at the working folder.");
   expect(titled("look", { path: "." })).toBe("look");
   expect(titled("create_issue", { intent: "A reason of several paragraphs." })).toBe("create_issue");
+});
+
+/** A call's announcement and its end: the updates that carry its name, its input and its raw output. */
+const announcedAndEnded = (updates: ReadonlyArray<SessionUpdate>) =>
+  updates.filter((update) => update.sessionUpdate === "tool_call" || (update.sessionUpdate === "tool_call_update" && (update.status === "completed" || update.status === "failed")));
+
+test("a call's tool_call carries its tool's name and its input; its end, what it returned as recorded: JSON parsed, text as text, a failure's reason, and nothing for bytes; replay sends the same", () => {
+  const cat = { call: "c2", tool: "cat", input: json({ path: "a.ts" }) };
+  const rm = { call: "c3", tool: "rm", input: json({ path: "a.ts" }) };
+  const shot = { call: "c4", tool: "screenshot", input: json({}) };
+  const blob = "ab".repeat(32);
+  const plain = (text: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text } });
+  const outcomes = [
+    { call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } },
+    { call: "c2", outcome: { _tag: "Succeeded", output: plain("export {};\n") } },
+    { call: "c3", outcome: { _tag: "Failed", reason: { _tag: "Reported", error: plain("a.ts is read-only") } } },
+    { call: "c4", outcome: { _tag: "Succeeded", output: { mediaType: "image/png", body: { _tag: "Stored", id: blob, size: 70000 } } } },
+  ];
+  const { session, inputs, fact } = recording();
+  fact(asked("look at a.ts"));
+  fact(dispatched());
+  for (const call of [ls, cat, rm, shot]) fact({ _tag: "ToolCallArrived", turn: "turn-1", ...call });
+  for (const { call } of outcomes) fact({ _tag: "ToolCallDispatched", call });
+  for (const ended of outcomes) fact({ _tag: "ToolEnded", ...ended });
+  fact(responded([ls, cat, rm, shot].map((call) => ({ _tag: "ToolCall", ...call }))));
+  const sent = announcedAndEnded(project(inputs, live).updates);
+  expect(sent).toEqual([
+    announced(ls, "ls", "read"),
+    announced(cat, "cat"),
+    announced(rm, "rm", "delete"),
+    announced(shot, "screenshot"),
+    updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
+    updated("c2", "completed", { content: output("export {};\n"), rawOutput: "export {};\n" }),
+    updated("c3", "failed", { content: output("a.ts is read-only"), rawOutput: "a.ts is read-only" }),
+    // The bytes are in the blob store: the content names them, and JSON cannot carry them.
+    updated("c4", "completed", { content: output(`[70000 bytes of image/png: blob://${blob}]`) }),
+  ] as never);
+  expect(announcedAndEnded(project(session.journal, replay).updates)).toEqual(sent);
+});
+
+test("a call announced again with another input than the client has: a tool_call_update carries that input as rawInput, once", () => {
+  const src = { ...ls, input: json({ path: "src" }) };
+  const { inputs, fact, stream } = recording();
+  fact(asked("list the files"));
+  fact(dispatched());
+  stream(arrived({ _tag: "ToolCall", ...ls }));
+  fact({ _tag: "ToolCallArrived", turn: "turn-1", ...src });
+  fact(responded([{ _tag: "ToolCall", ...src }]));
+  expect(project(inputs, live).updates).toEqual([announced(ls, "ls", "read"), { sessionUpdate: "tool_call_update", toolCallId: "c1", rawInput: { path: "src" } }] as never);
+});
+
+test("a call's input and output that claim JSON and do not parse: rawInput and rawOutput carry their text, and a warning says so", () => {
+  const broken = (text: string) => ({ mediaType: "application/json", body: { _tag: "Text", text } });
+  const { inputs, fact } = recording();
+  fact(asked("list the files"));
+  fact(dispatched());
+  fact({ _tag: "ToolCallArrived", turn: "turn-1", call: "c1", tool: "ls", input: broken('{"path": ') });
+  fact({ _tag: "ToolCallDispatched", call: "c1" });
+  fact({ _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: broken("a.ts") } });
+  const { updates, logged } = projectLogged(inputs, live);
+  expect(announcedAndEnded(updates)).toMatchObject([{ sessionUpdate: "tool_call", rawInput: '{"path": ' }, { sessionUpdate: "tool_call_update", rawOutput: "a.ts" }]);
+  const warned = (field: string, text: string) => ({
+    level: "Warn",
+    key: logKeys.update.rawNotJson,
+    details: { field, tool: "ls", mediaType: "application/json", cause: expect.stringContaining("not JSON"), text: { chars: text.length, start: text } },
+    annotations: { call: "c1" },
+  });
+  expect(logged).toEqual([warned("rawInput", '{"path": '), warned("rawOutput", "a.ts")]);
+});
+
+test("a response's thinking, its text, a call and its text after the call are three messages, live from deltas, parts and the response's rest, and on replay", () => {
+  const { session, inputs, items, fact, stream } = recording();
+  fact(asked("list the files"));
+  fact(dispatched());
+  stream(delta("Thinking", "Plan."), arrived(thinking("Plan.")), delta("Text", "Listing."), arrived(answer("Listing.")), arrived({ _tag: "ToolCall", ...ls }));
+  fact({ _tag: "ToolCallArrived", turn: "turn-1", ...ls });
+  stream(delta("Text", "Do"), delta("Text", "ne."), arrived(answer("Done.")), ended());
+  fact(responded([thinking("Plan."), answer("Listing."), { _tag: "ToolCall", ...ls }, answer("Done.")]));
+  const [request] = seqsOf(session.journal, "ModelRequestDispatched");
+  const expected: ReadonlyArray<readonly [string, string]> = [
+    [`agent_thought_chunk ${request}:0`, "Plan."],
+    [`agent_message_chunk ${request}:1`, "Listing."],
+    [`agent_message_chunk ${request}:2`, "Done."],
+  ];
+  expect(messages(project(inputs, live).updates)).toEqual(expected);
+  expect(messages(project(session.journal, replay).updates)).toEqual(expected);
+  // The response taken after "Do": the rest of the part from it goes in the message that "Do" began.
+  const at = session.journal.findIndex((input) => input._tag === "Observed" && input.observation._tag === "ModelResponded");
+  const early = [...session.journal.slice(0, at), ...items.slice(0, 6), session.journal[at] as Fact, ...items.slice(6), ...session.journal.slice(at + 1)];
+  expect(project(early, live).updates.filter((update) => update.sessionUpdate === "agent_message_chunk").slice(-2)).toEqual([said("Do", `${request}:2`), said("ne.", `${request}:2`)] as never);
+});
+
+test("two responses of only text with nothing between them, the second asked after the first was unfinished, are two messages, live and on replay", () => {
+  const { session, inputs, fact, stream } = recording();
+  fact(asked("check the files"));
+  fact(dispatched());
+  stream(delta("Text", "Let me check."), ended());
+  fact(responded([answer("Let me check.")], "Unfinished"));
+  fact(dispatched());
+  stream(delta("Text", "Done."), ended());
+  fact(responded([answer("Done.")]));
+  const [first, second] = seqsOf(session.journal, "ModelRequestDispatched");
+  expect(project(inputs, live).updates).toEqual([said("Let me check.", `${first}:0`), said("Done.", `${second}:0`)]);
+  expect(withoutInputs(project(session.journal, replay).updates)).toEqual([said("Let me check.", `${first}:0`), said("Done.", `${second}:0`)] as never);
+});
+
+test("a fallback that answers after the first provider failed with 503: the request's first dispatch names its messages, in every merge of the feeds and on replay", () => {
+  const { session, fact, stream, items } = recording();
+  fact(asked("hi"));
+  const from = session.journal.findIndex((input) => input._tag === "Observed" && input.observation._tag === "TurnStarted");
+  fact(dispatched());
+  fact({ _tag: "ModelAttemptFailed", turn: "turn-1", provider: "boring", model: "boring-1", failure: "HTTP 503: overloaded", error: json({ status: 503 }) });
+  fact({ _tag: "ModelRequestDispatched", turn: "turn-1", provider: "fallback", model: "fallback-1", sent: json({}) });
+  stream(delta("Text", "Hel"), delta("Text", "lo."), ended());
+  fact({ ...responded([answer("Hello.")]), provider: "fallback", model: "fallback-1" });
+  const [first] = seqsOf(session.journal, "ModelRequestDispatched");
+  const loaded = messages(project(session.journal, replay).updates);
+  expect(loaded).toEqual([[`agent_message_chunk ${first}:0`, "Hello."]]);
+  for (const updates of everyMerge(session.journal.slice(0, from), session.journal.slice(from), items)) expect(messages(updates)).toEqual(loaded);
+});
+
+test("a session loaded and gone on with: the replay names each message as live did, and a later turn's messages take ids that no earlier message has", () => {
+  const { session, inputs, fact, stream } = recording();
+  fact(asked("one"));
+  fact(dispatched());
+  stream(delta("Text", "One."), ended());
+  fact(responded([answer("One.")]));
+  const loaded = project(session.journal, replay);
+  expect(messages(loaded.updates)).toEqual(messages(project(inputs, live).updates));
+  const from = inputs.length;
+  fact(asked("two"));
+  fact(dispatched("turn-2"));
+  stream(delta("Text", "Two.", "turn-2"), ended("turn-2"));
+  fact(responded([answer("Two.")], "Complete", "turn-2"));
+  const later = project(inputs.slice(from), live, loaded.state).updates;
+  const [one, two] = seqsOf(session.journal, "InputArrived");
+  const [first, second] = seqsOf(session.journal, "ModelRequestDispatched");
+  expect(loaded.updates).toEqual([user("one", `${one}`), said("One.", `${first}:0`)]);
+  expect(later).toEqual([said("Two.", `${second}:0`)]);
+  // A second load sends the ids that the first load and the live turn after it sent.
+  expect(project(session.journal, replay).updates).toEqual([...loaded.updates, user("two", `${two}`), ...later]);
 });
