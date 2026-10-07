@@ -10,7 +10,7 @@
     "check:schemas": "bun scripts/config-schema.ts --check",
     "cli": "bun run src/examples/cli-repl/index.ts",
     "cli:watch": "bun --watch src/examples/cli-repl/index.ts",
-    "lint": "oxlint --type-aware --format default src tests scripts",
+    "lint": "oxlint --type-aware --format default src tests scripts bin",
     "models:refresh": "bun scripts/models/refresh.ts",
     "observability:alerts": "bun scripts/observability/alert-rules.ts",
     "observability:captures": "bun scripts/observability/capture-server.ts",
@@ -46,5 +46,8 @@
     "effective-acp": "0.2.1",
     "es-git": "^0.7.0",
     "yaml": "2.9.1"
+  },
+  "bin": {
+    "labkit": "bin/labkit.ts"
   }
 }

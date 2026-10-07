@@ -402,13 +402,14 @@ export const filesIn = (folder: string, wanted: (file: string) => boolean = () =
 /**
  * Reads the layers of the folders' files that `sources` names (only the user's, unless given), in
  * order: the user's folder's files, which are trusted, then the project's files and the local ones,
- * which are in the project's folder and are not trusted. A project's files are read only when named,
- * because a file that comes with a cloned project could turn off permission or give the model's
- * commands credentials.
+ * which are in the project's folder. The project's files and the local ones are trusted only when
+ * `projectTrusted` says the project's folder is (`agent-host/trust.ts`). A project's files are read
+ * only when named, because a file that comes with a cloned project could turn off permission or give
+ * the model's commands credentials.
  */
 export const fileLayers = (
   project: string,
-  options: FolderOptions & { readonly sources?: ReadonlyArray<FileSource> } = {},
+  options: FolderOptions & { readonly sources?: ReadonlyArray<FileSource>; readonly projectTrusted?: boolean } = {},
 ): Effect.Effect<ReadonlyArray<LayerSource>, ConfigInvalid, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const folders = configFolders(project, options);
@@ -426,7 +427,7 @@ export const fileLayers = (
     };
     const read = fileSources.filter((source) => (options.sources ?? ["user"]).includes(source));
     const layers = yield* Effect.forEach(read, (source) =>
-      Effect.flatMap(filesOf(source), (files) => Effect.forEach(files, (file) => fileLayer(file, source === "user"))),
+      Effect.flatMap(filesOf(source), (files) => Effect.forEach(files, (file) => fileLayer(file, source === "user" || options.projectTrusted === true))),
     );
     return layers.flat().filter((layer): layer is LayerSource => layer !== undefined);
   });

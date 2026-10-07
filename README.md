@@ -53,9 +53,17 @@ bun run check               # installs it if missing, then typecheck, lint, chec
 bun run acp:logs [--errors]  # the newest ACP launch log (~/.labkit/logs; LABKIT_ACP_LOG_DIR, _LEVEL, _MAX_BYTES, _BACKUPS)
 bun cli --help              # the CLI; --model, --permission-mode, --max-turns and its other shared options
                             # are read from LABKIT_MODEL, LABKIT_PERMISSION_MODE, ... when not given
+bun link                    # puts `labkit` on the PATH: the CLI, run in the folder you are in (bin/labkit.ts)
 bun scripts/trajectories/sweep.ts codex         # run both sweeps after changing a core machine, and
 bun scripts/trajectories/sweep.ts claude-code   # read the counts of observations not expected
 ```
+
+`labkit` reads a folder's own files, its `.env` files and its project settings (`.labkit/`), only
+when the folder is trusted. Bun would otherwise read a folder's `.env` and `bunfig.toml` before any
+of the agent's code runs, and either can make it run code. At a terminal, `labkit` asks whether to
+trust a folder that has such files; the trusted folders are listed in
+`~/.config/labkit/trusted-folders.json`. `bun cli` in this checkout reads this checkout's `.env`, as
+Bun always does.
 
 The adapter tests start [VidaiMock](https://github.com/vidaiUK/VidaiMock), a server that answers as
 the providers' APIs do. `scripts/vidaimock.ts` downloads the pinned release for this platform into

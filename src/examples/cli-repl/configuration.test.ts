@@ -33,6 +33,9 @@ const refused = (flags: Partial<ConfigFlags> = {}) =>
     ),
   );
 
+/** Adds the test's project folder to the trusted folders of the test's user. */
+const trustProject = () => write("home/.config/labkit/trusted-folders.json", JSON.stringify({ folders: [join(testFolder(), "project")] }));
+
 const listed = (configuration: Configuration) =>
   Object.fromEntries(Object.entries(configuration.lists).map(([seam, entries]) => [seam, entries.map((entry) => [entry.name, entry.settings])]));
 
@@ -61,6 +64,7 @@ test("flags override the files: --permission-mode sets the permission mode, and 
   ]);
   // When a file already lists the limit, the flag sets its value and the limit keeps its position.
   write("project/.labkit/policies.yml", "modelRequests: [maxTurnRequests, loopBreaker]\n");
+  trustProject();
   expect(listed(await configured({ maxTurns: 7, settingSources: "user,project" }))["modelRequests"]).toEqual([
     ["maxTurnRequests", { limit: 7 }],
     ["loopBreaker", { nudgeAt: 3, stopAt: 5, key: "toolAndInput" }],
@@ -71,6 +75,7 @@ test("flags override the files: --permission-mode sets the permission mode, and 
 test("--settings (JSON, or a JSON or YAML file) overrides the files; --setting-sources chooses which files are read, only the user's by default", async () => {
   write("home/.config/labkit/policies.yml", "plugins:\n  loopBreaker:\n    nudgeAt: 4\n");
   write("project/.labkit/policies.yml", "plugins:\n  loopBreaker:\n    stopAt: 9\n");
+  trustProject();
   const both = listed(await configured({ settingSources: "user,project", settings: '{"plugins": {"loopBreaker": {"key": "toolAndInput", "nudgeAt": 2}}}' }));
   expect(both["toolCalls"]?.[0]).toEqual(["loopBreaker", { nudgeAt: 2, stopAt: 9, key: "toolAndInput" }]);
   const yaml = write("settings.yml", "toolCalls: [permissions]\n");
@@ -100,11 +105,30 @@ test("--mcp-config adds MCP servers in Claude Code's .mcp.json format; with --st
   ]);
 });
 
-test("a project's files are ignored unless --setting-sources names them, and even then cannot load extensions", async () => {
+test("a project's files are read only when --setting-sources names them and the folder is trusted; in a trusted folder they may load extensions", async () => {
   write("project/.labkit/policies.yml", "toolCalls: [loopBreaker]\nplugins:\n  credentials:\n    pass: [ANTHROPIC_API_KEY]\n");
   const unread = listed(await configured());
   expect(unread["toolCalls"]?.map(([name]) => name)).toEqual(["loopBreaker", "permissions"]);
   expect(unread["commandEnvironment"]).toEqual([["credentials", { pass: [] }]]);
-  write("project/.labkit/policies.yml", "extensions: [./mine.ts]\n");
-  expect(await refused({ settingSources: "user,project" })).toEndWith("project/.labkit/policies.yml: extensions: Extensions are loaded only from the user's own configuration: a project's does not run code");
+  // Named in a folder that is not trusted, the project's files and the local ones are refused, not ignored.
+  expect(await refused({ settingSources: "user,project" })).toBe(`${join(testFolder(), "project")} is not trusted, so its settings are not read.`);
+  expect(await refused({ settingSources: "local" })).toBe(`${join(testFolder(), "project")} is not trusted, so its settings are not read.`);
+  trustProject();
+  const extension = new URL("../../../tests/support/config-extension.ts", import.meta.url).pathname;
+  write("project/.labkit/policies.yml", `extensions:\n  - ${extension}\nplugins:\n  denyTools:\n    tools: [change]\ntoolCalls: [denyTools, permissions]\n`);
+  expect(listed(await configured({ settingSources: "user,project" }))["toolCalls"]).toEqual([
+    ["denyTools", { tools: ["change"] }],
+    ["permissions", { mode: "default" }],
+  ]);
+});
+
+test("a folder inside a trusted folder is trusted; a list of trusted folders that cannot be decoded, and a relative --config-dir, are refused", async () => {
+  write("home/.config/labkit/trusted-folders.json", JSON.stringify({ folders: [testFolder()] }));
+  write("project/.labkit/policies.yml", "maxHolds: 3\n");
+  expect((await configured({ settingSources: "user,project" })).maxHolds).toBe(3);
+  write("home/.config/labkit/trusted-folders.json", JSON.stringify({ folders: ["project"] }));
+  expect(await refused()).toEndWith("trusted-folders.json: Not an absolute path: project");
+  write("home/.config/labkit/trusted-folders.json", "folders: [a]\n");
+  expect(await refused()).toStartWith(`${join(testFolder(), "home/.config/labkit/trusted-folders.json")}: Not JSON:`);
+  expect(await refused({ configDir: "config" })).toBe("--config-dir: Not an absolute path: config");
 });

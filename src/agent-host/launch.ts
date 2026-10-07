@@ -13,9 +13,10 @@
  * 1. the host's own defaults;
  * 2. the files of the user's configuration folder (`--config-dir`, else `~/.config/<brand>`), and
  *    the project's files and the local ones when `--setting-sources` names them, each folder's files
- *    in the order of their names. A project's files are read only when named, because a cloned
- *    folder's files could turn off permission or give the model's commands credentials. Named files
- *    are read but are not trusted, so they still may not name extensions or MCP servers;
+ *    in the order of their names. A project's files are read only when named, and only in a trusted
+ *    folder (`trust.ts`), because a cloned folder's files could turn off permission or give the
+ *    model's commands credentials. Naming them in a folder that is not trusted fails. In a trusted
+ *    folder they are the user's own, so they may name extensions and MCP servers;
  * 3. `--settings`: JSON, or a file of JSON or YAML;
  * 4. with `--strict-mcp-config`, a layer that removes every MCP server except those `--mcp-config`
  *    names;
@@ -25,16 +26,18 @@
  *    of model requests in a turn) and `--max-budget-usd` (the session's budget). A flag that sets a
  *    plug-in that the model requests list does not have adds it to the end of that list.
  *
- * Every layer except the project's files and the local ones is the user's, so it may load extensions.
+ * Every layer is the user's, so it may load extensions: the project's files and the local ones are
+ * read only in a trusted folder.
  */
 
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { Config, ConfigProvider, Effect, FileSystem, Option } from "effect";
 import { Command, Flag } from "effect/cli";
 import { ConfigInvalid, type Configuration, configFolders, fileLayer, fileLayers, type FileSource, fileSources, type LayerSource, loadConfiguration } from "../agent-config/file.ts";
 import { merged } from "../agent-config/merge.ts";
 import type { PermissionMode } from "../agent-policy/permissions.ts";
 import { type Brand, envPrefixOf } from "./brand.ts";
+import { FolderNotTrusted } from "./trust.ts";
 
 /** Returns a flag's name as a configuration key: in camel case (`max-turns`: `maxTurns`). */
 const keyOf = (flag: string): string => flag.replace(/-([a-z0-9])/g, (_, letter: string) => letter.toUpperCase());
@@ -145,10 +148,9 @@ const layerFromFlag = (flag: string, value: string): Effect.Effect<LayerSource, 
   });
 
 /**
- * Returns the file layers that `--setting-sources` names: only the user's when it is not given. A
+ * Returns the file sources that `--setting-sources` names: only the user's when it is not given. A
  * project's file and the local one come with the folder the host runs in, and could change what runs
- * without asking or what a command receives, so they are read only when named, until a folder can be
- * trusted.
+ * without asking or what a command receives, so they are read only when named.
  */
 const sourcesOf = (given: string | undefined): Effect.Effect<ReadonlyArray<FileSource>, ConfigInvalid> => {
   if (given === undefined) return Effect.succeed(["user"]);
@@ -191,21 +193,38 @@ const folderOptionsOf = (flags: ConfigFlags, options: { readonly home?: string; 
 export const userFolderOf = (flags: ConfigFlags, options: { readonly home?: string; readonly name?: string } = {}): string =>
   configFolders("", folderOptionsOf(flags, options)).user;
 
+/** Where a host's layers come from, besides its flags: the home and brand name of the user's folder, and whether the project's folder is trusted. */
+export interface LayerOptions {
+  readonly home?: string;
+  readonly name?: string;
+  /** Whether the project's folder is trusted (`trust.ts`), so that its files may be read; not trusted when left out. */
+  readonly projectTrusted?: boolean;
+}
+
 /**
  * Returns the layers, in order, for a host run in `project` whose own defaults are `defaults`. With
  * no project (a launcher before any session has one), the user's file is the only file read.
+ *
+ * Fails when `--config-dir` (or its variable) is not an absolute path, since a relative one would
+ * name a different folder in each folder the host runs in; and when `--setting-sources` names the
+ * project's files or the local ones and the project's folder is not trusted.
  */
 export const launchLayers = (
   project: string | undefined,
   defaults: LayerSource,
   flags: ConfigFlags,
-  options: { readonly home?: string; readonly name?: string } = {},
-): Effect.Effect<ReadonlyArray<LayerSource>, ConfigInvalid, FileSystem.FileSystem> =>
+  options: LayerOptions = {},
+): Effect.Effect<ReadonlyArray<LayerSource>, ConfigInvalid | FolderNotTrusted, FileSystem.FileSystem> =>
   Effect.gen(function* () {
+    if (flags.configDir !== undefined && !isAbsolute(flags.configDir))
+      return yield* new ConfigInvalid({ file: "--config-dir", path: "", problem: `Not an absolute path: ${flags.configDir}` });
     const sources = yield* sourcesOf(flags.settingSources);
+    const named = project === undefined ? sources.filter((source) => source === "user") : sources;
+    if (project !== undefined && options.projectTrusted !== true && named.some((source) => source !== "user")) return yield* new FolderNotTrusted({ folder: project });
     const files = yield* fileLayers(project ?? "", {
       ...folderOptionsOf(flags, options),
-      sources: project === undefined ? sources.filter((source) => source === "user") : sources,
+      sources: named,
+      projectTrusted: options.projectTrusted === true,
     });
     const settings = flags.settings === undefined ? [] : [yield* layerFromFlag("--settings", flags.settings)];
     const strict: ReadonlyArray<LayerSource> = flags.strictMcpConfig ? [{ name: "--strict-mcp-config", trusted: true, value: { mcpServers: null } }] : [];
@@ -221,6 +240,6 @@ export const launchConfiguration = (
   project: string | undefined,
   defaults: LayerSource,
   flags: ConfigFlags,
-  options: { readonly home?: string; readonly name?: string } = {},
-): Effect.Effect<Configuration & { readonly layers: ReadonlyArray<LayerSource> }, ConfigInvalid, FileSystem.FileSystem> =>
+  options: LayerOptions = {},
+): Effect.Effect<Configuration & { readonly layers: ReadonlyArray<LayerSource> }, ConfigInvalid | FolderNotTrusted, FileSystem.FileSystem> =>
   Effect.flatMap(launchLayers(project, defaults, flags, options), (layers) => Effect.map(loadConfiguration(layers), (configuration) => ({ ...configuration, layers })));

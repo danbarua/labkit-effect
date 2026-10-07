@@ -43,12 +43,42 @@ model.
       - `run_command` (the CLI's and the ACP host's) runs any shell command, and permission is
         given per tool: "Allow for the rest of the session" on one call allows every command
         after it (`rm`, `git push`, `curl … | sh`), and `bypassPermissions` runs them all
-        unasked. Needed: permission by command (allow for the session names the command, or
-        its first words, as Claude Code's `Bash(git log:*)` does), deny rules that hold in every
-        mode, and a command split at `;`, `&&`, `|` and `$(…)` judged part by part, so that an
-        allowed `git log` cannot carry another command. Dan has a bash invocation parser and
-        classifier, which builds a tree of what chained invocations intend: the policy starts
-        from it, with Jev classifying what it cannot.
+        unasked.
+      - Permission by command (Dan's decisions, 2026-10-07):
+        - **Parsing.** A command is parsed into segments: every program it would run, in
+          pipelines, `;` and `&&` lists, subshells and `$(…)`, and each redirect's target.
+          - The parser comes from Dan's exo-project spikes (`~/Code/ai/exo-project`, Rust:
+            rust-bash's parser and brush-parser's words). labkit-effect is exo-project's v0.
+          - It can run as WASM in Bun, as a binary called once per command, or as a TypeScript
+            port. The policy sees only `segmentsOf(command)`, so the route can change.
+        - **When it asks.**
+          - Code handed to another program asks: `sh -c`, `eval`, `xargs`, `find -exec`, and a
+            runtime fed a heredoc or `-c`.
+          - A command that does not parse asks.
+          - When no one can answer, these are vetoed.
+        - **Rules**, as Claude Code's `Bash(git log:*)`.
+          - Deny rules come from any layer and hold in every mode.
+          - Allow rules come only from trusted layers.
+          - A command runs unasked only when every segment is allowed.
+        - **Session answers.**
+          - "Allow for the rest of the session" grants the program and its subcommand
+            (`git log`, `bun test`), or the program alone when it has no subcommands.
+          - The answer records the rule it granted and the policy that asked.
+          - Session answers apply in `dontAsk` and headless mode too: those modes are autonomy.
+          - Answers recorded before this change need not be read the old way; no stored session
+            needs to be kept.
+        - **Later:**
+          - Jev classifies what the rules cannot decide, from the exo-project skeleton
+            (`01_3`).
+          - Models are told to use the write and edit tools instead of `python -c` and heredocs.
+      - The ACP host's `run_command` runs in the editor's terminal (`terminal/create`), with the
+        environment the editor gives it. It is to be named `terminal_command`.
+      - Later (Dan, 2026-10-07):
+        - Git subcommands that can lose uncommitted work (`git stash`, `git reset`,
+          `git checkout`, `git rebase`), which today are `edit` tools and run unasked under
+          `acceptEdits`.
+        - Allowed and denied tools per MCP server, to choose which tools are offered and which
+          can be called. Today an MCP tool's `readOnlyHint` alone makes it run in every mode.
 - [ ] Accounting for ACP. Built: a provider-neutral `usage` on each response; `contextGauge` (used,
       size, cost) and `requestsIn` (a turn's model requests) read from the facts (`accounting.ts`);
       prices with the well-known models; `maxTurnRequests` as an example host policy; for ACP,
@@ -138,16 +168,21 @@ model.
 
 ### Configuration
 
-- [ ] Trusted folders (Dan, 2026-10-04): a project's configuration is not read until its folder is
-      trusted; once a folder is trusted, its layers may name extensions and MCP servers. Built
-      (`docs/agent-config.md`): a project's files are read only when named
-      (`--setting-sources project`, `local`), and a layer that is not the user's own may not name
-      extensions or MCP servers (both run code). To do: trusting a folder, and reading nothing of a
-      project's until it is trusted. A folder's `.env` is the folder's too: Bun reads it by itself
-      where the agent runs, and the options' variables (the launch variables:
-      `LABKIT_PERMISSION_MODE`, `LABKIT_SETTING_SOURCES`, `LABKIT_MCP_CONFIG`, and `LABKIT_CONFIG_DIR`,
-      which names the folder whose files are trusted) can loosen permission or start MCP servers;
-      until the folder is trusted they are not to be read from it.
+- [ ] Trusted folders (Dan, 2026-10-04 and 2026-10-07). Built (`docs/agent-config.md`,
+      `agent-host/trust.ts`): the trusted folders listed in `trusted-folders.json` in the user's
+      configuration folder, a folder inside a listed one trusted too; the `labkit` command
+      (`bin/labkit.ts`), which Bun starts without the folder's `.env` and `bunfig.toml`, asks at a
+      terminal whether to trust a folder that has `.env` files or `.labkit/`, and starts the CLI with
+      the folder's `.env` only when it is trusted, never with its `bunfig.toml`; a project's files,
+      when `--setting-sources` names them, read only in a trusted folder and then trusted (so they
+      may name extensions and MCP servers); for the ACP host, the session's folder trusted, the
+      editor's workspace trust being the boundary; a relative `--config-dir` refused. To do:
+      - Trusting or no longer trusting a folder without a terminal: today the list is edited by hand.
+      - `bun cli` and the entry files run directly read the folder's `.env` and `bunfig.toml`, as Bun
+        does; only `labkit` keeps them out. The ACP launcher reads its spawn folder's, which the
+        editor chooses.
+      - The hints that name `bun cli` (`bun cli models lists the models you can use.`) are to name
+        the command the user ran.
 - [ ] Turn-end hooks by name, as policies are: a hold recorded from the hook that made it, so
       `retryIncomplete` counts its own holds, not every hook's. Today `holdsOf`
       (`agent-session/turn-holds.ts`) counts every hook's holds, for the loop and for zork's

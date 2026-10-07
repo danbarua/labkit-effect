@@ -2,12 +2,14 @@
  * The CLI's configuration: the layers both hosts build from their options (`agent-host/launch.ts`),
  * over the CLI's defaults: the loop breaker then permission on tool calls; the loop breaker on model
  * requests; one more request for an answer when a turn ends with thinking and no answer; and the
- * environment without credentials for the model's commands.
+ * environment without credentials for the model's commands. The project's files may be read only when
+ * the folder the CLI runs in is trusted (`agent-host/trust.ts`).
  */
 
-import type { Effect, FileSystem } from "effect";
+import { Effect, type FileSystem } from "effect";
 import type { ConfigInvalid, Configuration, LayerSource } from "../../agent-config/file.ts";
-import { type ConfigFlags, launchConfiguration } from "../../agent-host/launch.ts";
+import { type ConfigFlags, launchConfiguration, userFolderOf } from "../../agent-host/launch.ts";
+import { type FolderNotTrusted, isTrusted, type TrustFileInvalid } from "../../agent-host/trust.ts";
 
 /** The CLI's defaults: the first layer. */
 export const cliDefaults: LayerSource = {
@@ -21,5 +23,5 @@ export const cliConfiguration = (
   project: string,
   flags: ConfigFlags,
   options: { readonly home?: string; readonly name?: string } = {},
-): Effect.Effect<Configuration & { readonly layers: ReadonlyArray<LayerSource> }, ConfigInvalid, FileSystem.FileSystem> =>
-  launchConfiguration(project, cliDefaults, flags, options);
+): Effect.Effect<Configuration & { readonly layers: ReadonlyArray<LayerSource> }, ConfigInvalid | FolderNotTrusted | TrustFileInvalid, FileSystem.FileSystem> =>
+  Effect.flatMap(isTrusted(project, userFolderOf(flags, options)), (projectTrusted) => launchConfiguration(project, cliDefaults, flags, { ...options, projectTrusted }));

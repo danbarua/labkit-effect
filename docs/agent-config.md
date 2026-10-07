@@ -44,9 +44,9 @@ read layers.
 
 | Files | Trusted | Read |
 | --- | --- | --- |
-| the user's configuration folder: `~/.config/<name>/`, or `--config-dir` | yes | always |
-| the project's folder, `<project>/.<name>/`: its files other than `*.local.yml` | no | with `--setting-sources project` |
-| the project's folder: the user's own files for the project, `*.local.yml` | no | with `--setting-sources local` |
+| the user's configuration folder: `~/.config/<name>/`, or `--config-dir` (an absolute path) | yes | always |
+| the project's folder, `<project>/.<name>/`: its files other than `*.local.yml` | yes | with `--setting-sources project`, in a trusted folder |
+| the project's folder: the user's own files for the project, `*.local.yml` | yes | with `--setting-sources local`, in a trusted folder |
 
 - Each file is a layer. A folder's files are its `.yml` and `.yaml` files, read in the order of their
   names (code-unit order), so a name can start with a sorting prefix: `10_policies.yml`,
@@ -57,12 +57,21 @@ read layers.
 - A folder that does not exist adds no layer. A folder that cannot be read refuses the configuration,
   naming the folder.
 - `<name>` is `configName` (`labkit`) unless the caller gives another.
-- The project's files are read only when named, because a file that comes with a cloned project
-  could turn off permission or give the model's commands credentials. A file that is named is still
-  not trusted.
+- The project's files are read only when named, and only in a trusted folder, because a file that
+  comes with a cloned project could turn off permission or give the model's commands credentials.
+  - A folder is trusted when it, or a folder that contains it, is listed in `trusted-folders.json`
+    in the user's configuration folder (`agent-host/trust.ts`). The list is JSON, so it is not one of
+    the folder's layers.
+  - The CLI's command, `labkit` (`bin/labkit.ts`), asks at a terminal whether to trust a folder that
+    has its own files, and lists the folder when the user says yes.
+  - For the ACP host, the session's working folder counts as trusted, because the editor trusts its
+    workspace.
+  - Naming the project's files, or the local ones, in a folder that is not trusted refuses the
+    configuration.
 
 Only a trusted layer may name `extensions` or `mcpServers`, because both run code. An untrusted layer
-that names either is refused.
+that names either is refused. Every layer a host builds is trusted; the check guards layers that a
+caller builds itself (`fileLayer(file, false)`).
 
 ## What a layer holds
 

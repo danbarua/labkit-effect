@@ -176,7 +176,12 @@ type Unresolved = Omit<Config, "target"> & { readonly named: string | undefined 
 const configOf = (options: Options, interactive: boolean) =>
   Effect.gen(function* () {
     const brand = yield* Brand;
-    const configuration = yield* cliConfiguration(process.cwd(), options, { name: brand.name });
+    const configuration = yield* cliConfiguration(process.cwd(), options, { name: brand.name }).pipe(
+      Effect.catchTags({
+        FolderNotTrusted: (error) => Effect.fail(invalid(`This folder is not trusted, so its settings are not read: ${error.folder}.`, `Start ${brand.name} in it at a terminal, and trust it.`)),
+        TrustFileInvalid: (error) => Effect.fail(invalid(`The list of trusted folders cannot be read: ${error.message}`)),
+      }),
+    );
     const permissions = {
       configuration,
       canAsk: interactive && !options.print,

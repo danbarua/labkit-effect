@@ -1097,6 +1097,25 @@ test("a session's configuration is read when it is made: the user's file's MCP s
   expect(written.host).toMatchObject({ permissionMode: "acceptEdits", canAsk: true, world: "the host's own" });
 });
 
+test("a session's folder counts as trusted, since the editor trusts its workspace: with --setting-sources naming the project, the folder's own settings start the MCP servers they name", async () => {
+  const fake = new URL("../../tests/support/mcp-server.ts", import.meta.url).pathname;
+  const host = startHost({
+    world: echoWorld,
+    script: [answer({ _tag: "Text", text: "Hello." })],
+    configFlags: { mcpConfig: [], strictMcpConfig: false, settingSources: "user,project" },
+  });
+  mkdirSync(join(host.cwd, ".labkit"), { recursive: true });
+  writeFileSync(join(host.cwd, ".labkit", "mcp.yml"), `mcpServers:\n  project:\n    command: ${process.execPath}\n    args: [${fake}]\n`);
+  const { app } = sdkClient();
+  await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "Hi."));
+  });
+  await host.stop();
+  expect(host.contexts[0]?.tools.map((tool) => tool.name as string)).toEqual(["echo", "mcp__project__echo", "mcp__project__roots", "mcp__project__slow"]);
+});
+
 test("a server the configuration says is required that does not connect refuses session/new, session/load and session/resume, naming it, and leaves nothing open", async () => {
   const host = startHost({ script: [answer({ _tag: "Text", text: "Hello." })] });
   const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {

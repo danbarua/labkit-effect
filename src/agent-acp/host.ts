@@ -422,14 +422,22 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
          * Returns the configuration of a session in `cwd` whose client names `servers`: the host's defaults, the
          * launcher's layers with `cwd` as the project, then the client's servers. A configuration that cannot be used
          * refuses the request (-32603).
+         *
+         * `cwd` counts as a trusted folder (`agent-host/trust.ts`): the editor opened the session in a workspace that
+         * it trusts, and that trust is the boundary. So the project's files that `--setting-sources` names are read as
+         * the user's own.
          */
         const configurationFor = (cwd: string, servers: ReadonlyArray<McpServer>, doing: string): Effect.Effect<Configured, JsonRpcErrorObject, FileSystem.FileSystem> =>
           Effect.gen(function* () {
             const flags = options.configFlags ?? { mcpConfig: [], strictMcpConfig: false };
-            const layers = [...(yield* launchLayers(cwd, defaults, flags, { name: brand.name, ...(options.home === undefined ? {} : { home: options.home }) })), ...clientLayers(cwd, servers)];
+            const layers = [
+              ...(yield* launchLayers(cwd, defaults, flags, { name: brand.name, projectTrusted: true, ...(options.home === undefined ? {} : { home: options.home }) })),
+              ...clientLayers(cwd, servers),
+            ];
             return { ...(yield* loadConfiguration(layers)), layers };
           }).pipe(
-            Effect.catchTag("ConfigInvalid", (error) =>
+            // ConfigInvalid; FolderNotTrusted does not arise, since a session's folder is trusted, and would be refused alike.
+            Effect.catch((error) =>
               Effect.logWarning(logKeys.session.refused, { doing, cwd, cause: "the configuration cannot be used", problem: error.message }).pipe(
                 Effect.andThen(Effect.fail(rpcError(ErrorCode.InternalError, `The configuration cannot be used: ${error.message}`))),
               ),

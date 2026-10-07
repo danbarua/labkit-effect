@@ -201,7 +201,10 @@ in layers (`docs/agent-host.md`, Launch options):
 
 1. the host's defaults (`acpDefaults`);
 2. the user's file;
-3. the working folder's files, when `--setting-sources` names them;
+3. the working folder's files, when `--setting-sources` names them. The working folder counts as
+   trusted (`agent-host/trust.ts`): the editor opened the session in a workspace that it trusts, and
+   that trust is the boundary. So these files are the user's own and may name extensions and MCP
+   servers;
 4. the launcher's `--settings`, `--mcp-config` and flags;
 5. the MCP servers the client names. Each replaces the configuration's server of its name whole.
 
