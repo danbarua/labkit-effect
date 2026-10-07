@@ -12,7 +12,9 @@ import { OpenAiClient } from "@effect/ai-openai";
 import { OpenAiClient as OpenAiCompatClient } from "@effect/ai-openai-compat";
 import { Context, Effect, Layer, Logger, type LogLevel, Redacted, References, Tracer } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
-import type * as HttpClient from "effect/http/HttpClient";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { ModelName, ProviderName, TurnId } from "../agent-machine/names.ts";
 import { ModelClient, type ProviderRequest } from "../agent-session/contracts.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
@@ -25,7 +27,7 @@ import { xAiRequests } from "../agent-session/providers/xai-client.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { anthropicStream, chatStream, openAiStream } from "../../tests/support/streams.ts";
 import { test, testFolder } from "../../tests/support/test.ts";
-import { type CaptureSettings, HttpCaptures, capturesFolderIn, capturingHttp, eventBlocksOf } from "./http-captures.ts";
+import { type CaptureSettings, HttpCaptures, capturesFolderIn, capturingClient, capturingHttp, eventBlocksOf } from "./http-captures.ts";
 import { type SpanLine, SpansTo } from "./telemetry.ts";
 
 const stops: Array<() => unknown> = [];
@@ -232,6 +234,31 @@ test("a request that fails before any response is still captured, in the attempt
   expect(observed).toMatchObject({ _tag: "ModelFailed" });
   expect(captures.map(({ fields }) => fields.body)).toEqual(["request"]);
   expect(captures[0]!.spanId).toBe(attempts[0]!.spanId);
+});
+
+test("a request is sent before its body's capture is logged: capturing does not hold the send back", async () => {
+  const order: Array<string> = [];
+  // The send is noted when the client is called; the capture is logged only after its file is written.
+  const inner = HttpClient.make((request) =>
+    Effect.sync(() => {
+      order.push("sent");
+      return HttpClientResponse.fromWeb(request, Response.json({}));
+    }),
+  );
+  const noting = Logger.make((options) => {
+    const [key, fields]: ReadonlyArray<unknown> = Array.isArray(options.message) ? options.message : [];
+    if (key === logKeys.provider.payloadCaptured && typeof fields === "object" && fields !== null && "body" in fields && fields.body === "request") order.push("captured");
+  });
+  await runTest(
+    capturingClient(inner)
+      .execute(HttpClientRequest.post("http://localhost/v1/chat/completions").pipe(HttpClientRequest.bodyText('{"model":"m"}', "application/json")))
+      .pipe(
+        Effect.provide(Logger.layer([noting], { mergeWithExisting: true })),
+        Effect.provideService(HttpCaptures, { folder: join(testFolder(), "captures"), secrets: { values: [], tooShort: [] } }),
+        Effect.provideService(References.MinimumLogLevel, "Debug"),
+      ),
+  );
+  expect(order).toEqual(["sent", "captured"]);
 });
 
 test("a secret value in a body is replaced by <redacted>, and the line counts it", async () => {
