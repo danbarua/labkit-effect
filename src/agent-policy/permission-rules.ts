@@ -9,7 +9,8 @@
  * | `<tool>(<words>:*)` | a command tool's program whose words start with these |
  *
  * `command` in place of a tool's name names every command tool (`commandTools`). Words are separated
- * by spaces, so a rule cannot name a word that has a space in it.
+ * by spaces, so a rule cannot name a word that has a space in it. A `:` is only the `:*` that ends a
+ * prefix, so a rule cannot name paths (`rm:/tmp/*`) or a word with a `:` in it.
  *
  * A rule with words is matched against each program a command runs (`command-units.ts`), past its
  * wrappers: a word of the program that is not literal matches no word of a rule. An allow rule
@@ -28,7 +29,10 @@ import type { Unit } from "./command-units.ts";
 /** A rule: `<tool>`, `<tool>(<words>)` or `<tool>(<words>:*)`. */
 export const PermissionRule = Schema.String.pipe(
   Schema.brand("agent-policy/PermissionRule"),
-  Schema.check(Schema.isPattern(/^[A-Za-z0-9_.-]+(\([^()\s](?:[^()]*[^()\s])?\))?$/u, { message: "Expected <tool>, <tool>(<words>) or <tool>(<words>:*)" })),
+  // A `:` inside the parentheses is only the `:*` that ends a prefix: a rule cannot name paths (`rm:/tmp/*`).
+  Schema.check(
+    Schema.isPattern(/^[A-Za-z0-9_.-]+(\([^():\s](?:[^():]*[^():\s])?(?::\*)?\))?$/u, { message: "Expected <tool>, <tool>(<words>) or <tool>(<words>:*); a rule cannot name paths" }),
+  ),
 );
 export type PermissionRule = typeof PermissionRule.Type;
 

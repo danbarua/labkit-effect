@@ -82,7 +82,7 @@ export type PermissionOption = typeof PermissionOption.Type;
  * | `opaque` | its words do not show what it runs | an allow rule naming it |
  * | `writes` | it writes files inside the working folder | `acceptEdits` |
  * | `readsOutside` | it reads outside the working folder | an allow rule naming it |
- * | `changesOutside` | it writes, deletes, moves or changes paths outside the working folder | nothing |
+ * | `changesOutside` | it writes, deletes, moves or changes paths outside the working folder | an allow rule naming it |
  * | `unseen` | deny rules cannot see what it runs | nothing |
  * | `unparsed` | the command does not parse, or the call has no command | nothing |
  */
@@ -307,6 +307,7 @@ const commandStep = (
     const grant = unit.grant;
     return judging.settings.readOnly.some((prefix) => readOnlyNames(prefix, unit)) || (grant !== undefined && session.allowed.some((each) => sameGrant(each, grant)));
   };
+  const ruleAllows = (unit: Unit): boolean => allow.some((rule) => ruleNamesProgram(rule, unit, false));
   const needs: ReadonlyArray<CommandNeed> =
     split === undefined || split._tag === "Unparsed"
       ? [{ program: WordText.make(command ?? "the command"), kind: "unparsed", why: NeedText.make(split?._tag === "Unparsed" ? `it does not parse: ${split.reason}` : "the call's input has no command") }]
@@ -315,12 +316,11 @@ const commandStep = (
           const own: ReadonlyArray<CommandNeed> = [
             ...(allowed(unit) ? [] : [unit.opaque === undefined ? { program, kind: "notAllowed" as const, why: NeedText.make("it is not allowed yet") } : { program, kind: "opaque" as const, why: unit.opaque }]),
             ...(unit.writes.length === 0 || mode === "acceptEdits" ? [] : [{ program, kind: "writes" as const, why: NeedText.make(`it writes ${listed(unit.writes)}`) }]),
-            // Reading outside the working folder is lifted only by an allow rule that names the program.
-            ...(unit.outside.length === 0 || allow.some((rule) => ruleNamesProgram(rule, unit, false))
+            // Reading or changing paths outside the working folder is lifted only by an allow rule that names the program.
+            ...(unit.outside.length === 0 || ruleAllows(unit)
               ? []
               : [{ program, kind: "readsOutside" as const, why: NeedText.make(`it reads outside the working folder: ${listed(unit.outside)}`) }]),
-            // Changing paths outside the working folder is lifted by nothing but bypassPermissions.
-            ...changesOutsideNeeds(program, unit.changesOutside),
+            ...(ruleAllows(unit) ? [] : changesOutsideNeeds(program, unit.changesOutside)),
           ];
           const [first, ...rest] = own;
           return first === undefined || unit.detail === undefined ? own : [{ ...first, detail: unit.detail }, ...rest];

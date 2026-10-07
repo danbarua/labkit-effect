@@ -1,6 +1,7 @@
 /** The permission policy for command tools: each program a command runs is judged, by rules, read-only programs, session answers and mode. */
 
 import { expect } from "bun:test";
+import { Schema } from "effect";
 import { observe, open } from "../../tests/support/drive.ts";
 import { test } from "../../tests/support/test.ts";
 import type { Fact } from "../agent-machine/fact.ts";
@@ -208,9 +209,10 @@ test("acceptEdits lets a command write files inside the working folder, not outs
   expect(judged("git status > /dev/null 2>&1", { folders: project }).step).toBe("runs");
 });
 
-test("a command that changes paths outside the working folder is asked about even after cd, and with an allow rule naming the program; bypassPermissions, or an allow rule for the whole tool, runs it", () => {
+test("a command that changes paths outside the working folder is asked about even after cd; an allow rule naming the program, an allow rule for the whole tool, or bypassPermissions runs it", () => {
   expect(judged("cd ~/other && rm -rf build", { facts: answered("rm -rf dist", "allow-session"), folders: project }).question).toMatchObject({ needs: [{ program: "cd ~/other", kind: "readsOutside" }] });
-  expect(judged("rm -rf /tmp/build", { allow: ["command(rm:*)"], folders: project }).question).toMatchObject({ needs: [{ kind: "changesOutside" }] });
+  expect(judged("rm -rf /tmp/build", { allow: ["command(rm:*)"], folders: project }).step).toBe("runs");
+  expect(judged("rm -rf /tmp/build", { allow: ["command(rm -rf build)"], folders: project }).question).toMatchObject({ needs: [{ kind: "notAllowed" }, { kind: "changesOutside" }] });
   expect(judged("rm -rf ~/Code/other", { mode: "bypassPermissions", folders: project }).step).toBe("runs");
   // An allow rule for the whole tool runs every command, as it does in every other case.
   expect(judged("rm -rf ~/Code/other", { allow: ["command"], folders: project }).step).toBe("runs");
@@ -220,4 +222,10 @@ test("when no one can answer, a change outside the working folder is vetoed with
   expect(judged("echo x >> ~/.zshrc", { mode: "acceptEdits", canAsk: false, folders: project }).reason).toBe(
     "run_command needs permission, and no one is there to answer: a redirect (it writes outside the working folder: ~/.zshrc). --permission-mode bypassPermissions lets it run.",
   );
+});
+
+test("a rule names a tool, exact words or a prefix (:*); a rule that names paths (rm:/tmp/*) is not valid", () => {
+  const valid = Schema.is(PermissionRule);
+  expect(["command", "run_command(git log)", "command(bun test:*)", "command(rm -rf build)"].map(valid)).toEqual([true, true, true, true]);
+  expect(["command(rm:/tmp/*)", "command(git:log)", "command(:*)"].map(valid)).toEqual([false, false, false]);
 });

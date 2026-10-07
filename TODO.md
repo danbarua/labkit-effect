@@ -55,9 +55,9 @@ model.
         shows what a `sed` script does, in plain English, and code written in the command in its
         language. To do:
         - Changes outside the working folder (built: writes, `rm`, `mv`, `cp`, `chmod`, `touch`,
-          `curl -o`, `find -delete`, `xargs rm`, and the like) are lifted by nothing but
-          `bypassPermissions`. Not covered: `tar -x -C`, `patch -d`, `git -C <outside>` with a
-          subcommand that writes (asked about as a read), and every program not in `changers`.
+          `curl -o`, `find -delete`, `xargs rm`, and the like) are lifted by an allow rule naming
+          the program. To do: rules that name paths (`command(rm:/tmp/*)`, Dan, 2026-10-07), refused
+          until then; the programs the guide lists as not checked (`docs/guide/permissions.md`).
         - Jev classifies what the rules cannot decide, from the exo-project skeleton (`01_3`).
         - Models are told to use the write and edit tools instead of `python -c` and heredocs.
         - A here-document's body fed to a shell (`bash <<'EOF'`) is opaque; it could be split as
@@ -96,6 +96,10 @@ model.
       - The ACP host's command tool, `terminal_command`, runs in the editor's terminal
         (`terminal/create`), with the environment the editor gives it.
       - Later (Dan, 2026-10-07):
+        - A command whose effect is an edit to a file (`cat > f <<'EOF'`, `sed -i`) dispatched to
+          the edit tools, so that it goes through what they check and report: refusing an edit to
+          text that was not read, or to a file changed since it was read, and the editor's record of
+          a turn's edits (JetBrains Air's ACP extension, for review and comments).
         - Git subcommands that can lose uncommitted work (`git stash`, `git reset`,
           `git checkout`, `git rebase`), which today are `edit` tools and run unasked under
           `acceptEdits`.

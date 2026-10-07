@@ -141,9 +141,9 @@ not opaque (`readOnly`: `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `echo`, `grep`
 opaque. A program that writes files inside the working folder also needs the `acceptEdits` mode. A
 program that reads outside the working folder needs permission unless an allow rule names it (a
 session grant does not lift it). A program that changes paths outside the working folder needs
-permission in every mode but `bypassPermissions`: neither a session grant, `acceptEdits` nor an
-allow rule naming the program lifts it. An allow rule for the whole tool (`command`) runs every
-command, as it does for every other need but `unseen`. The working folder is the boundary that a trusted folder draws. A command that
+permission unless an allow rule names it: neither a session grant nor `acceptEdits` lifts it. An
+allow rule for the whole tool (`command`) runs every command, as it does for every other need but
+`unseen`. The working folder is the boundary that a trusted folder draws. A command that
 cannot be split needs permission.
 
 Only the programs named above have their paths judged. A program that writes files where its own
@@ -155,7 +155,7 @@ judged by its grant alone.
 | every program runs without a question | runs | runs | runs | runs |
 | a program writes files inside the working folder, the others run without a question | asks | runs | vetoed | runs |
 | a program reads outside the working folder | asks | asks | vetoed | runs |
-| a program writes, deletes, moves or changes paths outside the working folder | asks | asks | vetoed | runs |
+| a program writes, deletes, moves or changes paths outside the working folder (no allow rule names it) | asks | asks | vetoed | runs |
 | a program needs permission | asks | asks | vetoed | runs |
 | a deny rule or a rejected grant names a program | vetoed | vetoed | vetoed | vetoed |
 

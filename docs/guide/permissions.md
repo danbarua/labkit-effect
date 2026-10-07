@@ -49,8 +49,10 @@ not `~/.aws/credentials`. An allow rule in your settings that names the program
 
 Changing files outside your folder is asked about every time, in every mode but
 `bypassPermissions`: allowing `rm` for the session lets `rm -rf build` run, not
-`rm -rf ~/Code/other`, and an allow rule naming the program (`command(rm:*)`) does not lift it.
-An allow rule for the whole tool (`command`) runs every command. This covers redirects, `tee`, `sed -i`,
+`rm -rf ~/Code/other`. An allow rule in your settings that names the program lets it change files
+anywhere: `command(rm:*)` lets `rm -rf ~` run without a question. A rule cannot yet name paths
+(`command(rm:/tmp/*)`); such a rule is refused when the settings are read. An allow rule for the
+whole tool (`command`) runs every command. This covers redirects, `tee`, `sed -i`,
 `rm`, `mv`, `cp`, `rsync`, `ln`, `touch`, `mkdir`, `chmod`, `chown`, `curl -o`, `wget -O` and
 `find -delete`. A path labkit cannot read (`rm -rf "$DIR"`, or `xargs rm`, whose paths come from its
 input) counts as outside your folder. Other programs write where their own arguments say
@@ -108,6 +110,27 @@ editor.
   is in the command, including after `sudo`. When a deny rule names programs and labkit cannot read
   a command (it does not parse, or a program's name is not written out), labkit asks even in
   `bypassPermissions`.
-- **An allow rule** runs the program without a question, and lets it read outside your folder.
+- **An allow rule** runs the program without a question, and lets it read and change files outside
+  your folder.
 
 `readOnly` replaces the list of programs that run without a question.
+
+## What labkit does not check
+
+labkit judges a command by its words. It does not run the command to see what it does, so these
+pass by what their words show:
+
+- **Programs it does not know** write where their own arguments or files say: `make`,
+  `bun run build`, `go build -o ~/bin/tool`, a script. Allowing one for the session lets it write
+  anywhere your user can.
+- **Some programs that change files outside your folder** are not yet read for their paths:
+  `tar -x -C <folder>`, `patch -d <folder>`, `install -d`, `scp`, and `git -C <folder>` with a
+  subcommand that writes (asked about as a read outside your folder).
+- **Symbolic links** are not followed: a link inside your folder to a file outside it counts as
+  inside.
+- **`cd`** earlier in a command does not move the folder that later paths are judged against.
+  A `cd` or `pushd` outside your folder is asked about itself, and once you allow that call, the
+  rest of the command runs where it moved to.
+- **Code given to a program** (`python3 -c '…'`, a here-document fed to `bash`) is shown in the
+  question, not judged. Deny rules cannot see the programs that code runs.
+- **`bypassPermissions`** contains nothing (see Permission modes).
