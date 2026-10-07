@@ -109,6 +109,57 @@ Constraints:
 - "We should be able to build a clone of contemporary harnesses as they run now, with their
   constraints, **and** we should be free to imagine a smarter more adaptable way of working".
 
+### A tool's result has details for the harness (2026-10-08)
+
+Dan: "Tool results with details: … Yes, that's the one." A design, not built.
+
+**The problem.** A tool's result is one value, the text the model is sent
+(`ToolOutcome.Succeeded { output }`). What the call changed is not recorded, so a display that
+shows it has to work it out again. A command that wrote a file shows its diff live, read from the
+disk before the command ran (`agent-host/command-writes.ts`); a loaded session cannot, because the
+disk has moved on, so it says "Wrote config.yml." instead. `write_file` shows no diff at all.
+
+**What other harnesses do.** Each keeps two parts per result: what the model is sent, and
+structured details for the harness and its displays, which the model never sees. Claude Code's
+`toolUseResult` (a patch, the new text, and the old file up to about 10,000 characters), Codex's
+`FileChange` (the diff for an update, the whole content for a new or deleted file), opencode's
+`metadata` (a patch for an edit), omp's `details` (a display diff, and whole texts up to 32,768
+characters). Each shows a past edit's diff from what it stored, never from the disk or git.
+
+**The shape.**
+
+- A tool returns its text and, when it has them, its details:
+  `run: (input) => Effect<string | { text, details }>`. `details` is a tagged union, one variant per
+  kind of thing a call does, so a display branches on what happened, not on which tool ran:
+
+  | Details | When | Holds |
+  | --- | --- | --- |
+  | `FileChanged` | a file written, edited, created or deleted | the path, the change (`created`, `updated`, `deleted`), and the patch: a unified diff for an update, the whole content for a created or deleted file |
+  | none | anything else, until a display needs more | |
+
+- `ToolOutcome.Succeeded` gains `details`, beside `output`, recorded with the result in
+  `ToolEnded`. A large patch is kept in the blob store (`Received`'s `Stored` body), as large
+  outputs are. Failed calls have none: nothing changed, or what changed is not known.
+- The model is never sent `details`. Context assembly sends `output` only.
+- `write_file`, `edit_file` and the workspace tools return `FileChanged`. `terminal_command` and
+  `run_command` return it for each write whose text their words show (`textsWritten`), from the text
+  read before the command ran.
+
+**What it replaces.**
+
+- ACP's diff for a call, live and replayed alike, is built from `details`: one projection for live
+  and replay again, and the "Wrote config.yml." exception goes (`docs/agent-acp.md`).
+- The editor world's per-call memory of what a command's files held before it ran becomes the
+  input to the command's `details`, not a second record.
+- The REPL shows a finished call's diff from `details` too, whether or not it asked.
+
+**Open.**
+
+- Whether the text before a write is read by the tool runner, for every tool, or by each tool.
+- How large a patch is kept whole before it is cut, as Claude Code caps its stored old file.
+- Whether `details` are also what the harness tells the agent of changes to files it has read
+  (`TODO.md`, the harness telling the agent of file changes).
+
 ## Ideas, not decided
 
 - `ToolCallPolicies` takes the shape of a wrapper.
