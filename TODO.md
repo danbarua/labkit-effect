@@ -58,13 +58,25 @@ model.
           `bash -c` is.
         - The JSON Schema does not carry the rules' pattern; a rule that is not valid is refused when
           the configuration is read.
-        - How often it asks, over exo-project's corpus (43,491 commands from 231 Claude Code
-          sessions, default mode, 2026-10-07): with no session answers, 20.6% run without a
-          question, 32.8% ask with a grant to offer, 46.3% ask about the call only, 0.4% do not
-          parse. Allowing every grant offered for its session, 47.7% run and 52.3% ask. The
-          programs asked about the call only: `sed` (9,923), code read from input (6,363), files
-          written (6,030), code written in the command (2,975), a program's name not written out
-          (722), `awk` (619).
+        - Measured (`docs/bash-segments.md`, Measuring the policy): over 85,042 commands from
+          542 Claude Code, Codex and omp sessions (2026-10-07), 15.4% run without a question when
+          first in their session and 47.6% with every grant offered allowed for its session. The
+          questions that offer only the call are mostly reads outside the working folder (27,664:
+          paths not written out, sibling projects under `~/Code`, `/tmp` and Claude Code's
+          scratchpad), files written (15,784), code read from input (12,367) or written in the
+          command (5,039), and `awk` (1,695). By model, the share that runs without a question in
+          its session ranges from 3% (Sonnet 5 under omp) to 80% (Sonnet 5.5 under Claude Code);
+          `ask-rate` prints the table. 24,726 commands, from transcripts that no longer exist, have
+          no model recorded.
+        - A question about `sed` explains what its script does ("prints lines 1 to 5 of a.txt"),
+          from the commands `sed-script.ts` reads (Dan, 2026-10-07).
+        - `awk` judged by its program, as `sed` is (no `system()`, no pipes, no `print >`).
+        - Scratch folders (Dan, 2026-10-07): under a workspace-only model, `/tmp`, `/private/tmp`
+          and `/var/folders` are outside, and agents use them (about 4,800 of the corpus's reads).
+          Forcing everything into a tracked working folder is not ideal either. Sandboxing, scratch
+          folders, or a scratch database belong to the opinionated harness above this one, which
+          `examples/cli-repl` grows into (`src/cli`); with additional directories (Sessions, above)
+          they would be inside.
       - The ACP host's command tool, `terminal_command`, runs in the editor's terminal
         (`terminal/create`), with the environment the editor gives it.
       - Later (Dan, 2026-10-07):
@@ -416,6 +428,10 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 
 ## Later: worth doing, not core
 
+- [ ] Docs (Dan, 2026-10-07): the design docs move to `docs/dev/`, in one mechanical commit with
+      the references to them in code comments; the guide (`docs/guide/`) grows as features settle.
+- [ ] `native/bash-segments` as a package of its own, as `effective-acp` is (Dan has ideas to build
+      on it: agents' intent, side effects, whether a command is safe to replay or retry).
 - [ ] `/retry` after a failed turn (Dan, 2026-10-05: not needed yet). A tool call that arrives
       while a response streams runs at once. When the model request then fails (`ModelFailed`,
       after retries and fallbacks), the turn ends `Failed`, the response is not recorded, and no

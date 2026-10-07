@@ -29,6 +29,7 @@ about them are in [agent-host-direction.md](agent-host-direction.md).
 | `redaction.ts` | Removing the environment's secrets from log records. |
 | `brand.ts` | The name the agent goes by, and what is named after it. |
 | `launch.ts` | The launch options both hosts share, and the configuration layers they make. |
+| `command-parser.ts` | The command parser: the WebAssembly module of `native/bash-segments`, which splits a shell command into its segments (`docs/bash-segments.md`). |
 | `trust.ts` | Trusted folders: the folders whose own `.env` files and project settings the agent reads (`trusted-folders.json`). |
 | `log-keys.ts` | The names of the log events that this module writes. |
 

@@ -1,6 +1,6 @@
 /**
- * Prints the newest launch's ACP log (`acp-*.jsonl` in `<PREFIX>ACP_LOG_DIR`, `~/.<brand>/logs` by
- * default; `LABKIT_ACP_LOG_DIR` and `~/.labkit/logs` for labkit's), a record per line; its path goes
+ * Prints the newest launch's ACP log (`acp-*.jsonl` in `<PREFIX>ACP_LOG_DIR`, `~/.local/share/<brand>/logs`
+ * by default; `LABKIT_ACP_LOG_DIR` and `~/.local/share/labkit/logs` for labkit's), a record per line; its path goes
  * to stderr. `--errors` prints only the warning, error
  * and fatal records. Its rotated files (`.jsonl.<n>`) hold older lines and are not printed.
  */

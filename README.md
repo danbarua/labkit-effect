@@ -1,8 +1,75 @@
 # labkit-effect
 
-The domain core of a coding harness, and the layers around it.
+labkit is a coding agent: a model that reads your project, runs commands and changes files, asking
+you first before anything that could do harm. It runs at the terminal (the `labkit` command) and
+inside editors through the Agent Client Protocol (ACP). It is written in TypeScript with
+[Effect](https://effect.website) and runs on [Bun](https://bun.sh).
 
-## Constraints (Dan, verbatim)
+It is being built. It is used day to day at the terminal, and in VS Code for testing.
+
+## What it does
+
+- **Talks to the models you have keys for**: Anthropic, OpenAI and xAI, or a local
+  OpenAI-compatible server. You choose the model, its reasoning effort and its thinking.
+- **Keeps every session**, so you can carry on with it later, at the terminal or in an editor.
+- **Asks before it acts.** It reads your project without asking. Before it changes a file or runs a
+  command, it asks, unless you have allowed it. A command is judged by each program it runs:
+  `git log | head` runs, `git push` asks, and a command that reads `~/.aws/credentials` asks even if
+  it only uses `cat`. You can allow a program for the rest of a session, and write rules that allow
+  or refuse programs in every session.
+- **Trusts a project only when you say so.** A cloned project's `.env` and settings are not read
+  until you trust its folder.
+- **Uses MCP servers** that you configure, and the tools of the editor it runs in.
+- **Can report what it does** (traces, logs and metrics) to a local Grafana stack.
+
+## Getting started
+
+```sh
+bun install
+rustup target add wasm32-unknown-unknown   # once: the command parser is built to WebAssembly
+bun run native:build
+bun link                                   # puts the labkit command on your PATH
+export ANTHROPIC_API_KEY=…                 # or OPENAI_API_KEY, XAI_API_KEY, or a server at localhost:8000
+labkit                                     # in the folder you want to work in
+```
+
+The [guide](docs/guide/README.md) covers using labkit:
+[getting started](docs/guide/getting-started.md), [trusted folders](docs/guide/trusted-folders.md)
+and [permissions](docs/guide/permissions.md).
+
+## In an editor
+
+`bun src/agent-acp/main.ts` (`bun run acp:dev`) is the command an editor launches: ACP protocol v1
+on stdin and stdout. It writes a log file, whose path it prints once on stderr, and exits when stdin
+closes.
+
+`bun run vscode:dev [folder]` opens VS Code on a folder (this checkout when none is given) with
+labkit's ACP client and this agent in it. It builds the client from `LABKIT_VSCODE_CLIENT`
+(labkit-web's `packages/app-vscode`; set it in `.env`), and runs VS Code with user data of its own
+(`~/.labkit/vscode-dev`), so your own VS Code settings are not changed.
+
+The editor lists a folder's sessions, newest first, and reopens one with its history. The agent's
+options are flags (`bun src/agent-acp/main.ts --help`), each read from a `LABKIT_ACP_…` variable
+when not given: the model new sessions start on, the permission mode, where sessions are kept
+(`~/.local/share/labkit/sessions/`), the settings to read, and the MCP servers to start.
+`bun run acp:logs [--errors]` prints the newest launch's log (`~/.local/share/labkit/logs/`). The
+agent's design is in [docs/agent-acp.md](docs/agent-acp.md).
+
+## For developers
+
+```sh
+bun run check          # builds and tests the command parser, then typecheck, lint, schemas and tests
+bun cli --help         # the CLI from this checkout (it reads this checkout's .env, as Bun always does)
+bun run commands:import && bun run commands:ask-rate   # measure the permission policy over saved sessions
+bun scripts/trajectories/sweep.ts claude-code          # replay saved sessions through the core
+```
+
+`bun run check` needs Rust (`cargo`, with the `wasm32-unknown-unknown` target). The adapter tests
+start [VidaiMock](https://github.com/vidaiUK/VidaiMock), a server that answers as the providers'
+APIs do; `bun run vidaimock:install` downloads the pinned release into `.tools/`, checking its
+SHA-256.
+
+### Design constraints (Dan, verbatim)
 
 - C1. Pure state machines.
 - C2. Message passing only.
@@ -12,98 +79,39 @@ The domain core of a coding harness, and the layers around it.
 - C6. Everything written down - code or prose - says exactly what it means and nothing else.
 - C7. Behaviours: implementation details. Those are the layer *around* the core. Contracts. Adapters.
 
-## Layout
+### Layout
 
-| Directory | What it is | May import |
-|---|---|---|
-| `src/agent-machine/` | Machines with mailboxes that pass messages (agent, conversation turn, turn step, call), the router, and the facts, decisions and effect requests they record. See `docs/agent-machine.md`. | `Schema` from `effect` |
-| `src/agent-policy/` | Whether an effect request continues, is vetoed, or waits. See `docs/agent-policy.md`. | `Schema` from `effect`, `agent-machine` |
-| `src/agent-process/` | Child process groups that a session keeps (stdio MCP servers), and the removal of credentials from their environment and from logged arguments. See `docs/agent-process.md`. | `effect` |
-| `src/agent-session/` | The layer around them: contracts as Effect services, adapters, the loop (which records every fact, and so owns the journal). See `docs/agent-session.md`. | anything |
-| `src/agent-context/` | Context assembly: what the model is sent, from system prompts, tool catalogs and a view of the conversation; compaction. See `docs/agent-context.md` and `docs/agent-context-direction.md`. | anything |
-| `src/instrumentation/` | Tool usage counted from facts, as Effect metrics, and OpenTelemetry. See its `README.md`. | anything |
-| `src/agent-host/` | What both hosts share, lifted from the CLI: the model catalog, the provider clients, the services a session runs with, the permission policy for a mode, the folder sessions are kept in and a host's record of a session beside its facts, log files (and the ACP launcher's, JSONL, rotated), the draft a session is before turn zero, and a session's transcript as Markdown. See `docs/agent-host.md`, and `docs/agent-host-direction.md` for where the hosts are going. | the core; never `effective-acp` or a host |
-| `src/agent-acp/` | The ACP host, protocol v1 over stdio: `makeHost` joins `effective-acp` (the ACP protocol, a package of its own on npm: github.com/danbarua/effective-acp) to sessions of the core (a draft at `session/new`, turn zero at the first prompt), with tools through the editor's `fs/*`, permission, cancel, `usage_update`, `/export`, and `session/load`, `resume` and `list` over the sessions the directory keeps; the projection of a session's facts and the core's stream items to `session/update`; and the launcher, `bun src/agent-acp/main.ts`. See `docs/agent-acp.md`. | anything |
-| `src/examples/` | Examples, not part of the harness: the FizzBuzz session (a scripted model, its tools, a toy compaction) and example policies. | anything |
-| `scripts/probes/` | Live checks against the providers' APIs. Each reads its key from the environment and writes what it saw to a folder per run, `logs/probes/<probe>/<run>/` (not committed). | anything |
-| `scripts/trajectories/` | Importers that project Claude Code and Codex sessions' records through the core's decisions into `trajectories/` (not committed). | anything |
+| Directory | What it is | Design doc |
+| --- | --- | --- |
+| `src/agent-machine/` | The core: machines that pass messages (agent, conversation turn, turn step, call), and the facts, decisions and effect requests they record. Imports only `Schema` from `effect`. | [agent-machine](docs/agent-machine.md) |
+| `src/agent-policy/` | Whether an effect request continues, is vetoed or waits: permissions, rules, the loop breaker, turn limits. Imports only `Schema` and the core. | [agent-policy](docs/agent-policy.md) |
+| `src/agent-session/` | The agentic loop, the contracts as Effect services, and the providers' adapters. | [agent-session](docs/agent-session.md) |
+| `src/agent-context/` | What the model is sent: system prompts, tool catalogs, the conversation, compaction. | [agent-context](docs/agent-context.md) |
+| `src/agent-config/` | Configuration: layers, plug-ins, seams, the JSON Schema. | [agent-config](docs/agent-config.md) |
+| `src/agent-host/` | What the CLI and the ACP host share: the model catalog, provider clients, sessions on disk, logs, trusted folders, the command parser. | [agent-host](docs/agent-host.md) |
+| `src/agent-acp/` | The ACP host, on [effective-acp](https://github.com/danbarua/effective-acp). | [agent-acp](docs/agent-acp.md) |
+| `src/agent-tools/`, `src/agent-mcp/`, `src/agent-process/` | Tools, MCP clients, child processes. | [agent-mcp](docs/agent-mcp.md), [agent-process](docs/agent-process.md) |
+| `src/instrumentation/` | Metrics, traces and logs, sent as OpenTelemetry. | [README](src/instrumentation/README.md) |
+| `src/examples/` | The CLI (`cli-repl`), Zork, the spectator, FizzBuzz. | |
+| `native/bash-segments/` | The command parser, in Rust, built to WebAssembly. | [bash-segments](docs/bash-segments.md) |
+| `scripts/` | Probes against the providers, trajectory importers, the command corpus, the observability stack. | |
 
-`docs/<module>.md` describes a module's architecture: its files, its states, its interfaces, its
-design decisions and its tests. `docs/<module>-direction.md`, where a module has one, holds direction
-that is not built. `TODO.md` lists what is to be built.
+The docs come in three kinds:
 
-A module's tests are beside its code (`src/agent-machine/turn.test.ts`). The core's tests import only
-the core and `tests/support/`. `tests/` holds what joins modules: `tests/examples/` tests the
-examples, `tests/telemetry.test.ts` the instrumentation through one, and `tests/support/` what
-tests share (a driver for the core's machines, stand-ins for a provider, the test runner).
+- **The guide** (`docs/guide/`): what labkit does and how to use it.
+- **Design docs** (`docs/<module>.md`): how a module is built, its states, interfaces, decisions
+  and tests. `docs/<module>-direction.md` holds direction that is not built.
+- **`TODO.md`**: what is to be built.
 
-In the first two, `bun run lint` (oxlint, with Effect's recommended preset and the rules in
-`scripts/oxlint/abstract-layers.js`) enforces their imports and pure functions, in everything but
-their tests (no `let`, no loops,
-no call that changes a value in place), and refuses the `string` type and an unbranded
-`Schema.String`. `bun run check:brands` asks the TypeScript checker that every schema there decodes
-to a type with no unbranded string, however it is built.
+A module's tests are beside its code. `tests/` holds what joins modules, and `tests/support/` what
+tests share. In `agent-machine` and `agent-policy`, `bun run lint` (oxlint, with
+`scripts/oxlint/abstract-layers.js`) enforces their imports and pure functions, and refuses the
+`string` type and an unbranded `Schema.String`; `bun run check:brands` checks that every schema there
+decodes to a type with no unbranded string.
 
-## Commands
-
-```sh
-bun install
-bun run vidaimock:install   # the mock provider server the adapter tests run against
-bun run check               # installs it if missing, then typecheck, lint, check:brands, check:schemas, tests
-bun run acp:logs [--errors]  # the newest ACP launch log (~/.labkit/logs; LABKIT_ACP_LOG_DIR, _LEVEL, _MAX_BYTES, _BACKUPS)
-bun cli --help              # the CLI; --model, --permission-mode, --max-turns and its other shared options
-                            # are read from LABKIT_MODEL, LABKIT_PERMISSION_MODE, ... when not given
-bun link                    # puts `labkit` on the PATH: the CLI, run in the folder you are in (bin/labkit.ts)
-bun scripts/trajectories/sweep.ts codex         # run both sweeps after changing a core machine, and
-bun scripts/trajectories/sweep.ts claude-code   # read the counts of observations not expected
-```
-
-`labkit` reads a folder's own files, its `.env` files and its project settings (`.labkit/`), only
-when the folder is trusted. Bun would otherwise read a folder's `.env` and `bunfig.toml` before any
-of the agent's code runs, and either can make it run code. At a terminal, `labkit` asks whether to
-trust a folder that has such files; the trusted folders are listed in
-`~/.config/labkit/trusted-folders.json`. `bun cli` in this checkout reads this checkout's `.env`, as
-Bun always does.
-
-The adapter tests start [VidaiMock](https://github.com/vidaiUK/VidaiMock), a server that answers as
-the providers' APIs do. `scripts/vidaimock.ts` downloads the pinned release for this platform into
-`.tools/`, refusing an archive whose SHA-256 differs from the one it holds.
-
-## The ACP agent
-
-`bun src/agent-acp/main.ts` (`bun run acp:dev`) is the command an editor launches: protocol v1 on
-stdin and stdout, a log file whose path it says once on stderr, exit 0 when stdin closes.
-
-`bun run vscode:dev [folder]` opens VS Code on a folder (this checkout when none is given) with
-labkit's ACP client and this agent in it, as `labkit-effect`. It builds the client from
-`LABKIT_VSCODE_CLIENT` (labkit-web's `packages/app-vscode`; set it in `.env`) and runs VS Code with
-user data of its own (`~/.labkit/vscode-dev`), whose `settings.json` it gives the agent's entry in
-`acp.agents`; the user's own settings are not changed. Run `bun install` in this checkout first.
-
-Each session that had a turn is a folder in the session directory: its facts (`facts.jsonl`) and
-the host's record of it (`host.json`: the working folder, and a title from the first prompt). The
-editor lists them (`session/list`, by working folder, the latest first) and reopens one with
-`session/load`, which replays its history, or `session/resume`, which does not. A turn the process
-left running (the editor closed mid-turn) is ended as interrupted when its session is reopened,
-and nothing it had begun is run again. A session is open in one process at a time. `session/fork`
-waits for the core (`TODO.md`, Sessions).
-
-Its options are flags (`bun src/agent-acp/main.ts --help`), each read from its variable when not
-given: `--model` (`LABKIT_ACP_MODEL`: the model new sessions start on, `provider/model`; else the
-first the catalog lists), `--sessions-dir` (`LABKIT_ACP_SESSIONS_DIR`, default
-`~/.labkit/sessions`), `--local-tools` (`LABKIT_ACP_LOCAL_TOOLS=1`: tools on the local disk instead
-of through the editor, a stopgap), `--strict-tool-input` (`LABKIT_ACP_STRICT_TOOL_INPUT=1`: refuse a
-tool call whose input has properties its tool does not take; without it, the call runs without
-them, and its result says so), `--permission-mode`, `--max-turns`, `--retries`, `--settings`,
-`--setting-sources`, `--mcp-config`, and so on. One that cannot be used stops the launch. A
-provider's key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`) or the local server at
-`http://localhost:8000/v1` gives the models; `LABKIT_ACP_LOG_DIR`, `_LEVEL`, `_MAX_BYTES`, `_BACKUPS`
-the log. Each session reads its configuration as the CLI does (every `.yml` file in
-`~/.config/labkit/`, and the working folder's files when `--setting-sources` names them), with the MCP servers the
-editor names over those of the same name, and writes what it resolved to beside its facts
-(`effective-settings.json`).
+### The brand
 
 These are labkit's names. The agent goes by a brand (`src/agent-host/brand.ts`): the one its entry
-point gives (`main(brand)`, `launch(args, env, brand)`), else the one `LABKIT_BRAND` names, else labkit.
-As `acme` it reads `ACME_ACP_*`, keeps its sessions and logs in `~/.acme/`, its configuration in
-`~/.config/acme/` and `.acme/`, and calls itself `acme` to an ACP client and an MCP server.
+point gives, else the one `LABKIT_BRAND` names, else labkit. As `acme` it reads `ACME_…` variables,
+keeps its configuration in `~/.config/acme/` and `.acme/` and its sessions in
+`~/.local/share/acme/`, and calls itself `acme` to an ACP client and an MCP server.
