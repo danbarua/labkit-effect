@@ -2,58 +2,20 @@ import { expect } from "bun:test";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, Layer, Ref } from "effect";
-import { CallId, FailureText, ModelName, ModelText, ProviderName, StopReason, ToolName } from "../../src/agent-machine/names.ts";
-import type { ModelPart } from "../../src/agent-machine/observation.ts";
-import { ModelClient, type ModelContext } from "../../src/agent-session/contracts.ts";
+import { Effect, Ref } from "effect";
+import { CallId, ToolName } from "../../src/agent-machine/names.ts";
+import type { ModelContext } from "../../src/agent-session/contracts.ts";
 import { receivedJson } from "../../src/agent-session/received.ts";
 import { sentIn } from "../../src/agent-session/sent.ts";
 import { adventurerCustomisations, haikuAdventurer } from "../../src/examples/zork/customisations.ts";
-import { play, type Adventurer, type Player, type Setup } from "../../src/examples/zork/scenario.ts";
+import { adventurerFor, playerFor } from "../../src/examples/zork/players.ts";
+import { play, type Adventurer, type GameEvent, type Player, type Setup } from "../../src/examples/zork/scenario.ts";
 import { catalog, moveInputJson, offeredTools, worldTools, type GameState } from "../../src/examples/zork/tools.ts";
 import { applyAction, availableTools, grueEnding, initialWorld, inventory, maxTurns, view, type Action, type World } from "../../src/examples/zork/world.ts";
 import { runTest } from "../support/run.ts";
 import { test, testFolder } from "../support/test.ts";
+import { call, model, say, scriptedAdventurer, scriptedEngine, userWorld } from "../support/zork.ts";
 
-const say = (text: string): ReadonlyArray<ModelPart> => [{ _tag: "Text", text: ModelText.make(text) }];
-const call = (action: Action, id: string): ReadonlyArray<ModelPart> => [{
-  _tag: "ToolCall", call: CallId.make(id), tool: ToolName.make(action.tool), input: receivedJson(action.input),
-}];
-const model = (name: string, reply: (context: ModelContext, request: number) => ReadonlyArray<ModelPart> | undefined) => {
-  const seen: Array<ModelContext> = [];
-  const player: Player = {
-    target: { provider: ProviderName.make("scripted"), model: ModelName.make(name) },
-    client: Layer.succeed(ModelClient, {
-      respond: (target, context, turn) => Effect.sync(() => {
-        seen.push(context);
-        const parts = reply(context, seen.length);
-        return parts === undefined ? {
-          _tag: "ModelFailed" as const, turn, failure: FailureText.make("scripted outage"), error: receivedJson({}),
-        } : {
-          _tag: "ModelResponded" as const, turn, ...target, parts,
-          stop: StopReason.make(parts.some((part) => part._tag === "ToolCall") ? "tool_use" : "end_turn"),
-          ending: { _tag: "Complete" as const }, metadata: receivedJson({}),
-        };
-      }),
-    }),
-  };
-  return { player, seen };
-};
-const userWorld = (context: ModelContext): ReturnType<typeof view> => {
-  const text = context.messages.filter((message) => message.role === "user" && message.parts.some((part) => part._tag === "Text")).at(-1)?.parts
-    .flatMap((part) => part._tag === "Text" ? [part.text] : []).join("\n") ?? "";
-  return (JSON.parse(text) as { world: ReturnType<typeof view> }).world;
-};
-const scriptedEngine = (select: (world: ReturnType<typeof view>) => ReadonlyArray<string> = (world) => world.availableTools, narrate?: (world: ReturnType<typeof view>) => string, fenced = false) =>
-  model("engine", (context) => {
-    const world = userWorld(context);
-    const json = JSON.stringify({ narration: narrate?.(world) ?? world.event, tools: world.outcome === "Alive" ? select(world) : [] });
-    return say(fenced ? `\`\`\`json\n${json}\n\`\`\`` : json);
-  });
-const scriptedAdventurer = (choose: (world: ReturnType<typeof view>, context: ModelContext) => Action) => model("adventurer", (context, n) => {
-  if (context.messages.at(-1)?.parts.some((part) => part._tag === "ToolResult")) return say("Done.");
-  return call(choose(userWorld(context), context), `action-${n}`);
-});
 const setup = (engine: Player, adventurer: Adventurer): Setup => ({ engine, adventurer, directory: join(testFolder(), "zork"), home: testFolder() });
 /** Plays a game with the platform's file system, which its saved sessions and logs are written with. */
 const played = (given: Setup) => play(given).pipe(Effect.provide(BunServices.layer));
@@ -143,6 +105,37 @@ test("Haiku's adventurer requests, as recorded, constrain each offered tool and 
   expect([...new Set(offering.map((context) => directions(context).join(" ")))]).toEqual(["north", "south north", "south", "south down"]);
   // Game turn 2's reply after its action was the fifth request, which the limit vetoed.
   expect(replies.map((context) => context.toolChoice)).toEqual([undefined, undefined, undefined]);
+});
+
+test("a game reports its opening, then each action and its narration in order, as each is played", async () => {
+  const actions: ReadonlyArray<Action> = [move("north"), move("north"), target("open", "trapdoor"), move("down")];
+  const engine = scriptedEngine();
+  const adventurer = scriptedAdventurer((world) => actions[world.turn] ?? { tool: "look", input: {} });
+  const events: Array<GameEvent> = [];
+  // Each event is reported before the next model request: the adventurer has been asked once for each action reported so far.
+  const asked: Array<number> = [];
+  const game = await runTest(played({ ...setup(engine.player, adventurer.player), watch: (event) => Effect.sync(() => { events.push(event); asked.push(engine.seen.length); }) }));
+  expect(events.map((event) => event._tag === "Opened" ? "Opened" : `${event._tag} ${event.turn}`)).toEqual(["Opened", "Acted 1", "Narrated 1", "Acted 2", "Narrated 2", "Acted 3", "Narrated 3", "Acted 4", "Narrated 4"]);
+  expect(asked).toEqual([1, 1, 2, 2, 3, 3, 4, 4, 5]);
+  const opened = events[0];
+  expect(opened?._tag === "Opened" ? opened.offered : []).toEqual(availableTools(initialWorld()));
+  const acted = events.flatMap((event) => event._tag === "Acted" ? [event] : []);
+  expect(acted.map((event) => event.action)).toEqual([...actions]);
+  expect(acted.at(-1)?.world.outcome).toBe("EatenByGrue");
+  const narrated = events.flatMap((event) => event._tag === "Narrated" ? [event] : []);
+  expect(narrated.map((event) => event.narration)).toEqual(game.exchanges.map((exchange) => exchange.engine));
+  expect(narrated.at(-1)?.offered).toEqual([]);
+});
+
+test("a player is named by its model, and needs its provider's key; Haiku's adventurer has its customisation", () => {
+  const keys = { ANTHROPIC_API_KEY: "key", OPENAI_API_KEY: "key", XAI_API_KEY: "key" };
+  expect(playerFor("claude-haiku-4-5", keys)).toMatchObject({ target: { provider: "anthropic", model: "claude-haiku-4-5" } });
+  expect(playerFor("gpt-6-luna", keys)).toMatchObject({ target: { provider: "openai", model: "gpt-6-luna" } });
+  expect(playerFor("grok-build-0.1", keys)).toMatchObject({ target: { provider: "xai", model: "grok-build-0.1" } });
+  expect(playerFor("grok-4.7", {})).toEqual({ _tag: "KeyNotSet", model: "grok-4.7", variable: "XAI_API_KEY" });
+  expect(playerFor("llama-3", keys)).toEqual({ _tag: "UnknownModel", named: "llama-3" });
+  expect(adventurerFor("claude-haiku-4-5", keys)).toMatchObject({ customise: haikuAdventurer });
+  expect(adventurerFor("claude-sonnet-5-5", keys)).not.toHaveProperty("customise");
 });
 
 test("Zork enforces thirty actions and runner-owned death even when narration disagrees", async () => {

@@ -41,7 +41,23 @@ export interface Adventurer extends Player {
   /** How each request the adventurer is sent is changed for its model (`customisations.ts`); unchanged when not given. */
   readonly customise?: Customisation;
 }
-export class ZorkResponseFailed extends Data.TaggedError("ZorkResponseFailed")<{ readonly message: string }> {}
+/**
+ * A game that cannot go on: `message` names the session; `role` is the player that failed and
+ * `reason` says how, as a verb phrase after the player's name, without the session's id.
+ */
+export class ZorkResponseFailed extends Data.TaggedError("ZorkResponseFailed")<{
+  readonly message: string;
+  readonly role: "Engine" | "Adventurer";
+  readonly reason: string;
+}> {}
+/** What a game reports as it is played (`Setup.watch`). */
+export type GameEvent =
+  /** The engine's opening scene: its narration, and the tools it offers the first game turn. */
+  | { readonly _tag: "Opened"; readonly narration: string; readonly offered: ReadonlyArray<ActionName>; readonly world: World }
+  /** The adventurer's action that succeeded in game turn `turn`, from the tools offered, and the world after it. */
+  | { readonly _tag: "Acted"; readonly turn: number; readonly offered: ReadonlyArray<ActionName>; readonly action: Action; readonly world: World }
+  /** The engine's narration of game turn `turn`, and the tools it offers the next game turn (none after death). */
+  | { readonly _tag: "Narrated"; readonly turn: number; readonly narration: string; readonly offered: ReadonlyArray<ActionName> };
 export interface Setup {
   readonly engine: Player;
   readonly adventurer: Adventurer;
@@ -49,6 +65,8 @@ export interface Setup {
   readonly directory?: string;
   /** The home folder under which sessions and logs are kept (`~/.local/share/<brand>/`). Defaults to the user's. */
   readonly home?: string;
+  /** Called with the opening, and with each action and its narration as soon as each is played. */
+  readonly watch?: (event: GameEvent) => Effect.Effect<void>;
 }
 export interface Exchange {
   readonly turn: number;
@@ -137,6 +155,8 @@ const asked = (session: Session) => (text: string) => Effect.gen(function* () {
 
 /** Says how a turn of the session `id` ended, when it did not complete. */
 const endedAs = (id: string, ending: Ending): string => `${id}: ${ending._tag}${ending._tag === "Failed" ? `: ${ending.failure}` : ""}`;
+/** Says, after a player's name, that its turn did not complete, and how it ended. */
+const unfinished = (ending: Ending): string => ending._tag === "Failed" ? `did not finish its turn: ${ending.failure.replace(/\.$/, "")}` : `did not finish its turn (${ending._tag})`;
 
 const Scene = Schema.Struct({ narration: Schema.String, tools: Schema.Array(Schema.Literals(actionNames)) });
 const decodeScene = Schema.decodeUnknownResult(Scene, { onExcessProperty: "error" });
@@ -144,13 +164,17 @@ const sceneFrom = (text: string, world: World) => Effect.gen(function* () {
   // Providers sometimes fence a JSON answer even when asked for plain JSON.
   const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/i.exec(text.trim());
   const json = parseJson(receivedJsonText(fenced?.[1] ?? text));
-  if ("reason" in json) return yield* new ZorkResponseFailed({ message: `Engine must return a JSON scene: ${json.reason}` });
+  if ("reason" in json) return yield* new ZorkResponseFailed({ message: `Engine must return a JSON scene: ${json.reason}`, role: "Engine", reason: `did not answer with a JSON scene: ${json.reason}` });
   const decoded = decodeScene(json.value);
-  if (decoded._tag === "Failure") return yield* new ZorkResponseFailed({ message: decoded.failure.message });
+  if (decoded._tag === "Failure") return yield* new ZorkResponseFailed({ message: decoded.failure.message, role: "Engine", reason: `answered with a scene that does not fit the game: ${decoded.failure.message}` });
   const scene = decoded.success;
   if (scene.narration.trim() === "" || (world.outcome === "Alive" && scene.tools.length === 0) ||
     scene.tools.some((tool) => !availableTools(world).includes(tool)) || new Set(scene.tools).size !== scene.tools.length)
-    return yield* new ZorkResponseFailed({ message: "Engine scene must contain narration and a valid, unique selection of available tools (none after death)." });
+    return yield* new ZorkResponseFailed({
+      message: "Engine scene must contain narration and a valid, unique selection of available tools (none after death).",
+      role: "Engine",
+      reason: "answered without narration or without a valid, unique selection of the available tools",
+    });
   return scene;
 });
 const quote = (text: string): string => text.split("\n").map((line) => `> ${line}`).join("\n");
@@ -195,10 +219,12 @@ export const play = (setup: Setup) => {
           const adventurer = asked(adventurerSession);
           // The engine's turn must complete: its answer is the scene.
           const narrate = (world: World, action?: Action) => engine(JSON.stringify({ world: view(world), action: action ?? null })).pipe(
-            Effect.flatMap(({ ending, answer }) => ending._tag === "Completed" ? sceneFrom(answer, world) : Effect.fail(new ZorkResponseFailed({ message: endedAs(`zork-engine-${id}`, ending) }))),
+            Effect.flatMap(({ ending, answer }) => ending._tag === "Completed" ? sceneFrom(answer, world) : Effect.fail(new ZorkResponseFailed({ message: endedAs(`zork-engine-${id}`, ending), role: "Engine", reason: unfinished(ending) }))),
           );
+          const watch = setup.watch ?? (() => Effect.void);
           const scene = yield* narrate(initialWorld());
           yield* Ref.update(state, (current) => ({ ...current, offered: scene.tools }));
+          yield* watch({ _tag: "Opened", narration: scene.narration, offered: scene.tools, world: initialWorld() });
           const exchanges = yield* Effect.reduce(
             Array.from({ length: maxTurns }, (_, index) => index + 1),
             (): ReadonlyArray<Exchange> => [],
@@ -213,9 +239,15 @@ export const play = (setup: Setup) => {
                   message: played.ending._tag === "Completed"
                     ? `Adventurer ended the turn without a successful world tool call (game turn ${before.world.turn + 1}).`
                     : `${endedAs(`zork-adventurer-${id}`, played.ending)}, without a successful world tool call (game turn ${before.world.turn + 1}).`,
+                  role: "Adventurer",
+                  reason: played.ending._tag === "Completed"
+                    ? `ended game turn ${before.world.turn + 1} without an action`
+                    : `${unfinished(played.ending)}, without an action in game turn ${before.world.turn + 1}`,
                 });
+              yield* watch({ _tag: "Acted", turn: after.world.turn, offered: before.offered, action: after.action, world: after.world });
               const next = yield* narrate(after.world, after.action);
               yield* Ref.update(state, (current) => ({ ...current, offered: next.tools, action: undefined }));
+              yield* watch({ _tag: "Narrated", turn: after.world.turn, narration: next.narration, offered: next.tools });
               return [...previous, { turn: after.world.turn, offered: before.offered, action: after.action, world: after.world, engine: next.narration }];
             }),
           );

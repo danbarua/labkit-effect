@@ -86,8 +86,11 @@ and provider details; the readable transcript shows the successful actions.
 bun test tests/examples/zork.test.ts
 ```
 
-`scenario.ts` exports `play(setup)` for other model clients; `index.ts` supplies
-the live setup. Set an observation origin using `reportedBy` when calling `play`
-directly (the CLI and `runTest` already do). The result includes both sessions'
-facts, the final world and the transcript path. Tests can set `setup.directory`
-to keep transcripts in their own log folders.
+`scenario.ts` exports `play(setup)` for other model clients; `players.ts` makes
+the live players from model names, and `index.ts` supplies the live setup. Set an
+observation origin using `reportedBy` when calling `play` directly (the CLI and
+`runTest` already do). The result includes both sessions' facts, the final world
+and the transcript path. Tests can set `setup.directory` to keep transcripts in
+their own log folders. `setup.watch`, when given, is called with the opening, and
+with each action and its narration as soon as each is played; the spectator
+(`../zork-spectator`) shows a game with it.
