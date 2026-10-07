@@ -7,10 +7,16 @@
  * | `<tool>` | every call to the tool |
  * | `<tool>(<words>)` | a command tool's program that is exactly these words |
  * | `<tool>(<words>:*)` | a command tool's program whose words start with these |
+ * | `Read(<path>)` | the paths a call reads that match the pattern (`path-patterns.ts`) |
+ * | `Edit(<path>)` | the paths a call writes, changes or deletes that match the pattern; an allowed edit is an allowed read too |
+ *
+ * Path rules are Claude Code's: `Read(~/.ssh/**)`, `Edit(//tmp/**)`, `Read(./.env)`. A program rule
+ * says which programs run; path rules say where they may read and change files. A path rule names no
+ * tool, so it applies to every tool that reads or changes files.
  *
  * `command` in place of a tool's name names every command tool (`commandTools`). Words are separated
- * by spaces, so a rule cannot name a word that has a space in it. A `:` is only the `:*` that ends a
- * prefix, so a rule cannot name paths (`rm:/tmp/*`) or a word with a `:` in it.
+ * by spaces, so a rule cannot name a word that has a space in it. In a program rule, a `:` is only the
+ * `:*` that ends a prefix: `command(rm:/tmp/*)` is refused, with a hint to use `Edit(//tmp/**)`.
  *
  * A rule with words is matched against each program a command runs (`command-units.ts`), past its
  * wrappers: a word of the program that is not literal matches no word of a rule. An allow rule
@@ -25,13 +31,25 @@ import { Schema } from "effect";
 import { ToolName } from "../agent-machine/names.ts";
 import { WordText } from "./command-segments.ts";
 import type { Unit } from "./command-units.ts";
+import { type PathPattern, parsePathPattern } from "./path-patterns.ts";
 
-/** A rule: `<tool>`, `<tool>(<words>)` or `<tool>(<words>:*)`. */
+/** Why `rule` is refused, when it is a rule of a kind people write by mistake: `Write(<path>)`, a path from a single `/`, or a program rule naming a path. */
+const mistakeIn = (rule: Parameters<typeof WordText.make>[0]): Parameters<typeof WordText.make>[0] | undefined => {
+  if (/^(Write|NotebookEdit)\(/.test(rule)) return "Write(<path>) does not name paths: use Edit(<path>), which covers writing, changing and deleting files";
+  if (/^(Read|Edit)\(\/(?!\/)/.test(rule)) return "A path rule may not start with a single /: write //<path> for a path from the root of the file system, ~/<path> for one in the home folder, or a path relative to the working folder";
+  if (!/^(Read|Edit)\(/.test(rule) && /^[A-Za-z0-9_.-]+\([^()]*:(?!\*\)$)[^()]*\)$/.test(rule)) return "A program rule names a program's words, not paths: use Read(<path>) or Edit(<path>), such as Edit(//tmp/**)";
+  return undefined;
+};
+
+/** A rule: `<tool>`, `<tool>(<words>)`, `<tool>(<words>:*)`, `Read(<path>)` or `Edit(<path>)`. */
 export const PermissionRule = Schema.String.pipe(
   Schema.brand("agent-policy/PermissionRule"),
-  // A `:` inside the parentheses is only the `:*` that ends a prefix: a rule cannot name paths (`rm:/tmp/*`).
   Schema.check(
-    Schema.isPattern(/^[A-Za-z0-9_.-]+(\([^():\s](?:[^():]*[^():\s])?(?::\*)?\))?$/u, { message: "Expected <tool>, <tool>(<words>) or <tool>(<words>:*); a rule cannot name paths" }),
+    Schema.makeFilter((rule) => mistakeIn(rule) ?? true, undefined, true),
+    // In a program rule, a `:` is only the `:*` that ends a prefix.
+    Schema.isPattern(/^((Read|Edit)\(\S(?:[^()]*\S)?\)|[A-Za-z0-9_.-]+(\([^():\s](?:[^():]*[^():\s])?(?::\*)?\))?)$/u, {
+      message: "Expected <tool>, <tool>(<words>), <tool>(<words>:*), Read(<path>) or Edit(<path>)",
+    }),
   ),
 );
 export type PermissionRule = typeof PermissionRule.Type;
@@ -53,6 +71,20 @@ export interface ParsedRule {
   /** Whether its words are a prefix (`:*`) rather than the whole program. */
   readonly prefix: boolean;
 }
+
+/** A path rule, read: whether it is about reading or changing files, and its pattern. */
+export interface PathRule {
+  readonly rule: PermissionRule;
+  readonly access: "read" | "edit";
+  readonly pattern: PathPattern;
+}
+
+/** Returns `rule` as a path rule; undefined when it is a rule about a tool or a program. */
+export const pathRuleOf = (rule: PermissionRule): PathRule | undefined => {
+  const found = /^(Read|Edit)\((.+)\)$/.exec(rule);
+  const pattern = found?.[2] === undefined ? undefined : parsePathPattern(found[2]);
+  return pattern === undefined ? undefined : { rule, access: found?.[1] === "Read" ? "read" : "edit", pattern };
+};
 
 /** The name that stands for every command tool in a rule. */
 export const everyCommandTool = ToolName.make("command");

@@ -53,7 +53,7 @@ import { type SegmentsOf, ShellCommand, WordText } from "./command-segments.ts";
 import { commandNotes, notesOf } from "./command-explainers.ts";
 import { Detail, type Folders, NeedText, type OutsideChange, type Unit, unitsOf } from "./command-units.ts";
 import { Explanation } from "./sed-script.ts";
-import { defaultReadOnly, namesProgram, namesTool, type ParsedRule, parseRule, PermissionRule, type ReadOnlyPrefix, readOnlyNames, ruleNamesProgram } from "./permission-rules.ts";
+import { defaultReadOnly, namesProgram, namesTool, type ParsedRule, parseRule, pathRuleOf, PermissionRule, type ReadOnlyPrefix, readOnlyNames, ruleNamesProgram } from "./permission-rules.ts";
 import type { Policy, PolicyStep } from "./policy.ts";
 
 export const PermissionMode = Schema.Literals(["default", "acceptEdits", "dontAsk", "bypassPermissions"]);
@@ -292,6 +292,9 @@ export interface CommandJudging {
   readonly folders?: Folders;
 }
 
+/** The rules in `list` about tools and programs, read; path rules (`Read(...)`, `Edit(...)`) are not among them. */
+const programRules = (list: ReadonlyArray<PermissionRule>): ReadonlyArray<ParsedRule> => list.filter((rule) => pathRuleOf(rule) === undefined).map(parseRule);
+
 /** The step for a call to command tool `tool` (see the module's comment). */
 const commandStep = (
   request: { readonly input: Received },
@@ -302,8 +305,8 @@ const commandStep = (
   facts: ReadonlyArray<Fact>,
   judging: CommandJudging,
 ): PolicyStep<PermissionQuestion> => {
-  const allow = judging.settings.allow.map(parseRule).filter((rule) => namesTool(rule, tool, true));
-  const deny = judging.settings.deny.map(parseRule).filter((rule) => namesTool(rule, tool, true));
+  const allow = programRules(judging.settings.allow).filter((rule) => namesTool(rule, tool, true));
+  const deny = programRules(judging.settings.deny).filter((rule) => namesTool(rule, tool, true));
   const toolDeny = deny.find((rule) => rule.words === undefined);
   if (toolDeny !== undefined) return veto(`${tool} is denied by the rule ${toolDeny.rule}.`);
   const session = sessionAnswersFor(facts, tool);
@@ -408,7 +411,7 @@ export function permissions(
       if (request._tag !== "RunTool") return proceed;
       const kind = kindOf(request.tool) ?? "other";
       if (commands !== undefined && commands.settings.commandTools.includes(request.tool)) return commandStep(request, request.tool, kind, mode, canAsk, facts, commands);
-      const rules = (list: ReadonlyArray<PermissionRule>) => list.map(parseRule).filter((rule) => rule.words === undefined && namesTool(rule, request.tool, false));
+      const rules = (list: ReadonlyArray<PermissionRule>) => programRules(list).filter((rule) => rule.words === undefined && namesTool(rule, request.tool, false));
       const denyRule = rules(commands?.settings.deny ?? [])[0];
       if (denyRule !== undefined) return veto(`${request.tool} is denied by the rule ${denyRule.rule}.`);
       if (onlyReads.includes(kind)) return proceed;

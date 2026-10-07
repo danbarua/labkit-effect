@@ -221,8 +221,15 @@ test("when no one can answer, a change outside the working folder is vetoed with
   );
 });
 
-test("a rule names a tool, exact words or a prefix (:*); a rule that names paths (rm:/tmp/*) is not valid", () => {
+test("a rule names a tool, exact words, a prefix (:*), or paths read (Read) or changed (Edit); a program rule naming a path, Write(…) and a path from a single / are refused, saying what to write", () => {
   const valid = Schema.is(PermissionRule);
-  expect(["command", "run_command(git log)", "command(bun test:*)", "command(rm -rf build)"].map(valid)).toEqual([true, true, true, true]);
-  expect(["command(rm:/tmp/*)", "command(git:log)", "command(:*)"].map(valid)).toEqual([false, false, false]);
+  expect(["command", "run_command(git log)", "command(bun test:*)", "command(rm -rf build)", "Read(~/.ssh/**)", "Edit(//tmp/**)", "Read(./.env)", "Edit(src/**/*.ts)"].map(valid)).toEqual([true, true, true, true, true, true, true, true]);
+  const refusal = (rule: string) => {
+    const decoded = Schema.decodeUnknownResult(PermissionRule)(rule);
+    return decoded._tag === "Failure" ? String(decoded.failure) : "accepted";
+  };
+  expect(refusal("command(rm:/tmp/*)")).toContain("A program rule names a program's words, not paths: use Read(<path>) or Edit(<path>), such as Edit(//tmp/**)");
+  expect(refusal("Write(src/**)")).toContain("Write(<path>) does not name paths: use Edit(<path>)");
+  expect(refusal("Read(/etc/**)")).toContain("A path rule may not start with a single /: write //<path>");
+  expect(refusal("command(git log")).toContain("Expected <tool>, <tool>(<words>), <tool>(<words>:*), Read(<path>) or Edit(<path>)");
 });
