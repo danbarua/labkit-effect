@@ -15,6 +15,10 @@ session.
 
 Choose one with `--permission-mode`, or in an editor with the session's permission setting.
 
+`bypassPermissions` contains nothing. A command runs as your user, with access to every file your
+user can read or change, inside your folder or not. Use it only where that is acceptable, such as a
+container or a machine you can throw away.
+
 ## Commands
 
 A command is judged by each program it runs: in a pipeline, after `&&` or `;`, inside `$(…)`, and
@@ -30,15 +34,39 @@ labkit asks, and says why, when a command:
 | --- | --- | --- |
 | runs a program not allowed yet | `rm -rf build`, `bun test` | the call, or the program (and its subcommand) for the rest of the session |
 | writes a file | `echo done > notes.txt` | the call; `acceptEdits` allows it |
-| reads outside your folder | `cat ~/.aws/credentials` | the call |
+| reads outside your folder | `cat ~/.aws/credentials` | the call (see below) |
 | runs code labkit cannot read | `python3 -c '…'`, `curl … \| sh` | the call |
 | does not parse | | the call |
 
 "Allow for the rest of the session" names what it allows: `rm`, `git push`, `bun run build`,
 `npx eslint`. A later command that runs only allowed programs runs without a question.
 
+Reading outside your folder is asked about every time, even after you allowed the program for the
+session: allowing `cat` for the session lets `cat` read files in your folder without a question,
+not `~/.aws/credentials`. An allow rule in your settings that names the program
+(`command(cat:*)`) lets it read anywhere without a question.
+
 `ssh`, `docker` and `kubectl` are allowed by host or container (`ssh build-box`,
 `docker exec web`): the command they run there is not judged.
+
+## What a question shows
+
+A question names each program that needs permission and why. Two kinds of program also show what
+they will do:
+
+- **`sed`** is explained in plain English, command by command:
+
+  ```text
+  sed -i 's/foo/bar/g' notes.txt: it is not allowed yet
+    Edits notes.txt in place:
+      Replaces every match of `foo` with `bar`, on every line.
+      Saves every line, after these changes.
+  ```
+
+- **Code written in the command** is shown in its language: `python3 -c`, `node -e`, `perl -ne`,
+  `ruby -e`, `bun -e`, `deno eval`, an `awk` program, and code given to a program or a shell as a
+  here-document (`python3 - <<'EOF'`). In an editor it is a fenced code block, so the editor
+  highlights it.
 
 ## Rules
 

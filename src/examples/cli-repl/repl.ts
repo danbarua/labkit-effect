@@ -23,6 +23,7 @@
 import type { McpServers } from "../../agent-mcp/servers.ts";
 import { Console, Deferred, Effect, HashMap, Option, PubSub, Queue, Ref } from "effect";
 import { Brand } from "../../agent-host/brand.ts";
+import { terminalOf } from "../../agent-host/command-detail.ts";
 import type { SessionUpdate } from "effective-acp/schema/v1";
 import { next, presentFrom, type ProjectionInput, project } from "../../agent-acp/projection.ts";
 import { immutableToolCatalogOf } from "../../agent-session/configuration/session-setup.ts";
@@ -138,11 +139,15 @@ const inputOf = (facts: ReadonlyArray<Fact>, call: CallId): string => {
 
 /**
  * The permission question as shown. About a command: the command, then each of its programs that
- * needs permission and why. About a tool: the tool, its kind, and the call's input.
+ * needs permission and why, with what a `sed` script does or the code a runtime is given indented
+ * under it. About a tool: the tool, its kind, and the call's input.
  */
 const shown = (question: PermissionQuestion, input: string): string =>
   question._tag === "Command"
-    ? [`Run this command? ${question.command}`, ...question.needs.map((each) => `  ${each.program}: ${each.why}`)].join("\n")
+    ? [
+        `Run this command? ${question.command}`,
+        ...question.needs.flatMap((each) => [`  ${each.program}: ${each.why}`, ...(each.detail === undefined ? [] : terminalOf(each.detail).map((line) => `    ${line}`))]),
+      ].join("\n")
     : `Run ${question.tool} (${question.kind})? ${input}`;
 
 /** Returns the first line of `text`, cut to `width` characters, and how many lines follow it. */

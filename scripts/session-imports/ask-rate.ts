@@ -12,7 +12,8 @@
  *
  * A command's paths are judged against its session's working folder and this process's home folder.
  *
- * It prints the shares overall, by source, by model, and by project (the last part of the session's
+ * It prints the shares overall, by source, by model (when a transcript records none, the vendor its source
+ * runs: Claude for Claude Code, OpenAI for Codex), and by project (the last part of the session's
  * working folder, for the projects with the most commands), the needs that the questions name, and the grants
  * offered most. It writes each command's judgement to `judgements.jsonl` beside the corpus
  * (`{ key, cold, session, needs, grants }`), replacing the file, for later study.
@@ -80,6 +81,13 @@ const count = (table: Map<string, Map<Outcome, number>>, group: string, outcome:
 };
 const projectOf = (command: CorpusCommand) => (command.cwd === "" ? "(none)" : basename(command.cwd));
 
+/** The vendor whose model a source's command came from when its transcript records no model: Claude Code runs Claude models, and Codex runs OpenAI's. */
+const unrecorded: ReadonlyMap<CorpusCommand["source"], string> = new Map([
+  ["claude-code", "Claude (model not recorded)"],
+  ["codex", "OpenAI (model not recorded)"],
+]);
+const modelOf = (command: CorpusCommand) => command.model ?? unrecorded.get(command.source) ?? "(model not recorded)";
+
 corpus.forEach((command, id) => {
   const first = outcomeOf(judge(command.command, id, [], command.cwd));
   const facts = sessions.get(`${command.source}:${command.session}`) ?? [];
@@ -90,7 +98,7 @@ corpus.forEach((command, id) => {
     facts.push({ _tag: "Observed", observation: { _tag: "PermissionAsked", call: CallId.make(`c${id}`), asks: step.asks } } as unknown as Fact);
     facts.push({ _tag: "Observed", observation: { _tag: "PermissionAnswered", call: CallId.make(`c${id}`), answer: answerPicking(OptionId.make("allow-session")) } } as unknown as Fact);
   }
-  for (const group of ["all", `source: ${command.source}`, `model: ${command.model ?? "(model not recorded)"}`, `project: ${projectOf(command)}`]) {
+  for (const group of ["all", `source: ${command.source}`, `model: ${modelOf(command)}`, `project: ${projectOf(command)}`]) {
     count(cold, group, first.outcome);
     count(warm, group, inSession.outcome === "asks with a grant" || inSession.outcome === "asks about the call only" || inSession.outcome === "does not parse" ? "asks about the call only" : inSession.outcome);
   }

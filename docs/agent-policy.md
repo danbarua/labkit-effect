@@ -15,7 +15,7 @@ exist: it receives a veto as an observation, like any other outcome.
 | `permission-rules.ts` | The rules (`<tool>`, `<tool>(<words>)`, `<tool>(<words>:*)`) and the read-only programs. |
 | `command-segments.ts` | A shell command's segments, as the host's parser (`agent-host/command-parser.ts`, the Rust crate `native/bash-segments`) returns them. |
 | `command-units.ts` | The programs a command runs, past wrappers; what a session grant names; the files they write; which are opaque. |
-| `sed-script.ts` | What a `sed` script does besides transforming text: runs commands, writes files, reads files. |
+| `sed-script.ts` | What a `sed` script does besides transforming text (runs commands, writes files, reads files), and what it does, in plain English. |
 | `loop-breaker.ts` | `repeatedCalls` and `repeatingTurns`: they stop a model that makes the same tool call again and again. |
 | `max-turn-requests.ts` | `maxTurnRequests`: a limit on the number of model requests in one turn (ACP's `max_turn_requests`). |
 
@@ -111,7 +111,10 @@ programs that run. Each program, its unit, has:
 - the paths outside the working folder that it reads (an absolute path, one through `..` or `~`, or
   one not written out), for the read-only programs, `sed` and `git -C`;
 - whether it is opaque: its words do not show what it runs (`python3 -c`, `curl … | sh`, `sudo`,
-  `awk`, a variable such as `PATH` set for it), with why.
+  `awk`, a variable such as `PATH` set for it), with why;
+- a detail that helps a person judge it: what a `sed` script does, in plain English, or the code
+  written in the command, with its language (`python3 -c`, `node -e`, `perl -ne`, `bun -e`,
+  `deno eval`, an `awk` program, a here-document or here-string that a runtime or a shell reads).
 
 `sed` is judged by its script (`sed-script.ts`): a script that runs commands (`e`), that is in a
 file (`-f`), or that is not understood is opaque; otherwise its grant is `sed`, and it writes the
@@ -135,7 +138,8 @@ permission.
 | a program needs permission | asks | asks | vetoed | runs |
 | a deny rule or a rejected grant names a program | vetoed | vetoed | vetoed | vetoed |
 
-The question (`Command`) names the command and each program that needs permission, with why. It
+The question (`Command`) names the command and each program that needs permission, with why; a
+program's first need carries its detail. It
 offers `allow_once` and `reject_once`; and, when every program it asks about is one that is not
 allowed yet and has a grant, `allow_always` and `reject_always` for those grants. Session answers
 apply in every mode: `dontAsk` and print mode are autonomy.

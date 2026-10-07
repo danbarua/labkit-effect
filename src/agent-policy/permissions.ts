@@ -50,7 +50,7 @@ import type { Fact } from "../agent-machine/fact.ts";
 import { FailureText, ToolKind, ToolName } from "../agent-machine/names.ts";
 import { MediaType, type Received, ReceivedText } from "../agent-machine/received.ts";
 import { type SegmentsOf, ShellCommand, WordText } from "./command-segments.ts";
-import { type Folders, NeedText, type Unit, unitsOf } from "./command-units.ts";
+import { Detail, type Folders, NeedText, type Unit, unitsOf } from "./command-units.ts";
 import { defaultReadOnly, namesProgram, namesTool, type ParsedRule, parseRule, PermissionRule, type ReadOnlyPrefix, readOnlyNames, ruleNamesProgram } from "./permission-rules.ts";
 import type { Policy, PolicyStep } from "./policy.ts";
 
@@ -72,8 +72,12 @@ export const PermissionOption = Schema.Struct({
 });
 export type PermissionOption = typeof PermissionOption.Type;
 
-/** What a command needs before it runs: one of its programs, as written, and why it needs permission. */
-export const CommandNeed = Schema.Struct({ program: WordText, why: NeedText });
+/**
+ * What a command needs before it runs: one of its programs, as written, and why it needs permission.
+ * The first need of a program carries what helps the person judge it, when there is any: what a `sed`
+ * script does, in plain English, or the code that a runtime or shell is given, in its language.
+ */
+export const CommandNeed = Schema.Struct({ program: WordText, why: NeedText, detail: Schema.optionalKey(Detail) });
 export type CommandNeed = typeof CommandNeed.Type;
 
 /** A grant, as a question offers it and an answer records it: the words that a session allows or rejects (`git log`). */
@@ -288,14 +292,18 @@ const commandStep = (
   const needs: ReadonlyArray<CommandNeed> =
     split === undefined || split._tag === "Unparsed"
       ? [{ program: WordText.make(command ?? "the command"), why: NeedText.make(split?._tag === "Unparsed" ? `it does not parse: ${split.reason}` : "the call's input has no command") }]
-      : units.flatMap((unit) => [
-          ...(allowed(unit) ? [] : [{ program: programOf(unit), why: unit.opaque ?? notYet }]),
-          ...(unit.writes.length === 0 || mode === "acceptEdits" ? [] : [{ program: programOf(unit), why: NeedText.make(`it writes ${listed(unit.writes)}`) }]),
-          // Reading outside the working folder is lifted only by an allow rule that names the program.
-          ...(unit.outside.length === 0 || allow.some((rule) => ruleNamesProgram(rule, unit, false))
-            ? []
-            : [{ program: programOf(unit), why: NeedText.make(`it reads outside the working folder: ${listed(unit.outside)}`) }]),
-        ]);
+      : units.flatMap((unit) => {
+          const own: ReadonlyArray<CommandNeed> = [
+            ...(allowed(unit) ? [] : [{ program: programOf(unit), why: unit.opaque ?? notYet }]),
+            ...(unit.writes.length === 0 || mode === "acceptEdits" ? [] : [{ program: programOf(unit), why: NeedText.make(`it writes ${listed(unit.writes)}`) }]),
+            // Reading outside the working folder is lifted only by an allow rule that names the program.
+            ...(unit.outside.length === 0 || allow.some((rule) => ruleNamesProgram(rule, unit, false))
+              ? []
+              : [{ program: programOf(unit), why: NeedText.make(`it reads outside the working folder: ${listed(unit.outside)}`) }]),
+          ];
+          const [first, ...rest] = own;
+          return first === undefined || unit.detail === undefined ? own : [{ ...first, detail: unit.detail }, ...rest];
+        });
   if (needs.length === 0) return proceed;
   const needing = units.filter((unit) => !allowed(unit));
   const grantable = needs.every((each) => each.why === notYet) && needing.every((unit) => unit.grant !== undefined);

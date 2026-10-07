@@ -30,6 +30,7 @@ about them are in [agent-host-direction.md](agent-host-direction.md).
 | `brand.ts` | The name the agent goes by, and what is named after it. |
 | `launch.ts` | The launch options both hosts share, and the configuration layers they make. |
 | `command-parser.ts` | The command parser: the WebAssembly module of `native/bash-segments`, which splits a shell command into its segments (`docs/bash-segments.md`). |
+| `command-detail.ts` | A permission question's detail, shown as Markdown for ACP (code in a fence that names its language, an explanation as a nested list) and as plain lines for the REPL. |
 | `trust.ts` | Trusted folders: the folders whose own `.env` files and project settings the agent reads (`trusted-folders.json`). |
 | `log-keys.ts` | The names of the log events that this module writes. |
 

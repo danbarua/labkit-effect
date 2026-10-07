@@ -84,6 +84,9 @@ pub struct Redirect {
     /// The file or descriptor written to or read from; absent for here-documents, here-strings and process substitutions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<WordOut>,
+    /// The text a here-document or here-string gives as input, as written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
 }
 
 /// Returns the segments of `command`.
@@ -360,20 +363,20 @@ impl Walker {
                             None
                         }
                     };
-                    Redirect { op: op.to_owned(), fd: fd.as_ref().map(|fd| *fd as i32), target }
+                    Redirect { op: op.to_owned(), fd: fd.as_ref().map(|fd| *fd as i32), target, body: None }
                 }
                 IoRedirect::HereDocument(fd, document) => {
                     if document.requires_expansion {
                         self.expanded_text(&document.doc.value);
                     }
-                    Redirect { op: "<<".to_owned(), fd: fd.as_ref().map(|fd| *fd as i32), target: None }
+                    Redirect { op: "<<".to_owned(), fd: fd.as_ref().map(|fd| *fd as i32), target: None, body: Some(document.doc.value.clone()) }
                 }
                 IoRedirect::HereString(fd, word) => {
-                    self.word(word);
-                    Redirect { op: "<<<".to_owned(), fd: fd.as_ref().map(|fd| *fd as i32), target: None }
+                    let text = self.word(word);
+                    Redirect { op: "<<<".to_owned(), fd: fd.as_ref().map(|fd| *fd as i32), target: None, body: Some(text.literal.unwrap_or(text.text)) }
                 }
                 IoRedirect::OutputAndError(word, append) => {
-                    Redirect { op: if *append { "&>>" } else { "&>" }.to_owned(), fd: None, target: Some(self.word(word)) }
+                    Redirect { op: if *append { "&>>" } else { "&>" }.to_owned(), fd: None, target: Some(self.word(word)), body: None }
                 }
             })
             .collect()

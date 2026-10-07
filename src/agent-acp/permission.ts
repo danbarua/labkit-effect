@@ -10,24 +10,32 @@ import { Data } from "effect";
 import type { RequestPermissionRequest, RequestPermissionResponse, SessionId, ToolCallContent } from "effective-acp/schema/v1";
 import { PermissionOptionId, ToolCallId } from "effective-acp/schema/v1";
 import type { Received } from "../agent-machine/received.ts";
-import { answerPicking, type PermissionQuestion } from "../agent-policy/permissions.ts";
+import { markdownOf } from "../agent-host/command-detail.ts";
+import { answerPicking, type CommandNeed, type PermissionQuestion } from "../agent-policy/permissions.ts";
 import { parseJson } from "../agent-session/received.ts";
 import type { Call, Presented } from "./projection.ts";
 
 /** A response that picks no option the question offered; the host answers -32602. */
 export class InvalidAnswer extends Data.TaggedError("InvalidAnswer")<{ readonly reason: string }> {}
 
-/** A command question's reasons, as a text block: each program that needs permission, and why. */
+/** A need, as a Markdown list item: the program and why, then its detail, indented under the item. */
+const needShown = (need: CommandNeed): ReadonlyArray<string> => [
+  `- ${need.program}: ${need.why}`,
+  ...(need.detail === undefined ? [] : ["", ...markdownOf(need.detail).map((line) => (line === "" ? "" : `  ${line}`))]),
+];
+
+/** A command question's reasons, as a Markdown text block: each program that needs permission, why, and what helps judge it. */
 const needsBlock = (question: PermissionQuestion): ReadonlyArray<ToolCallContent> =>
   question._tag === "Command"
-    ? [{ type: "content", content: { type: "text", text: ["This command needs permission:", ...question.needs.map((each) => `- ${each.program}: ${each.why}`)].join("\n") } }]
+    ? [{ type: "content", content: { type: "text", text: ["This command needs permission:", "", ...question.needs.flatMap(needShown)].join("\n") } }]
     : [];
 
 /**
  * Returns the `session/request_permission` for `call` in session `sessionId`: the call as the host
  * presents it, `pending`, with its input as `rawInput`, and the options that `question` offers. A
  * question about a command adds to the call's content a text block naming each program that needs
- * permission and why, so that a client shows why it is asked.
+ * permission and why, so that a client shows why it is asked, with what a `sed` script does or the code
+ * a runtime is given.
  */
 export function requestOf(sessionId: SessionId, call: Call, question: PermissionQuestion, presented: Presented): RequestPermissionRequest {
   const input = parseJson(call.input);

@@ -51,7 +51,13 @@ model.
         written out for `bash -c` and `eval`, and marks what is opaque; allow and deny rules
         (`<tool>(<words>:*)`, `command(…)` for every command tool), the read-only programs, grants
         for the rest of the session (program and subcommand, script or package), and redirects to
-        files needing `acceptEdits`. Session answers apply in `dontAsk` and headless mode. To do:
+        files needing `acceptEdits`. Session answers apply in `dontAsk` and headless mode. A question
+        shows what a `sed` script does, in plain English, and code written in the command in its
+        language. To do:
+        - Writes and deletes outside the working folder are not checked: only reads are. Once `rm`
+          is allowed for the session, `rm -rf ~/Code/other` runs without a question, and a redirect
+          to `~/.zshrc` is only "writes a file", which `acceptEdits` allows anywhere (Dan,
+          2026-10-07: next).
         - Jev classifies what the rules cannot decide, from the exo-project skeleton (`01_3`).
         - Models are told to use the write and edit tools instead of `python -c` and heredocs.
         - A here-document's body fed to a shell (`bash <<'EOF'`) is opaque; it could be split as
@@ -67,16 +73,26 @@ model.
           command (5,039), and `awk` (1,695). By model, the share that runs without a question in
           its session ranges from 3% (Sonnet 5 under omp) to 80% (Sonnet 5.5 under Claude Code);
           `ask-rate` prints the table. 24,726 commands, from transcripts that no longer exist, have
-          no model recorded.
-        - A question about `sed` explains what its script does ("prints lines 1 to 5 of a.txt"),
-          from the commands `sed-script.ts` reads (Dan, 2026-10-07).
+          no model recorded; `ask-rate` reports them as Claude's (from Claude Code) or OpenAI's (from
+          Codex).
+        - Code is shown as written: a one-line `python3 -c '…; …'` stays on one line. Formatting it
+          (Python's `ast.unparse`, a JavaScript formatter) would run a program on the host.
         - `awk` judged by its program, as `sed` is (no `system()`, no pipes, no `print >`).
+        - Git judged by its action, as `sed` is by its script: which git actions read, which write
+          the working tree or the history, and which reach a remote (Dan, 2026-10-07).
         - Scratch folders (Dan, 2026-10-07): under a workspace-only model, `/tmp`, `/private/tmp`
           and `/var/folders` are outside, and agents use them (about 4,800 of the corpus's reads).
           Forcing everything into a tracked working folder is not ideal either. Sandboxing, scratch
           folders, or a scratch database belong to the opinionated harness above this one, which
           `examples/cli-repl` grows into (`src/cli`); with additional directories (Sessions, above)
           they would be inside.
+        - An isolated temporary folder for each agent, on by default with an opt-out, for security
+          research and evaluations (Dan, 2026-10-07).
+        - The opinionated harness runs a composite command itself (Dan, 2026-10-07): it splits the
+          command into its programs and their order, runs each, and returns to the model the result
+          the command asked for (the output of `… | tail`), with each program's exit code and a
+          pointer to its full output. Every program's run is then recorded, for audit and for
+          analytics over a project's commands.
       - The ACP host's command tool, `terminal_command`, runs in the editor's terminal
         (`terminal/create`), with the environment the editor gives it.
       - Later (Dan, 2026-10-07):
@@ -345,6 +361,12 @@ with no model, its attachments as pointers and one line for each tool call (`dig
         observability:datasources` is run by hand after `lgtm-stack.sh`;
       - captures from zork's two sessions are checked by reading the code, not by a live game.
 
+- [ ] Additional directories (Claude Code's `/add-dir`, ACP's additional directories): folders a
+      session may use at the same trust level as its working folder. Claude Code asks whether the
+      directory is added for this session or remembered (Dan, 2026-10-07).
+- [ ] A session is not bound to its working folder for ever (Dan, 2026-10-07): moving it to another
+      folder forks it and rewrites its turn zero, which records the working folder. Waits for forks,
+      below.
 - [ ] Forks as sessions, and the turn pointer (`session/turn`; turn zero of a root points at
       itself). A fact is addressed by its session and its position. In the CLI,
       `--fork-session` (commented out): go on from an earlier turn of a session, as a new one, to

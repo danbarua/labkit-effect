@@ -149,3 +149,33 @@ test("with the working and home folders known, an absolute path or one from ~ is
   const home = unitsOf(ShellCommand.make("cd"), segmentsOf, { working: WordText.make("/home/dan"), home: WordText.make("/home/dan") });
   expect((home._tag === "Units" ? home.units[0]?.outside : []) as unknown).toEqual([]);
 });
+
+/** The detail of each unit of `command` that has one, as the unit's program and its detail. */
+const details = (command: string): ReadonlyArray<unknown> => {
+  const split = unitsOf(ShellCommand.make(command), segmentsOf);
+  if (split._tag === "Unparsed") return [`unparsed: ${split.reason}`];
+  return split.units.flatMap((unit) => (unit.detail === undefined ? [] : [[unit.words[0]?.literal, unit.detail]]));
+};
+
+test("code written in the command is shown in its language: inline options, including at the end of a cluster (perl -ne), awk's program, and bun and deno", () => {
+  expect(details("python3 -c 'import sys; print(sys.argv)'")).toEqual([["python3", { _tag: "Code", language: "python", code: "import sys; print(sys.argv)" }]]);
+  expect(details("node -e 'console.log(1)'")).toEqual([["node", { _tag: "Code", language: "javascript", code: "console.log(1)" }]]);
+  expect(details("perl -ne 'print if /x/' f")).toEqual([["perl", { _tag: "Code", language: "perl", code: "print if /x/" }]]);
+  expect(details("ruby -pe 'gsub(/a/, \"b\")' f")).toEqual([["ruby", { _tag: "Code", language: "ruby", code: 'gsub(/a/, "b")' }]]);
+  expect(details("awk -F: -v n=1 '{print $n}' /etc/passwd")).toEqual([["awk", { _tag: "Code", language: "awk", code: "{print $n}" }]]);
+  expect(details("bun -e 'console.log(1)'")).toEqual([["bun", { _tag: "Code", language: "typescript", code: "console.log(1)" }]]);
+  expect(details("deno eval 'console.log(1)'")).toEqual([["deno", { _tag: "Code", language: "typescript", code: "console.log(1)" }]]);
+  // Code that is not written out has nothing to show.
+  expect(details('python3 -c "$CODE"')).toEqual([]);
+});
+
+test("a program reading code from a here-document or here-string shows that code, in the program's language; a shell's is bash", () => {
+  expect(details("python3 - <<'EOF'\nimport sys\nprint(sys.argv)\nEOF")).toEqual([["python3", { _tag: "Code", language: "python", code: "import sys\nprint(sys.argv)" }]]);
+  expect(details("bash <<'EOF'\nrm -rf build\nEOF")).toEqual([["bash", { _tag: "Code", language: "bash", code: "rm -rf build" }]]);
+  expect(details("node <<< 'console.log(1)'")).toEqual([["node", { _tag: "Code", language: "javascript", code: "console.log(1)" }]]);
+});
+
+test("a sed call carries its explanation, whether it is granted as sed or runs commands", () => {
+  expect(details("sed -n '/x/p' f")).toEqual([["sed", { _tag: "Explained", lines: [{ depth: 0, text: "Reads f:" }, { depth: 1, text: "Prints lines matching `x`." }] }]]);
+  expect(details("sed 's/x/y/e' f")).toMatchObject([["sed", { _tag: "Explained" }]]);
+});

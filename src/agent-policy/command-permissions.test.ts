@@ -158,3 +158,25 @@ test("sed is asked about once and can then be allowed for the session; a script 
   expect(judged("sed 's/a/b/e' b.txt", { facts: allowed }).question).toMatchObject({ grants: [] });
   expect(judged("sed -i 's/a/b/' b.txt", { facts: allowed }).question).toMatchObject({ needs: [{ program: "sed -i 's/a/b/' b.txt", why: "it writes b.txt" }] });
 });
+
+/** What the question about `command` names as needed, when the policy asks about a command. */
+const needsOf = (command: string) => {
+  const question = judged(command).question;
+  return question?._tag === "Command" ? question.needs : undefined;
+};
+
+test("a program's first need carries what helps judge it: the code a runtime is given, or what a sed script does; a program allowed by its grant shows nothing", () => {
+  expect(needsOf("python3 -c 'print(1)' > out.txt") as unknown).toEqual([
+    { program: "python3 -c 'print(1)'", why: "it runs code written in the command", detail: { _tag: "Code", language: "python", code: "print(1)" } },
+    { program: "a redirect", why: "it writes out.txt" },
+  ]);
+  expect(needsOf("sed -i 's/a/b/' f.txt") as unknown).toEqual([
+    {
+      program: "sed -i 's/a/b/' f.txt",
+      why: "it is not allowed yet",
+      detail: { _tag: "Explained", lines: [{ depth: 0, text: "Edits f.txt in place:" }, { depth: 1, text: "Replaces the first match of `a` with `b`, on every line." }, { depth: 1, text: "Saves every line, after these changes." }] },
+    },
+    { program: "sed -i 's/a/b/' f.txt", why: "it writes f.txt" },
+  ]);
+  expect(judged("sed -n 1p f", { facts: answered("sed -n 2p f", "allow-session") }).step).toBe("runs");
+});

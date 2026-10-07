@@ -46,11 +46,26 @@
 
 import { Schema } from "effect";
 import { type Segment, type SegmentsOf, ShellCommand, type UnparsedReason, type Word, WordText } from "./command-segments.ts";
-import { analyse, SedScript } from "./sed-script.ts";
+import { effectsOf, explain as explainSed, ExplanationLine, parse as parseSed, SedFile, SedScript } from "./sed-script.ts";
 
 /** Why a unit's words do not show what it runs. */
 export const NeedText = Schema.String.pipe(Schema.brand("agent-policy/NeedText"));
 export type NeedText = typeof NeedText.Type;
+
+/** The language of code that a command gives a program to run, for showing it. */
+export const CodeLanguage = Schema.Literals(["python", "javascript", "typescript", "ruby", "perl", "php", "lua", "applescript", "r", "powershell", "awk", "bash"]);
+export type CodeLanguage = typeof CodeLanguage.Type;
+
+/** Code that a command gives a program to run, as written. */
+export const CodeText = Schema.String.pipe(Schema.brand("agent-policy/CodeText"));
+export type CodeText = typeof CodeText.Type;
+
+/** What helps a person judge a program: what it does, in plain English (`sed`), or the code it runs, in its language. */
+export const Detail = Schema.Union([
+  Schema.TaggedStruct("Explained", { lines: Schema.Array(ExplanationLine) }),
+  Schema.TaggedStruct("Code", { language: CodeLanguage, code: CodeText }),
+]);
+export type Detail = typeof Detail.Type;
 
 /** A program that a command runs, after the programs around it that only run it. */
 export interface Unit {
@@ -64,6 +79,8 @@ export interface Unit {
   readonly opaque: NeedText | undefined;
   /** The paths it reads outside the working folder, as written: absolute, through `..` or `~`, or not written out. */
   readonly outside: ReadonlyArray<WordText>;
+  /** What it does in plain English, or the code it runs; for showing to the person asked. */
+  readonly detail: Detail | undefined;
 }
 
 export type Units = { readonly _tag: "Units"; readonly units: ReadonlyArray<Unit> } | { readonly _tag: "Unparsed"; readonly reason: UnparsedReason };
@@ -86,14 +103,20 @@ const isOption = (word: Word | undefined): boolean => (word?.literal ?? word?.te
 const is = (word: Word | undefined, ...values: ReadonlyArray<Name>): boolean => word?.literal !== undefined && values.includes(word.literal);
 const present = <A>(value: A | undefined): ReadonlyArray<A> => (value === undefined ? [] : [value]);
 
-const unit = (words: ReadonlyArray<Word>, grant: ReadonlyArray<WordText> | undefined, writes: ReadonlyArray<WordText> = [], outside: ReadonlyArray<WordText> = []): Unit => ({
-  words,
-  grant,
-  writes,
-  opaque: undefined,
-  outside,
-});
-const opaque = (words: ReadonlyArray<Word>, why: NeedText): Unit => ({ words, grant: undefined, writes: [], opaque: why, outside: [] });
+const unit = (
+  words: ReadonlyArray<Word>,
+  grant: ReadonlyArray<WordText> | undefined,
+  writes: ReadonlyArray<WordText> = [],
+  outside: ReadonlyArray<WordText> = [],
+  detail?: Detail,
+): Unit => ({ words, grant, writes, opaque: undefined, outside, detail });
+const opaque = (words: ReadonlyArray<Word>, why: NeedText, detail?: Detail): Unit => ({ words, grant: undefined, writes: [], opaque: why, outside: [], detail });
+
+/** The code `code` in `language`, as a detail, without the line break that ends a here-document; undefined when there is no code to show. */
+const codeOf = (language: CodeLanguage, code: WordText | undefined): Detail | undefined => {
+  const trimmed = code?.replace(/\n$/, "");
+  return trimmed === undefined || trimmed === "" ? undefined : { _tag: "Code", language, code: CodeText.make(trimmed) };
+};
 
 // —— Variables ——
 
@@ -230,23 +253,42 @@ const inlineProgram = named("awk", "gawk", "mawk", "nawk");
 const seds = named("sed", "gsed");
 const declaring = named("export", "declare", "typeset", "local", "readonly");
 
-/** Each runtime, and the options with which it runs code written in the command. */
-const runtimes: ReadonlyMap<WordText, ReadonlySet<WordText>> = new Map([
-  [WordText.make("python"), named("-c")],
-  [WordText.make("python3"), named("-c")],
-  [WordText.make("node"), named("-e", "--eval", "-p", "--print")],
-  [WordText.make("ruby"), named("-e")],
-  [WordText.make("perl"), named("-e", "-E")],
-  [WordText.make("php"), named("-r")],
-  [WordText.make("lua"), named("-e")],
-  [WordText.make("osascript"), named("-e")],
-  [WordText.make("Rscript"), named("-e")],
-  [WordText.make("pwsh"), named("-c", "-Command", "-command")],
-  [WordText.make("powershell"), named("-c", "-Command", "-command")],
+/** A runtime: the options with which it runs code written in the command, and the language of that code. */
+interface Runtime {
+  readonly inline: ReadonlySet<WordText>;
+  readonly language: CodeLanguage;
+}
+
+const runtimes: ReadonlyMap<WordText, Runtime> = new Map([
+  [WordText.make("python"), { inline: named("-c"), language: "python" }],
+  [WordText.make("python3"), { inline: named("-c"), language: "python" }],
+  [WordText.make("node"), { inline: named("-e", "--eval", "-p", "--print"), language: "javascript" }],
+  [WordText.make("ruby"), { inline: named("-e"), language: "ruby" }],
+  [WordText.make("perl"), { inline: named("-e", "-E"), language: "perl" }],
+  [WordText.make("php"), { inline: named("-r"), language: "php" }],
+  [WordText.make("lua"), { inline: named("-e"), language: "lua" }],
+  [WordText.make("osascript"), { inline: named("-e"), language: "applescript" }],
+  [WordText.make("Rscript"), { inline: named("-e"), language: "r" }],
+  [WordText.make("pwsh"), { inline: named("-c", "-Command", "-command"), language: "powershell" }],
+  [WordText.make("powershell"), { inline: named("-c", "-Command", "-command"), language: "powershell" }],
 ]);
 
-/** Returns the runtime's inline options: `python3.12` is `python3`. */
-const runtimeOf = (base: WordText): ReadonlySet<WordText> | undefined => runtimes.get(WordText.make(base.replace(/^python3\.\d+$/, "python3")));
+/** Returns the runtime that `base` names: `python3.12` is `python3`. */
+const runtimeOf = (base: WordText): Runtime | undefined => runtimes.get(WordText.make(base.replace(/^python3\.\d+$/, "python3")));
+
+const awkValued = named("-F", "-v", "-f", "--file", "--field-separator", "--assign");
+
+/** The program that `awk`'s arguments `rest` write out: the first operand past its options; undefined when it is not a literal word. */
+const awkProgram = (rest: ReadonlyArray<Word>): WordText | undefined => {
+  const [next, ...after] = rest;
+  if (next === undefined) return undefined;
+  if (is(next, "--")) return literalOf(after[0]);
+  if (next.literal !== undefined && awkValued.has(next.literal)) return awkProgram(after.slice(1));
+  return isOption(next) ? awkProgram(after) : next.literal;
+};
+
+/** The code that `deno eval`'s arguments `rest` write out: the first operand past its options. */
+const denoCode = (rest: ReadonlyArray<Word>): WordText | undefined => literalOf(rest.find((word) => !isOption(word)));
 
 // —— Files written ——
 
@@ -390,13 +432,14 @@ const sedFlags = named("-n", "--quiet", "--silent", "-E", "-r", "--regexp-extend
  * the files its scripts name and, with `-i`, the files it edits, and reading its files.
  */
 const sedUnits = (words: ReadonlyArray<Word>, folders: Folders | undefined): ReadonlyArray<Unit> => {
-  const scan = (rest: ReadonlyArray<Word>, scripts: ReadonlyArray<Word>, operands: ReadonlyArray<Word>, inPlace: boolean): Unit | { readonly scripts: ReadonlyArray<Word>; readonly operands: ReadonlyArray<Word>; readonly inPlace: boolean } => {
+  const quiet = words.slice(1).some((word) => is(word, "-n", "--quiet", "--silent") || /^-[a-zA-Z]*n[a-zA-Z]*$/.test(word.literal ?? ""));
+  const scan = (rest: ReadonlyArray<Word>, scripts: ReadonlyArray<Word>, operands: ReadonlyArray<Word>, inPlace: boolean): Unit | { readonly scripts: ReadonlyArray<Word>; readonly operands: ReadonlyArray<Word>; readonly inPlace: boolean; readonly quiet: boolean } => {
     const [next, ...after] = rest;
-    if (next === undefined) return { scripts, operands, inPlace };
+    if (next === undefined) return { scripts, operands, inPlace, quiet };
     const option = next.literal;
     if (!isOption(next)) return scan(after, scripts, [...operands, next], inPlace);
     if (option === undefined) return opaque(words, need("it gives sed an option that is not written out"));
-    if (option === WordText.make("--")) return { scripts, operands: [...operands, ...after], inPlace };
+    if (option === WordText.make("--")) return { scripts, operands: [...operands, ...after], inPlace, quiet };
     if (sedFlags.has(option)) return scan(after, scripts, operands, inPlace);
     if (option === WordText.make("-e") || option === WordText.make("--expression")) return after[0] === undefined ? opaque(words, need("sed -e has no script")) : scan(after.slice(1), [...scripts, after[0]], operands, inPlace);
     if (option.startsWith("--expression=")) return scan(after, [...scripts, { text: WordText.make(option.slice(13)), literal: WordText.make(option.slice(13)) }], operands, inPlace);
@@ -412,11 +455,16 @@ const sedUnits = (words: ReadonlyArray<Word>, folders: Folders | undefined): Rea
   const [inline, ...files] = read.scripts.length === 0 ? read.operands : [undefined, ...read.operands];
   const scripts = read.scripts.length === 0 ? present(inline) : read.scripts;
   if (scripts.length === 0) return [opaque(words, need("sed has no script"))];
-  const effects = scripts.map((script) => (script.literal === undefined ? undefined : analyse(SedScript.make(script.literal))));
-  if (effects.some((each) => each === undefined)) return [opaque(words, need("sed's script is not written out, or is not understood"))];
-  const known = effects.filter((each) => each !== undefined);
-  if (known.some((each) => each.executes)) return [opaque(words, need("sed's script runs commands (e)"))];
+  const parsed = scripts.map((script) => (script.literal === undefined ? undefined : parseSed(SedScript.make(script.literal))));
+  if (parsed.some((each) => each === undefined)) return [opaque(words, need("sed's script is not written out, or is not understood"))];
+  const commands = parsed.filter((each) => each !== undefined);
+  const known = commands.map(effectsOf);
   const operands = files.filter((word) => word !== undefined);
+  const explained: Detail = {
+    _tag: "Explained",
+    lines: explainSed(commands, { quiet: read.quiet, inPlace: read.inPlace, files: operands.map((word) => SedFile.make(word.literal ?? word.text)) }),
+  };
+  if (known.some((each) => each.executes)) return [opaque(words, need("sed's script runs commands (e)"), explained)];
   const named = known.flatMap((each) => each.reads).map((file) => ({ text: WordText.make(file), literal: WordText.make(file) }));
   return [
     unit(
@@ -424,6 +472,7 @@ const sedUnits = (words: ReadonlyArray<Word>, folders: Folders | undefined): Rea
       [WordText.make("sed")],
       [...known.flatMap((each) => each.writes).map((file) => WordText.make(file)), ...(read.inPlace ? operands.map((word) => word.literal ?? word.text) : [])],
       [...operands, ...named].filter((word) => escapes(word, folders)).map((word) => word.text),
+      explained,
     ),
   ];
 };
@@ -435,6 +484,8 @@ interface Seen {
   readonly depth: number;
   /** Whether the program's input is text written in the command (a here-document or here-string). */
   readonly fedText: boolean;
+  /** That text, as written, when the command has it. */
+  readonly fedBody: WordText | undefined;
   readonly folders: Folders | undefined;
 }
 
@@ -502,7 +553,7 @@ const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> =>
   if (runner !== undefined && literalOf(rest[0]) === runner && rest[1] !== undefined && !isOption(rest[1])) return resolve(rest.slice(1), seen);
   if (asAnotherUser.has(base)) return [opaque(words, need(`it runs as another user (${base})`))];
   if (notFollowed.has(base)) return [opaque(words, need(`${base} runs a command that is not followed`))];
-  if (inlineProgram.has(base) && !rest.some((word) => is(word, "-f", "--file"))) return [opaque(words, need(`${base} runs a program written in the command`))];
+  if (inlineProgram.has(base) && !rest.some((word) => is(word, "-f", "--file"))) return [opaque(words, need(`${base} runs a program written in the command`), codeOf("awk", awkProgram(rest)))];
   if (shells.has(base)) return shellUnits(words, seen);
   if (base === WordText.make("eval")) {
     const code = rest.map(literalOf);
@@ -529,10 +580,11 @@ const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> =>
   if (base === WordText.make("find")) return findUnits(words, seen);
   if (base === WordText.make(".") || base === WordText.make("source")) return [unit(words, rest[0] === undefined ? undefined : scriptGrant(words, rest[0]))];
   if (base === WordText.make("rg") && rest.some((word) => /^--pre(=|$)/.test(word.literal ?? word.text))) return [opaque(words, need("rg --pre runs a program on each file it searches"))];
-  if (base === WordText.make("bun") && rest.some((word) => is(word, "-e", "--eval", "-p", "--print"))) return [opaque(words, need("bun runs code written in the command"))];
-  if (base === WordText.make("deno") && is(rest[0], "eval")) return [opaque(words, need("deno eval runs code written in the command"))];
-  const inline = runtimeOf(base);
-  if (inline !== undefined) return runtimeUnits(words, inline, seen);
+  const bunEval = rest.findIndex((word) => is(word, "-e", "--eval", "-p", "--print"));
+  if (base === WordText.make("bun") && bunEval !== -1) return [opaque(words, need("bun runs code written in the command"), codeOf("typescript", literalOf(rest[bunEval + 1])))];
+  if (base === WordText.make("deno") && is(rest[0], "eval")) return [opaque(words, need("deno eval runs code written in the command"), codeOf("typescript", denoCode(rest.slice(1))))];
+  const runtime = runtimeOf(base);
+  if (runtime !== undefined) return runtimeUnits(words, runtime.inline, runtime.language, seen);
   const exported = declaring.has(base) ? steeringNeed(rest.flatMap((word) => present(word.literal).filter((value) => value.includes("=")))) : undefined;
   if (exported !== undefined) return [opaque(words, exported)];
   return [unit(words, grantOf(words), ownWrites(base, words), outsideOf(base, words, seen.folders))];
@@ -546,7 +598,7 @@ const wrapped = (base: WordText, options: WrapperOptions, words: ReadonlyArray<W
   const steered = steeringNeed(assignments.map((word) => word.literal ?? word.text));
   if (steered !== undefined) return [opaque(words, steered)];
   const inner = past.slice(assignments.length);
-  if (inner.length !== 0) return resolve(inner, { ...seen, fedText: base === WordText.make("xargs") ? false : seen.fedText });
+  if (inner.length !== 0) return resolve(inner, base === WordText.make("xargs") ? { ...seen, fedText: false, fedBody: undefined } : seen);
   return base === WordText.make("xargs") ? resolve([{ text: WordText.make("echo"), literal: WordText.make("echo") }], seen) : [unit(words, grantOf(words))];
 };
 
@@ -566,7 +618,7 @@ const shellUnits = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit>
     return code === undefined ? [opaque(words, need("it runs code that is not written out"))] : unitsOfCode(code, words, seen);
   }
   const script = operands[0];
-  if (flags.includes(WordText.make("s")) || script === undefined || is(script, "-") || seen.fedText) return [opaque(words, need("it runs code read from its input"))];
+  if (flags.includes(WordText.make("s")) || script === undefined || is(script, "-") || seen.fedText) return [opaque(words, need("it runs code read from its input"), codeOf("bash", seen.fedBody))];
   return [unit(words, scriptGrant(words, script))];
 };
 
@@ -577,15 +629,23 @@ const scriptGrant = (words: ReadonlyArray<Word>, script: Word): ReadonlyArray<Wo
 };
 
 /** A runtime runs code written in the command (its `inline` options), code from its input, a module (`-m`), or a script. */
-const runtimeUnits = (words: ReadonlyArray<Word>, inline: ReadonlySet<WordText>, seen: Seen): ReadonlyArray<Unit> => {
+/** Whether `word` is one of the `inline` options, alone or ending a cluster of short options (`perl -ne`, `ruby -pe`). */
+const isInline = (word: Word, inline: ReadonlySet<WordText>): boolean => {
+  const option = word.literal;
+  if (option === undefined) return false;
+  return inline.has(option) || (/^-[A-Za-z0-9]{2,}$/.test(option) && inline.has(WordText.make(`-${option.slice(-1)}`)));
+};
+
+const runtimeUnits = (words: ReadonlyArray<Word>, inline: ReadonlySet<WordText>, language: CodeLanguage, seen: Seen): ReadonlyArray<Unit> => {
   const rest = words.slice(1);
-  if (rest.some((word) => word.literal !== undefined && inline.has(word.literal))) return [opaque(words, need("it runs code written in the command"))];
+  const at = rest.findIndex((word) => isInline(word, inline));
+  if (at !== -1) return [opaque(words, need("it runs code written in the command"), codeOf(language, literalOf(rest[at + 1])))];
   const program = literalOf(words[0]);
   const module = literalOf(rest[1]);
   if (is(rest[0], "-m") && program !== undefined && module !== undefined) return [unit(words, [program, WordText.make("-m"), module])];
   if (rest.some((word) => is(word, "-m"))) return [unit(words, undefined)];
   const script = rest.find((word) => !isOption(word));
-  if (script === undefined || is(script, "-") || seen.fedText) return [opaque(words, need("it runs code read from its input"))];
+  if (script === undefined || is(script, "-") || seen.fedText) return [opaque(words, need("it runs code read from its input"), codeOf(language, seen.fedBody))];
   return [unit(words, scriptGrant(words, script))];
 };
 
@@ -601,7 +661,7 @@ const findUnits = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> 
     if (option !== undefined && execOptions.has(option)) {
       const end = after.findIndex((word) => is(word, ";", "+"));
       if (end === -1) return [opaque(words, need(`find ${option} has no end (; or +)`))];
-      return scan(after.slice(end + 1), own, [...inner, ...resolve(after.slice(0, end), { ...seen, fedText: false })], writes);
+      return scan(after.slice(end + 1), own, [...inner, ...resolve(after.slice(0, end), { ...seen, fedText: false, fedBody: undefined })], writes);
     }
     if (option === WordText.make("-delete")) return scan(after, [...own, next], inner, [...writes, WordText.make("the files that find finds")]);
     if (option !== undefined && fileOptions.has(option)) {
@@ -622,14 +682,15 @@ const segmentUnits = (segment: Segment, functions: ReadonlySet<WordText>, seen: 
   if (steered !== undefined) return [opaque(segment.words, steered), ...written];
   const program = segment.words[0]?.literal;
   if (program !== undefined && functions.has(program)) return written;
-  return [...resolve(segment.words, { ...seen, fedText: segment.fed_text }), ...written];
+  const fedBody = segment.redirects.find((redirect) => redirect.op === "<<" || redirect.op === "<<<")?.body;
+  return [...resolve(segment.words, { ...seen, fedText: segment.fed_text, fedBody }), ...written];
 };
 
 const unitsAt = (command: ShellCommand, segmentsOf: SegmentsOf, depth: number, folders: Folders | undefined): Units => {
   const split = segmentsOf(command);
   if (split._tag === "Unparsed") return split;
   const functions = new Set(split.segments.flatMap((segment) => (segment.kind === "function_definition" ? present(segment.words[0]?.literal) : [])));
-  return { _tag: "Units", units: split.segments.flatMap((segment) => segmentUnits(segment, functions, { segmentsOf, depth, fedText: false, folders })) };
+  return { _tag: "Units", units: split.segments.flatMap((segment) => segmentUnits(segment, functions, { segmentsOf, depth, fedText: false, fedBody: undefined, folders })) };
 };
 
 /** Returns the units of `command`, split by `segmentsOf`, with the paths they read judged against `folders`. */

@@ -150,3 +150,15 @@ fn an_assignment_after_the_commands_name_is_an_argument_and_one_before_it_sets_a
         Segments::Unparsed { reason } => panic!("{reason}"),
     }
 }
+
+#[test]
+fn a_here_document_and_a_here_string_carry_the_text_they_give_as_input() {
+    match segments_of("python3 - <<'EOF'\nprint(1)\nEOF\n") {
+        Segments::Parsed { segments } => assert_eq!(segments[0].redirects[0].body.as_deref(), Some("print(1)\n")),
+        Segments::Unparsed { reason } => panic!("{reason}"),
+    }
+    match segments_of("bash <<< 'rm x'") {
+        Segments::Parsed { segments } => assert_eq!(segments[0].redirects[0].body.as_deref(), Some("rm x")),
+        Segments::Unparsed { reason } => panic!("{reason}"),
+    }
+}
