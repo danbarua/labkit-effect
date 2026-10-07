@@ -40,6 +40,8 @@ test("package scripts and package runners name the script or package; project ru
   expect(units("bun x tsc")).toEqual(["bun x tsc [bun x tsc]"]);
   expect(units("uv run pytest -q")).toEqual(["pytest -q [pytest]"]);
   expect(units("uv run rm -rf x")).toEqual(["rm -rf x [rm]"]);
+  // A runner with options first is not read past, and allowing it for the session would allow every program it runs.
+  expect(units("uv run --with x pytest")).toEqual(["uv run --with x pytest []"]);
   expect(units("timeout -s KILL 5 cargo test")).toEqual(["cargo test [cargo test]"]);
   expect(units("env -i X=1 make build")).toEqual(["make build [make build]"]);
   expect(units("nice -n 5 nohup exec rm x")).toEqual(["rm x [rm]"]);

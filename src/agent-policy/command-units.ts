@@ -126,6 +126,8 @@ export const grantOf = (words: ReadonlyArray<Word>): ReadonlyArray<WordText> | u
   if (program === undefined) return undefined;
   const base = basename(program);
   if (packageRunners.has(base)) return isPackageWord(second) ? [program, second.literal] : undefined;
+  // A project runner read past runs the program after it; one that could not be (an option first) has no grant.
+  if (second?.literal !== undefined && projectRunners.get(base) === second.literal) return undefined;
   if (!subcommands.has(base) && !twoWordSubcommands.has(base)) return [program];
   if (!isSubcommandWord(second)) return undefined;
   if (namingSubcommands.get(base)?.has(second.literal) === true) return isPackageWord(third) ? [program, second.literal, third.literal] : undefined;
