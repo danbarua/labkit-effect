@@ -41,14 +41,16 @@
   #tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--fg); }
   #panels { flex: 1; min-height: 0; display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
   #panels::-webkit-scrollbar { display: none; }
-  .panel { flex: 0 0 100%; scroll-snap-align: start; display: flex; flex-direction: column; min-height: 0; position: relative; padding: 8px; }
+  .panel { flex: 0 0 100%; min-width: 0; scroll-snap-align: start; display: flex; flex-direction: column; min-height: 0; position: relative; padding: 8px; }
   .terminal { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #020402; position: relative; overflow: hidden; }
   .terminal::after {
     content: ""; position: absolute; inset: 0; pointer-events: none;
     background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0.32) 0 1px, transparent 1px 3px);
   }
-  .status { font-size: 12px; padding: 6px 10px; border-bottom: 1px solid var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .status.error { color: var(--error); white-space: normal; }
+  /* Only the room's name is cut short when the line is too long; the turn and the outcome always show. */
+  .status { font-size: 12px; padding: 6px 10px; border-bottom: 1px solid var(--dim); display: flex; gap: 0.6em; white-space: nowrap; }
+  .status .room { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .status.error { color: var(--error); white-space: normal; display: block; }
   .screen { flex: 1; overflow-y: auto; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; text-shadow: 0 0 4px rgba(61, 255, 122, 0.45); }
   .screen p { margin: 0 0 12px; }
   .screen .dim { color: var(--dim); text-shadow: none; }
@@ -133,11 +135,18 @@ function adventurerLines(shown) {
   });
 }
 
-function statusText(state) {
+function span(text, className) {
+  const element = document.createElement("span");
+  element.textContent = text;
+  if (className) element.className = className;
+  return element;
+}
+
+function statusParts(state) {
   const failed = state.shown.find((shown) => shown._tag === "Failed");
-  if (failed) return { text: failed.error, error: true };
+  if (failed) return { parts: [span(failed.error)], error: true };
   const { turn, of, location, outcome } = state.status;
-  return { text: `TURN ${turn}/${of} · ${location} · ${outcome === "Alive" ? "ALIVE" : "EATEN"}`, error: false };
+  return { parts: [span(`TURN ${turn}/${of}`), span(location, "room"), span(outcome === "Alive" ? "ALIVE" : "EATEN")], error: false };
 }
 
 function fill(screen, lines) {
@@ -150,9 +159,9 @@ function renderMatch(state) {
   setOptions(pickers.engine, [state.engine], null);
   setOptions(pickers.adventurer, [state.adventurer], null);
   for (const select of Object.values(pickers)) select.disabled = true;
-  const status = statusText(state);
   for (const id of ["engine-status", "adventurer-status"]) {
-    $(id).textContent = status.text;
+    const status = statusParts(state);
+    $(id).replaceChildren(...status.parts);
     $(id).classList.toggle("error", status.error);
   }
   fill($("engine-screen"), engineLines(state.shown));
