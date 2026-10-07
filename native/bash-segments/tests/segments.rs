@@ -162,3 +162,19 @@ fn a_here_document_and_a_here_string_carry_the_text_they_give_as_input() {
         Segments::Unparsed { reason } => panic!("{reason}"),
     }
 }
+
+#[test]
+fn a_here_document_expands_unless_its_delimiter_is_quoted_and_a_tab_stripping_one_loses_its_leading_tabs() {
+    let first = |command: &str| match segments_of(command) {
+        Segments::Parsed { segments } => segments[0].redirects.iter().find(|redirect| redirect.op.starts_with("<<")).cloned().expect("a here-document or here-string"),
+        Segments::Unparsed { reason } => panic!("{reason}"),
+    };
+    let quoted = first("cat > f <<'EOF'\n$HOME\nEOF\n");
+    assert_eq!((quoted.body.as_deref(), quoted.expands), (Some("$HOME\n"), false));
+    let unquoted = first("cat <<EOF > f\n$HOME\nEOF\n");
+    assert!(unquoted.expands);
+    let stripped = first("cat <<-'EOF' > f\n\tone\n\t\ttwo\n\tEOF\n");
+    assert_eq!(stripped.body.as_deref(), Some("one\ntwo\n"));
+    assert!(!first("cat <<< 'x' > f").expands);
+    assert!(first("cat <<< \"$x\" > f").expands);
+}

@@ -19,6 +19,8 @@ import type { AgentConnection } from "effective-acp/agent";
 import type { V1Version } from "effective-acp/protocol";
 import { type SessionId, type TerminalId, ToolCallId } from "effective-acp/schema/v1";
 import { type CallId, ToolName } from "../agent-machine/names.ts";
+import type { ShownWrite } from "../agent-host/command-writes.ts";
+import { ShellCommand } from "../agent-policy/command-segments.ts";
 import { FilePath } from "../agent-tools/paths.ts";
 import { CurrentCall, Reported, Rejected, type Tool } from "../agent-tools/tool.ts";
 import { commandSeconds, EditFile, maxReadBytes, maxReadText, ReadFile, RunCommand } from "../agent-tools/workspace.ts";
@@ -33,6 +35,11 @@ export class Editor extends Context.Service<
     readonly cwd: string;
     /** The terminal each command ran in, by call: shown in the call as it runs, and when it has ended. */
     readonly terminals: Ref.Ref<HashMap.HashMap<CallId, TerminalId>>;
+    /**
+     * Reads, once for each call, the current text of the files that its command writes text to, so
+     * that the call shows each write as a diff; the command runs after it.
+     */
+    readonly writesBefore: (call: CallId, command: ShellCommand) => Effect.Effect<ReadonlyArray<ShownWrite>>;
   }
 >()("agent-acp/Editor") {}
 
@@ -154,9 +161,10 @@ export const runCommand: Tool<typeof RunCommand.fields, Editor | CurrentCall> = 
   input: RunCommand,
   run: (input) =>
     Effect.gen(function* () {
-      const { connection, sessionId, cwd, terminals } = yield* Editor;
+      const { connection, sessionId, cwd, terminals, writesBefore } = yield* Editor;
       const call = yield* CurrentCall;
       const seconds = input.timeout_seconds ?? commandSeconds;
+      yield* writesBefore(call, ShellCommand.make(input.command));
       const { output, truncated, exited } = yield* Effect.acquireUseRelease(
         connection.client["terminal/create"]({ sessionId, command: "/bin/sh", args: ["-c", input.command], cwd, outputByteLimit: maxReadBytes }),
         ({ terminalId }) =>

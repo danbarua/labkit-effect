@@ -18,16 +18,26 @@ import type { Call, Presented } from "./projection.ts";
 /** A response that picks no option the question offered; the host answers -32602. */
 export class InvalidAnswer extends Data.TaggedError("InvalidAnswer")<{ readonly reason: string }> {}
 
-/** A need, as a Markdown list item: the program and why, then its detail, indented under the item. */
-const needShown = (need: CommandNeed): ReadonlyArray<string> => [
-  `- ${need.program}: ${need.why}`,
-  ...(need.detail === undefined ? [] : ["", ...markdownOf(need.detail).map((line) => (line === "" ? "" : `  ${line}`))]),
-];
+/** Whether `content` has a diff of the file that `path` (as the command writes it) names: the same path, or one that ends with it. */
+const diffed = (content: ReadonlyArray<ToolCallContent>, path: string): boolean => {
+  const relative = path.replace(/^(\.\/|~\/)/, "");
+  return content.some((each) => each.type === "diff" && (each.path === path || each.path.endsWith(`/${relative}`)));
+};
+
+/** A need, as a Markdown list item: the program and why, then its detail, indented under the item. A write the call shows as a diff is named, not repeated. */
+const needShown =
+  (content: ReadonlyArray<ToolCallContent>) =>
+  (need: CommandNeed): ReadonlyArray<string> => [
+    `- ${need.program}: ${need.why}`,
+    ...(need.detail === undefined
+      ? []
+      : ["", ...markdownOf(need.detail, need.detail._tag === "Writes" && diffed(content, need.detail.path)).map((line) => (line === "" ? "" : `  ${line}`))]),
+  ];
 
 /** A command question's reasons, as a Markdown text block: each program that needs permission, why, and what helps judge it. */
-const needsBlock = (question: PermissionQuestion): ReadonlyArray<ToolCallContent> =>
+const needsBlock = (question: PermissionQuestion, content: ReadonlyArray<ToolCallContent>): ReadonlyArray<ToolCallContent> =>
   question._tag === "Command"
-    ? [{ type: "content", content: { type: "text", text: ["This command needs permission:", "", ...question.needs.flatMap(needShown)].join("\n") } }]
+    ? [{ type: "content", content: { type: "text", text: ["This command needs permission:", "", ...question.needs.flatMap(needShown(content))].join("\n") } }]
     : [];
 
 /**
@@ -39,7 +49,7 @@ const needsBlock = (question: PermissionQuestion): ReadonlyArray<ToolCallContent
  */
 export function requestOf(sessionId: SessionId, call: Call, question: PermissionQuestion, presented: Presented): RequestPermissionRequest {
   const input = parseJson(call.input);
-  const content = [...(presented.content ?? []), ...needsBlock(question)];
+  const content = [...(presented.content ?? []), ...needsBlock(question, presented.content ?? [])];
   return {
     sessionId,
     toolCall: {

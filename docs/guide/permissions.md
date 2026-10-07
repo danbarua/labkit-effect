@@ -75,6 +75,11 @@ they will do:
       Saves every line, after these changes.
   ```
 
+- **A file a command writes** is shown as a diff against its current text, when the command's words
+  show the text: `cat > notes.md <<'EOF'`, `echo done >> log.txt`, `tee -a notes.md <<< '…'`. In an
+  editor, the diff is in the command's call, so it shows whether or not you are asked, as an edit's
+  does; at the terminal, it is in the question.
+
 - **Code written in the command** is shown in its language: `python3 -c`, `node -e`, `perl -ne`,
   `ruby -e`, `bun -e`, `deno eval`, an `awk` program, and code given to a program or a shell as a
   here-document (`python3 - <<'EOF'`). In an editor it is a fenced code block, so the editor

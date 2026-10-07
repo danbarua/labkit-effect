@@ -31,7 +31,14 @@ export const RedirectOp = Schema.Literals(["<", ">", ">>", "<>", ">|", "<&", ">&
 export type RedirectOp = typeof RedirectOp.Type;
 
 /** A redirect: its operator, the descriptor it names, its target (none for a here-document, a here-string or a process substitution), and the text a here-document or here-string gives as input. */
-export const Redirect = Schema.Struct({ op: RedirectOp, fd: Schema.optionalKey(Schema.Int), target: Schema.optionalKey(Word), body: Schema.optionalKey(WordText) });
+export const Redirect = Schema.Struct({
+  op: RedirectOp,
+  fd: Schema.optionalKey(Schema.Int),
+  target: Schema.optionalKey(Word),
+  body: Schema.optionalKey(WordText),
+  /** Whether the shell expands the body before giving it (`$x`): a here-document whose delimiter is not quoted, or a here-string that is not a literal word. */
+  expands: Schema.optionalKey(Schema.Boolean),
+});
 export type Redirect = typeof Redirect.Type;
 
 export const Segment = Schema.Struct({

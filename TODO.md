@@ -75,6 +75,10 @@ model.
           `ask-rate` prints the table. 24,726 commands, from transcripts that no longer exist, have
           no model recorded; `ask-rate` reports them as Claude's (from Claude Code) or OpenAI's (from
           Codex).
+        - A file a command writes is shown as a diff (built: the editor's call and the REPL's question).
+          To do: the REPL shows no diff for a write it does not ask about (`acceptEdits`), since its
+          command tool does not read the file before it runs; the local tools' world
+          (`--local-tools`) shows none; `printf` and `sed -i` are not shown as diffs.
         - Code is shown as written: a one-line `python3 -c '…; …'` stays on one line. Formatting it
           (Python's `ast.unparse`, a JavaScript formatter) would run a program on the host.
         - `awk` judged by its program, as `sed` is (no `system()`, no pipes, no `print >`).

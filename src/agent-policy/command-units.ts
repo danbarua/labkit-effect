@@ -69,11 +69,19 @@ export type CodeLanguage = typeof CodeLanguage.Type;
 export const CodeText = Schema.String.pipe(Schema.brand("agent-policy/CodeText"));
 export type CodeText = typeof CodeText.Type;
 
-/** What helps a person judge a program: what it does, in plain English (`sed`), or the code it runs, in its language. */
-export const Detail = Schema.Union([
-  Schema.TaggedStruct("Explained", { lines: Schema.Array(ExplanationLine) }),
-  Schema.TaggedStruct("Code", { language: CodeLanguage, code: CodeText }),
-]);
+/**
+ * Text that a command writes to a file, when its words show it: the file's path as written, the
+ * text, whether it is added to the end of the file (`>>`, `tee -a`), and whether the shell expands
+ * `$…` and `` `…` `` in it first, so that what is written may differ.
+ */
+export const Writes = Schema.TaggedStruct("Writes", { path: WordText, text: CodeText, append: Schema.Boolean, expands: Schema.Boolean });
+export type Writes = typeof Writes.Type;
+
+/**
+ * What helps a person judge a program: what it does, in plain English (`sed`), the code it runs, in
+ * its language, or the text it writes to a file.
+ */
+export const Detail = Schema.Union([Schema.TaggedStruct("Explained", { lines: Schema.Array(ExplanationLine) }), Schema.TaggedStruct("Code", { language: CodeLanguage, code: CodeText }), Writes]);
 export type Detail = typeof Detail.Type;
 
 /** What a program does to a path outside the working folder: writes a file there, deletes it, moves it, or changes its permissions or owner. */
@@ -839,19 +847,80 @@ const findUnits = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> 
   return scan(words.slice(1), words.slice(0, 1), [], [], false);
 };
 
+// —— Text written to a file ——
+
+/** The text a segment's here-document or here-string gives as input, with the line break a here-string adds, and whether the shell expands it. */
+const fedTextOf = (segment: Segment): { readonly text: WordText; readonly expands: boolean } | undefined => {
+  const fed = segment.redirects.find((redirect) => redirect.op === "<<" || redirect.op === "<<<");
+  if (fed?.body === undefined) return undefined;
+  return { text: WordText.make(fed.op === "<<<" ? `${fed.body}\n` : fed.body), expands: fed.expands === true };
+};
+
+/**
+ * The text that a simple segment's program prints, when its words show it: `cat` (or `cat -`) given a
+ * here-document or here-string, or `echo` (or `echo -n`) with literal words that have no backslash,
+ * whose meaning differs between shells. Undefined for anything else.
+ */
+const printedTextOf = (segment: Segment, fed: ReturnType<typeof fedTextOf>): { readonly text: WordText; readonly expands: boolean } | undefined => {
+  const words = segment.words.map(literalOf);
+  const [program, ...rest] = words;
+  if (program === undefined || words.some((word) => word === undefined)) return undefined;
+  if (basename(program) === WordText.make("cat")) return rest.length === 0 || (rest.length === 1 && rest[0] === WordText.make("-")) ? fed : undefined;
+  if (basename(program) !== WordText.make("echo")) return undefined;
+  const plain = rest.filter((word) => word !== undefined);
+  const noNewline = plain[0] === WordText.make("-n");
+  const args = noNewline ? plain.slice(1) : plain;
+  if (args.some((word) => word.startsWith("-") || word.includes("\\"))) return undefined;
+  return { text: WordText.make(`${args.join(" ")}${noNewline ? "" : "\n"}`), expands: false };
+};
+
+/** `word` as a path to write: a literal word, or one from `~` with nothing else to expand (`~/notes.md`, which the shell expands to the home folder). */
+const writtenPath = (word: Word | undefined): WordText | undefined =>
+  word?.literal ?? (word !== undefined && /^~[A-Za-z0-9_.-]*(\/[^$`"'\\*?[\]{}\s]*)?$/.test(word.text) ? word.text : undefined);
+
+/** The file a segment's standard output goes to: its one redirect that writes a file (`>`, `>|` or `>>`, whose name is a literal word or a path from `~`); undefined when it has another, or none. */
+const outputFileOf = (segment: Segment): { readonly path: WordText; readonly append: boolean } | undefined => {
+  const files = segment.redirects.filter((redirect) => redirectWrites({ ...segment, redirects: [redirect] }).length > 0);
+  const [only] = files;
+  const path = writtenPath(only?.target);
+  if (files.length !== 1 || only === undefined || path === undefined || !(only.fd === undefined || only.fd === 1) || ![">", ">|", ">>"].includes(only.op)) return undefined;
+  return { path, append: only.op === ">>" };
+};
+
+/** `tee`'s detail, when it is given text written in the command and writes one file whose name is a literal word (`tee -a notes.md <<'EOF'`). */
+const teeWrites = (words: ReadonlyArray<Word>, fed: ReturnType<typeof fedTextOf>): Writes | undefined => {
+  if (fed === undefined || words[0]?.literal === undefined || basename(words[0].literal) !== WordText.make("tee")) return undefined;
+  const options = words.slice(1).filter(isOption);
+  const files = words.slice(1).filter((word) => !isOption(word));
+  const path = files.length === 1 ? writtenPath(files[0]) : undefined;
+  if (path === undefined || options.some((word) => !is(word, "-a", "--append"))) return undefined;
+  return { _tag: "Writes", path, text: CodeText.make(fed.text), append: options.length > 0, expands: fed.expands };
+};
+
 /** Returns the units of `segment`. A call to a function in `functions` is not a unit. */
 const segmentUnits = (segment: Segment, functions: ReadonlySet<WordText>, seen: Seen): ReadonlyArray<Unit> => {
   const writes = redirectWrites(segment);
   const reads = segment.redirects.flatMap((redirect) => (redirect.op === "<" ? present(fileOf(redirect.target)) : [])).filter((word) => escapes(word, seen.folders));
-  const written = writes.length === 0 && reads.length === 0 ? [] : [unit([], undefined, { folders: seen.folders, writes, reads: reads.map(textOf) })];
+  const fed = fedTextOf(segment);
+  const printed = segment.kind === "simple" ? printedTextOf(segment, fed) : undefined;
+  const output = printed === undefined ? undefined : outputFileOf(segment);
+  const detail: Writes | undefined = printed === undefined || output === undefined ? undefined : { _tag: "Writes", ...output, text: CodeText.make(printed.text), expands: printed.expands };
+  const written = writes.length === 0 && reads.length === 0 ? [] : [unit([], undefined, { folders: seen.folders, writes, reads: reads.map(textOf), ...(detail === undefined ? {} : { detail }) })];
   if (segment.kind !== "simple") return written;
   const steered = steeringNeed(segment.assignments);
   if (steered !== undefined) return [opaque(segment.words, steered), ...written];
   const program = segment.words[0]?.literal;
   if (program !== undefined && functions.has(program)) return written;
-  const fedBody = segment.redirects.find((redirect) => redirect.op === "<<" || redirect.op === "<<<")?.body;
-  return [...resolve(segment.words, { ...seen, fedText: segment.fed_text, fedBody }), ...written];
+  const resolved = resolve(segment.words, { ...seen, fedText: segment.fed_text, fedBody: fed?.text });
+  const teed = teeWrites(segment.words, fed);
+  return [...(teed === undefined ? resolved : resolved.map((each) => (each.words[0] === segment.words[0] ? { ...each, detail: teed } : each))), ...written];
 };
+
+/** The texts a command's units write to files, in order, each with whether a `cd`, `pushd` or `popd` before it may have moved the folder its path is relative to. */
+export const textsWritten = (units: ReadonlyArray<Unit>): ReadonlyArray<{ readonly writes: Writes; readonly moved: boolean }> =>
+  units.flatMap((each, at) =>
+    each.detail?._tag === "Writes" ? [{ writes: each.detail, moved: units.slice(0, at).some((before) => ["cd", "pushd", "popd"].includes(basename(before.words[0]?.literal ?? WordText.make("")))) }] : [],
+  );
 
 const unitsAt = (command: ShellCommand, segmentsOf: SegmentsOf, depth: number, folders: Folders | undefined): Units => {
   const split = segmentsOf(command);

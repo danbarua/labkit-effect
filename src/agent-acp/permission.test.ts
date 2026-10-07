@@ -134,3 +134,27 @@ test("a need's detail is Markdown indented under its item: code in a fence that 
     },
   ]);
 });
+
+test("a write that the call shows as a diff is named in the question, not repeated; one it does not is shown as the text it writes", () => {
+  const writing: PermissionQuestion = {
+    _tag: "Command",
+    tool: ToolName.make("terminal_command"),
+    kind: "execute",
+    options: [],
+    command: ShellCommand.make("cat > config.yml <<'EOF' …"),
+    needs: [
+      {
+        program: WordText.make("a redirect"),
+        kind: "writes",
+        why: NeedText.make("it writes config.yml"),
+        detail: { _tag: "Writes", path: WordText.make("config.yml"), text: CodeText.make("name: x\n"), append: false, expands: false },
+      },
+    ],
+    grants: [],
+  };
+  const diff = { type: "diff" as const, path: "/w/config.yml", oldText: "name: old\n", newText: "name: x\n" };
+  const textOf = (content: ReadonlyArray<unknown> | null | undefined) => JSON.stringify(content?.at(-1));
+  expect(requestOf(SessionId.make("s1"), call, writing, { title: "Write", content: [diff] }).toolCall.content?.[0]).toEqual(diff);
+  expect(textOf(requestOf(SessionId.make("s1"), call, writing, { title: "Write", content: [diff] }).toolCall.content)).toContain("The diff shows what it writes to config.yml.");
+  expect(textOf(requestOf(SessionId.make("s1"), call, writing, { title: "Write" }).toolCall.content)).toContain("It writes this text to config.yml:\\n  ```\\n  name: x\\n  ```");
+});

@@ -21,15 +21,20 @@
  */
 
 import type { McpServers } from "../../agent-mcp/servers.ts";
-import { Console, Deferred, Effect, HashMap, Option, PubSub, Queue, Ref } from "effect";
+import { Console, Deferred, Effect, FileSystem, HashMap, Option, PubSub, Queue, Ref } from "effect";
+import { homedir } from "node:os";
 import { Brand } from "../../agent-host/brand.ts";
 import { terminalOf } from "../../agent-host/command-detail.ts";
+import { currentOnDisk, type ShownWrite, shownWrites } from "../../agent-host/command-writes.ts";
+import { unifiedDiff } from "../../agent-host/line-diff.ts";
+import { WordText } from "../../agent-policy/command-segments.ts";
+import type { Folders } from "../../agent-policy/command-units.ts";
 import type { SessionUpdate } from "effective-acp/schema/v1";
 import { next, presentFrom, type ProjectionInput, project } from "../../agent-acp/projection.ts";
 import { immutableToolCatalogOf } from "../../agent-session/configuration/session-setup.ts";
 import { Prompt } from "effect/cli";
 import type { Fact } from "../../agent-machine/fact.ts";
-import { answerPicking, OptionId, type PermissionQuestion, questionIn } from "../../agent-policy/permissions.ts";
+import { answerPicking, type CommandNeed, OptionId, type PermissionQuestion, questionIn } from "../../agent-policy/permissions.ts";
 import type { CallId, TurnId } from "../../agent-machine/names.ts";
 import type { ToolOutcome } from "../../agent-machine/observation.ts";
 import type { Services, Session } from "../../agent-session/loop.ts";
@@ -137,16 +142,41 @@ const inputOf = (facts: ReadonlyArray<Fact>, call: CallId): string => {
   return found === undefined ? "" : asText(found);
 };
 
+/** A unified diff's lines, coloured: removed lines red, added lines green, hunk headers dim. */
+const coloured = (line: string): string => {
+  if (line.startsWith("@@") || line.startsWith("---") || line.startsWith("+++")) return `\x1b[2m${line}\x1b[0m`;
+  if (line.startsWith("-")) return `\x1b[31m${line}\x1b[0m`;
+  return line.startsWith("+") ? `\x1b[32m${line}\x1b[0m` : line;
+};
+
+/** The diff of the file that a need's write names, among `writes`; undefined when it is not shown as one. */
+const diffFor = (need: CommandNeed, writes: ReadonlyArray<ShownWrite>): ReadonlyArray<string> | undefined => {
+  const detail = need.detail;
+  if (detail?._tag !== "Writes") return undefined;
+  const write = writes.find((each) => each._tag === "Diff" && each.writes.path === detail.path);
+  return write?._tag === "Diff" ? unifiedDiff(detail.path, write.before, write.after) : undefined;
+};
+
 /**
  * The permission question as shown. About a command: the command, then each of its programs that
- * needs permission and why, with what a `sed` script does or the code a runtime is given indented
- * under it. About a tool: the tool, its kind, and the call's input.
+ * needs permission and why, with what a `sed` script does, the code a runtime is given, or the diff
+ * of a file it writes (`writes`, read before the command runs) indented under it. About a tool: the
+ * tool, its kind, and the call's input.
  */
-const shown = (question: PermissionQuestion, input: string): string =>
+const shown = (question: PermissionQuestion, input: string, writes: ReadonlyArray<ShownWrite>): string =>
   question._tag === "Command"
     ? [
         `Run this command? ${question.command}`,
-        ...question.needs.flatMap((each) => [`  ${each.program}: ${each.why}`, ...(each.detail === undefined ? [] : terminalOf(each.detail).map((line) => `    ${line}`))]),
+        ...question.needs.flatMap((each) => {
+          const diff = diffFor(each, writes);
+          const why = writes.find((write) => write._tag === "NoDiff" && each.detail?._tag === "Writes" && write.writes.path === each.detail.path);
+          return [
+            `  ${each.program}: ${each.why}`,
+            ...(each.detail === undefined ? [] : terminalOf(each.detail, diff !== undefined).map((line) => `    ${line}`)),
+            ...(diff ?? []).map((line) => `    ${coloured(line)}`),
+            ...(why?._tag === "NoDiff" ? [`    (No diff: ${why.reason}.)`] : []),
+          ];
+        }),
       ].join("\n")
     : `Run ${question.tool} (${question.kind})? ${input}`;
 
@@ -213,6 +243,8 @@ const following = (session: Session, view: View, stdin?: NodeJS.ReadStream) =>
     const inbox = yield* Queue.unbounded<ProjectionInput>();
     const before = yield* session.facts;
     const present = presentFrom(yield* immutableToolCatalogOf(before));
+    const disk = yield* FileSystem.FileSystem;
+    const folders: Folders = { working: WordText.make(process.cwd()), home: WordText.make(homedir()) };
     const replayed = (yield* project(before, { mode: "replay", present })).state;
     const state = yield* Ref.make(replayed);
     // The turns whose updates are all printed: those that ended before following began, then each one as it ends.
@@ -261,7 +293,9 @@ const following = (session: Session, view: View, stdin?: NodeJS.ReadStream) =>
         if (question === undefined) return;
         const rejecting = question.options.find((option) => option.kind === "reject_once")?.optionId ?? OptionId.make("reject-once");
         yield* endLine;
-        const message = shown(question, inputOf(yield* session.facts, call));
+        // The command waits for the answer, so its files are read before it runs.
+        const writes = question._tag === "Command" ? yield* shownWrites(question.command, folders, (full, path) => currentOnDisk(disk, full, path)) : [];
+        const message = shown(question, inputOf(yield* session.facts, call), writes);
         const picked = yield* keys
           .lend(Prompt.Select({ message, choices: question.options.map((option) => ({ title: option.name, value: option.optionId })) }))
           .pipe(Effect.catchTag("QuitError", () => Effect.succeed(rejecting)));

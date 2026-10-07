@@ -464,6 +464,17 @@ the file tools' paths are resolved against the working folder (`agent-tools/in-w
   choice. A path is the call's location. An edit's call shows its change as a `diff`, from when
   permission is asked; a command's call shows its `terminal` from when it has one, and when it has
   ended.
+- A command that writes text to a file where its words show the text (`cat > f <<'EOF'`,
+  `echo x >> f`, `tee f <<< x`; `agent-host/command-writes.ts`) shows each such file's `diff` in its
+  call: from when it is announced, in its permission question, and after it succeeds. The file's text
+  before is read once, before the command runs: by `terminal_command` itself, or when the call is
+  first presented, whichever comes first. Whether the file exists is read from the disk; its text,
+  through `fs/read_text_file`, so an unsaved change in the editor counts. A file that does not exist
+  has no text before (`oldText: null`). When the text before cannot be read (the read fails, the
+  file is over 256 KiB, a `cd` comes first in the command), the call says why no diff is shown, and
+  the permission question shows the text the command writes. A note follows a diff whose text the
+  shell expands (`$…`) before writing it. A session that is loaded shows no diff for the calls it
+  replays: their text before was not read.
 
 ### `workspaceWorld`
 

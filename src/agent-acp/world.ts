@@ -30,9 +30,14 @@
 
 import type { Environment } from "../agent-process/environment.ts";
 import { Effect, FileSystem, HashMap, Option, Ref } from "effect";
+import { homedir } from "node:os";
+import { type Current, currentOnDisk, type ShownWrite, shownWrites } from "../agent-host/command-writes.ts";
+import { logKeys as hostLogKeys } from "../agent-host/log-keys.ts";
+import { ShellCommand, WordText } from "../agent-policy/command-segments.ts";
+import type { Folders } from "../agent-policy/command-units.ts";
 import type { AgentConnection } from "effective-acp/agent";
 import type { V1Version } from "effective-acp/protocol";
-import type { McpServer, SessionId, TerminalId } from "effective-acp/schema/v1";
+import type { McpServer, SessionId, TerminalId, ToolCallContent } from "effective-acp/schema/v1";
 import type { CallId } from "../agent-machine/names.ts";
 import type { ToolSource } from "../agent-session/tool-sources.ts";
 import { parseJson } from "../agent-session/received.ts";
@@ -99,12 +104,58 @@ const systemFor = (cwd: string, git: ReturnType<typeof gitToolsAt>): Effect.Effe
  * `intent` (`described`), and the file tools' paths are resolved against the working folder
  * (`inWorkspace`). The world provides the editor (`Editor`) to the tools.
  */
-export const editorWorld: World = {
+/**
+ * A command's write as a call's content: a diff of the file, with a note when the shell expands the
+ * text it writes; or why no diff is shown (the permission question shows the text).
+ */
+const writeContent = (write: ShownWrite): ReadonlyArray<ToolCallContent> => {
+  if (write._tag === "NoDiff") return [{ type: "content", content: { type: "text", text: `No diff of ${write.writes.path} is shown: ${write.reason}.` } }];
+  const diff: ToolCallContent = { type: "diff", path: write.full, oldText: write.before ?? null, newText: write.after };
+  return write.writes.expands ? [diff, { type: "content", content: { type: "text", text: `When the command runs, the shell replaces \`$…\` and backquoted commands in the text it writes to ${write.writes.path}, so the file may differ from this diff.` } }] : [diff];
+};
+
+export const editorWorld: World<FileSystem.FileSystem> = {
   open: ({ sessionId, cwd, connection, strictInput }) =>
     Effect.gen(function* () {
       const fs = connection.profile.client.capabilities.fs;
+      const disk = yield* FileSystem.FileSystem;
       // The terminal each command ran in, by call: shown in the call as it runs, and when it has ended.
       const terminals = yield* Ref.make(HashMap.empty<CallId, TerminalId>());
+      // What each command writes to files, with their text before it ran: read once, before it runs.
+      const writes = yield* Ref.make(HashMap.empty<CallId, ReadonlyArray<ShownWrite>>());
+      const folders: Folders = { working: WordText.make(cwd), home: WordText.make(homedir()) };
+      // A file's current text: whether it exists from the disk, and its text from the editor, so that an unsaved change counts.
+      const currentOf = (full: string, path: string): Effect.Effect<Current> =>
+        currentOnDisk(disk, full, path).pipe(
+          Effect.filterOrElse(
+            (current) => current._tag !== "Text" || fs?.readTextFile !== true,
+            () =>
+              connection.client["fs/read_text_file"]({ sessionId, path: full }).pipe(
+                Effect.map(({ content }): Current => ({ _tag: "Text", text: content })),
+                Effect.catch((error) =>
+                  Effect.logWarning(hostLogKeys.writes.currentUnread, { path, full, cause: error.message }).pipe(
+                    Effect.as<Current>({ _tag: "Unknown", reason: `the editor could not read its current text: ${error.message}` }),
+                  ),
+                ),
+              ),
+          ),
+        );
+      const writesBefore = (call: CallId, command: ShellCommand): Effect.Effect<ReadonlyArray<ShownWrite>> =>
+        Effect.gen(function* () {
+          const known = HashMap.get(yield* Ref.get(writes), call);
+          if (Option.isSome(known)) return known.value;
+          const shown = yield* shownWrites(command, folders, currentOf);
+          // The first reading kept wins: a later one may have read after the command ran.
+          return yield* Ref.modify(writes, (all) =>
+            Option.match(HashMap.get(all, call), { onSome: (kept) => [kept, all] as const, onNone: () => [shown, HashMap.set(all, call, shown)] as const }),
+          );
+        });
+      // A call's writes: read before its command runs; once it has ended, those read before it ran.
+      const writesShown = (call: CallId, command: ShellCommand | undefined, ended: boolean): Effect.Effect<ReadonlyArray<ShownWrite>> => {
+        if (command === undefined) return Effect.succeed([]);
+        if (!ended) return writesBefore(call, command);
+        return Ref.get(writes).pipe(Effect.map((all) => Option.getOrElse(HashMap.get(all, call), () => [])));
+      };
       const inFolder = inWorkspace(cwd);
       const tools: ReadonlyArray<AnyTool<Editor | CurrentCall>> = [
         ...(fs?.readTextFile === true ? [anyTool(described(inFolder(readFile)))] : []),
@@ -113,7 +164,7 @@ export const editorWorld: World = {
         anyTool(described(updatePlan)),
         ...(connection.profile.client.capabilities.terminal === true ? [anyTool(described(runCommand))] : []),
       ];
-      const source = yield* sourceOf(tools, { strictInput }).pipe(Effect.provideService(Editor, { connection, sessionId, cwd, terminals }));
+      const source = yield* sourceOf(tools, { strictInput }).pipe(Effect.provideService(Editor, { connection, sessionId, cwd, terminals, writesBefore }));
 
       const git = gitToolsAt(cwd, strictInput);
       const plain = presentFrom([...source.tools, ...(git?.catalog ?? [])]);
@@ -131,7 +182,13 @@ export const editorWorld: World = {
           const base = yield* plain(call, outcome);
           const shown: Presented = { ...base, ...(about === undefined || base.title !== call.tool ? {} : { title: `${call.tool}: ${oneLine(about)}` }) };
           const terminalId = Option.getOrUndefined(HashMap.get(yield* Ref.get(terminals), call.call));
-          if (call.tool === "terminal_command" && terminalId !== undefined) return { ...shown, content: [{ type: "terminal", terminalId }] } satisfies Presented;
+          if (call.tool === "terminal_command") {
+            // Before the command runs, its writes are read; once it has ended, the writes read before it ran are shown, after a success.
+            const command = typeof input["command"] === "string" ? ShellCommand.make(input["command"]) : undefined;
+            const before = yield* writesShown(call.call, command, outcome !== undefined);
+            const content = [...(outcome === undefined || outcome._tag === "Succeeded" ? before.flatMap(writeContent) : []), ...(terminalId === undefined ? [] : [{ type: "terminal" as const, terminalId }])];
+            return content.length === 0 ? shown : ({ ...shown, content } satisfies Presented);
+          }
           const at = typeof input["path"] === "string" ? inside(cwd, input["path"]) : undefined;
           if (at === undefined || "problem" in at) return shown;
           const located: Presented = { ...shown, locations: [{ path: at.full }] };

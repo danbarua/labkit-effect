@@ -804,6 +804,33 @@ test("edit_file replaces one occurrence through fs/*, shown as a diff; terminal_
   ]);
 });
 
+test("a command that writes text to a file shows the file's diff in its call: before the command runs, in the question, and after it succeeds; the text before is the editor's, and a new file's is none", async () => {
+  const host = startHost({
+    script: [
+      answer({ _tag: "ToolCall", call: "write-1", tool: "terminal_command", input: { command: "cat > config.yml <<'EOF'\nname: new\nEOF\necho hi >> new.txt", intent: "Write the files." } }),
+      answer({ _tag: "Text", text: "Written." }),
+    ],
+  });
+  mkdirSync(host.cwd, { recursive: true });
+  writeFileSync(join(host.cwd, "config.yml"), "name: on disk\n");
+  const { app, log } = sdkClient(undefined, { [join(host.cwd, "config.yml")]: "name: in the editor\n" });
+  await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, { fs: { readTextFile: true, writeTextFile: true }, terminal: true });
+    const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "Write"));
+  });
+  await host.stop();
+  const diffs = [
+    { type: "diff", path: join(host.cwd, "config.yml"), oldText: "name: in the editor\n", newText: "name: new\n" },
+    { type: "diff", path: join(host.cwd, "new.txt"), oldText: null, newText: "hi\n" },
+  ];
+  const asked = log.asked.find((each) => each.toolCall.toolCallId === "write-1")?.toolCall.content ?? [];
+  expect(asked.slice(0, 2) as unknown).toEqual(diffs);
+  expect(JSON.stringify(asked.at(-1))).toContain("The diff shows what it writes to config.yml.");
+  const updates = log.updates.filter((update) => update.sessionUpdate === "tool_call_update" && update.toolCallId === "write-1" && "content" in update && update.content !== undefined);
+  expect(updates.at(-1) as unknown).toMatchObject({ status: "completed", content: [...diffs, { type: "terminal" }] });
+});
+
 test("the editor world offers read_file and write_file as the client advertised fs; read_file reads through fs/read_text_file, a path outside the working folder is refused, and a client with no fs has no file tools", async () => {
   const host = startHost({
     script: [

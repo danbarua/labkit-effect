@@ -30,4 +30,12 @@ export const logKeys = {
      */
     levelInvalid: "host_logs.level_invalid",
   },
+  writes: {
+    /**
+     * Warning: the current text of a file that a command writes could not be read, so its diff is not
+     * shown. Details: the command's path for the file, the full path, and the cause. The text the
+     * command writes is shown instead.
+     */
+    currentUnread: "host_writes.current_unread",
+  },
 } as const;

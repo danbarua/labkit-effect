@@ -84,9 +84,14 @@ pub struct Redirect {
     /// The file or descriptor written to or read from; absent for here-documents, here-strings and process substitutions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<WordOut>,
-    /// The text a here-document or here-string gives as input, as written.
+    /// The text a here-document or here-string gives as input, as written; a `<<-` here-document's
+    /// lines without their leading tabs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
+    /// Whether the shell expands that text before giving it (`$x`, `` `cmd` ``): a here-document whose
+    /// delimiter is not quoted, or a here-string that is not a literal word.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub expands: bool,
 }
 
 /// Returns the segments of `command`.
@@ -363,20 +368,26 @@ impl Walker {
                             None
                         }
                     };
-                    Redirect { op: op.to_owned(), fd: fd.as_ref().map(|fd| *fd as i32), target, body: None }
+                    Redirect { op: op.to_owned(), fd: fd.as_ref().map(|fd| *fd as i32), target, body: None, expands: false }
                 }
                 IoRedirect::HereDocument(fd, document) => {
                     if document.requires_expansion {
                         self.expanded_text(&document.doc.value);
                     }
-                    Redirect { op: "<<".to_owned(), fd: fd.as_ref().map(|fd| *fd as i32), target: None, body: Some(document.doc.value.clone()) }
+                    let body = if document.remove_tabs {
+                        document.doc.value.split_inclusive('\n').map(|line| line.trim_start_matches('\t')).collect()
+                    } else {
+                        document.doc.value.clone()
+                    };
+                    Redirect { op: "<<".to_owned(), fd: fd.as_ref().map(|fd| *fd as i32), target: None, body: Some(body), expands: document.requires_expansion }
                 }
                 IoRedirect::HereString(fd, word) => {
                     let text = self.word(word);
-                    Redirect { op: "<<<".to_owned(), fd: fd.as_ref().map(|fd| *fd as i32), target: None, body: Some(text.literal.unwrap_or(text.text)) }
+                    let expands = text.literal.is_none();
+                    Redirect { op: "<<<".to_owned(), fd: fd.as_ref().map(|fd| *fd as i32), target: None, body: Some(text.literal.unwrap_or(text.text)), expands }
                 }
                 IoRedirect::OutputAndError(word, append) => {
-                    Redirect { op: if *append { "&>>" } else { "&>" }.to_owned(), fd: None, target: Some(self.word(word)), body: None }
+                    Redirect { op: if *append { "&>>" } else { "&>" }.to_owned(), fd: None, target: Some(self.word(word)), body: None, expands: false }
                 }
             })
             .collect()

@@ -125,9 +125,13 @@ a `cd` earlier in the command does not move the folder that later paths are judg
 outside it is itself a read outside it).
 - whether it is opaque: its words do not show what it runs (`python3 -c`, `curl … | sh`, `sudo`,
   `awk`, a variable such as `PATH` set for it), with why;
-- a detail that helps a person judge it: what a `sed` script does, in plain English, or the code
+- a detail that helps a person judge it: what a `sed` script does, in plain English; the code
   written in the command, with its language (`python3 -c`, `node -e`, `perl -ne`, `bun -e`,
-  `deno eval`, an `awk` program, a here-document or here-string that a runtime or a shell reads).
+  `deno eval`, an `awk` program, a here-document or here-string that a runtime or a shell reads); or
+  the text it writes to one file (`Writes`): `cat` given a here-document or here-string, `echo` with
+  literal words and no backslash, or `tee`, writing to one file named by a literal word or a path from
+  `~`, with whether the text is added to the end (`>>`, `tee -a`) and whether the shell expands
+  `$…` in it. `textsWritten` lists a command's writes, each with whether a `cd` comes before it.
 
 `sed` is judged by its script (`sed-script.ts`): a script that runs commands (`e`), that is in a
 file (`-f`), or that is not understood is opaque; otherwise its grant is `sed`, and it writes the
