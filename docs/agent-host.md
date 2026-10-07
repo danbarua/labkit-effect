@@ -15,7 +15,7 @@ about them are in [agent-host-direction.md](agent-host-direction.md).
 | --- | --- |
 | `catalog.ts` | The model catalog (`ModelCatalog`), `askable`, and `targetOf`. |
 | `local-server.ts` | The local server's models and what is known of them; `KnownWithLocalServer`, `SettlingWithLocalServer`. |
-| `clients.ts` | `Clients`: one model client per provider whose key is set, and the local server. |
+| `clients.ts` | `Clients`: one model client per provider whose key is set, and the local server. Every provider's requests go through one HTTP client that captures their bodies (`capturingHttp`), and each attempt is observed on its span (`observedAttempts`); both are in `src/instrumentation`. |
 | `services.ts` | `SessionServices`, `permissionsFor`, `loopBreaker`, `turnRequestLimit`, `budgetLimit`. |
 | `with-session.ts` | `withSession`: a session as a host runs it, with the host's bolt-ons. |
 | `directory.ts` | The folder of sessions. |
@@ -24,6 +24,7 @@ about them are in [agent-host-direction.md](agent-host-direction.md).
 | `export.ts` | `markdownOf`: a session's transcript as Markdown. |
 | `incomplete.ts` | `retryIncomplete`: the turn-end hook for a response with thinking and no answer. |
 | `logs.ts` | `LogsToFile`, `LogsToStderr`. |
+| `log-level.ts` | The level a program logs at, from `<PREFIX>LOG_LEVEL`, and the warning for a value that names no level. |
 | `launcher-logs.ts`, `log-file.ts` | The ACP launcher's log files. `log-file.ts` is listed in `imperativeBoundaries` in `oxlint.config.ts`. |
 | `redaction.ts` | Removing the environment's secrets from log records. |
 | `brand.ts` | The name the agent goes by, and what is named after it. |
@@ -208,6 +209,20 @@ alone: no model and no blob store is asked. A host's `/export` writes it; where 
   stdout carries the protocol. `launcherLogOptionsFrom(env)` reads the options from the environment.
   `bun run acp:logs` prints the newest launch's file; `--errors` prints only its warning, error and
   fatal records.
+- Each of these layers also names the folder where the bodies of the session's model requests are
+  captured (`HttpCaptures`, `src/instrumentation/http-captures.ts`): `http-captures/` beside the log
+  file (`LogsToFile`), in the brand's logs folder (`LogsToStderr`), or in the launcher's folder.
+  Captures are written only when debug lines are logged.
+
+### Log level
+
+Every entry point (the CLI, the ACP launcher, `runTest`, zork, the spectator, the probes) logs at the
+level `<PREFIX>LOG_LEVEL` names (`log-level.ts`; `LABKIT_LOG_LEVEL` for labkit), info by default.
+The names are those the CLI's `--log-level` takes: all, trace, debug, info, warn or warning, error,
+fatal, none, in any case. The CLI's `--log-level` wins over the variable. The ACP launcher reads
+`<PREFIX>ACP_LOG_LEVEL` first, then `<PREFIX>LOG_LEVEL`, then debug. A value that names no level is
+passed over, to the next variable or the default, and reported once as a warning
+(`host_logs.level_invalid`) with the variable, the value and the level used, in the run's log.
 
 ### Launcher log files
 
@@ -220,11 +235,12 @@ sets the minimum log level. The file's path is written to stderr once, at start.
 | Variable (after the brand's prefix, `LABKIT_` for labkit) | Default |
 | --- | --- |
 | `ACP_LOG_DIR` | `~/.local/share/<brand>/logs` |
-| `ACP_LOG_LEVEL` | debug |
+| `ACP_LOG_LEVEL` | `LOG_LEVEL`, else debug |
 | `ACP_LOG_MAX_BYTES` | 10 MiB |
 | `ACP_LOG_BACKUPS` | 4 |
 
-A value that does not parse takes the default. Each launch has its own id.
+A size or backup count that does not parse takes the default; a level that does not parse is
+reported (above). Each launch has its own id.
 
 - **Rotation.** A record that would take the file past `maxBytes` first rotates it: `.jsonl` becomes
   `.jsonl.1`, each backup moves up one, and backups past `backups` are deleted.

@@ -37,7 +37,7 @@ const linesOf = async (file: string): Promise<Array<Line>> =>
 const launched = async (options: Partial<LauncherLogOptions> & { readonly dir: string }, program: Effect.Effect<unknown>): Promise<Array<string>> => {
   const stderr: Array<string> = [];
   const console = { ...globalThis.console, error: (...args: ReadonlyArray<unknown>) => void stderr.push(args.map(String).join(" ")) };
-  const layer = LauncherLogs({ level: "Debug", maxBytes: 1024 * 1024, backups: 2, launchId: "test", keep: 20, secrets: { values: [], tooShort: [] }, service: "labkit-tests", ...options });
+  const layer = LauncherLogs({ level: "Debug", invalidLevels: [], maxBytes: 1024 * 1024, backups: 2, launchId: "test", keep: 20, secrets: { values: [], tooShort: [] }, service: "labkit-tests", ...options });
   await runTest(program.pipe(Effect.provide(layer.pipe(Layer.provide(BunServices.layer))), Effect.provideService(Console.Console, console)));
   return stderr;
 };
@@ -106,8 +106,22 @@ test.each(["", "ten", "-5", "1.5", "0x", "1e400"])("a size or backup count that 
   expect(launcherLogOptionsFrom({ LABKIT_ACP_LOG_MAX_BYTES: value, LABKIT_ACP_LOG_BACKUPS: value })).toMatchObject({ maxBytes: 10 * 1024 * 1024, backups: 4 });
 });
 
-test.each(["verbose", "constructor", "Warn"])("a level that is not one of trace, debug, info, warning, error, fatal (%p) falls back to debug", (value) => {
-  expect(launcherLogOptionsFrom({ LABKIT_ACP_LOG_LEVEL: value }).level).toBe("Debug");
+test.each(["verbose", "constructor", "warnings"])("a level that is not one of all, trace, debug, info, warn, warning, error, fatal, none (%p) falls back to debug, and is listed to be reported", (value) => {
+  expect(launcherLogOptionsFrom({ LABKIT_ACP_LOG_LEVEL: value })).toMatchObject({ level: "Debug", invalidLevels: [{ variable: "LABKIT_ACP_LOG_LEVEL", value }] });
+});
+
+test("the launcher's level is ACP_LOG_LEVEL, else LOG_LEVEL, else debug; an ACP_LOG_LEVEL that names no level gives way to LOG_LEVEL", () => {
+  expect(launcherLogOptionsFrom({ LABKIT_ACP_LOG_LEVEL: "error", LABKIT_LOG_LEVEL: "info" }).level).toBe("Error");
+  expect(launcherLogOptionsFrom({ LABKIT_LOG_LEVEL: "info" })).toMatchObject({ level: "Info", invalidLevels: [] });
+  expect(launcherLogOptionsFrom({ LABKIT_ACP_LOG_LEVEL: "loud", LABKIT_LOG_LEVEL: "trace" })).toMatchObject({ level: "Trace", invalidLevels: [{ variable: "LABKIT_ACP_LOG_LEVEL", value: "loud" }] });
+});
+
+test("a level variable that names no level is reported once at start: the variable, its value and the level used", async () => {
+  const dir = `${testFolder()}/logs`;
+  const { level, invalidLevels } = launcherLogOptionsFrom({ LABKIT_ACP_LOG_LEVEL: "loud", LABKIT_LOG_LEVEL: "warning" });
+  await launched({ dir, level, invalidLevels }, Effect.logWarning("started"));
+  const lines = await linesOf(fileOf(dir));
+  expect(lines.map((line) => line.message)).toEqual([["host_logs.level_invalid", { variable: "LABKIT_ACP_LOG_LEVEL", value: "loud", level: "warning" }], "started"]);
 });
 
 test("a record that would take the file past maxBytes rotates it first: .jsonl to .1 and on, no more than `backups` kept", async () => {

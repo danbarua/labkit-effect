@@ -40,6 +40,16 @@ export const logKeys = {
     fileAsPointer: "provider.request.file_as_pointer",
     /** A field of the request's context that this provider's adapter does not translate was not sent; the details name the field, its value, and what the provider does without it. */
     notTranslated: "provider.request.not_translated",
+    /**
+     * One body of a model request's HTTP exchange was written to a file (`instrumentation/http-captures.ts`);
+     * the details name the file (`capture_id`, `body_uri`, `size`, `sha256`), which body it holds
+     * (`body`), and how many secret values were replaced in it (`redacted`).
+     */
+    payloadCaptured: "provider.http.payload_captured",
+    /** A body of a model request's HTTP exchange could not be written to its file; the details name the body, the folder and the error. */
+    payloadNotCaptured: "provider.http.payload_not_captured",
+    /** Warning: a failed model request's recorded error is not an `AiError`, so its span has no `error_kind`; the details are the error as recorded. */
+    failureKindUnread: "provider.failure.kind_unread",
   },
   loop: {
     /**

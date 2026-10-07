@@ -20,6 +20,7 @@ import { Effect, Layer, Redacted, Schema } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { CompactedConversation } from "../../src/agent-context/compaction.ts";
 import { SummariesInFolder } from "../../src/agent-context/summaries-in-folder.ts";
+import { logLevelOf, withLogLevel } from "../../src/agent-host/log-level.ts";
 import { Fact } from "../../src/agent-machine/fact.ts";
 import { ModelName, ProviderName, TestName } from "../../src/agent-machine/names.ts";
 import { FallbackModelClient } from "../../src/agent-session/model-fallback.ts";
@@ -29,6 +30,7 @@ import { openAiRequests } from "../../src/agent-session/providers/openai-client.
 import { whenCountReaches } from "../../src/examples/fizzbuzz/compaction-policies.ts";
 import { basic, countingUser, play } from "../../src/examples/fizzbuzz/scenario.ts";
 import { EmojiHappyFizzBuzzSummarizer, PlainTextFizzBuzzSummarizer } from "../../src/examples/fizzbuzz/summarizers.ts";
+import { capturingHttp } from "../../src/instrumentation/http-captures.ts";
 import { TelemetryToFiles } from "../../src/instrumentation/telemetry.ts";
 import { transcript } from "./transcript.ts";
 
@@ -55,7 +57,7 @@ const client = Layer.unwrap(
 ).pipe(
   Layer.provide(
     Layer.mergeAll(AnthropicClient.layer({ apiKey: keyOf("ANTHROPIC_API_KEY") }), OpenAiClient.layer({ apiKey: keyOf("OPENAI_API_KEY") })).pipe(
-      Layer.provide(FetchHttpClient.layer),
+      Layer.provide(capturingHttp(FetchHttpClient.layer)),
     ),
   ),
 );
@@ -81,7 +83,7 @@ const { facts } = await Effect.runPromise(
       [16, claude],
     ]),
     summaries: SummariesInFolder(folder).pipe(Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))),
-  }).pipe(reportedBy({ _tag: "Test", name: TestName.make("fizzbuzz-switch") }), Effect.provide(TelemetryToFiles(join(run, "telemetry")))),
+  }).pipe(reportedBy({ _tag: "Test", name: TestName.make("fizzbuzz-switch") }), Effect.provide(withLogLevel(logLevelOf(process.env), TelemetryToFiles(join(run, "telemetry"))))),
 );
 
 const replies = facts.flatMap((fact) => {

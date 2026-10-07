@@ -41,13 +41,30 @@ export const secretsOf = (env: Readonly<Record<string, string | undefined>>): Se
 const secretField =
   /^(?:api[-_]?key|x[-_]api[-_]key|authorization|proxy[-_]authorization|password|client[-_]?secret|access[-_]?token|refresh[-_]?token|id[-_]?token|cookie|set-cookie)$/i;
 
-/** Returns a function that replaces each of `values` in a text, the longest first, so that a secret containing another is replaced whole. */
-export const redactorOf = (values: ReadonlyArray<string>) => {
-  const ordered = Arr.sort(
+/** Returns `values` without empty or repeated ones, the longest first, so that a secret containing another is replaced whole. */
+const longestFirst = (values: ReadonlyArray<string>): ReadonlyArray<string> =>
+  Arr.sort(
     Arr.dedupe(values.filter((value) => value !== "")),
     Order.mapInput(Order.flip(Order.Number), (value: string) => value.length),
   );
+
+/** Returns a function that replaces each of `values` in a text, the longest first, so that a secret containing another is replaced whole. */
+export const redactorOf = (values: ReadonlyArray<string>) => {
+  const ordered = longestFirst(values);
   return (text: string): string => ordered.reduce((redacted, secret) => redacted.replaceAll(secret, redactionPlaceholder), text);
+};
+
+/** As `redactorOf`, and also returns how many values it replaced, so that a copy can say it is no longer exact. */
+export const countingRedactorOf = (values: ReadonlyArray<string>) => {
+  const ordered = longestFirst(values);
+  return (text: string): { readonly text: string; readonly replaced: number } =>
+    ordered.reduce(
+      (done, secret) => {
+        const pieces = done.text.split(secret);
+        return { text: pieces.join(redactionPlaceholder), replaced: done.replaced + pieces.length - 1 };
+      },
+      { text, replaced: 0 },
+    );
 };
 
 /**

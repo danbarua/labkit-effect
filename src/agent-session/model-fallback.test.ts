@@ -26,6 +26,7 @@ import { anthropicRequests } from "./providers/anthropic-client.ts";
 import { Report } from "./report.ts";
 import { openAiRequests } from "./providers/openai-client.ts";
 import { type SpanLine, SpansTo } from "../instrumentation/telemetry.ts";
+import { observedAttempts } from "../instrumentation/model-attempts.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { anthropicAtMock, openAiAtMock, startVidaiMock, type VidaiMock } from "../../tests/support/vidaimock.ts";
 
@@ -43,13 +44,13 @@ const anthropic: Target = { provider: ProviderName.make("anthropic"), model: Mod
 const openAi: Target = { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.6") };
 const noRetries: Retries = { times: 0, firstWait: "1 millis" };
 
-/** Anthropic, then OpenAI, each at the mock; a provider given a status fails every request with it. */
+/** Anthropic, then OpenAI, each at the mock, each attempt observed as the hosts observe it; a provider given a status fails every request with it. */
 const chain = (status: { readonly anthropic?: number; readonly openAi?: number }) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const requests = new Map([
-        [anthropic.provider, yield* anthropicRequests(noRetries)],
-        [openAi.provider, yield* openAiRequests(noRetries)],
+        [anthropic.provider, observedAttempts(yield* anthropicRequests(noRetries))],
+        [openAi.provider, observedAttempts(yield* openAiRequests(noRetries))],
       ]);
       return FallbackModelClient({ requests, fallbacks: [openAi] });
     }),
@@ -180,7 +181,7 @@ test("a fallback to a provider with no request configured is a defect when the l
   expect(Exit.isFailure(exit) && Exit.hasDies(exit)).toBe(true);
 });
 
-test("each attempt runs in its own span, with its provider and model", async () => {
+test("each attempt runs in its own span, with its provider and model, and, when it fails, the HTTP status of its response that was not 2xx", async () => {
   const spans: Array<SpanLine> = [];
   const reported: Array<Observation> = [];
   const attempts = await runTest(
@@ -195,9 +196,10 @@ test("each attempt runs in its own span, with its provider and model", async () 
       Effect.provideService(Report, (observation) => Effect.sync(() => reported.push(observation))),
     ),
   );
-  expect(attempts.filter((span) => span.name === "agent.model.attempt")).toEqual([
-    { name: "agent.model.attempt", attributes: { provider: "anthropic", model: "claude-sonnet-5" } },
-    { name: "agent.model.attempt", attributes: { provider: "openai", model: "gpt-5.6" } },
+  const attemptSpans = attempts.filter((span) => span.name === "agent.model.attempt");
+  expect(attemptSpans.map(({ attributes }) => [attributes["provider"], attributes["model"], attributes["outcome"], attributes["http_status"]])).toEqual([
+    ["anthropic", "claude-sonnet-5", "failed", 529],
+    ["openai", "gpt-5.6", "responded", undefined],
   ]);
   expect(reported.map((observation) => observation._tag)).toEqual(["ModelAttemptFailed", "ModelRequestDispatched", "ModelChangeArrived"]);
 });

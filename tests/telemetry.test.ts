@@ -14,6 +14,7 @@ import { FallbackModelClient } from "../src/agent-session/model-fallback.ts";
 import { scriptedFizzBuzzModel } from "../src/examples/fizzbuzz/model.ts";
 import { advanced, play } from "../src/examples/fizzbuzz/scenario.ts";
 import { SourcedToolRunner } from "../src/agent-session/tool-sources.ts";
+import { asText } from "../src/agent-session/received.ts";
 import { OtlpFromEnv, type SpanLine, SpansTo, TelemetryToFiles } from "../src/instrumentation/telemetry.ts";
 import { CountedToolRunner } from "../src/instrumentation/tool-metrics.ts";
 import { runTest } from "./support/run.ts";
@@ -30,13 +31,46 @@ test("each request is a span with the session, turn, call and tool", async () =>
   expect(ended.filter((span) => span.name === "agent.model.request").length).toBe(5);
 });
 
+test("a counted tool run's span has how the run ended and the sizes of the call's input and of what the tool returned, as the facts record them", async () => {
+  const ended: Array<SpanLine> = [];
+  const { facts } = await runTest(
+    play(["1", "3", "7"], { ...advanced, session: "fay", tools: CountedToolRunner(SourcedToolRunner) }).pipe(Effect.provide(SpansTo((line) => ended.push(line)))),
+  );
+  const observed = facts.flatMap((fact) => (fact._tag === "Observed" ? [fact.observation] : []));
+  const expected = observed.flatMap((observation) => {
+    if (observation._tag !== "ToolEnded") return [];
+    // The scripted model does not stream: each call is a part of the response that made it.
+    const call = observed.flatMap((each) => (each._tag === "ModelResponded" ? each.parts : [])).find((part) => part._tag === "ToolCall" && part.call === observation.call);
+    const result = observation.outcome._tag === "Succeeded" ? observation.outcome.output : observation.outcome.reason._tag === "Reported" ? observation.outcome.reason.error : undefined;
+    return [
+      {
+        call: observation.call,
+        outcome: observation.outcome._tag === "Succeeded" ? "Succeeded" : observation.outcome.reason._tag,
+        args_chars: call?._tag === "ToolCall" ? asText(call.input).length : undefined,
+        ...(result === undefined ? {} : { result_chars: asText(result).length }),
+      },
+    ];
+  });
+  expect(expected.length).toBe(2);
+  expect(
+    ended
+      .filter((span) => span.name === "agent.tool.run")
+      .map(({ attributes }) => ({
+        call: attributes["call"],
+        outcome: attributes["outcome"],
+        args_chars: attributes["args_chars"],
+        ...("result_chars" in attributes ? { result_chars: attributes["result_chars"] } : {}),
+      })),
+  ).toEqual(expected);
+});
+
 const readLines = <A>(path: string): ReadonlyArray<A> =>
   readFileSync(path, "utf8")
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line) as A);
 
-test("the file holds the session's span, each turn's under it, each request's under its turn, and each attempt under its request", async () => {
+test("the file holds the session's span, each turn's under it, each request's under its turn, and each attempt under its request; the session's span ends with the session's totals", async () => {
   const base = join(testFolder(), "telemetry");
   const target = { provider: ProviderName.make("scripted"), model: ModelName.make("fizzbuzz-1") };
   // The scripted model as a provider's request, behind the fallback chain, so each request makes an attempt.
@@ -62,7 +96,21 @@ test("the file holds the session's span, each turn's under it, each request's un
   expect(more).toEqual([]);
   if (session === undefined) throw new Error("no agent.session span was written");
   expect(session.parentSpanId).toBeUndefined();
-  expect(session.attributes).toEqual({ session: "dave" });
+  // The scripted model has no price and reports no usage: its five responses are unpriced, and the session has no cost.
+  expect(session.attributes).toEqual({
+    session: "dave",
+    requests: 5,
+    failed_requests: 0,
+    turns: 3,
+    tool_calls: 2,
+    failed_tool_calls: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    unpriced_requests: 5,
+    models: "scripted/fizzbuzz-1",
+  });
   expect(new Set(lines.map((span) => span.traceId))).toEqual(new Set([session.traceId]));
 
   const turns = named("agent.turn");

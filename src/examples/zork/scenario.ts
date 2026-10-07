@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { Clock, Data, Effect, Layer, Ref, Schema } from "effect";
 import { AgentContextAssembler, WholeConversation } from "../../agent-context/assembler.ts";
 import { Brand, logsFolderOf, sessionsFolderOf } from "../../agent-host/brand.ts";
+import { type InvalidLevel, warnInvalidLevels } from "../../agent-host/log-level.ts";
 import { LogsToFile } from "../../agent-host/logs.ts";
 import { SessionServices } from "../../agent-host/services.ts";
 import { Headless, withSession } from "../../agent-host/with-session.ts";
@@ -67,6 +68,8 @@ export interface Setup {
   readonly home?: string;
   /** Called with the opening, and with each action and its narration as soon as each is played. */
   readonly watch?: (event: GameEvent) => Effect.Effect<void>;
+  /** The log-level variables that named no level (`agent-host/log-level.ts`), reported in each session's log once it is open. None when not given. */
+  readonly invalidLevels?: ReadonlyArray<InvalidLevel>;
 }
 export interface Exchange {
   readonly turn: number;
@@ -212,9 +215,10 @@ export const play = (setup: Setup) => {
       const lastChance = holdsOf(facts, turn) >= holdLimit || requestsIn(facts, turn) >= requestLimit;
       return customise === undefined ? offered : customise({ state: current, context: offered, lastChance });
     }));
+    const invalidLevels = setup.invalidLevels ?? [];
     return yield* withSession(optionsOf(setup, id, "engine", setup.engine, enginePrompt(commands), brand), (engineSession) =>
-      withSession(optionsOf(setup, id, "adventurer", setup.adventurer, adventurerPrompt(commands), brand, worldTools(state), request, feedback), (adventurerSession) =>
-        Effect.gen(function* () {
+      Effect.andThen(warnInvalidLevels(invalidLevels), withSession(optionsOf(setup, id, "adventurer", setup.adventurer, adventurerPrompt(commands), brand, worldTools(state), request, feedback), (adventurerSession) =>
+        Effect.andThen(warnInvalidLevels(invalidLevels), Effect.gen(function* () {
           const engine = asked(engineSession);
           const adventurer = asked(adventurerSession);
           // The engine's turn must complete: its answer is the scene.
@@ -264,8 +268,8 @@ export const play = (setup: Setup) => {
             await writeFile(transcriptPath, transcript(game, setup), { flag: "wx" });
           });
           return { ...game, facts: { engine: yield* engineSession.facts, adventurer: yield* adventurerSession.facts }, transcriptPath } satisfies Played;
-        }),
-      ),
+        })),
+      )),
     );
   }).pipe(
     Effect.withSpan("zork.game", { attributes: { game: id, engine: `${setup.engine.target.provider}/${setup.engine.target.model}`, adventurer: `${setup.adventurer.target.provider}/${setup.adventurer.target.model}` } }),

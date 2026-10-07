@@ -19,6 +19,9 @@
  *
  * The session that `use` is given carries its own services, so a host can run two sessions at once:
  * zork's engine and adventurer each call the other's session.
+ *
+ * Every span made in the session carries the host's name (`host`) and, when the record has one, the
+ * session's working folder (`cwd`), as the session's record holds them.
  */
 
 import { Effect, Layer, type Scope } from "effect";
@@ -142,4 +145,8 @@ export const withSession = <A, E, R, SE, SR, L, H>(options: SessionOptions<SE, S
       yield* bound.idle;
       return yield* use(bound).pipe(Effect.onInterrupt(() => interrupted(bound)));
     }).pipe(Effect.provideContext(context));
-  }).pipe(Effect.scoped, Effect.provide(options.logs));
+  }).pipe(
+    Effect.annotateSpans({ host: options.record.host, ...(typeof options.record["cwd"] === "string" ? { cwd: options.record["cwd"] } : {}) }),
+    Effect.scoped,
+    Effect.provide(options.logs),
+  );

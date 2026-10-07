@@ -20,6 +20,7 @@ import { AnthropicClient } from "@effect/ai-anthropic";
 import { OpenAiClient } from "@effect/ai-openai";
 import { Effect, Layer, Redacted, Schema } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import { logLevelOf, withLogLevel } from "../../src/agent-host/log-level.ts";
 import { Fact } from "../../src/agent-machine/fact.ts";
 import { ModelName, ProviderName, SessionId, TestName } from "../../src/agent-machine/names.ts";
 import type { Observation } from "../../src/agent-machine/observation.ts";
@@ -35,6 +36,7 @@ import { openedWith } from "../../src/agent-session/configuration/session-setup.
 import { TurnContextAssembler } from "../../src/agent-session/turn-context.ts";
 import { CountingTurns } from "../../src/agent-session/turns.ts";
 import { SmolToolRunner, smolCatalog } from "../../tests/support/smol-tools.ts";
+import { capturingHttp } from "../../src/instrumentation/http-captures.ts";
 import { TelemetryToFiles } from "../../src/instrumentation/telemetry.ts";
 import { transcript } from "./transcript.ts";
 
@@ -59,10 +61,10 @@ const apiKey = Redacted.make(key);
 
 const client =
   provider === "anthropic"
-    ? AnthropicModelClient.pipe(Layer.provide(AnthropicClient.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))))
+    ? AnthropicModelClient.pipe(Layer.provide(AnthropicClient.layer({ apiKey }).pipe(Layer.provide(capturingHttp(FetchHttpClient.layer)))))
     : provider === "xai"
-      ? XAiModelClient.pipe(Layer.provide(xAiClient(apiKey).pipe(Layer.provide(FetchHttpClient.layer))))
-      : OpenAiModelClient.pipe(Layer.provide(OpenAiClient.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))));
+      ? XAiModelClient.pipe(Layer.provide(xAiClient(apiKey).pipe(Layer.provide(capturingHttp(FetchHttpClient.layer)))))
+      : OpenAiModelClient.pipe(Layer.provide(OpenAiClient.layer({ apiKey }).pipe(Layer.provide(capturingHttp(FetchHttpClient.layer)))));
 
 const encodeFact = Schema.encodeSync(Fact);
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -101,7 +103,7 @@ const facts = await Effect.runPromise(
         client,
         CountingTurns,
         SmolToolRunner,
-        TelemetryToFiles(join(run, "telemetry")),
+        withLogLevel(logLevelOf(process.env), TelemetryToFiles(join(run, "telemetry"))),
       ),
     ),
   ),

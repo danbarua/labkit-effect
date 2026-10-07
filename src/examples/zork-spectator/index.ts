@@ -5,10 +5,11 @@
  *
  * Each model is asked as `zork/players.ts` describes, with its provider's key from the environment;
  * a model whose key is not set is refused when the game begins. Each game is played as `bun run zork`
- * plays one, with the same sessions, logs, transcripts, spans and ten-minute limit.
+ * plays one, with the same sessions, logs, transcripts, spans, log level and ten-minute limit.
  */
 import { BunServices } from "@effect/platform-bun";
-import { Effect, Layer, Logger } from "effect";
+import { Effect, Layer, Logger, References } from "effect";
+import { logLevelOf } from "../../agent-host/log-level.ts";
 import { TestName } from "../../agent-machine/names.ts";
 import { reportedBy } from "../../agent-session/origin.ts";
 import { OtlpSpansAndMetrics, otlpLogger } from "../../instrumentation/telemetry.ts";
@@ -24,13 +25,15 @@ const players: Players = {
   adventurer: (label) => adventurerFor(modelOf[label]),
 };
 
+const { level, invalid } = logLevelOf(process.env);
+
 const match = await Effect.runPromise(
   makeMatch(players, (setup) =>
-    play(setup).pipe(
+    play({ ...setup, invalidLevels: invalid }).pipe(
       reportedBy({ _tag: "Test", name: TestName.make("zork") }),
       Effect.timeout("10 minutes"),
       // Each session's log lines go to its log file, and to OTLP when it is set up.
-      Effect.provide(Layer.mergeAll(Logger.layer([otlpLogger("labkit-zork")]), OtlpSpansAndMetrics("labkit-zork"), BunServices.layer)),
+      Effect.provide(Layer.mergeAll(Logger.layer([otlpLogger("labkit-zork")]), Layer.succeed(References.MinimumLogLevel, level), OtlpSpansAndMetrics("labkit-zork"), BunServices.layer)),
     ),
   ),
 );

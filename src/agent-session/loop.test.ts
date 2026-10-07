@@ -3,18 +3,20 @@
 import { expect } from "bun:test";
 import { test } from "../../tests/support/test.ts";
 import { Effect, Layer, Logger, PubSub, References } from "effect";
-import { ModelName, ModelText, ProviderName, SessionId, StopReason, TurnId } from "../agent-machine/names.ts";
+import { ModelName, ModelText, ProviderName, SessionId, StopReason, TokenCount, TurnId } from "../agent-machine/names.ts";
+import type { Fact } from "../agent-machine/fact.ts";
 import { CurrentWork, type Work } from "./work.ts";
 import type { Observation } from "../agent-machine/observation.ts";
 import { BoringContextAssembler, BoringModelProvider } from "../../tests/support/boring.ts";
-import { CountingTurns } from "./turns.ts";
+import { CountingTurns, CountingTurnsInStore } from "./turns.ts";
 import { MaxHolds, ModelClient, ModelProvider, TurnEndHooks } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
 import { openSession } from "./loop.ts";
-import { EphemeralSessionStore } from "./session-store.ts";
+import { EphemeralSessionStore, ephemeralSessionStore } from "./session-store.ts";
 import { receivedJson } from "./received.ts";
 import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { runTest } from "../../tests/support/run.ts";
+import { type SpanLine, SpansTo } from "../instrumentation/telemetry.ts";
 import { boringOpening } from "../../tests/support/boring.ts";
 
 test("while a request is carried out, CurrentWork and every log line name its session and turn; every line names the test", async () => {
@@ -272,4 +274,78 @@ test("a request that dies of a defect is logged with what it died of, and record
     logKeys.loop.requestDied,
     expect.objectContaining({ request: "RequestModelResponse", turn: "turn-1", defect: expect.stringContaining("No request is configured for provider boring") }),
   ]);
+});
+
+test("a session opened under a host's span annotations has them on its turn's and request's spans, though the input comes from a fiber without them; its span ends with the session's totals", async () => {
+  const spans: Array<SpanLine> = [];
+  const host = { cwd: "/work/a", host: "cli" };
+  await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore), Effect.annotateSpans(host));
+      // Observed outside the annotations, as a host's other fibers (an ACP prompt's) do.
+      yield* session.observe(boringOpening());
+      yield* session.idle;
+      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
+      yield* session.idle;
+    }).pipe(Effect.provide(Layer.mergeAll(stubProvider, answering, BoringContextAssembler, CountingTurns, SmolToolRunner, SpansTo((line) => void spans.push(line))))),
+  );
+  const attributesOf = (name: string) => spans.find((span) => span.name === name)?.attributes;
+  expect(attributesOf("agent.model.request")).toMatchObject(host);
+  expect(attributesOf("agent.turn")).toMatchObject(host);
+  // The stub's answer reports no usage, so it is not priced, and the session has no cost.
+  expect(attributesOf("agent.session")).toEqual({
+    ...host,
+    session: "s1",
+    requests: 1,
+    failed_requests: 0,
+    turns: 1,
+    tool_calls: 0,
+    failed_tool_calls: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    unpriced_requests: 1,
+    models: "stub/stub-1",
+  });
+});
+
+test("a session reopened over the facts of an earlier run ends its span with the totals of the requests made since it reopened, not the earlier run's", async () => {
+  const spans: Array<SpanLine> = [];
+  const sonnet = Layer.succeed(ModelProvider, { select: () => Effect.succeed({ provider: ProviderName.make("anthropic"), model: ModelName.make("claude-sonnet-5-5") }) });
+  // Each answer: 1,000 tokens in at $2 and 100 out at $10, per million.
+  const priced = Layer.succeed(ModelClient, {
+    respond: (target, _context, turn) =>
+      Effect.succeed({
+        _tag: "ModelResponded" as const,
+        turn,
+        provider: target.provider,
+        model: target.model,
+        parts: [{ _tag: "Text" as const, text: ModelText.make("Done.") }],
+        ending: { _tag: "Complete" as const },
+        usage: { input: TokenCount.make(1000), output: TokenCount.make(100) },
+        metadata: receivedJson({}),
+      }),
+  });
+  /** Opens a session over `facts` in a run of its own, gives it `inputs`, and returns its facts. */
+  const run = (facts: ReadonlyArray<Fact>, inputs: ReadonlyArray<string>) => {
+    const store = ephemeralSessionStore(facts);
+    return runTest(
+      Effect.gen(function* () {
+        const session = yield* openSession;
+        if (facts.length === 0) yield* session.observe(boringOpening());
+        yield* session.idle;
+        yield* Effect.forEach(inputs, (text) => session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text } as unknown as Observation).pipe(Effect.andThen(session.idle)), { discard: true });
+        return yield* session.facts;
+      }).pipe(
+        Effect.provide(Layer.mergeAll(sonnet, priced, BoringContextAssembler, CountingTurnsInStore, SmolToolRunner, SpansTo((line) => void spans.push(line))).pipe(Layer.provideMerge(store))),
+      ),
+    );
+  };
+  const earlier = await run([], ["one", "two"]);
+  await run(earlier, ["three"]);
+  const [first, second] = spans.filter((span) => span.name === "agent.session");
+  expect(first?.attributes).toMatchObject({ session: "s1", requests: 2, turns: 2, input_tokens: 2000, output_tokens: 200, cost_usd: expect.closeTo(0.006, 12) });
+  expect(second?.attributes).toMatchObject({ session: "s1", requests: 1, turns: 1, input_tokens: 1000, output_tokens: 100, cost_usd: expect.closeTo(0.003, 12), models: "anthropic/claude-sonnet-5-5" });
+  expect(second?.traceId).not.toBe(first?.traceId);
 });

@@ -24,7 +24,13 @@
  *   scope closes. Each request runs in a span named for its kind (`agent.model.request`,
  *   `agent.tool.run`, `agent.turn.review`) under its turn's span, or under the session's when the
  *   turn has no span (a turn started before the session was resumed). The observations that follow
- *   a request are recorded outside its span.
+ *   a request are recorded outside its span. The span annotations in place when the session opens
+ *   (`Effect.annotateSpans`: a host's working folder and name, say) are on every span the session
+ *   makes, whichever fiber starts it. When the session's span ends, it holds the totals of this
+ *   opening: those of the facts recorded since the session opened over its store (`sessionTotals`,
+ *   `accounting.ts`), not of the facts an earlier run recorded. A session continued from its facts
+ *   (resumed, or loaded again) is a new span in a new trace, so a sum over session spans counts each
+ *   request once.
  * - **Reports.** What happens during a request besides its outcome (a failed attempt, say) is
  *   recorded at once through `Report`.
  * - **Logs and subscribers.** Each fact is logged as it is recorded (`loop.observation.recorded`,
@@ -37,7 +43,8 @@
  */
 
 import { keptOutcome } from "./blobs.ts";
-import { Clock, DateTime, Deferred, Effect, Exit, FiberSet, Option, PubSub, Ref, type Scope, Semaphore, type Tracer } from "effect";
+import { Clock, DateTime, Deferred, Effect, Exit, FiberSet, Option, PubSub, Ref, References, type Scope, Semaphore, type Tracer } from "effect";
+import { sessionTotals } from "./accounting.ts";
 import type { Decision, Ending } from "../agent-machine/decision.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { notObserved } from "../agent-machine/not-observed.ts";
@@ -202,15 +209,38 @@ export interface Session {
 export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionStore> = Effect.gen(function* () {
   const store = yield* SessionStore;
   const facts = yield* store.facts;
+  // The host's span annotations, kept for the spans that other fibers start for the session.
+  const annotations = yield* References.TracerSpanAnnotations;
   // Made before `running`, so closing the scope ends the requests' spans, then the turns', then this.
   const sessionSpan = yield* Effect.makeSpanScoped("agent.session");
+  // A session continued from its facts records no opening again: its span is named from the facts.
+  const continued = sessionOf(facts);
+  if (continued !== undefined) sessionSpan.attribute("session", continued);
   // A turn's span stays here after it ends: requests that follow from its ending are still under it.
   const turnSpans = yield* Ref.make<ReadonlyMap<TurnId, Tracer.Span>>(new Map());
+  // Added after the session's span, so it runs before the span ends.
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeNanos;
       const open = [...(yield* Ref.get(turnSpans)).values()].filter((span) => span.status._tag === "Started");
       yield* Effect.forEach(open, (span) => Effect.sync(() => span.end(now, Exit.void)), { discard: true });
+      // This opening's totals: the facts recorded since it opened, which an earlier opening's span did not count.
+      const totals = sessionTotals((yield* store.facts).slice(facts.length));
+      const attributes = {
+        requests: totals.requests,
+        failed_requests: totals.failedRequests,
+        turns: totals.turns,
+        tool_calls: totals.toolCalls,
+        failed_tool_calls: totals.failedToolCalls,
+        input_tokens: totals.inputTokens,
+        output_tokens: totals.outputTokens,
+        cache_read_tokens: totals.cacheReadTokens,
+        cache_write_tokens: totals.cacheWriteTokens,
+        ...(totals.cost === undefined ? {} : { cost_usd: totals.cost }),
+        unpriced_requests: totals.unpricedRequests,
+        models: totals.models.join(","),
+      };
+      yield* Effect.sync(() => Object.entries(attributes).forEach(([key, value]) => sessionSpan.attribute(key, value)));
     }),
   );
   /** Names the session on its span when it opens, opens a turn's span when it starts, and ends it when it ends. */
@@ -220,7 +250,7 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
       if (observation._tag === "TurnStarted") {
         const span = yield* Effect.makeSpan("agent.turn", {
           parent: sessionSpan,
-          attributes: { ...(session === undefined ? {} : { session }), turn: observation.turn },
+          attributes: { ...annotations, ...(session === undefined ? {} : { session }), turn: observation.turn },
         });
         yield* Ref.update(turnSpans, (now) => new Map([...now, [observation.turn, span]]));
       }
@@ -623,11 +653,12 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
       const report = (reported: Observation, by: Origin) =>
         record(by, reported).pipe(Effect.provideContext(services), Effect.catchTag("SessionStoreFailed", () => Effect.interrupt));
       const stop = work.turn === undefined ? undefined : yield* cancelOf(work.turn);
-      // The parent span is set explicitly: this fiber was started from whichever fiber recorded the observation.
+      // The parent span and the annotations are set explicitly: this fiber was started from whichever fiber recorded the observation.
       const parent = (work.turn === undefined ? undefined : (yield* Ref.get(turnSpans)).get(work.turn)) ?? sessionSpan;
       const observed = yield* carryOut(request, stop).pipe(
         Effect.withSpan(spanNames[request._tag], { attributes: { ...work } }),
         Effect.withParentSpan(parent),
+        Effect.annotateSpans(annotations),
         Effect.annotateLogs({ ...work }),
         Effect.provideService(CurrentWork, work),
         Effect.provideService(Report, report),

@@ -31,6 +31,7 @@ import { OpenAiClient } from "@effect/ai-openai";
 import { Effect, Layer, Redacted, Schema } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { CompactedConversation } from "../../src/agent-context/compaction.ts";
+import { logLevelOf, withLogLevel } from "../../src/agent-host/log-level.ts";
 import { Fact } from "../../src/agent-machine/fact.ts";
 import { contextGauge } from "../../src/agent-session/accounting.ts";
 import { ModelSettings } from "../../src/agent-machine/settings.ts";
@@ -46,6 +47,7 @@ import { isObject } from "../../src/agent-session/shaping.ts";
 import { afterFizzBuzz, whenCountReaches } from "../../src/examples/fizzbuzz/compaction-policies.ts";
 import { basic, countingUser, play } from "../../src/examples/fizzbuzz/scenario.ts";
 import { EmojiHappyFizzBuzzSummarizer, PlainTextFizzBuzzSummarizer } from "../../src/examples/fizzbuzz/summarizers.ts";
+import { capturingHttp } from "../../src/instrumentation/http-captures.ts";
 import { TelemetryToFiles } from "../../src/instrumentation/telemetry.ts";
 import { transcript } from "./transcript.ts";
 
@@ -72,17 +74,19 @@ if (key === undefined || key === "") {
 }
 const apiKey = Redacted.make(key);
 
-const openAiClientLayer = (provider === "xai" ? xAiClient(apiKey) : OpenAiClient.layer({ apiKey })).pipe(Layer.provide(FetchHttpClient.layer));
+// Each request's bodies are captured beside the run's telemetry, at debug (`instrumentation/http-captures.ts`).
+const http = capturingHttp(FetchHttpClient.layer);
+const openAiClientLayer = (provider === "xai" ? xAiClient(apiKey) : OpenAiClient.layer({ apiKey })).pipe(Layer.provide(http));
 // The provider's own compaction, asked through the same client as the requests.
 const byProvider =
   compacting === "provider" ? providerCompaction(await Effect.runPromise(openAiCompactions().pipe(Effect.provide(openAiClientLayer)))) : undefined;
 
 const client =
   provider === "anthropic"
-    ? AnthropicModelClient.pipe(Layer.provide(AnthropicClient.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))))
+    ? AnthropicModelClient.pipe(Layer.provide(AnthropicClient.layer({ apiKey }).pipe(Layer.provide(http))))
     : provider === "xai"
-      ? XAiModelClient.pipe(Layer.provide(xAiClient(apiKey).pipe(Layer.provide(FetchHttpClient.layer))))
-      : OpenAiModelClient.pipe(Layer.provide(OpenAiClient.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))));
+      ? XAiModelClient.pipe(Layer.provide(xAiClient(apiKey).pipe(Layer.provide(http))))
+      : OpenAiModelClient.pipe(Layer.provide(OpenAiClient.layer({ apiKey }).pipe(Layer.provide(http))));
 
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const name = [stamp, "fizzbuzz", provider, model, counted, ...rest].join("-");
@@ -105,7 +109,7 @@ const { facts, summaries } = await Effect.runPromise(
     model: { target: { provider: ProviderName.make(provider), model: ModelName.make(model), settings }, client },
   }).pipe(
     reportedBy({ _tag: "Test", name: TestName.make(`fizzbuzz-live ${provider} ${model}`) }),
-    Effect.provide(TelemetryToFiles(join(run, "telemetry"))),
+    Effect.provide(withLogLevel(logLevelOf(process.env), TelemetryToFiles(join(run, "telemetry")))),
   ),
 );
 

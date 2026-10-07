@@ -26,6 +26,7 @@ import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import * as BunPath from "@effect/platform-bun/BunPath";
 import { Effect, Layer, Redacted, Schema } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import { logLevelOf, withLogLevel } from "../../src/agent-host/log-level.ts";
 import { Fact } from "../../src/agent-machine/fact.ts";
 import { InputText, ModelName, ProviderName, SessionId, TestName, ToolName } from "../../src/agent-machine/names.ts";
 import { type ModelContext, ToolRunner, type ToolSpec } from "../../src/agent-session/contracts.ts";
@@ -176,7 +177,17 @@ const facts = await Effect.runPromise(
   }).pipe(
     reportedBy({ _tag: "Test", name: TestName.make(`attachments-live ${provider} ${model}`) }),
     Effect.scoped,
-    Effect.provide(Layer.mergeAll(ModelFromFacts, TurnContextAssembler, client, CountingTurns, viaTool ? Looking : SmolToolRunner, BlobsInFolder(blobFolder).pipe(Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))))),
+    Effect.provide(
+      Layer.mergeAll(
+        ModelFromFacts,
+        TurnContextAssembler,
+        client,
+        CountingTurns,
+        viaTool ? Looking : SmolToolRunner,
+        BlobsInFolder(blobFolder).pipe(Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))),
+        withLogLevel(logLevelOf(process.env), Layer.empty),
+      ),
+    ),
   ),
 );
 

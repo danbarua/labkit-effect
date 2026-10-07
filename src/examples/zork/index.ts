@@ -3,11 +3,14 @@
  * describes. By default the Engine is claude-sonnet-5-5 and the Adventurer claude-haiku-4-5.
  *
  * A game's two sessions are saved in `~/.local/share/labkit/sessions/` and log to
- * `~/.local/share/labkit/logs/zork-<role>-<game>.log`; with `OTEL_EXPORTER_OTLP_ENDPOINT` set, their
- * spans and log lines are also sent as OTLP, as the service `labkit-zork`.
+ * `~/.local/share/labkit/logs/zork-<role>-<game>.log`, at the level `LABKIT_LOG_LEVEL` names, info by
+ * default (`agent-host/log-level.ts`); a value that names no level is reported in both logs. With
+ * `OTEL_EXPORTER_OTLP_ENDPOINT` set, their spans and log lines are also sent as OTLP, as the service
+ * `labkit-zork`.
  */
 import { BunServices } from "@effect/platform-bun";
-import { Effect, Layer, Logger } from "effect";
+import { Effect, Layer, Logger, References } from "effect";
+import { logLevelOf } from "../../agent-host/log-level.ts";
 import { TestName } from "../../agent-machine/names.ts";
 import { reportedBy } from "../../agent-session/origin.ts";
 import { OtlpSpansAndMetrics, otlpLogger } from "../../instrumentation/telemetry.ts";
@@ -26,12 +29,13 @@ const orExit = <P extends Player>(found: P | Unavailable): P => {
 };
 
 const [engineModel = "claude-sonnet-5-5", adventurerModel = "claude-haiku-4-5"] = process.argv.slice(2);
+const { level, invalid } = logLevelOf(process.env);
 const game = await Effect.runPromise(
-  play({ engine: orExit(playerFor(engineModel)), adventurer: orExit(adventurerFor(adventurerModel)) }).pipe(
+  play({ engine: orExit(playerFor(engineModel)), adventurer: orExit(adventurerFor(adventurerModel)), invalidLevels: invalid }).pipe(
     reportedBy({ _tag: "Test", name: TestName.make("zork") }),
     Effect.timeout("10 minutes"),
     // The console shows only the game; each session's log lines go to its log file, and to OTLP when it is set up.
-    Effect.provide(Layer.mergeAll(Logger.layer([otlpLogger("labkit-zork")]), OtlpSpansAndMetrics("labkit-zork"), BunServices.layer)),
+    Effect.provide(Layer.mergeAll(Logger.layer([otlpLogger("labkit-zork")]), Layer.succeed(References.MinimumLogLevel, level), OtlpSpansAndMetrics("labkit-zork"), BunServices.layer)),
   ),
 );
 console.log(`Eaten by a Grue after ${game.exchanges.length} turns. Transcript: ${game.transcriptPath}`);

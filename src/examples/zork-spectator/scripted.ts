@@ -5,12 +5,15 @@
  * mailbox, takes the leaflet and the lantern, opens the trapdoor and goes down without light, and is
  * eaten in game turn 7. Each answer takes 1.5 seconds, so the page shows the game arrive turn by turn.
  *
- * Its sessions and transcripts are kept in `logs/zork-spectator/scripted/`, apart from real games.
+ * Its sessions and transcripts are kept in `logs/zork-spectator/scripted/`, apart from real games,
+ * and log at the level `LABKIT_LOG_LEVEL` names, info by default (`agent-host/log-level.ts`); a value
+ * that names no level is reported in each session's log.
  * Like the spectator, the server listens on `localhost` only.
  */
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
-import { Effect } from "effect";
+import { Effect, Layer, References } from "effect";
+import { logLevelOf } from "../../agent-host/log-level.ts";
 import { TestName } from "../../agent-machine/names.ts";
 import { reportedBy } from "../../agent-session/origin.ts";
 import { play } from "../zork/scenario.ts";
@@ -37,11 +40,13 @@ const pause = () => Effect.sleep("1500 millis");
 const engine = scriptedPlayer("engine", engineScript(), pause);
 const adventurer = scriptedPlayer("adventurer", adventurerScript((world) => plan[world.turn] ?? { tool: "look", input: {} }), pause);
 
+const { level, invalid } = logLevelOf(process.env);
+
 const match = await Effect.runPromise(
   makeMatch({ engine: () => engine, adventurer: () => adventurer }, (setup) =>
-    play({ ...setup, directory: join(folder, "transcripts"), home: join(folder, "home") }).pipe(
+    play({ ...setup, directory: join(folder, "transcripts"), home: join(folder, "home"), invalidLevels: invalid }).pipe(
       reportedBy({ _tag: "Test", name: TestName.make("zork-spectator-scripted") }),
-      Effect.provide(BunServices.layer),
+      Effect.provide(Layer.merge(Layer.succeed(References.MinimumLogLevel, level), BunServices.layer)),
     ),
   ),
 );

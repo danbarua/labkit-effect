@@ -29,6 +29,7 @@ import { Cause, Config, Context, Effect, Exit, type Fiber, Layer, Logger, Option
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { OtlpExporter, OtlpLogger, OtlpMetrics, OtlpSerialization, OtlpTracer } from "effect/observability";
 import { redactedValue, redactorOf, secretsOf } from "../agent-host/redaction.ts";
+import { HttpCaptures, capturesFolderIn } from "./http-captures.ts";
 
 /** This process's instance of its service (`service.instance.id`). */
 const instance = randomUUID();
@@ -244,10 +245,13 @@ const logsTo = (path: string) =>
 /**
  * Spans to `<base>.spans.jsonl` and log lines to `<base>.logs.jsonl`, each written as it ends or is
  * logged, so a run that stops early leaves what it got to; and, when `OTEL_EXPORTER_OTLP_ENDPOINT`
- * is set, all of it as OTLP too. The session's span ends when the scope it was opened in closes, so
- * this layer is provided outside that scope, or the session's span is never written.
+ * is set, all of it as OTLP too. Model requests' body captures, at debug, go to `http-captures/`
+ * beside them (`http-captures.ts`). The session's span ends when the scope it was opened in closes,
+ * so this layer is provided outside that scope, or the session's span is never written.
  */
 export const TelemetryToFiles = (base: string, service = "labkit-probe"): Layer.Layer<never> =>
-  Layer.mergeAll(SpansTo((line) => append(`${base}.spans.jsonl`, line)), logsTo(`${base}.logs.jsonl`)).pipe(
-    Layer.provideMerge(OtlpFromEnv(service)),
-  );
+  Layer.mergeAll(
+    SpansTo((line) => append(`${base}.spans.jsonl`, line)),
+    logsTo(`${base}.logs.jsonl`),
+    Layer.sync(HttpCaptures, () => ({ folder: capturesFolderIn(dirname(base)), secrets: secretsOf(process.env) })),
+  ).pipe(Layer.provideMerge(OtlpFromEnv(service)));

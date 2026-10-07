@@ -41,6 +41,9 @@
  * names the command and its folders. Options shared with the ACP launcher (`agent-host/launch.ts`)
  * fall back to environment variables: `--max-turns` to `LABKIT_MAX_TURNS`, and so on.
  *
+ * The lowest level logged is `--log-level`'s, else `LABKIT_LOG_LEVEL`'s (`agent-host/log-level.ts`),
+ * else info. A value of `LABKIT_LOG_LEVEL` that names no level is reported in the session's log.
+ *
  * From an agent's shell tool, use `-p` with the prompt as an argument: without `-p` the REPL waits
  * for input, and `-p` without a prompt reads stdin to its end. `bun --silent cli` keeps bun's echo of
  * the script off stdout.
@@ -48,7 +51,7 @@
 
 import { cliConfiguration } from "./configuration.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { ConfigProvider, Console, Effect, Layer, Option, Result, Stdio, Stream } from "effect";
+import { ConfigProvider, Console, Effect, Layer, Option, References, Result, Stdio, Stream } from "effect";
 import { Argument, CliOutput, Command, Flag, Prompt } from "effect/cli";
 import { Effort, ThinkingMode } from "../../agent-machine/settings.ts";
 import { knowledgeWith, settingsGiven, takenBy } from "./model-settings.ts";
@@ -57,8 +60,9 @@ import { askable, KeyedAndLocalCatalog, ModelCatalog } from "../../agent-host/ca
 import { NoSessionStored, readSession, summaryOf } from "../../agent-host/directory.ts";
 import { recordedSessions } from "../../agent-host/record.ts";
 import { LogsToFile, LogsToStderr } from "../../agent-host/logs.ts";
+import { type InvalidLevel, logLevelOf, warnInvalidLevels } from "../../agent-host/log-level.ts";
 import { OtlpSpansAndMetrics } from "../../instrumentation/telemetry.ts";
-import { Brand, brandFrom } from "../../agent-host/brand.ts";
+import { Brand, brandFrom, logsFolderOf } from "../../agent-host/brand.ts";
 import { launchFlags, launchVariables, userFolderOf } from "../../agent-host/launch.ts";
 import { invalid, saidFormatter } from "./invalid.ts";
 import { askedOf, targetOf, unavailable } from "./models.ts";
@@ -219,8 +223,8 @@ const checked = (config: Config) =>
     return config;
   });
 
-/** The CLI, as a command named after `brand`. */
-export const cliOf = (brand: Brand) =>
+/** The CLI, as a command named after `brand`; once its session opens, the session's log reports `invalidLevels` (`agent-host/log-level.ts`). */
+export const cliOf = (brand: Brand, invalidLevels: ReadonlyArray<InvalidLevel> = []) =>
   Command.make(
     brand.name,
     { prompt: arg("prompt"), ...flags },
@@ -243,17 +247,23 @@ export const cliOf = (brand: Brand) =>
         const config: Config = yield* checked({ ...unresolved, target });
         // A prompt given on the command line was not sent when the REPL opened without a model, so it is dropped.
         const first = Result.isSuccess(found) ? options.prompt : undefined;
-        return yield* withCliSession(config, LogsToFile(logFileOf(brand, config.sessionId), `${brand.name}-cli`), terminal(context.view), (session, mcp) => repl(session, config, first, interactive, context, mcp));
+        return yield* withCliSession(config, LogsToFile(logFileOf(brand, config.sessionId), `${brand.name}-cli`), terminal(context.view), (session, mcp) =>
+          Effect.andThen(warnInvalidLevels(invalidLevels), repl(session, config, first, interactive, context, mcp)),
+        );
       }
       const config: Config = yield* checked({ ...unresolved, target: yield* targetOf(named, "--model") });
       if (!options.print)
-        return yield* withCliSession(config, LogsToFile(logFileOf(brand, config.sessionId), `${brand.name}-cli`), interactive ? terminal(context.view) : Headless, (session, mcp) => repl(session, config, options.prompt, interactive, context, mcp));
+        return yield* withCliSession(config, LogsToFile(logFileOf(brand, config.sessionId), `${brand.name}-cli`), interactive ? terminal(context.view) : Headless, (session, mcp) =>
+          Effect.andThen(warnInvalidLevels(invalidLevels), repl(session, config, options.prompt, interactive, context, mcp)),
+        );
       // Piped input is read only when no prompt was given: a shell that leaves stdin open would
       // otherwise keep a prompted run waiting for an end of input that never comes.
       const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));
       // Checked before the session opens, so a run with no prompt saves no session.
       if (prompt === "") return yield* invalid("No prompt given.", "Pass the prompt as an argument, or pipe it to stdin.");
-      yield* withCliSession(config, LogsToStderr(`${brand.name}-cli`), Headless, (session) => printOnce(session, config, prompt, options.outputFormat ?? "text", options.verbose));
+      yield* withCliSession(config, LogsToStderr(`${brand.name}-cli`, logsFolderOf(brand)), Headless, (session) =>
+        Effect.andThen(warnInvalidLevels(invalidLevels), printOnce(session, config, prompt, options.outputFormat ?? "text", options.verbose)),
+      );
     }),
   ).pipe(
     Command.withDescription("A coding agent: an interactive REPL, or -p to answer one prompt and exit."),
@@ -285,11 +295,20 @@ export const withResumeValue = (args: ReadonlyArray<string>): ReadonlyArray<stri
   });
 
 /**
+ * Runs the CLI's command with `args` as `brand`, at the level `env` gives it (`agent-host/log-level.ts`).
+ * `--log-level`, which the command applies inside this, wins over it.
+ */
+export const runCommand = (args: ReadonlyArray<string>, brand: Brand, env: Readonly<Record<string, string | undefined>>) => {
+  const { level, invalid } = logLevelOf(env, brand);
+  return Command.runWith(cliOf(brand, invalid), { version: brand.version })(withResumeValue(args)).pipe(Effect.provideService(References.MinimumLogLevel, level));
+};
+
+/**
  * Runs the CLI with `args` as `brand` (by default, the brand the environment names, else labkit). The
  * usable models are the well-known models whose provider has an API key, and the local server's.
  */
 export const run = (args: ReadonlyArray<string>, brand: Brand = brandFrom(process.env)) =>
-  Command.runWith(cliOf(brand), { version: brand.version })(withResumeValue(args)).pipe(
+  runCommand(args, brand, process.env).pipe(
     Effect.provide(Layer.mergeAll(CliOutput.layer(saidFormatter), KeyedAndLocalCatalog)),
     Effect.provideService(Brand, brand),
     Effect.provideService(ConfigProvider.ConfigProvider, launchVariables(brand)),

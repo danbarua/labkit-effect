@@ -1,11 +1,13 @@
 /** What a session has used, read from its facts: the context gauge, its cost, and a turn's requests. */
 
 import { expect } from "bun:test";
+import { Schema } from "effect";
 import { observe, open, opened } from "../../tests/support/drive.ts";
 import { json } from "../../tests/support/received.ts";
 import { test } from "../../tests/support/test.ts";
+import { Fact } from "../agent-machine/fact.ts";
 import { TokenCount, TurnId } from "../agent-machine/names.ts";
-import { contextGauge, costOf } from "./accounting.ts";
+import { contextGauge, costByComponent, costOf, sessionTotals } from "./accounting.ts";
 import { requestsIn } from "../agent-machine/turn-requests.ts";
 import { capabilitiesOf } from "./configuration/well-known-models.ts";
 
@@ -37,6 +39,62 @@ test("cache writes kept for an hour are priced at their own rate, the rest at th
     (2000 * 2.5 + 1000 * 4) / 1_000_000,
     12,
   );
+});
+
+test("a response's cost by component: uncached input, output, cache reads, and cache writes with the hour-long ones at their own rate; the components add up to the total", () => {
+  const sonnet = capabilitiesOf("anthropic", "claude-sonnet-5-5")?.price;
+  if (sonnet === undefined) throw new Error("claude-sonnet-5-5 is not a well-known model");
+  // 1,000 uncached at $2, 100 out at $10, 3,000 read at $0.20, 1,000 written for five minutes at $2.50 and 1,000 for an hour at $4, per million.
+  const usage = { input: tokens(6000), cacheRead: tokens(3000), cacheWrite: tokens(2000), cacheWrite1h: tokens(1000), output: tokens(100) };
+  const cost = costByComponent(usage, sonnet);
+  expect(cost.input).toBeCloseTo((1000 * 2) / 1_000_000, 12);
+  expect(cost.output).toBeCloseTo((100 * 10) / 1_000_000, 12);
+  expect(cost.cacheRead).toBeCloseTo((3000 * 0.2) / 1_000_000, 12);
+  expect(cost.cacheWrite).toBeCloseTo((1000 * 2.5 + 1000 * 4) / 1_000_000, 12);
+  expect(cost.total).toBeCloseTo(cost.input + cost.output + cost.cacheRead + cost.cacheWrite, 12);
+  expect(costOf(usage, sonnet)).toBe(cost.total);
+});
+
+/** The facts of a session, from the observations given, each recorded by the loop. */
+const factsOf = (observations: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<Fact> =>
+  observations.map((observation, at) =>
+    Schema.decodeUnknownSync(Fact)({ _tag: "Observed", seq: at + 1, time: "2026-10-07T12:00:00.000Z", origin: { _tag: "Harness", part: "loop" }, observation }),
+  );
+
+test("a session's totals: requests with an outcome and those failed, turns, tool calls ended and those failed, tokens, the priced responses' cost, the unpriced responses, and the models in the order first asked", () => {
+  const local = [
+    { _tag: "TurnStarted", turn: "turn-1" },
+    { _tag: "ModelRequestDispatched", turn: "turn-1", provider: "localhost", model: "qwen", sent: json({}) },
+    { ...responded({ input: 900, output: 100 }, [{ _tag: "ToolCall", call: "c1", tool: "ls", input: json({}) }]), provider: "localhost", model: "qwen" },
+    { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json([]) } },
+  ];
+  // Only a local model has answered: the session has no cost, which is not a cost of 0.
+  expect(sessionTotals(factsOf(local))).toMatchObject({ requests: 1, unpricedRequests: 1, cost: undefined });
+  const totals = sessionTotals(
+    factsOf([
+      ...local,
+      { _tag: "ModelRequestDispatched", turn: "turn-1", provider: "anthropic", model: "claude-sonnet-5-5", sent: json({}) },
+      { ...responded({ input: 5000, cacheRead: 3000, cacheWrite: 1000, output: 500 }, [{ _tag: "ToolCall", call: "c2", tool: "ls", input: json({}) }]), model: "claude-sonnet-5-5" },
+      { _tag: "ToolEnded", call: "c2", outcome: { _tag: "Failed", reason: { _tag: "NotFound" } } },
+      { _tag: "TurnStarted", turn: "turn-2" },
+      { _tag: "ModelRequestDispatched", turn: "turn-2", provider: "localhost", model: "qwen", sent: json({}) },
+      { _tag: "ModelFailed", turn: "turn-2", failure: "The server is down.", error: json({}) },
+    ]),
+  );
+  expect(totals).toEqual({
+    requests: 3,
+    failedRequests: 1,
+    turns: 2,
+    toolCalls: 2,
+    failedToolCalls: 1,
+    inputTokens: 5900,
+    outputTokens: 600,
+    cacheReadTokens: 3000,
+    cacheWriteTokens: 1000,
+    cost: expect.closeTo((1000 * 2 + 3000 * 0.2 + 1000 * 2.5 + 500 * 10) / 1_000_000, 12),
+    unpricedRequests: 1,
+    models: ["localhost/qwen", "anthropic/claude-sonnet-5-5"],
+  });
 });
 
 test("a request whose input is over a tier's context is priced at the higher tier", () => {

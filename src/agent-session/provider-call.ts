@@ -80,14 +80,30 @@ export const ResponseBegan = Context.Reference<{ readonly mark: Effect.Effect<vo
   defaultValue: () => ({ mark: Effect.void }),
 });
 
+/**
+ * Keeps the status of the last HTTP response of the attempt being made, when it was not 2xx, for the
+ * attempt's span: a failure's reason, such as a rate limit, does not keep it. A 2xx response clears
+ * it, so a status that a retry got past is not kept. The model attempt's observer
+ * (`instrumentation/model-attempts.ts`) gives each attempt its own; outside one, nothing is kept.
+ */
+export const FailedStatus = Context.Reference<Ref.Ref<number | undefined> | undefined>("agent-session/FailedStatus", { defaultValue: () => undefined });
+
+/** Keeps `status` as the attempt's last status (`FailedStatus`), when the attempt keeps one. */
+const keepStatus = (status: number | undefined) =>
+  Effect.gen(function* () {
+    const kept = yield* FailedStatus;
+    if (kept !== undefined) yield* Ref.set(kept, status);
+  });
+
 const failure = (caller: Caller, reason: AiError.AiErrorReason): AiError.AiError =>
   AiError.make({ module: caller.module, method: caller.method, reason });
 
 /**
  * Posts `post` and returns the response. A response that is not 2xx fails with the `AiError` reason
  * for its status, whether it arrives as a response or, from a client that fails such responses
- * itself (Effect's OpenAI client does), inside a `StatusCodeError`. A 2xx response marks the response
- * as begun (`ResponseBegan`).
+ * itself (Effect's OpenAI client does), inside a `StatusCodeError`, and its status is kept
+ * (`FailedStatus`). A 2xx response clears the status kept, and marks the response as begun
+ * (`ResponseBegan`).
  */
 const send = (
   http: HttpClient.HttpClient,
@@ -107,7 +123,8 @@ const send = (
     Effect.filterOrElse(
       (response) => response.status >= 200 && response.status <= 299,
       (response) =>
-        bodyText(caller, response).pipe(
+        keepStatus(response.status).pipe(
+          Effect.andThen(bodyText(caller, response)),
           Effect.flatMap((text) =>
             Effect.fail(
               failure(caller, reasonOf(response.status, response.headers["retry-after"], `HTTP ${response.status}: ${text}`)),
@@ -117,6 +134,7 @@ const send = (
     ),
     Effect.tap(() =>
       Effect.gen(function* () {
+        yield* keepStatus(undefined);
         yield* (yield* ResponseBegan).mark;
       }),
     ),

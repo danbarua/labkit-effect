@@ -8,7 +8,7 @@ import { expect } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, Exit, Layer, Stdio, Terminal } from "effect";
+import { Effect, Exit, Layer, type LogLevel, References, Stdio, Terminal } from "effect";
 import { CliOutput, Command } from "effect/cli";
 import { TestConsole } from "effect/testing";
 import { Brand, defaultBrand } from "../../agent-host/brand.ts";
@@ -18,7 +18,7 @@ import { ModelName, ProviderName } from "../../agent-machine/names.ts";
 import { runTest } from "../../../tests/support/run.ts";
 import { typing } from "../../../tests/support/terminal.ts";
 import { test, testFolder } from "../../../tests/support/test.ts";
-import { cliOf, withResumeValue } from "./index.ts";
+import { cliOf, runCommand, withResumeValue } from "./index.ts";
 import { saidFormatter } from "./invalid.ts";
 import { storeFolderOf } from "./session.ts";
 
@@ -164,4 +164,29 @@ test("-p at a terminal with no model fails at once, with a hint about --model ra
   expect(Exit.isFailure(exit)).toBe(true);
   expect(logged).toEqual([]);
   expect(errors).toEqual(["ERROR: --model is required.\nHINT: bun cli models shows available models discovered from the environment."]);
+});
+
+/** Runs `models` with `args` and the environment `env`, and gives the minimum log levels in force each time it reads the catalog, each once. */
+const levelWhileListing = (args: ReadonlyArray<string>, env: Record<string, string>) =>
+  runTest(
+    Effect.gen(function* () {
+      const seen: Array<LogLevel.LogLevel> = [];
+      const catalog = Layer.succeed(ModelCatalog, {
+        sources: Effect.gen(function* () {
+          seen.push(yield* References.MinimumLogLevel);
+          return [openai];
+        }),
+      });
+      yield* runCommand(["models", ...args], defaultBrand, env).pipe(Effect.provide(catalog));
+      return [...new Set(seen)];
+    }).pipe(
+      Effect.provideService(Brand, defaultBrand),
+      Effect.provide(Layer.mergeAll(BunServices.layer, TestConsole.layer, CliOutput.layer(saidFormatter))),
+    ),
+  );
+
+test("the CLI logs at the level LABKIT_LOG_LEVEL names, and --log-level wins over it", async () => {
+  expect(await levelWhileListing([], { LABKIT_LOG_LEVEL: "debug" })).toEqual(["Debug"]);
+  expect(await levelWhileListing(["--log-level", "info"], { LABKIT_LOG_LEVEL: "debug" })).toEqual(["Info"]);
+  expect(await levelWhileListing(["--log-level", "trace"], { LABKIT_LOG_LEVEL: "error" })).toEqual(["Trace"]);
 });

@@ -15,7 +15,7 @@ the provider adapters, the stores where a session's facts are kept, and the sess
 | Tools | `tool-sources.ts`, `tool-input.ts` |
 | Providers | `provider-call.ts`, `shaping.ts`, `model-fallback.ts`, `providers/` (Anthropic Messages, OpenAI Responses, xAI, Chat Completions) |
 | Configuration | `configuration/`: the model and settings read from the facts, the well-known models, the options a host offers, and the gate for a user's changes |
-| Usage | `accounting.ts`: the context gauge and cost, read from the facts |
+| Usage | `accounting.ts`: the context gauge, a response's cost by component, and a session's totals, read from the facts |
 | Shared | `first-answer.ts` (an ordered list of sources where the first that knows answers), `log-keys.ts` |
 
 ## Services the loop needs

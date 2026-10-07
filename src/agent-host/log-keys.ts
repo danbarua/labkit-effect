@@ -24,5 +24,10 @@ export const logKeys = {
      * value, and the shortest length that is searched for.
      */
     secretsNotLookedFor: "host_logs.secrets_not_looked_for",
+    /**
+     * Warning, when the host's logs are created: a log-level variable is set to a value that names no
+     * level (`log-level.ts`). Details: the variable, its value, and the level used instead.
+     */
+    levelInvalid: "host_logs.level_invalid",
   },
 } as const;

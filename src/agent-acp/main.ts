@@ -11,8 +11,9 @@
  * stopgap tools on the local disk) and `--retries` (how many times a turn with thinking and no answer
  * is asked again for it; 1). A flag not given is read from its variable: the brand's prefix, `ACP_`,
  * then the flag's name in capitals (`LABKIT_ACP_MODEL`, `LABKIT_ACP_SESSIONS_DIR`). The log's
- * variables are `<PREFIX>ACP_LOG_*` (`launcher-logs.ts`); the providers' keys are `ANTHROPIC_API_KEY`,
- * `OPENAI_API_KEY` and `XAI_API_KEY`.
+ * variables are `<PREFIX>ACP_LOG_*` (`launcher-logs.ts`); its level is `<PREFIX>ACP_LOG_LEVEL`, else
+ * `<PREFIX>LOG_LEVEL`, else debug. The providers' keys are `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and
+ * `XAI_API_KEY`.
  *
  * Before it serves, it loads what of each session's configuration no session's folder changes: the
  * host's defaults, the user's file, `--settings`, `--mcp-config` and the flags. An option or a

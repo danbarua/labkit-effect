@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Logger, type Scope } from "effect";
 import type { ChildProcessSpawner } from "effect/process";
+import { logLevelOf, withLogLevel } from "../../src/agent-host/log-level.ts";
 import { connectStdio, type McpConnection, type McpFailed } from "../../src/agent-mcp/client.ts";
 import { connectRemote, type RemoteRefused } from "../../src/agent-mcp/http.ts";
 import { OtlpSpansAndMetrics, otlpLogger } from "../../src/instrumentation/telemetry.ts";
@@ -79,7 +80,12 @@ const program = Effect.gen(function* () {
   return result;
 });
 
-const result = await Effect.runPromise(program.pipe(Effect.scoped, Effect.provide(Layer.mergeAll(BunServices.layer, Logger.layer([log, otlpLogger("labkit-probe")]), OtlpSpansAndMetrics("labkit-probe")))));
+const result = await Effect.runPromise(
+  program.pipe(
+    Effect.scoped,
+    Effect.provide(Layer.mergeAll(BunServices.layer, withLogLevel(logLevelOf(process.env), Logger.layer([log, otlpLogger("labkit-probe")])), OtlpSpansAndMetrics("labkit-probe"))),
+  ),
+);
 console.log(JSON.stringify(result, null, 2));
 console.log(`Written to ${folder}`);
 process.exit(0);

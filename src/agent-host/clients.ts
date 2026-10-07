@@ -12,10 +12,13 @@ import { anthropicRequests } from "../agent-session/providers/anthropic-client.t
 import { openAiRequests } from "../agent-session/providers/openai-client.ts";
 import { openAiCompatRequests } from "../agent-session/providers/openai-compat-client.ts";
 import { xAiClient, xAiRequests } from "../agent-session/providers/xai-client.ts";
+import { capturingHttp } from "../instrumentation/http-captures.ts";
+import { observedAttempts } from "../instrumentation/model-attempts.ts";
 import { keyOf } from "./catalog.ts";
 import { localServer } from "./local-server.ts";
 
-const http = FetchHttpClient.layer;
+/** The one `HttpClient` that every provider's client sends through, recording each exchange's bodies (`http-captures.ts`). */
+const http = capturingHttp(FetchHttpClient.layer);
 
 /** The providers reached with a key: each provider's request function, made with its key. */
 const keyed: ReadonlyArray<{ readonly provider: string; readonly requestsWith: (key: Redacted.Redacted) => Effect.Effect<ProviderRequest> }> = [
@@ -27,15 +30,15 @@ const keyed: ReadonlyArray<{ readonly provider: string; readonly requestsWith: (
 /** The local server's request function, which needs no key. */
 const local = openAiCompatRequests().pipe(Effect.provide(OpenAiCompatClient.layer({ apiUrl: localServer, apiKey: Redacted.make("none") }).pipe(Layer.provide(http))));
 
-/** One model client that reaches every provider with a key set, and the local server. The keys are read when the layer is built. */
+/** One model client that reaches every provider with a key set, and the local server. Each attempt's outcome is put on its span (`instrumentation/model-attempts.ts`). The keys are read when the layer is built. */
 export const Clients = Layer.unwrap(
   Effect.suspend(() => {
     const requests: ReadonlyArray<Effect.Effect<readonly [ProviderName, ProviderRequest]>> = [
       ...keyed.flatMap(({ provider, requestsWith }) => {
         const key = keyOf(provider);
-        return key === undefined ? [] : [Effect.map(requestsWith(key), (request) => [ProviderName.make(provider), request] as const)];
+        return key === undefined ? [] : [Effect.map(requestsWith(key), (request) => [ProviderName.make(provider), observedAttempts(request)] as const)];
       }),
-      Effect.map(local, (request) => [ProviderName.make("localhost"), request] as const),
+      Effect.map(local, (request) => [ProviderName.make("localhost"), observedAttempts(request)] as const),
     ];
     return Effect.all(requests).pipe(Effect.map((each) => FallbackModelClient({ requests: new Map(each), fallbacks: [] })));
   }),

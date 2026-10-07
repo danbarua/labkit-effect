@@ -6,9 +6,11 @@
  */
 
 import { type Brand, brandFrom, envPrefixOf, logsFolderOf } from "./brand.ts";
+import { type InvalidLevel, levelFrom, levelNames, logLevelVariableOf, withInvalidLevelWarning } from "./log-level.ts";
 import { redactedValue, redactorOf, type Secrets, withTooShortWarning, secretsOf } from "./redaction.ts";
 import { resolve } from "node:path";
 import { Array as Arr, Cause, Console, Effect, FileSystem, Layer, Logger, type LogLevel, Option, Order, Path, References } from "effect";
+import { HttpCaptures, capturesFolderIn } from "../instrumentation/http-captures.ts";
 import { otlpLogger } from "../instrumentation/telemetry.ts";
 import { logFile } from "./log-file.ts";
 
@@ -16,7 +18,9 @@ export interface LauncherLogOptions {
   /** The folder for the launch's file, created when missing. */
   readonly dir: string;
   /** The lowest level written. */
-  readonly level: LogLevel.Severity;
+  readonly level: LogLevel.LogLevel;
+  /** The level variables set to a value that names no level, reported at start (`log-level.ts`). */
+  readonly invalidLevels: ReadonlyArray<InvalidLevel>;
   /** The file size, in bytes, at which the file is rotated. */
   readonly maxBytes: number;
   /** How many rotated files a launch keeps: `.jsonl.1` (the newest) to `.jsonl.<backups>`. */
@@ -34,27 +38,6 @@ export interface LauncherLogOptions {
 /** A record's line is cut past this many UTF-8 bytes. */
 export const recordLimit = 256 * 1024;
 
-const levelsByName: Record<string, LogLevel.Severity> = {
-  trace: "Trace",
-  debug: "Debug",
-  info: "Info",
-  warning: "Warn",
-  error: "Error",
-  fatal: "Fatal",
-};
-
-const levelNames: Record<LogLevel.LogLevel, string> = {
-  All: "all",
-  Trace: "trace",
-  Debug: "debug",
-  Info: "info",
-  Warn: "warning",
-  Error: "error",
-  Fatal: "fatal",
-  None: "none",
-};
-
-
 /** Parses a whole number of at least `least`; returns undefined for anything else (an empty string is not 0). */
 const wholeNumber = (value: string | undefined, least: number): number | undefined => {
   if (value === undefined || value.trim() === "") return undefined;
@@ -66,20 +49,22 @@ const wholeNumber = (value: string | undefined, least: number): number | undefin
  * Returns the options from the environment, each variable after the brand's prefix (`LABKIT_` for
  * labkit). Defaults are in parentheses:
  * - `ACP_LOG_DIR` (`~/.local/share/<brand>/logs`, `logsFolderOf`);
- * - `ACP_LOG_LEVEL` (`debug`; one of trace, debug, info, warning, error, fatal);
+ * - `ACP_LOG_LEVEL`, else `LOG_LEVEL`, the level every entry point reads (`debug`; `log-level.ts`);
  * - `ACP_LOG_MAX_BYTES` (10 MiB);
  * - `ACP_LOG_BACKUPS` (4).
  *
- * A value that does not parse takes the default. The secrets come from the environment
- * (`redaction.ts` `secretsOf`); the launch id is generated.
+ * A size or backup count that does not parse takes the default. A level that names no level is
+ * passed over for the next variable, else the default, and is reported once the log is open. The
+ * secrets come from the environment (`redaction.ts` `secretsOf`); the launch id is generated.
  */
 export const launcherLogOptionsFrom = (env: Readonly<Record<string, string | undefined>>, brand: Brand = brandFrom(env)): LauncherLogOptions => {
   const prefix = `${envPrefixOf(brand)}ACP_LOG_`;
-  const [dir, levelName = "", maxBytes, backups] = [env[`${prefix}DIR`], env[`${prefix}LEVEL`], env[`${prefix}MAX_BYTES`], env[`${prefix}BACKUPS`]];
+  const [dir, maxBytes, backups] = [env[`${prefix}DIR`], env[`${prefix}MAX_BYTES`], env[`${prefix}BACKUPS`]];
+  const { level, invalid } = levelFrom(env, [`${prefix}LEVEL`, logLevelVariableOf(brand)], "Debug");
   return {
     dir: dir ? resolve(dir) : logsFolderOf(brand),
-    // `Object.hasOwn` keeps out names like `constructor`, which every object has.
-    level: Object.hasOwn(levelsByName, levelName.toLowerCase()) ? levelsByName[levelName.toLowerCase()]! : "Debug",
+    level,
+    invalidLevels: invalid,
     maxBytes: wholeNumber(maxBytes, 1) ?? 10 * 1024 * 1024,
     backups: wholeNumber(backups, 0) ?? 4,
     launchId: crypto.randomUUID(),
@@ -188,6 +173,8 @@ const removeOldLaunches = (dir: string, keep: number) =>
  * - A write is a synchronous append, so a crash keeps the lines written before it.
  * - A record that would take the file past `maxBytes` rotates the file first.
  * - The first failure to write is reported on stderr; that line and every later one go to stderr.
+ * - Model requests' body captures go to `http-captures/` in `dir`, redacted with `options.secrets`
+ *   (`instrumentation/http-captures.ts`).
  */
 export const LauncherLogs = (options: LauncherLogOptions): Layer.Layer<never, never, FileSystem.FileSystem | Path.Path> =>
   Layer.unwrap(
@@ -229,7 +216,11 @@ export const LauncherLogs = (options: LauncherLogOptions): Layer.Layer<never, ne
             return appended satisfies never;
         }
       });
-      const logs = Layer.mergeAll(Logger.layer([logger, otlpLogger(options.service)]), Layer.succeed(References.MinimumLogLevel, options.level));
-      return withTooShortWarning(options.secrets, logs);
+      const logs = Layer.mergeAll(
+        Logger.layer([logger, otlpLogger(options.service)]),
+        Layer.succeed(References.MinimumLogLevel, options.level),
+        Layer.succeed(HttpCaptures, { folder: capturesFolderIn(options.dir), secrets: options.secrets }),
+      );
+      return withInvalidLevelWarning(options.invalidLevels, withTooShortWarning(options.secrets, logs));
     }),
   );

@@ -82,7 +82,7 @@ import { PermissionMode } from "../agent-policy/permissions.ts";
 import { acpUser, type Feed, startFeed } from "./feed.ts";
 import { logKeys } from "./log-keys.ts";
 import { presentFrom, type ProjectionState, project, start } from "./projection.ts";
-import { InvalidCursor, pageOf, readSessionRecord, recordFor } from "./session-record.ts";
+import { acpHost, InvalidCursor, pageOf, readSessionRecord, recordFor } from "./session-record.ts";
 import { stopOf } from "./stop-reason.ts";
 import { usageUpdate } from "./usage.ts";
 import { editorWorld, type World, type WorldSession, workspaceWorld } from "./world.ts";
@@ -588,7 +588,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           id: AcpSessionId,
           world: WorldSession,
           permissionMode: Ref.Ref<PermissionMode>,
-          parent: { readonly scope: Scope.Scope; readonly mcp: McpServers; readonly configuration: Configured },
+          parent: { readonly scope: Scope.Scope; readonly mcp: McpServers; readonly configuration: Configured; readonly cwd: string },
           go: (session: Session, context: Context.Context<Services>, follow: (initial: ProjectionState) => Effect.Effect<Feed>) => Effect.Effect<A, E, X>,
         ) =>
           Effect.gen(function* () {
@@ -609,7 +609,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               );
               const layer = Layer.mergeAll(services(runner).pipe(Layer.provide(notices)), seamLayer(lists), blobs).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
               const context = yield* Layer.buildWithScope(layer, scope);
-              const session = yield* openSession.pipe(Effect.provideContext(context), Scope.provide(scope));
+              // Every span of the session carries its working folder and this host, as its record holds them.
+              const session = yield* openSession.pipe(Effect.provideContext(context), Effect.annotateSpans({ host: acpHost, cwd: parent.cwd }), Scope.provide(scope));
 
               const follow = (initial: ProjectionState) =>
                 startFeed({ sessionId: id, session, context, present: world.present, connection, annotations: { connection: connectionId, session: id }, initial }).pipe(
@@ -659,7 +660,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             yield* writeRecord(options.directory, entry.id, record).pipe(Effect.catch(failed("writing the session's record at its first prompt")));
             yield* Effect.logInfo(logKeys.record.written, { file: recordFileOf(options.directory, entry.id), cwd: record.cwd, titled: record.title !== undefined });
             yield* settingsWritten(entry.id, entry.configuration, yield* Ref.get(entry.permissionMode), `${draft.model.provider}/${draft.model.model}`);
-            const opened = yield* startSession(entry.id, entry.world, entry.permissionMode, { scope: entry.scope, mcp: entry.mcp, configuration: entry.configuration }, (session, context, follow) =>
+            const opened = yield* startSession(entry.id, entry.world, entry.permissionMode, { scope: entry.scope, mcp: entry.mcp, configuration: entry.configuration, cwd: entry.cwd }, (session, context, follow) =>
               Effect.gen(function* () {
                 // The feed starts first: the session has no facts yet, so the feed sends everything from the opening on, live.
                 const feed = yield* follow(start);
@@ -846,7 +847,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               // The policy reads the session's mode at each call; the mode starts as the configuration says.
               const initialMode = startingModeOf(configuration);
               const mode = yield* Ref.make(initialMode);
-              const opened = yield* startSession(sessionId, sessionWorld, mode, { scope, mcp, configuration }, (session, context, follow) =>
+              const opened = yield* startSession(sessionId, sessionWorld, mode, { scope, mcp, configuration, cwd }, (session, context, follow) =>
                 Effect.gen(function* () {
                   const left = leftRunning(yield* session.facts);
                   if (left !== undefined) {
