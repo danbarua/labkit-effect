@@ -441,6 +441,8 @@ the file tools' paths are resolved against the working folder (`agent-tools/in-w
 - `write_file` and `edit_file` ask permission in the default mode. `terminal_command` is a command
   tool: each program its command runs is judged, and a read-only one such as `ls` runs without a
   question (`docs/agent-policy.md`, Command tools).
+  The permission request for a command adds to the call's content a text block naming each program
+  that needs permission and why.
 - A call whose input has properties its tool does not take runs without them, and its result names
   them; with `--strict-tool-input` it is refused.
 - A call's title is its intent. A call without one, recorded before its tool took an intent, is

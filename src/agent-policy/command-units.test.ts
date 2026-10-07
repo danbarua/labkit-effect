@@ -77,7 +77,6 @@ test("runtimes are opaque with code in the command or from their input; with a s
   expect(units("python3 -W ignore scripts/x.py")).toEqual(["python3 -W ignore scripts/x.py []"]);
   expect(units("bun -e 'x'")).toEqual(["bun -e x [] opaque: bun runs code written in the command"]);
   expect(units("awk '{print $1}' f")).toEqual(["awk {print $1} f [] opaque: awk runs a program written in the command"]);
-  expect(units("sed -n 1p f")).toEqual(["sed -n 1p f [] opaque: sed runs a program written in the command"]);
   expect(units("rg --pre cat x")).toEqual(["rg --pre cat x [] opaque: rg --pre runs a program on each file it searches"]);
   expect(units("sudo rm x")).toEqual(["sudo rm x [] opaque: it runs as another user (sudo)"]);
 });
@@ -100,17 +99,45 @@ test("a variable that chooses which programs or code run, set for a command, wit
   expect(units("FOO=1 make build")).toEqual(["make build [make build]"]);
 });
 
-test("commands that trap, git or ssh would run are judged or opaque, so that no grant names more than the user saw", () => {
+test("commands that trap or git would run are judged or opaque, so that no grant names more than the user saw; ssh is trusted per host", () => {
   expect(units("trap 'rm -rf build' EXIT; make")).toEqual(["rm -rf build [rm]", "make []"]);
   expect(units('trap "$X" EXIT')).toEqual(["trap ? EXIT [] opaque: trap runs code that is not written out"]);
   expect(units("git rebase -x 'make test' main")).toEqual(["git rebase -x make test main [] opaque: git rebase --exec runs a command for each commit"]);
   expect(units("git submodule foreach git pull")).toEqual(["git submodule foreach git pull [] opaque: git submodule foreach runs a command in each submodule"]);
   expect(units("git bisect run make test")).toEqual(["git bisect run make test [] opaque: git bisect run runs a command for each step"]);
   expect(units("npm x eslint && yarn exec tsc")).toEqual(["npm x eslint [npm x eslint]", "yarn exec tsc [yarn exec tsc]"]);
-  expect(units("ssh -p 2222 build-box 'rm -rf /srv'")).toEqual(["ssh -p 2222 build-box rm -rf /srv [] opaque: it runs a command on build-box"]);
-  expect(units("ssh build-box")).toEqual(["ssh build-box [ssh build-box]"]);
+  // ssh, like docker and kubectl, is trusted as a whole: the command it runs on the host is not judged.
+  expect(units("ssh -p 2222 build-box 'rm -rf /srv'")).toEqual(["ssh -p 2222 build-box rm -rf /srv [ssh build-box]"]);
+  expect(units("docker exec web ls")).toEqual(["docker exec web ls [docker exec web]"]);
 });
 
 test("a command that the parser cannot follow is Unparsed", () => {
   expect(units("echo ${x:-$(rm x)}")).toEqual(["unparsed: A command substitution inside a parameter expansion is not followed: ${x:-$(rm x)}"]);
+});
+
+/** Each unit of `command` as `program outside: …` when it reads outside the working folder. */
+const outside = (command: string): ReadonlyArray<string> => {
+  const split = unitsOf(ShellCommand.make(command), segmentsOf);
+  return split._tag === "Units" ? split.units.map((unit) => `${unit.words[0]?.literal ?? "?"}${unit.outside.length === 0 ? "" : ` outside: ${unit.outside.join(", ")}`}`) : [];
+};
+
+test("a read-only program's paths outside the working folder are found: absolute, through .. or ~, or not written out; a pattern or text is not a path", () => {
+  expect(outside("cat ~/.aws/credentials")).toEqual(["cat outside: ~/.aws/credentials"]);
+  expect(outside("grep -r token / && grep '/usr/bin' notes.txt")).toEqual(["grep outside: /", "grep"]);
+  expect(outside("grep -f /etc/patterns src")).toEqual(["grep outside: /etc/patterns"]);
+  expect(outside("ls src ../other; head -n 5 a.txt; echo /etc/passwd")).toEqual(["ls outside: ../other", "head", "echo"]);
+  expect(outside('cat "$HOME/x" src/*.ts')).toEqual(['cat outside: "$HOME/x"']);
+  expect(outside("cd; cd -; cd src/../..; cd src")).toEqual(["cd outside: ~", "cd outside: -", "cd outside: src/../..", "cd"]);
+  expect(outside("git -C ~/other log && git diff --no-index /tmp/a b")).toEqual(["git outside: ~/other", "git outside: /tmp/a"]);
+});
+
+test("sed is judged by its script: opaque when it runs commands, is in a file or is not understood; otherwise granted as sed, with the files it writes and reads", () => {
+  expect(units("sed -n 1p f")).toEqual(["sed -n 1p f [sed]"]);
+  expect(units("sed 's/x/y/e' f")).toEqual(["sed s/x/y/e f [] opaque: sed's script runs commands (e)"]);
+  expect(units("sed -i 's/a/b/' f.txt")).toEqual(["sed -i s/a/b/ f.txt [sed] writes: f.txt"]);
+  expect(units("sed -i '' 's/a/b/' f.txt")).toEqual(["sed -i  s/a/b/ f.txt [sed] writes: f.txt"]);
+  expect(units("sed -e 's/a/b/w out.txt' -e p f")).toEqual(["sed -e s/a/b/w out.txt -e p f [sed] writes: out.txt"]);
+  expect(units("sed -f fix.sed f")).toEqual(["sed -f fix.sed f [] opaque: sed runs a script from a file"]);
+  expect(units("sed \"$S\" f")).toEqual(["sed ? f [] opaque: sed's script is not written out, or is not understood"]);
+  expect(outside("sed -n p /etc/passwd; sed 'r /etc/hosts' f")).toEqual(["sed outside: /etc/passwd", "sed outside: /etc/hosts"]);
 });

@@ -21,7 +21,9 @@
  * when an allow rule names it, a read-only prefix names it (`readOnly`), or the session has allowed
  * its grant. A program whose words do not show what it runs (it is opaque) runs without a question
  * only when an allow rule names it. A program that writes files (a redirect, `tee`) needs the
- * `acceptEdits` mode as well. A command that cannot be split is asked about. When every program
+ * `acceptEdits` mode as well. A program that reads outside the working folder (an absolute path, one
+ * through `..` or `~`, or one not written out) needs permission unless an allow rule names it, even
+ * when it is read-only or its grant is allowed. A command that cannot be split is asked about. When every program
  * runs without a question, the call runs; otherwise, by the mode:
  *
  * - `default` and `acceptEdits`: asks, naming each program that needs permission and why.
@@ -288,6 +290,10 @@ const commandStep = (
       : units.flatMap((unit) => [
           ...(allowed(unit) ? [] : [{ program: programOf(unit), why: unit.opaque ?? notYet }]),
           ...(unit.writes.length === 0 || mode === "acceptEdits" ? [] : [{ program: programOf(unit), why: NeedText.make(`it writes ${listed(unit.writes)}`) }]),
+          // Reading outside the working folder is lifted only by an allow rule that names the program.
+          ...(unit.outside.length === 0 || allow.some((rule) => ruleNamesProgram(rule, unit, false))
+            ? []
+            : [{ program: programOf(unit), why: NeedText.make(`it reads outside the working folder: ${listed(unit.outside)}`) }]),
         ]);
   if (needs.length === 0) return proceed;
   const needing = units.filter((unit) => !allowed(unit));

@@ -139,3 +139,22 @@ test("when deny rules name programs, a command they cannot see (one that does no
   expect(judged("echo ${x:-$(rm -rf build)}", { mode: "bypassPermissions" }).step).toBe("runs");
   expect(judged("ls", { deny, mode: "bypassPermissions" }).step).toBe("runs");
 });
+
+test("a program that reads outside the working folder is asked about, with only the call to allow, even when it is read-only; an allow rule naming it lets it run", () => {
+  expect(judged("cat ~/.aws/credentials").question).toMatchObject({
+    needs: [{ program: "cat ~/.aws/credentials", why: "it reads outside the working folder: ~/.aws/credentials" }],
+    grants: [],
+  });
+  expect(judged("cat src/a.ts | grep -n TODO").step).toBe("runs");
+  expect(judged("cat ~/.aws/credentials", { allow: ["command(cat:*)"] }).step).toBe("runs");
+  expect(judged("cat ~/.aws/credentials", { mode: "bypassPermissions" }).step).toBe("runs");
+  expect(judged("cat ~/.aws/credentials", { mode: "dontAsk" }).step).toBe("vetoed");
+});
+
+test("sed is asked about once and can then be allowed for the session; a script that runs commands is asked about with only the call to allow", () => {
+  expect(judged("sed -n 1,5p a.txt").question).toMatchObject({ needs: [{ program: "sed -n 1,5p a.txt", why: "it is not allowed yet" }], grants: [["sed"]] });
+  const allowed = answered("sed -n 1,5p a.txt", "allow-session");
+  expect(judged("sed 's/a/b/g' b.txt", { facts: allowed }).step).toBe("runs");
+  expect(judged("sed 's/a/b/e' b.txt", { facts: allowed }).question).toMatchObject({ grants: [] });
+  expect(judged("sed -i 's/a/b/' b.txt", { facts: allowed }).question).toMatchObject({ needs: [{ program: "sed -i 's/a/b/' b.txt", why: "it writes b.txt" }] });
+});

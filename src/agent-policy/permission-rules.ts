@@ -28,14 +28,14 @@ import type { Unit } from "./command-units.ts";
 /** A rule: `<tool>`, `<tool>(<words>)` or `<tool>(<words>:*)`. */
 export const PermissionRule = Schema.String.pipe(
   Schema.brand("agent-policy/PermissionRule"),
-  Schema.check(Schema.isPattern(/^[A-Za-z0-9_.-]+(\([^()\s](?:[^()]*[^()\s])?\))?$/, { message: "Expected <tool>, <tool>(<words>) or <tool>(<words>:*)" })),
+  Schema.check(Schema.isPattern(/^[A-Za-z0-9_.-]+(\([^()\s](?:[^()]*[^()\s])?\))?$/u, { message: "Expected <tool>, <tool>(<words>) or <tool>(<words>:*)" })),
 );
 export type PermissionRule = typeof PermissionRule.Type;
 
 /** A read-only program: the words its commands start with (`git log`). */
 export const ReadOnlyPrefix = Schema.String.pipe(
   Schema.brand("agent-policy/ReadOnlyPrefix"),
-  Schema.check(Schema.isPattern(/^\S+( \S+)*$/, { message: "Expected words separated by single spaces" })),
+  Schema.check(Schema.isPattern(/^\S+( \S+)*$/u, { message: "Expected words separated by single spaces" })),
 );
 export type ReadOnlyPrefix = typeof ReadOnlyPrefix.Type;
 

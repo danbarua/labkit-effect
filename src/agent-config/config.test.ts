@@ -465,6 +465,8 @@ test("the JSON Schema accepts valid files and refuses mistakes, as the loader do
   const bad = [
     { plugins: { loopBreaker: { nudgAt: 3 } } },
     { plugins: { permissions: { mode: "yolo" } } },
+    { plugins: { permissions: { allow: ["run_command(git log"] } } },
+    { plugins: { permissions: { readOnly: ["git  log"] } } },
     { plugins: { mine: { stopAt: 3 } } },
     { plugins: { mine: { use: "loopBraker" } } },
     { toolcalls: ["permissions"] },

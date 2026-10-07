@@ -15,6 +15,7 @@ exist: it receives a veto as an observation, like any other outcome.
 | `permission-rules.ts` | The rules (`<tool>`, `<tool>(<words>)`, `<tool>(<words>:*)`) and the read-only programs. |
 | `command-segments.ts` | A shell command's segments, as the host's parser (`agent-host/command-parser.ts`, the Rust crate `native/bash-segments`) returns them. |
 | `command-units.ts` | The programs a command runs, past wrappers; what a session grant names; the files they write; which are opaque. |
+| `sed-script.ts` | What a `sed` script does besides transforming text: runs commands, writes files, reads files. |
 | `loop-breaker.ts` | `repeatedCalls` and `repeatingTurns`: they stop a model that makes the same tool call again and again. |
 | `max-turn-requests.ts` | `maxTurnRequests`: a limit on the number of model requests in one turn (ACP's `max_turn_requests`). |
 
@@ -107,19 +108,30 @@ programs that run. Each program, its unit, has:
   `python3 -m pytest`), or none when only the call can be allowed;
 - the files it writes (a redirect to a file, `tee`, `dd of=`, `sort -o`, `git --output`,
   `find -delete`);
+- the paths outside the working folder that it reads (an absolute path, one through `..` or `~`, or
+  one not written out), for the read-only programs, `sed` and `git -C`;
 - whether it is opaque: its words do not show what it runs (`python3 -c`, `curl … | sh`, `sudo`,
-  `awk`, `sed`, a variable such as `PATH` set for it), with why.
+  `awk`, a variable such as `PATH` set for it), with why.
+
+`sed` is judged by its script (`sed-script.ts`): a script that runs commands (`e`), that is in a
+file (`-f`), or that is not understood is opaque; otherwise its grant is `sed`, and it writes the
+files its script names (`w`) and, with `-i`, the files it edits. `ssh`, `docker` and `kubectl` are
+trusted as a whole: the command that `ssh <host> <command>` or `docker exec` runs is not judged, and
+their grants name the host or the container (`ssh build-box`, `docker exec web`).
 
 A program runs without a question when an allow rule names it, a read-only prefix names it and it is
 not opaque (`readOnly`: `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `echo`, `grep`, `rg`, `which`, `cd`,
 `git status`, `git log`, `git diff`, `git show`), or the session has allowed its grant and it is not
-opaque. A program that writes files also needs the `acceptEdits` mode. A command that cannot be split
-needs permission.
+opaque. A program that writes files also needs the `acceptEdits` mode. A program that reads outside
+the working folder needs permission unless an allow rule names it (a session grant does not lift it):
+the working folder is the boundary that a trusted folder draws. A command that cannot be split needs
+permission.
 
 | Command | `default` | `acceptEdits` | `dontAsk` | `bypassPermissions` |
 | --- | --- | --- | --- | --- |
 | every program runs without a question | runs | runs | runs | runs |
 | a program writes files, the others run without a question | asks | runs | vetoed | runs |
+| a program reads outside the working folder | asks | asks | vetoed | runs |
 | a program needs permission | asks | asks | vetoed | runs |
 | a deny rule or a rejected grant names a program | vetoed | vetoed | vetoed | vetoed |
 

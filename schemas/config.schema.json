@@ -53,19 +53,22 @@
                 "allow": {
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_.-]+(\\([^()\\s](?:[^()]*[^()\\s])?\\))?$"
                   }
                 },
                 "deny": {
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_.-]+(\\([^()\\s](?:[^()]*[^()\\s])?\\))?$"
                   }
                 },
                 "readOnly": {
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "type": "string",
+                    "pattern": "^\\S+( \\S+)*$"
                   }
                 },
                 "commandTools": {
@@ -212,19 +215,22 @@
               "allow": {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_.-]+(\\([^()\\s](?:[^()]*[^()\\s])?\\))?$"
                 }
               },
               "deny": {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_.-]+(\\([^()\\s](?:[^()]*[^()\\s])?\\))?$"
                 }
               },
               "readOnly": {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "pattern": "^\\S+( \\S+)*$"
                 }
               },
               "commandTools": {

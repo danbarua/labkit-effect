@@ -46,6 +46,7 @@
 
 import { Schema } from "effect";
 import { type Segment, type SegmentsOf, ShellCommand, type UnparsedReason, type Word, WordText } from "./command-segments.ts";
+import { analyse, SedScript } from "./sed-script.ts";
 
 /** Why a unit's words do not show what it runs. */
 export const NeedText = Schema.String.pipe(Schema.brand("agent-policy/NeedText"));
@@ -61,6 +62,8 @@ export interface Unit {
   readonly writes: ReadonlyArray<WordText>;
   /** Why its words do not show what it runs; undefined when they do. */
   readonly opaque: NeedText | undefined;
+  /** The paths it reads outside the working folder, as written: absolute, through `..` or `~`, or not written out. */
+  readonly outside: ReadonlyArray<WordText>;
 }
 
 export type Units = { readonly _tag: "Units"; readonly units: ReadonlyArray<Unit> } | { readonly _tag: "Unparsed"; readonly reason: UnparsedReason };
@@ -77,8 +80,14 @@ const isOption = (word: Word | undefined): boolean => (word?.literal ?? word?.te
 const is = (word: Word | undefined, ...values: ReadonlyArray<Name>): boolean => word?.literal !== undefined && values.includes(word.literal);
 const present = <A>(value: A | undefined): ReadonlyArray<A> => (value === undefined ? [] : [value]);
 
-const unit = (words: ReadonlyArray<Word>, grant: ReadonlyArray<WordText> | undefined, writes: ReadonlyArray<WordText> = []): Unit => ({ words, grant, writes, opaque: undefined });
-const opaque = (words: ReadonlyArray<Word>, why: NeedText): Unit => ({ words, grant: undefined, writes: [], opaque: why });
+const unit = (words: ReadonlyArray<Word>, grant: ReadonlyArray<WordText> | undefined, writes: ReadonlyArray<WordText> = [], outside: ReadonlyArray<WordText> = []): Unit => ({
+  words,
+  grant,
+  writes,
+  opaque: undefined,
+  outside,
+});
+const opaque = (words: ReadonlyArray<Word>, why: NeedText): Unit => ({ words, grant: undefined, writes: [], opaque: why, outside: [] });
 
 // —— Variables ——
 
@@ -211,7 +220,8 @@ const shells = named("sh", "bash", "zsh", "dash", "ksh", "mksh", "fish");
 const shellValued = named("-o", "+o", "-O", "+O", "--rcfile", "--init-file");
 const asAnotherUser = named("sudo", "doas", "su", "pkexec");
 const notFollowed = named("watch", "parallel", "script", "expect");
-const inlineProgram = named("awk", "gawk", "mawk", "nawk", "sed", "gsed");
+const inlineProgram = named("awk", "gawk", "mawk", "nawk");
+const seds = named("sed", "gsed");
 const declaring = named("export", "declare", "typeset", "local", "readonly");
 
 /** Each runtime, and the options with which it runs code written in the command. */
@@ -271,6 +281,124 @@ const ownWrites = (base: WordText, words: ReadonlyArray<Word>): ReadonlyArray<Wo
   return [];
 };
 
+// —— Paths outside the working folder ——
+
+/** Whether `word`, a path, may be outside the working folder: absolute, through `..`, from `~`, or not written out. */
+const escapes = (word: Word): boolean => {
+  if (word.literal === undefined && /[$`]/.test(word.text)) return true;
+  const value = word.literal ?? word.text;
+  return value.startsWith("/") || value.startsWith("~") || value === ".." || value.startsWith("../") || value.includes("/../") || value.endsWith("/..");
+};
+
+/** For each read-only program whose arguments are paths, its options that take the next word as a value. */
+const pathPrograms: ReadonlyMap<WordText, ReadonlySet<WordText>> = new Map([
+  [WordText.make("ls"), named("-I", "--ignore", "--hide", "-w", "--width", "-T", "--tabsize", "--format", "--sort", "--time", "--time-style", "--color", "--block-size")],
+  [WordText.make("cat"), named()],
+  [WordText.make("head"), named("-n", "-c", "--lines", "--bytes")],
+  [WordText.make("tail"), named("-n", "-c", "--lines", "--bytes", "-s", "--sleep-interval", "--pid")],
+  [WordText.make("wc"), named()],
+  [WordText.make("cd"), named()],
+  [
+    WordText.make("grep"),
+    named("-e", "--regexp", "-f", "--file", "-m", "--max-count", "-A", "--after-context", "-B", "--before-context", "-C", "--context", "--include", "--exclude", "--exclude-dir", "-d", "--directories", "-D", "--devices", "--color", "--colour", "--label", "--binary-files"),
+  ],
+  [
+    WordText.make("rg"),
+    named("-e", "--regexp", "-f", "--file", "-g", "--glob", "--iglob", "-t", "--type", "-T", "--type-not", "--type-add", "-m", "--max-count", "-A", "--after-context", "-B", "--before-context", "-C", "--context", "-j", "--threads", "--max-depth", "-M", "--max-columns", "--sort", "--sortr", "--color", "-E", "--encoding", "--max-filesize", "-r", "--replace"),
+  ],
+]);
+const patternFiles = named("-f", "--file");
+const patterns = named("-e", "--regexp", "-f", "--file");
+
+/** The paths that a read-only program's arguments name: its operands (for grep and rg, not the pattern) and its pattern files. */
+const pathsOf = (base: WordText, words: ReadonlyArray<Word>): ReadonlyArray<Word> => {
+  const valued = pathPrograms.get(base);
+  if (valued === undefined) return [];
+  const scan = (rest: ReadonlyArray<Word>, operands: ReadonlyArray<Word>, files: ReadonlyArray<Word>, optionsEnded: boolean): { readonly operands: ReadonlyArray<Word>; readonly files: ReadonlyArray<Word> } => {
+    const [next, ...after] = rest;
+    if (next === undefined) return { operands, files };
+    const option = next.literal;
+    if (optionsEnded || !isOption(next)) return scan(after, [...operands, next], files, optionsEnded);
+    if (option === WordText.make("--")) return scan(after, operands, files, true);
+    if (option !== undefined && valued.has(option)) return scan(after.slice(1), operands, patternFiles.has(option) ? [...files, ...present(after[0])] : files, false);
+    const attached = option === undefined ? undefined : /^(--[^=]+)=(.*)$/.exec(option);
+    if (attached?.[1] !== undefined && patternFiles.has(WordText.make(attached[1]))) return scan(after, operands, [...files, { text: WordText.make(attached[2] ?? ""), literal: WordText.make(attached[2] ?? "") }], false);
+    return scan(after, operands, files, false);
+  };
+  const { operands, files } = scan(words.slice(1), [], [], false);
+  const searching = base === WordText.make("grep") || base === WordText.make("rg");
+  const patternGiven = words.slice(1).some((word) => word.literal !== undefined && (patterns.has(word.literal) || /^--(regexp|file)=/.test(word.literal)));
+  return [...(searching && !patternGiven ? operands.slice(1) : operands), ...files];
+};
+
+/** The paths outside the working folder that a read-only program reads, as written. `cd` with no folder, or to `-`, leaves it. */
+const outsideOf = (base: WordText, words: ReadonlyArray<Word>): ReadonlyArray<WordText> => {
+  if (base === WordText.make("cd")) {
+    if (words.slice(1).some((word) => is(word, "-"))) return [WordText.make("-")];
+    if (words.slice(1).every(isOption)) return [WordText.make("~")];
+  }
+  return pathsOf(base, words).filter(escapes).map((word) => word.text);
+};
+
+/** The paths outside the working folder that a git command reads: its `-C`, `--git-dir` and `--work-tree`, and the operands of `diff --no-index`. */
+const gitOutside = (words: ReadonlyArray<Word>, normal: ReadonlyArray<Word>): ReadonlyArray<WordText> => {
+  const named = words.slice(1).flatMap((word, at, all) => {
+    if (is(word, "-C", "--git-dir", "--work-tree")) return present(all[at + 1]);
+    const attached = /^--(git-dir|work-tree)=(.*)$/.exec(word.literal ?? "");
+    return attached === null ? [] : [{ text: WordText.make(attached[2] ?? ""), literal: WordText.make(attached[2] ?? "") }];
+  });
+  const noIndex = normal.some((word) => is(word, "--no-index")) ? normal.slice(2).filter((word) => !isOption(word)) : [];
+  return [...named, ...noIndex].filter(escapes).map((word) => word.text);
+};
+
+// —— sed ——
+
+const sedFlags = named("-n", "--quiet", "--silent", "-E", "-r", "--regexp-extended", "-s", "--separate", "-u", "--unbuffered", "-z", "--null-data", "--posix", "--debug", "--sandbox", "-b", "--binary", "--follow-symlinks");
+
+/**
+ * `sed`, judged by its scripts (`sed-script.ts`): opaque when a script runs commands, is in a file
+ * (`-f`), is not written out, or is not understood; otherwise a unit whose grant is `sed`, writing
+ * the files its scripts name and, with `-i`, the files it edits, and reading its files.
+ */
+const sedUnits = (words: ReadonlyArray<Word>): ReadonlyArray<Unit> => {
+  const scan = (rest: ReadonlyArray<Word>, scripts: ReadonlyArray<Word>, operands: ReadonlyArray<Word>, inPlace: boolean): Unit | { readonly scripts: ReadonlyArray<Word>; readonly operands: ReadonlyArray<Word>; readonly inPlace: boolean } => {
+    const [next, ...after] = rest;
+    if (next === undefined) return { scripts, operands, inPlace };
+    const option = next.literal;
+    if (!isOption(next)) return scan(after, scripts, [...operands, next], inPlace);
+    if (option === undefined) return opaque(words, need("it gives sed an option that is not written out"));
+    if (option === WordText.make("--")) return { scripts, operands: [...operands, ...after], inPlace };
+    if (sedFlags.has(option)) return scan(after, scripts, operands, inPlace);
+    if (option === WordText.make("-e") || option === WordText.make("--expression")) return after[0] === undefined ? opaque(words, need("sed -e has no script")) : scan(after.slice(1), [...scripts, after[0]], operands, inPlace);
+    if (option.startsWith("--expression=")) return scan(after, [...scripts, { text: WordText.make(option.slice(13)), literal: WordText.make(option.slice(13)) }], operands, inPlace);
+    if (option === WordText.make("-f") || option === WordText.make("--file") || option.startsWith("--file=")) return opaque(words, need("sed runs a script from a file"));
+    if (option === WordText.make("-l") || option === WordText.make("--line-length")) return scan(after.slice(1), scripts, operands, inPlace);
+    // BSD sed takes -i's suffix as the next word, often empty (`sed -i '' …`).
+    if (option === WordText.make("-i")) return scan(is(after[0], "") ? after.slice(1) : after, scripts, operands, true);
+    if (option.startsWith("-i") || option.startsWith("--in-place")) return scan(after, scripts, operands, true);
+    return opaque(words, need(`it gives sed an option that is not known (${option})`));
+  };
+  const read = scan(words.slice(1), [], [], false);
+  if ("words" in read) return [read];
+  const [inline, ...files] = read.scripts.length === 0 ? read.operands : [undefined, ...read.operands];
+  const scripts = read.scripts.length === 0 ? present(inline) : read.scripts;
+  if (scripts.length === 0) return [opaque(words, need("sed has no script"))];
+  const effects = scripts.map((script) => (script.literal === undefined ? undefined : analyse(SedScript.make(script.literal))));
+  if (effects.some((each) => each === undefined)) return [opaque(words, need("sed's script is not written out, or is not understood"))];
+  const known = effects.filter((each) => each !== undefined);
+  if (known.some((each) => each.executes)) return [opaque(words, need("sed's script runs commands (e)"))];
+  const operands = files.filter((word) => word !== undefined);
+  const named = known.flatMap((each) => each.reads).map((file) => ({ text: WordText.make(file), literal: WordText.make(file) }));
+  return [
+    unit(
+      words,
+      [WordText.make("sed")],
+      [...known.flatMap((each) => each.writes).map((file) => WordText.make(file)), ...(read.inPlace ? operands.map((word) => word.literal ?? word.text) : [])],
+      [...operands, ...named].filter(escapes).map((word) => word.text),
+    ),
+  ];
+};
+
 // —— Units ——
 
 interface Seen {
@@ -323,13 +451,12 @@ const gitRunning = (words: ReadonlyArray<Word>): NeedText | undefined => {
 
 const sshValued = named("-b", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-Q", "-R", "-S", "-W", "-w");
 
-/** The host when `ssh`'s arguments `rest` give a command to run on it; undefined when they do not. */
-const sshCommand = (rest: ReadonlyArray<Word>): WordText | undefined => {
+/** The host that `ssh`'s arguments `rest` name, past its options; undefined when it is not a literal word. */
+const sshHost = (rest: ReadonlyArray<Word>): WordText | undefined => {
   const [next, ...after] = rest;
   if (next === undefined) return undefined;
-  if (next.literal !== undefined && sshValued.has(next.literal)) return sshCommand(after.slice(1));
-  if (isOption(next)) return sshCommand(after);
-  return after.length > 0 ? (next.literal ?? next.text) : undefined;
+  if (next.literal !== undefined && sshValued.has(next.literal)) return sshHost(after.slice(1));
+  return isOption(next) ? sshHost(after) : next.literal;
 };
 
 /** Returns the units of a simple command whose words are `words`. */
@@ -355,7 +482,7 @@ const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> =>
     const normal = gitWords(words);
     if (typeof normal === "string") return [opaque(words, normal)];
     const running = gitRunning(normal);
-    return running === undefined ? [unit(normal, grantOf(normal), ownWrites(base, normal))] : [opaque(normal, running)];
+    return running === undefined ? [unit(normal, grantOf(normal), ownWrites(base, normal), gitOutside(words, normal))] : [opaque(normal, running)];
   }
   if (base === WordText.make("trap")) {
     const past = rest.filter((word, at) => !(at === 0 && is(word, "-p", "-l", "--")));
@@ -363,10 +490,12 @@ const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> =>
     if (code === undefined || is(code, "-")) return [unit(words, grantOf(words))];
     return code.literal === undefined ? [opaque(words, need("trap runs code that is not written out"))] : unitsOfCode(code.literal, words, seen);
   }
+  // ssh, like docker and kubectl, is trusted as a whole: a command it runs on a host is not judged.
   if (base === WordText.make("ssh")) {
-    const remote = sshCommand(rest);
-    if (remote !== undefined) return [opaque(words, need(`it runs a command on ${remote}`))];
+    const host = sshHost(rest);
+    return [unit(words, host === undefined ? undefined : [program, host])];
   }
+  if (seds.has(base)) return sedUnits(words);
   if (base === WordText.make("find")) return findUnits(words, seen);
   if (base === WordText.make(".") || base === WordText.make("source")) return [unit(words, rest[0] === undefined ? undefined : scriptGrant(words, rest[0]))];
   if (base === WordText.make("rg") && rest.some((word) => /^--pre(=|$)/.test(word.literal ?? word.text))) return [opaque(words, need("rg --pre runs a program on each file it searches"))];
@@ -376,7 +505,7 @@ const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> =>
   if (inline !== undefined) return runtimeUnits(words, inline, seen);
   const exported = declaring.has(base) ? steeringNeed(rest.flatMap((word) => present(word.literal).filter((value) => value.includes("=")))) : undefined;
   if (exported !== undefined) return [opaque(words, exported)];
-  return [unit(words, grantOf(words), ownWrites(base, words))];
+  return [unit(words, grantOf(words), ownWrites(base, words), outsideOf(base, words))];
 };
 
 /** A wrapper's units: the program it runs, or the wrapper alone when it runs none. */

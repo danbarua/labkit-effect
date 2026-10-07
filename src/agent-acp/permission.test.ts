@@ -2,11 +2,13 @@
 
 import { expect } from "bun:test";
 import { test } from "../../tests/support/test.ts";
-import { PermissionOptionId, SessionId } from "effective-acp/schema/v1";
+import { TerminalId, PermissionOptionId, SessionId } from "effective-acp/schema/v1";
 import { CallId, ToolName } from "../agent-machine/names.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { OptionId, OptionName, type PermissionQuestion, permissions, questionIn } from "../agent-policy/permissions.ts";
 import { receivedJson } from "../agent-session/received.ts";
+import { ShellCommand, WordText } from "../agent-policy/command-segments.ts";
+import { NeedText } from "../agent-policy/command-units.ts";
 import { answerOf, InvalidAnswer, requestOf } from "./permission.ts";
 
 const call = { call: CallId.make("c1"), tool: ToolName.make("write_file"), input: receivedJson({ path: "a.ts", text: "hi" }) };
@@ -69,4 +71,22 @@ test("an option the question did not offer, or a cancel with no option to reject
     "allow-forever is not an option offered for write_file.",
     "The request was cancelled, and the question about write_file offers no option that rejects the call once.",
   ]);
+});
+
+test("a question about a command adds to the call's content a text block naming each program that needs permission and why", () => {
+  const command: PermissionQuestion = {
+    _tag: "Command",
+    tool: ToolName.make("terminal_command"),
+    kind: "execute",
+    options: [],
+    command: ShellCommand.make("git log; rm -rf build"),
+    needs: [{ program: WordText.make("rm -rf build"), why: NeedText.make("it is not allowed yet") }],
+    grants: [],
+  };
+  const presented = { title: "Clean the build", kind: "execute" as const, content: [{ type: "terminal" as const, terminalId: TerminalId.make("t1") }] };
+  expect(requestOf(SessionId.make("s1"), call, command, presented).toolCall.content as unknown).toEqual([
+    { type: "terminal", terminalId: "t1" },
+    { type: "content", content: { type: "text", text: "This command needs permission:\n- rm -rf build: it is not allowed yet" } },
+  ]);
+  expect(requestOf(SessionId.make("s1"), call, question, { title: "Write a.ts", kind: "edit" }).toolCall.content).toBeUndefined();
 });
