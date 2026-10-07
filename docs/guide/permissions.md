@@ -61,6 +61,14 @@ input) counts as outside your folder. Other programs write where their own argum
 `ssh`, `docker` and `kubectl` are allowed by host or container (`ssh build-box`,
 `docker exec web`): the command they run there is not judged.
 
+## Trying it
+
+`bun run playground:make [folder]` makes a playground (`~/Code/labkit-playground` unless you name
+a folder): a folder with two git repositories in it, `app/` and `lib/`, and a README in each folder
+with prompts to type and what each one should do. Some prompts give other answers depending on
+the folder the session starts in. `scripts/playground/exercises.ts` holds the prompts; a test checks
+that each one does what its README says.
+
 ## What a question shows
 
 A question names each program that needs permission and why. Two kinds of program also show what
