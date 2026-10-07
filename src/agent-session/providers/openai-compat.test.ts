@@ -3,6 +3,7 @@
 import { afterAll, expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
 import { Effect, Layer, Logger } from "effect";
+import * as IdGenerator from "effect/ai/IdGenerator";
 import { CallId, ModelName, ProviderName, ThinkingText, ToolName, TurnId } from "../../agent-machine/names.ts";
 import { ModelStream, type Streamed } from "../model-stream.ts";
 import { ModelClient, type ModelContext } from "../contracts.ts";
@@ -27,9 +28,27 @@ afterAll(() => {
   for (const stop of stops) stop();
 });
 
+/** A logger that keeps each line's level and message. */
+function capturing() {
+  const logged: Array<{ readonly level: string; readonly message: unknown }> = [];
+  const capture = Logger.make((options) => {
+    logged.push({ level: options.logLevel, message: options.message });
+  });
+  return { logged, layer: Logger.layer([capture], { mergeWithExisting: true }) };
+}
+
+/** The client's layer for the server at `url`, with `ids` as its `IdGenerator` when given. */
+const clientAt = (url: URL, ids?: IdGenerator.Service) =>
+  OpenAiCompatModelClient.pipe(Layer.provide(Layer.mergeAll(openAiCompatAt(url), ids === undefined ? Layer.empty : Layer.succeed(IdGenerator.IdGenerator, ids))));
+
+/** The warnings that a call was given an id: each one's details. */
+const idsSupplied = (logged: ReadonlyArray<{ readonly level: string; readonly message: unknown }>) =>
+  logged.flatMap(({ level, message }) => (Array.isArray(message) && message[0] === logKeys.provider.callIdSupplied ? [{ level, details: message[1] as Record<string, unknown> }] : []));
+
 async function turn(responses: ReadonlyArray<unknown>) {
   const provider = recordingServer(responses);
   stops.push(provider.stop);
+  const { logged, layer } = capturing();
   const facts = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
@@ -43,14 +62,15 @@ async function turn(responses: ReadonlyArray<unknown>) {
         Layer.mergeAll(
           BoringModelProvider,
           TurnContextAssembler,
-          OpenAiCompatModelClient.pipe(Layer.provide(openAiCompatAt(provider.url))),
+          clientAt(provider.url),
           CountingTurns,
           SmolToolRunner,
+          layer,
         ),
       ),
     ),
   );
-  return { provider, facts };
+  return { provider, facts, logged };
 }
 
 const choice = (message: unknown, finish_reason: string) => ({ id: "chatcmpl-1", choices: [{ index: 0, message, finish_reason }] });
@@ -61,7 +81,7 @@ const callsAdd = choice(
 const answers = choice({ role: "assistant", content: "5." }, "stop");
 
 test("a tool turn sends the catalog, then the call and a tool message with its result", async () => {
-  const { provider, facts } = await turn([callsAdd, answers]);
+  const { provider, facts, logged } = await turn([callsAdd, answers]);
   const tools = smolCatalog.map((tool) => ({
     type: "function",
     function: { name: tool.name, description: tool.description, parameters: tool.input },
@@ -88,6 +108,25 @@ test("a tool turn sends the catalog, then the call and a tool message with its r
     },
   ]);
   expect(facts.at(-1) as unknown).toMatchObject({ decision: { _tag: "TurnEnded", ending: { _tag: "Completed" } } });
+  // The server gave the call its id, so none is supplied.
+  expect(idsSupplied(logged)).toEqual([]);
+});
+
+test("a call that arrives with no id is given one: the facts record it, its result is sent back under it, and a warning says so", async () => {
+  const received = { type: "function", function: { name: "add", arguments: '{"a":2,"b":3}' } };
+  const { provider, facts, logged } = await turn([choice({ role: "assistant", content: null, tool_calls: [received] }, "tool_calls"), answers]);
+  const responded = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded");
+  const call = responded?._tag === "Observed" && responded.observation._tag === "ModelResponded" ? responded.observation.parts[0] : undefined;
+  if (call?._tag !== "ToolCall") throw new Error(`expected a ToolCall, got ${JSON.stringify(call)}`);
+  expect(call.call).toMatch(/^call_labkit_[0-9A-Za-z]{16}$/);
+  const ended = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ToolEnded");
+  expect(ended as unknown).toMatchObject({ observation: { call: call.call, outcome: { _tag: "Succeeded" } } });
+  const second = provider.bodies[1] as { readonly messages: ReadonlyArray<unknown> };
+  expect(second.messages.slice(1)).toEqual([
+    { role: "assistant", content: null, tool_calls: [{ id: call.call, ...received }] },
+    { role: "tool", tool_call_id: call.call, content: "5" },
+  ]);
+  expect(idsSupplied(logged)).toEqual([{ level: "Warn", details: { turn: "turn-1", tool: "add", id: call.call, received: { id: null, ...received } } }]);
 });
 
 test("the choice's message becomes parts: thinking, content, calls to any tool name, and other fields kept whole", async () => {
@@ -336,11 +375,15 @@ const hello: ModelContext = { system: undefined, tools: [], messages: [{ role: "
 const streamedChunk = (delta: unknown, finish_reason: string | null = null) => ({ id: "c1", choices: [{ index: 0, delta, finish_reason }] });
 const callDelta = (call: Record<string, unknown>) => ({ tool_calls: [call] });
 
-/** One request whose response is `chunks`: what the client passed on as it streamed, and the observation it made. */
-async function streamed(chunks: ReadonlyArray<unknown>) {
+/**
+ * One request whose response is `chunks`, with `ids` as the client's `IdGenerator` when given: what the
+ * client passed on as it streamed, the observation it made, and what it logged.
+ */
+async function streamed(chunks: ReadonlyArray<unknown>, ids?: IdGenerator.Service) {
   const provider = recordingServer([() => chatChunks(chunks)]);
   stops.push(provider.stop);
   const passed: Array<Streamed> = [];
+  const { logged, layer } = capturing();
   const responded = await runTest(
     Effect.gen(function* () {
       const client = yield* ModelClient;
@@ -351,13 +394,14 @@ async function streamed(chunks: ReadonlyArray<unknown>) {
           passed.push(each);
         }),
       ),
-      Effect.provide(OpenAiCompatModelClient.pipe(Layer.provide(openAiCompatAt(provider.url)))),
+      Effect.provide(Layer.mergeAll(clientAt(provider.url, ids), layer)),
     ),
   );
   if (responded._tag !== "ModelResponded") throw new Error(`expected ModelResponded, got ${responded._tag}`);
   return {
     parts: responded.parts,
     passedCalls: passed.flatMap((each) => (each._tag === "Part" && each.part._tag === "ToolCall" ? [String(each.part.call)] : [])),
+    logged,
   };
 }
 
@@ -366,6 +410,51 @@ const add = (id: string, index: number | undefined, a: number) => ({
   id,
   type: "function",
   function: { name: "add", arguments: JSON.stringify({ a, b: a }) },
+});
+
+test("a streamed call whose deltas carry no id is one call with one id, from the IdGenerator provided; a call with no name gets none", async () => {
+  let made = 0;
+  const ids: IdGenerator.Service = { generateId: () => Effect.sync(() => `call_test_${++made}`) };
+  const { parts, passedCalls, logged } = await streamed(
+    [
+      streamedChunk({ role: "assistant", ...callDelta({ index: 0, type: "function", function: { name: "add", arguments: '{"a":2,' } }) }),
+      streamedChunk(callDelta({ index: 0, function: { arguments: '"b":3}' } })),
+      streamedChunk(callDelta({ index: 1, type: "function", function: { name: "add", arguments: '{"a":1,"b":1}' } })),
+      streamedChunk(callDelta({ index: 2, function: { arguments: "{}" } })),
+      streamedChunk({}, "tool_calls"),
+    ],
+    ids,
+  );
+  // The first call is passed on once the second begins; the second once the third does.
+  expect(passedCalls).toEqual(["call_test_1", "call_test_2"]);
+  expect(parts as unknown).toMatchObject([
+    { _tag: "ToolCall", call: "call_test_1", tool: "add", input: json({ a: 2, b: 3 }) },
+    { _tag: "ToolCall", call: "call_test_2", tool: "add", input: json({ a: 1, b: 1 }) },
+    { _tag: "Unrecognised", received: json({ tool_calls: [{ id: null, type: "function", function: { name: null, arguments: "{}" } }] }) },
+  ]);
+  expect(made).toBe(2);
+  expect(idsSupplied(logged).map(({ level, details }) => [level, details["id"], details["received"]])).toEqual([
+    ["Warn", "call_test_1", { id: null, type: "function", function: { name: "add", arguments: '{"a":2,"b":3}' } }],
+    ["Warn", "call_test_2", { id: null, type: "function", function: { name: "add", arguments: '{"a":1,"b":1}' } }],
+  ]);
+});
+
+test("two calls of one response whose id is empty are two calls, each given an id of its own", async () => {
+  let made = 0;
+  const ids: IdGenerator.Service = { generateId: () => Effect.sync(() => `call_test_${++made}`) };
+  const { parts, logged } = await streamed(
+    [
+      streamedChunk({ role: "assistant", ...callDelta({ index: 0, id: "", type: "function", function: { name: "add", arguments: '{"a":2,"b":3}' } }) }),
+      streamedChunk(callDelta({ index: 1, id: "", type: "function", function: { name: "add", arguments: '{"a":1,"b":1}' } })),
+      streamedChunk({}, "tool_calls"),
+    ],
+    ids,
+  );
+  expect(parts as unknown).toMatchObject([
+    { _tag: "ToolCall", call: "call_test_1", tool: "add", input: json({ a: 2, b: 3 }) },
+    { _tag: "ToolCall", call: "call_test_2", tool: "add", input: json({ a: 1, b: 1 }) },
+  ]);
+  expect(idsSupplied(logged).map(({ details }) => details["id"])).toEqual(["call_test_1", "call_test_2"]);
 });
 
 test("calls are passed on once each: those a later call completes in the order they arrived, those left at the end in index order; the message holds them in index order", async () => {

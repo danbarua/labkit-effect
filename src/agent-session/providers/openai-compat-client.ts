@@ -25,7 +25,9 @@
  *     chunks as `Thinking`;
  *   - each of its `tool_calls`: a `ToolCall`, whatever the tool's name, with its arguments kept as
  *     the text received. A call's other fields (Gemini's `extra_content`) become an `Unrecognised`
- *     part holding the call;
+ *     part holding the call. A call with a name and no id (some local servers send none) is given
+ *     one (`withIds`), recorded and sent back as if the server had sent it; a call with no name is
+ *     `Unrecognised`;
  *   - any other field of the message (`refusal`, ...): `Unrecognised`, holding that field.
  * - The stop is the choice's `finish_reason`. The usage is the last usage that a chunk held
  *   (`usageIn`). Everything else that the chunks held is `metadata`.
@@ -35,7 +37,8 @@
 import type { BlobId } from "../../agent-machine/blob.ts";
 import { knownOf, takesFile } from "../configuration/well-known-models.ts";
 import { OpenAiClient } from "@effect/ai-openai-compat";
-import { Array as Arr, Effect, HashSet, Layer, Order, Ref, type Schema, Stream } from "effect";
+import { Array as Arr, Effect, HashSet, Layer, Option, Order, Ref, type Schema, Stream } from "effect";
+import * as IdGenerator from "effect/ai/IdGenerator";
 import type * as AiError from "effect/ai/AiError";
 import type * as HttpClient from "effect/http/HttpClient";
 import { CallId, ModelText, StopReason, ThinkingText, ToolName, type TurnId } from "../../agent-machine/names.ts";
@@ -43,6 +46,7 @@ import type { ModelPart, Observation } from "../../agent-machine/observation.ts"
 import { type ContextMessage, type ContextPart, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
 import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEventsOrWhole, type Retries, withRetries } from "../provider-call.ts";
 import { ModelStream, type Streamed } from "../model-stream.ts";
+import { logKeys } from "../log-keys.ts";
 import { reportAdjusted } from "../configuration/settings.ts";
 import { openAiCompatSettle } from "./openai-compat-settings.ts";
 import { receivedJson, receivedJsonText } from "../received.ts";
@@ -229,7 +233,8 @@ function body(target: Target, context: ModelContext, files: ReadonlyMap<BlobId, 
  * Returns the parts that one tool call becomes: a `ToolCall`, and, when the call holds fields other
  * than `id`, `type` and `function` (Gemini's `extra_content`), an `Unrecognised` part holding the call
  * as received, so that those fields are sent back with it. A call with no id or name is
- * `Unrecognised`.
+ * `Unrecognised`; a named call that arrived without an id has been given one (`withIds`) before it
+ * gets here.
  */
 function callParts(call: Json): ReadonlyArray<ModelPart> {
   const received: ModelPart = { _tag: "Unrecognised", received: receivedJson({ tool_calls: [call] }) };
@@ -359,8 +364,9 @@ const usageIn = (chunk: Schema.JsonObject, choice: Json | undefined): Json | und
  *   follows a list becomes a text chunk.
  * - Any other field has the value of its last delta.
  * - Tool calls are kept by their `index`, with their `arguments` joined (an object as its JSON text),
- *   their `id` as first given, and their name as `nameOf` returns it. A call delta with no index
- *   belongs to the call that its `id` names, or starts a new call.
+ *   their `id` as first given (`withIds` gives one to a named call whose deltas gave none, once the
+ *   call is whole), and their name as `nameOf` returns it. A call delta with no index belongs to the
+ *   call that its `id` names, or starts a new call.
  */
 interface Building {
   readonly fields: ReadonlyMap<string, Json>;
@@ -419,7 +425,7 @@ function added(building: Building, delta: Schema.JsonObject): { readonly buildin
   const [calls, touched] = Arr.mapAccum(tool_calls as ReadonlyArray<Json>, building.calls, (calls, each): readonly [ReadonlyMap<number, BuiltCall>, ReadonlyArray<number>] => {
     if (!isObject(each)) return [calls, []];
     const { index, id, function: fn, type: _type, ...extra } = each;
-    const byId = typeof id === "string" ? [...calls].find(([, call]) => call.id === id)?.[0] : undefined;
+    const byId = typeof id === "string" && id !== "" ? [...calls].find(([, call]) => call.id === id)?.[0] : undefined;
     const at = typeof index === "number" ? index : (byId ?? calls.size);
     const call = calls.get(at) ?? { arguments: "", rest: {} };
     const named = isObject(fn ?? null) ? (fn as { readonly name?: Json; readonly arguments?: Json }) : {};
@@ -434,10 +440,13 @@ function added(building: Building, delta: Schema.JsonObject): { readonly buildin
   return { building: { fields, calls }, touched: touched.flat() };
 }
 
-/** Returns a call's id from its deltas: the first id given. */
+/**
+ * Returns a call's id from its deltas: the first id given. An empty id is no id: two calls with one
+ * would share it, so a call given `""` is given an id of its own (`withIds`).
+ */
 const idOf = (before: string | undefined, given: Json | undefined): { readonly id?: string } => {
   if (before !== undefined) return { id: before };
-  return typeof given === "string" ? { id: given } : {};
+  return typeof given === "string" && given !== "" ? { id: given } : {};
 };
 
 /** Returns what a delta adds to a call's arguments: their text, or an object as its JSON text. */
@@ -463,6 +472,40 @@ const callOf = (call: BuiltCall): Json => ({
   function: { name: call.name ?? null, arguments: call.arguments },
   ...call.rest,
 });
+
+/**
+ * Makes the ids given to calls that arrive without one when no `IdGenerator` is provided:
+ * `call_labkit_` and 16 random letters and digits, so that a reader of the facts can tell that the
+ * id was supplied. It cannot fail: its separator, `_`, is not in its alphabet.
+ */
+const labkitCallIds = IdGenerator.make({
+  prefix: "call_labkit",
+  separator: "_",
+  alphabet: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+  size: 16,
+}).pipe(Effect.orDie);
+
+/**
+ * Returns `building` with an id given to each whole call at `ats` that has a name and no id. Some
+ * local servers send calls without ids, and a call needs one: its result is sent back under it. The
+ * id is given once a call is whole, so that a call whose deltas never carry one is one call with one
+ * id, and its parts as passed on and as recorded hold the same id. Each id given is logged once as a
+ * warning, with the call as it arrived (`id: null`). A call with no name keeps no id: it is
+ * `Unrecognised` (`callParts`).
+ */
+const withIds = (building: Building, ats: ReadonlyArray<number>, ids: IdGenerator.Service, turn: TurnId): Effect.Effect<Building> =>
+  Effect.reduce(
+    ats,
+    () => building,
+    (building, at) => {
+      const call = building.calls.get(at);
+      if (call === undefined || call.id !== undefined || call.name === undefined) return Effect.succeed(building);
+      return ids.generateId().pipe(
+        Effect.tap((id) => Effect.logWarning(logKeys.provider.callIdSupplied, { turn, tool: call.name, id, received: callOf(call) })),
+        Effect.map((id): Building => ({ ...building, calls: new Map([...building.calls, [at, { ...call, id }]]) })),
+      );
+    },
+  );
 
 /** Returns the message that the deltas built. */
 const messageOf = (building: Building): Schema.JsonObject => ({
@@ -500,6 +543,7 @@ const respondOnce = (
   post: Post,
   target: Target,
   turn: TurnId,
+  ids: IdGenerator.Service,
 ): Effect.Effect<Responded, AiError.AiError> =>
   Effect.gen(function* () {
     const passOn = yield* ModelStream;
@@ -520,10 +564,12 @@ const respondOnce = (
             const streamedDelta = choice !== undefined && isObject(choice) ? choice["delta"] : undefined;
             const delta = choice !== undefined && isObject(choice) ? (streamedDelta ?? choice["message"]) : undefined;
             if (streamedDelta !== undefined && isObject(streamedDelta)) yield* Effect.forEach(deltasIn(streamedDelta), passOn, { discard: true });
-            const { building, touched } = delta !== undefined && isObject(delta) ? added(so.building, delta) : { building: so.building, touched: [] };
+            const grown = delta !== undefined && isObject(delta) ? added(so.building, delta) : { building: so.building, touched: [] };
             // A call is whole once a later one begins.
-            const later = Math.max(-1, ...touched);
-            const whole = [...building.calls].filter(([at]) => at < later && !HashSet.has(so.passed, at));
+            const later = Math.max(-1, ...grown.touched);
+            const wholeAt = [...grown.building.calls.keys()].filter((at) => at < later && !HashSet.has(so.passed, at));
+            const building = yield* withIds(grown.building, wholeAt, ids, turn);
+            const whole = [...building.calls].filter(([at]) => wholeAt.includes(at));
             yield* Effect.forEach(whole, ([, call]) => Effect.forEach(callParts(callOf(call)), (part) => passOn({ _tag: "Part", part }), { discard: true }), { discard: true });
             const finish = choice !== undefined && isObject(choice) && choice["finish_reason"] !== null && choice["finish_reason"] !== undefined ? choice["finish_reason"] : so.finish;
             return {
@@ -536,10 +582,12 @@ const respondOnce = (
           }),
       ),
     );
-    const { building, passed } = end;
-    if (end.finish === undefined) return yield* invalidOutput(caller, `The stream ended with no finish_reason: ${JSON.stringify(messageOf(building))}`);
+    const { passed } = end;
+    if (end.finish === undefined) return yield* invalidOutput(caller, `The stream ended with no finish_reason: ${JSON.stringify(messageOf(end.building))}`);
     // Mistral and OpenRouter end a response that failed with `finish_reason: "error"`.
-    if (end.finish === "error") return yield* invalidOutput(caller, `The response ended with finish_reason "error": ${JSON.stringify(messageOf(building))}`);
+    if (end.finish === "error") return yield* invalidOutput(caller, `The response ended with finish_reason "error": ${JSON.stringify(messageOf(end.building))}`);
+    const unpassedAt = Arr.sort([...end.building.calls.keys()].filter((at) => !HashSet.has(passed, at)), Order.Number);
+    const building = yield* withIds(end.building, unpassedAt, ids, turn);
     const message = messageOf(building);
     const responded = parts(message);
     const unpassed = Arr.sort([...building.calls].filter(([at]) => !HashSet.has(passed, at)), byIndex);
@@ -567,6 +615,8 @@ export const openAiCompatRequests = (
 ): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
+    // As Effect's `LanguageModel` does: the provided `IdGenerator`, else the adapter's own.
+    const ids = yield* Effect.serviceOption(IdGenerator.IdGenerator).pipe(Effect.flatMap(Option.match({ onNone: () => labkitCallIds, onSome: Effect.succeed })));
     const omittedLogged = yield* Ref.make<OmittedLogged>(new Set());
     return (target, context, turn) => {
       const settled = openAiCompatSettle(target);
@@ -580,7 +630,7 @@ export const openAiCompatRequests = (
         };
         return reportAdjusted(turn, target, settled).pipe(
           Effect.andThen(logSupplied(sent.supplied, target, turn, omittedLogged)),
-          Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
+          Effect.andThen(respondOnce(http, post, target, turn, ids).pipe(withRetries(retries), failedPosting(post))),
         );
         }),
       );

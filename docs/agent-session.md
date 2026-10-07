@@ -195,6 +195,12 @@ back into the core's observations:
   caught.
 - `shaping.ts` holds what every adapter needs to shape a context. Where an adapter supplies or
   replaces something that the context does not say, it records it as `Supplied` and logs it.
+- A tool call needs an id: its result is sent back under it. When a Chat Completions server sends a
+  named call without one (some local servers do), the adapter gives it one from Effect's
+  `IdGenerator`, or `call_labkit_` and 16 random characters when none is provided, once the call is
+  whole, so a streamed call is one call with one id. The call is recorded and sent back under that
+  id, and a warning (`provider.response.call_id_supplied`) gives the tool, the id and the call as it
+  arrived. A call with no name stays `Unrecognised`.
 - `model-fallback.ts` tries the session's target, then each fallback, moving on only after a
   failure that means the provider cannot serve the request now. When a fallback answers, the chain
   records a change of model to it.

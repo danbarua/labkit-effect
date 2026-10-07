@@ -35,6 +35,12 @@ export const logKeys = {
     toolInputReplaced: "provider.request.tool_input_replaced",
     /** A response ended while parts of it were still arriving; they are not recorded. The details name them. */
     partCut: "provider.response.part_cut",
+    /**
+     * Warning: a response's tool call arrived with a name and no id, so it was given one; the call is
+     * recorded, and its result sent back, under that id. The details are the turn, the tool, the id
+     * given (`id`) and the call as it arrived (`received`).
+     */
+    callIdSupplied: "provider.response.call_id_supplied",
     /** A part of an earlier response was not sent; the details say which part and why. */
     partsOmitted: "provider.request.parts_omitted",
     fileAsPointer: "provider.request.file_as_pointer",
