@@ -20,6 +20,9 @@
  *   their input. `awk` and `sed` run a program written in the command, so they are opaque too
  *   (unless it is in a file, `-f`), as are `rg --pre`, `watch`, `parallel`, `script` and `expect`.
  * - **Another user**: `sudo`, `doas`, `su` and `pkexec` are opaque.
+ * - **Commands that git or ssh run**: `git rebase --exec`, `git submodule foreach`, `git bisect run`,
+ *   `git difftool --extcmd`, `git filter-branch`, and `ssh <host> <command>` are opaque; `trap`'s code
+ *   is judged as `eval`'s is.
  * - **A call to a function** defined in the same command is not a unit: the function's body is
  *   judged where it is defined, and a function does not outlive its command.
  *
@@ -106,9 +109,9 @@ const subcommands = named(
 const packageRunners = named("npx", "bunx", "uvx");
 /** The subcommands that run a script or package, which the grant then names too. */
 const namingSubcommands: ReadonlyMap<WordText, ReadonlySet<WordText>> = new Map([
-  [WordText.make("npm"), named("run", "run-script", "exec")],
+  [WordText.make("npm"), named("run", "run-script", "exec", "x")],
   [WordText.make("pnpm"), named("run", "dlx", "exec")],
-  [WordText.make("yarn"), named("run", "dlx")],
+  [WordText.make("yarn"), named("run", "dlx", "exec")],
   [WordText.make("bun"), named("run", "x")],
   [WordText.make("pipx"), named("run")],
   [WordText.make("deno"), named("run", "task")],
@@ -306,6 +309,29 @@ const gitWords = (words: ReadonlyArray<Word>): ReadonlyArray<Word> | NeedText =>
   return typeof rest === "string" ? rest : [...words.slice(0, 1), ...rest];
 };
 
+/** Why a git command (without its global options) runs another program it names: `rebase --exec`, `submodule foreach`, `bisect run`, `difftool --extcmd`, `filter-branch`; undefined when it does not. */
+const gitRunning = (words: ReadonlyArray<Word>): NeedText | undefined => {
+  const [, subcommand, ...args] = words;
+  const has = (...options: ReadonlyArray<Name>) => args.some((word) => options.some((each) => word.literal === each || word.literal?.startsWith(`${each}=`) === true));
+  if (is(subcommand, "rebase") && has("-x", "--exec")) return need("git rebase --exec runs a command for each commit");
+  if (is(subcommand, "submodule") && is(args[0], "foreach")) return need("git submodule foreach runs a command in each submodule");
+  if (is(subcommand, "bisect") && is(args[0], "run")) return need("git bisect run runs a command for each step");
+  if (is(subcommand, "difftool", "mergetool") && has("-x", "--extcmd")) return need("git difftool --extcmd runs the command it names");
+  if (is(subcommand, "filter-branch")) return need("git filter-branch runs the commands it is given");
+  return undefined;
+};
+
+const sshValued = named("-b", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-Q", "-R", "-S", "-W", "-w");
+
+/** The host when `ssh`'s arguments `rest` give a command to run on it; undefined when they do not. */
+const sshCommand = (rest: ReadonlyArray<Word>): WordText | undefined => {
+  const [next, ...after] = rest;
+  if (next === undefined) return undefined;
+  if (next.literal !== undefined && sshValued.has(next.literal)) return sshCommand(after.slice(1));
+  if (isOption(next)) return sshCommand(after);
+  return after.length > 0 ? (next.literal ?? next.text) : undefined;
+};
+
 /** Returns the units of a simple command whose words are `words`. */
 const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> => {
   const [first, ...rest] = words;
@@ -327,7 +353,19 @@ const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> =>
   }
   if (base === WordText.make("git")) {
     const normal = gitWords(words);
-    return typeof normal === "string" ? [opaque(words, normal)] : [unit(normal, grantOf(normal), ownWrites(base, normal))];
+    if (typeof normal === "string") return [opaque(words, normal)];
+    const running = gitRunning(normal);
+    return running === undefined ? [unit(normal, grantOf(normal), ownWrites(base, normal))] : [opaque(normal, running)];
+  }
+  if (base === WordText.make("trap")) {
+    const past = rest.filter((word, at) => !(at === 0 && is(word, "-p", "-l", "--")));
+    const code = past[0];
+    if (code === undefined || is(code, "-")) return [unit(words, grantOf(words))];
+    return code.literal === undefined ? [opaque(words, need("trap runs code that is not written out"))] : unitsOfCode(code.literal, words, seen);
+  }
+  if (base === WordText.make("ssh")) {
+    const remote = sshCommand(rest);
+    if (remote !== undefined) return [opaque(words, need(`it runs a command on ${remote}`))];
   }
   if (base === WordText.make("find")) return findUnits(words, seen);
   if (base === WordText.make(".") || base === WordText.make("source")) return [unit(words, rest[0] === undefined ? undefined : scriptGrant(words, rest[0]))];

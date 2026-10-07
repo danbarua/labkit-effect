@@ -123,3 +123,19 @@ test("tool rules apply to tools that do not run commands: a deny rule vetoes in 
   expect(judged("", { tool: "git_push", allow: ["git_push"] }).step).toBe("runs");
   expect(judged("", { tool: "git_push" }).question).toMatchObject({ _tag: "Tool", tool: "git_push" });
 });
+
+test("when deny rules name programs, a command they cannot see (one that does not parse, or a program whose name is not written out) is asked about even in bypassPermissions", () => {
+  const deny = ["command(rm:*)"];
+  expect(judged("echo ${x:-$(rm -rf build)}", { deny, mode: "bypassPermissions" }).question).toMatchObject({
+    needs: [{ program: "echo ${x:-$(rm -rf build)}", why: "deny rules cannot see what it runs: it does not parse" }],
+    grants: [],
+  });
+  expect(judged("$(printf rm) -rf build", { deny, mode: "bypassPermissions" }).question).toMatchObject({
+    needs: [{ program: "$(printf rm) -rf build", why: "deny rules cannot see what it runs: its program's name is not written out" }],
+  });
+  expect(judged("$(printf rm) -rf build", { deny, allow: ["run_command"] }).step).toBe("asks");
+  expect(judged("$(printf rm) -rf build", { deny, mode: "bypassPermissions", canAsk: false }).reason).toEndWith("Write the command out, so that the deny rules can see what it runs.");
+  // Without deny rules that name programs, bypassPermissions runs them.
+  expect(judged("echo ${x:-$(rm -rf build)}", { mode: "bypassPermissions" }).step).toBe("runs");
+  expect(judged("ls", { deny, mode: "bypassPermissions" }).step).toBe("runs");
+});

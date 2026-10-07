@@ -266,7 +266,15 @@ const commandStep = (
     return grant !== undefined && session.rejected.some((rejected) => sameGrant(rejected, grant)) ? [`${shownGrant(grant)} was rejected for the rest of the session`] : [];
   });
   if (denied.length > 0) return veto(`${denied.join("; ")}.`);
-  if (allow.some((rule) => rule.words === undefined) || mode === "bypassPermissions") return proceed;
+  // Deny rules with words cannot see a command that does not parse, or a program whose name is not
+  // written out; when there are such rules, those run only after a question, even in bypassPermissions.
+  const unseen: ReadonlyArray<CommandNeed> = !deny.some((rule) => rule.words !== undefined)
+    ? []
+    : split === undefined || split._tag === "Unparsed"
+      ? [{ program: WordText.make(command ?? "the command"), why: NeedText.make("deny rules cannot see what it runs: it does not parse") }]
+      : units.flatMap((unit) => (unit.words.length > 0 && unit.words[0]?.literal === undefined ? [{ program: programOf(unit), why: NeedText.make("deny rules cannot see what it runs: its program's name is not written out") }] : []));
+  if ((allow.some((rule) => rule.words === undefined) || mode === "bypassPermissions") && unseen.length === 0) return proceed;
+  if (mode === "bypassPermissions" || allow.some((rule) => rule.words === undefined)) return asked(unseen, [], tool, kind, mode, canAsk, command);
   const allowed = (unit: Unit): boolean => {
     if (unit.words.length === 0 || allow.some((rule) => ruleNamesProgram(rule, unit, false))) return true;
     if (unit.opaque !== undefined) return false;
@@ -282,15 +290,30 @@ const commandStep = (
           ...(unit.writes.length === 0 || mode === "acceptEdits" ? [] : [{ program: programOf(unit), why: NeedText.make(`it writes ${listed(unit.writes)}`) }]),
         ]);
   if (needs.length === 0) return proceed;
+  const needing = units.filter((unit) => !allowed(unit));
+  const grantable = needs.every((each) => each.why === notYet) && needing.every((unit) => unit.grant !== undefined);
+  const grants = grantable ? needing.flatMap((unit) => (unit.grant === undefined ? [] : [unit.grant])).filter((grant, at, all) => all.findIndex((other) => sameGrant(other, grant)) === at) : [];
+  return asked(needs, grants, tool, kind, mode, canAsk, command);
+};
+
+/** Asks about `needs`, offering `grants` for the session; or vetoes, naming them, in `dontAsk` mode or when no one can answer. */
+const asked = (
+  needs: ReadonlyArray<CommandNeed>,
+  grants: ReadonlyArray<Grant>,
+  tool: ToolName,
+  kind: ToolKind,
+  mode: PermissionMode,
+  canAsk: boolean,
+  command: ShellCommand | undefined,
+): PolicyStep<PermissionQuestion> => {
   const described = listed(needs.map((each) => WordText.make(`${each.program} (${each.why})`)));
   if (mode === "dontAsk") return veto(`${tool} needs permission, and the permission mode is dontAsk: ${described}.`);
   if (!canAsk) {
     const onlyWrites = needs.every((each) => each.why.startsWith("it writes "));
-    return veto(`${tool} needs permission, and no one is there to answer: ${described}. --permission-mode ${onlyWrites ? "acceptEdits or bypassPermissions" : "bypassPermissions"} lets it run.`);
+    const unseen = needs.some((each) => each.why.startsWith("deny rules cannot see"));
+    const hint = unseen ? "Write the command out, so that the deny rules can see what it runs." : `--permission-mode ${onlyWrites ? "acceptEdits or bypassPermissions" : "bypassPermissions"} lets it run.`;
+    return veto(`${tool} needs permission, and no one is there to answer: ${described}. ${hint}`);
   }
-  const needing = units.filter((unit) => !allowed(unit));
-  const grantable = needs.every((each) => each.why === notYet) && needing.every((unit) => unit.grant !== undefined);
-  const grants = grantable ? needing.flatMap((unit) => (unit.grant === undefined ? [] : [unit.grant])).filter((grant, at, all) => all.findIndex((other) => sameGrant(other, grant)) === at) : [];
   return ask({ _tag: "Command", tool, kind, options: commandOptions(grants), command: command ?? ShellCommand.make(""), needs, grants });
 };
 

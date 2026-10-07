@@ -84,7 +84,13 @@ The permissions plug-in's settings hold rules (`permission-rules.ts`):
 `command` in place of a tool's name names every command tool. A deny rule (`deny`) vetoes the call
 in every mode, `bypassPermissions` included. An allow rule (`allow`) lets it run without a question.
 A deny rule compares a program by the last part of its path (`rm:*` names `/bin/rm`); an allow rule
-compares it as written (`ls:*` does not name `./ls`). Every layer a host builds is trusted
+compares it as written (`ls:*` does not name `./ls`). A deny rule names a program wherever the
+command runs it, past wrappers, inside `bash -c '…'` and `eval '…'` written out, and anywhere among
+the words of `sudo` and other opaque programs (`sudo rm`). When deny rules name programs, a command
+they cannot see (one that does not parse, or a program whose name is not written out, such as
+`$(printf rm)`) is asked about in every mode, `bypassPermissions` included, and vetoed when no one
+can answer. Deny rules cannot see code that a program is given to run (`python3 -c '…'`,
+`sh -c "$X"`, a here-document fed to a shell): in `bypassPermissions` that code runs. Every layer a host builds is trusted
 (`docs/agent-config.md`), so rules come only from the user's own configuration and the folders they
 trust.
 

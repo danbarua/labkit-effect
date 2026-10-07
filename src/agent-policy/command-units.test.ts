@@ -100,6 +100,17 @@ test("a variable that chooses which programs or code run, set for a command, wit
   expect(units("FOO=1 make build")).toEqual(["make build [make build]"]);
 });
 
+test("commands that trap, git or ssh would run are judged or opaque, so that no grant names more than the user saw", () => {
+  expect(units("trap 'rm -rf build' EXIT; make")).toEqual(["rm -rf build [rm]", "make []"]);
+  expect(units('trap "$X" EXIT')).toEqual(["trap ? EXIT [] opaque: trap runs code that is not written out"]);
+  expect(units("git rebase -x 'make test' main")).toEqual(["git rebase -x make test main [] opaque: git rebase --exec runs a command for each commit"]);
+  expect(units("git submodule foreach git pull")).toEqual(["git submodule foreach git pull [] opaque: git submodule foreach runs a command in each submodule"]);
+  expect(units("git bisect run make test")).toEqual(["git bisect run make test [] opaque: git bisect run runs a command for each step"]);
+  expect(units("npm x eslint && yarn exec tsc")).toEqual(["npm x eslint [npm x eslint]", "yarn exec tsc [yarn exec tsc]"]);
+  expect(units("ssh -p 2222 build-box 'rm -rf /srv'")).toEqual(["ssh -p 2222 build-box rm -rf /srv [] opaque: it runs a command on build-box"]);
+  expect(units("ssh build-box")).toEqual(["ssh build-box [ssh build-box]"]);
+});
+
 test("a command that the parser cannot follow is Unparsed", () => {
   expect(units("echo ${x:-$(rm x)}")).toEqual(["unparsed: A command substitution inside a parameter expansion is not followed: ${x:-$(rm x)}"]);
 });
