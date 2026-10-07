@@ -150,10 +150,11 @@ export const editorWorld: World<FileSystem.FileSystem> = {
             Option.match(HashMap.get(all, call), { onSome: (kept) => [kept, all] as const, onNone: () => [shown, HashMap.set(all, call, shown)] as const }),
           );
         });
-      // A call's writes: read before its command runs; once it has ended, those read before it ran.
-      const writesShown = (call: CallId, command: ShellCommand | undefined, ended: boolean): Effect.Effect<ReadonlyArray<ShownWrite>> => {
+      // A call's writes: read while it runs live and has not ended, before its command runs; otherwise
+      // those read before it ran, or none (a replayed call's files were read after it ran).
+      const writesShown = (call: CallId, command: ShellCommand | undefined, readNow: boolean): Effect.Effect<ReadonlyArray<ShownWrite>> => {
         if (command === undefined) return Effect.succeed([]);
-        if (!ended) return writesBefore(call, command);
+        if (readNow) return writesBefore(call, command);
         return Ref.get(writes).pipe(Effect.map((all) => Option.getOrElse(HashMap.get(all, call), () => [])));
       };
       const inFolder = inWorkspace(cwd);
@@ -174,7 +175,7 @@ export const editorWorld: World<FileSystem.FileSystem> = {
       // its location. An edit's change is shown as a diff
       // before it runs (when permission is asked) and once it succeeded. A command's terminal is shown
       // once the call has one.
-      const present: Present = (call, outcome) =>
+      const present: Present = (call, outcome, mode = "replay") =>
         Effect.gen(function* () {
           const parsed = parseJson(call.input);
           const input = "value" in parsed && typeof parsed.value === "object" && parsed.value !== null ? (parsed.value as Record<string, unknown>) : {};
@@ -185,7 +186,7 @@ export const editorWorld: World<FileSystem.FileSystem> = {
           if (call.tool === "terminal_command") {
             // Before the command runs, its writes are read; once it has ended, the writes read before it ran are shown, after a success.
             const command = typeof input["command"] === "string" ? ShellCommand.make(input["command"]) : undefined;
-            const before = yield* writesShown(call.call, command, outcome !== undefined);
+            const before = yield* writesShown(call.call, command, outcome === undefined && mode === "live");
             const content = [...(outcome === undefined || outcome._tag === "Succeeded" ? before.flatMap(writeContent) : []), ...(terminalId === undefined ? [] : [{ type: "terminal" as const, terminalId }])];
             return content.length === 0 ? shown : ({ ...shown, content } satisfies Presented);
           }

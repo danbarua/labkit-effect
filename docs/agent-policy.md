@@ -130,7 +130,7 @@ outside it is itself a read outside it).
   written in the command, with its language (`python3 -c`, `node -e`, `perl -ne`, `bun -e`,
   `deno eval`, an `awk` program, a here-document or here-string that a runtime or a shell reads); or
   the text it writes to one file (`Writes`): `cat` given a here-document or here-string, `echo` with
-  literal words and no backslash, or `tee`, writing to one file named by a literal word or a path from
+  literal words and no option or backslash (their meanings differ between shells), or `tee`, writing to one file named by a literal word or a path from
   `~`, with whether the text is added to the end (`>>`, `tee -a`) and whether the shell expands
   `$…` in it. `textsWritten` lists a command's writes, each with whether a `cd` comes before it.
 

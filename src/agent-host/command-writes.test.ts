@@ -14,7 +14,7 @@ const planned = (command: string) => plannedWrites(ShellCommand.make(command), f
 
 test("a write's path is resolved against the working folder, and ~ against the home folder", () => {
   expect(planned("cat > config.yml <<'EOF'\nname: x\nEOF")).toEqual(['/home/someone/project/config.yml ← "name: x\\n"']);
-  expect(planned("echo hi >> ~/notes.txt && echo -n x > ../sibling/a.txt")).toEqual(['/home/someone/notes.txt ← "hi\\n"', '/home/someone/sibling/a.txt ← "x"']);
+  expect(planned("echo hi >> ~/notes.txt && echo x > ../sibling/a.txt")).toEqual(['/home/someone/notes.txt ← "hi\\n"', '/home/someone/sibling/a.txt ← "x\\n"']);
 });
 
 test("a write after a cd, or to another user's home folder, is not planned as a diff, with why", () => {

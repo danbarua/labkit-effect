@@ -831,6 +831,36 @@ test("a command that writes text to a file shows the file's diff in its call: be
   expect(updates.at(-1) as unknown).toMatchObject({ status: "completed", content: [...diffs, { type: "terminal" }] });
 });
 
+test("a loaded session shows no diff for the writes it replays: their files were read after the commands ran", async () => {
+  const first = startHost({
+    script: [answer({ _tag: "ToolCall", call: "append-1", tool: "terminal_command", input: { command: "echo two >> log.txt", intent: "Append." } }), answer({ _tag: "Text", text: "Appended." })],
+  });
+  mkdirSync(first.cwd, { recursive: true });
+  writeFileSync(join(first.cwd, "log.txt"), "one\n");
+  const live = sdkClient(undefined, { [join(first.cwd, "log.txt")]: "one\n" });
+  const sessionId = await live.app.connectWith(first.stream, async (ctx) => {
+    await initialize(ctx, { fs: { readTextFile: true, writeTextFile: true }, terminal: true });
+    const created = await ctx.request("session/new", { cwd: first.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "Append"));
+    return created.sessionId;
+  });
+  await first.stop();
+  const contentOf = (updates: ReadonlyArray<Update>) =>
+    updates.flatMap((update) => ((update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") && update.toolCallId === "append-1" ? (update.content ?? []) : []));
+  expect(contentOf(live.log.updates)).toContainEqual({ type: "diff", path: join(first.cwd, "log.txt"), oldText: "one\n", newText: "one\ntwo\n" });
+  // The command ran: the file now holds what it appended.
+  writeFileSync(join(first.cwd, "log.txt"), "one\ntwo\n");
+  const second = startHost({});
+  const reloaded = sdkClient(undefined, { [join(first.cwd, "log.txt")]: "one\ntwo\n" });
+  await reloaded.app.connectWith(second.stream, async (ctx) => {
+    await initialize(ctx, { fs: { readTextFile: true, writeTextFile: true }, terminal: true });
+    await ctx.request("session/load", { sessionId, cwd: second.cwd, mcpServers: [] });
+  });
+  await second.stop();
+  expect(reloaded.log.updates.some((update) => "toolCallId" in update && update.toolCallId === "append-1")).toBe(true);
+  expect(contentOf(reloaded.log.updates).filter((content) => content.type === "diff")).toEqual([]);
+});
+
 test("the editor world offers read_file and write_file as the client advertised fs; read_file reads through fs/read_text_file, a path outside the working folder is refused, and a client with no fs has no file tools", async () => {
   const host = startHost({
     script: [

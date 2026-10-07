@@ -242,15 +242,15 @@ test("the text that cat, echo or tee writes to one file is the redirect's or tee
   expect(details("cat > config.yml <<'EOF'\nname: x\nEOF")).toEqual([[undefined, writes("config.yml", "name: x\n")]]);
   expect(details("cat <<EOF >> notes.md\n$HOME\nEOF")).toEqual([[undefined, writes("notes.md", "$HOME\n", true, true)]]);
   expect(details("cat <<< 'one line' > a.txt")).toEqual([[undefined, writes("a.txt", "one line\n")]]);
-  expect(details("echo hello world > a.txt && echo -n x >> a.txt")).toEqual([
+  expect(details("echo hello world > a.txt && echo x >> a.txt")).toEqual([
     [undefined, writes("a.txt", "hello world\n")],
-    [undefined, writes("a.txt", "x", true)],
+    [undefined, writes("a.txt", "x\n", true)],
   ]);
   expect(details("tee -a log.txt <<< 'x'")).toEqual([["tee", writes("log.txt", "x\n", true)]]);
 });
 
 test("a write whose text or file its words do not show has no detail: printf, echo with a backslash or an option, cat of a file, two files, a file not written out", () => {
-  for (const command of ["printf 'x\\n' > a.txt", "echo 'a\\tb' > a.txt", "echo -e x > a.txt", "cat other.txt > a.txt", "cat > a.txt > b.txt <<< x", 'cat > "$OUT" <<< x', "tee a.txt b.txt <<< x"]) {
+  for (const command of ["printf 'x\\n' > a.txt", "echo 'a\\tb' > a.txt", "echo -e x > a.txt", "echo -n x > a.txt", "cat other.txt > a.txt", "cat > a.txt > b.txt <<< x", 'cat > "$OUT" <<< x', "tee a.txt b.txt <<< x"]) {
     expect([command, details(command)]).toEqual([command, []]);
   }
 });

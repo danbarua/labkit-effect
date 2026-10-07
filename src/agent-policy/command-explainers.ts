@@ -17,7 +17,7 @@
  */
 
 import { type Segment, type SegmentsOf, type ShellCommand, WordText } from "./command-segments.ts";
-import { type Folders, fullPathOf, type Unit } from "./command-units.ts";
+import { type Folders, fullPathOf, judgesPathsOf, type Unit } from "./command-units.ts";
 import { Explanation } from "./sed-script.ts";
 
 /** Notes about one program, from its unit; none when it has nothing to say. */
@@ -165,11 +165,17 @@ const installsBy: ReadonlyMap<WordText, (args: ReadonlyArray<WordText>) => Reado
   ],
   [
     WordText.make("pnpm"),
-    (args) => (args[0] !== undefined && nodeInstalls.has(args[0]) ? [said("It downloads packages from the npm registry. It runs the install scripts of the packages your project allows to run them.")] : []),
+    (args) =>
+      args[0] !== undefined && nodeInstalls.has(args[0])
+        ? [said("It downloads packages from the npm registry. Depending on the pnpm version and the project's settings, it runs their install scripts, which can run any code on this machine.")]
+        : [],
   ],
   [
     WordText.make("bun"),
-    (args) => (args[0] !== undefined && nodeInstalls.has(args[0]) ? [said("It downloads packages from the npm registry. It runs install scripts only for the packages your package.json trusts (trustedDependencies).")] : []),
+    (args) =>
+      args[0] !== undefined && nodeInstalls.has(args[0])
+        ? [said("It downloads packages from the npm registry. It runs install scripts only for the packages bun trusts: its own list of common packages, and those in your package.json's trustedDependencies.")]
+        : [],
   ],
   [WordText.make("pip"), (args) => pipNotes(args)],
   [WordText.make("pip3"), (args) => pipNotes(args)],
@@ -214,17 +220,29 @@ export const notesOf = (unit: Unit, folders: Folders | undefined): ReadonlyArray
 
 // —— the command as a whole ——
 
-/** What a session grant covers, for the grants a question offers (`rm`, `git push`). */
-const grantsNote = (grants: ReadonlyArray<ReadonlyArray<WordText>>): ReadonlyArray<Explanation> =>
-  grants.length === 0
-    ? []
-    : [
-        said(
-          grants.length === 1
-            ? `Allowing ${grants[0]?.join(" ") ?? ""} for the rest of the session lets later ${grants[0]?.join(" ") ?? ""} commands run without a question inside the working folder. Outside it, they are still asked about.`
-            : `Allowing ${listed(grants.map((grant) => WordText.make(grant.join(" "))))} for the rest of the session lets later commands that use them run without a question inside the working folder. Outside it, they are still asked about.`,
-        ),
-      ];
+/**
+ * What a session grant covers, for the grants a question offers: for a program whose paths the policy
+ * judges (`rm`), later calls inside the working folder; for any other (`bun test`, `git push`), later
+ * calls wherever they read or write, since the policy does not see where.
+ */
+const grantsNote = (grants: ReadonlyArray<ReadonlyArray<WordText>>): ReadonlyArray<Explanation> => {
+  const named = (group: ReadonlyArray<ReadonlyArray<WordText>>): Text => listed(group.map((grant) => WordText.make(grant.join(" "))));
+  const judged = grants.filter((grant) => grant[0] !== undefined && judgesPathsOf(grant[0]));
+  const unjudged = grants.filter((grant) => !judged.includes(grant));
+  const later = (group: ReadonlyArray<ReadonlyArray<WordText>>): Text => (group.length === 1 ? `later ${named(group)} commands` : `later commands that use them`);
+  return [
+    ...(judged.length === 0
+      ? []
+      : [said(`Allowing ${named(judged)} for the rest of the session lets ${later(judged)} run without a question inside the working folder. Outside it, they are still asked about.`)]),
+    ...(unjudged.length === 0
+      ? []
+      : [
+          said(
+            `Allowing ${named(unjudged)} for the rest of the session lets ${later(unjudged)} run without a question. labkit does not see which files ${unjudged.length === 1 ? "it reads or writes" : "they read or write"} itself, so it does not ask about them, even outside the working folder.`,
+          ),
+        ]),
+  ];
+};
 
 /** For each pipeline in `segments`, that only its last program's exit status counts, unless `set -o pipefail` comes before it. */
 const pipelineNotes = (segments: ReadonlyArray<Segment>): ReadonlyArray<Explanation> =>

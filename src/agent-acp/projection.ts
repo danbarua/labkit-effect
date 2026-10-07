@@ -48,8 +48,12 @@ export interface Presented {
   readonly content?: ReadonlyArray<ToolCallContent>;
 }
 
-/** The host's presentation of a tool call; `outcome` is absent until the call ends. */
-export type Present = (call: Call, outcome?: ToolOutcome) => Effect.Effect<Presented>;
+/**
+ * The host's presentation of a tool call; `outcome` is absent until the call ends. `mode` is the
+ * projection's: `live` while the session runs, `replay` when a loaded session's facts are shown
+ * again, when what the call changed has already happened. It is `replay` when not given.
+ */
+export type Present = (call: Call, outcome?: ToolOutcome, mode?: "live" | "replay") => Effect.Effect<Presented>;
 
 export interface ProjectionContext {
   /** `replay` echoes each input as `user_message_chunk`; `live` does not. */
@@ -178,7 +182,7 @@ const chunkOf = (kind: TextKind, value: string): SessionUpdate =>
 /** Announces `call` as `pending`, unless it was announced. */
 const announce = (state: ProjectionState, call: Call, context: ProjectionContext): Effect.Effect<Projected> => {
   if (state.calls.has(call.call)) return Effect.succeed({ state, updates: [] });
-  return Effect.map(context.present(call), (shown) => ({
+  return Effect.map(context.present(call, undefined, context.mode), (shown) => ({
     state: { ...state, calls: new Map([...state.calls, [call.call, { call, shown }]]) },
     updates: [
       {
@@ -320,7 +324,7 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
               },
             ],
           });
-          return known === undefined ? Effect.succeed(ended(undefined)) : Effect.map(context.present(known.call, outcome), ended);
+          return known === undefined ? Effect.succeed(ended(undefined)) : Effect.map(context.present(known.call, outcome, context.mode), ended);
         }
         case "SessionOpened":
         case "InputCancelled":

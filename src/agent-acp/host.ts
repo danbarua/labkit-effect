@@ -510,9 +510,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               system: opened.system,
               sources: [...opened.sources, ...mcp.sources],
               // A call is shown with its result as the model is sent it: an MCP server's result as text, whether or not the server is still running.
-              present: (call, outcome) => {
+              present: (call, outcome, mode) => {
                 const sent = outcome === undefined ? undefined : outcomeAsSent(outcome);
-                return catalog.some((tool) => tool.name === call.tool) ? mcpPresent(call, sent) : opened.present(call, sent);
+                return catalog.some((tool) => tool.name === call.tool) ? mcpPresent(call, sent, mode) : opened.present(call, sent, mode);
               },
             };
             return { world, scope, mcp };

@@ -554,6 +554,12 @@ const pathsOf = (base: WordText, words: ReadonlyArray<Word>): ReadonlyArray<Word
   return [...(searching && !patternGiven ? operands.slice(1) : operands), ...files];
 };
 
+/** Whether the policy judges the paths that `program` reads or changes: the read-only programs with paths, `sed`, `find`, and the programs in `changers`. */
+export const judgesPathsOf = (program: WordText): boolean => {
+  const base = basename(program);
+  return pathPrograms.has(base) || changers.has(base) || seds.has(base) || base === WordText.make("find");
+};
+
 /** The paths outside the working folder that a read-only program reads, as written. `cd` with no folder, or to `-`, leaves it; so does `pushd` to a folder outside it. */
 const outsideOf = (base: WordText, words: ReadonlyArray<Word>, folders: Folders | undefined): ReadonlyArray<WordText> => {
   const home: Word = { text: WordText.make("~"), literal: WordText.make("~") };
@@ -866,8 +872,8 @@ const fedTextOf = (segment: Segment): { readonly text: WordText; readonly expand
 
 /**
  * The text that a simple segment's program prints, when its words show it: `cat` (or `cat -`) given a
- * here-document or here-string, or `echo` (or `echo -n`) with literal words that have no backslash,
- * whose meaning differs between shells. Undefined for anything else.
+ * here-document or here-string, or `echo` with literal words and no option or backslash, whose
+ * meanings differ between shells. Undefined for anything else.
  */
 const printedTextOf = (segment: Segment, fed: ReturnType<typeof fedTextOf>): { readonly text: WordText; readonly expands: boolean } | undefined => {
   const words = segment.words.map(literalOf);
@@ -875,11 +881,10 @@ const printedTextOf = (segment: Segment, fed: ReturnType<typeof fedTextOf>): { r
   if (program === undefined || words.some((word) => word === undefined)) return undefined;
   if (basename(program) === WordText.make("cat")) return rest.length === 0 || (rest.length === 1 && rest[0] === WordText.make("-")) ? fed : undefined;
   if (basename(program) !== WordText.make("echo")) return undefined;
-  const plain = rest.filter((word) => word !== undefined);
-  const noNewline = plain[0] === WordText.make("-n");
-  const args = noNewline ? plain.slice(1) : plain;
+  const args = rest.filter((word) => word !== undefined);
+  // echo's options and backslashes mean different things in different shells: macOS's /bin/sh prints `-n`.
   if (args.some((word) => word.startsWith("-") || word.includes("\\"))) return undefined;
-  return { text: WordText.make(`${args.join(" ")}${noNewline ? "" : "\n"}`), expands: false };
+  return { text: WordText.make(`${args.join(" ")}\n`), expands: false };
 };
 
 /** `word` as a path to write: a literal word, or one from `~` with nothing else to expand (`~/notes.md`, which the shell expands to the home folder). */

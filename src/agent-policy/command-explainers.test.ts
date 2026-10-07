@@ -63,4 +63,9 @@ test("the command's notes: a pipeline's exit status is its last program's, unles
   expect(of("mkdir out && cp a out", [["mkdir"], ["cp"]])).toEqual([
     "Allowing mkdir and cp for the rest of the session lets later commands that use them run without a question inside the working folder. Outside it, they are still asked about.",
   ]);
+  // A program whose paths are not judged is not asked about outside the working folder either, and the note says so.
+  expect(of("bun test && rm -rf build", [["bun", "test"], ["rm"]])).toEqual([
+    "Allowing rm for the rest of the session lets later rm commands run without a question inside the working folder. Outside it, they are still asked about.",
+    "Allowing bun test for the rest of the session lets later bun test commands run without a question. labkit does not see which files it reads or writes itself, so it does not ask about them, even outside the working folder.",
+  ]);
 });
