@@ -112,7 +112,7 @@ export const exercises: ReadonlyArray<Exercise> = [
     expect: "asks",
     needs: ["notAllowed"],
     offersSession: true,
-    look: "The question says that rm deletes the folder and everything in it, for good, and what allowing rm for the rest of the session covers. Choose that, then try the next prompt.",
+    look: "The question says that rm deletes the folder and everything in it, for good, and what allowing rm for the rest of the session covers. Choose that, then try the next prompt. build/ is ignored by git, so `git status` shows no change once it is gone; the editor's file view does.",
   },
   {
     start: "app",
@@ -204,7 +204,7 @@ export const exercises: ReadonlyArray<Exercise> = [
     expect: "asks",
     needs: ["notAllowed"],
     offersSession: true,
-    look: "Both folders are inside the working folder: only rm itself is asked about, and it can be allowed for the session.",
+    look: "Both folders are inside the working folder: only rm itself is asked about, and it can be allowed for the session. Both are ignored by git, so `git status` shows no change once they are gone; the editor's file view does.",
   },
   {
     start: "lib",

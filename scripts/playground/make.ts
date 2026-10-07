@@ -6,7 +6,7 @@
  *   bun run playground:make [folder]
  *
  * The folder is `~/Code/labkit-playground` when none is given. It must not exist yet: the script does
- * not delete or replace files. The exercises change files only inside the playground and under
+ * not delete or replace files. To start the exercises again, delete the folder and make it again. The exercises change files only inside the playground and under
  * `/tmp/labkit-playground`.
  */
 
@@ -46,6 +46,7 @@ from a shell that has one, or choose a local model, which needs none.
 
 The exercises change files only inside this folder and under \`/tmp/labkit-playground\`. Run them in
 the \`default\` permission mode unless an exercise says otherwise, and not in \`bypassPermissions\`.
+To start them again, delete this folder and run \`bun run playground:make\` again.
 
 `;
 

@@ -100,6 +100,17 @@ model.
       - The ACP host's command tool, `terminal_command`, runs in the editor's terminal
         (`terminal/create`), with the environment the editor gives it.
       - Later (Dan, 2026-10-07):
+        - git as the record of what agents change in files, rather than the session's facts: a
+          snapshot commit before each change, in a repository of the agent's own (Gemini CLI's
+          checkpointing: `~/.gemini/history/<project hash>`, and `/restore`), so a past call's diff
+          is a diff between two commits and a session records only their ids.
+        - Marking commits an agent authored (`<session>@labkit`), with git notes or a commit
+          trailer, so that notifications can be filtered: not telling an agent about its own
+          comment or pull request, telling it about a push to its pull request's branch by someone
+          else. Notes are not pushed or fetched unless asked for (`refs/notes/*`), and GitHub's
+          webhook payloads do not carry them; a push event does carry each commit's message, and so
+          its trailers. Comments and pull requests are not commits: the agent would record the id of
+          each it makes.
         - A command whose effect is an edit to a file (`cat > f <<'EOF'`, `sed -i`) dispatched to
           the edit tools, so that it goes through what they check and report: refusing an edit to
           text that was not read, or to a file changed since it was read, and the editor's record of
