@@ -175,8 +175,10 @@ const shown = (question: PermissionQuestion, input: string, writes: ReadonlyArra
             ...(each.detail === undefined ? [] : terminalOf(each.detail, diff !== undefined).map((line) => `    ${line}`)),
             ...(diff ?? []).map((line) => `    ${coloured(line)}`),
             ...(why?._tag === "NoDiff" ? [`    (No diff: ${why.reason}.)`] : []),
+            ...(each.notes ?? []).map((note) => `    ${note}`),
           ];
         }),
+        ...(question.notes ?? []).map((note) => `  \x1b[2m${note}\x1b[0m`),
       ].join("\n")
     : `Run ${question.tool} (${question.kind})? ${input}`;
 

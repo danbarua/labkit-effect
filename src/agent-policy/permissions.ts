@@ -50,7 +50,9 @@ import type { Fact } from "../agent-machine/fact.ts";
 import { FailureText, ToolKind, ToolName } from "../agent-machine/names.ts";
 import { MediaType, type Received, ReceivedText } from "../agent-machine/received.ts";
 import { type SegmentsOf, ShellCommand, WordText } from "./command-segments.ts";
+import { commandNotes, notesOf } from "./command-explainers.ts";
 import { Detail, type Folders, NeedText, type OutsideChange, type Unit, unitsOf } from "./command-units.ts";
+import { Explanation } from "./sed-script.ts";
 import { defaultReadOnly, namesProgram, namesTool, type ParsedRule, parseRule, PermissionRule, type ReadOnlyPrefix, readOnlyNames, ruleNamesProgram } from "./permission-rules.ts";
 import type { Policy, PolicyStep } from "./policy.ts";
 
@@ -92,9 +94,12 @@ export type NeedKind = typeof NeedKind.Type;
 /**
  * What a command needs before it runs: one of its programs, as written, why it needs permission (its
  * kind, and as shown), and, on a program's first need, what helps the person judge it: what a `sed`
- * script does, in plain English, or the code that a runtime or shell is given, in its language.
+ * script does, in plain English, the code that a runtime or shell is given, in its language, or the
+ * text it writes to a file (`detail`); and plain-English notes on what its words do not say plainly
+ * (`notes`, `command-explainers.ts`): what cannot be undone, the hosts it connects to, what an install
+ * runs, and paths in full.
  */
-export const CommandNeed = Schema.Struct({ program: WordText, kind: NeedKind, why: NeedText, detail: Schema.optionalKey(Detail) });
+export const CommandNeed = Schema.Struct({ program: WordText, kind: NeedKind, why: NeedText, detail: Schema.optionalKey(Detail), notes: Schema.optionalKey(Schema.Array(Explanation)) });
 export type CommandNeed = typeof CommandNeed.Type;
 
 /** A grant, as a question offers it and an answer records it: the words that a session allows or rejects (`git log`). */
@@ -116,6 +121,8 @@ export const PermissionQuestion = Schema.Union([
     command: ShellCommand,
     needs: Schema.Array(CommandNeed),
     grants: Schema.Array(Grant),
+    /** Notes about the command as a whole: what the grants offered cover, and a pipeline whose exit status is its last program's. */
+    notes: Schema.optionalKey(Schema.Array(Explanation)),
   }),
 ]);
 export type PermissionQuestion = typeof PermissionQuestion.Type;
@@ -323,13 +330,15 @@ const commandStep = (
             ...(ruleAllows(unit) ? [] : changesOutsideNeeds(program, unit.changesOutside)),
           ];
           const [first, ...rest] = own;
-          return first === undefined || unit.detail === undefined ? own : [{ ...first, detail: unit.detail }, ...rest];
+          const notes = notesOf(unit, judging.folders);
+          return first === undefined ? own : [{ ...first, ...(unit.detail === undefined ? {} : { detail: unit.detail }), ...(notes.length === 0 ? {} : { notes }) }, ...rest];
         });
   if (needs.length === 0) return proceed;
   const needing = units.filter((unit) => !allowed(unit));
   const grantable = needs.every((each) => each.kind === "notAllowed") && needing.every((unit) => unit.grant !== undefined);
   const grants = grantable ? needing.flatMap((unit) => (unit.grant === undefined ? [] : [unit.grant])).filter((grant, at, all) => all.findIndex((other) => sameGrant(other, grant)) === at) : [];
-  return asked(needs, grants, tool, kind, mode, canAsk, command);
+  const notes = command === undefined ? [] : commandNotes(command, judging.segmentsOf, grants);
+  return asked(needs, grants, tool, kind, mode, canAsk, command, notes);
 };
 
 /** The needs of `program` for the paths outside the working folder that it changes, one for each way it changes them. */
@@ -351,6 +360,7 @@ const asked = (
   mode: PermissionMode,
   canAsk: boolean,
   command: ShellCommand | undefined,
+  notes: ReadonlyArray<Explanation> = [],
 ): PolicyStep<PermissionQuestion> => {
   const described = listed(needs.map((each) => WordText.make(`${each.program} (${each.why})`)));
   if (mode === "dontAsk") return veto(`${tool} needs permission, and the permission mode is dontAsk: ${described}.`);
@@ -360,7 +370,7 @@ const asked = (
     const hint = unseen ? "Write the command out, so that the deny rules can see what it runs." : `--permission-mode ${onlyWrites ? "acceptEdits or bypassPermissions" : "bypassPermissions"} lets it run.`;
     return veto(`${tool} needs permission, and no one is there to answer: ${described}. ${hint}`);
   }
-  return ask({ _tag: "Command", tool, kind, options: commandOptions(grants), command: command ?? ShellCommand.make(""), needs, grants });
+  return ask({ _tag: "Command", tool, kind, options: commandOptions(grants), command: command ?? ShellCommand.make(""), needs, grants, ...(notes.length === 0 ? {} : { notes }) });
 };
 
 /**

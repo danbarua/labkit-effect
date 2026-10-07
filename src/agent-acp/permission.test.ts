@@ -158,3 +158,32 @@ test("a write that the call shows as a diff is named in the question, not repeat
   expect(textOf(requestOf(SessionId.make("s1"), call, writing, { title: "Write", content: [diff] }).toolCall.content)).toContain("The diff shows what it writes to config.yml.");
   expect(textOf(requestOf(SessionId.make("s1"), call, writing, { title: "Write" }).toolCall.content)).toContain("It writes this text to config.yml:\\n  ```\\n  name: x\\n  ```");
 });
+
+test("a need's notes are a list under its item, and the question's notes are paragraphs after the list", () => {
+  const noted: PermissionQuestion = {
+    _tag: "Command",
+    tool: ToolName.make("terminal_command"),
+    kind: "execute",
+    options: [],
+    command: ShellCommand.make("rm -rf build"),
+    needs: [{ program: WordText.make("rm -rf build"), kind: "notAllowed", why: NeedText.make("it is not allowed yet"), notes: [Explanation.make("It deletes the files and folders it names.")] }],
+    grants: [],
+    notes: [Explanation.make("Allowing rm for the rest of the session lets later rm commands run without a question inside the working folder.")],
+  };
+  expect(requestOf(SessionId.make("s1"), call, noted, { title: "Clean" }).toolCall.content as unknown).toEqual([
+    {
+      type: "content",
+      content: {
+        type: "text",
+        text: [
+          "This command needs permission:",
+          "",
+          "- rm -rf build: it is not allowed yet",
+          "  - It deletes the files and folders it names.",
+          "",
+          "Allowing rm for the rest of the session lets later rm commands run without a question inside the working folder.",
+        ].join("\n"),
+      },
+    },
+  ]);
+});

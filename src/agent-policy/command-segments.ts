@@ -52,6 +52,8 @@ export const Segment = Schema.Struct({
   /** Whether its standard input is text written in the command: a here-document or a here-string. */
   fed_text: Schema.Boolean,
   context: Schema.Literals(["command", "subshell", "function_body", "command_substitution", "process_substitution"]),
+  /** Its place in a pipeline of two commands or more (`a | b`): which pipeline of the command, from 0; its position, from 0; and how many commands the pipeline has. */
+  pipe: Schema.optionalKey(Schema.Struct({ pipeline: Schema.Int, position: Schema.Int, of: Schema.Int })),
 });
 export type Segment = typeof Segment.Type;
 

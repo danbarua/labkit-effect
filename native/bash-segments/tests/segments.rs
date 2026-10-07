@@ -178,3 +178,28 @@ fn a_here_document_expands_unless_its_delimiter_is_quoted_and_a_tab_stripping_on
     assert!(!first("cat <<< 'x' > f").expands);
     assert!(first("cat <<< \"$x\" > f").expands);
 }
+
+#[test]
+fn a_simple_command_in_a_pipeline_knows_its_place_and_a_substitution_in_it_does_not() {
+    match segments_of("bun test | tail -5; git log | grep $(cat pattern) | head") {
+        Segments::Parsed { segments } => {
+            let places: Vec<_> = segments.iter().map(|segment| (segment.words[0].text.clone(), segment.pipe.map(|slot| (slot.pipeline, slot.position, slot.of)))).collect();
+            assert_eq!(
+                places,
+                vec![
+                    ("bun".to_owned(), Some((0, 0, 2))),
+                    ("tail".to_owned(), Some((0, 1, 2))),
+                    ("git".to_owned(), Some((1, 0, 3))),
+                    ("cat".to_owned(), None),
+                    ("grep".to_owned(), Some((1, 1, 3))),
+                    ("head".to_owned(), Some((1, 2, 3))),
+                ]
+            );
+        }
+        Segments::Unparsed { reason } => panic!("{reason}"),
+    }
+    match segments_of("make build") {
+        Segments::Parsed { segments } => assert_eq!(segments[0].pipe, None),
+        Segments::Unparsed { reason } => panic!("{reason}"),
+    }
+}

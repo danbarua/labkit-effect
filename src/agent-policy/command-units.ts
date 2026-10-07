@@ -485,6 +485,14 @@ const normalised = (path: WordText): ReadonlyArray<WordText> =>
     return part === ".." && path.startsWith("/") ? parts : [...parts, WordText.make(part)];
   }, []);
 
+/** `path`, as written, resolved against `folders`: absolute, with `~`, `.` and `..` resolved; undefined for another user's `~`. */
+export const fullPathOf = (path: WordText, folders: Folders): WordText | undefined => {
+  const fromHome = path === "~" || path.startsWith("~/");
+  if (path.startsWith("~") && !fromHome) return undefined;
+  const absolute = fromHome ? `${folders.home}${path.slice(1)}` : path.startsWith("/") ? path : `${folders.working}/${path}`;
+  return WordText.make(`/${normalised(WordText.make(absolute)).join("/")}`);
+};
+
 /**
  * Whether `word`, a path, may be outside the working folder: an absolute path (or one from `~`) not
  * inside `folders.working`, a relative path whose `..` climb above it, a path from another user's `~`,

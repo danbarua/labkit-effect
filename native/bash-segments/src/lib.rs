@@ -41,6 +41,19 @@ pub struct Segment {
     /// Whether its standard input is a here-document or a here-string, written in the command.
     pub fed_text: bool,
     pub context: Context,
+    /// Its place in a pipeline of two commands or more, when it is one of them (`a | b`); a command
+    /// inside a compound command or a substitution in a pipeline has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipe: Option<PipeSlot>,
+}
+
+/// A simple command's place in a pipeline: which pipeline of the command (counted from 0, in the
+/// order they are written), its position in it (from 0), and how many commands the pipeline has.
+#[derive(Debug, Serialize, PartialEq, Clone, Copy)]
+pub struct PipeSlot {
+    pub pipeline: u32,
+    pub position: u32,
+    pub of: u32,
 }
 
 #[derive(Debug, Serialize, PartialEq, Clone, Copy)]
@@ -135,6 +148,10 @@ struct Walker {
     inherited: Vec<Vec<Redirect>>,
     context: Vec<Context>,
     failed: Option<String>,
+    /// How many pipelines of two commands or more have been walked.
+    pipelines: u32,
+    /// The place of the simple command about to be walked, when it is in such a pipeline.
+    pending_pipe: Option<PipeSlot>,
 }
 
 impl Walker {
@@ -154,13 +171,13 @@ impl Walker {
         self.context.pop();
     }
 
-    fn emit(&mut self, kind: SegmentKind, words: Vec<WordOut>, assignments: Vec<String>, mut redirects: Vec<Redirect>) {
+    fn emit(&mut self, kind: SegmentKind, words: Vec<WordOut>, assignments: Vec<String>, mut redirects: Vec<Redirect>, pipe: Option<PipeSlot>) {
         for outer in self.inherited.iter().rev() {
             redirects.extend(outer.iter().cloned());
         }
         let fed_text = redirects.iter().any(|redirect| redirect.op == "<<" || redirect.op == "<<<");
         let context = self.context();
-        self.segments.push(Segment { kind, words, assignments, redirects, fed_text, context });
+        self.segments.push(Segment { kind, words, assignments, redirects, fed_text, context, pipe });
     }
 
     fn program(&mut self, program: &Program) {
@@ -185,8 +202,17 @@ impl Walker {
     }
 
     fn pipeline(&mut self, pipeline: &Pipeline) {
-        for command in &pipeline.seq {
+        let of = pipeline.seq.len() as u32;
+        let id = self.pipelines;
+        if of >= 2 {
+            self.pipelines += 1;
+        }
+        for (position, command) in pipeline.seq.iter().enumerate() {
+            if of >= 2 && matches!(command, Command::Simple(_)) {
+                self.pending_pipe = Some(PipeSlot { pipeline: id, position: position as u32, of });
+            }
             self.command(command);
+            self.pending_pipe = None;
         }
     }
 
@@ -201,7 +227,7 @@ impl Walker {
             }
             Command::Function(definition) => {
                 let name = self.word(&definition.fname);
-                self.emit(SegmentKind::FunctionDefinition, vec![name], vec![], vec![]);
+                self.emit(SegmentKind::FunctionDefinition, vec![name], vec![], vec![], None);
                 let own = definition.body.1.as_ref().map(|list| self.redirects(&list.0)).unwrap_or_default();
                 self.inherited.push(own);
                 self.within(Context::FunctionBody, |walker| walker.compound(&definition.body.0));
@@ -210,7 +236,7 @@ impl Walker {
             Command::ExtendedTest(test, redirects) => {
                 let own = redirects.as_ref().map(|list| self.redirects(&list.0)).unwrap_or_default();
                 self.test_words(&test.expr);
-                self.emit(SegmentKind::Test, vec![], vec![], own);
+                self.emit(SegmentKind::Test, vec![], vec![], own, None);
             }
         }
     }
@@ -236,7 +262,7 @@ impl Walker {
         match compound {
             CompoundCommand::Arithmetic(arithmetic) => {
                 self.expanded_text(&arithmetic.expr.value);
-                self.emit(SegmentKind::Arithmetic, vec![], vec![], vec![]);
+                self.emit(SegmentKind::Arithmetic, vec![], vec![], vec![], None);
             }
             CompoundCommand::ArithmeticForClause(clause) => {
                 for expr in [&clause.initializer, &clause.condition, &clause.updater].into_iter().flatten() {
@@ -282,6 +308,8 @@ impl Walker {
     }
 
     fn simple(&mut self, simple: &SimpleCommand) {
+        // Taken first, so that a substitution in its words does not take its place.
+        let pipe = self.pending_pipe.take();
         let mut words = Vec::new();
         let mut assignments = Vec::new();
         let mut redirects = Vec::new();
@@ -298,7 +326,7 @@ impl Walker {
         for item in simple.suffix.iter().flat_map(|suffix| suffix.0.iter()) {
             self.item(item, false, &mut words, &mut assignments, &mut redirects);
         }
-        self.emit(SegmentKind::Simple, words, assignments, redirects);
+        self.emit(SegmentKind::Simple, words, assignments, redirects, pipe);
     }
 
     /// Adds a simple command's `item` to its words, assignments or redirects. An assignment before the

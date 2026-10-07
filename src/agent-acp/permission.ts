@@ -32,12 +32,13 @@ const needShown =
     ...(need.detail === undefined
       ? []
       : ["", ...markdownOf(need.detail, need.detail._tag === "Writes" && diffed(content, need.detail.path)).map((line) => (line === "" ? "" : `  ${line}`))]),
+    ...(need.notes ?? []).map((note) => `  - ${note}`),
   ];
 
 /** A command question's reasons, as a Markdown text block: each program that needs permission, why, and what helps judge it. */
 const needsBlock = (question: PermissionQuestion, content: ReadonlyArray<ToolCallContent>): ReadonlyArray<ToolCallContent> =>
   question._tag === "Command"
-    ? [{ type: "content", content: { type: "text", text: ["This command needs permission:", "", ...question.needs.flatMap(needShown(content))].join("\n") } }]
+    ? [{ type: "content", content: { type: "text", text: ["This command needs permission:", "", ...question.needs.flatMap(needShown(content)), ...(question.notes ?? []).flatMap((note) => ["", note])].join("\n") } }]
     : [];
 
 /**

@@ -88,6 +88,18 @@ they will do:
   editor, the diff is in the command's call, so it shows whether or not you are asked, as an edit's
   does; at the terminal, it is in the question.
 
+- **Notes in plain English** say what the words do not say plainly:
+  - what cannot be undone: `rm` (folders with `-r`, without asking with `-f`), `git reset --hard`,
+    `git push --force`, `git clean -f`, `git checkout -- <files>`, `git restore`, `git branch -D`,
+    `git stash drop`, `-R` on `chmod` and `chown`, `dd` to a device;
+  - the hosts a command connects to, and whether it sends them data (`curl`, `wget`, `git push`,
+    `git pull`, `git clone`, `ssh`, `scp`, `rsync`);
+  - what installing packages downloads and runs (`npm`, `yarn`, `pnpm`, `bun`, `pip`, `cargo install`,
+    `gem install`, `go install`, `brew install`);
+  - a relative path outside your folder (`../lib/secret.txt`) as its full path;
+  - that in a pipeline (`bun test | tail -20`) only the last program's exit status counts;
+  - what "Allow … for the rest of the session" covers.
+
 - **Code written in the command** is shown in its language: `python3 -c`, `node -e`, `perl -ne`,
   `ruby -e`, `bun -e`, `deno eval`, an `awk` program, and code given to a program or a shell as a
   here-document (`python3 - <<'EOF'`). In an editor it is a fenced code block, so the editor
