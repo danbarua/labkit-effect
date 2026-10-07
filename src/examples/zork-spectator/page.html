@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#050805">
+<title>Zork</title>
+<style>
+  :root { --bg: #050805; --fg: #3dff7a; --dim: #1c7a3c; --error: #ff6b5e; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); }
+  body {
+    font: 15px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    display: flex; flex-direction: column; height: 100dvh; max-width: 520px; margin: 0 auto;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    -webkit-tap-highlight-color: transparent;
+  }
+  [hidden] { display: none !important; }
+
+  /* The pickers: full size during setup, one locked line during a game. */
+  #pickers { display: flex; flex-direction: column; gap: 14px; padding: 28px 16px 0; }
+  #pickers label { display: flex; flex-direction: column; gap: 6px; text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px; color: var(--dim); }
+  select, button {
+    font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--dim); border-radius: 0;
+    padding: 12px; width: 100%; appearance: none; -webkit-appearance: none;
+  }
+  select:disabled { opacity: 1; color: var(--fg); }
+  button:disabled { color: var(--dim); }
+  button:not(:disabled):active { background: var(--fg); color: var(--bg); }
+  body[data-mode="match"] #pickers { flex-direction: row; gap: 8px; padding: 8px 8px 0; }
+  body[data-mode="match"] #pickers label { flex: 1; min-width: 0; font-size: 10px; gap: 2px; }
+  body[data-mode="match"] select { padding: 4px 6px; border-color: transparent; font-size: 13px; }
+
+  #title { font-size: 40px; letter-spacing: 0.3em; text-align: center; margin: 32px 0 0; text-shadow: 0 0 8px rgba(61, 255, 122, 0.5); }
+  #setup { display: flex; flex-direction: column; gap: 14px; padding: 14px 16px; }
+  #setup-error { color: var(--error); white-space: pre-wrap; margin: 0; min-height: 3em; }
+
+  #match { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #tabs { display: flex; padding: 8px 8px 0; gap: 8px; }
+  #tabs button { padding: 6px; font-size: 12px; letter-spacing: 0.12em; border: 0; border-bottom: 1px solid var(--dim); color: var(--dim); }
+  #tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--fg); }
+  #panels { flex: 1; min-height: 0; display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
+  #panels::-webkit-scrollbar { display: none; }
+  .panel { flex: 0 0 100%; scroll-snap-align: start; display: flex; flex-direction: column; min-height: 0; position: relative; padding: 8px; }
+  .terminal { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #020402; position: relative; overflow: hidden; }
+  .terminal::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0.32) 0 1px, transparent 1px 3px);
+  }
+  .status { font-size: 12px; padding: 6px 10px; border-bottom: 1px solid var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status.error { color: var(--error); white-space: normal; }
+  .screen { flex: 1; overflow-y: auto; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; text-shadow: 0 0 4px rgba(61, 255, 122, 0.45); }
+  .screen p { margin: 0 0 12px; }
+  .screen .dim { color: var(--dim); text-shadow: none; }
+  .screen .call { margin-bottom: 14px; }
+</style>
+</head>
+<body data-mode="setup">
+  <h1 id="title">ZORK</h1>
+  <div id="pickers">
+    <label>Engine <select id="engine"></select></label>
+    <label>Adventurer <select id="adventurer"></select></label>
+  </div>
+  <div id="setup">
+    <button id="begin" disabled>Begin game</button>
+    <p id="setup-error"></p>
+  </div>
+  <div id="match" hidden>
+    <div id="tabs" role="tablist">
+      <button role="tab" data-panel="0" aria-selected="true">ENGINE</button>
+      <button role="tab" data-panel="1" aria-selected="false">ADVENTURER</button>
+    </div>
+    <div id="panels">
+      <section class="panel"><div class="terminal"><div class="status" id="engine-status"></div><div class="screen" id="engine-screen"></div></div></section>
+      <section class="panel"><div class="terminal"><div class="status" id="adventurer-status"></div><div class="screen" id="adventurer-screen"></div></div></section>
+    </div>
+  </div>
+<script>
+"use strict";
+// The page shows what the server sends (`match.ts`): the setup state, or the running game. A finished
+// game stays on screen, frozen, until a tap; then the page shows the server's state at that time.
+const $ = (id) => document.getElementById(id);
+const pickers = { engine: $("engine"), adventurer: $("adventurer") };
+let latest = null;      // The last state the server sent.
+let frozen = null;      // A finished game's state, shown until a tap.
+let beginning = false;  // A Begin was sent, and neither a game nor a refusal has come back.
+let mode = "setup";
+
+const finished = (state) => state._tag === "Playing" && state.shown.some((shown) => shown._tag === "Ended" || shown._tag === "Failed");
+
+function setOptions(select, values, placeholder) {
+  const wanted = JSON.stringify([placeholder, ...values]);
+  if (select.dataset.options === wanted) return;
+  select.dataset.options = wanted;
+  const options = values.map((value) => new Option(value, value));
+  select.replaceChildren(...(placeholder === null ? options : [new Option(placeholder, ""), ...options]));
+  if (placeholder !== null) select.options[0].disabled = true;
+  select.value = placeholder === null ? values[0] : "";
+}
+
+function renderSetup(state) {
+  setOptions(pickers.engine, state.choices, "Choose");
+  setOptions(pickers.adventurer, state.choices, "Choose");
+  for (const select of Object.values(pickers)) select.disabled = beginning;
+  $("begin").disabled = beginning || pickers.engine.value === "" || pickers.adventurer.value === "";
+}
+
+function line(text, className) {
+  const element = document.createElement("p");
+  element.textContent = text;
+  if (className) element.className = className;
+  return element;
+}
+
+function engineLines(shown) {
+  return shown.flatMap((each) => {
+    if (each._tag === "Opened") return [line(each.narration)];
+    if (each._tag === "Narrated") return [line(`- turn ${each.turn} -`, "dim"), line(each.narration)];
+    return [];
+  });
+}
+
+function offeredLines(turn, offered) {
+  return offered.length === 0 ? [] : [line(`TURN ${turn}`, "dim"), line(`offered: ${offered.join(", ")}`)];
+}
+
+function adventurerLines(shown) {
+  return shown.flatMap((each) => {
+    if (each._tag === "Opened") return offeredLines(1, each.offered);
+    if (each._tag === "Acted") return [line(`> ${each.call}`, "call")];
+    if (each._tag === "Narrated") return offeredLines(each.turn + 1, each.offered);
+    return [];
+  });
+}
+
+function statusText(state) {
+  const failed = state.shown.find((shown) => shown._tag === "Failed");
+  if (failed) return { text: failed.error, error: true };
+  const { turn, of, location, outcome } = state.status;
+  return { text: `TURN ${turn}/${of} · ${location} · ${outcome === "Alive" ? "ALIVE" : "EATEN"}`, error: false };
+}
+
+function fill(screen, lines) {
+  const atBottom = screen.scrollHeight - screen.scrollTop - screen.clientHeight < 40;
+  screen.replaceChildren(...lines);
+  if (atBottom) screen.scrollTop = screen.scrollHeight;
+}
+
+function renderMatch(state) {
+  setOptions(pickers.engine, [state.engine], null);
+  setOptions(pickers.adventurer, [state.adventurer], null);
+  for (const select of Object.values(pickers)) select.disabled = true;
+  const status = statusText(state);
+  for (const id of ["engine-status", "adventurer-status"]) {
+    $(id).textContent = status.text;
+    $(id).classList.toggle("error", status.error);
+  }
+  fill($("engine-screen"), engineLines(state.shown));
+  fill($("adventurer-screen"), adventurerLines(state.shown));
+}
+
+function render() {
+  const state = frozen ?? latest;
+  if (state === null) return;
+  const next = state._tag === "Setup" ? "setup" : "match";
+  if (next === "setup" && mode === "match") {
+    // Setup after a game starts again with nothing chosen.
+    delete pickers.engine.dataset.options;
+    delete pickers.adventurer.dataset.options;
+    $("setup-error").textContent = "";
+  }
+  mode = next;
+  document.body.dataset.mode = mode;
+  $("title").hidden = mode === "match";
+  $("setup").hidden = mode === "match";
+  $("match").hidden = mode === "setup";
+  if (state._tag === "Setup") renderSetup(state);
+  else renderMatch(state);
+}
+
+function onState(state) {
+  latest = state;
+  if (state._tag === "Playing") beginning = false;
+  if (frozen === null && finished(state)) frozen = state;
+  render();
+}
+
+for (const select of Object.values(pickers)) select.addEventListener("change", render);
+
+$("begin").addEventListener("click", async () => {
+  beginning = true;
+  $("setup-error").textContent = "";
+  render();
+  try {
+    const response = await fetch("/begin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ engine: pickers.engine.value, adventurer: pickers.adventurer.value }),
+    });
+    const begun = await response.json();
+    if (begun._tag === "Refused") {
+      beginning = false;
+      $("setup-error").textContent = `${begun.error}\n${begun.hint}`;
+    }
+  } catch {
+    beginning = false;
+    $("setup-error").textContent = "ERROR: The spectator could not be reached.\nHINT: Check that the spectator is running, then try again.";
+  }
+  render();
+});
+
+// Swiping moves between the panels; a tab moves to its panel.
+const panels = $("panels");
+const tabs = [...document.querySelectorAll("#tabs button")];
+for (const tab of tabs) tab.addEventListener("click", () => panels.scrollTo({ left: Number(tab.dataset.panel) * panels.clientWidth, behavior: "smooth" }));
+panels.addEventListener("scroll", () => {
+  const index = Math.round(panels.scrollLeft / Math.max(1, panels.clientWidth));
+  tabs.forEach((tab, at) => tab.setAttribute("aria-selected", String(at === index)));
+});
+
+// A frozen game goes back to setup on a tap: a press that does not move, away from the tabs.
+let pressed = null;
+$("match").addEventListener("pointerdown", (event) => { pressed = { x: event.clientX, y: event.clientY }; });
+$("match").addEventListener("pointerup", (event) => {
+  const moved = pressed === null ? Infinity : Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y);
+  pressed = null;
+  if (frozen === null || moved > 10 || event.target.closest("#tabs")) return;
+  frozen = null;
+  render();
+});
+
+new EventSource("/events").onmessage = (message) => onState(JSON.parse(message.data));
+</script>
+</body>
+</html>
