@@ -10,6 +10,17 @@ bun run zork:spectator
 
 The server listens on `localhost` only, so only this machine can open the page and begin a game.
 
+To see the page without a provider's key, run the scripted spectator instead:
+
+```sh
+bun run zork:spectator:scripted
+# Open http://localhost:3002.
+```
+
+Whichever models are chosen, it plays the same short game with scripted players
+(`zork/scripted.ts`), one answer every 1.5 seconds, and is eaten in game turn 7. Its sessions and
+transcripts are kept in `logs/zork-spectator/scripted/`.
+
 ## Setup
 
 The page shows two pickers, Engine and Adventurer, each with the same models:
@@ -56,6 +67,7 @@ to OTLP as the service `labkit-zork`, and it has the same ten-minute limit.
 | File | What it holds |
 | --- | --- |
 | `index.ts` | The entrypoint: the live players and the server on port 3001. |
+| `scripted.ts` | The scripted entrypoint: scripted players and the server on port 3002. |
 | `match.ts` | The one game: its state, what a page is sent of it, and Begin. |
 | `server.ts` | The HTTP routes: the page, the state as server-sent events, and Begin. |
 | `page.html` | The phone page. |
