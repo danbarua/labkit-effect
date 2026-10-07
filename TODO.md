@@ -84,14 +84,23 @@ model.
         - `awk` judged by its program, as `sed` is (no `system()`, no pipes, no `print >`).
         - Git judged by its action, as `sed` is by its script: which git actions read, which write
           the working tree or the history, and which reach a remote (Dan, 2026-10-07).
-        - Scratch folders (Dan, 2026-10-07): under a workspace-only model, `/tmp`, `/private/tmp`
-          and `/var/folders` are outside, and agents use them (about 4,800 of the corpus's reads).
-          Forcing everything into a tracked working folder is not ideal either. Sandboxing, scratch
-          folders, or a scratch database belong to the opinionated harness above this one, which
-          `examples/cli-repl` grows into (`src/cli`); with additional directories (Sessions, above)
-          they would be inside.
-        - An isolated temporary folder for each agent, on by default with an opt-out, for security
-          research and evaluations (Dan, 2026-10-07).
+        - A temporary folder for each session (Dan, 2026-10-08): a private folder the agent may
+          write anything to without a question, named by a virtual URL (`tmp://`, as omp's
+          `local://`), and counted as inside the working folder. Writing to `/tmp` and the like is
+          asked about. Whether the folder's files are kept or deleted is the operator's choice, not
+          the agent's: a "throw-away" script often turns out to be the work (labkit's exploratory
+          science). Setting `TMPDIR` in the commands' environment (`commandEnvironment`) puts
+          `mktemp` and Python's `tempfile` there with no change in how agents work. It replaces the
+          isolated temporary folder for each agent (2026-10-07), opt-out included. Virtual URLs need
+          commands' paths found, which `command-units.ts` does.
+        - Tool results with details (Dan, 2026-10-08): a result has the text the model sees and
+          details for the harness and its displays, which the model never sees, as Claude Code's
+          `toolUseResult`, Codex's `FileChange`, opencode's `metadata` and omp's `details` do. A
+          file change's details are its patch (Codex's size: the diff for an update, the content for
+          a new file), stored with the result (large ones in the blob store), so a loaded session
+          shows the same diff as the live one, `write_file` and `edit_file` included, and a
+          replayed command's "Wrote config.yml." goes. To write up first, in
+          `docs/agent-tools-direction.md`, then build.
         - The opinionated harness runs a composite command itself (Dan, 2026-10-07): it splits the
           command into its programs and their order, runs each, and returns to the model the result
           the command asked for (the output of `… | tail`), with each program's exit code and a
