@@ -208,10 +208,12 @@ test("acceptEdits lets a command write files inside the working folder, not outs
   expect(judged("git status > /dev/null 2>&1", { folders: project }).step).toBe("runs");
 });
 
-test("a command that changes paths outside the working folder is asked about even after cd, and with an allow rule naming the program; bypassPermissions runs it", () => {
+test("a command that changes paths outside the working folder is asked about even after cd, and with an allow rule naming the program; bypassPermissions, or an allow rule for the whole tool, runs it", () => {
   expect(judged("cd ~/other && rm -rf build", { facts: answered("rm -rf dist", "allow-session"), folders: project }).question).toMatchObject({ needs: [{ program: "cd ~/other", kind: "readsOutside" }] });
   expect(judged("rm -rf /tmp/build", { allow: ["command(rm:*)"], folders: project }).question).toMatchObject({ needs: [{ kind: "changesOutside" }] });
   expect(judged("rm -rf ~/Code/other", { mode: "bypassPermissions", folders: project }).step).toBe("runs");
+  // An allow rule for the whole tool runs every command, as it does in every other case.
+  expect(judged("rm -rf ~/Code/other", { allow: ["command"], folders: project }).step).toBe("runs");
 });
 
 test("when no one can answer, a change outside the working folder is vetoed with a hint that names bypassPermissions, not acceptEdits", () => {

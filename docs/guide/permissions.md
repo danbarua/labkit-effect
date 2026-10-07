@@ -49,7 +49,8 @@ not `~/.aws/credentials`. An allow rule in your settings that names the program
 
 Changing files outside your folder is asked about every time, in every mode but
 `bypassPermissions`: allowing `rm` for the session lets `rm -rf build` run, not
-`rm -rf ~/Code/other`, and an allow rule does not lift it. This covers redirects, `tee`, `sed -i`,
+`rm -rf ~/Code/other`, and an allow rule naming the program (`command(rm:*)`) does not lift it.
+An allow rule for the whole tool (`command`) runs every command. This covers redirects, `tee`, `sed -i`,
 `rm`, `mv`, `cp`, `rsync`, `ln`, `touch`, `mkdir`, `chmod`, `chown`, `curl -o`, `wget -O` and
 `find -delete`. A path labkit cannot read (`rm -rf "$DIR"`, or `xargs rm`, whose paths come from its
 input) counts as outside your folder. Other programs write where their own arguments say

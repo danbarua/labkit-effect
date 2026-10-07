@@ -389,6 +389,8 @@ interface Changer {
   readonly verb: ChangeVerb;
   readonly valued: ReadonlySet<WordText>;
   readonly skip: number;
+  /** Whether its first operand is a mode, which may start with `-` (`chmod -x`). */
+  readonly mode: boolean;
   readonly operands: "every" | "last" | "none";
   readonly othersRead: boolean;
   readonly outputs: ReadonlySet<WordText>;
@@ -399,10 +401,14 @@ const changer = (verb: ChangeVerb, operands: Changer["operands"], options: Parti
   operands,
   valued: options.valued ?? named(),
   skip: options.skip ?? 0,
+  mode: options.mode ?? false,
   othersRead: options.othersRead ?? false,
   outputs: options.outputs ?? named(),
 });
 const targetDirectory = named("-t", "--target-directory");
+
+/** A `chmod` mode: octal (`755`), or symbolic (`+x`, `-w`, `u=rw,go-rwx`). */
+const chmodMode = /^([0-7]{1,4}|[ugoa]*[-+=][rwxXstugo]*([-+=][rwxXstugo]*)*(,[ugoa]*[-+=][rwxXstugo]*([-+=][rwxXstugo]*)*)*)$/;
 
 const changers: ReadonlyMap<WordText, Changer> = new Map([
   [WordText.make("rm"), changer("deletes", "every")],
@@ -423,7 +429,7 @@ const changers: ReadonlyMap<WordText, Changer> = new Map([
   [WordText.make("touch"), changer("writes", "every", { valued: named("-r", "--reference", "-d", "--date", "-t") })],
   [WordText.make("mkdir"), changer("writes", "every", { valued: named("-m", "--mode") })],
   [WordText.make("truncate"), changer("writes", "every", { valued: named("-s", "--size", "-r", "--reference") })],
-  [WordText.make("chmod"), changer("changes", "every", { skip: 1 })],
+  [WordText.make("chmod"), changer("changes", "every", { mode: true })],
   [WordText.make("chown"), changer("changes", "every", { skip: 1 })],
   [WordText.make("chgrp"), changer("changes", "every", { skip: 1 })],
   [WordText.make("curl"), changer("writes", "none", { outputs: named("-o", "--output", "--output-dir") })],
@@ -446,8 +452,9 @@ const changesOf = (base: WordText, words: ReadonlyArray<Word>, fed: boolean): Pi
     if (attached?.[1] !== undefined && known.outputs.has(WordText.make(attached[1]))) return scan(after, operands, [...outputs, literalWord(attached[2] ?? "")], false);
     return scan(after, operands, outputs, false);
   };
-  const { operands, outputs } = scan(words.slice(1), [], [], false);
   const byReference = words.some((word) => word.literal?.startsWith("--reference") === true);
+  const modeAt = known.mode && !byReference ? words.findIndex((word, at) => at > 0 && chmodMode.test(word.literal ?? "")) : -1;
+  const { operands, outputs } = scan(words.slice(1).filter((_, at) => at + 1 !== modeAt), [], [], false);
   const paths = operands.slice(byReference ? 0 : known.skip);
   const destination = known.operands === "last" && outputs.length === 0 && paths.length >= 2 ? paths.slice(-1) : [];
   const changed = known.operands === "every" ? paths : destination;
@@ -497,6 +504,7 @@ const pathPrograms: ReadonlyMap<WordText, ReadonlySet<WordText>> = new Map([
   [WordText.make("tail"), named("-n", "-c", "--lines", "--bytes", "-s", "--sleep-interval", "--pid")],
   [WordText.make("wc"), named()],
   [WordText.make("cd"), named()],
+  [WordText.make("pushd"), named()],
   [
     WordText.make("grep"),
     named("-e", "--regexp", "-f", "--file", "-m", "--max-count", "-A", "--after-context", "-B", "--before-context", "-C", "--context", "--include", "--exclude", "--exclude-dir", "-d", "--directories", "-D", "--devices", "--color", "--colour", "--label", "--binary-files"),
@@ -530,7 +538,7 @@ const pathsOf = (base: WordText, words: ReadonlyArray<Word>): ReadonlyArray<Word
   return [...(searching && !patternGiven ? operands.slice(1) : operands), ...files];
 };
 
-/** The paths outside the working folder that a read-only program reads, as written. `cd` with no folder, or to `-`, leaves it. */
+/** The paths outside the working folder that a read-only program reads, as written. `cd` with no folder, or to `-`, leaves it; so does `pushd` to a folder outside it. */
 const outsideOf = (base: WordText, words: ReadonlyArray<Word>, folders: Folders | undefined): ReadonlyArray<WordText> => {
   const home: Word = { text: WordText.make("~"), literal: WordText.make("~") };
   if (base === WordText.make("cd")) {

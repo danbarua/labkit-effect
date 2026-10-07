@@ -202,6 +202,7 @@ test("rm, mv, chmod and the programs like them change each operand; only operand
   expect(touched("mv notes.txt ~/notes.txt")).toEqual(["mv moves ~/notes.txt"]);
   expect(touched("mv -t /tmp a b")).toEqual(["mv moves /tmp"]);
   expect(touched("chmod +x ~/bin/tool && chmod 755 run.sh")).toEqual(["chmod changes ~/bin/tool", "chmod"]);
+  expect(touched("chmod -x ~/bin/tool && chmod -R u=rw,go-rwx ~/secrets && chmod --reference=a ~/b")).toEqual(["chmod changes ~/bin/tool", "chmod changes ~/secrets", "chmod changes ~/b"]);
   expect(touched("chown dan:staff /etc/hosts")).toEqual(["chown changes /etc/hosts"]);
   expect(touched("touch /tmp/marker && mkdir -p /tmp/out build")).toEqual(["touch writes /tmp/marker", "mkdir writes /tmp/out"]);
 });
@@ -230,6 +231,7 @@ test("find reads its starting points, and with -delete deletes what it finds und
   expect(touched("find /tmp/x -name '*.log' -delete")).toEqual(["find deletes /tmp/x"]);
   expect(touched("find . -name '*.pyc' -delete")).toEqual(["find writes inside the files that find finds"]);
   expect(touched("find -L src -type f")).toEqual(["find"]);
+  expect(touched("pushd /tmp && rm -rf build")).toEqual(["pushd reads /tmp", "rm"]);
   expect(touched("git ls-files -z | xargs -0 rm")).toEqual(["git", "rm deletes (its input)"]);
   expect(touched("ls | xargs -I{} cp {} /tmp/out")).toEqual(["ls", "cp writes /tmp/out"]);
   expect(touched("git ls-files | xargs cat")).toEqual(["git", "cat"]);

@@ -73,8 +73,8 @@ export const PermissionOption = Schema.Struct({
 export type PermissionOption = typeof PermissionOption.Type;
 
 /**
- * Why a program needs permission, and what else lets it run without a question. `bypassPermissions`
- * lets every kind run except `unseen`.
+ * Why a program needs permission, and what else lets it run without a question. `bypassPermissions`,
+ * and an allow rule for the whole tool, let every kind run except `unseen`.
  *
  * | Kind | Why | What else lets it run |
  * | --- | --- | --- |

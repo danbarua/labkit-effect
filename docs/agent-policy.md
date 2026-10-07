@@ -142,7 +142,8 @@ opaque. A program that writes files inside the working folder also needs the `ac
 program that reads outside the working folder needs permission unless an allow rule names it (a
 session grant does not lift it). A program that changes paths outside the working folder needs
 permission in every mode but `bypassPermissions`: neither a session grant, `acceptEdits` nor an
-allow rule lifts it. The working folder is the boundary that a trusted folder draws. A command that
+allow rule naming the program lifts it. An allow rule for the whole tool (`command`) runs every
+command, as it does for every other need but `unseen`. The working folder is the boundary that a trusted folder draws. A command that
 cannot be split needs permission.
 
 Only the programs named above have their paths judged. A program that writes files where its own
