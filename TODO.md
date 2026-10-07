@@ -119,10 +119,19 @@ model.
           and agents see only timely, relevant notifications. A commit trailer naming a Claude Code
           cloud session is no use for this: only Anthropic can resolve it to a local session.
           A note belongs to one commit id: a squash or rebase merge on GitHub makes new commits
-          without it, and a local rebase or amend drops it unless `notes.rewriteRef` copies it. Notes
-          serve a pull request's branch until it merges; what follows a merge (comments on it, a
-          revert, a failing build on `main`) names the pull request by number, which the harness
-          records when it opens one.
+          without it, and a local rebase or amend drops it unless `notes.rewriteRef` copies it. That
+          is wanted: notes mark work in progress on a pull request's branch. What follows a merge
+          (comments on it, a revert, a failing build on `main`) names the pull request by number,
+          which the harness records when it opens one.
+        - Webhook delivery (Dan, 2026-10-07): an extension and a sidecar daemon at the harness's
+          layer, not MCP servers and polling. The daemon is started by the first session that needs
+          it, shared, and stops when none has needed it for a while (Effect's `RcRef` and `RcMap`
+          do this within one process: acquired on first use, released after `idleTimeToLive`). It
+          receives GitHub's webhooks through a Cloudflare tunnel: `labkit.cloud`, or a temporary
+          `*.trycloudflare.com` tunnel whose lifetime is a scoped resource like an MCP server's. A
+          long-running session trusted to do so could set up its own repositories' webhooks and its
+          own tunnel. Deliveries are current only: when this machine is offline, no one is working,
+          so there is no queue of stale deliveries (unlike agent-bridge's message queue with TTLs).
         - A command whose effect is an edit to a file (`cat > f <<'EOF'`, `sed -i`) dispatched to
           the edit tools, so that it goes through what they check and report: refusing an edit to
           text that was not read, or to a file changed since it was read, and the editor's record of
