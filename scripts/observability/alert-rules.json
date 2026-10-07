@@ -1,0 +1,47 @@
+{
+  "folder": { "uid": "labkit", "title": "labkit" },
+  "group": {
+    "title": "labkit",
+    "interval": 60,
+    "rules": [
+      {
+        "uid": "labkit-logs-folder-size",
+        "title": "labkit logs folder is larger than 1 GB",
+        "condition": "C",
+        "data": [
+          {
+            "refId": "A",
+            "datasourceUid": "prometheus",
+            "relativeTimeRange": { "from": 600, "to": 0 },
+            "model": {
+              "refId": "A",
+              "expr": "max by (path) (agent_logs_folder_bytes{folder=\"logs\"})",
+              "instant": true,
+              "range": false
+            }
+          },
+          {
+            "refId": "C",
+            "datasourceUid": "__expr__",
+            "relativeTimeRange": { "from": 0, "to": 0 },
+            "model": {
+              "refId": "C",
+              "type": "threshold",
+              "expression": "A",
+              "conditions": [{ "evaluator": { "type": "gt", "params": [1000000000] } }]
+            }
+          }
+        ],
+        "noDataState": "KeepLast",
+        "execErrState": "Error",
+        "for": "0s",
+        "annotations": {
+          "summary": "The labkit logs folder {{ $labels.path }} holds {{ humanize1024 $values.A.Value }}B, more than 1 GB.",
+          "description": "Capture files (http-captures/) are never deleted. The size is reported by the capture server (bun run observability:captures) while it runs."
+        },
+        "labels": {},
+        "isPaused": false
+      }
+    ]
+  }
+}

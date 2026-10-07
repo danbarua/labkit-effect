@@ -1,14 +1,14 @@
 {
   "uid": "labkit-agent",
   "title": "labkit agent",
-  "description": "Model latency, token use, tool runs, sessions and warnings of the labkit harness. Source: scripts/observability/labkit-dashboard.json.",
+  "description": "Model latency, token use, tool runs, sessions, the size of the logs folder and warnings of the labkit harness. Source: scripts/observability/labkit-dashboard.json.",
   "tags": [
     "labkit"
   ],
   "timezone": "browser",
   "schemaVersion": 41,
   "time": {
-    "from": "now-3h",
+    "from": "now-7d",
     "to": "now"
   },
   "refresh": "30s",
@@ -40,6 +40,111 @@
   },
   "panels": [
     {
+      "id": 8,
+      "type": "stat",
+      "title": "Logs folder size",
+      "description": "The latest size, in bytes, of the logs folder (~/.local/share/labkit/logs) and of its http-captures subfolder, and the time of that report: the gauge agent.logs.folder_bytes (Prometheus agent_logs_folder_bytes), which the capture server (bun run observability:captures) reports at a fixed interval while it runs. Size: the last sample of the folder's latest report in the dashboard's range (last_over_time over the range, from the series whose report is newest); report time: max_over_time(timestamp(...)) over the range. \"No data\" when no report arrived in the range. Capture files are never deleted; an alert fires when the logs folder passes 1 GB.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 1,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1000000000
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              },
+              {
+                "id": "decimals"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "text": {
+          "titleSize": 14,
+          "valueSize": 32
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (folder) (last_over_time(agent_logs_folder_bytes{folder=~\"logs|http-captures\"}[$__range]) and on (folder, service_instance_id) (max_over_time(timestamp(agent_logs_folder_bytes{folder=~\"logs|http-captures\"})[$__range:1m]) == on (folder) group_left max by (folder) (max_over_time(timestamp(agent_logs_folder_bytes{folder=~\"logs|http-captures\"})[$__range:1m]))))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{folder}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (folder) (max_over_time(timestamp(agent_logs_folder_bytes{folder=~\"logs|http-captures\"})[$__range:1m])) * 1000",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{folder}} reported"
+        }
+      ]
+    },
+    {
       "id": 1,
       "type": "timeseries",
       "title": "Time to first token, by model",
@@ -50,7 +155,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 0,
+        "y": 4,
         "w": 12,
         "h": 8
       },
@@ -91,7 +196,8 @@
           "queryType": "traceql",
           "query": "{resource.service.name=~\"$service\" && span.ttft_ms > 0.0} | avg_over_time(span.ttft_ms) by (span.model)",
           "metricsQueryType": "range",
-          "limit": 20
+          "limit": 20,
+          "step": "10m"
         },
         {
           "refId": "B",
@@ -102,7 +208,8 @@
           "queryType": "traceql",
           "query": "{resource.service.name=~\"$service\" && span.ttft_ms > 0.0} | max_over_time(span.ttft_ms) by (span.model)",
           "metricsQueryType": "range",
-          "limit": 20
+          "limit": 20,
+          "step": "10m"
         }
       ]
     },
@@ -117,7 +224,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 0,
+        "y": 4,
         "w": 12,
         "h": 8
       },
@@ -158,7 +265,8 @@
           "queryType": "traceql",
           "query": "{resource.service.name=~\"$service\" && name=\"agent.model.attempt\"} | quantile_over_time(duration, .5, .95) by (span.model)",
           "metricsQueryType": "range",
-          "limit": 20
+          "limit": 20,
+          "step": "10m"
         }
       ]
     },
@@ -173,7 +281,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 8,
+        "y": 12,
         "w": 12,
         "h": 8
       },
@@ -214,7 +322,8 @@
           "queryType": "traceql",
           "query": "{resource.service.name=~\"$service\" && name=\"agent.model.request\" && span.input_tokens > 0} | sum_over_time(span.input_tokens) by (span.model)",
           "metricsQueryType": "range",
-          "limit": 20
+          "limit": 20,
+          "step": "10m"
         },
         {
           "refId": "B",
@@ -225,7 +334,8 @@
           "queryType": "traceql",
           "query": "{resource.service.name=~\"$service\" && name=\"agent.model.request\" && span.output_tokens > 0} | sum_over_time(span.output_tokens) by (span.model)",
           "metricsQueryType": "range",
-          "limit": 20
+          "limit": 20,
+          "step": "10m"
         }
       ]
     },
@@ -240,7 +350,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 8,
+        "y": 12,
         "w": 12,
         "h": 8
       },
@@ -281,7 +391,8 @@
           "queryType": "traceql",
           "query": "{resource.service.name=~\"$service\" && name=\"agent.tool.run\"} | count_over_time() by (span.tool)",
           "metricsQueryType": "range",
-          "limit": 20
+          "limit": 20,
+          "step": "10m"
         }
       ]
     },
@@ -296,7 +407,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 16,
+        "y": 20,
         "w": 24,
         "h": 8
       },
@@ -342,16 +453,16 @@
       "id": 6,
       "type": "table",
       "title": "Sessions and games",
-      "description": "The latest sessions (agent.session) and zork games (zork.game). Select a trace to see its timeline.",
+      "description": "The latest sessions (agent.session spans) and zork games (zork.game spans, whose two sessions follow them as rows of their own), newest first, with the totals each session span carries when it ends: requests (and failed), turns, tool calls, tokens (input with cache read and cache write, and output), the cost of its priced requests and how many requests were unpriced, its models and working folder. Tempo search, at most 50 traces. \"Session\" opens the session dashboard for the row's trace; \"Span\" opens the trace in Explore. A running session or a game row has no totals.",
       "datasource": {
         "type": "tempo",
         "uid": "tempo"
       },
       "gridPos": {
         "x": 0,
-        "y": 24,
+        "y": 28,
         "w": 24,
-        "h": 9
+        "h": 12
       },
       "targets": [
         {
@@ -361,9 +472,271 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && (name=\"agent.session\" || name=\"zork.game\")}",
+          "query": "{resource.service.name=~\"$service\" && (name=\"agent.session\" || name=\"zork.game\")} | select(span.session, span.cwd, span.models, span.requests, span.failed_requests, span.turns, span.tool_calls, span.input_tokens, span.output_tokens, span.cost_usd, span.unpriced_requests) with (most_recent=true)",
           "limit": 50,
-          "tableType": "traces"
+          "spss": 5,
+          "tableType": "spans"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Start time"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Started"
+              },
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Session"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open in the session dashboard",
+                    "url": "/d/labkit-session/labkit-session?var-trace=${__data.fields.traceIdHidden}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "session"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Session ID"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cwd"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Folder"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "models"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Models"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duration"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ns"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "requests"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Requests"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "failed_requests"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Failed"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "turns"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Turns"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tool_calls"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Tool calls"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "input_tokens"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Input tokens"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "output_tokens"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Output tokens"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cost_usd"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Cost"
+              },
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "unpriced_requests"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Unpriced"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Span ID"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Span"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "sortBy": [
+          {
+            "displayName": "Started",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "Start time": 0,
+              "Name": 1,
+              "session": 2,
+              "cwd": 3,
+              "models": 4,
+              "Duration": 5,
+              "requests": 6,
+              "failed_requests": 7,
+              "turns": 8,
+              "tool_calls": 9,
+              "input_tokens": 10,
+              "output_tokens": 11,
+              "cost_usd": 12,
+              "unpriced_requests": 13,
+              "Span ID": 14
+            },
+            "excludeByName": {
+              "Trace Service": true,
+              "Trace Name": true
+            },
+            "renameByName": {}
+          }
         }
       ]
     },
@@ -371,14 +744,14 @@
       "id": 7,
       "type": "logs",
       "title": "Warnings and errors",
-      "description": "Log lines at warning level and above.",
+      "description": "Log lines at warning level and above (the detected_level that Loki gives each line).",
       "datasource": {
         "type": "loki",
         "uid": "loki"
       },
       "gridPos": {
         "x": 0,
-        "y": 33,
+        "y": 40,
         "w": 24,
         "h": 10
       },
@@ -396,9 +769,21 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{service_name=~\"$service\", detected_level=~\"warn|error|fatal\"}"
+          "expr": "{service_name=~\"$service\"} | detected_level=~\"warn|error|fatal\""
         }
       ]
+    }
+  ],
+  "links": [
+    {
+      "title": "labkit dashboards",
+      "type": "dashboards",
+      "tags": [
+        "labkit"
+      ],
+      "asDropdown": true,
+      "includeVars": true,
+      "keepTime": true
     }
   ]
 }

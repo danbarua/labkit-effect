@@ -1,0 +1,918 @@
+{
+  "uid": "labkit-projects",
+  "title": "labkit projects",
+  "description": "The labkit harness's model requests by working folder (span.cwd): requests, sessions, tokens, cost and when each was last used, from Tempo's spans; omp's stats Projects. Source: scripts/observability/labkit-projects-dashboard.json.",
+  "tags": [
+    "labkit"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "editable": true,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "refresh": "",
+  "links": [
+    {
+      "type": "dashboards",
+      "tags": [
+        "labkit"
+      ],
+      "asDropdown": true,
+      "title": "labkit dashboards",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "icon": "external link"
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(traces_spanmetrics_calls_total{service=~\"labkit-.*\"}, service)",
+          "refId": "service"
+        },
+        "includeAll": true,
+        "allValue": "labkit-.*",
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Folders",
+      "description": "Usage by working folder: span.cwd, the folder the session was opened in (as its host.json records it), on agent.model.request spans. For each: requests; sessions (agent.session spans); tokens (input + output); cost (span.cost_usd of priced responses); cache rate (cache read ÷ (uncached input + cache read)); errors (failed ÷ requests); average duration of a request. nil = spans without span.cwd (written by tests or before it existed). When it was last used is in the next table: it needs Tempo's range query, which cannot be in a table of expressions. omp hides temporary folders (/tmp, /var/folders) behind a checkbox and shows cache savings; neither is here (Grafana has no row filter on a computed column, and cache savings needs the uncached price of cache reads on the span).",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 11
+      },
+      "targets": [
+        {
+          "refId": "Requests_q",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=~\"$service\" && name=\"agent.model.request\"} | count_over_time() by (span.cwd)",
+          "metricsQueryType": "instant",
+          "hide": true,
+          "limit": 100
+        },
+        {
+          "refId": "Requests",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "reduce",
+          "expression": "Requests_q",
+          "reducer": "last",
+          "settings": {
+            "mode": "dropNN"
+          }
+        },
+        {
+          "refId": "Cost_q",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=~\"$service\" && name=\"agent.model.request\" && span.cost_usd != nil && span.priced = true} | sum_over_time(span.cost_usd) by (span.cwd)",
+          "metricsQueryType": "instant",
+          "hide": true,
+          "limit": 100
+        },
+        {
+          "refId": "Cost",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "reduce",
+          "expression": "Cost_q",
+          "reducer": "last",
+          "settings": {
+            "mode": "dropNN"
+          }
+        },
+        {
+          "refId": "in_q",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=~\"$service\" && name=\"agent.model.request\" && span.input_tokens != nil} | sum_over_time(span.input_tokens) by (span.cwd)",
+          "metricsQueryType": "instant",
+          "hide": true,
+          "limit": 100
+        },
+        {
+          "refId": "in",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "reduce",
+          "expression": "in_q",
+          "reducer": "last",
+          "settings": {
+            "mode": "replaceNN",
+            "replaceWithValue": 0
+          },
+          "hide": true
+        },
+        {
+          "refId": "out_q",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=~\"$service\" && name=\"agent.model.request\" && span.output_tokens != nil} | sum_over_time(span.output_tokens) by (span.cwd)",
+          "metricsQueryType": "instant",
+          "hide": true,
+          "limit": 100
+        },
+        {
+          "refId": "out",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "reduce",
+          "expression": "out_q",
+          "reducer": "last",
+          "settings": {
+            "mode": "replaceNN",
+            "replaceWithValue": 0
+          },
+          "hide": true
+        },
+        {
+          "refId": "Tokens",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$in + $out"
+        },
+        {
+          "refId": "cr_q",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=~\"$service\" && name=\"agent.model.request\" && span.cache_read_tokens != nil} | sum_over_time(span.cache_read_tokens) by (span.cwd)",
+          "metricsQueryType": "instant",
+          "hide": true,
+          "limit": 100
+        },
+        {
+          "refId": "cr",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "reduce",
+          "expression": "cr_q",
+          "reducer": "last",
+          "settings": {
+            "mode": "replaceNN",
+            "replaceWithValue": 0
+          },
+          "hide": true
+        },
+        {
+          "refId": "unc_q",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=~\"$service\" && name=\"agent.model.request\" && span.uncached_input_tokens != nil} | sum_over_time(span.uncached_input_tokens) by (span.cwd)",
+          "metricsQueryType": "instant",
+          "hide": true,
+          "limit": 100
+        },
+        {
+          "refId": "unc",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "reduce",
+          "expression": "unc_q",
+          "reducer": "last",
+          "settings": {
+            "mode": "replaceNN",
+            "replaceWithValue": 0
+          },
+          "hide": true
+        },
+        {
+          "refId": "CacheRate",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$cr / ($unc + $cr)"
+        },
+        {
+          "refId": "f_q",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=~\"$service\" && name=\"agent.model.request\" && span.outcome = \"failed\"} | count_over_time() by (span.cwd)",
+          "metricsQueryType": "instant",
+          "hide": true,
+          "limit": 100
+        },
+        {
+          "refId": "f",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "reduce",
+          "expression": "f_q",
+          "reducer": "last",
+          "settings": {
+            "mode": "replaceNN",
+            "replaceWithValue": 0
+          },
+          "hide": true
+        },
+        {
+          "refId": "Errors",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$f / $Requests"
+        },
+        {
+          "refId": "dur_q",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=~\"$service\" && name=\"agent.model.request\"} | avg_over_time(duration) by (span.cwd)",
+          "metricsQueryType": "instant",
+          "hide": true,
+          "limit": 100
+        },
+        {
+          "refId": "Duration",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "reduce",
+          "expression": "dur_q",
+          "reducer": "last",
+          "settings": {
+            "mode": "dropNN"
+          },
+          "hide": false
+        },
+        {
+          "refId": "Sessions_q",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=~\"$service\" && name=\"agent.session\" && span.cwd != nil} | count_over_time() by (span.cwd)",
+          "metricsQueryType": "instant",
+          "hide": true,
+          "limit": 100
+        },
+        {
+          "refId": "Sessions",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "reduce",
+          "expression": "Sessions_q",
+          "reducer": "last",
+          "settings": {
+            "mode": "dropNN"
+          }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "span.cwd": 0,
+              "Requests": 1,
+              "Sessions": 2,
+              "Tokens": 3,
+              "Cost": 4,
+              "CacheRate": 5,
+              "Errors": 6,
+              "Duration": 7
+            },
+            "renameByName": {
+              "span.model": "Model",
+              "span.provider": "Provider",
+              "span.cwd": "Folder",
+              "CacheRate": "Cache rate",
+              "TokensPerSecond": "Tokens/s",
+              "TTFT": "TTFT",
+              "Duration": "Average duration"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "Cost",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "span.cwd"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^\"(.*)\"$",
+                      "result": {
+                        "text": "$1",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Requests"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Cost"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Tokens"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CacheRate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Errors"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "noValue",
+                "value": "0%"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "TokensPerSecond"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "TTFT"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duration"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Sessions"
+            },
+            "properties": [
+              {
+                "id": "noValue",
+                "value": "0"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "span.cwd"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 460
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false,
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Last used",
+      "description": "For each working folder (span.cwd), when an agent.model.request span last started in the range, to within 10 minutes: the end of the last 10-minute step in which Tempo counted one (the step still in progress is not counted).",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 11,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=~\"$service\" && name=\"agent.model.request\" && span.cwd != nil} | count_over_time() by (span.cwd)",
+          "metricsQueryType": "range",
+          "step": "10m",
+          "limit": 100
+        }
+      ],
+      "transformations": [
+        {
+          "id": "seriesToRows",
+          "options": {}
+        },
+        {
+          "id": "filterByValue",
+          "options": {
+            "type": "include",
+            "match": "any",
+            "filters": [
+              {
+                "fieldName": "Value",
+                "config": {
+                  "id": "greater",
+                  "options": {
+                    "value": 0
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Metric": {
+                "operation": "groupby",
+                "aggregations": []
+              },
+              "Time": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "max"
+                ]
+              },
+              "Value": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "sum"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "Metric": "Folder",
+              "Time (max)": "Last used"
+            },
+            "excludeByName": {
+              "Value (sum)": true
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "Last used",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last used"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Metric"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 460
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false,
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "bargauge",
+      "title": "Top by cost",
+      "description": "The 8 working folders (span.cwd) with the highest span.cost_usd of priced agent.model.request spans.",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 11,
+        "w": 6,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "v_q",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=~\"$service\" && name=\"agent.model.request\" && span.cost_usd != nil && span.priced = true} | sum_over_time(span.cost_usd) by (span.cwd) | topk(8)",
+          "metricsQueryType": "instant",
+          "hide": true,
+          "limit": 100
+        },
+        {
+          "refId": "v",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "reduce",
+          "expression": "v_q",
+          "reducer": "last",
+          "settings": {
+            "mode": "dropNN"
+          }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "span.cwd"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^\"(.*)\"$",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 4,
+          "color": {
+            "mode": "continuous-BlYlRd"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "text",
+        "namePlacement": "top",
+        "showUnfilled": true,
+        "sizing": "manual",
+        "minVizHeight": 16,
+        "maxVizHeight": 28,
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "legend": {
+          "showLegend": false
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "bargauge",
+      "title": "Top by requests",
+      "description": "The 8 working folders (span.cwd) with the most agent.model.request spans.",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 11,
+        "w": 6,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "v_q",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=~\"$service\" && name=\"agent.model.request\"} | count_over_time() by (span.cwd) | topk(8)",
+          "metricsQueryType": "instant",
+          "hide": true,
+          "limit": 100
+        },
+        {
+          "refId": "v",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "reduce",
+          "expression": "v_q",
+          "reducer": "last",
+          "settings": {
+            "mode": "dropNN"
+          }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "span.cwd"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^\"(.*)\"$",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "continuous-BlYlRd"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "text",
+        "namePlacement": "top",
+        "showUnfilled": true,
+        "sizing": "manual",
+        "minVizHeight": 16,
+        "maxVizHeight": 28,
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "legend": {
+          "showLegend": false
+        }
+      }
+    }
+  ]
+}

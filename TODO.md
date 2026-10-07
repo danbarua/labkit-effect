@@ -282,15 +282,27 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       disk, blobs (images, audio, other binary content), and a human-readable formatting of the logs
       beside the JSONL. Continuing a session in another host than the one that made it waits for a
       session's tools to change during it.
-- [ ] Provider usage as metrics (Dan, 2026-10-06): tokens, cost and request time for each provider
-      and model, sent with the tool metrics. Built: tokens by provider, model and kind
-      (`agent.model.tokens`), the time to the first token (`agent.model.time_to_first_token`), each
-      request's time in the span metrics, and a Grafana dashboard of them
-      (`scripts/observability/`; `src/instrumentation/README.md`). To do: cost.
-- [ ] Each model request's HTTP request and response bodies in the telemetry, linked to the
-      request's span (as related log lines, not span attributes), so that a trace reads from the
-      session down through the machines' transitions to what the model was sent and what it
-      answered (Dan, 2026-10-06). For compaction, caching and usage work.
+- [ ] Provider usage (Dan, 2026-10-06). What is built is in `src/instrumentation/README.md`. To do:
+      a summarizer's requests are not in the facts, so their tokens and cost are in no session's
+      totals; on a failed request after a fallback, the request's span names the model it asked,
+      because `ModelFailed` does not record which fallback failed last (the attempt spans do); tokens
+      and cost attributed to each tool call (omp splits a turn's evenly across its calls) need the
+      tool span to name the request that asked for it.
+- [ ] Each model request's HTTP bodies (Dan, 2026-10-06, 2026-10-07). Built: captured as files and
+      linked to the attempt's span (`src/instrumentation/README.md`). To do:
+      - a retention rule for capture files: none is decided; the logs folder's size is shown and
+        alerted on at 1 GB, and only while `bun run observability:captures` runs;
+      - the adapters' changes to each request (parts omitted, settings not translated, thinking
+        disabled for a forced tool call, `strict` and `tool_choice`) recorded as facts, not only in
+        the log and the captured body (Dan, 2026-10-07: a branch of its own);
+      - the CLI's `-p` runs log to stderr, with their capture lines; whether they also write
+        `cli-<session>.log`;
+      - a session's logs layer is provided twice (`withCliSession` and `withSession` each provide
+        it), so a warning logged while the layer is built (`host_logs.secrets_not_looked_for`)
+        appears twice in the CLI's log;
+      - lgtm resets its datasources when its container is rebuilt: `bun run
+        observability:datasources` is run by hand after `lgtm-stack.sh`;
+      - captures from zork's two sessions are checked by reading the code, not by a live game.
 
 - [ ] Forks as sessions, and the turn pointer (`session/turn`; turn zero of a root points at
       itself). A fact is addressed by its session and its position. In the CLI,

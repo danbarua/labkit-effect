@@ -3,6 +3,9 @@
 BRAND="labkit"
 HTTP_CAPTURES="$HOME/.local/share/$BRAND/logs/http-captures"
 LGTM_DATA="$HOME/lgtm-data/"
+# Tempo keeps traces 31 days and queries over up to 31 days (tempo-config.yaml beside this script);
+# Prometheus keeps 31 days. The dashboards are read at 7d and 30d.
+TEMPO_CONFIG="${0:A:h}/tempo-config.yaml"
 mkdir -p $LGTM_DATA
 mkdir -p $HTTP_CAPTURES
 
@@ -11,6 +14,8 @@ docker rm -f lgtm
 docker run -d \
   --name lgtm \
   -e 'TEMPO_EXTRA_ARGS=--query-frontend.mcp-server.enabled=true' \
+  -e 'PROMETHEUS_EXTRA_ARGS=--storage.tsdb.retention.time=31d' \
+  -v "$TEMPO_CONFIG:/otel-lgtm/tempo-config.yaml:ro" \
   -v "$LGTM_DATA:/data" \
   -v "$HTTP_CAPTURES:/data/http-captures:ro" \
   -p 3000:3000 \
