@@ -14,7 +14,7 @@ import { launchConfiguration, launchFlags, type LaunchOptions, launchVariables }
 import { defaultPermissionSettings } from "../agent-policy/permissions.ts";
 
 /** The permissions plug-in's settings in `mode`, the others at their defaults. */
-const permissionSettings = (mode: string) => ({ mode, ...defaultPermissionSettings });
+const permissionSettings = (mode: string) => ({ mode, ...defaultPermissionSettings, additionalDirectories: [] });
 
 /** The options `args` give, the variables being `env`'s for `brand` and `host`; and what a plain variable reads as beside them. */
 const launched = (args: ReadonlyArray<string>, env: Readonly<Record<string, string>>, host: ReadonlyArray<string> = [], brand: Brand = defaultBrand) => {
@@ -45,6 +45,7 @@ const allTwins = {
   LABKIT_SETTINGS: '{"maxHolds": 2}',
   LABKIT_SETTING_SOURCES: "user,project",
   LABKIT_CONFIG_DIR: "/etc/labkit",
+  LABKIT_ADD_DIR: "/data",
 };
 
 test("a flag not given is read from its variable, the brand's prefix and the flag's name in capitals; a flag given wins", async () => {
@@ -56,12 +57,13 @@ test("a flag not given is read from its variable, the brand's prefix and the fla
     maxBudgetUsd: 2.5,
     mcpConfig: ['{"mcpServers": {}}'],
     strictMcpConfig: true,
+    addDir: ["/data"],
     settings: '{"maxHolds": 2}',
     settingSources: "user,project",
     configDir: "/etc/labkit",
   });
-  const given = await launched(["--model", "xai/grok-4.7", "--max-turns", "3", "--mcp-config", "a.json", "--mcp-config", "b.json"], allTwins);
-  expect(given.seen?.options).toMatchObject({ model: "xai/grok-4.7", maxTurns: 3, mcpConfig: ["a.json", "b.json"], permissionMode: "acceptEdits" });
+  const given = await launched(["--model", "xai/grok-4.7", "--max-turns", "3", "--mcp-config", "a.json", "--mcp-config", "b.json", "--add-dir", "../shared", "--add-dir", "~/notes"], allTwins);
+  expect(given.seen?.options).toMatchObject({ model: "xai/grok-4.7", maxTurns: 3, mcpConfig: ["a.json", "b.json"], addDir: ["../shared", "~/notes"], permissionMode: "acceptEdits" });
   expect((await launched([], {})).seen?.options).toEqual({
     model: undefined,
     permissionMode: undefined,
@@ -70,6 +72,7 @@ test("a flag not given is read from its variable, the brand's prefix and the fla
     maxBudgetUsd: undefined,
     mcpConfig: [],
     strictMcpConfig: false,
+    addDir: [],
     settings: undefined,
     settingSources: undefined,
     configDir: undefined,

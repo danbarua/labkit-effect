@@ -61,6 +61,12 @@ then open.
 The same id is ACP's `sessionId` and the core's `SessionId`: one id with two lifetimes. A draft that
 never gets a prompt leaves nothing on disk, so `session/list` lists only sessions that had a turn.
 
+The host advertises `sessionCapabilities.additionalDirectories`. The `additionalDirectories` of
+`session/new`, `session/load` and `session/resume` are folders that count as inside the working
+folder for the permission policy (`docs/agent-policy.md`), after those of the launcher's
+`--add-dir` and the settings' `additionalDirectories`. Each must be an absolute path, as `cwd` must,
+or the request is refused (-32602, naming it). A new session's are kept in its record.
+
 ### `session/new`
 
 - A `cwd` that is not absolute is refused (-32602).
@@ -194,8 +200,8 @@ flight, with no call arrived, shows its input alone.
 
 - A page lists the stored sessions whose record reads, the one written to last first, and by id among
   those written at the same time. Given `cwd`, only those made for it are listed.
-- Each session is listed as its `SessionInfo`: its id, working folder, title and when its facts were
-  last written.
+- Each session is listed as its `SessionInfo`: its id, working folder, additional folders (when it
+  was made with any), title and when its facts were last written.
 - A page holds at most `pageSize` sessions (50 unless the host is given another; at least one), and
   `nextCursor` when more follow. A cursor continues after the session its page ended with, so each
   session comes once and one written to meanwhile is not repeated.

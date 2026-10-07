@@ -89,6 +89,13 @@ export const launchFlags = {
     Flag.map(Option.getOrElse((): ReadonlyArray<string> => [])),
   ),
   strictMcpConfig: toggleFlag("strict-mcp-config", "Use only the MCP servers from --mcp-config"),
+  addDir: Flag.String("add-dir").pipe(
+    Flag.atLeast(1),
+    Flag.withDescription("A folder whose files the agent may read and change as it does the working folder's; repeatable"),
+    Flag.withFallbackConfig(Config.String(keyOf("add-dir")).pipe(Config.map((one): ReadonlyArray<string> => [one]))),
+    Flag.optional,
+    Flag.map(Option.getOrElse((): ReadonlyArray<string> => [])),
+  ),
   settings: textFlag("settings", "Settings as JSON, or a JSON or YAML file, applied over the configuration files"),
   configDir: textFlag("config-dir", "Configuration folder; its .yml files are read in name order (default ~/.config/<brand>)"),
   settingSources: textFlag("setting-sources", "Settings files to read, comma-separated: user, project, local (default user)"),

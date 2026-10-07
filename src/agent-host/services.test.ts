@@ -35,3 +35,21 @@ test("a call is judged by its tool's kind in the catalog that the session opened
   expect(await verdicts("default", true, ["look", "change", "elsewhere"])).toEqual(["runs", "asks", "asks"]);
   expect(await verdicts("default", false, ["look", "change"])).toEqual(["runs", "vetoed"]);
 });
+
+test("an additional folder counts as inside the working folder: from ~, relative to the working folder, or absolute", async () => {
+  const judged = (command: string, additional: ReadonlyArray<string>) =>
+    runTest(
+      Effect.gen(function* () {
+        const facts: ReadonlyArray<Fact> = [
+          { _tag: "Observed", seq: Seq.make(1), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation: boringOpening([spec("run_command", "execute")]) },
+        ];
+        const policy = yield* permissionsFor("default", true, undefined, "/work/project", additional)(facts);
+        const step = policy.start({ _tag: "RunTool", call: CallId.make("c1"), tool: ToolName.make("run_command"), input: receivedJson({ command }) });
+        return step._tag === "Waiting" ? "asks" : step.verdict._tag === "Continue" ? "runs" : "vetoed";
+      }),
+    );
+  expect(await judged("cat ../shared/notes.md", [])).toBe("asks");
+  expect(await judged("cat ../shared/notes.md", ["../shared"])).toBe("runs");
+  expect(await judged("cat /data/x.csv", ["/data"])).toBe("runs");
+  expect(await judged("cat /data2/x.csv", ["/data"])).toBe("asks");
+});

@@ -55,6 +55,7 @@ export const hostOptionsOf = (options: LauncherOptions, brand: Brand, home?: str
   configFlags: options,
   retries: options.retries,
   strictToolInput: options.strictToolInput,
+  additionalFolders: options.addDir,
   brand,
   ...(home === undefined ? {} : { home }),
 });

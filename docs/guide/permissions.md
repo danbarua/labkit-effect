@@ -152,6 +152,21 @@ editor.
 
 `readOnly` replaces the list of programs that run without a question.
 
+`additionalDirectories` lists folders whose files count as inside your folder: a command may read
+and change files there as it does in your folder. A folder is absolute, from `~`, or relative to
+your folder:
+
+```yaml
+plugins:
+  permissions:
+    additionalDirectories:
+      - ~/Code/shared-config
+      - ../docs
+```
+
+`--add-dir <folder>` adds one for a session, at the terminal or in the ACP launcher, and is
+repeatable. An editor can name more for each session it opens (ACP's `additionalDirectories`).
+
 ## What labkit does not check
 
 labkit judges a command by its words. It does not run the command to see what it does, so these

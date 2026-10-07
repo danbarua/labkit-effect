@@ -50,8 +50,11 @@ export const loopBreaker = plugin(
 
 /**
  * The permission policy (`agent-policy/permissions.ts`): its mode; its allow and deny rules
- * (`<tool>`, `<tool>(<words>)`, `<tool>(<words>:*)`, with `command` for every command tool); the
- * read-only programs that command tools run without a question; and which tools run shell commands.
+ * (`<tool>`, `<tool>(<words>)`, `<tool>(<words>:*)`, with `command` for every command tool, and the
+ * path rules `Read(<path>)` and `Edit(<path>)`); the read-only programs that command tools run without
+ * a question; which tools run shell commands; and the additional folders that count as inside the
+ * working folder (`additionalDirectories`: absolute, from `~`, or relative to the working folder),
+ * with those the host adds for the session.
  */
 export const permissions = plugin(
   "permissions",
@@ -61,10 +64,11 @@ export const permissions = plugin(
     deny: defaulted(Schema.Array(PermissionRule), []),
     readOnly: defaulted(Schema.Array(ReadOnlyPrefix), defaultPermissionSettings.readOnly),
     commandTools: defaulted(Schema.Array(ToolName), defaultPermissionSettings.commandTools),
+    additionalDirectories: defaulted(Schema.Array(Schema.String), []),
   }),
   ["toolCalls"],
-  ({ mode, ...settings }, host) => ({
-    toolCalls: permissionsFor(host.permissionMode ?? mode, host.canAsk, settings, host.workingFolder),
+  ({ mode, additionalDirectories, ...settings }, host) => ({
+    toolCalls: permissionsFor(host.permissionMode ?? mode, host.canAsk, settings, host.workingFolder, [...additionalDirectories, ...(host.additionalFolders ?? [])]),
   }),
 );
 

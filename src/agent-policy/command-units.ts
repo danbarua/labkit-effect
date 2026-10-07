@@ -122,10 +122,15 @@ export interface UnitPath {
 
 export type Units = { readonly _tag: "Units"; readonly units: ReadonlyArray<Unit> } | { readonly _tag: "Unparsed"; readonly reason: UnparsedReason };
 
-/** The folders that paths are judged against: the working folder, and the home folder that `~` names; both absolute. */
+/**
+ * The folders that paths are judged against, all absolute: the working folder, the home folder that
+ * `~` names, and the additional folders that count as inside the working folder (Claude Code's
+ * `additionalDirectories`, `--add-dir`; ACP's `additionalDirectories`).
+ */
 export interface Folders {
   readonly working: WordText;
   readonly home: WordText;
+  readonly additional?: ReadonlyArray<WordText>;
 }
 
 /** How many levels of written-out shell code (`bash -c '…'` inside `bash -c '…'`) are followed. */

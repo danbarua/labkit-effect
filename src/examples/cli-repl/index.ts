@@ -185,6 +185,7 @@ const configOf = (options: Options, interactive: boolean) =>
     const permissions = {
       configuration,
       canAsk: interactive && !options.print,
+      additionalFolders: options.addDir,
       persist: !options.noSessionPersistence,
       strictToolInput: options.strictToolInput,
     } as const;

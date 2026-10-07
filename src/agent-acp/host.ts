@@ -37,9 +37,7 @@
  * The end of the connection closes every session's scope.
  */
 
-import { homedir } from "node:os";
 import { type Brand, defaultBrand, envPrefixOf, folderOf } from "../agent-host/brand.ts";
-import { WordText } from "../agent-policy/command-segments.ts";
 import { type ConfigFlags, launchLayers } from "../agent-host/launch.ts";
 import { writeEffectiveSettings } from "../agent-config/effective.ts";
 import { type Configuration, type LayerSource, loadConfiguration } from "../agent-config/file.ts";
@@ -64,7 +62,7 @@ import { chooseModel, defaultModel, type Draft, draftOf, opening, optionsOfDraft
 import { markdownOf } from "../agent-host/export.ts";
 import { KnownWithLocalServer, localServer, SettlingWithLocalServer } from "../agent-host/local-server.ts";
 import { readRecord, RecordFailed, recordedSessions, recordFileOf, writeRecord } from "../agent-host/record.ts";
-import { SessionServices } from "../agent-host/services.ts";
+import { foldersOf, SessionServices } from "../agent-host/services.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { leftRunning } from "../agent-machine/left-running.ts";
 import { InputText, SessionId, type TurnId } from "../agent-machine/names.ts";
@@ -124,6 +122,8 @@ export interface HostOptions<R = never> {
    * result names the properties that were ignored.
    */
   readonly strictToolInput?: boolean | undefined;
+  /** Folders that count as inside every session's working folder (the launcher's `--add-dir`), before those a session's request names. */
+  readonly additionalFolders?: ReadonlyArray<string> | undefined;
   /**
    * The maximum number of model requests in one turn, unless the configuration gives another
    * (`--max-turns`): the request beyond it is vetoed, and the prompt ends with the stop reason
@@ -259,6 +259,8 @@ type EntryState = { readonly _tag: "Draft"; readonly draft: Draft } | { readonly
 interface Entry {
   readonly id: AcpSessionId;
   readonly cwd: string;
+  /** The folders the client named with the working folder (`additionalDirectories`), absolute. */
+  readonly additional: ReadonlyArray<string>;
   /** Its world, with the MCP servers' tools after the world's own. */
   readonly world: WorldSession;
   /** The entry's scope, from `session/new` (or load, or resume) to `session/close`: its MCP servers, and its open session's scope, are in it. */
@@ -385,7 +387,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
     capabilities: {
       promptCapabilities: { image: true, audio: false, embeddedContext: true },
       loadSession: true,
-      sessionCapabilities: { close: {}, list: {}, resume: {} },
+      sessionCapabilities: { close: {}, list: {}, resume: {}, additionalDirectories: {} },
       mcpCapabilities: { http: true, sse: true },
     },
     handlers: (connection) =>
@@ -623,7 +625,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           id: AcpSessionId,
           world: WorldSession,
           permissionMode: Ref.Ref<PermissionMode>,
-          parent: { readonly scope: Scope.Scope; readonly mcp: McpServers; readonly configuration: Configured; readonly cwd: string },
+          parent: { readonly scope: Scope.Scope; readonly mcp: McpServers; readonly configuration: Configured; readonly cwd: string; readonly additional: ReadonlyArray<string> },
           go: (session: Session, context: Context.Context<Services>, follow: (initial: ProjectionState) => Effect.Effect<Feed>) => Effect.Effect<A, E, X>,
         ) =>
           Effect.gen(function* () {
@@ -634,7 +636,13 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const blobs = BlobsInFolder(join(sessionFolderOf(options.directory, id), "blobs"));
               // The configuration's seam lists, with permission following the session's mode (`FromHost.permissionMode`). Its tool
               // sources are not used: the session's tools are the world's and its MCP servers'.
-              const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(parent.configuration, { canAsk: true, permissionMode: Ref.get(permissionMode), workingFolder: parent.cwd });
+              const additionalFolders = [...(options.additionalFolders ?? []), ...parent.additional];
+              const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(parent.configuration, {
+                canAsk: true,
+                permissionMode: Ref.get(permissionMode),
+                workingFolder: parent.cwd,
+                additionalFolders,
+              });
               const runner = SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, world.sources)));
               // The model is told of the session's MCP servers that are not running (`McpServers.notices`).
               const notices = Layer.mergeAll(
@@ -653,7 +661,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   session,
                   context,
                   present: world.present,
-                  folders: { working: WordText.make(parent.cwd), home: WordText.make(homedir()) },
+                  folders: foldersOf(parent.cwd, additionalFolders),
                   connection,
                   annotations: { connection: connectionId, session: id },
                   initial,
@@ -700,11 +708,11 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 Effect.andThen(Effect.fail(rpcError(ErrorCode.InternalError, `The session could not be opened: ${error.message}`))),
               );
 
-            const record = recordFor(entry.cwd, text);
+            const record = recordFor(entry.cwd, text, entry.additional);
             yield* writeRecord(options.directory, entry.id, record).pipe(Effect.catch(failed("writing the session's record at its first prompt")));
             yield* Effect.logInfo(logKeys.record.written, { file: recordFileOf(options.directory, entry.id), cwd: record.cwd, titled: record.title !== undefined });
             yield* settingsWritten(entry.id, entry.configuration, yield* Ref.get(entry.permissionMode), `${draft.model.provider}/${draft.model.model}`);
-            const opened = yield* startSession(entry.id, entry.world, entry.permissionMode, { scope: entry.scope, mcp: entry.mcp, configuration: entry.configuration, cwd: entry.cwd }, (session, context, follow) =>
+            const opened = yield* startSession(entry.id, entry.world, entry.permissionMode, { scope: entry.scope, mcp: entry.mcp, configuration: entry.configuration, cwd: entry.cwd, additional: entry.additional }, (session, context, follow) =>
               Effect.gen(function* () {
                 // The feed starts first: the session has no facts yet, so the feed sends everything from the opening on, live.
                 const feed = yield* follow(start);
@@ -844,13 +852,19 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
          */
         const reopen = (
           method: "session/load" | "session/resume",
-          params: { readonly sessionId: AcpSessionId; readonly cwd: string; readonly mcpServers: ReadonlyArray<McpServer> },
+          params: { readonly sessionId: AcpSessionId; readonly cwd: string; readonly additionalDirectories: ReadonlyArray<string>; readonly mcpServers: ReadonlyArray<McpServer> },
         ) =>
           Effect.gen(function* () {
             const { sessionId, cwd, mcpServers } = params;
+            const additional = params.additionalDirectories;
             if (!isAbsolute(cwd)) {
               yield* Effect.logWarning(logKeys.session.refused, { doing: method, cwd, cause: "the working folder is not an absolute path" });
               return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, `cwd must be an absolute path: ${cwd}`));
+            }
+            const notAbsolute = additional.find((folder) => !isAbsolute(folder));
+            if (notAbsolute !== undefined) {
+              yield* Effect.logWarning(logKeys.session.refused, { doing: method, cwd, additionalDirectories: additional, cause: "an additional directory is not an absolute path" });
+              return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, `additionalDirectories must be absolute paths: ${notAbsolute}`));
             }
             if (HashMap.has(yield* Ref.get(entries), sessionId) || HashSet.has(yield* Ref.get(starting), sessionId)) {
               yield* Effect.logWarning(logKeys.session.refused, { doing: method, cause: "the session is already loaded on this connection" });
@@ -884,7 +898,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               // The policy reads the session's mode at each call; the mode starts as the configuration says.
               const initialMode = startingModeOf(configuration);
               const mode = yield* Ref.make(initialMode);
-              const opened = yield* startSession(sessionId, sessionWorld, mode, { scope, mcp, configuration, cwd }, (session, context, follow) =>
+              const opened = yield* startSession(sessionId, sessionWorld, mode, { scope, mcp, configuration, cwd, additional }, (session, context, follow) =>
                 Effect.gen(function* () {
                   const left = leftRunning(yield* session.facts);
                   if (left !== undefined) {
@@ -903,6 +917,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const entry: Entry = {
                 id: sessionId,
                 cwd,
+                additional,
                 world: sessionWorld,
                 scope,
                 mcp,
@@ -936,12 +951,18 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           });
 
         const handlers: Agent.AgentHandlers<Protocol.V1Version, ModelCatalog | FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner | Scope.Scope | R> = {
-          "session/new": ({ cwd, mcpServers }) =>
+          "session/new": ({ cwd, mcpServers, additionalDirectories }) =>
             traced(
               Effect.gen(function* () {
                 if (!isAbsolute(cwd)) {
                   yield* Effect.logWarning(logKeys.session.refused, { cwd, cause: "the working folder is not an absolute path" });
                   return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, `cwd must be an absolute path: ${cwd}`));
+                }
+                const additional = additionalDirectories ?? [];
+                const notAbsolute = additional.find((folder) => !isAbsolute(folder));
+                if (notAbsolute !== undefined) {
+                  yield* Effect.logWarning(logKeys.session.refused, { cwd, additionalDirectories: additional, cause: "an additional directory is not an absolute path" });
+                  return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, `additionalDirectories must be absolute paths: ${notAbsolute}`));
                 }
                 const configuration = yield* configurationFor(cwd, mcpServers, "session/new");
                 const model = yield* startingModelOf(configuration).pipe(
@@ -967,6 +988,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 const entry: Entry = {
                   id,
                   cwd,
+                  additional,
                   world: sessionWorld,
                   scope,
                   mcp,
@@ -998,9 +1020,11 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               }),
             ),
 
-          "session/load": ({ sessionId, cwd, mcpServers }) => traced(reopen("session/load", { sessionId, cwd, mcpServers }), sessionId),
+          "session/load": ({ sessionId, cwd, mcpServers, additionalDirectories }) =>
+            traced(reopen("session/load", { sessionId, cwd, mcpServers, additionalDirectories: additionalDirectories ?? [] }), sessionId),
 
-          "session/resume": ({ sessionId, cwd, mcpServers }) => traced(reopen("session/resume", { sessionId, cwd, mcpServers: mcpServers ?? [] }), sessionId),
+          "session/resume": ({ sessionId, cwd, mcpServers, additionalDirectories }) =>
+            traced(reopen("session/resume", { sessionId, cwd, mcpServers: mcpServers ?? [], additionalDirectories: additionalDirectories ?? [] }), sessionId),
 
           "session/list": (params) =>
             traced(

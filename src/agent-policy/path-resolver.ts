@@ -10,7 +10,7 @@
  * | `~name/path` | not resolved: another user's home folder |
  * | `"$DIR"/x`, `$(pwd)` | not resolved: not written out |
  *
- * A resolved path is inside when it is the working folder or under it. Without folders, a relative
+ * A resolved path is inside when it is the working folder or an additional folder, or under one. Without folders, a relative
  * path is inside unless its `..` climb above its start, and an absolute path or one from `~` is
  * outside, with no full path to match rules against.
  *
@@ -47,7 +47,8 @@ export const resolvePath = (word: Word, folders: Folders | undefined): ResolvedP
   if (folders === undefined) return { _tag: "Local", full: undefined, inside: !(fromHome || value.startsWith("/")) && normalised(value)[0] !== WordText.make("..") };
   const absolute = fromHome ? `${folders.home}${value.slice(1)}` : value.startsWith("/") ? value : `${folders.working}/${value}`;
   const parts = normalised(absolute);
-  return { _tag: "Local", full: WordText.make(`/${parts.join("/")}`), inside: isUnder(parts, normalised(folders.working)) };
+  const inside = [folders.working, ...(folders.additional ?? [])].some((folder) => isUnder(parts, normalised(folder)));
+  return { _tag: "Local", full: WordText.make(`/${parts.join("/")}`), inside };
 };
 
 /** Whether `word` may lead outside the working folder: a path outside it, or one that is not resolved. */

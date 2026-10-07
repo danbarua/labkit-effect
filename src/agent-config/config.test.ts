@@ -26,7 +26,7 @@ import { seamLayer, seamListsOf } from "./seams.ts";
 import { defaultPermissionSettings } from "../agent-policy/permissions.ts";
 
 /** The permissions plug-in's settings in `mode`, the others at their defaults. */
-const permissionSettings = (mode: string) => ({ mode, ...defaultPermissionSettings });
+const permissionSettings = (mode: string) => ({ mode, ...defaultPermissionSettings, additionalDirectories: [] });
 
 /** Writes `text` to `path` under the test's folder, making its folders; gives the full path. */
 const write = (path: string, text: string): string => {

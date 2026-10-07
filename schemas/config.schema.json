@@ -76,6 +76,12 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "additionalDirectories": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               },
               "additionalProperties": false
@@ -234,6 +240,12 @@
                 }
               },
               "commandTools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "additionalDirectories": {
                 "type": "array",
                 "items": {
                   "type": "string"

@@ -56,8 +56,9 @@ model.
         language. To do:
         - Reads and changes outside the working folder (built: writes, `rm`, `mv`, `cp`, `chmod`,
           `touch`, `curl -o`, `find -delete`, `xargs rm`, and the like) are lifted only by path
-          rules, `Read(...)` and `Edit(...)`, as in Claude Code (2026-10-08). To do: path
-          rules for the file tools, and additional directories (`permissions/path-rules`); the
+          rules, `Read(...)` and `Edit(...)`, as in Claude Code (2026-10-08); additional folders
+          (settings, `--add-dir`, ACP's `additionalDirectories`) count as inside. To do: the file
+          tools, which refuse any path outside the working folder; the REPL's `/add-dir`; the
           programs the guide lists as not checked (`docs/guide/permissions.md`).
         - The harness tells the agent of changes to files it has read (Dan, 2026-10-08): with every
           path going through one place (`path-resolver.ts`), the harness knows what the agent read

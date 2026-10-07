@@ -299,7 +299,8 @@ options make (`launchConfiguration`, over the host's own defaults).
 
 - The options are `--model`, `--permission-mode` (`manual` means `default`), `--strict-tool-input`,
   `--max-turns`, `--max-budget-usd`, `--mcp-config` (repeatable), `--strict-mcp-config`,
-  `--settings`, `--setting-sources` and `--config-dir` (the user's configuration folder).
+  `--add-dir` (repeatable: a folder that counts as inside the working folder), `--settings`,
+  `--setting-sources` and `--config-dir` (the user's configuration folder).
 - An option that is not given is read from a variable named: the brand's prefix, the host's part
   (`ACP_` for the ACP launcher, none for the CLI), then the option's name in capitals with `_` for
   `-` (`LABKIT_MAX_TURNS`, `LABKIT_ACP_MAX_TURNS`). `--mcp-config` takes one value from its

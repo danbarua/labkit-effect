@@ -862,6 +862,30 @@ test("a loaded session shows no diff for the writes it replays, whose files were
   expect(contentOf(reloaded.log.updates)).toContainEqual({ type: "content", content: { type: "text", text: "Added to the end of log.txt." } });
 });
 
+test("additionalDirectories count as inside the working folder: a command reading there is not asked about; the folders are kept in the session's record and listed; a relative one is refused", async () => {
+  const shared = join(testFolder(), "shared");
+  const host = startHost({
+    script: [
+      answer({ _tag: "ToolCall", call: "read-1", tool: "terminal_command", input: { command: `cat ${shared}/notes.md`, intent: "Read the shared notes." } }),
+      answer({ _tag: "Text", text: "Read." }),
+    ],
+  });
+  const { app, log } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    const initialized = (await initialize(ctx, { terminal: true })) as acp.InitializeResponse;
+    const created = await ctx.request("session/new", { cwd: host.cwd, additionalDirectories: [shared], mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "Read the notes"));
+    const listed = await ctx.request("session/list", {});
+    const refused = await failure(ctx.request("session/new", { cwd: host.cwd, additionalDirectories: ["relative/folder"], mcpServers: [] }));
+    return { initialized, sessionId: created.sessionId, listed, refused };
+  });
+  await host.stop();
+  expect(result.initialized.agentCapabilities?.sessionCapabilities?.additionalDirectories).toEqual({});
+  expect(log.asked).toEqual([]);
+  expect(result.listed.sessions.find((each) => each.sessionId === result.sessionId)?.additionalDirectories).toEqual([shared]);
+  expect(result.refused).toMatchObject({ code: -32602, message: "additionalDirectories must be absolute paths: relative/folder" });
+});
+
 test("the editor world offers read_file and write_file as the client advertised fs; read_file reads through fs/read_text_file, a path outside the working folder is refused, and a client with no fs has no file tools", async () => {
   const host = startHost({
     script: [
@@ -1160,7 +1184,7 @@ test("a session's configuration is read when it is made: the user's file's MCP s
     { name: "extra", command: process.execPath, required: false },
   ]);
   expect(written.from["mcpServers.fake.command"]).toBe("the client's MCP servers");
-  expect(written.lists.toolCalls).toEqual([{ name: "permissions", use: "permissions", settings: { mode: "acceptEdits", ...defaultPermissionSettings } }]);
+  expect(written.lists.toolCalls).toEqual([{ name: "permissions", use: "permissions", settings: { mode: "acceptEdits", ...defaultPermissionSettings, additionalDirectories: [] } }]);
   expect(written.host).toMatchObject({ permissionMode: "acceptEdits", canAsk: true, world: "the host's own" });
 });
 

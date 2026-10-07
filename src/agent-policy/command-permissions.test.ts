@@ -262,3 +262,10 @@ test("when deny rules name paths, a path they cannot see is asked about even in 
   expect(judged("git ls-files | xargs rm", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it deletes: it gets them from its input" }] });
   expect(judged('cat "$F"', { folders: project, mode: "bypassPermissions" }).step).toBe("runs");
 });
+
+test("an additional folder counts as inside the working folder: reading and changing in it need no path permission", () => {
+  const withShared = { ...project, additional: [WordText.make("/home/dan/shared")] };
+  expect(judged("cat ~/shared/notes.md", { folders: withShared }).step).toBe("runs");
+  expect(judged("rm -rf ~/shared/build", { facts: answered("rm -rf dist", "allow-session"), folders: withShared }).step).toBe("runs");
+  expect(judged("cat ~/other/notes.md", { folders: withShared }).question).toMatchObject({ needs: [{ kind: "readsOutside" }] });
+});

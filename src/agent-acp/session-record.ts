@@ -1,6 +1,6 @@
 /**
  * What the ACP host keeps of a session in its record (`agent-host/record.ts`): that the ACP host
- * made it, the working folder it was made for, and its title; and `session/list` over the stored
+ * made it, the working folder it was made for, the additional folders named with it, and its title; and `session/list` over the stored
  * sessions, a page at a time. The sessions folder is shared with the CLI, whose records name the
  * CLI, so `session/list` lists only the sessions that the ACP host made.
  */
@@ -16,7 +16,13 @@ const titleLength = 120;
 export const acpHost = "acp";
 
 /** What the host records of a session. */
-export const SessionRecord = Schema.Struct({ host: Schema.Literal(acpHost), cwd: Schema.String, title: Schema.optionalKey(Schema.String) });
+export const SessionRecord = Schema.Struct({
+  host: Schema.Literal(acpHost),
+  cwd: Schema.String,
+  /** The folders the client named with the working folder (`additionalDirectories`), when it named any. */
+  additionalDirectories: Schema.optionalKey(Schema.Array(Schema.String)),
+  title: Schema.optionalKey(Schema.String),
+});
 export type SessionRecord = typeof SessionRecord.Type;
 
 const decodeRecord = Schema.decodeUnknownOption(SessionRecord);
@@ -32,10 +38,10 @@ export const titleOf = (text: string): string | undefined => {
   return title === "" ? undefined : title;
 };
 
-/** Returns the record that turn zero writes: the ACP host, the working folder, and the title from the first prompt when it gives one. */
-export const recordFor = (cwd: string, firstPrompt: string): SessionRecord => {
+/** Returns the record that turn zero writes: the ACP host, the working folder, the additional folders when there are any, and the title from the first prompt when it gives one. */
+export const recordFor = (cwd: string, firstPrompt: string, additional: ReadonlyArray<string> = []): SessionRecord => {
   const title = titleOf(firstPrompt);
-  return title === undefined ? { host: acpHost, cwd } : { host: acpHost, cwd, title };
+  return { host: acpHost, cwd, ...(additional.length === 0 ? {} : { additionalDirectories: additional }), ...(title === undefined ? {} : { title }) };
 };
 
 /** Returns a host record as a `SessionRecord`, or undefined when it is not one, such as a record that the CLI wrote. Other fields of the record are dropped. */
@@ -101,6 +107,7 @@ export const pageOf = (
     (each): SessionInfo => ({
       sessionId: SessionId.make(each.sessionId),
       cwd: each.record.cwd,
+      ...(each.record.additionalDirectories === undefined ? {} : { additionalDirectories: each.record.additionalDirectories }),
       ...(each.record.title === undefined ? {} : { title: each.record.title }),
       ...(each.at === undefined ? {} : { updatedAt: each.at.toISOString() }),
     }),

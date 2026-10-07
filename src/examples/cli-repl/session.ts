@@ -62,6 +62,8 @@ export interface Config {
   readonly configuration: Configuration & { readonly layers: ReadonlyArray<LayerSource> };
   /** Whether someone can answer a permission question: true for the REPL at a terminal. */
   readonly canAsk: boolean;
+  /** The folders that count as inside the working folder for this session (`--add-dir`). */
+  readonly additionalFolders: ReadonlyArray<string>;
   /**
    * Whether a tool call with input properties the tool does not define is refused
    * (`--strict-tool-input`); otherwise it runs without them, and its result names the ones ignored.
@@ -108,7 +110,7 @@ const gitOf = (config: Config) => (isRepositoryRoot(process.cwd()) ? gitTools(pr
  */
 const servicesOf = (config: Config) => {
   // The CLI uses its own tool sources (the workspace's and the MCP servers'), not the configuration's.
-  const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(config.configuration, { canAsk: config.canAsk, workingFolder: process.cwd() });
+  const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(config.configuration, { canAsk: config.canAsk, workingFolder: process.cwd(), additionalFolders: config.additionalFolders });
   return Layer.mergeAll(SessionServices(SourcedToolRunner).pipe(Layer.provide(Layer.succeed(ModelOverrides, config.configuration.models))), seamLayer(lists));
 };
 

@@ -5,6 +5,8 @@ import { AgentContextAssembler, WholeConversation } from "../agent-context/assem
 import { defaultPermissionSettings, type PermissionMode, type PermissionSettings, permissions } from "../agent-policy/permissions.ts";
 import { homedir } from "node:os";
 import { WordText } from "../agent-policy/command-segments.ts";
+import type { Folders } from "../agent-policy/command-units.ts";
+import { join, resolve } from "node:path";
 import { segmentsOf } from "./command-parser.ts";
 import { type LoopBreakerSettings, loopBreakerDefaults, repeatedCalls, repeatingTurns } from "../agent-policy/loop-breaker.ts";
 import { maxTurnRequests } from "../agent-policy/max-turn-requests.ts";
@@ -44,12 +46,13 @@ export const SessionServices = <E, R>(runner: Layer.Layer<ToolRunner, E, R>) =>
  * The permission policy for `mode`, over the tools that the session opened with: each call is judged
  * by its tool's kind, and a call to a command tool by the programs its command runs, split by the
  * host's command parser (`command-parser.ts`), with `settings`' rules, and the paths a program reads
- * judged against `workingFolder` and this process's home folder. `canAsk` is whether anyone can
+ * judged against `workingFolder`, the `additional` folders that count as inside it (absolute, from
+ * `~`, or relative to the working folder), and this process's home folder. `canAsk` is whether anyone can
  * answer a question before a call runs. `mode` is read at each call, so a host that lets the user
  * change it applies the change from the next call. A tool call policy (`ToolCallPolicies`).
  */
 export const permissionsFor =
-  (mode: PermissionMode | Effect.Effect<PermissionMode>, canAsk: boolean, settings: PermissionSettings = defaultPermissionSettings, workingFolder?: string): PolicyOfFacts =>
+  (mode: PermissionMode | Effect.Effect<PermissionMode>, canAsk: boolean, settings: PermissionSettings = defaultPermissionSettings, workingFolder?: string, additional: ReadonlyArray<string> = []): PolicyOfFacts =>
   (facts) =>
     Effect.flatMap(immutableToolCatalogOf(facts), (tools) =>
       Effect.map(
@@ -58,10 +61,20 @@ export const permissionsFor =
           permissions(now, canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts, {
             settings,
             segmentsOf,
-            ...(workingFolder === undefined ? {} : { folders: { working: WordText.make(workingFolder), home: WordText.make(homedir()) } }),
+            ...(workingFolder === undefined ? {} : { folders: foldersOf(workingFolder, additional) }),
           }) as Policy<unknown>,
       ),
     );
+
+/** The working folder, the home folder, and the additional folders resolved against them (`~/x` from the home folder, a relative path from the working folder). */
+export const foldersOf = (workingFolder: string, additional: ReadonlyArray<string>): Folders => {
+  const home = homedir();
+  return {
+    working: WordText.make(workingFolder),
+    home: WordText.make(home),
+    additional: additional.map((folder) => WordText.make(folder === "~" || folder.startsWith("~/") ? join(home, folder.slice(1)) : resolve(workingFolder, folder))),
+  };
+};
 
 /** The limit on a turn's model requests (`agent-policy/max-turn-requests.ts`), 1000 when not given. A model request policy. */
 export const turnRequestLimit =

@@ -13,7 +13,7 @@ import { cliConfiguration } from "./configuration.ts";
 import { defaultPermissionSettings } from "../../agent-policy/permissions.ts";
 
 /** The permissions plug-in's settings in `mode`, the others at their defaults. */
-const permissionSettings = (mode: string) => ({ mode, ...defaultPermissionSettings });
+const permissionSettings = (mode: string) => ({ mode, ...defaultPermissionSettings, additionalDirectories: [] });
 
 const write = (path: string, text: string): string => {
   const full = join(testFolder(), path);
