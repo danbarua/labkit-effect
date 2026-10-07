@@ -9,7 +9,7 @@ session.
 | Mode | What it does |
 | --- | --- |
 | `default` | Asks before a file is changed and before a command that is not read-only. |
-| `acceptEdits` | Changes files without asking: the file tools, and a command's writes to files (`>`, `tee`). Still asks about a program not allowed yet. |
+| `acceptEdits` | Changes files in your folder without asking: the file tools, and a command's writes to files there (`>`, `tee`). Still asks about a program not allowed yet, and about changes outside your folder. |
 | `dontAsk` | Asks nothing: what would be asked about is refused, unless you allowed it earlier in the session. |
 | `bypassPermissions` | Runs everything, except what a deny rule refuses. |
 
@@ -35,6 +35,7 @@ labkit asks, and says why, when a command:
 | runs a program not allowed yet | `rm -rf build`, `bun test` | the call, or the program (and its subcommand) for the rest of the session |
 | writes a file | `echo done > notes.txt` | the call; `acceptEdits` allows it |
 | reads outside your folder | `cat ~/.aws/credentials` | the call (see below) |
+| writes, deletes or moves outside your folder | `rm -rf ~/Code/other`, `echo x >> ~/.zshrc` | the call (see below) |
 | runs code labkit cannot read | `python3 -c '…'`, `curl … \| sh` | the call |
 | does not parse | | the call |
 
@@ -45,6 +46,14 @@ Reading outside your folder is asked about every time, even after you allowed th
 session: allowing `cat` for the session lets `cat` read files in your folder without a question,
 not `~/.aws/credentials`. An allow rule in your settings that names the program
 (`command(cat:*)`) lets it read anywhere without a question.
+
+Changing files outside your folder is asked about every time, in every mode but
+`bypassPermissions`: allowing `rm` for the session lets `rm -rf build` run, not
+`rm -rf ~/Code/other`, and an allow rule does not lift it. This covers redirects, `tee`, `sed -i`,
+`rm`, `mv`, `cp`, `rsync`, `ln`, `touch`, `mkdir`, `chmod`, `chown`, `curl -o`, `wget -O` and
+`find -delete`. A path labkit cannot read (`rm -rf "$DIR"`, or `xargs rm`, whose paths come from its
+input) counts as outside your folder. Other programs write where their own arguments say
+(`go build -o ~/bin/tool`, a script), and labkit does not see where.
 
 `ssh`, `docker` and `kubectl` are allowed by host or container (`ssh build-box`,
 `docker exec web`): the command they run there is not judged.

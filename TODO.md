@@ -54,10 +54,10 @@ model.
         files needing `acceptEdits`. Session answers apply in `dontAsk` and headless mode. A question
         shows what a `sed` script does, in plain English, and code written in the command in its
         language. To do:
-        - Writes and deletes outside the working folder are not checked: only reads are. Once `rm`
-          is allowed for the session, `rm -rf ~/Code/other` runs without a question, and a redirect
-          to `~/.zshrc` is only "writes a file", which `acceptEdits` allows anywhere (Dan,
-          2026-10-07: next).
+        - Changes outside the working folder (built: writes, `rm`, `mv`, `cp`, `chmod`, `touch`,
+          `curl -o`, `find -delete`, `xargs rm`, and the like) are lifted by nothing but
+          `bypassPermissions`. Not covered: `tar -x -C`, `patch -d`, `git -C <outside>` with a
+          subcommand that writes (asked about as a read), and every program not in `changers`.
         - Jev classifies what the rules cannot decide, from the exo-project skeleton (`01_3`).
         - Models are told to use the write and edit tools instead of `python -c` and heredocs.
         - A here-document's body fed to a shell (`bash <<'EOF'`) is opaque; it could be split as
@@ -66,7 +66,7 @@ model.
           the configuration is read.
         - Measured (`docs/bash-segments.md`, Measuring the policy): over 85,042 commands from
           542 Claude Code, Codex and omp sessions (2026-10-07), 15.4% run without a question when
-          first in their session and 47.6% with every grant offered allowed for its session. The
+          first in their session and 46.8% with every grant offered allowed for its session. The
           questions that offer only the call are mostly reads outside the working folder (27,664:
           paths not written out, sibling projects under `~/Code`, `/tmp` and Claude Code's
           scratchpad), files written (15,784), code read from input (12,367) or written in the

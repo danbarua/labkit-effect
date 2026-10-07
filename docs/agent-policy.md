@@ -106,10 +106,23 @@ programs that run. Each program, its unit, has:
 - its words, from the program on;
 - a grant: what "allow for the rest of the session" names (`git log`, `bun run build`, `npx eslint`,
   `python3 -m pytest`), or none when only the call can be allowed;
-- the files it writes (a redirect to a file, `tee`, `dd of=`, `sort -o`, `git --output`,
-  `find -delete`);
-- the paths outside the working folder that it reads (an absolute path, one through `..` or `~`, or
-  one not written out), for the read-only programs, `sed` and `git -C`;
+- the files it writes inside the working folder (a redirect to a file, `tee`, `dd of=`, `sort -o`,
+  `git --output`, `sed -i`, `find -delete`);
+- the paths outside the working folder that it writes, deletes, moves or changes: the files above
+  when they are outside, and the operands of the programs that change the paths they are given
+  (`rm`, `rmdir`, `unlink`, `shred`, `mv`, `cp`, `install`, `rsync` and `ln` to their destination,
+  `touch`, `mkdir`, `truncate`, `chmod`, `chown`, `chgrp`, `curl -o`, `wget -O`, and what
+  `find <outside> -delete` finds); inside the working folder, those operands are not writes. The
+  paths that `xargs` gives such a program on its input count as outside, since they are not
+  written out;
+- the paths outside the working folder that it reads: the read-only programs' operands, `cp`'s,
+  `install`'s and `rsync`'s sources, `find`'s starting points, `sed`'s files, `git -C`, and a
+  redirect's input (`<`).
+
+A path is outside the working folder when it is absolute (or from `~`) and not inside it, when its
+`..` climb above it, or when it is not written out (`"$DIR"`). Symbolic links are not followed, and
+a `cd` earlier in the command does not move the folder that later paths are judged against (a `cd`
+outside it is itself a read outside it).
 - whether it is opaque: its words do not show what it runs (`python3 -c`, `curl … | sh`, `sudo`,
   `awk`, a variable such as `PATH` set for it), with why;
 - a detail that helps a person judge it: what a `sed` script does, in plain English, or the code
@@ -125,21 +138,28 @@ their grants name the host or the container (`ssh build-box`, `docker exec web`)
 A program runs without a question when an allow rule names it, a read-only prefix names it and it is
 not opaque (`readOnly`: `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `echo`, `grep`, `rg`, `which`, `cd`,
 `git status`, `git log`, `git diff`, `git show`), or the session has allowed its grant and it is not
-opaque. A program that writes files also needs the `acceptEdits` mode. A program that reads outside
-the working folder needs permission unless an allow rule names it (a session grant does not lift it):
-the working folder is the boundary that a trusted folder draws. A command that cannot be split needs
-permission.
+opaque. A program that writes files inside the working folder also needs the `acceptEdits` mode. A
+program that reads outside the working folder needs permission unless an allow rule names it (a
+session grant does not lift it). A program that changes paths outside the working folder needs
+permission in every mode but `bypassPermissions`: neither a session grant, `acceptEdits` nor an
+allow rule lifts it. The working folder is the boundary that a trusted folder draws. A command that
+cannot be split needs permission.
+
+Only the programs named above have their paths judged. A program that writes files where its own
+arguments or configuration say (`make`, `bun run build`, `go build -o ~/bin/x`, a script) is
+judged by its grant alone.
 
 | Command | `default` | `acceptEdits` | `dontAsk` | `bypassPermissions` |
 | --- | --- | --- | --- | --- |
 | every program runs without a question | runs | runs | runs | runs |
-| a program writes files, the others run without a question | asks | runs | vetoed | runs |
+| a program writes files inside the working folder, the others run without a question | asks | runs | vetoed | runs |
 | a program reads outside the working folder | asks | asks | vetoed | runs |
+| a program writes, deletes, moves or changes paths outside the working folder | asks | asks | vetoed | runs |
 | a program needs permission | asks | asks | vetoed | runs |
 | a deny rule or a rejected grant names a program | vetoed | vetoed | vetoed | vetoed |
 
-The question (`Command`) names the command and each program that needs permission, with why; a
-program's first need carries its detail. It
+The question (`Command`) names the command and each program that needs permission, with why and its
+kind (`NeedKind`: what lets it run); a program's first need carries its detail. It
 offers `allow_once` and `reject_once`; and, when every program it asks about is one that is not
 allowed yet and has a grant, `allow_always` and `reject_always` for those grants. Session answers
 apply in every mode: `dontAsk` and print mode are autonomy.

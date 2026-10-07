@@ -105,11 +105,15 @@ Over 85,042 commands from 542 sessions (2026-10-07), in `default` mode:
 
 | | Runs without a question | Asks, with a grant to offer | Asks about the call only | Does not parse |
 | --- | ---: | ---: | ---: | ---: |
-| First in its session | 15.4% | 37.1% | 47.2% | 0.3% |
+| First in its session | 15.4% | 36.1% | 48.2% | 0.3% |
 
-With every grant offered allowed for the rest of its session, 47.6% run without a question. The
+With every grant offered allowed for the rest of its session, 46.8% run without a question. The
 questions that offer only the call are mostly reads outside the working folder (paths not written
-out, sibling projects, `/tmp`), files written, and code read from input or written in the command.
+out, sibling projects, `/tmp`), files written, changes outside the working folder (writes to `/tmp`
+and `$`-paths, `rm`, `cp` and `mkdir` there), and code read from input or written in the command.
+Asking about changes outside the working folder moved 716 commands (0.8%) from running in their
+session to a question: `rm`, `cp` and `mkdir` on `/tmp`, on paths not written out, and on
+`~/.claude`.
 
 ## Tests
 

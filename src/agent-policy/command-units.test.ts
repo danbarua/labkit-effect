@@ -6,7 +6,7 @@ import { segmentsOf } from "../agent-host/command-parser.ts";
 import { ShellCommand, WordText } from "./command-segments.ts";
 import { unitsOf } from "./command-units.ts";
 
-/** Each unit of `command` as `program [grant] writes:… opaque:…`, the program being the unit's first word. */
+/** Each unit of `command` as `program [grant] writes:… changes outside:… opaque:…`, the program being the unit's first word. */
 const units = (command: string): ReadonlyArray<string> => {
   const split = unitsOf(ShellCommand.make(command), segmentsOf);
   if (split._tag === "Unparsed") return [`unparsed: ${split.reason}`];
@@ -15,6 +15,7 @@ const units = (command: string): ReadonlyArray<string> => {
       unit.words.map((word) => word.literal ?? "?").join(" ") || "(no program)",
       unit.grant === undefined ? "[]" : `[${unit.grant.join(" ")}]`,
       ...(unit.writes.length === 0 ? [] : [`writes: ${unit.writes.join(", ")}`]),
+      ...(unit.changesOutside.length === 0 ? [] : [`changes outside: ${unit.changesOutside.map((change) => `${change.verb} ${change.path ?? "(its input)"}`).join(", ")}`]),
       ...(unit.opaque === undefined ? [] : [`opaque: ${unit.opaque}`]),
     ].join(" "),
   );
@@ -45,7 +46,7 @@ test("package scripts and package runners name the script or package; project ru
   expect(units("timeout -s KILL 5 cargo test")).toEqual(["cargo test [cargo test]"]);
   expect(units("env -i X=1 make build")).toEqual(["make build [make build]"]);
   expect(units("nice -n 5 nohup exec rm x")).toEqual(["rm x [rm]"]);
-  expect(units("xargs -0 rm")).toEqual(["rm [rm]"]);
+  expect(units("xargs -0 rm")).toEqual(["rm [rm] changes outside: deletes (its input)"]);
   expect(units("timeout --bogus 5 rm")).toEqual(["timeout --bogus 5 rm [] opaque: it gives timeout options that are not known"]);
 });
 
@@ -86,7 +87,7 @@ test("find's -exec commands are units of their own; -delete, tee, redirects to f
   expect(units("find . -exec rm {} \\;")).toEqual(["find . [find]", "rm {} [rm]"]);
   expect(units("find . -delete")).toEqual(["find . -delete [find] writes: the files that find finds"]);
   expect(units("cat x | tee out.txt")).toEqual(["cat x [cat]", "tee out.txt [tee] writes: out.txt"]);
-  expect(units("git log > ~/.zshrc")).toEqual(["git log [git log]", "(no program) [] writes: ~/.zshrc"]);
+  expect(units("git log > ~/.zshrc")).toEqual(["git log [git log]", "(no program) [] changes outside: writes ~/.zshrc"]);
   expect(units("echo hi > /dev/null 2>&1")).toEqual(["echo hi [echo]"]);
   expect(units("{ git log; } >> log.txt")).toEqual(["git log [git log]", "(no program) [] writes: log.txt"]);
   expect(units("dd if=a of=b")).toEqual(["dd if=a of=b [dd] writes: b"]);
@@ -178,4 +179,58 @@ test("a program reading code from a here-document or here-string shows that code
 test("a sed call carries its explanation, whether it is granted as sed or runs commands", () => {
   expect(details("sed -n '/x/p' f")).toEqual([["sed", { _tag: "Explained", lines: [{ depth: 0, text: "Reads f:" }, { depth: 1, text: "Prints lines matching `x`." }] }]]);
   expect(details("sed 's/x/y/e' f")).toMatchObject([["sed", { _tag: "Explained" }]]);
+});
+
+/** Each unit of `command`, judged in /home/dan/project, as `program` and what it does outside that folder: `changes …`, `reads …`, and its `writes` inside. */
+const touched = (command: string): ReadonlyArray<string> => {
+  const split = unitsOf(ShellCommand.make(command), segmentsOf, { working: WordText.make("/home/dan/project"), home: WordText.make("/home/dan") });
+  if (split._tag === "Unparsed") return [`unparsed: ${split.reason}`];
+  return split.units.map((unit) =>
+    [
+      unit.words[0]?.literal ?? "(no program)",
+      ...unit.changesOutside.map((change) => `${change.verb} ${change.path ?? "(its input)"}`),
+      ...(unit.outside.length === 0 ? [] : [`reads ${unit.outside.join(", ")}`]),
+      ...(unit.writes.length === 0 ? [] : [`writes inside ${unit.writes.join(", ")}`]),
+    ].join(" "),
+  );
+};
+
+test("rm, mv, chmod and the programs like them change each operand; only operands outside the working folder count, and inside it they are not writes", () => {
+  expect(touched("rm -rf build /home/dan/project/tmp")).toEqual(["rm"]);
+  expect(touched("rm -rf ~/Code/other ../sibling")).toEqual(["rm deletes ~/Code/other deletes ../sibling"]);
+  expect(touched('rm -rf "$DIR"')).toEqual(['rm deletes "$DIR"']);
+  expect(touched("mv notes.txt ~/notes.txt")).toEqual(["mv moves ~/notes.txt"]);
+  expect(touched("mv -t /tmp a b")).toEqual(["mv moves /tmp"]);
+  expect(touched("chmod +x ~/bin/tool && chmod 755 run.sh")).toEqual(["chmod changes ~/bin/tool", "chmod"]);
+  expect(touched("chown dan:staff /etc/hosts")).toEqual(["chown changes /etc/hosts"]);
+  expect(touched("touch /tmp/marker && mkdir -p /tmp/out build")).toEqual(["touch writes /tmp/marker", "mkdir writes /tmp/out"]);
+});
+
+test("cp, install and rsync write their last operand or -t's folder and read the others; ln writes the link it makes; curl and wget write the files their options name", () => {
+  expect(touched("cp ~/.ssh/id_rsa .")).toEqual(["cp reads ~/.ssh/id_rsa"]);
+  expect(touched("cp -r src /tmp/backup")).toEqual(["cp writes /tmp/backup"]);
+  expect(touched("cp -t /tmp a b")).toEqual(["cp writes /tmp"]);
+  expect(touched("rsync -av --exclude node_modules src/ ~/backup/")).toEqual(["rsync writes ~/backup/"]);
+  expect(touched("ln -s /etc/hosts hosts && ln -s tool ~/bin/tool")).toEqual(["ln", "ln writes ~/bin/tool"]);
+  expect(touched("curl -o ~/bin/x https://example.com/x && curl https://example.com/a/b")).toEqual(["curl writes ~/bin/x", "curl"]);
+  expect(touched("wget -O /tmp/page.html https://example.com")).toEqual(["wget writes /tmp/page.html"]);
+  expect(touched("curl -s -o /dev/null -w '%{http_code}' https://example.com && cp /dev/null empty.txt")).toEqual(["curl", "cp"]);
+});
+
+test("a redirect, tee or sed -i that writes outside the working folder changes a file there; a redirect's input outside it is read", () => {
+  expect(touched("echo x >> ~/.zshrc && echo y > notes.txt")).toEqual(["echo", "(no program) writes ~/.zshrc", "echo", "(no program) writes inside notes.txt"]);
+  expect(touched("echo hi > /dev/null 2>&1")).toEqual(["echo"]);
+  expect(touched("cat < ~/.aws/credentials")).toEqual(["cat", "(no program) reads ~/.aws/credentials"]);
+  expect(touched("git log | tee /tmp/log.txt")).toEqual(["git", "tee writes /tmp/log.txt"]);
+  expect(touched("sed -i 's/a/b/' ~/.bashrc")).toEqual(["sed writes ~/.bashrc reads ~/.bashrc"]);
+});
+
+test("find reads its starting points, and with -delete deletes what it finds under them; xargs gives a program operands from its input, which count as changes outside", () => {
+  expect(touched("find ~/Code/other -name '*.log'")).toEqual(["find reads ~/Code/other"]);
+  expect(touched("find /tmp/x -name '*.log' -delete")).toEqual(["find deletes /tmp/x"]);
+  expect(touched("find . -name '*.pyc' -delete")).toEqual(["find writes inside the files that find finds"]);
+  expect(touched("find -L src -type f")).toEqual(["find"]);
+  expect(touched("git ls-files -z | xargs -0 rm")).toEqual(["git", "rm deletes (its input)"]);
+  expect(touched("ls | xargs -I{} cp {} /tmp/out")).toEqual(["ls", "cp writes /tmp/out"]);
+  expect(touched("git ls-files | xargs cat")).toEqual(["git", "cat"]);
 });

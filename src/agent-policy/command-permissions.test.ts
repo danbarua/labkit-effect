@@ -8,6 +8,8 @@ import { CallId, type ToolKind, ToolName } from "../agent-machine/names.ts";
 import type { EffectRequest } from "../agent-machine/request.ts";
 import { receivedJson } from "../agent-session/received.ts";
 import { segmentsOf } from "../agent-host/command-parser.ts";
+import { WordText } from "./command-segments.ts";
+import type { Folders } from "./command-units.ts";
 import { PermissionRule } from "./permission-rules.ts";
 import { answerPicking, defaultPermissionSettings, OptionId, type PermissionMode, permissions, type PermissionQuestion, questionIn } from "./permissions.ts";
 
@@ -22,9 +24,12 @@ interface Judged {
 }
 
 /** What the policy does with `command` in `mode`, given the session's `facts` and the rules. */
-const judged = (command: string, options: { mode?: PermissionMode; facts?: ReadonlyArray<Fact>; canAsk?: boolean; allow?: ReadonlyArray<string>; deny?: ReadonlyArray<string>; tool?: string } = {}): Judged => {
+const judged = (
+  command: string,
+  options: { mode?: PermissionMode; facts?: ReadonlyArray<Fact>; canAsk?: boolean; allow?: ReadonlyArray<string>; deny?: ReadonlyArray<string>; tool?: string; folders?: Folders } = {},
+): Judged => {
   const settings = { ...defaultPermissionSettings, allow: (options.allow ?? []).map((rule) => PermissionRule.make(rule)), deny: (options.deny ?? []).map((rule) => PermissionRule.make(rule)) };
-  const policy = permissions(options.mode ?? "default", options.canAsk ?? true, kindOf, options.facts ?? [], { settings, segmentsOf });
+  const policy = permissions(options.mode ?? "default", options.canAsk ?? true, kindOf, options.facts ?? [], { settings, segmentsOf, ...(options.folders === undefined ? {} : { folders: options.folders }) });
   const request = options.tool === undefined ? run(command) : { _tag: "RunTool" as const, call: CallId.make("c1"), tool: ToolName.make(options.tool), input: receivedJson({}) };
   const step = policy.start(request);
   if (step._tag === "Waiting") return { step: "asks", question: step.asks === undefined ? undefined : questionIn(step.asks), reason: undefined, asks: step.asks };
@@ -167,16 +172,50 @@ const needsOf = (command: string) => {
 
 test("a program's first need carries what helps judge it: the code a runtime is given, or what a sed script does; a program allowed by its grant shows nothing", () => {
   expect(needsOf("python3 -c 'print(1)' > out.txt") as unknown).toEqual([
-    { program: "python3 -c 'print(1)'", why: "it runs code written in the command", detail: { _tag: "Code", language: "python", code: "print(1)" } },
-    { program: "a redirect", why: "it writes out.txt" },
+    { program: "python3 -c 'print(1)'", kind: "opaque", why: "it runs code written in the command", detail: { _tag: "Code", language: "python", code: "print(1)" } },
+    { program: "a redirect", kind: "writes", why: "it writes out.txt" },
   ]);
   expect(needsOf("sed -i 's/a/b/' f.txt") as unknown).toEqual([
     {
       program: "sed -i 's/a/b/' f.txt",
+      kind: "notAllowed",
       why: "it is not allowed yet",
       detail: { _tag: "Explained", lines: [{ depth: 0, text: "Edits f.txt in place:" }, { depth: 1, text: "Replaces the first match of `a` with `b`, on every line." }, { depth: 1, text: "Saves every line, after these changes." }] },
     },
-    { program: "sed -i 's/a/b/' f.txt", why: "it writes f.txt" },
+    { program: "sed -i 's/a/b/' f.txt", kind: "writes", why: "it writes f.txt" },
   ]);
   expect(judged("sed -n 1p f", { facts: answered("sed -n 2p f", "allow-session") }).step).toBe("runs");
+});
+
+const project: Folders = { working: WordText.make("/home/dan/project"), home: WordText.make("/home/dan") };
+
+test("after a program is allowed for the session, it runs inside the working folder, and is asked about, with only the call to allow, when it changes paths outside it", () => {
+  const allowed = answered("rm -rf dist", "allow-session");
+  expect(judged("rm -rf build", { facts: allowed, folders: project }).step).toBe("runs");
+  const outside = judged("rm -rf ~/Code/other", { facts: allowed, folders: project });
+  expect(outside.question).toMatchObject({ needs: [{ program: "rm -rf ~/Code/other", kind: "changesOutside", why: "it deletes outside the working folder: ~/Code/other" }], grants: [] });
+  expect(judged('rm -rf "$DIR"', { facts: allowed, folders: project }).question).toMatchObject({ needs: [{ kind: "changesOutside", why: 'it deletes outside the working folder: "$DIR"' }] });
+  expect(judged("git ls-files | xargs rm", { facts: allowed, folders: project }).question).toMatchObject({
+    needs: [{ kind: "notAllowed" }, { program: "rm", kind: "changesOutside", why: "it deletes the paths it reads from its input, which may be outside the working folder" }],
+  });
+});
+
+test("acceptEdits lets a command write files inside the working folder, not outside it; a file that is not a file (/dev/null) is not asked about", () => {
+  expect(judged("echo x >> notes.txt", { mode: "acceptEdits", folders: project }).step).toBe("runs");
+  expect(judged("echo x >> ~/.zshrc", { mode: "acceptEdits", folders: project }).question).toMatchObject({
+    needs: [{ program: "a redirect", kind: "changesOutside", why: "it writes outside the working folder: ~/.zshrc" }],
+  });
+  expect(judged("git status > /dev/null 2>&1", { folders: project }).step).toBe("runs");
+});
+
+test("a command that changes paths outside the working folder is asked about even after cd, and with an allow rule naming the program; bypassPermissions runs it", () => {
+  expect(judged("cd ~/other && rm -rf build", { facts: answered("rm -rf dist", "allow-session"), folders: project }).question).toMatchObject({ needs: [{ program: "cd ~/other", kind: "readsOutside" }] });
+  expect(judged("rm -rf /tmp/build", { allow: ["command(rm:*)"], folders: project }).question).toMatchObject({ needs: [{ kind: "changesOutside" }] });
+  expect(judged("rm -rf ~/Code/other", { mode: "bypassPermissions", folders: project }).step).toBe("runs");
+});
+
+test("when no one can answer, a change outside the working folder is vetoed with a hint that names bypassPermissions, not acceptEdits", () => {
+  expect(judged("echo x >> ~/.zshrc", { mode: "acceptEdits", canAsk: false, folders: project }).reason).toBe(
+    "run_command needs permission, and no one is there to answer: a redirect (it writes outside the working folder: ~/.zshrc). --permission-mode bypassPermissions lets it run.",
+  );
 });

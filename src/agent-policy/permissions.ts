@@ -50,7 +50,7 @@ import type { Fact } from "../agent-machine/fact.ts";
 import { FailureText, ToolKind, ToolName } from "../agent-machine/names.ts";
 import { MediaType, type Received, ReceivedText } from "../agent-machine/received.ts";
 import { type SegmentsOf, ShellCommand, WordText } from "./command-segments.ts";
-import { Detail, type Folders, NeedText, type Unit, unitsOf } from "./command-units.ts";
+import { Detail, type Folders, NeedText, type OutsideChange, type Unit, unitsOf } from "./command-units.ts";
 import { defaultReadOnly, namesProgram, namesTool, type ParsedRule, parseRule, PermissionRule, type ReadOnlyPrefix, readOnlyNames, ruleNamesProgram } from "./permission-rules.ts";
 import type { Policy, PolicyStep } from "./policy.ts";
 
@@ -73,11 +73,28 @@ export const PermissionOption = Schema.Struct({
 export type PermissionOption = typeof PermissionOption.Type;
 
 /**
- * What a command needs before it runs: one of its programs, as written, and why it needs permission.
- * The first need of a program carries what helps the person judge it, when there is any: what a `sed`
+ * Why a program needs permission, and what else lets it run without a question. `bypassPermissions`
+ * lets every kind run except `unseen`.
+ *
+ * | Kind | Why | What else lets it run |
+ * | --- | --- | --- |
+ * | `notAllowed` | it is not allowed yet | an allow rule naming it, a read-only prefix, or its grant allowed for the session |
+ * | `opaque` | its words do not show what it runs | an allow rule naming it |
+ * | `writes` | it writes files inside the working folder | `acceptEdits` |
+ * | `readsOutside` | it reads outside the working folder | an allow rule naming it |
+ * | `changesOutside` | it writes, deletes, moves or changes paths outside the working folder | nothing |
+ * | `unseen` | deny rules cannot see what it runs | nothing |
+ * | `unparsed` | the command does not parse, or the call has no command | nothing |
+ */
+export const NeedKind = Schema.Literals(["notAllowed", "opaque", "writes", "readsOutside", "changesOutside", "unseen", "unparsed"]);
+export type NeedKind = typeof NeedKind.Type;
+
+/**
+ * What a command needs before it runs: one of its programs, as written, why it needs permission (its
+ * kind, and as shown), and, on a program's first need, what helps the person judge it: what a `sed`
  * script does, in plain English, or the code that a runtime or shell is given, in its language.
  */
-export const CommandNeed = Schema.Struct({ program: WordText, why: NeedText, detail: Schema.optionalKey(Detail) });
+export const CommandNeed = Schema.Struct({ program: WordText, kind: NeedKind, why: NeedText, detail: Schema.optionalKey(Detail) });
 export type CommandNeed = typeof CommandNeed.Type;
 
 /** A grant, as a question offers it and an answer records it: the words that a session allows or rejects (`git log`). */
@@ -278,8 +295,10 @@ const commandStep = (
   const unseen: ReadonlyArray<CommandNeed> = !deny.some((rule) => rule.words !== undefined)
     ? []
     : split === undefined || split._tag === "Unparsed"
-      ? [{ program: WordText.make(command ?? "the command"), why: NeedText.make("deny rules cannot see what it runs: it does not parse") }]
-      : units.flatMap((unit) => (unit.words.length > 0 && unit.words[0]?.literal === undefined ? [{ program: programOf(unit), why: NeedText.make("deny rules cannot see what it runs: its program's name is not written out") }] : []));
+      ? [{ program: WordText.make(command ?? "the command"), kind: "unseen", why: NeedText.make("deny rules cannot see what it runs: it does not parse") }]
+      : units.flatMap((unit): ReadonlyArray<CommandNeed> =>
+          unit.words.length > 0 && unit.words[0]?.literal === undefined ? [{ program: programOf(unit), kind: "unseen", why: NeedText.make("deny rules cannot see what it runs: its program's name is not written out") }] : [],
+        );
   if ((allow.some((rule) => rule.words === undefined) || mode === "bypassPermissions") && unseen.length === 0) return proceed;
   if (mode === "bypassPermissions" || allow.some((rule) => rule.words === undefined)) return asked(unseen, [], tool, kind, mode, canAsk, command);
   const allowed = (unit: Unit): boolean => {
@@ -288,28 +307,40 @@ const commandStep = (
     const grant = unit.grant;
     return judging.settings.readOnly.some((prefix) => readOnlyNames(prefix, unit)) || (grant !== undefined && session.allowed.some((each) => sameGrant(each, grant)));
   };
-  const notYet = NeedText.make("it is not allowed yet");
   const needs: ReadonlyArray<CommandNeed> =
     split === undefined || split._tag === "Unparsed"
-      ? [{ program: WordText.make(command ?? "the command"), why: NeedText.make(split?._tag === "Unparsed" ? `it does not parse: ${split.reason}` : "the call's input has no command") }]
+      ? [{ program: WordText.make(command ?? "the command"), kind: "unparsed", why: NeedText.make(split?._tag === "Unparsed" ? `it does not parse: ${split.reason}` : "the call's input has no command") }]
       : units.flatMap((unit) => {
+          const program = programOf(unit);
           const own: ReadonlyArray<CommandNeed> = [
-            ...(allowed(unit) ? [] : [{ program: programOf(unit), why: unit.opaque ?? notYet }]),
-            ...(unit.writes.length === 0 || mode === "acceptEdits" ? [] : [{ program: programOf(unit), why: NeedText.make(`it writes ${listed(unit.writes)}`) }]),
+            ...(allowed(unit) ? [] : [unit.opaque === undefined ? { program, kind: "notAllowed" as const, why: NeedText.make("it is not allowed yet") } : { program, kind: "opaque" as const, why: unit.opaque }]),
+            ...(unit.writes.length === 0 || mode === "acceptEdits" ? [] : [{ program, kind: "writes" as const, why: NeedText.make(`it writes ${listed(unit.writes)}`) }]),
             // Reading outside the working folder is lifted only by an allow rule that names the program.
             ...(unit.outside.length === 0 || allow.some((rule) => ruleNamesProgram(rule, unit, false))
               ? []
-              : [{ program: programOf(unit), why: NeedText.make(`it reads outside the working folder: ${listed(unit.outside)}`) }]),
+              : [{ program, kind: "readsOutside" as const, why: NeedText.make(`it reads outside the working folder: ${listed(unit.outside)}`) }]),
+            // Changing paths outside the working folder is lifted by nothing but bypassPermissions.
+            ...changesOutsideNeeds(program, unit.changesOutside),
           ];
           const [first, ...rest] = own;
           return first === undefined || unit.detail === undefined ? own : [{ ...first, detail: unit.detail }, ...rest];
         });
   if (needs.length === 0) return proceed;
   const needing = units.filter((unit) => !allowed(unit));
-  const grantable = needs.every((each) => each.why === notYet) && needing.every((unit) => unit.grant !== undefined);
+  const grantable = needs.every((each) => each.kind === "notAllowed") && needing.every((unit) => unit.grant !== undefined);
   const grants = grantable ? needing.flatMap((unit) => (unit.grant === undefined ? [] : [unit.grant])).filter((grant, at, all) => all.findIndex((other) => sameGrant(other, grant)) === at) : [];
   return asked(needs, grants, tool, kind, mode, canAsk, command);
 };
+
+/** The needs of `program` for the paths outside the working folder that it changes, one for each way it changes them. */
+const changesOutsideNeeds = (program: WordText, changes: ReadonlyArray<OutsideChange>): ReadonlyArray<CommandNeed> =>
+  [...new Set(changes.map((change) => change.verb))].map((verb) => {
+    const paths = changes.flatMap((change) => (change.verb === verb && change.path !== undefined ? [change.path] : []));
+    const fed = changes.some((change) => change.verb === verb && change.path === undefined);
+    const named = paths.length === 0 ? [] : [`it ${verb} outside the working folder: ${listed(paths)}`];
+    const input = fed ? [`it ${verb} the paths it reads from its input, which may be outside the working folder`] : [];
+    return { program, kind: "changesOutside", why: NeedText.make([...named, ...input].join("; ")) };
+  });
 
 /** Asks about `needs`, offering `grants` for the session; or vetoes, naming them, in `dontAsk` mode or when no one can answer. */
 const asked = (
@@ -324,8 +355,8 @@ const asked = (
   const described = listed(needs.map((each) => WordText.make(`${each.program} (${each.why})`)));
   if (mode === "dontAsk") return veto(`${tool} needs permission, and the permission mode is dontAsk: ${described}.`);
   if (!canAsk) {
-    const onlyWrites = needs.every((each) => each.why.startsWith("it writes "));
-    const unseen = needs.some((each) => each.why.startsWith("deny rules cannot see"));
+    const onlyWrites = needs.every((each) => each.kind === "writes");
+    const unseen = needs.some((each) => each.kind === "unseen");
     const hint = unseen ? "Write the command out, so that the deny rules can see what it runs." : `--permission-mode ${onlyWrites ? "acceptEdits or bypassPermissions" : "bypassPermissions"} lets it run.`;
     return veto(`${tool} needs permission, and no one is there to answer: ${described}. ${hint}`);
   }

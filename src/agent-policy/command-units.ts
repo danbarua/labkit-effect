@@ -35,8 +35,17 @@
  *
  * A unit also lists the files written by its redirects (`>`, `>>`, `>|`, `&>`, `&>>`, `<>`, and
  * `>&` to a name), and by `tee`, `dd of=`, `sort -o`, `git --output` and `find -delete`.
- * `/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/tty` and file descriptors are not files; a target
+ * `/dev/null`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, `/dev/tty` and file descriptors are not files; a target
  * that is not a literal word is a file all the same.
+ *
+ * Paths are judged against the working folder (`Folders`). A file written outside it is not one of
+ * the unit's writes but one of its changes outside, as are the paths outside it that a program in
+ * `changers` deletes, moves, writes or changes (`rm`, `mv`, `cp`'s destination, `chmod`, `touch`,
+ * `curl -o`). Inside the working folder, those programs' operands are not writes: `rm build` needs
+ * only `rm` to be allowed. Paths that `xargs` gives such a program on its input are not written out,
+ * so they count as changes outside. A unit lists the paths outside the working folder that it reads:
+ * the read-only programs' operands, `cp`'s sources, `find`'s starting points, `sed`'s files, `git -C`,
+ * and a redirect's input (`<`). Symbolic links are not followed.
  *
  * Setting a variable that chooses which programs or code run (`PATH`, `LD_*`, `DYLD_*`, `GIT_*`,
  * `BASH_ENV`, `NODE_OPTIONS`, …) for a command, with `env`, or with `export`, makes its unit opaque.
@@ -67,14 +76,25 @@ export const Detail = Schema.Union([
 ]);
 export type Detail = typeof Detail.Type;
 
+/** What a program does to a path outside the working folder: writes a file there, deletes it, moves it, or changes its permissions or owner. */
+export type ChangeVerb = "writes" | "deletes" | "moves" | "changes";
+
+/** A path outside the working folder that a program changes, as written, and how; `path` is undefined for the paths a program is given on its input (`xargs rm`). */
+export interface OutsideChange {
+  readonly verb: ChangeVerb;
+  readonly path: WordText | undefined;
+}
+
 /** A program that a command runs, after the programs around it that only run it. */
 export interface Unit {
   /** Its words from the program on, as the command writes them. Empty for a segment that runs no program but writes a file. */
   readonly words: ReadonlyArray<Word>;
   /** What "allow for the rest of the session" names; undefined when only the one call can be allowed. */
   readonly grant: ReadonlyArray<WordText> | undefined;
-  /** The files it writes, as written. */
+  /** The files it writes inside the working folder, as written. */
   readonly writes: ReadonlyArray<WordText>;
+  /** The paths outside the working folder that it writes, deletes, moves or changes: absolute, through `..` or `~`, not written out, or given on its input. */
+  readonly changesOutside: ReadonlyArray<OutsideChange>;
   /** Why its words do not show what it runs; undefined when they do. */
   readonly opaque: NeedText | undefined;
   /** The paths it reads outside the working folder, as written: absolute, through `..` or `~`, or not written out. */
@@ -103,14 +123,41 @@ const isOption = (word: Word | undefined): boolean => (word?.literal ?? word?.te
 const is = (word: Word | undefined, ...values: ReadonlyArray<Name>): boolean => word?.literal !== undefined && values.includes(word.literal);
 const present = <A>(value: A | undefined): ReadonlyArray<A> => (value === undefined ? [] : [value]);
 
-const unit = (
-  words: ReadonlyArray<Word>,
-  grant: ReadonlyArray<WordText> | undefined,
-  writes: ReadonlyArray<WordText> = [],
-  outside: ReadonlyArray<WordText> = [],
-  detail?: Detail,
-): Unit => ({ words, grant, writes, opaque: undefined, outside, detail });
-const opaque = (words: ReadonlyArray<Word>, why: NeedText, detail?: Detail): Unit => ({ words, grant: undefined, writes: [], opaque: why, outside: [], detail });
+const textOf = (word: Word): WordText => word.literal ?? word.text;
+const literalWord = (text: Name): Word => ({ text: WordText.make(text), literal: WordText.make(text) });
+
+/** What a unit does to files, before its paths are judged against the working folder (`folders`). */
+interface Touches {
+  readonly folders?: Folders | undefined;
+  /** The files it writes: those inside the working folder are its writes, the others its changes outside. */
+  readonly writes?: ReadonlyArray<Word>;
+  /** The paths it deletes, moves, writes or changes as a program in `changers`: only those outside the working folder count. */
+  readonly changes?: ReadonlyArray<{ readonly verb: ChangeVerb; readonly word: Word }>;
+  /** What it does to the paths it is given on its input (`xargs rm`), when it changes them. */
+  readonly fed?: ChangeVerb | undefined;
+  /** The paths outside the working folder that it reads, as written. */
+  readonly reads?: ReadonlyArray<WordText>;
+  readonly detail?: Detail;
+}
+
+const unit = (words: ReadonlyArray<Word>, grant: ReadonlyArray<WordText> | undefined, touches: Touches = {}): Unit => {
+  const written = touches.writes ?? [];
+  const outside = (word: Word): boolean => escapes(word, touches.folders);
+  return {
+    words,
+    grant,
+    writes: written.filter((word) => !outside(word)).map(textOf),
+    changesOutside: [
+      ...written.filter(outside).map((word): OutsideChange => ({ verb: "writes", path: textOf(word) })),
+      ...(touches.changes ?? []).filter((change) => outside(change.word)).map((change): OutsideChange => ({ verb: change.verb, path: textOf(change.word) })),
+      ...(touches.fed === undefined ? [] : [{ verb: touches.fed, path: undefined }]),
+    ],
+    opaque: undefined,
+    outside: touches.reads ?? [],
+    detail: touches.detail,
+  };
+};
+const opaque = (words: ReadonlyArray<Word>, why: NeedText, detail?: Detail): Unit => ({ words, grant: undefined, writes: [], changesOutside: [], opaque: why, outside: [], detail });
 
 /** The code `code` in `language`, as a detail, without the line break that ends a here-document; undefined when there is no code to show. */
 const codeOf = (language: CodeLanguage, code: WordText | undefined): Detail | undefined => {
@@ -292,18 +339,16 @@ const denoCode = (rest: ReadonlyArray<Word>): WordText | undefined => literalOf(
 
 // —— Files written ——
 
-const notFiles = named("/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty");
+const notFiles = named("/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/dev/tty");
 
-/** Returns the file that `target` names, as written; undefined when it names no file. */
-const fileOf = (target: Word | undefined): WordText | undefined => {
-  if (target === undefined) return undefined;
-  const value = target.literal;
-  if (value === undefined) return target.text;
-  return notFiles.has(value) || value.startsWith("/dev/fd/") ? undefined : value;
+/** Returns `target` when it names a file; undefined when it names none (`/dev/null`, a file descriptor). */
+const fileOf = (target: Word | undefined): Word | undefined => {
+  const value = target?.literal;
+  return value !== undefined && (notFiles.has(value) || value.startsWith("/dev/fd/")) ? undefined : target;
 };
 
 /** The files that `segment`'s redirects write. */
-const redirectWrites = (segment: Segment): ReadonlyArray<WordText> =>
+const redirectWrites = (segment: Segment): ReadonlyArray<Word> =>
   segment.redirects.flatMap((redirect) => {
     if (redirect.op === ">&") {
       const value = redirect.target?.literal;
@@ -313,20 +358,106 @@ const redirectWrites = (segment: Segment): ReadonlyArray<WordText> =>
   });
 
 /** The files a program writes through its own options and arguments: `tee`, `dd of=`, `sort -o`, `git --output`. */
-const ownWrites = (base: WordText, words: ReadonlyArray<Word>): ReadonlyArray<WordText> => {
+const ownWrites = (base: WordText, words: ReadonlyArray<Word>): ReadonlyArray<Word> => {
   const args = words.slice(1);
-  if (base === WordText.make("tee")) return args.filter((word) => !isOption(word)).map((word) => word.literal ?? word.text);
-  if (base === WordText.make("dd")) return args.flatMap((word) => (word.literal?.startsWith("of=") === true ? [WordText.make(word.literal.slice(3))] : []));
-  const valued = (short: Name | undefined, long: Name) =>
+  if (base === WordText.make("tee")) return args.filter((word) => !isOption(word));
+  if (base === WordText.make("dd")) return args.flatMap((word) => (word.literal?.startsWith("of=") === true ? [literalWord(word.literal.slice(3))] : []));
+  const valued = (short: Name | undefined, long: Name): ReadonlyArray<Word> =>
     args.flatMap((word, at) => {
       const value = word.literal;
       if (value === undefined) return [];
-      if (value === short || value === long) return present(args[at + 1]).map((file) => file.literal ?? file.text);
-      return value.startsWith(`${long}=`) ? [WordText.make(value.slice(long.length + 1))] : [];
+      if (value === short || value === long) return present(args[at + 1]);
+      return value.startsWith(`${long}=`) ? [literalWord(value.slice(long.length + 1))] : [];
     });
   if (base === WordText.make("sort")) return valued("-o", "--output");
   if (base === WordText.make("git")) return valued(undefined, "--output");
   return [];
+};
+
+// —— Paths changed ——
+
+/**
+ * A program that changes the paths it is given: what it does to them, its options that take a value,
+ * its leading operands that are not paths (`chmod`'s mode, `chown`'s owner), which operands it
+ * changes, and its options whose value is a path it changes (`-t DIR`, `curl -o FILE`).
+ *
+ * `every`: each operand is changed. `last`: given two operands or more and no output option, the last
+ * one is changed; the others, and every operand when an output option names the destination, are
+ * read (`cp`) or not used (`ln`'s targets). `none`: its operands are not paths (`curl`'s URLs).
+ */
+interface Changer {
+  readonly verb: ChangeVerb;
+  readonly valued: ReadonlySet<WordText>;
+  readonly skip: number;
+  readonly operands: "every" | "last" | "none";
+  readonly othersRead: boolean;
+  readonly outputs: ReadonlySet<WordText>;
+}
+
+const changer = (verb: ChangeVerb, operands: Changer["operands"], options: Partial<Omit<Changer, "verb" | "operands">> = {}): Changer => ({
+  verb,
+  operands,
+  valued: options.valued ?? named(),
+  skip: options.skip ?? 0,
+  othersRead: options.othersRead ?? false,
+  outputs: options.outputs ?? named(),
+});
+const targetDirectory = named("-t", "--target-directory");
+
+const changers: ReadonlyMap<WordText, Changer> = new Map([
+  [WordText.make("rm"), changer("deletes", "every")],
+  [WordText.make("rmdir"), changer("deletes", "every")],
+  [WordText.make("unlink"), changer("deletes", "every")],
+  [WordText.make("shred"), changer("deletes", "every", { valued: named("-n", "--iterations", "-s", "--size", "--random-source") })],
+  [WordText.make("mv"), changer("moves", "every", { valued: named("-S", "--suffix"), outputs: targetDirectory })],
+  [WordText.make("cp"), changer("writes", "last", { valued: named("-S", "--suffix"), othersRead: true, outputs: targetDirectory })],
+  [WordText.make("install"), changer("writes", "last", { valued: named("-m", "--mode", "-o", "--owner", "-g", "--group", "-S", "--suffix"), othersRead: true, outputs: targetDirectory })],
+  [WordText.make("ln"), changer("writes", "last", { valued: named("-S", "--suffix"), outputs: targetDirectory })],
+  [
+    WordText.make("rsync"),
+    changer("writes", "last", {
+      valued: named("-e", "--rsh", "--rsync-path", "-f", "--filter", "--exclude", "--include", "--exclude-from", "--include-from", "--files-from", "-T", "--temp-dir", "--partial-dir", "--backup-dir", "--log-file", "--password-file", "--compare-dest", "--copy-dest", "--link-dest", "--chmod", "--chown", "--max-size", "--min-size", "--bwlimit", "--timeout", "--port", "--suffix", "-M", "--remote-option"),
+      othersRead: true,
+    }),
+  ],
+  [WordText.make("touch"), changer("writes", "every", { valued: named("-r", "--reference", "-d", "--date", "-t") })],
+  [WordText.make("mkdir"), changer("writes", "every", { valued: named("-m", "--mode") })],
+  [WordText.make("truncate"), changer("writes", "every", { valued: named("-s", "--size", "-r", "--reference") })],
+  [WordText.make("chmod"), changer("changes", "every", { skip: 1 })],
+  [WordText.make("chown"), changer("changes", "every", { skip: 1 })],
+  [WordText.make("chgrp"), changer("changes", "every", { skip: 1 })],
+  [WordText.make("curl"), changer("writes", "none", { outputs: named("-o", "--output", "--output-dir") })],
+  [WordText.make("wget"), changer("writes", "none", { outputs: named("-O", "--output-document", "-P", "--directory-prefix", "-o", "--output-file", "-a", "--append-output") })],
+]);
+
+/** What a program in `changers` changes and reads, from its words; `fed` when `xargs` gives it more operands on its input. Undefined for any other program. */
+const changesOf = (base: WordText, words: ReadonlyArray<Word>, fed: boolean): Pick<Touches, "changes" | "fed"> & { readonly reads: ReadonlyArray<Word> } | undefined => {
+  const known = changers.get(base);
+  if (known === undefined) return undefined;
+  const scan = (rest: ReadonlyArray<Word>, operands: ReadonlyArray<Word>, outputs: ReadonlyArray<Word>, ended: boolean): { readonly operands: ReadonlyArray<Word>; readonly outputs: ReadonlyArray<Word> } => {
+    const [next, ...after] = rest;
+    if (next === undefined) return { operands, outputs };
+    const option = next.literal;
+    if (ended || !isOption(next)) return scan(after, [...operands, next], outputs, ended);
+    if (option === WordText.make("--")) return scan(after, operands, outputs, true);
+    if (option !== undefined && known.outputs.has(option)) return scan(after.slice(1), operands, [...outputs, ...present(after[0])], false);
+    if (option !== undefined && known.valued.has(option)) return scan(after.slice(1), operands, outputs, false);
+    const attached = option === undefined ? null : /^(--[^=]+)=(.*)$/.exec(option);
+    if (attached?.[1] !== undefined && known.outputs.has(WordText.make(attached[1]))) return scan(after, operands, [...outputs, literalWord(attached[2] ?? "")], false);
+    return scan(after, operands, outputs, false);
+  };
+  const { operands, outputs } = scan(words.slice(1), [], [], false);
+  const byReference = words.some((word) => word.literal?.startsWith("--reference") === true);
+  const paths = operands.slice(byReference ? 0 : known.skip);
+  const destination = known.operands === "last" && outputs.length === 0 && paths.length >= 2 ? paths.slice(-1) : [];
+  const changed = known.operands === "every" ? paths : destination;
+  const others = known.operands === "last" ? paths.slice(0, paths.length - destination.length) : [];
+  const files = (words: ReadonlyArray<Word>): ReadonlyArray<Word> => words.flatMap((word) => present(fileOf(word)));
+  return {
+    changes: files([...changed, ...outputs]).map((word) => ({ verb: known.verb, word })),
+    fed: fed && known.operands === "every" ? known.verb : undefined,
+    reads: known.othersRead ? files(others) : [],
+  };
 };
 
 // —— Paths outside the working folder ——
@@ -467,13 +598,12 @@ const sedUnits = (words: ReadonlyArray<Word>, folders: Folders | undefined): Rea
   if (known.some((each) => each.executes)) return [opaque(words, need("sed's script runs commands (e)"), explained)];
   const named = known.flatMap((each) => each.reads).map((file) => ({ text: WordText.make(file), literal: WordText.make(file) }));
   return [
-    unit(
-      words,
-      [WordText.make("sed")],
-      [...known.flatMap((each) => each.writes).map((file) => WordText.make(file)), ...(read.inPlace ? operands.map((word) => word.literal ?? word.text) : [])],
-      [...operands, ...named].filter((word) => escapes(word, folders)).map((word) => word.text),
-      explained,
-    ),
+    unit(words, [WordText.make("sed")], {
+      folders,
+      writes: [...known.flatMap((each) => each.writes).map(literalWord), ...(read.inPlace ? operands : [])],
+      reads: [...operands, ...named].filter((word) => escapes(word, folders)).map((word) => word.text),
+      detail: explained,
+    }),
   ];
 };
 
@@ -486,6 +616,8 @@ interface Seen {
   readonly fedText: boolean;
   /** That text, as written, when the command has it. */
   readonly fedBody: WordText | undefined;
+  /** Whether `xargs` gives the program more operands, read from its input. */
+  readonly fedArgs: boolean;
   readonly folders: Folders | undefined;
 }
 
@@ -563,7 +695,7 @@ const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> =>
     const normal = gitWords(words);
     if (typeof normal === "string") return [opaque(words, normal)];
     const running = gitRunning(normal);
-    return running === undefined ? [unit(normal, grantOf(normal), ownWrites(base, normal), gitOutside(words, normal, seen.folders))] : [opaque(normal, running)];
+    return running === undefined ? [unit(normal, grantOf(normal), { folders: seen.folders, writes: ownWrites(base, normal), reads: gitOutside(words, normal, seen.folders) })] : [opaque(normal, running)];
   }
   if (base === WordText.make("trap")) {
     const past = rest.filter((word, at) => !(at === 0 && is(word, "-p", "-l", "--")));
@@ -587,7 +719,9 @@ const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> =>
   if (runtime !== undefined) return runtimeUnits(words, runtime.inline, runtime.language, seen);
   const exported = declaring.has(base) ? steeringNeed(rest.flatMap((word) => present(word.literal).filter((value) => value.includes("=")))) : undefined;
   if (exported !== undefined) return [opaque(words, exported)];
-  return [unit(words, grantOf(words), ownWrites(base, words), outsideOf(base, words, seen.folders))];
+  const changed = changesOf(base, words, seen.fedArgs);
+  const reads = [...outsideOf(base, words, seen.folders), ...(changed?.reads ?? []).filter((word) => escapes(word, seen.folders)).map(textOf)];
+  return [unit(words, grantOf(words), { folders: seen.folders, writes: ownWrites(base, words), changes: changed?.changes ?? [], fed: changed?.fed, reads })];
 };
 
 /** A wrapper's units: the program it runs, or the wrapper alone when it runs none. */
@@ -598,7 +732,7 @@ const wrapped = (base: WordText, options: WrapperOptions, words: ReadonlyArray<W
   const steered = steeringNeed(assignments.map((word) => word.literal ?? word.text));
   if (steered !== undefined) return [opaque(words, steered)];
   const inner = past.slice(assignments.length);
-  if (inner.length !== 0) return resolve(inner, base === WordText.make("xargs") ? { ...seen, fedText: false, fedBody: undefined } : seen);
+  if (inner.length !== 0) return resolve(inner, base === WordText.make("xargs") ? { ...seen, fedText: false, fedBody: undefined, fedArgs: true } : seen);
   return base === WordText.make("xargs") ? resolve([{ text: WordText.make("echo"), literal: WordText.make("echo") }], seen) : [unit(words, grantOf(words))];
 };
 
@@ -653,30 +787,55 @@ const execOptions = named("-exec", "-execdir", "-ok", "-okdir");
 const fileOptions = named("-fprint", "-fprint0", "-fprintf", "-fls");
 
 /** `find`, and each command its `-exec`-style options run, each a unit. */
+const findLeading = named("-H", "-L", "-P");
+const findExpression = named("(", ")", "!", ",");
+
+/** `find`'s starting points: the operands before its expression, past `-H`, `-L`, `-P`, `-D` and `-O`. */
+const findStarts = (rest: ReadonlyArray<Word>): ReadonlyArray<Word> => {
+  const [next, ...after] = rest;
+  if (next === undefined) return [];
+  const option = next.literal;
+  if (option !== undefined && findLeading.has(option)) return findStarts(after);
+  if (is(next, "-D")) return findStarts(after.slice(1));
+  if (option !== undefined && /^-O\d*$/.test(option)) return findStarts(after);
+  const end = rest.findIndex((word) => isOption(word) || (word.literal !== undefined && findExpression.has(word.literal)));
+  return end === -1 ? rest : rest.slice(0, end);
+};
+
+/**
+ * `find`'s units: `find` itself, and each program its `-exec`, `-execdir`, `-ok` and `-okdir` run.
+ * `find` reads its starting points; with `-delete` it deletes what it finds under them, and writes the
+ * files its `-fprint` options name.
+ */
 const findUnits = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> => {
-  const scan = (remaining: ReadonlyArray<Word>, own: ReadonlyArray<Word>, inner: ReadonlyArray<Unit>, writes: ReadonlyArray<WordText>): ReadonlyArray<Unit> => {
+  const outsideStarts = findStarts(words.slice(1)).filter((word) => escapes(word, seen.folders));
+  const scan = (remaining: ReadonlyArray<Word>, own: ReadonlyArray<Word>, inner: ReadonlyArray<Unit>, writes: ReadonlyArray<Word>, deletes: boolean): ReadonlyArray<Unit> => {
     const [next, ...after] = remaining;
-    if (next === undefined) return [unit(own, grantOf(own), writes), ...inner];
+    if (next === undefined) {
+      const changes = deletes ? outsideStarts.map((word) => ({ verb: "deletes" as const, word })) : [];
+      return [unit(own, grantOf(own), { folders: seen.folders, writes, changes, reads: deletes ? [] : outsideStarts.map(textOf) }), ...inner];
+    }
     const option = next.literal;
     if (option !== undefined && execOptions.has(option)) {
       const end = after.findIndex((word) => is(word, ";", "+"));
       if (end === -1) return [opaque(words, need(`find ${option} has no end (; or +)`))];
-      return scan(after.slice(end + 1), own, [...inner, ...resolve(after.slice(0, end), { ...seen, fedText: false, fedBody: undefined })], writes);
+      return scan(after.slice(end + 1), own, [...inner, ...resolve(after.slice(0, end), { ...seen, fedText: false, fedBody: undefined, fedArgs: false })], writes, deletes);
     }
-    if (option === WordText.make("-delete")) return scan(after, [...own, next], inner, [...writes, WordText.make("the files that find finds")]);
+    if (option === WordText.make("-delete")) return scan(after, [...own, next], inner, outsideStarts.length === 0 ? [...writes, literalWord("the files that find finds")] : writes, true);
     if (option !== undefined && fileOptions.has(option)) {
       const file = after[0];
-      return scan(after.slice(1), [...own, next, ...present(file)], inner, [...writes, ...present(file).map((each) => each.literal ?? each.text)]);
+      return scan(after.slice(1), [...own, next, ...present(file)], inner, [...writes, ...present(file)], deletes);
     }
-    return scan(after, [...own, next], inner, writes);
+    return scan(after, [...own, next], inner, writes, deletes);
   };
-  return scan(words.slice(1), words.slice(0, 1), [], []);
+  return scan(words.slice(1), words.slice(0, 1), [], [], false);
 };
 
 /** Returns the units of `segment`. A call to a function in `functions` is not a unit. */
 const segmentUnits = (segment: Segment, functions: ReadonlySet<WordText>, seen: Seen): ReadonlyArray<Unit> => {
   const writes = redirectWrites(segment);
-  const written = writes.length === 0 ? [] : [unit([], undefined, writes)];
+  const reads = segment.redirects.flatMap((redirect) => (redirect.op === "<" ? present(fileOf(redirect.target)) : [])).filter((word) => escapes(word, seen.folders));
+  const written = writes.length === 0 && reads.length === 0 ? [] : [unit([], undefined, { folders: seen.folders, writes, reads: reads.map(textOf) })];
   if (segment.kind !== "simple") return written;
   const steered = steeringNeed(segment.assignments);
   if (steered !== undefined) return [opaque(segment.words, steered), ...written];
@@ -690,7 +849,7 @@ const unitsAt = (command: ShellCommand, segmentsOf: SegmentsOf, depth: number, f
   const split = segmentsOf(command);
   if (split._tag === "Unparsed") return split;
   const functions = new Set(split.segments.flatMap((segment) => (segment.kind === "function_definition" ? present(segment.words[0]?.literal) : [])));
-  return { _tag: "Units", units: split.segments.flatMap((segment) => segmentUnits(segment, functions, { segmentsOf, depth, fedText: false, fedBody: undefined, folders })) };
+  return { _tag: "Units", units: split.segments.flatMap((segment) => segmentUnits(segment, functions, { segmentsOf, depth, fedText: false, fedBody: undefined, fedArgs: false, folders })) };
 };
 
 /** Returns the units of `command`, split by `segmentsOf`, with the paths they read judged against `folders`. */

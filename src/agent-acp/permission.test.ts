@@ -81,7 +81,7 @@ test("a question about a command adds to the call's content a text block naming 
     kind: "execute",
     options: [],
     command: ShellCommand.make("git log; rm -rf build"),
-    needs: [{ program: WordText.make("rm -rf build"), why: NeedText.make("it is not allowed yet") }],
+    needs: [{ program: WordText.make("rm -rf build"), kind: "notAllowed", why: NeedText.make("it is not allowed yet") }],
     grants: [],
   };
   const presented = { title: "Clean the build", kind: "execute" as const, content: [{ type: "terminal" as const, terminalId: TerminalId.make("t1") }] };
@@ -100,9 +100,10 @@ test("a need's detail is Markdown indented under its item: code in a fence that 
     options: [],
     command: ShellCommand.make("python3 -c 'print(1)'; sed -n /x/p f"),
     needs: [
-      { program: WordText.make("python3 -c print(1)"), why: NeedText.make("it runs code written in the command"), detail: { _tag: "Code", language: "python", code: CodeText.make("import sys\nprint(1)") } },
+      { program: WordText.make("python3 -c print(1)"), kind: "opaque", why: NeedText.make("it runs code written in the command"), detail: { _tag: "Code", language: "python", code: CodeText.make("import sys\nprint(1)") } },
       {
         program: WordText.make("sed -n /x/p f"),
+        kind: "notAllowed",
         why: NeedText.make("it is not allowed yet"),
         detail: { _tag: "Explained", lines: [{ depth: 0, text: Explanation.make("Reads f:") }, { depth: 1, text: Explanation.make("Prints lines matching `x`.") }] },
       },
