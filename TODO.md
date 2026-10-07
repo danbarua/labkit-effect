@@ -100,17 +100,24 @@ model.
       - The ACP host's command tool, `terminal_command`, runs in the editor's terminal
         (`terminal/create`), with the environment the editor gives it.
       - Later (Dan, 2026-10-07):
-        - git as the record of what agents change in files, rather than the session's facts: a
-          snapshot commit before each change, in a repository of the agent's own (Gemini CLI's
-          checkpointing: `~/.gemini/history/<project hash>`, and `/restore`), so a past call's diff
-          is a diff between two commits and a session records only their ids.
-        - Marking commits an agent authored (`<session>@labkit`), with git notes or a commit
-          trailer, so that notifications can be filtered: not telling an agent about its own
-          comment or pull request, telling it about a push to its pull request's branch by someone
-          else. Notes are not pushed or fetched unless asked for (`refs/notes/*`), and GitHub's
-          webhook payloads do not carry them; a push event does carry each commit's message, and so
-          its trailers. Comments and pull requests are not commits: the agent would record the id of
-          each it makes.
+        - git as the record of what agents change in files, rather than the session's facts (Dan,
+          2026-10-07): a snapshot commit after each tool call, in a repository of the harness's own,
+          so that it works in a folder that is not a git repository (Gemini CLI's checkpointing:
+          `~/.gemini/history/<project hash>`, and `/restore`). A past call's diff is a diff between
+          two commits, and a session records only their ids. It gives `/undo` and `/rewind`, and,
+          git being a content-addressed tree, a way to fork and branch sessions with their files
+          (Forks, under Sessions). Open: how much it grows, against the session's facts.
+        - The harness as the broker between agents and the environment (Dan, 2026-10-07). A
+          `git push` run in a terminal and a `git_push` tool are the same request, and the harness
+          decides whether (permissions) and how (the tool runner) it happens, so it can add to it:
+          a git note naming the session (`<session>@labkit`) on each commit an agent made, pushed
+          with the commits (`refs/notes/*`, which git does not push by itself). With its own record
+          of which agent committed, pushed, opened a pull request or commented, it can match
+          GitHub's webhooks to agents: not telling an agent about its own comment or pull request,
+          telling it about a push by someone else to its pull request's branch. What is built today
+          outside it (MCP servers, a webhook peer, a daemon compiling digests) becomes the harness's,
+          and agents see only timely, relevant notifications. A commit trailer naming a Claude Code
+          cloud session is no use for this: only Anthropic can resolve it to a local session.
         - A command whose effect is an edit to a file (`cat > f <<'EOF'`, `sed -i`) dispatched to
           the edit tools, so that it goes through what they check and report: refusing an edit to
           text that was not read, or to a file changed since it was read, and the editor's record of
