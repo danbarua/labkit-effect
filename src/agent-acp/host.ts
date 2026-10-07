@@ -607,7 +607,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const blobs = BlobsInFolder(join(sessionFolderOf(options.directory, id), "blobs"));
               // The configuration's seam lists, with permission following the session's mode (`FromHost.permissionMode`). Its tool
               // sources are not used: the session's tools are the world's and its MCP servers'.
-              const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(parent.configuration, { canAsk: true, permissionMode: Ref.get(permissionMode) });
+              const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(parent.configuration, { canAsk: true, permissionMode: Ref.get(permissionMode), workingFolder: parent.cwd });
               const runner = SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, world.sources)));
               // The model is told of the session's MCP servers that are not running (`McpServers.notices`).
               const notices = Layer.mergeAll(

@@ -68,6 +68,12 @@ export interface Unit {
 
 export type Units = { readonly _tag: "Units"; readonly units: ReadonlyArray<Unit> } | { readonly _tag: "Unparsed"; readonly reason: UnparsedReason };
 
+/** The folders that paths are judged against: the working folder, and the home folder that `~` names; both absolute. */
+export interface Folders {
+  readonly working: WordText;
+  readonly home: WordText;
+}
+
 /** How many levels of written-out shell code (`bash -c '…'` inside `bash -c '…'`) are followed. */
 export const maxDepth = 3;
 
@@ -283,11 +289,31 @@ const ownWrites = (base: WordText, words: ReadonlyArray<Word>): ReadonlyArray<Wo
 
 // —— Paths outside the working folder ——
 
-/** Whether `word`, a path, may be outside the working folder: absolute, through `..`, from `~`, or not written out. */
-const escapes = (word: Word): boolean => {
+/** Returns `path`'s parts with `.` and `..` resolved; a relative path that climbs above its start keeps its leading `..`. */
+const normalised = (path: WordText): ReadonlyArray<WordText> =>
+  path.split("/").reduce<ReadonlyArray<WordText>>((parts, part) => {
+    if (part === "" || part === ".") return parts;
+    if (part === ".." && parts.length > 0 && parts.at(-1) !== WordText.make("..")) return parts.slice(0, -1);
+    return part === ".." && path.startsWith("/") ? parts : [...parts, WordText.make(part)];
+  }, []);
+
+/**
+ * Whether `word`, a path, may be outside the working folder: an absolute path (or one from `~`) not
+ * inside `folders.working`, a relative path whose `..` climb above it, a path from another user's `~`,
+ * or one not written out. Without `folders`, every absolute path and `~` is outside.
+ */
+const escapes = (word: Word, folders: Folders | undefined): boolean => {
   if (word.literal === undefined && /[$`]/.test(word.text)) return true;
   const value = word.literal ?? word.text;
-  return value.startsWith("/") || value.startsWith("~") || value === ".." || value.startsWith("../") || value.includes("/../") || value.endsWith("/..");
+  const fromHome = value === "~" || value.startsWith("~/");
+  if (value.startsWith("~") && !fromHome) return true;
+  if (fromHome || value.startsWith("/")) {
+    if (folders === undefined) return true;
+    const path = normalised(WordText.make(fromHome ? `${folders.home}${value.slice(1)}` : value));
+    const working = normalised(folders.working);
+    return path.length < working.length || working.some((part, at) => path[at] !== part);
+  }
+  return normalised(value)[0] === WordText.make("..");
 };
 
 /** For each read-only program whose arguments are paths, its options that take the next word as a value. */
@@ -332,23 +358,26 @@ const pathsOf = (base: WordText, words: ReadonlyArray<Word>): ReadonlyArray<Word
 };
 
 /** The paths outside the working folder that a read-only program reads, as written. `cd` with no folder, or to `-`, leaves it. */
-const outsideOf = (base: WordText, words: ReadonlyArray<Word>): ReadonlyArray<WordText> => {
+const outsideOf = (base: WordText, words: ReadonlyArray<Word>, folders: Folders | undefined): ReadonlyArray<WordText> => {
+  const home: Word = { text: WordText.make("~"), literal: WordText.make("~") };
   if (base === WordText.make("cd")) {
     if (words.slice(1).some((word) => is(word, "-"))) return [WordText.make("-")];
-    if (words.slice(1).every(isOption)) return [WordText.make("~")];
+    if (words.slice(1).every(isOption)) return escapes(home, folders) ? [WordText.make("~")] : [];
   }
-  return pathsOf(base, words).filter(escapes).map((word) => word.text);
+  return pathsOf(base, words)
+    .filter((word) => escapes(word, folders))
+    .map((word) => word.text);
 };
 
 /** The paths outside the working folder that a git command reads: its `-C`, `--git-dir` and `--work-tree`, and the operands of `diff --no-index`. */
-const gitOutside = (words: ReadonlyArray<Word>, normal: ReadonlyArray<Word>): ReadonlyArray<WordText> => {
+const gitOutside = (words: ReadonlyArray<Word>, normal: ReadonlyArray<Word>, folders: Folders | undefined): ReadonlyArray<WordText> => {
   const named = words.slice(1).flatMap((word, at, all) => {
     if (is(word, "-C", "--git-dir", "--work-tree")) return present(all[at + 1]);
     const attached = /^--(git-dir|work-tree)=(.*)$/.exec(word.literal ?? "");
     return attached === null ? [] : [{ text: WordText.make(attached[2] ?? ""), literal: WordText.make(attached[2] ?? "") }];
   });
   const noIndex = normal.some((word) => is(word, "--no-index")) ? normal.slice(2).filter((word) => !isOption(word)) : [];
-  return [...named, ...noIndex].filter(escapes).map((word) => word.text);
+  return [...named, ...noIndex].filter((word) => escapes(word, folders)).map((word) => word.text);
 };
 
 // —— sed ——
@@ -360,7 +389,7 @@ const sedFlags = named("-n", "--quiet", "--silent", "-E", "-r", "--regexp-extend
  * (`-f`), is not written out, or is not understood; otherwise a unit whose grant is `sed`, writing
  * the files its scripts name and, with `-i`, the files it edits, and reading its files.
  */
-const sedUnits = (words: ReadonlyArray<Word>): ReadonlyArray<Unit> => {
+const sedUnits = (words: ReadonlyArray<Word>, folders: Folders | undefined): ReadonlyArray<Unit> => {
   const scan = (rest: ReadonlyArray<Word>, scripts: ReadonlyArray<Word>, operands: ReadonlyArray<Word>, inPlace: boolean): Unit | { readonly scripts: ReadonlyArray<Word>; readonly operands: ReadonlyArray<Word>; readonly inPlace: boolean } => {
     const [next, ...after] = rest;
     if (next === undefined) return { scripts, operands, inPlace };
@@ -394,7 +423,7 @@ const sedUnits = (words: ReadonlyArray<Word>): ReadonlyArray<Unit> => {
       words,
       [WordText.make("sed")],
       [...known.flatMap((each) => each.writes).map((file) => WordText.make(file)), ...(read.inPlace ? operands.map((word) => word.literal ?? word.text) : [])],
-      [...operands, ...named].filter(escapes).map((word) => word.text),
+      [...operands, ...named].filter((word) => escapes(word, folders)).map((word) => word.text),
     ),
   ];
 };
@@ -406,12 +435,13 @@ interface Seen {
   readonly depth: number;
   /** Whether the program's input is text written in the command (a here-document or here-string). */
   readonly fedText: boolean;
+  readonly folders: Folders | undefined;
 }
 
 /** Returns the units of code written out as `code`, one level deeper; opaque when that is too deep or the code does not parse. */
 const unitsOfCode = (code: WordText, around: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> => {
   if (seen.depth >= maxDepth) return [opaque(around, need(`it runs code nested more than ${maxDepth} levels deep`))];
-  const inner = unitsAt(ShellCommand.make(code), seen.segmentsOf, seen.depth + 1);
+  const inner = unitsAt(ShellCommand.make(code), seen.segmentsOf, seen.depth + 1, seen.folders);
   return inner._tag === "Units" ? inner.units : [opaque(around, need(`the code it runs does not parse: ${inner.reason}`))];
 };
 
@@ -482,7 +512,7 @@ const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> =>
     const normal = gitWords(words);
     if (typeof normal === "string") return [opaque(words, normal)];
     const running = gitRunning(normal);
-    return running === undefined ? [unit(normal, grantOf(normal), ownWrites(base, normal), gitOutside(words, normal))] : [opaque(normal, running)];
+    return running === undefined ? [unit(normal, grantOf(normal), ownWrites(base, normal), gitOutside(words, normal, seen.folders))] : [opaque(normal, running)];
   }
   if (base === WordText.make("trap")) {
     const past = rest.filter((word, at) => !(at === 0 && is(word, "-p", "-l", "--")));
@@ -495,7 +525,7 @@ const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> =>
     const host = sshHost(rest);
     return [unit(words, host === undefined ? undefined : [program, host])];
   }
-  if (seds.has(base)) return sedUnits(words);
+  if (seds.has(base)) return sedUnits(words, seen.folders);
   if (base === WordText.make("find")) return findUnits(words, seen);
   if (base === WordText.make(".") || base === WordText.make("source")) return [unit(words, rest[0] === undefined ? undefined : scriptGrant(words, rest[0]))];
   if (base === WordText.make("rg") && rest.some((word) => /^--pre(=|$)/.test(word.literal ?? word.text))) return [opaque(words, need("rg --pre runs a program on each file it searches"))];
@@ -505,7 +535,7 @@ const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> =>
   if (inline !== undefined) return runtimeUnits(words, inline, seen);
   const exported = declaring.has(base) ? steeringNeed(rest.flatMap((word) => present(word.literal).filter((value) => value.includes("=")))) : undefined;
   if (exported !== undefined) return [opaque(words, exported)];
-  return [unit(words, grantOf(words), ownWrites(base, words), outsideOf(base, words))];
+  return [unit(words, grantOf(words), ownWrites(base, words), outsideOf(base, words, seen.folders))];
 };
 
 /** A wrapper's units: the program it runs, or the wrapper alone when it runs none. */
@@ -595,12 +625,12 @@ const segmentUnits = (segment: Segment, functions: ReadonlySet<WordText>, seen: 
   return [...resolve(segment.words, { ...seen, fedText: segment.fed_text }), ...written];
 };
 
-const unitsAt = (command: ShellCommand, segmentsOf: SegmentsOf, depth: number): Units => {
+const unitsAt = (command: ShellCommand, segmentsOf: SegmentsOf, depth: number, folders: Folders | undefined): Units => {
   const split = segmentsOf(command);
   if (split._tag === "Unparsed") return split;
   const functions = new Set(split.segments.flatMap((segment) => (segment.kind === "function_definition" ? present(segment.words[0]?.literal) : [])));
-  return { _tag: "Units", units: split.segments.flatMap((segment) => segmentUnits(segment, functions, { segmentsOf, depth, fedText: false })) };
+  return { _tag: "Units", units: split.segments.flatMap((segment) => segmentUnits(segment, functions, { segmentsOf, depth, fedText: false, folders })) };
 };
 
-/** Returns the units of `command`, split by `segmentsOf`. */
-export const unitsOf = (command: ShellCommand, segmentsOf: SegmentsOf): Units => unitsAt(command, segmentsOf, 0);
+/** Returns the units of `command`, split by `segmentsOf`, with the paths they read judged against `folders`. */
+export const unitsOf = (command: ShellCommand, segmentsOf: SegmentsOf, folders?: Folders): Units => unitsAt(command, segmentsOf, 0, folders);

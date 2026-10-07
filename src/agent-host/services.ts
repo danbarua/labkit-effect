@@ -3,6 +3,8 @@
 import { Effect, Layer } from "effect";
 import { AgentContextAssembler, WholeConversation } from "../agent-context/assembler.ts";
 import { defaultPermissionSettings, type PermissionMode, type PermissionSettings, permissions } from "../agent-policy/permissions.ts";
+import { homedir } from "node:os";
+import { WordText } from "../agent-policy/command-segments.ts";
 import { segmentsOf } from "./command-parser.ts";
 import { type LoopBreakerSettings, loopBreakerDefaults, repeatedCalls, repeatingTurns } from "../agent-policy/loop-breaker.ts";
 import { maxTurnRequests } from "../agent-policy/max-turn-requests.ts";
@@ -41,17 +43,23 @@ export const SessionServices = <E, R>(runner: Layer.Layer<ToolRunner, E, R>) =>
 /**
  * The permission policy for `mode`, over the tools that the session opened with: each call is judged
  * by its tool's kind, and a call to a command tool by the programs its command runs, split by the
- * host's command parser (`command-parser.ts`), with `settings`' rules. `canAsk` is whether anyone can
+ * host's command parser (`command-parser.ts`), with `settings`' rules, and the paths a program reads
+ * judged against `workingFolder` and this process's home folder. `canAsk` is whether anyone can
  * answer a question before a call runs. `mode` is read at each call, so a host that lets the user
  * change it applies the change from the next call. A tool call policy (`ToolCallPolicies`).
  */
 export const permissionsFor =
-  (mode: PermissionMode | Effect.Effect<PermissionMode>, canAsk: boolean, settings: PermissionSettings = defaultPermissionSettings): PolicyOfFacts =>
+  (mode: PermissionMode | Effect.Effect<PermissionMode>, canAsk: boolean, settings: PermissionSettings = defaultPermissionSettings, workingFolder?: string): PolicyOfFacts =>
   (facts) =>
     Effect.flatMap(immutableToolCatalogOf(facts), (tools) =>
       Effect.map(
         Effect.isEffect(mode) ? mode : Effect.succeed(mode),
-        (now) => permissions(now, canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts, { settings, segmentsOf }) as Policy<unknown>,
+        (now) =>
+          permissions(now, canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts, {
+            settings,
+            segmentsOf,
+            ...(workingFolder === undefined ? {} : { folders: { working: WordText.make(workingFolder), home: WordText.make(homedir()) } }),
+          }) as Policy<unknown>,
       ),
     );
 

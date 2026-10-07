@@ -108,7 +108,7 @@ const gitOf = (config: Config) => (isRepositoryRoot(process.cwd()) ? gitTools(pr
  */
 const servicesOf = (config: Config) => {
   // The CLI uses its own tool sources (the workspace's and the MCP servers'), not the configuration's.
-  const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(config.configuration, { canAsk: config.canAsk });
+  const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(config.configuration, { canAsk: config.canAsk, workingFolder: process.cwd() });
   return Layer.mergeAll(SessionServices(SourcedToolRunner).pipe(Layer.provide(Layer.succeed(ModelOverrides, config.configuration.models))), seamLayer(lists));
 };
 

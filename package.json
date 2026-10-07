@@ -24,7 +24,9 @@
     "zork:spectator": "bun run src/examples/zork-spectator/index.ts",
     "zork:spectator:scripted": "bun run src/examples/zork-spectator/scripted.ts",
     "native:build": "bun scripts/native.ts build",
-    "native:test": "bun scripts/native.ts test"
+    "native:test": "bun scripts/native.ts test",
+    "commands:import": "bun scripts/session-imports/commands.ts",
+    "commands:ask-rate": "bun scripts/session-imports/ask-rate.ts"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.5.0",

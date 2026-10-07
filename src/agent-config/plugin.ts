@@ -43,6 +43,8 @@ export interface FromHost {
   readonly canAsk: boolean;
   /** The session's current permission mode, read at each call; the configured `mode` is the mode that the session starts in. */
   readonly permissionMode?: Effect.Effect<PermissionMode> | undefined;
+  /** The folder the session works in, as an absolute path: the permission policy reads a path outside it as one that needs permission. */
+  readonly workingFolder?: string | undefined;
 }
 
 /** A plug-in's settings: a struct, each of its settings with a default (`Schema.withDecodingDefaultKey`). */

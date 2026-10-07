@@ -50,7 +50,7 @@ import type { Fact } from "../agent-machine/fact.ts";
 import { FailureText, ToolKind, ToolName } from "../agent-machine/names.ts";
 import { MediaType, type Received, ReceivedText } from "../agent-machine/received.ts";
 import { type SegmentsOf, ShellCommand, WordText } from "./command-segments.ts";
-import { NeedText, type Unit, unitsOf } from "./command-units.ts";
+import { type Folders, NeedText, type Unit, unitsOf } from "./command-units.ts";
 import { defaultReadOnly, namesProgram, namesTool, type ParsedRule, parseRule, PermissionRule, type ReadOnlyPrefix, readOnlyNames, ruleNamesProgram } from "./permission-rules.ts";
 import type { Policy, PolicyStep } from "./policy.ts";
 
@@ -237,10 +237,11 @@ const programOf = (unit: Unit): WordText => WordText.make(unit.words.length === 
 const denies = (rule: ParsedRule, unit: Unit): boolean =>
   unit.opaque === undefined ? ruleNamesProgram(rule, unit, true) : unit.words.some((_, at) => rule.words !== undefined && namesProgram(rule.words, rule.prefix, { ...unit, words: unit.words.slice(at) }, true));
 
-/** The judging of command tools' calls: the settings, and the parser that splits a command. */
+/** The judging of command tools' calls: the settings, the parser that splits a command, and the folders that paths are judged against (without them, every absolute path and `~` is outside). */
 export interface CommandJudging {
   readonly settings: PermissionSettings;
   readonly segmentsOf: SegmentsOf;
+  readonly folders?: Folders;
 }
 
 /** The step for a call to command tool `tool` (see the module's comment). */
@@ -259,7 +260,7 @@ const commandStep = (
   if (toolDeny !== undefined) return veto(`${tool} is denied by the rule ${toolDeny.rule}.`);
   const session = sessionAnswersFor(facts, tool);
   const command = commandIn(request.input);
-  const split = command === undefined ? undefined : unitsOf(command, judging.segmentsOf);
+  const split = command === undefined ? undefined : unitsOf(command, judging.segmentsOf, judging.folders);
   const units = split?._tag === "Units" ? split.units : [];
   const denied = units.flatMap((unit) => {
     const rule = deny.find((each) => denies(each, unit));

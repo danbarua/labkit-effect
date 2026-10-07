@@ -64,7 +64,7 @@ export const permissions = plugin(
   }),
   ["toolCalls"],
   ({ mode, ...settings }, host) => ({
-    toolCalls: permissionsFor(host.permissionMode ?? mode, host.canAsk, settings),
+    toolCalls: permissionsFor(host.permissionMode ?? mode, host.canAsk, settings, host.workingFolder),
   }),
 );
 

@@ -3,7 +3,7 @@
 import { expect } from "bun:test";
 import { test } from "../../tests/support/test.ts";
 import { segmentsOf } from "../agent-host/command-parser.ts";
-import { ShellCommand } from "./command-segments.ts";
+import { ShellCommand, WordText } from "./command-segments.ts";
 import { unitsOf } from "./command-units.ts";
 
 /** Each unit of `command` as `program [grant] writes:… opaque:…`, the program being the unit's first word. */
@@ -140,4 +140,12 @@ test("sed is judged by its script: opaque when it runs commands, is in a file or
   expect(units("sed -f fix.sed f")).toEqual(["sed -f fix.sed f [] opaque: sed runs a script from a file"]);
   expect(units("sed \"$S\" f")).toEqual(["sed ? f [] opaque: sed's script is not written out, or is not understood"]);
   expect(outside("sed -n p /etc/passwd; sed 'r /etc/hosts' f")).toEqual(["sed outside: /etc/passwd", "sed outside: /etc/hosts"]);
+});
+
+test("with the working and home folders known, an absolute path or one from ~ is outside only when it leaves the working folder; a relative one only when its .. climb above it", () => {
+  const folders = { working: WordText.make("/home/dan/project"), home: WordText.make("/home/dan") };
+  const split = unitsOf(ShellCommand.make("cat /home/dan/project/src/a.ts /home/dan/project/../x ~/notes ~/project/b src/../c src/../../d /home/dan/projects-old/e"), segmentsOf, folders);
+  expect((split._tag === "Units" ? split.units[0]?.outside : []) as unknown).toEqual(["/home/dan/project/../x", "~/notes", "src/../../d", "/home/dan/projects-old/e"]);
+  const home = unitsOf(ShellCommand.make("cd"), segmentsOf, { working: WordText.make("/home/dan"), home: WordText.make("/home/dan") });
+  expect((home._tag === "Units" ? home.units[0]?.outside : []) as unknown).toEqual([]);
 });
