@@ -60,8 +60,8 @@ model.
           the configuration is read.
         - How often it asks, over exo-project's corpus (43,491 commands from 231 Claude Code
           sessions, default mode, 2026-10-07): with no session answers, 20.6% run without a
-          question, 32.8% ask with a grant to offer, 46.2% ask about the call only, 0.4% do not
-          parse. Allowing every grant offered for its session, 47.8% run and 52.2% ask. The
+          question, 32.8% ask with a grant to offer, 46.3% ask about the call only, 0.4% do not
+          parse. Allowing every grant offered for its session, 47.7% run and 52.3% ask. The
           programs asked about the call only: `sed` (9,923), code read from input (6,363), files
           written (6,030), code written in the command (2,975), a program's name not written out
           (722), `awk` (619).
