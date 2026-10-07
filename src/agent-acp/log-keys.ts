@@ -95,7 +95,7 @@ export const logKeys = {
     failed: "acp_host.export.failed",
   },
   usage: {
-    /** The `usage_update` sent at a turn's end. */
+    /** A `usage_update` sent: the session's first on the connection, or one whose numbers differ from the last sent. */
     sent: "acp_host.usage.sent",
   },
   update: {

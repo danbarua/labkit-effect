@@ -102,16 +102,17 @@ model.
         - Allowed and denied tools per MCP server, to choose which tools are offered and which
           can be called. Today an MCP tool's `readOnlyHint` alone makes it run in every mode.
 - [ ] Accounting for ACP. Built: a provider-neutral `usage` on each response; `contextGauge` (used,
-      size, cost) and `requestsIn` (a turn's model requests) read from the facts (`accounting.ts`);
-      prices with the well-known models; `maxTurnRequests` as an example host policy; for ACP,
-      `usage_update` and a turn's stop reason, where a vetoed request is `max_turn_requests` and a
-      cut-short response `max_tokens` (`src/agent-acp/usage.ts`, `stop-reason.ts`), sent and
-      answered by the host after a prompt, `session/load` and `resume`. To do in the host: sending
-      it when the numbers change; refuse the next prompt with an error at a session-level turn
-      limit (ACP has no stop reason for it). Open: after a compaction `used` is the last response's
-      until the next one reports (an estimate would come from the next-request size estimate); a
-      summarizer's own requests are not counted in `cost`. `PromptResponse.usage` is a draft; not
-      built.
+      size, cost) read from the facts (`accounting.ts`) and `requestsIn` (a turn's model requests,
+      `src/agent-machine/turn-requests.ts`); prices with the well-known models; `maxTurnRequests` as
+      an example host policy; for ACP, `usage_update` and a turn's stop reason, where a vetoed
+      request is `max_turn_requests` and a cut-short response `max_tokens` (`src/agent-acp/usage.ts`,
+      `stop-reason.ts`). The session's feed sends `usage_update` when the numbers change (after a
+      response, a change of model taken, a turn's end, before the prompt's answer) and after
+      `session/load` and `resume`, never twice in a row with the same numbers, and with no `cost`
+      while no response of the session was priced. Open: after a compaction `used` is the last
+      response's until the next one reports (an estimate would come from the next-request size
+      estimate); a summarizer's own requests are not counted in `cost`. `PromptResponse.usage` is a
+      draft; not built.
 - [ ] Attachments. Built: input carries files by reference (`InputArrived.attachments`); a tool's
       output that arrives as bytes is kept in the blob store and recorded by reference (`Received`
       body `Stored`); bytes in the blob store (`Blobs`: in memory by default, or a folder); each

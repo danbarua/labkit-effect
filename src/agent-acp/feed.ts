@@ -13,11 +13,18 @@
  *   counts as the reject-once option, and is logged as a warning with its cause.
  * - A call that ends while its question is still out (its turn was cancelled) has its request
  *   cancelled.
- * - `turnEnded(turn)` completes once the feed has taken the turn's `TurnEnded`. By then every update
- *   of the turn has been sent, so a prompt answers after them.
+ * - The feed is the one sender of the session's `usage_update` (`usage.ts`). It sends it when the
+ *   numbers can change: as it takes a `ModelResponded` (used, cost), a `ModelChangeTaken` (size) and
+ *   a `TurnEnded` (whatever ended the turn), after that fact's own updates. The update reflects the
+ *   facts through the one taken, not later ones, so the client sees the numbers in the order they
+ *   came. `usage` sends it on the host's asking (after a load or a resume). An update whose numbers
+ *   are those last sent to the client is not sent: the client has them.
+ * - `caughtUp` completes once the feed has taken every fact the session had when it was asked. By
+ *   then each of their updates has been sent, so a prompt answers after its turn's updates, its
+ *   usage included.
  */
 
-import { type Context, Deferred, Effect, Fiber, HashMap, Option, PubSub, Queue, Ref, References, type Scope } from "effect";
+import { type Context, Effect, Fiber, HashMap, Option, PubSub, Queue, Ref, References, type Scope, Semaphore, Stream, SubscriptionRef } from "effect";
 import type { AgentConnection } from "effective-acp/agent";
 import type { V1Version } from "effective-acp/protocol";
 import type { SessionId, SessionUpdate } from "effective-acp/schema/v1";
@@ -30,6 +37,7 @@ import { reportedBy } from "../agent-session/origin.ts";
 import { logKeys } from "./log-keys.ts";
 import { answerOf, InvalidAnswer, requestOf } from "./permission.ts";
 import { next, type Present, type ProjectionInput, type ProjectionState, start } from "./projection.ts";
+import { type UsageUpdate, usageUpdate } from "./usage.ts";
 
 /** The origin that the host records observations with: a person, through ACP. */
 export const acpUser: Origin = { _tag: "User", via: Via.make("acp") };
@@ -51,13 +59,18 @@ export interface FeedOptions {
 }
 
 export interface Feed {
-  /** Completes once the feed has taken `turn`'s `TurnEnded` and sent every update of the turn. */
-  readonly turnEnded: (turn: TurnId) => Effect.Effect<void>;
+  /** Completes once the feed has taken every fact that the session has now, and sent their updates. */
+  readonly caughtUp: Effect.Effect<void>;
+  /** Sends the session's `usage_update` as of the facts the feed has taken, unless it is the one sent last. */
+  readonly usage: Effect.Effect<void>;
 }
 
 /** Returns the answer that picks the option refusing this call once, which a failed or cancelled question records. */
 const rejectOnce = (question: PermissionQuestion) =>
   answerPicking(question.options.find((option) => option.kind === "reject_once")?.optionId ?? OptionId.make("reject-once"));
+
+/** Returns the seq of the last of `facts`; 0 when there are none (seq starts at 1). */
+const lastSeqOf = (facts: ReadonlyArray<Fact>): number => facts.at(-1)?.seq ?? 0;
 
 /** Starts the feed of `options.session` in the scope given; it runs until the scope closes. */
 export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scope.Scope> =>
@@ -66,18 +79,12 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
     const facts = yield* session.subscribe;
     const streamed = yield* session.streamed;
     const inbox = yield* Queue.unbounded<ProjectionInput>();
-    // For each turn, a signal that completes when the feed takes the turn's end; made when first asked for.
-    const ends = yield* Ref.make(HashMap.empty<TurnId, Deferred.Deferred<void>>());
-    const endOf = (turn: TurnId): Effect.Effect<Deferred.Deferred<void>> =>
-      Ref.modify(ends, (all) =>
-        Option.match(HashMap.get(all, turn), {
-          onSome: (found) => [found, all] as const,
-          onNone: () => {
-            const made = Deferred.makeUnsafe<void>();
-            return [made, HashMap.set(all, turn, made)] as const;
-          },
-        }),
-      );
+    // The seq of the last fact the feed has taken and sent the updates of; at its start, the last the session had.
+    const taken = yield* SubscriptionRef.make(lastSeqOf(yield* session.facts));
+    // What the client has been sent of the session's usage: the last update sent, and the last fact the
+    // usage was read through. One sender at a time, so the updates reach the client in the order of their facts.
+    const usage = yield* Ref.make<{ readonly through: number; readonly sent: UsageUpdate | undefined }>({ through: yield* SubscriptionRef.get(taken), sent: undefined });
+    const usageLock = yield* Semaphore.make(1);
     // For each call, the fiber that asks its question while the question is out.
     const asking = yield* Ref.make(HashMap.empty<CallId, Fiber.Fiber<void>>());
     const state = yield* Ref.make<ProjectionState>(options.initial ?? start);
@@ -145,14 +152,40 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
         Effect.ensuring(Ref.update(asking, HashMap.remove(call))),
       );
 
-    /** Acts on a fact beyond its updates: asks permission, cancels a question that no call waits for, and marks a turn's end. */
+    /**
+     * Sends the session's `usage_update` as of its facts through `seq` (as of the last facts it was read
+     * through, when left out), unless its numbers are those sent last. None for a session whose model's
+     * window is not known.
+     */
+    const sendUsage = (seq?: number) =>
+      usageLock.withPermit(
+        Effect.gen(function* () {
+          const before = yield* Ref.get(usage);
+          const through = seq ?? before.through;
+          yield* Ref.set(usage, { ...before, through });
+          // Facts recorded after the one taken are not the feed's yet: their numbers come when it takes them.
+          const all = yield* session.facts;
+          const now = lastSeqOf(all) <= through ? all : all.filter((fact) => fact.seq <= through);
+          if (now.length === 0) return;
+          const update = yield* usageUpdate(now).pipe(Effect.provideContext(context));
+          if (update === undefined) return;
+          const last = before.sent;
+          if (last !== undefined && update.used === last.used && update.size === last.size && update.cost?.amount === last.cost?.amount && update.cost?.currency === last.cost?.currency) return;
+          yield* send(update);
+          yield* Ref.set(usage, { through, sent: update });
+          yield* Effect.logDebug(logKeys.usage.sent, { used: update.used, size: update.size });
+        }),
+      );
+
+    /** Acts on a fact beyond its updates: sends the usage where it can have changed, asks permission, and cancels a question that no call waits for. */
     const act = (fact: Fact) =>
       Effect.gen(function* () {
         if (fact._tag === "Decided") {
-          if (fact.decision._tag === "TurnEnded") yield* Deferred.succeed(yield* endOf(fact.decision.turn), undefined);
+          if (fact.decision._tag === "ModelChangeTaken" || fact.decision._tag === "TurnEnded") yield* sendUsage(fact.seq);
           return;
         }
         const observation = fact.observation;
+        if (observation._tag === "ModelResponded") yield* sendUsage(fact.seq);
         if (observation._tag === "TurnStarted") yield* Ref.set(turn, observation.turn);
         if (observation._tag === "PermissionAsked") {
           const question = questionIn(observation.asks);
@@ -175,6 +208,8 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
       }).pipe(
         // A defect in one input (a presentation that throws) is logged; the feed goes on with the next.
         Effect.catchDefect((defect) => Effect.logError(logKeys.update.notSent, { input: input._tag, cause: String(defect) })),
+        // A fact is taken even when it could not be projected, so whoever waits for the feed (`caughtUp`) is not left waiting.
+        Effect.andThen(input._tag === "Observed" || input._tag === "Decided" ? SubscriptionRef.set(taken, input.seq) : Effect.void),
       );
 
     const forward = <A extends ProjectionInput>(subscription: PubSub.Subscription<A>) =>
@@ -186,6 +221,10 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
     yield* Effect.forkScoped(annotated(Effect.forever(Queue.take(inbox).pipe(Effect.flatMap(take)))));
 
     return {
-      turnEnded: (ended) => Effect.flatMap(endOf(ended), Deferred.await).pipe(Effect.ensuring(Ref.update(ends, HashMap.remove(ended)))),
+      caughtUp: Effect.gen(function* () {
+        const recorded = lastSeqOf(yield* session.facts);
+        yield* SubscriptionRef.changes(taken).pipe(Stream.filter((seq) => seq >= recorded), Stream.runHead);
+      }),
+      usage: sendUsage(),
     };
   });

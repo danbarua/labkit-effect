@@ -102,8 +102,8 @@ The prompt is then the turn's input, from the same origin. A prompt's input is:
 - One prompt runs at a time. A prompt to a session that has one running is refused (-32000, "already
   has an active prompt").
 - A request that names a session the connection does not hold is refused (-32002).
-- The feed sends the turn's updates. When the feed has taken the turn's `TurnEnded`, the host sends
-  `usage_update` and answers the prompt with the turn's stop (`stopOf`).
+- The feed sends the turn's updates, `usage_update` among them (The feed). Once the feed has taken
+  the turn's facts, the host answers the prompt with the turn's stop (`stopOf`).
 - `/export`, alone in a prompt, writes the session's transcript (`markdownOf`) to
   `<cwd>/.<brand>/exports/<sessionId>.md`, says where in an `agent_message_chunk`, and answers
   `end_turn` without asking the model. On a draft it says that there is nothing to export, and
@@ -162,7 +162,7 @@ A turn that has not ended has no stop. After a failed turn the session takes the
 8. The host writes `effective-settings.json`, then answers with the session's config options.
 9. After the answer, the host sends `available_commands_update`, `session_info_update` (the record's
    title, `null` when it has none or it does not read, and when the facts file was last written)
-   and `usage_update`.
+   and, through the feed, `usage_update`, unless the feed has sent the same numbers since it started.
 
 A loaded session's permission mode starts at the configuration's mode, as a new session's does. The
 mode a session had when it was closed is not kept.
@@ -273,6 +273,11 @@ catalog's (`askable`), and `limit` is the model's output limit (none known: ever
 - The gate is settled when a prompt's turn ends and before a prompt starts one.
 - The answer is every option as the configuration will be, held changes included. The same options
   are sent as `config_option_update`, because a client may draw its controls from updates alone.
+- On an open session, `config_option_update` is sent once the feed has taken what the change
+  recorded. A model changed between turns is taken at once (`ModelChangeTaken` is decided with
+  `ModelChangeArrived`), so its `usage_update`, with the new model's window, comes just before
+  `config_option_update`, and both before the answer. A model change held while a turn runs is taken
+  when the gate is settled after that prompt's answer, and its `usage_update` is sent then.
 
 ### The permission mode
 
@@ -373,8 +378,15 @@ the load showed is not shown again, and a later request's deltas are sent once.
   sends each update in the order the projection gives.
 - Each `PermissionAsked` is asked of the client as `session/request_permission`, in a fiber of its
   own so the updates go on. The answer is recorded as `PermissionAnswered`.
-- `turnEnded(turn)` completes once the feed has taken the turn's `TurnEnded`: by then every update
-  of the turn has been sent, so a prompt answers after them.
+- It is the one sender of the session's `usage_update` (`usage.ts`), sent when the numbers can
+  change: as it takes a `ModelResponded` (used, cost), a `ModelChangeTaken` (size) and a `TurnEnded`
+  (whatever ended the turn), after that fact's own updates. The update reflects the facts through
+  the one taken, not later ones, so the client sees the numbers in the order they came. `usage`
+  sends it when the host asks (after a load or a resume). An update with the numbers last sent to
+  the client is not sent again; the first always is.
+- `caughtUp` completes once the feed has taken every fact the session has when it is asked: by then
+  each of their updates has been sent, so a prompt answers after its turn's updates, its usage among
+  them. A fact that could not be projected counts as taken.
 - A defect while projecting one input is logged, and the feed goes on with the next.
 
 ### Permission
@@ -493,7 +505,7 @@ The projection does not make these; the host sends them:
 | --- | --- |
 | `available_commands_update` | After `session/new`, `session/load` and `session/resume` answer: `/export` and `/mcp`. |
 | `session_info_update` | At turn zero, and after a load or a resume. |
-| `usage_update` | At each turn's end, before the prompt's answer, and after a load or a resume: the gauge of the model the session asks now (`contextGauge`), with the model's window as `KnownModels` knows it and the cost so far; none for a model whose window is not known. |
+| `usage_update` | Sent by the feed when its numbers can change: after each response, a change of model taken and a turn's end (before the prompt's answer), and after a load or a resume; never twice in a row with the same numbers. The gauge of the model the session asks now (`contextGauge`), with the model's window as `KnownModels` knows it, and the cost so far: the priced responses' total. While no response of the session was priced (a local model's are not), it has no `cost`, because a cost not known is not nothing spent. None for a model whose window is not known. |
 | `config_option_update` | After each `session/set_config_option`. |
 | `plan` | From `update_plan`. |
 

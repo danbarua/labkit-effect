@@ -11,18 +11,21 @@
  *   answer, `available_commands_update` offers `/export` and `/mcp`.
  * - `session/set_config_option` changes the draft. On an open session it goes through the
  *   configuration gate: made at once between turns, held until the turn ends otherwise. The answer
- *   is every option as the configuration will be.
+ *   is every option as the configuration will be, sent too as `config_option_update` once the feed
+ *   has taken what the change recorded: a model changed between turns has its `usage_update` (the
+ *   new window) sent before the options.
  * - `session/prompt` opens a draft (turn zero: the session's record, `host.json`, with its working
  *   folder and the first prompt's text as its title; its folder in the session directory; its
  *   services; `SessionOpened`; then `session_info_update` with the title) and runs the turn with
- *   `Session.prompt`. The session's feed (`feed.ts`) sends the turn's updates and asks permission.
- *   Once the feed has taken the turn's end, the host sends `usage_update` and answers with the
+ *   `Session.prompt`. The session's feed (`feed.ts`) sends the turn's updates, `usage_update` among
+ *   them, and asks permission. Once the feed has taken the turn's facts, the host answers with the
  *   turn's stop (`stopOf`). `/export` and `/mcp` are answered without the model.
  * - `session/load` starts a stored session on this connection from its facts file, with the world
  *   opened for the `cwd` and the MCP servers asked. A turn that its facts left running is ended, not
  *   continued. Its facts are replayed through the projection (`replay`) before the answer, and the
  *   feed continues from the state they leave. `session/resume` does the same and replays nothing.
- *   After either answer: `available_commands_update`, `session_info_update` and `usage_update`.
+ *   After either answer: `available_commands_update`, `session_info_update` and, through the feed,
+ *   `usage_update`.
  * - `session/list` lists the stored sessions that have the host's record (`session-record.ts`).
  * - `session/cancel` is `Session.cancel`, and so is a prompt request that the client cancels
  *   (`$/cancel_request`). A prompt interrupted by the end of the connection leaves its turn running
@@ -84,7 +87,6 @@ import { logKeys } from "./log-keys.ts";
 import { presentFrom, type ProjectionState, project, start } from "./projection.ts";
 import { acpHost, InvalidCursor, pageOf, readSessionRecord, recordFor } from "./session-record.ts";
 import { stopOf } from "./stop-reason.ts";
-import { usageUpdate } from "./usage.ts";
 import { editorWorld, type World, type WorldSession, workspaceWorld } from "./world.ts";
 
 export interface HostOptions<R = never> {
@@ -722,7 +724,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             ),
           );
 
-        /** Opens the draft if it is one, runs the turn, waits for the feed to take the turn's end, sends `usage_update`, and returns the stop. */
+        /** Opens the draft if it is one, runs the turn, waits for the feed to take the turn's facts (its usage among their updates), and returns the stop. */
         const turnOf = (entry: Entry, text: string, blocks: ReadonlyArray<ContentBlock>) =>
           Effect.gen(function* () {
             const began = yield* Clock.currentTimeMillis;
@@ -751,12 +753,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             // The prompt returns at its turn's end, and no other turn starts meanwhile: one prompt runs at a time.
             const turn = facts.reduce<TurnId | undefined>((last, fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? fact.decision.turn : last), undefined);
             if (turn === undefined) return yield* Effect.die(new Error("A prompt returned with no turn ended"));
-            yield* feed.turnEnded(turn);
-            const usage = yield* usageUpdate(facts).pipe(Effect.provideContext(context));
-            if (usage !== undefined) {
-              yield* send(entry.id, usage);
-              yield* Effect.logDebug(logKeys.usage.sent, { used: usage.used, size: usage.size });
-            }
+            // Every update of the turn, its usage included, is sent before the answer.
+            yield* feed.caughtUp;
             const stop = stopOf(facts, turn);
             const took = (yield* Clock.currentTimeMillis) - began;
             if (stop === undefined) return yield* Effect.die(new Error(`Turn ${turn} has no stop though it ended`));
@@ -784,7 +782,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           );
         };
 
-        /** Sends what the host sends of a session started from its facts, once the client knows it: the commands, its title and last write, and its usage. */
+        /** Sends what the host sends of a session started from its facts, once the client knows it: the commands, its title and last write, and, through the feed, its usage. */
         const announce = (entry: Entry, opened: Opened) =>
           Effect.gen(function* () {
             yield* send(entry.id, { sessionUpdate: "available_commands_update", availableCommands: [exportCommandOf(brand), mcpCommand] });
@@ -796,11 +794,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             );
             const updatedAt = written ?? new Date(yield* Clock.currentTimeMillis);
             yield* send(entry.id, { sessionUpdate: "session_info_update", title: title ?? null, updatedAt: updatedAt.toISOString() });
-            const usage = yield* Effect.flatMap(opened.session.facts, usageUpdate).pipe(Effect.provideContext(opened.context));
-            if (usage !== undefined) {
-              yield* send(entry.id, usage);
-              yield* Effect.logDebug(logKeys.usage.sent, { used: usage.used, size: usage.size });
-            }
+            yield* opened.feed.usage;
           });
 
         /**
@@ -1041,8 +1035,15 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                     return { configOptions: (yield* configurationOf(entry)).options };
                   }),
                 ).pipe(
-                  // The options are sent as an update too: a client may draw its controls from updates alone (labkit's does).
-                  Effect.tap(({ configOptions }) => send(entry.id, { sessionUpdate: "config_option_update", configOptions })),
+                  // The options are sent as an update too: a client may draw its controls from updates alone (labkit's does). Once the
+                  // feed has taken what the change recorded, so a model changed between turns has its usage (its window) sent first.
+                  Effect.tap(({ configOptions }) =>
+                    Effect.gen(function* () {
+                      const state = yield* Ref.get(entry.state);
+                      if (state._tag === "Open") yield* state.opened.feed.caughtUp;
+                      yield* send(entry.id, { sessionUpdate: "config_option_update", configOptions });
+                    }),
+                  ),
                 );
               }),
               params.sessionId,

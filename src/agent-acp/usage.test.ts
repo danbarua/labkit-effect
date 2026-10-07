@@ -41,9 +41,30 @@ test("the window is the model's the session asks now, after a change of model wa
   expect((await Effect.runPromise(usageUpdate(changed)))?.size).toBe(200000);
 });
 
-test("a model nothing is known of has no gauge; one the host knows has its window", async () => {
+test("a model nothing is known of has no gauge; one the host knows has its window, and no cost while no response was priced: its cost is not known, not nothing", async () => {
   const local = session("localhost", "qwen/qwen3-8b");
   expect(await Effect.runPromise(usageUpdate(local))).toBeUndefined();
   const known = Effect.provideService(usageUpdate(local), KnownModels, [() => Effect.succeed({ context: 32768, input: ["text"], price: { input: 0, output: 0 } })]);
-  expect(await Effect.runPromise(known)).toEqual({ sessionUpdate: "usage_update", used: 1150, size: 32768, cost: { amount: 0, currency: "USD" } });
+  expect(await Effect.runPromise(known)).toStrictEqual({ sessionUpdate: "usage_update", used: 1150, size: 32768 });
+});
+
+test("once a response is priced the cost is the priced responses' total; a local model's response adds nothing", async () => {
+  const mixed = session(
+    "localhost",
+    "qwen/qwen3-8b",
+    { _tag: "ModelChangeArrived", provider: "openai", model: "gpt-5.5" },
+    {
+      _tag: "ModelResponded",
+      turn: "turn-1",
+      provider: "openai",
+      model: "gpt-5.5",
+      parts: [{ _tag: "Text", text: "Hello again." }],
+      ending: { _tag: "Complete" },
+      usage: { input: 2000, output: 100 },
+      metadata: json({}),
+    },
+  );
+  const update = await Effect.runPromise(usageUpdate(mixed));
+  expect(update).toMatchObject({ sessionUpdate: "usage_update", used: 2100, size: 1050000, cost: { currency: "USD" } });
+  expect(update?.cost?.amount).toBeCloseTo((2000 * 5 + 100 * 30) / 1_000_000, 12);
 });

@@ -120,6 +120,12 @@ const heldAfterCall = (call: Extract<Piece, { _tag: "ToolCall" }>, started: Defe
 const failed: Reply = (turn) =>
   Effect.succeed({ _tag: "ModelFailed", turn, failure: FailureText.make("The provider answered 529: overloaded"), error: receivedText("overloaded") });
 
+/** `reply`, reporting `input` and `output` tokens as its usage. */
+const reporting = (input: number, output: number, reply: Reply): Reply => (turn, target) =>
+  Effect.map(reply(turn, target), (responded) =>
+    responded._tag === "ModelResponded" ? { ...responded, usage: { input: TokenCount.make(input), output: TokenCount.make(output) } } : responded,
+  );
+
 interface Logged {
   readonly level: string;
   readonly key: unknown;
@@ -409,6 +415,7 @@ test("the first prompt opens the draft; thinking and text stream, write_file goe
     "agent_message_chunk",
     "tool_call:pending",
     "tool_call_update:pending",
+    "usage_update",
     "tool_call_update:in_progress",
     "tool_call_update:completed",
     "agent_message_chunk",
@@ -1196,7 +1203,9 @@ test("by default a response after a tool call with thinking but no answer is ask
     "tool_call:pending",
     "tool_call_update:in_progress",
     "tool_call_update:completed",
+    "usage_update",
     "agent_thought_chunk",
+    "usage_update",
     "agent_message_chunk",
     "usage_update",
   ]);
@@ -1296,6 +1305,112 @@ const echoTurn: ReadonlyArray<ReadonlyArray<Piece>> = [
   ],
   [{ _tag: "Text", text: "Echoed." }],
 ];
+
+/**
+ * What the agent wrote, in order, as words: each update's kind (a text chunk with its text, a usage_update with its numbers), and
+ * each answer (`answer <stopReason>`, `answer options` for config options, `answer` for any other) or `error`. The client's own
+ * handlers may run a tick after its request resolves, so the wire is the witness of order.
+ */
+const writtenBy = (host: HostRun): Array<string> =>
+  host.wire.flatMap((message) => {
+    if (isUpdateNotification(message)) {
+      const update = message.params.update;
+      if (update.sessionUpdate === "usage_update") return [`usage_update used=${update.used} size=${update.size}`];
+      if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") return [`agent_message_chunk ${update.content.text}`];
+      return kinds([update]);
+    }
+    const result = message["result"];
+    if (typeof result === "object" && result !== null) {
+      if ("stopReason" in result && typeof result.stopReason === "string") return [`answer ${result.stopReason}`];
+      return ["configOptions" in result ? "answer options" : "answer"];
+    }
+    return "error" in message ? ["error"] : [];
+  });
+
+/** The usage_update notifications the agent wrote, in order. */
+const usagesBy = (host: HostRun) =>
+  host.wire.flatMap((message) => (isUpdateNotification(message) && message.params.update.sessionUpdate === "usage_update" ? [message.params.update] : []));
+
+test("a turn with a tool call sends usage_update after each of its two responses, the second with the larger used and cost, each after that response's updates and before the next step's; the prompt answers after the last", async () => {
+  const host = startHost({
+    world: echoWorld,
+    script: [
+      reporting(1000, 20, answer({ _tag: "Text", text: "Echoing." }, { _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "4" } })),
+      reporting(1100, 30, answer({ _tag: "Text", text: "It is 4." })),
+    ],
+  });
+  const stopReason = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    return (await ctx.request("session/prompt", say(sessionId, "What is 2 + 2? Echo it first."))).stopReason;
+  });
+  await host.stop();
+  expect(stopReason).toBe("end_turn");
+  // The call's later updates are left out: it runs as soon as it arrives, so they may come before or after its response's usage.
+  expect(writtenBy(host).filter((word) => !word.startsWith("tool_call_update"))).toEqual([
+    "answer",
+    "answer options",
+    "available_commands_update",
+    "session_info_update",
+    "agent_message_chunk Echoing.",
+    "tool_call:pending",
+    "usage_update used=1020 size=1050000",
+    "agent_message_chunk It is 4.",
+    "usage_update used=1130 size=1050000",
+    "answer end_turn",
+  ]);
+  const [first, second] = usagesBy(host);
+  expect(second?.cost?.amount).toBeGreaterThan(first?.cost?.amount ?? Infinity);
+});
+
+test("a turn whose numbers do not change after its last usage_update sends no other at its end, nor does a failed turn with no response; a later turn whose response changes them sends one", async () => {
+  const host = startHost({ script: [answer({ _tag: "Text", text: "One." }), failed, reporting(1500, 60, answer({ _tag: "Text", text: "Three." }))] });
+  await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(sessionId, "One"));
+    await failure(ctx.request("session/prompt", say(sessionId, "Two")));
+    await ctx.request("session/prompt", say(sessionId, "Three"));
+  });
+  await host.stop();
+  expect(writtenBy(host).filter((word) => word.startsWith("usage_update") || word.startsWith("answer end_turn") || word === "error")).toEqual([
+    "usage_update used=1240 size=1050000",
+    "answer end_turn",
+    "error",
+    "usage_update used=1560 size=1050000",
+    "answer end_turn",
+  ]);
+  expect(host.logged.filter((each) => each.key === logKeys.usage.sent)).toHaveLength(2);
+});
+
+test("a model changed with set_config_option between turns sends usage_update with the new model's window, then config_option_update, both before the answer", async () => {
+  const anthropic = ProviderName.make("anthropic");
+  const host = startHost({
+    sources: [
+      { provider: openai, models: [sol, luna] },
+      { provider: anthropic, models: [ModelName.make("claude-haiku-4-5")] },
+    ],
+    script: [answer({ _tag: "Text", text: "One." })],
+  });
+  const changed = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(sessionId, "One"));
+    return ctx.request("session/set_config_option", { sessionId, configId: "model", value: "anthropic/claude-haiku-4-5" });
+  });
+  await host.stop();
+  expect(changed.configOptions.find((option) => option.id === "model")).toMatchObject({ currentValue: "anthropic/claude-haiku-4-5" });
+  const words = writtenBy(host);
+  expect(words.slice(words.indexOf("answer end_turn"))).toEqual([
+    "answer end_turn",
+    "usage_update used=1240 size=200000",
+    "config_option_update",
+    "answer options",
+  ]);
+  // The cost so far is the session's, whichever model it asks now.
+  const [before, after] = usagesBy(host);
+  expect(after?.cost).toEqual(before?.cost);
+});
 
 test("initialize advertises session/load and the session methods close, list and resume, and not fork", async () => {
   const host = startHost();
