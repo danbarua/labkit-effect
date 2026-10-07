@@ -862,17 +862,20 @@ test("a loaded session shows no diff for the writes it replays, whose files were
   expect(contentOf(reloaded.log.updates)).toContainEqual({ type: "content", content: { type: "text", text: "Added to the end of log.txt." } });
 });
 
-test("additionalDirectories count as inside the working folder: a command reading there is not asked about; the folders are kept in the session's record and listed; a relative one is refused", async () => {
+test("additionalDirectories count as inside the working folder: a command reading there is not asked about, read_file reads there, and the system text names them; the folders are kept in the session's record and listed; a relative one is refused", async () => {
   const shared = join(testFolder(), "shared");
   const host = startHost({
     script: [
-      answer({ _tag: "ToolCall", call: "read-1", tool: "terminal_command", input: { command: `cat ${shared}/notes.md`, intent: "Read the shared notes." } }),
+      answer(
+        { _tag: "ToolCall", call: "read-1", tool: "terminal_command", input: { command: `cat ${shared}/notes.md`, intent: "Read the shared notes." } },
+        { _tag: "ToolCall", call: "read-2", tool: "read_file", input: { path: `${shared}/notes.md`, intent: "Read the shared notes." } },
+      ),
       answer({ _tag: "Text", text: "Read." }),
     ],
   });
-  const { app, log } = sdkClient();
+  const { app, log } = sdkClient(undefined, { [join(shared, "notes.md")]: "shared notes" });
   const result = await app.connectWith(host.stream, async (ctx) => {
-    const initialized = (await initialize(ctx, { terminal: true })) as acp.InitializeResponse;
+    const initialized = (await initialize(ctx, { terminal: true, fs: { readTextFile: true } })) as acp.InitializeResponse;
     const created = await ctx.request("session/new", { cwd: host.cwd, additionalDirectories: [shared], mcpServers: [] });
     await ctx.request("session/prompt", say(created.sessionId, "Read the notes"));
     const listed = await ctx.request("session/list", {});
@@ -882,6 +885,10 @@ test("additionalDirectories count as inside the working folder: a command readin
   await host.stop();
   expect(result.initialized.agentCapabilities?.sessionCapabilities?.additionalDirectories).toEqual({});
   expect(log.asked).toEqual([]);
+  const facts = await factsOn(storeFileOf(host.directory, result.sessionId));
+  expect(immutableSystemPromptOf(facts)).toContain(`These folders count as inside it too: ${shared}.`);
+  const ended = observed(facts).flatMap((fact) => (fact.observation._tag === "ToolEnded" ? [fact.observation] : []));
+  expect(ended.find((each) => each.call === "read-2")?.outcome).toMatchObject({ _tag: "Succeeded", output: { body: { _tag: "Text", text: "shared notes" } } });
   expect(result.listed.sessions.find((each) => each.sessionId === result.sessionId)?.additionalDirectories).toEqual([shared]);
   expect(result.refused).toMatchObject({ code: -32602, message: "additionalDirectories must be absolute paths: relative/folder" });
 });

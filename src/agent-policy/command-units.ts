@@ -114,10 +114,17 @@ export interface Unit {
   readonly detail: Detail | undefined;
 }
 
-/** A path a unit reads or changes, as written, and how; `word` is undefined for the paths a program is given on its input (`xargs rm`). */
+/**
+ * A path a unit reads or changes, as written, and how. `word` is undefined for the paths a program is
+ * given as it runs, and `givenBy` says by whom: `xargs`, from its input, anywhere; `find`, from under
+ * its starting points (`find -exec cat {}`), which are judged as find's own. `recursive` marks a read
+ * of a folder and all it holds (`rg`, `grep -r`, `ls -R`).
+ */
 export interface UnitPath {
   readonly access: "reads" | ChangeVerb;
   readonly word: Word | undefined;
+  readonly givenBy?: "xargs" | "find";
+  readonly recursive?: boolean;
 }
 
 export type Units = { readonly _tag: "Units"; readonly units: ReadonlyArray<Unit> } | { readonly _tag: "Unparsed"; readonly reason: UnparsedReason };
@@ -155,17 +162,23 @@ interface Touches {
   readonly writes?: ReadonlyArray<Word>;
   /** The paths it deletes, moves, writes or changes as a program in `changers`: only those outside the working folder count. */
   readonly changes?: ReadonlyArray<{ readonly verb: ChangeVerb; readonly word: Word }>;
-  /** What it does to the paths it is given on its input (`xargs rm`), when it changes them. */
+  /** What it does to the paths it is given as it runs (`xargs rm`, `find -exec rm {}`), when it changes them. */
   readonly fed?: ChangeVerb | undefined;
+  /** Who gives it paths as it runs: `xargs`, from its input, or `find`, from under its starting points. */
+  readonly fedBy?: "xargs" | "find" | undefined;
   /** The paths it reads: those outside the working folder are its reads outside. */
   readonly reads?: ReadonlyArray<Word>;
+  /** The folders it reads with all they hold (`rg`, `grep -r`): reads too. */
+  readonly recursiveReads?: ReadonlyArray<Word>;
+  /** Whether it reads paths it is given as it runs (`xargs cat`, `find -exec cat {}`). */
+  readonly fedReads?: boolean;
   readonly detail?: Detail;
 }
 
 const unit = (words: ReadonlyArray<Word>, grant: ReadonlyArray<WordText> | undefined, touches: Touches = {}): Unit => {
   const written = touches.writes ?? [];
   const outside = (word: Word): boolean => escapes(word, touches.folders);
-  const reads = touches.reads ?? [];
+  const reads = [...(touches.reads ?? []), ...(touches.recursiveReads ?? [])];
   return {
     words,
     grant,
@@ -173,15 +186,18 @@ const unit = (words: ReadonlyArray<Word>, grant: ReadonlyArray<WordText> | undef
     changesOutside: [
       ...written.filter(outside).map((word): OutsideChange => ({ verb: "writes", path: textOf(word) })),
       ...(touches.changes ?? []).filter((change) => outside(change.word)).map((change): OutsideChange => ({ verb: change.verb, path: textOf(change.word) })),
-      ...(touches.fed === undefined ? [] : [{ verb: touches.fed, path: undefined }]),
+      // Paths xargs gives may be anywhere; find gives paths under its starting points, judged as its own.
+      ...(touches.fed === undefined || touches.fedBy === "find" ? [] : [{ verb: touches.fed, path: undefined }]),
     ],
     opaque: undefined,
     outside: reads.filter(outside).map(textOf),
     paths: [
-      ...reads.map((word): UnitPath => ({ access: "reads", word })),
+      ...(touches.reads ?? []).map((word): UnitPath => ({ access: "reads", word })),
+      ...(touches.recursiveReads ?? []).map((word): UnitPath => ({ access: "reads", word, recursive: true })),
+      ...(touches.fedReads === true ? [{ access: "reads" as const, word: undefined, givenBy: touches.fedBy ?? "xargs" }] : []),
       ...written.map((word): UnitPath => ({ access: "writes", word })),
       ...(touches.changes ?? []).map((change): UnitPath => ({ access: change.verb, word: change.word })),
-      ...(touches.fed === undefined ? [] : [{ access: touches.fed, word: undefined }]),
+      ...(touches.fed === undefined ? [] : [{ access: touches.fed, word: undefined, givenBy: touches.fedBy ?? "xargs" }]),
     ],
     detail: touches.detail,
   };
@@ -556,13 +572,27 @@ export const judgesPathsOf = (program: WordText): boolean => {
   return pathPrograms.has(base) || changers.has(base) || seds.has(base) || base === WordText.make("find");
 };
 
-/** The paths a read-only program reads, as written. `cd` with no folder goes to `~`, and `cd -` to the folder before, which is not written out. */
-const readsOf = (base: WordText, words: ReadonlyArray<Word>): ReadonlyArray<Word> => {
+/** Whether a read-only program reads the folders it names with all they hold: `rg`, `grep -r`, `ls -R`. */
+const readsRecursively = (base: WordText, words: ReadonlyArray<Word>): boolean => {
+  const flags = words.slice(1).flatMap((word) => (word.literal !== undefined && /^-[A-Za-z]+$/.test(word.literal) ? word.literal.slice(1).split("") : []));
+  if (base === WordText.make("rg")) return true;
+  if (base === WordText.make("grep")) return flags.includes("r") || flags.includes("R") || words.some((word) => is(word, "--recursive", "--dereference-recursive"));
+  return base === WordText.make("ls") && (flags.includes("R") || words.some((word) => is(word, "--recursive")));
+};
+
+/**
+ * The paths a read-only program reads, as written, and those it reads with all they hold. `cd` with
+ * no folder goes to `~`, and `cd -` to the folder before, which is not written out. A recursive search
+ * that names no folder searches the working folder.
+ */
+const readsOf = (base: WordText, words: ReadonlyArray<Word>): { readonly reads: ReadonlyArray<Word>; readonly recursiveReads: ReadonlyArray<Word> } => {
   if (base === WordText.make("cd")) {
-    if (words.slice(1).some((word) => is(word, "-"))) return [{ text: WordText.make("$OLDPWD") }];
-    if (words.slice(1).every(isOption)) return [literalWord("~")];
+    if (words.slice(1).some((word) => is(word, "-"))) return { reads: [{ text: WordText.make("$OLDPWD") }], recursiveReads: [] };
+    if (words.slice(1).every(isOption)) return { reads: [literalWord("~")], recursiveReads: [] };
   }
-  return pathsOf(base, words);
+  const paths = pathsOf(base, words);
+  if (!readsRecursively(base, words)) return { reads: paths, recursiveReads: [] };
+  return { reads: [], recursiveReads: paths.length === 0 ? [literalWord(".")] : paths };
 };
 
 /** The paths a git command reads: its `-C`, `--git-dir` and `--work-tree`, and the operands of `diff --no-index`. */
@@ -639,8 +669,8 @@ interface Seen {
   readonly fedText: boolean;
   /** That text, as written, when the command has it. */
   readonly fedBody: WordText | undefined;
-  /** Whether `xargs` gives the program more operands, read from its input. */
-  readonly fedArgs: boolean;
+  /** Who gives the program more operands as it runs: `xargs`, from its input, or `find -exec`, the paths it finds; false when no one. */
+  readonly fedArgs: false | "xargs" | "find";
   readonly folders: Folders | undefined;
 }
 
@@ -742,9 +772,21 @@ const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> =>
   if (runtime !== undefined) return runtimeUnits(words, runtime.inline, runtime.language, seen);
   const exported = declaring.has(base) ? steeringNeed(rest.flatMap((word) => present(word.literal).filter((value) => value.includes("=")))) : undefined;
   if (exported !== undefined) return [opaque(words, exported)];
-  const changed = changesOf(base, words, seen.fedArgs);
-  const reads = [...readsOf(base, words), ...(changed?.reads ?? [])];
-  return [unit(words, grantOf(words), { folders: seen.folders, writes: ownWrites(base, words), changes: changed?.changes ?? [], fed: changed?.fed, reads })];
+  const changed = changesOf(base, words, seen.fedArgs !== false);
+  const read = readsOf(base, words);
+  return [
+    unit(words, grantOf(words), {
+      folders: seen.folders,
+      writes: ownWrites(base, words),
+      changes: changed?.changes ?? [],
+      fed: changed?.fed,
+      fedBy: seen.fedArgs === false ? undefined : seen.fedArgs,
+      reads: [...read.reads, ...(changed?.reads ?? [])],
+      recursiveReads: read.recursiveReads,
+      // The paths xargs or find -exec gives a program it judges, when it does not change them, are read.
+      fedReads: seen.fedArgs !== false && changed?.fed === undefined && judgesPathsOf(base),
+    }),
+  ];
 };
 
 /** A wrapper's units: the program it runs, or the wrapper alone when it runs none. */
@@ -755,7 +797,7 @@ const wrapped = (base: WordText, options: WrapperOptions, words: ReadonlyArray<W
   const steered = steeringNeed(assignments.map((word) => word.literal ?? word.text));
   if (steered !== undefined) return [opaque(words, steered)];
   const inner = past.slice(assignments.length);
-  if (inner.length !== 0) return resolve(inner, base === WordText.make("xargs") ? { ...seen, fedText: false, fedBody: undefined, fedArgs: true } : seen);
+  if (inner.length !== 0) return resolve(inner, base === WordText.make("xargs") ? { ...seen, fedText: false, fedBody: undefined, fedArgs: "xargs" } : seen);
   return base === WordText.make("xargs") ? resolve([{ text: WordText.make("echo"), literal: WordText.make("echo") }], seen) : [unit(words, grantOf(words))];
 };
 
@@ -843,7 +885,8 @@ const findUnits = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> 
     if (option !== undefined && execOptions.has(option)) {
       const end = after.findIndex((word) => is(word, ";", "+"));
       if (end === -1) return [opaque(words, need(`find ${option} has no end (; or +)`))];
-      return scan(after.slice(end + 1), own, [...inner, ...resolve(after.slice(0, end), { ...seen, fedText: false, fedBody: undefined, fedArgs: false })], writes, deletes);
+      // The program -exec runs is given the paths find finds, as xargs gives them.
+      return scan(after.slice(end + 1), own, [...inner, ...resolve(after.slice(0, end), { ...seen, fedText: false, fedBody: undefined, fedArgs: "find" })], writes, deletes);
     }
     if (option === WordText.make("-delete")) return scan(after, [...own, next], inner, outsideStarts.length === 0 ? [...writes, literalWord("the files that find finds")] : writes, true);
     if (option !== undefined && fileOptions.has(option)) {

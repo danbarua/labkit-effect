@@ -152,8 +152,9 @@ editor.
 
 `readOnly` replaces the list of programs that run without a question.
 
-`additionalDirectories` lists folders whose files count as inside your folder: a command may read
-and change files there as it does in your folder. A folder is absolute, from `~`, or relative to
+`additionalDirectories` lists folders whose files count as inside your folder: a command and the
+file tools may read and change files there as they do in your folder, and the agent is told of
+them. A folder is absolute, from `~`, or relative to
 your folder:
 
 ```yaml
@@ -180,9 +181,16 @@ pass by what their words show:
   subcommand that writes (asked about as a read outside your folder).
 - **Symbolic links** are not followed: a link inside your folder to a file outside it counts as
   inside.
-- **`cd`** earlier in a command does not move the folder that later paths are judged against.
-  A `cd` or `pushd` outside your folder is asked about itself, and once you allow that call, the
-  rest of the command runs where it moved to.
+- **`cd`** is followed: after `cd src`, a relative path is judged both in your folder and in `src`,
+  since the `cd` may fail. After `popd`, `cd -` or a `cd` to a folder not written out, where a
+  relative path leads is not known, and it counts as outside your folder.
+- **A deny rule that names a file at any depth** (`Read(./.env)`, `Edit(*.pem)`) is not seen inside
+  a folder that a recursive search (`rg`, `grep -r`) or a delete (`rm -rf config`) covers. A deny rule
+  anchored to a folder is: `Read(secrets/**)` refuses `rg KEY .`, which would search `secrets`.
+  Claude Code's checks of shell commands have the same limit.
+- **When deny rules name paths,** a path they cannot see is asked about even in
+  `bypassPermissions`: one not written out (`"$F"`), a glob (`.en*`), and the paths `xargs` or
+  `find -exec` give a program as it runs.
 - **Code given to a program** (`python3 -c '…'`, a here-document fed to `bash`) is shown in the
   question, not judged. Deny rules cannot see the programs that code runs.
 - **`bypassPermissions`** contains nothing (see Permission modes).

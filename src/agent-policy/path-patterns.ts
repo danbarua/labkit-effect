@@ -15,7 +15,9 @@
  * - a pattern with a `/` at its start or in its middle is anchored at the root; one without matches a
  *   file or folder of that name at any depth (`.env`, `*.pem`);
  * - a path inside a folder that matches is matched too (`build` matches `build/out.txt`);
- * - a trailing `/` is dropped: whether a path is a folder is not known before the command runs.
+ * - a trailing `/` is dropped: whether a path is a folder is not known before the command runs;
+ * - as in Claude Code, a trailing `/**` matches the folder itself as well as what it holds
+ *   (`//tmp/**` matches `/tmp`), and the pattern stays anchored (`src/**` does not match `a/src`).
  *
  * A pattern starting with a single `/` is not accepted: in Claude Code it is relative to the
  * settings file it is in, which the policy does not know. A path outside a pattern's root does not
@@ -76,6 +78,8 @@ const anchoredSource = (glob: Text): Text => {
 
 /** Whether `relative`, a path from the pattern's root, matches `glob`: itself, or a folder it is inside. */
 const globMatches = (glob: Text, relative: ReadonlyArray<Text>): boolean => {
+  // A trailing `/**` matches the folder too: matched as the folder, anchored, it covers what the folder holds.
+  if (glob.endsWith("/**") && glob !== "/**") return globMatches(`/${glob.slice(0, -3).replace(/^\//, "")}`, relative);
   if (!glob.replace(/\/$/, "").includes("/") && glob !== "**") {
     const part = new RegExp(`^${partSource(glob)}$`, "u");
     return relative.some((name) => part.test(name));

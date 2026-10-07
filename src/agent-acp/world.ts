@@ -54,6 +54,8 @@ export interface WorldOpening {
   readonly sessionId: SessionId;
   /** The working folder, absolute. */
   readonly cwd: string;
+  /** The folders that count as inside the working folder (`additionalDirectories`, `--add-dir`), absolute. */
+  readonly additionalFolders?: ReadonlyArray<string> | undefined;
   readonly mcpServers: ReadonlyArray<McpServer>;
   readonly connection: AgentConnection<V1Version>;
   /**
@@ -94,8 +96,8 @@ const aboutOf = (input: Readonly<Record<string, unknown>>): string | undefined =
 const gitToolsAt = (cwd: string, strictInput: boolean) => (isRepositoryRoot(cwd) ? gitTools(cwd, { strictInput }) : undefined);
 
 /** Returns the system text for the working folder `cwd`: the line that names it, and the git tools' line when it is a repository's root. */
-const systemFor = (cwd: string, git: ReturnType<typeof gitToolsAt>): Effect.Effect<string> =>
-  Effect.map(git === undefined ? Effect.succeed("") : Effect.map(git.system, (line) => ` ${line}`), (line) => `${workingFolderLine(cwd)}${line}`);
+const systemFor = (cwd: string, git: ReturnType<typeof gitToolsAt>, additional: ReadonlyArray<string> = []): Effect.Effect<string> =>
+  Effect.map(git === undefined ? Effect.succeed("") : Effect.map(git.system, (line) => ` ${line}`), (line) => `${workingFolderLine(cwd, additional)}${line}`);
 
 /**
  * The tools that go through the editor (`editor-tools.ts`), for the methods the client advertised:
@@ -121,9 +123,10 @@ const wroteContent = (planned: PlannedWrite): ToolCallContent => ({
 });
 
 export const editorWorld: World<FileSystem.FileSystem> = {
-  open: ({ sessionId, cwd, connection, strictInput }) =>
+  open: ({ sessionId, cwd, connection, strictInput, additionalFolders }) =>
     Effect.gen(function* () {
       const fs = connection.profile.client.capabilities.fs;
+      const additional = additionalFolders ?? [];
       const disk = yield* FileSystem.FileSystem;
       // The terminal each command ran in, by call: shown in the call as it runs, and when it has ended.
       const terminals = yield* Ref.make(HashMap.empty<CallId, TerminalId>());
@@ -163,7 +166,7 @@ export const editorWorld: World<FileSystem.FileSystem> = {
         if (readNow) return writesBefore(call, command);
         return Ref.get(writes).pipe(Effect.map((all) => Option.getOrElse(HashMap.get(all, call), () => [])));
       };
-      const inFolder = inWorkspace(cwd);
+      const inFolder = inWorkspace(cwd, additional);
       const tools: ReadonlyArray<AnyTool<Editor | CurrentCall>> = [
         ...(fs?.readTextFile === true ? [anyTool(described(inFolder(readFile)))] : []),
         ...(fs?.writeTextFile === true ? [anyTool(described(inFolder(writeFile)))] : []),
@@ -211,7 +214,7 @@ export const editorWorld: World<FileSystem.FileSystem> = {
             : located;
         });
 
-      return { system: yield* systemFor(cwd, git), sources: [source, ...(git === undefined ? [] : [yield* git.source])], present };
+      return { system: yield* systemFor(cwd, git, additional), sources: [source, ...(git === undefined ? [] : [yield* git.source])], present };
     }),
 };
 
@@ -221,13 +224,14 @@ export const editorWorld: World<FileSystem.FileSystem> = {
  * is not notified of writes.
  */
 export const workspaceWorld: World<FileSystem.FileSystem> = {
-  open: ({ cwd, strictInput, environment }) =>
+  open: ({ cwd, strictInput, environment, additionalFolders }) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspace = workspaceTools(cwd, { strictInput, ...(environment === undefined ? {} : { environment }) });
+      const additional = additionalFolders ?? [];
+      const workspace = workspaceTools(cwd, { strictInput, additional, ...(environment === undefined ? {} : { environment }) });
       const git = gitToolsAt(cwd, strictInput);
       return {
-        system: yield* systemFor(cwd, git),
+        system: yield* systemFor(cwd, git, additional),
         sources: [yield* workspace.source.pipe(Effect.provideService(FileSystem.FileSystem, fs)), ...(git === undefined ? [] : [yield* git.source])],
         present: presentFrom([...workspace.catalog, ...(git?.catalog ?? [])]),
       };

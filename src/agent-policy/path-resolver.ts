@@ -38,21 +38,21 @@ export const normalised = (path: Text): ReadonlyArray<WordText> =>
 
 const isUnder = (path: ReadonlyArray<WordText>, folder: ReadonlyArray<WordText>): boolean => path.length >= folder.length && folder.every((part, at) => path[at] === part);
 
-/** Resolves `word`, a path as a command writes it, against `folders`. */
-export const resolvePath = (word: Word, folders: Folders | undefined): ResolvedPath => {
+/** Resolves `word`, a path as a command writes it, against `folders`: a relative path from `from` (the working folder unless a `cd` moved), inside judged against the working folder and the additional ones. */
+export const resolvePath = (word: Word, folders: Folders | undefined, from?: WordText): ResolvedPath => {
   if (word.literal === undefined && /[$`]/.test(word.text)) return { _tag: "Unresolved", why: "not written out" };
   const value = word.literal ?? word.text;
   const fromHome = value === "~" || value.startsWith("~/");
   if (value.startsWith("~") && !fromHome) return { _tag: "Unresolved", why: "another user's home folder" };
   if (folders === undefined) return { _tag: "Local", full: undefined, inside: !(fromHome || value.startsWith("/")) && normalised(value)[0] !== WordText.make("..") };
-  const absolute = fromHome ? `${folders.home}${value.slice(1)}` : value.startsWith("/") ? value : `${folders.working}/${value}`;
+  const absolute = fromHome ? `${folders.home}${value.slice(1)}` : value.startsWith("/") ? value : `${from ?? folders.working}/${value}`;
   const parts = normalised(absolute);
   const inside = [folders.working, ...(folders.additional ?? [])].some((folder) => isUnder(parts, normalised(folder)));
   return { _tag: "Local", full: WordText.make(`/${parts.join("/")}`), inside };
 };
 
 /** Whether `word` may lead outside the working folder: a path outside it, or one that is not resolved. */
-export const leavesFolder = (word: Word, folders: Folders | undefined): boolean => {
-  const resolved = resolvePath(word, folders);
+export const leavesFolder = (word: Word, folders: Folders | undefined, from?: WordText): boolean => {
+  const resolved = resolvePath(word, folders, from);
   return resolved._tag === "Unresolved" || !resolved.inside;
 };

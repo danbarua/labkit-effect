@@ -92,9 +92,15 @@ place a path as written becomes a full path. A path deny rule vetoes a read that
 matches, or a change that reaches an `Edit` pattern (`changeReaches`: the path matches, or it is a
 folder holding the folder an anchored pattern starts from). A path allow rule lifts a read outside
 the working folder that a `Read` or `Edit` pattern matches, a change outside it, or a write inside
-it, that an `Edit` pattern matches; the paths it does not match are still named. When path deny
-rules exist, a path they cannot see (not written out, another user's `~`, given on a program's
-input) is `unseen`. A program rule decides which programs run; only path rules lift reads and
+it, that an `Edit` pattern matches; the paths it does not match are still named. A recursive read
+(`rg`, `grep -r`, `ls -R`; `UnitPath.recursive`) reaches an anchored pattern inside the folder it
+reads, as a change does. A relative path after a `cd` or `pushd` to a folder written out is judged
+from both folders (it is denied when either is, allowed only when both are, and outside when either
+is); after `popd`, `cd -` or a `cd` to a folder not written out it is outside, and unseen. When path
+deny rules exist, a path they cannot see (not written out, another user's `~`, a glob, after a move
+that cannot be followed, or given as a program runs by `xargs` or `find -exec`) is `unseen`. The paths
+`find -exec` gives are under find's starting points, which are find's own reads, so they are not
+counted as outside. A program rule decides which programs run; only path rules lift reads and
 changes outside the working folder, as in Claude Code, whose path checks come before its program
 allow rules.
 

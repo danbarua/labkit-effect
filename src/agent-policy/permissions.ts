@@ -295,47 +295,77 @@ export interface CommandJudging {
 }
 
 /**
- * The path rules of `judging`'s settings, applied to a unit's paths (`UnitPath`), each resolved
- * against the working and home folders (`path-resolver.ts`):
- * - `deniedBy`: the deny rule a path is refused by: a read by a `Read(...)` rule it matches, a change
- *   by an `Edit(...)` rule whose paths it reaches (`changeReaches`: `rm -rf ~` reaches `~/.ssh/**`);
- * - `unseen`: why deny rules of its kind cannot see the path: it is not written out, it names
- *   another user's home folder, or it is given on the program's input;
- * - `allows`: whether an allow rule matches the path: a read by a `Read(...)` or an `Edit(...)` rule
- *   (an allowed edit is an allowed read), a change by an `Edit(...)` rule;
- * - `leaves`: whether a path may lead outside the working folder.
+ * The path rules of `judging`'s settings, applied to each unit's paths (`UnitPath`), each resolved
+ * against the folders a relative path may be in at that unit (`path-resolver.ts`):
+ * - a `cd` or `pushd` to a folder written out adds it, since the command may or may not have moved
+ *   by then; after a `popd`, a `cd -`, or a `cd` to a folder not written out, where a relative path
+ *   leads is not known;
+ * - `deniedBy`: the deny rule a path is refused by: a read by a `Read(...)` rule it matches, or whose
+ *   paths a recursive read reaches; a change by an `Edit(...)` rule whose paths it reaches
+ *   (`changeReaches`: `rm -rf ~` reaches `~/.ssh/**`);
+ * - `unseen`: why deny rules of its kind cannot see the path: not written out, another user's home
+ *   folder, a glob (`.en*`), after a move it cannot follow, or given as the program runs (`xargs`,
+ *   `find -exec`);
+ * - `allows`: whether an allow rule matches the path in every folder it may be in: a read by a
+ *   `Read(...)` or an `Edit(...)` rule (an allowed edit is an allowed read), a change by an `Edit(...)`
+ *   rule;
+ * - `leaves`: whether a path may lead outside the working folder, in any folder it may be in.
  */
-const pathJudging = (judging: CommandJudging) => {
+const pathJudging = (judging: CommandJudging, units: ReadonlyArray<Unit>) => {
   const folders = judging.folders;
   const allow = judging.settings.allow.flatMap((rule) => present(pathRuleOf(rule)));
   const deny = judging.settings.deny.flatMap((rule) => present(pathRuleOf(rule)));
-  const fullOf = (word: Word): WordText | undefined => {
-    const resolved = resolvePath(word, folders);
-    return resolved._tag === "Local" ? resolved.full : undefined;
-  };
+  const relative = (word: Word): boolean => !/^[/~]/.test(word.literal ?? word.text);
+  // For each unit, the folders a relative path may be resolved from (undefined: the working folder), and whether that is not known.
+  type Placed = { readonly bases: ReadonlyArray<WordText | undefined>; readonly unknown: boolean };
+  const placed = units.reduce<Placed & { readonly at: ReadonlyArray<Placed> }>(
+    (state, unit) => {
+      const here = { bases: state.bases, unknown: state.unknown };
+      const program = unit.words[0]?.literal;
+      const name = program === undefined ? "" : program.slice(program.lastIndexOf("/") + 1);
+      if (name === "popd") return { bases: state.bases, unknown: true, at: [...state.at, here] };
+      if (name !== "cd" && name !== "pushd") return { ...state, at: [...state.at, here] };
+      const target = unit.paths[0]?.word;
+      const moved = state.bases.flatMap((base) => {
+        if (target === undefined || folders === undefined) return [];
+        const resolved = resolvePath(target, folders, base);
+        return resolved._tag === "Local" && resolved.full !== undefined ? [resolved.full] : [];
+      });
+      const lost = target === undefined || resolvePath(target, folders)._tag === "Unresolved" || (folders !== undefined && moved.length === 0);
+      return { bases: [...state.bases, ...moved], unknown: state.unknown || lost, at: [...state.at, here] };
+    },
+    { bases: [undefined], unknown: false, at: [] },
+  ).at;
+  const basesAt = (word: Word, at: number): ReadonlyArray<WordText | undefined> => (relative(word) ? (placed[at]?.bases ?? [undefined]) : [undefined]);
+  const fullsOf = (word: Word, at: number): ReadonlyArray<WordText | undefined> =>
+    basesAt(word, at).map((base) => {
+      const resolved = resolvePath(word, folders, base);
+      return resolved._tag === "Local" ? resolved.full : undefined;
+    });
+  const isGlob = (word: Word): boolean => /[*?[]/.test(word.literal ?? word.text);
   return {
     deny,
-    leaves: (word: Word): boolean => leavesFolder(word, folders),
-    deniedBy: (path: UnitPath): PathRule | undefined => {
-      const full = path.word === undefined ? undefined : fullOf(path.word);
-      if (full === undefined || folders === undefined) return undefined;
-      return path.access === "reads"
-        ? deny.find((rule) => rule.access === "read" && matchesPath(rule.pattern, full, folders))
-        : deny.find((rule) => rule.access === "edit" && changeReaches(rule.pattern, full, folders));
+    leaves: (word: Word, at: number): boolean => basesAt(word, at).some((base) => leavesFolder(word, folders, base)) || (relative(word) && placed[at]?.unknown === true),
+    deniedBy: (path: UnitPath, at: number): PathRule | undefined => {
+      if (path.word === undefined || folders === undefined) return undefined;
+      const fulls = fullsOf(path.word, at).flatMap((full) => present(full));
+      const reached = (rule: PathRule) => fulls.some((full) => (path.access === "reads" && path.recursive !== true ? matchesPath(rule.pattern, full, folders) : changeReaches(rule.pattern, full, folders)));
+      return deny.find((rule) => rule.access === (path.access === "reads" ? "read" : "edit") && reached(rule));
     },
-    unseen: (path: UnitPath): NeedText | undefined => {
-      const kind = path.access === "reads" ? "read" : "edit";
-      if (!deny.some((rule) => rule.access === kind)) return undefined;
-      const verb = path.access === "reads" ? "reads" : "changes";
-      if (path.word === undefined) return NeedText.make(`deny rules cannot see which files it ${path.access}: it gets them from its input`);
+    unseen: (path: UnitPath, at: number): NeedText | undefined => {
+      if (!deny.some((rule) => rule.access === (path.access === "reads" ? "read" : "edit"))) return undefined;
+      const verb = path.access;
+      if (path.word === undefined) return NeedText.make(`deny rules cannot see which files it ${verb}: ${path.givenBy === "find" ? "find" : "xargs"} gives them as it runs`);
       const resolved = resolvePath(path.word, folders);
       if (resolved._tag === "Unresolved") return NeedText.make(`deny rules cannot see which file it ${verb}: ${path.word.text} is ${resolved.why === "not written out" ? "not written out" : "in another user's home folder"}`);
+      if (isGlob(path.word)) return NeedText.make(`deny rules cannot see which files it ${verb}: ${path.word.text} is a pattern`);
+      if (relative(path.word) && placed[at]?.unknown === true) return NeedText.make(`deny rules cannot see which file it ${verb}: a cd earlier in the command moves where ${path.word.text} leads`);
       return resolved.full === undefined || folders === undefined ? NeedText.make(`deny rules cannot see which file it ${verb}: the working folder is not known`) : undefined;
     },
-    allows: (path: UnitPath): boolean => {
-      const full = path.word === undefined ? undefined : fullOf(path.word);
-      if (full === undefined || folders === undefined) return false;
-      return allow.some((rule) => (path.access === "reads" || rule.access === "edit") && matchesPath(rule.pattern, full, folders));
+    allows: (path: UnitPath, at: number): boolean => {
+      if (path.word === undefined || folders === undefined || (relative(path.word) && placed[at]?.unknown === true)) return false;
+      const fulls = fullsOf(path.word, at);
+      return fulls.every((full) => full !== undefined && allow.some((rule) => (path.access === "reads" || rule.access === "edit") && matchesPath(rule.pattern, full, folders)));
     },
   };
 };
@@ -367,11 +397,11 @@ const commandStep = (
   // Path rules (`Read(...)`, `Edit(...)`): a deny rule refuses a read or a change of a path it
   // matches, in every mode; an allow rule lifts a path outside the working folder that it matches.
   // Program rules say which programs run, not where they read and change files.
-  const paths = pathJudging(judging);
-  const denied = units.flatMap((unit) => {
+  const paths = pathJudging(judging, units);
+  const denied = units.flatMap((unit, at) => {
     const rule = deny.find((each) => denies(each, unit));
     if (rule !== undefined) return [`${programOf(unit)} is denied by the rule ${rule.rule}`];
-    const pathRule = unit.paths.map(paths.deniedBy).find((each) => each !== undefined);
+    const pathRule = unit.paths.map((path) => paths.deniedBy(path, at)).find((each) => each !== undefined);
     if (pathRule !== undefined) return [`${programOf(unit)} is denied by the rule ${pathRule.rule}`];
     const grant = unit.grant;
     return grant !== undefined && session.rejected.some((rejected) => sameGrant(rejected, grant)) ? [`${shownGrant(grant)} was rejected for the rest of the session`] : [];
@@ -383,11 +413,11 @@ const commandStep = (
     ? []
     : split === undefined || split._tag === "Unparsed"
       ? [{ program: WordText.make(command ?? "the command"), kind: "unseen", why: NeedText.make("deny rules cannot see what it runs: it does not parse") }]
-      : units.flatMap((unit): ReadonlyArray<CommandNeed> => [
+      : units.flatMap((unit, at): ReadonlyArray<CommandNeed> => [
           ...(deny.some((rule) => rule.words !== undefined) && unit.words.length > 0 && unit.words[0]?.literal === undefined
             ? [{ program: programOf(unit), kind: "unseen" as const, why: NeedText.make("deny rules cannot see what it runs: its program's name is not written out") }]
             : []),
-          ...unit.paths.flatMap((path) => present(paths.unseen(path)).map((why) => ({ program: programOf(unit), kind: "unseen" as const, why }))),
+          ...unit.paths.flatMap((path) => present(paths.unseen(path, at)).map((why) => ({ program: programOf(unit), kind: "unseen" as const, why }))),
         ]);
   if ((allow.some((rule) => rule.words === undefined) || mode === "bypassPermissions") && unseen.length === 0) return proceed;
   if (mode === "bypassPermissions" || allow.some((rule) => rule.words === undefined)) return asked(unseen, [], tool, kind, mode, canAsk, command);
@@ -400,16 +430,17 @@ const commandStep = (
   const needs: ReadonlyArray<CommandNeed> =
     split === undefined || split._tag === "Unparsed"
       ? [{ program: WordText.make(command ?? "the command"), kind: "unparsed", why: NeedText.make(split?._tag === "Unparsed" ? `it does not parse: ${split.reason}` : "the call's input has no command") }]
-      : units.flatMap((unit) => {
+      : units.flatMap((unit, at) => {
           const program = programOf(unit);
           // A path that a path allow rule matches needs no permission; the others are named.
-          const unallowed = unit.paths.filter((path) => !paths.allows(path));
-          const writes = unallowed.flatMap((path) => (path.access === "writes" && path.word !== undefined && !paths.leaves(path.word) ? [wordText(path.word)] : []));
-          const readsOutside = unallowed.flatMap((path) => (path.access === "reads" && path.word !== undefined && paths.leaves(path.word) ? [wordText(path.word)] : []));
+          const unallowed = unit.paths.filter((path) => !paths.allows(path, at));
+          const writes = unallowed.flatMap((path) => (path.access === "writes" && path.word !== undefined && !paths.leaves(path.word, at) ? [wordText(path.word)] : []));
+          const readsOutside = unallowed.flatMap((path) => (path.access === "reads" && path.word !== undefined && paths.leaves(path.word, at) ? [wordText(path.word)] : []));
           const changesOutside = unallowed.flatMap((path): ReadonlyArray<OutsideChange> => {
             if (path.access === "reads") return [];
-            if (path.word === undefined) return [{ verb: path.access, path: undefined }];
-            return paths.leaves(path.word) ? [{ verb: path.access, path: wordText(path.word) }] : [];
+            // Paths xargs gives may be anywhere; those find gives are under its starting points, judged as find's own.
+            if (path.word === undefined) return path.givenBy === "find" ? [] : [{ verb: path.access, path: undefined }];
+            return paths.leaves(path.word, at) ? [{ verb: path.access, path: wordText(path.word) }] : [];
           });
           const own: ReadonlyArray<CommandNeed> = [
             ...(allowed(unit) ? [] : [unit.opaque === undefined ? { program, kind: "notAllowed" as const, why: NeedText.make("it is not allowed yet") } : { program, kind: "opaque" as const, why: unit.opaque }]),

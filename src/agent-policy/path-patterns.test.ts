@@ -17,7 +17,7 @@ const matches = (pattern: string, path: string): boolean => {
 const patterns = [".env", "*.pem", "build", "src/**", "**/secrets", "a/**/b", "docs/*.md", "**", "x?z", "[ab]c", "[!a]c", "lib/**/*.ts", "a**b", "deep/x/"];
 const paths = [".env", "a/.env", "a/.env/inner", "key.pem", "a/b/key.pem", "build", "build/out.txt", "a/build", "src", "src/a.ts", "src/x/y.ts", "other/src/a.ts", "secrets", "x/secrets/k", "a/b", "a/x/y/b", "a/b/c", "docs/a.md", "docs/x/a.md", "top", "a/top", "xyz", "x/z", "ac", "bc", "cc", "lib/a.ts", "lib/x/a.ts", "lib/x/a.js", "axxb", "ax/xb", "deep/x", "deep/x/y"];
 
-test("a pattern from the working folder matches the paths git ignores for the same line in a .gitignore, except that a trailing / also matches a path git takes for a file", () => {
+test("a pattern from the working folder matches the paths git ignores for the same line in a .gitignore, except that a trailing / also matches a path git takes for a file, and a trailing /** the folder itself, as in Claude Code", () => {
   const folder = testFolder();
   const answers = patterns.map((pattern, at) => {
     const repository = join(folder, `case-${at}`);
@@ -31,7 +31,7 @@ test("a pattern from the working folder matches the paths git ignores for the sa
       return ours === ignored.has(path) ? [] : [`${pattern} ${path}: git ${ignored.has(path)}, ours ${ours}`];
     });
   });
-  expect(answers.flat()).toEqual(["deep/x/ deep/x: git false, ours true"]);
+  expect(answers.flat()).toEqual(["src/** src: git false, ours true", "deep/x/ deep/x: git false, ours true"]);
 });
 
 test("// is the file system's root, ~/ the home folder, and anything else the working folder; a path outside the root does not match", () => {

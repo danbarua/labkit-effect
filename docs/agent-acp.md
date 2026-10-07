@@ -63,8 +63,9 @@ never gets a prompt leaves nothing on disk, so `session/list` lists only session
 
 The host advertises `sessionCapabilities.additionalDirectories`. The `additionalDirectories` of
 `session/new`, `session/load` and `session/resume` are folders that count as inside the working
-folder for the permission policy (`docs/agent-policy.md`), after those of the launcher's
-`--add-dir` and the settings' `additionalDirectories`. Each must be an absolute path, as `cwd` must,
+folder, after those of the launcher's `--add-dir` and before the settings' `additionalDirectories`:
+for the permission policy (`docs/agent-policy.md`), for the file tools, which take a path inside
+any of them (`inWorkspace`), and in the system text, which names them. Each must be an absolute path, as `cwd` must,
 or the request is refused (-32602, naming it). A new session's are kept in its record.
 
 ### `session/new`

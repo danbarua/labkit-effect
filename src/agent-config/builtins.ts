@@ -24,6 +24,7 @@ import { budgetLimit, loopBreaker as loopBreakerPolicies, permissionsFor, turnRe
 import { type CallKey, sameToolAndInput } from "../agent-policy/loop-breaker.ts";
 import { defaultMaxTurnRequests } from "../agent-policy/max-turn-requests.ts";
 import { defaultPermissionSettings, PermissionMode } from "../agent-policy/permissions.ts";
+import type { Configuration } from "./file.ts";
 import { PermissionRule, ReadOnlyPrefix } from "../agent-policy/permission-rules.ts";
 import { ToolName } from "../agent-machine/names.ts";
 import type { Received } from "../agent-machine/received.ts";
@@ -71,6 +72,14 @@ export const permissions = plugin(
     toolCalls: permissionsFor(host.permissionMode ?? mode, host.canAsk, settings, host.workingFolder, [...additionalDirectories, ...(host.additionalFolders ?? [])]),
   }),
 );
+
+/** The folders that `configuration`'s permissions plug-in counts as inside the working folder (`additionalDirectories`), as written. */
+export const additionalDirectoriesOf = (configuration: Configuration): ReadonlyArray<string> =>
+  (configuration.lists.toolCalls ?? []).flatMap((entry) => {
+    const settings: unknown = entry.settings;
+    if (entry.plugin.use !== permissions.use || typeof settings !== "object" || settings === null || !("additionalDirectories" in settings) || !Array.isArray(settings.additionalDirectories)) return [];
+    return settings.additionalDirectories.filter((folder): folder is string => typeof folder === "string");
+  });
 
 export const maxTurnRequests = plugin("maxTurnRequests", Schema.Struct({ limit: defaulted(atLeast(1), defaultMaxTurnRequests) }), ["modelRequests"], ({ limit }) => ({
   modelRequests: turnRequestLimit(limit),

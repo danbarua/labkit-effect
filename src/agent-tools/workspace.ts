@@ -59,7 +59,8 @@ export const maxCommandSeconds = 600;
  * The system text that names the working folder. The tool descriptions refer to "the working folder"
  * without naming it, so a host that offers these tools sends this text as well.
  */
-export const workingFolderLine = (folder: string): string => `The working folder is ${folder}.`;
+export const workingFolderLine = (folder: string, additional: ReadonlyArray<string> = []): string =>
+  `The working folder is ${folder}.${additional.length === 0 ? "" : ` These folders count as inside it too: ${additional.join(", ")}.`}`;
 
 export const ReadFile = Schema.Struct({
   path: FilePath,
@@ -263,10 +264,11 @@ export const runCommand = (root: string, environment: Environment): Tool<typeof 
  * its tool does not take is refused; without (the default), it runs without them, and its result
  * says which were ignored.
  */
-export function workspaceTools(root: string, options: { readonly strictInput?: boolean; readonly environment?: Environment } = {}) {
+export function workspaceTools(root: string, options: { readonly strictInput?: boolean; readonly environment?: Environment; readonly additional?: ReadonlyArray<string> } = {}) {
   // What `run_command` is given: what the host composed (`commandEnvironment`), else this process's without its credentials.
   const environment = options.environment ?? withoutCredentials(process.env).env;
-  const bound = inWorkspace(root);
+  const additional = options.additional ?? [];
+  const bound = inWorkspace(root, additional);
   const tools = [
     anyTool(described(bound(readFile))),
     anyTool(described(bound(listDir))),
@@ -278,6 +280,6 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
     catalog: tools.map((tool) => tool.spec),
     source: sourceOf(tools, { strictInput: options.strictInput ?? false }),
     environment,
-    system: workingFolderLine(root),
+    system: workingFolderLine(root, additional),
   };
 }

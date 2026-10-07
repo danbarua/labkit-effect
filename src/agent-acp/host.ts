@@ -63,6 +63,7 @@ import { markdownOf } from "../agent-host/export.ts";
 import { KnownWithLocalServer, localServer, SettlingWithLocalServer } from "../agent-host/local-server.ts";
 import { readRecord, RecordFailed, recordedSessions, recordFileOf, writeRecord } from "../agent-host/record.ts";
 import { foldersOf, SessionServices } from "../agent-host/services.ts";
+import { additionalDirectoriesOf } from "../agent-config/builtins.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { leftRunning } from "../agent-machine/left-running.ts";
 import { InputText, SessionId, type TurnId } from "../agent-machine/names.ts";
@@ -661,7 +662,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   session,
                   context,
                   present: world.present,
-                  folders: foldersOf(parent.cwd, additionalFolders),
+                  folders: foldersOf(parent.cwd, [...additionalFolders, ...additionalDirectoriesOf(parent.configuration)]),
                   connection,
                   annotations: { connection: connectionId, session: id },
                   initial,
@@ -888,6 +889,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const worldAlone = yield* (world as World<R | FileSystem.FileSystem>).open({
                 sessionId,
                 cwd,
+                additionalFolders: sessionFolders(cwd, additional, configuration),
                 mcpServers,
                 connection,
                 strictInput: options.strictToolInput ?? false,
@@ -950,6 +952,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             );
           });
 
+        // The folders a session counts as inside its working folder, absolute: the launcher's, the session's, then the settings'.
+        const sessionFolders = (cwd: string, additional: ReadonlyArray<string>, configuration: Configured): ReadonlyArray<string> =>
+          foldersOf(cwd, [...(options.additionalFolders ?? []), ...additional, ...additionalDirectoriesOf(configuration)]).additional ?? [];
+
         const handlers: Agent.AgentHandlers<Protocol.V1Version, ModelCatalog | FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner | Scope.Scope | R> = {
           "session/new": ({ cwd, mcpServers, additionalDirectories }) =>
             traced(
@@ -972,6 +978,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 const worldAlone = yield* (world as World<R | FileSystem.FileSystem>).open({
                   sessionId: id,
                   cwd,
+                  additionalFolders: sessionFolders(cwd, additional, configuration),
                   mcpServers,
                   connection,
                   strictInput: options.strictToolInput ?? false,

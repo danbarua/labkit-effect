@@ -208,7 +208,12 @@ test("acceptEdits lets a command write files inside the working folder, not outs
 });
 
 test("a command that changes paths outside the working folder is asked about even after cd and when a rule allows the program; an Edit rule matching the path, an allow rule for the whole tool, or bypassPermissions runs it", () => {
-  expect(judged("cd ~/other && rm -rf build", { facts: answered("rm -rf dist", "allow-session"), folders: project }).question).toMatchObject({ needs: [{ program: "cd ~/other", kind: "readsOutside" }] });
+  expect(judged("cd ~/other && rm -rf build", { facts: answered("rm -rf dist", "allow-session"), folders: project }).question).toMatchObject({
+    needs: [
+      { program: "cd ~/other", kind: "readsOutside" },
+      { program: "rm -rf build", kind: "changesOutside", why: "it deletes outside the working folder: build" },
+    ],
+  });
   expect(judged("rm -rf /tmp/build", { allow: ["command(rm:*)"], folders: project }).question).toMatchObject({ needs: [{ kind: "changesOutside" }] });
   expect(judged("rm -rf /tmp/build", { allow: ["command(rm:*)", "Edit(//tmp/**)"], folders: project }).step).toBe("runs");
   expect(judged("rm -rf /tmp/build", { allow: ["command(rm -rf build)"], folders: project }).question).toMatchObject({ needs: [{ kind: "notAllowed" }, { kind: "changesOutside" }] });
@@ -259,7 +264,7 @@ test("a deny rule refuses a read or a change of a path it matches, inside the wo
 test("when deny rules name paths, a path they cannot see is asked about even in bypassPermissions: one not written out, or ones a program gets from its input", () => {
   const deny = { deny: ["Read(./.env)", "Edit(~/.ssh/**)"], folders: project, mode: "bypassPermissions" as const };
   expect(judged('cat "$F"', deny).question).toMatchObject({ needs: [{ kind: "unseen", why: 'deny rules cannot see which file it reads: "$F" is not written out' }] });
-  expect(judged("git ls-files | xargs rm", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it deletes: it gets them from its input" }] });
+  expect(judged("git ls-files | xargs rm", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it deletes: xargs gives them as it runs" }] });
   expect(judged('cat "$F"', { folders: project, mode: "bypassPermissions" }).step).toBe("runs");
 });
 
@@ -268,4 +273,28 @@ test("an additional folder counts as inside the working folder: reading and chan
   expect(judged("cat ~/shared/notes.md", { folders: withShared }).step).toBe("runs");
   expect(judged("rm -rf ~/shared/build", { facts: answered("rm -rf dist", "allow-session"), folders: withShared }).step).toBe("runs");
   expect(judged("cat ~/other/notes.md", { folders: withShared }).question).toMatchObject({ needs: [{ kind: "readsOutside" }] });
+});
+
+test("a path deny rule sees past a cd, through find -exec and xargs, into a recursive search, and through a glob: it refuses what it can match and asks about what it cannot", () => {
+  const deny = { deny: ["Read(secrets/**)", "Read(./.env)"], folders: project, mode: "bypassPermissions" as const };
+  // A relative path after a cd is judged in the folder before the cd and in the one after it.
+  expect(judged("cd secrets && cat key", deny).reason).toBe("cd secrets is denied by the rule Read(secrets/**); cat key is denied by the rule Read(secrets/**).");
+  expect(judged("cd src && cat ../secrets/key", deny).reason).toBe("cat ../secrets/key is denied by the rule Read(secrets/**).");
+  expect(judged("cd src && cat a.ts", deny).step).toBe("runs");
+  expect(judged('cd "$D" && cat key', deny).question).toMatchObject({ needs: [{ kind: "unseen" }, { kind: "unseen", why: "deny rules cannot see which file it reads: a cd earlier in the command moves where key leads" }] });
+  // The paths find -exec and xargs give are not seen.
+  expect(judged("find . -name .env -exec cat {} \\;", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it reads: find gives them as it runs" }] });
+  expect(judged("git ls-files | xargs cat", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it reads: xargs gives them as it runs" }] });
+  // A recursive search reaches an anchored pattern inside the folder it searches; one that matches at any depth is not seen there.
+  expect(judged("rg KEY .", deny).reason).toBe("rg KEY . is denied by the rule Read(secrets/**).");
+  expect(judged("rg TODO src", deny).step).toBe("runs");
+  // A glob could name a denied file.
+  expect(judged("cat .en*", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it reads: .en* is a pattern" }] });
+});
+
+test("a cd moves where later relative paths lead: after a cd outside the working folder, a change there is a change outside it", () => {
+  const rm = answered("rm -rf dist", "allow-session");
+  expect(judged("cd /tmp && rm -rf build", { facts: rm, allow: ["Read(//tmp/**)"], folders: project }).question).toMatchObject({ needs: [{ kind: "changesOutside", why: "it deletes outside the working folder: build" }] });
+  // The paths find gives are under its starting points, which are find's own reads.
+  expect(judged("find . -exec rm {} \\;", { facts: rm, allow: ["command(find:*)"], folders: project }).step).toBe("runs");
 });

@@ -36,6 +36,8 @@ import type { Fact } from "../../agent-machine/fact.ts";
 import { InputText, type TurnId, Via } from "../../agent-machine/names.ts";
 import type { SettingsChange } from "../../agent-machine/settings.ts";
 import { gitTools, isRepositoryRoot } from "../../agent-tools/git.ts";
+import { additionalDirectoriesOf } from "../../agent-config/builtins.ts";
+import { foldersOf } from "../../agent-host/services.ts";
 import { workspaceTools } from "../../agent-tools/workspace.ts";
 import type { Session } from "../../agent-session/loop.ts";
 import { SourcedToolRunner } from "../../agent-session/tool-sources.ts";
@@ -97,6 +99,7 @@ export const madeIn = (record: unknown, cwd: string): boolean => Predicate.isRea
 const workspaceOf = (config: Config) =>
   workspaceTools(process.cwd(), {
     strictInput: config.strictToolInput,
+    additional: foldersOf(process.cwd(), [...config.additionalFolders, ...additionalDirectoriesOf(config.configuration)]).additional ?? [],
     environment: processEnvironmentWith(seamListsOf(config.configuration, { canAsk: config.canAsk }).commandEnvironment ?? [removeCredentials()]),
   });
 
