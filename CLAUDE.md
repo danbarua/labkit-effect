@@ -72,8 +72,8 @@ To move to another version, install it, then:
   and the facts and log of the sessions it ran, each script checking them and exiting 1 on a failure.
 - `logs/commands/`: the output of commands run by hand, such as `bun run check`.
 
-The hosts keep what they write outside the repository, in `~/.local/share/<brand>/`
-(`src/agent-host/brand.ts`):
+The hosts keep what they write outside the repository, in `~/.local/share/<brand>/`, or the folder
+`--data-dir` names (`src/agent-host/brand-folders.ts`, `BrandFolders`):
 
 - `sessions/<version>/<session>/`: a session's facts (`facts.jsonl`, its session store), its record
   (`host.json`: the host that made it and its working folder) and, for the CLI, what its

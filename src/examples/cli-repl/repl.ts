@@ -23,7 +23,7 @@
 import type { McpServers } from "../../agent-mcp/servers.ts";
 import { Console, Deferred, Effect, FileSystem, HashMap, Option, PubSub, Queue, Ref } from "effect";
 import { homedir } from "node:os";
-import { Brand } from "../../agent-host/brand.ts";
+import { BrandFolders } from "../../agent-host/brand-folders.ts";
 import { terminalOf } from "../../agent-host/command-detail.ts";
 import { type ShownWrite, shownWrites } from "../../agent-host/command-writes.ts";
 import { currentOnDisk, patchCutNote } from "../../agent-tools/file-change.ts";
@@ -398,7 +398,7 @@ const thinkingKey = (view: View): KeyBinding => ({ matches: isOptionT, run: togg
 
 export const repl = (session: Session, config: Config, first: string | undefined, interactive: boolean, context: ReplContext, mcp?: McpServers) =>
   Effect.scoped(Effect.gen(function* () {
-    yield* Console.log(`${config.target.provider}/${config.target.model} · /help for commands · /exit to quit · log: ${logFileOf(yield* Brand, config.sessionId)}`);
+    yield* Console.log(`${config.target.provider}/${config.target.model} · /help for commands · /exit to quit · log: ${logFileOf((yield* BrandFolders).logs, config.sessionId)}`);
     if (first !== undefined) yield* turn(session, first, context.view);
     if (!interactive) return;
     yield* bracketedPaste;

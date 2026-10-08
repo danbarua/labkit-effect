@@ -28,6 +28,7 @@ about them are in [agent-host-direction.md](agent-host-direction.md).
 | `launcher-logs.ts`, `log-file.ts` | The ACP launcher's log files. `log-file.ts` is listed in `imperativeBoundaries` in `oxlint.config.ts`. |
 | `redaction.ts` | Removing the environment's secrets from log records. |
 | `brand.ts` | The name the agent goes by, and what is named after it. |
+| `brand-folders.ts` | `BrandFolders`: every folder named after the brand (configuration, data, sessions, blobs, logs, the project's folder), resolved once at an entry point from the brand, the home folder and `--config-dir`, `--data-dir` and `--sessions-dir`. |
 | `launch.ts` | The launch options both hosts share, and the configuration layers they make. |
 | `command-parser.ts` | The command parser: the WebAssembly module of `native/bash-segments`, which splits a shell command into its segments (`docs/bash-segments.md`). |
 | `command-writes.ts` | The files a command writes text to (`cat > f <<'EOF'`, `echo x >> f`), their full paths, and their text before the command runs, read from the disk (`currentOnDisk`, `agent-tools/file-change.ts`) or by a host's own means: what a host shows as each file's diff, and the files a command tool records (`writtenFiles`). |
@@ -287,9 +288,27 @@ brand at its entry point; the CLI's `main(brand)` and the ACP launcher's `launch
   none); otherwise labkit.
 - Named after the brand: the configuration folders (`~/.config/<name>/`, `<project>/.<name>/`), the
   folder where the hosts keep what they write (`~/.local/share/<name>/`: every host's sessions in
-  `sessions/<version>/`, the log files in `logs/`; `brand.ts`), the launcher's variables
+  `sessions/<version>/`, their blobs in `blobs/`, the log files in `logs/`), the launcher's variables
   (`<PREFIX>ACP_*`), where `/export` writes (`.<name>/exports`), the name the ACP host gives a client
   (`agentInfo`) and the MCP client a server (`clientInfo`), and the CLI's command.
+
+## The brand's folders
+
+`BrandFolders` (`brand-folders.ts`) holds every folder named after the brand, resolved once at each
+entry point (the CLI, the ACP launcher, zork) and provided to what runs there; whatever reads or
+writes one of them reads it from the service, which has no default. Tests provide one pointed at
+their own folder.
+
+| Folder | Default | Moved by |
+| --- | --- | --- |
+| `config` | `~/.config/<brand>` | `--config-dir` |
+| `data` | `~/.local/share/<brand>` | `--data-dir` (an absolute path; a relative one is refused) |
+| `sessions` | `<data>/sessions/<version>` | `--data-dir`; the ACP launcher's `--sessions-dir` moves it alone |
+| `blobs` | `<data>/blobs` | `--data-dir` |
+| `logs` | `<data>/logs` | `--data-dir`; the ACP launcher's own log files: `<BRAND>_ACP_LOG_DIR` |
+| `project` | `.<brand>`, in a project's folder | |
+
+The ACP launcher opens its log file once its flags are read, so that `--data-dir` moves it.
 
 ## Launch options
 
@@ -300,7 +319,8 @@ options make (`launchConfiguration`, over the host's own defaults).
 - The options are `--model`, `--permission-mode` (`manual` means `default`), `--strict-tool-input`,
   `--max-turns`, `--max-budget-usd`, `--mcp-config` (repeatable), `--strict-mcp-config`,
   `--add-dir` (repeatable: a folder that counts as inside the working folder), `--settings`,
-  `--setting-sources` and `--config-dir` (the user's configuration folder).
+  `--setting-sources`, `--config-dir` (the user's configuration folder) and `--data-dir` (where the
+  hosts keep what they write, in place of `~/.local/share/<brand>/`: an absolute path).
 - An option that is not given is read from a variable named: the brand's prefix, the host's part
   (`ACP_` for the ACP launcher, none for the CLI), then the option's name in capitals with `_` for
   `-` (`LABKIT_MAX_TURNS`, `LABKIT_ACP_MAX_TURNS`). `--mcp-config` takes one value from its

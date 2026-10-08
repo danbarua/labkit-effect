@@ -62,15 +62,17 @@ import { recordedSessions } from "../../agent-host/record.ts";
 import { LogsToFile, LogsToStderr } from "../../agent-host/logs.ts";
 import { type InvalidLevel, logLevelOf, warnInvalidLevels } from "../../agent-host/log-level.ts";
 import { OtlpSpansAndMetrics } from "../../instrumentation/telemetry.ts";
-import { Brand, brandFrom, logsFolderOf } from "../../agent-host/brand.ts";
-import { launchFlags, launchVariables, userFolderOf } from "../../agent-host/launch.ts";
+import { resolve } from "node:path";
+import { Brand, brandFrom } from "../../agent-host/brand.ts";
+import { BrandFolders, brandFoldersFor, brandFoldersLayer } from "../../agent-host/brand-folders.ts";
+import { launchFlags, launchVariables } from "../../agent-host/launch.ts";
 import { invalid, saidFormatter } from "./invalid.ts";
 import { askedOf, targetOf, unavailable } from "./models.ts";
 import { printOnce } from "./print.ts";
 import { repl, type ReplContext, terminal, withoutModel } from "./repl.ts";
 import { viewOf } from "./view.ts";
 import { Headless } from "../../agent-host/with-session.ts";
-import { type Config, logFileOf, madeIn, storeFolderOf, withCliSession } from "./session.ts";
+import { type Config, logFileOf, madeIn, withCliSession } from "./session.ts";
 
 const optional = <A>(flag: Flag.Flag<A>) => flag.pipe(Flag.optional, Flag.map(Option.getOrUndefined));
 const text = (name: string, description: string, ...aliases: Array<string>) =>
@@ -201,7 +203,7 @@ const configOf = (options: Options, interactive: boolean) =>
     }
     if (options.sessionId !== undefined) return yield* invalid("--session-id cannot be used with --continue or --resume.", "A continued session keeps its own ID.");
     if (system !== undefined) return yield* invalid("A continued session cannot change its system prompt.", "Start a new session to use another system prompt.");
-    const root = storeFolderOf(yield* Brand);
+    const root = (yield* BrandFolders).sessions;
     const latest = options.resume === undefined ? yield* latestHere(root) : yield* resumed(options.resume, interactive, root);
     const now = yield* modelOf(latest.facts);
     const config: Unresolved = { sessionId: latest.sessionId, named: options.model ?? `${now.provider}/${now.model}`, settings, system, continues: latest.facts, ...permissions };
@@ -235,41 +237,49 @@ export const cliOf = (brand: Brand, invalidLevels: ReadonlyArray<InvalidLevel> =
     brand.name,
     { prompt: arg("prompt"), ...flags },
     Effect.fnUntraced(function* (options) {
-      const stdio = yield* Stdio.Stdio;
-      const interactive = yield* stdio.stdinIsTerminal;
-      const { named, ...unresolved } = yield* configOf(options, interactive);
-      const context: ReplContext = {
-        configFolder: userFolderOf(options, { name: (yield* Brand).name }),
-        view: yield* viewOf(unresolved.configuration.cli.view.thinking),
-        commandLine: unresolved.settings,
-      };
-      // At a terminal, a new session whose model cannot be used opens the REPL without a model.
-      if (interactive && !options.print && unresolved.continues === undefined) {
-        const found = yield* Effect.result(askedOf(named, "/model"));
-        const target = Result.isSuccess(found)
-          ? found.success
-          : yield* withoutModel(found.failure, options.prompt, context, unresolved.configuration.layers).pipe(Effect.provide(knowledgeWith(unresolved.configuration.models)));
-        if (target === undefined) return;
-        const config: Config = yield* checked({ ...unresolved, target });
-        // A prompt given on the command line was not sent when the REPL opened without a model, so it is dropped.
-        const first = Result.isSuccess(found) ? options.prompt : undefined;
-        return yield* withCliSession(config, LogsToFile(logFileOf(brand, config.sessionId), `${brand.name}-cli`), terminal(context.view), (session, mcp) =>
-          Effect.andThen(warnInvalidLevels(invalidLevels), repl(session, config, first, interactive, context, mcp)),
+      // The brand's folders, as --config-dir and --data-dir move them, for everything the run reads and writes.
+      const folders = yield* brandFoldersFor(brand, {
+        ...(options.configDir === undefined ? {} : { configDir: resolve(options.configDir) }),
+        dataDir: options.dataDir,
+      }).pipe(Effect.mapError((error) => invalid(`Invalid configuration: ${error.message}`)));
+      const run = Effect.gen(function* () {
+        const stdio = yield* Stdio.Stdio;
+        const interactive = yield* stdio.stdinIsTerminal;
+        const { named, ...unresolved } = yield* configOf(options, interactive);
+        const context: ReplContext = {
+          configFolder: folders.config,
+          view: yield* viewOf(unresolved.configuration.cli.view.thinking),
+          commandLine: unresolved.settings,
+        };
+        // At a terminal, a new session whose model cannot be used opens the REPL without a model.
+        if (interactive && !options.print && unresolved.continues === undefined) {
+          const found = yield* Effect.result(askedOf(named, "/model"));
+          const target = Result.isSuccess(found)
+            ? found.success
+            : yield* withoutModel(found.failure, options.prompt, context, unresolved.configuration.layers).pipe(Effect.provide(knowledgeWith(unresolved.configuration.models)));
+          if (target === undefined) return;
+          const config: Config = yield* checked({ ...unresolved, target });
+          // A prompt given on the command line was not sent when the REPL opened without a model, so it is dropped.
+          const first = Result.isSuccess(found) ? options.prompt : undefined;
+          return yield* withCliSession(config, LogsToFile(logFileOf(folders.logs, config.sessionId), `${brand.name}-cli`), terminal(context.view), (session, mcp) =>
+            Effect.andThen(warnInvalidLevels(invalidLevels), repl(session, config, first, interactive, context, mcp)),
+          );
+        }
+        const config: Config = yield* checked({ ...unresolved, target: yield* targetOf(named, "--model") });
+        if (!options.print)
+          return yield* withCliSession(config, LogsToFile(logFileOf(folders.logs, config.sessionId), `${brand.name}-cli`), interactive ? terminal(context.view) : Headless, (session, mcp) =>
+            Effect.andThen(warnInvalidLevels(invalidLevels), repl(session, config, options.prompt, interactive, context, mcp)),
+          );
+        // Piped input is read only when no prompt was given: a shell that leaves stdin open would
+        // otherwise keep a prompted run waiting for an end of input that never comes.
+        const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));
+        // Checked before the session opens, so a run with no prompt saves no session.
+        if (prompt === "") return yield* invalid("No prompt given.", "Pass the prompt as an argument, or pipe it to stdin.");
+        yield* withCliSession(config, LogsToStderr(`${brand.name}-cli`, folders.logs), Headless, (session) =>
+          Effect.andThen(warnInvalidLevels(invalidLevels), printOnce(session, config, prompt, options.outputFormat ?? "text", options.verbose)),
         );
-      }
-      const config: Config = yield* checked({ ...unresolved, target: yield* targetOf(named, "--model") });
-      if (!options.print)
-        return yield* withCliSession(config, LogsToFile(logFileOf(brand, config.sessionId), `${brand.name}-cli`), interactive ? terminal(context.view) : Headless, (session, mcp) =>
-          Effect.andThen(warnInvalidLevels(invalidLevels), repl(session, config, options.prompt, interactive, context, mcp)),
-        );
-      // Piped input is read only when no prompt was given: a shell that leaves stdin open would
-      // otherwise keep a prompted run waiting for an end of input that never comes.
-      const prompt = options.prompt ?? (interactive ? "" : yield* stdio.stdin.pipe(Stream.decodeText(), Stream.mkString));
-      // Checked before the session opens, so a run with no prompt saves no session.
-      if (prompt === "") return yield* invalid("No prompt given.", "Pass the prompt as an argument, or pipe it to stdin.");
-      yield* withCliSession(config, LogsToStderr(`${brand.name}-cli`, logsFolderOf(brand)), Headless, (session) =>
-        Effect.andThen(warnInvalidLevels(invalidLevels), printOnce(session, config, prompt, options.outputFormat ?? "text", options.verbose)),
-      );
+      });
+      return yield* run.pipe(Effect.provide(brandFoldersLayer(folders)));
     }),
   ).pipe(
     Command.withDescription("A coding agent: an interactive REPL, or -p to answer one prompt and exit."),

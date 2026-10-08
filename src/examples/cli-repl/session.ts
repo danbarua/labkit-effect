@@ -27,7 +27,7 @@ import { describe } from "../../agent-mcp/server-machine.ts";
 import { removeCredentials, processEnvironmentWith } from "../../agent-process/environment.ts";
 import { type GivenServer, type McpServers, startMcpServers } from "../../agent-mcp/servers.ts";
 import type { Asked } from "../../agent-host/catalog.ts";
-import { blobsFolderOf, Brand, logsFolderOf, sessionsFolderOf } from "../../agent-host/brand.ts";
+import { BrandFolders } from "../../agent-host/brand-folders.ts";
 import { BlobsInFolder, BlobsInMemory } from "../../agent-session/blobs.ts";
 import { sessionFolderOf } from "../../agent-host/directory.ts";
 import { SessionServices } from "../../agent-host/services.ts";
@@ -76,15 +76,8 @@ export interface Config {
   readonly strictToolInput: boolean;
 }
 
-/**
- * The folder where the CLI saves sessions (`agent-host/directory.ts`): the brand's sessions folder,
- * which the ACP host shares (`agent-host/brand.ts`). A session's folder holds its facts, its record
- * (`cliRecord`) and the settings it resolved to.
- */
-export const storeFolderOf = (brand: Brand): string => sessionsFolderOf(brand);
-
-/** The file a session's log is written to, in the brand's logs folder. */
-export const logFileOf = (brand: Brand, sessionId: string): string => join(logsFolderOf(brand), `cli-${sessionId}.log`);
+/** The file a session's log is written to, in the brand's logs folder (`BrandFolders`' `logs`). */
+export const logFileOf = (logs: string, sessionId: string): string => join(logs, `cli-${sessionId}.log`);
 
 /** The host that a record names when the CLI made the session. */
 const cliHost = "cli";
@@ -217,8 +210,9 @@ export const withCliSession = <A, E, R, L, H>(
   use: (session: Session, mcp: McpServers) => Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
-    const brand = yield* Brand;
-    const root = storeFolderOf(brand);
+    // The brand's sessions folder, which the ACP host shares: a session's folder holds its facts, its record (`cliRecord`) and the settings it resolved to.
+    const folders = yield* BrandFolders;
+    const root = folders.sessions;
     const workspace = workspaceOf(config);
     yield* written(config, workspace.environment, root);
     // The MCP servers start in the session's scope, before its services, because their tools are among them.
@@ -236,7 +230,7 @@ export const withCliSession = <A, E, R, L, H>(
         root,
         record: cliRecord(process.cwd()),
         // A saved session's blobs are kept in the brand's blobs folder, which the ACP host shares, so a continued session has them.
-        services: Layer.merge(servicesOf(config, workspace.catalog), config.persist ? BlobsInFolder(blobsFolderOf(brand)) : BlobsInMemory),
+        services: Layer.merge(servicesOf(config, workspace.catalog), config.persist ? BlobsInFolder(folders.blobs) : BlobsInMemory),
         boltOns: [folder, serversBoltOn(mcp)],
         logs,
         host,

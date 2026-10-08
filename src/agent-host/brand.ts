@@ -3,9 +3,10 @@
  * `runCli({ name: "labkit" })`), and everything named after the brand follows:
  *
  * - the configuration folders: `~/.config/<name>/` and `<project>/.<name>/`;
- * - where the agent keeps what it writes (`dataFolderOf`): `~/.local/share/<name>/`, with the
- *   sessions of every host in `sessions/<version>/`, the bytes their facts refer to (images, files,
- *   stored outputs) in `blobs/`, and the log files in `logs/`;
+ * - where the agent keeps what it writes: `~/.local/share/<name>/`, with the sessions of every host
+ *   in `sessions/<version>/`, the bytes their facts refer to (images, files, stored outputs) in
+ *   `blobs/`, and the log files in `logs/` (`brand-folders.ts`, which resolves every folder named
+ *   after the brand);
  * - where `/export` writes: `<folder>/.<name>/exports`;
  * - the environment variable prefix: `<NAME>_` (`<NAME>_ACP_` for the ACP launcher's);
  * - the name it gives an ACP client (`agentInfo`) and an MCP server (`clientInfo`).
@@ -15,8 +16,6 @@
  * build can run as another brand without code changes); otherwise the default.
  */
 
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { Context } from "effect";
 
 export interface Brand {
@@ -52,19 +51,3 @@ export const folderOf = (brand: Brand): string => `.${brand.name}`;
  * sessions in an older version's folder are left where they are.
  */
 export const sessionsVersion = "v0.1.0";
-
-/** The folder where the agent keeps what it writes: `<home>/.local/share/<name>/`, the home folder read from `HOME` when this is called. */
-export const dataFolderOf = (brand: Brand, home: string = homedir()): string => join(home, ".local", "share", brand.name);
-
-/** The folder of every host's sessions, for the current `sessionsVersion`. */
-export const sessionsFolderOf = (brand: Brand, home: string = homedir()): string => join(dataFolderOf(brand, home), "sessions", sessionsVersion);
-
-/**
- * The folder of every host's blobs (`agent-session/blobs.ts`), each a file named for its id. An id is
- * the SHA-256 of the bytes, so one folder serves every session, and a session that another host
- * continues finds its blobs.
- */
-export const blobsFolderOf = (brand: Brand, home: string = homedir()): string => join(dataFolderOf(brand, home), "blobs");
-
-/** The folder of the agent's log files. */
-export const logsFolderOf = (brand: Brand, home: string = homedir()): string => join(dataFolderOf(brand, home), "logs");

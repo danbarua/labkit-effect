@@ -16,7 +16,8 @@ import { BunServices } from "@effect/platform-bun";
 import { Deferred, Effect, Fiber, Layer, Logger, References } from "effect";
 import * as Agent from "effective-acp/agent";
 import { fromWebStreams } from "effective-acp/stdio";
-import { blobsFolderOf, type Brand, defaultBrand } from "../agent-host/brand.ts";
+import { type Brand, defaultBrand } from "../agent-host/brand.ts";
+import { brandFoldersOf } from "../agent-host/brand-folders.ts";
 import { blobNameOf } from "../agent-session/blobs.ts";
 import type { ConfigFlags } from "../agent-host/launch.ts";
 import type { Environment } from "../agent-process/environment.ts";
@@ -216,7 +217,8 @@ function startHost(
       }),
   });
   const host = makeHost({
-    directory,
+    // The brand's folders are the test's own: its sessions in `directory`, the rest under its home.
+    folders: brandFoldersOf(options.brand ?? defaultBrand, { home: join(testFolder(), "home"), sessionsDir: directory }),
     ...(options.world === undefined ? {} : { world: options.world }),
     ...(options.pageSize === undefined ? {} : { pageSize: options.pageSize }),
     ...(options.maxTurnRequests === undefined ? {} : { maxTurnRequests: options.maxTurnRequests }),
@@ -224,8 +226,6 @@ function startHost(
     ...(options.configFlags === undefined ? {} : { configFlags: options.configFlags }),
     ...(options.retries === "the host's default" ? {} : { retries: options.retries ?? 0 }),
     ...(options.strictToolInput === undefined ? {} : { strictToolInput: options.strictToolInput }),
-    // The user's file is the test's own, not the machine's.
-    home: join(testFolder(), "home"),
     services: (runner) => Layer.mergeAll((options.services ?? SessionServices)(runner), scripted, Layer.succeed(ModelStreamInterval, Millis.make(0))),
   });
   const capture = Logger.make((log) => {
@@ -551,7 +551,7 @@ test("a prompt's image and embedded file are attached to the input, their bytes 
   });
   const attached = input !== undefined && input._tag === "InputArrived" ? (input.attachments ?? []) : [];
   // The brand's blobs folder, which every session and host shares, holds them.
-  for (const blob of attached) expect(await Bun.file(join(blobsFolderOf(defaultBrand, join(testFolder(), "home")), blobNameOf(blob.id, blob.mediaType))).exists()).toBe(true);
+  for (const blob of attached) expect(await Bun.file(join(brandFoldersOf(defaultBrand, { home: join(testFolder(), "home") }).blobs, blobNameOf(blob.id, blob.mediaType))).exists()).toBe(true);
   const second = startHost({});
   const reloaded = sdkClient();
   await reloaded.app.connectWith(second.stream, async (ctx) => {

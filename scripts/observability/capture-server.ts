@@ -24,12 +24,13 @@ import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { BunRuntime } from "@effect/platform-bun";
 import { Duration, Effect, Metric, Schedule } from "effect";
-import { brandFrom, logsFolderOf } from "../../src/agent-host/brand.ts";
+import { brandFrom } from "../../src/agent-host/brand.ts";
+import { brandFoldersOf } from "../../src/agent-host/brand-folders.ts";
 import { capturesFolderIn } from "../../src/instrumentation/http-captures.ts";
 import { OtlpSpansAndMetrics } from "../../src/instrumentation/telemetry.ts";
 import { captureIdPattern, captureServerPort, captureUrlOf } from "./config.ts";
 
-const logsFolder = logsFolderOf(brandFrom(process.env));
+const logsFolder = brandFoldersOf(brandFrom(process.env)).logs;
 const capturesFolder = capturesFolderIn(logsFolder);
 
 /** How often the disk use is reported. */

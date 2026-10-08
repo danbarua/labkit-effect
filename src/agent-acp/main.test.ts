@@ -16,7 +16,8 @@ import { Command } from "effect/cli";
 import { runTest } from "../../tests/support/run.ts";
 import { type Brand, defaultBrand } from "../agent-host/brand.ts";
 import { launchVariables } from "../agent-host/launch.ts";
-import { hostOptionsOf, launchChecked, launcherFlags, type LauncherOptions, sessionsDirectoryOf } from "./main.ts";
+import { brandFoldersOf } from "../agent-host/brand-folders.ts";
+import { hostOptionsOf, launchChecked, launcherFlags, launcherFolders, type LauncherOptions } from "./main.ts";
 
 const secret = "sk-launcher-test-0123456789";
 
@@ -107,7 +108,7 @@ const launcherOptions = (args: ReadonlyArray<string>, env: Readonly<Record<strin
 /** Whether what of a session's configuration no folder changes can be used with `options`; the problem when it cannot. */
 const checked = (options: LauncherOptions) =>
   runTest(
-    launchChecked(options, defaultBrand, join(testFolder(), "home")).pipe(
+    launchChecked(options, defaultBrand, brandFoldersOf(defaultBrand, { home: join(testFolder(), "home") })).pipe(
       Effect.map(() => "usable"),
       Effect.catchTag("ConfigInvalid", (error) => Effect.succeed(error.message)),
       Effect.provide(BunServices.layer),
@@ -124,12 +125,15 @@ test("--retries (LABKIT_ACP_RETRIES) is how many times a turn with thinking and 
   expect(await checked(minusOne!)).toBe('the ACP host\'s defaults: plugins.retryIncomplete.retries: Expected a value greater than or equal to 0 at ["retries"]');
 });
 
-test("sessions are kept in --sessions-dir (LABKIT_ACP_SESSIONS_DIR), else in ~/.labkit/sessions; for another brand, its variable and folder", async () => {
+/** The brand's folders for the launcher's options from `args` and `env`. */
+const foldersOf = async (env: Readonly<Record<string, string>>, brand: Brand = defaultBrand, args: ReadonlyArray<string> = []) =>
+  runTest(launcherFolders((await launcherOptions(args, env, brand))!, brand));
+
+test("sessions are kept in --sessions-dir (LABKIT_ACP_SESSIONS_DIR), else in ~/.local/share/<brand>/sessions; for another brand, its variable and folder", async () => {
   const acme = { name: "acme", version: "1.0.0" };
-  expect(sessionsDirectoryOf(undefined, defaultBrand)).toBe(join(homedir(), ".local", "share", "labkit", "sessions", "v0.1.0"));
-  expect(sessionsDirectoryOf(undefined, acme)).toBe(join(homedir(), ".local", "share", "acme", "sessions", "v0.1.0"));
-  const directory = async (env: Readonly<Record<string, string>>, brand: Brand = defaultBrand, args: ReadonlyArray<string> = []) =>
-    hostOptionsOf((await launcherOptions(args, env, brand))!, brand).directory;
+  const directory = async (env: Readonly<Record<string, string>>, brand: Brand = defaultBrand, args: ReadonlyArray<string> = []) => (await foldersOf(env, brand, args)).sessions;
+  expect(await directory({})).toBe(join(homedir(), ".local", "share", "labkit", "sessions", "v0.1.0"));
+  expect(await directory({}, acme)).toBe(join(homedir(), ".local", "share", "acme", "sessions", "v0.1.0"));
   expect(await directory({ LABKIT_ACP_SESSIONS_DIR: "" })).toBe(join(homedir(), ".local", "share", "labkit", "sessions", "v0.1.0"));
   expect(await directory({ LABKIT_ACP_SESSIONS_DIR: "/tmp/elsewhere" })).toBe("/tmp/elsewhere");
   expect(await directory({ LABKIT_ACP_SESSIONS_DIR: "/tmp/elsewhere" }, defaultBrand, ["--sessions-dir", "/tmp/given"])).toBe("/tmp/given");
@@ -137,18 +141,20 @@ test("sessions are kept in --sessions-dir (LABKIT_ACP_SESSIONS_DIR), else in ~/.
   expect(await directory({ ACME_ACP_SESSIONS_DIR: "/tmp/acme" }, acme)).toBe("/tmp/acme");
 });
 
-test("--sessions-dir moves the sessions alone: the host is given no other folder for their blobs", async () => {
-  const options = hostOptionsOf((await launcherOptions(["--sessions-dir", "/tmp/given"], {}))!, defaultBrand);
-  expect(options.directory).toBe("/tmp/given");
-  expect(Object.keys(options)).not.toContain("blobsFolder");
+test("--sessions-dir moves the sessions alone; --data-dir (LABKIT_ACP_DATA_DIR) moves sessions, blobs and logs together, and a relative one is refused", async () => {
+  const share = join(homedir(), ".local", "share", "labkit");
+  expect(await foldersOf({}, defaultBrand, ["--sessions-dir", "/tmp/given"])).toMatchObject({ sessions: "/tmp/given", blobs: join(share, "blobs"), logs: join(share, "logs") });
+  expect(await foldersOf({ LABKIT_ACP_DATA_DIR: "/srv/labkit" })).toMatchObject({ sessions: "/srv/labkit/sessions/v0.1.0", blobs: "/srv/labkit/blobs", logs: "/srv/labkit/logs" });
+  const relative = await runTest(launcherFolders((await launcherOptions(["--data-dir", "data"], {}))!, defaultBrand).pipe(Effect.flip));
+  expect(relative).toMatchObject({ _tag: "ConfigInvalid", file: "--data-dir" });
 });
 
 test("the launcher's options are the brand's variables, and no other brand's", async () => {
   const acme = { name: "acme", version: "1.0.0" };
   const env = { ACME_ACP_MODEL: "openai/gpt-5.5", ACME_ACP_RETRIES: "3", ACME_ACP_PERMISSION_MODE: "acceptEdits", ACME_ACP_LOCAL_TOOLS: "1", LABKIT_ACP_RETRIES: "9" };
-  const asAcme = hostOptionsOf((await launcherOptions([], env, acme))!, acme);
+  const asAcme = hostOptionsOf((await launcherOptions([], env, acme))!, acme, brandFoldersOf(acme));
   expect(asAcme).toMatchObject({ model: "openai/gpt-5.5", world: "local", retries: 3, strictToolInput: false, brand: acme, configFlags: { permissionMode: "acceptEdits" } });
-  expect(hostOptionsOf((await launcherOptions([], env))!, defaultBrand)).toMatchObject({ model: undefined, world: "editor", retries: 9, configFlags: { permissionMode: undefined } });
+  expect(hostOptionsOf((await launcherOptions([], env))!, defaultBrand, brandFoldersOf(defaultBrand))).toMatchObject({ model: undefined, world: "editor", retries: 9, configFlags: { permissionMode: undefined } });
 });
 
 test("the launcher refuses to start when an option cannot be used: said on stderr, nothing on stdout, exit code 1", async () => {

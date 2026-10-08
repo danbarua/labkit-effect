@@ -1,5 +1,6 @@
 /** The REPL's commands, run against a session whose model client records each request. */
 
+import { brandFoldersLayer, brandFoldersOf } from "../../agent-host/brand-folders.ts";
 import { expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -102,6 +103,7 @@ const session = (
           recording,
           CountingTurns,
           Layer.succeed(ToolRunner, { run: () => Effect.die("no tools") }),
+          brandFoldersLayer(brandFoldersOf(brand, { home: testFolder() })),
         ),
       ),
     ),

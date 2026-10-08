@@ -12,7 +12,8 @@
 
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { defaultBrand, sessionsFolderOf } from "../../src/agent-host/brand.ts";
+import { defaultBrand } from "../../src/agent-host/brand.ts";
+import { brandFoldersOf } from "../../src/agent-host/brand-folders.ts";
 
 const at = process.argv.indexOf("--model");
 const model = at === -1 ? "localhost/mlx-community/Qwen3.5-9B-8bit" : process.argv[at + 1];
@@ -38,8 +39,8 @@ const result = (() => {
     return {};
   }
 })();
-// HOME is the run folder, so the CLI keeps its sessions under it (`agent-host/brand.ts`).
-const sessions = sessionsFolderOf(defaultBrand, run);
+// HOME is the run folder, so the CLI keeps its sessions under it (`agent-host/brand-folders.ts`).
+const sessions = brandFoldersOf(defaultBrand, { home: run }).sessions;
 const session = result.session_id ?? readdirSync(sessions).at(0) ?? "";
 const facts = readFileSync(join(sessions, session, "facts.jsonl"), "utf8")
   .split("\n")

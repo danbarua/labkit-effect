@@ -45,6 +45,7 @@ const allTwins = {
   LABKIT_SETTINGS: '{"maxHolds": 2}',
   LABKIT_SETTING_SOURCES: "user,project",
   LABKIT_CONFIG_DIR: "/etc/labkit",
+  LABKIT_DATA_DIR: "/var/labkit",
   LABKIT_ADD_DIR: "/data",
 };
 
@@ -61,6 +62,7 @@ test("a flag not given is read from its variable, the brand's prefix and the fla
     settings: '{"maxHolds": 2}',
     settingSources: "user,project",
     configDir: "/etc/labkit",
+    dataDir: "/var/labkit",
   });
   const given = await launched(["--model", "xai/grok-4.7", "--max-turns", "3", "--mcp-config", "a.json", "--mcp-config", "b.json", "--add-dir", "../shared", "--add-dir", "~/notes"], allTwins);
   expect(given.seen?.options).toMatchObject({ model: "xai/grok-4.7", maxTurns: 3, mcpConfig: ["a.json", "b.json"], addDir: ["../shared", "~/notes"], permissionMode: "acceptEdits" });
@@ -76,6 +78,7 @@ test("a flag not given is read from its variable, the brand's prefix and the fla
     settings: undefined,
     settingSources: undefined,
     configDir: undefined,
+    dataDir: undefined,
   });
 });
 

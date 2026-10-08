@@ -37,7 +37,8 @@
  * The end of the connection closes every session's scope.
  */
 
-import { blobsFolderOf, type Brand, defaultBrand, envPrefixOf, folderOf } from "../agent-host/brand.ts";
+import { type Brand, defaultBrand, envPrefixOf } from "../agent-host/brand.ts";
+import type { BrandFolderPaths } from "../agent-host/brand-folders.ts";
 import { type ConfigFlags, launchLayers } from "../agent-host/launch.ts";
 import { writeEffectiveSettings } from "../agent-config/effective.ts";
 import { type Configuration, type LayerSource, loadConfiguration } from "../agent-config/file.ts";
@@ -96,8 +97,12 @@ import { noticeOf, stopOf } from "./stop-reason.ts";
 import { editorWorld, type World, type WorldSession, workspaceWorld } from "./world.ts";
 
 export interface HostOptions<R = never> {
-  /** The session directory's root (`agent-host/directory.ts`). Each session that had a turn is a folder in it. */
-  readonly directory: string;
+  /**
+   * The brand's folders (`agent-host/brand-folders.ts`): the sessions' (`sessions`, the session
+   * directory's root, `agent-host/directory.ts`: each session that had a turn is a folder in it), the
+   * blobs', the user's configuration folder, and the project folder's name.
+   */
+  readonly folders: BrandFolderPaths;
   /**
    * Where the sessions' tools come from: `"editor"` (`editorWorld`, the default), `"local"`
    * (`workspaceWorld`, a stopgap that bypasses the editor; the launcher's `--local-tools`), or a
@@ -112,8 +117,6 @@ export interface HostOptions<R = never> {
    * `--max-budget-usd`, `--settings`, `--setting-sources`, `--mcp-config` and `--strict-mcp-config`.
    */
   readonly configFlags?: ConfigFlags | undefined;
-  /** The home whose `.config/<brand>` is the user's configuration folder; this process's when left out. */
-  readonly home?: string | undefined;
   /**
    * How many times a turn whose response had thinking but no answer is asked again for it (the
    * launcher's `--retries`; 0 means never); 1 when left out. The host's defaults list
@@ -212,7 +215,7 @@ const startingModeOf = (configuration: Configuration): PermissionMode => {
 type Configured = Configuration & { readonly layers: ReadonlyArray<LayerSource> };
 
 /** The `/export` command, which the host answers without the model. */
-const exportCommandOf = (brand: Brand) => ({ name: "export", description: `Write this session's transcript as Markdown to ${folderOf(brand)}/exports/<session>.md in the working folder.` });
+const exportCommandOf = (project: string) => ({ name: "export", description: `Write this session's transcript as Markdown to ${project}/exports/<session>.md in the working folder.` });
 
 /** The `/mcp` command, which reports the state of each of the session's MCP servers and can start one again. */
 const mcpCommand = { name: "mcp", description: "Say how this session's MCP servers are; `reconnect <server>` starts one again.", input: { hint: "reconnect <server>" } };
@@ -464,7 +467,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           Effect.gen(function* () {
             const flags = options.configFlags ?? { mcpConfig: [], strictMcpConfig: false };
             const layers = [
-              ...(yield* launchLayers(cwd, defaults, flags, { name: brand.name, projectTrusted: true, ...(options.home === undefined ? {} : { home: options.home }) })),
+              ...(yield* launchLayers(cwd, defaults, flags, { name: brand.name, projectTrusted: true, configDir: options.folders.config })),
               ...clientLayers(cwd, servers),
             ];
             return { ...(yield* loadConfiguration(layers)), layers };
@@ -482,7 +485,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
 
         /** Writes what a session's configuration resolved to, with what the host says beside it, to the session's folder. */
         const settingsWritten = (id: AcpSessionId, configuration: Configured, permissionMode: PermissionMode, model: string) =>
-          writeEffectiveSettings(sessionFolderOf(options.directory, id), configuration.layers, configuration, {
+          writeEffectiveSettings(sessionFolderOf(options.folders.sessions, id), configuration.layers, configuration, {
             model,
             permissionMode,
             canAsk: true,
@@ -490,7 +493,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             world: worldKind,
           }).pipe(
             Effect.tap((path) => Effect.logInfo(logKeys.settings.written, { path })),
-            Effect.catch((error) => Effect.logWarning(logKeys.settings.notWritten, { folder: sessionFolderOf(options.directory, id), cause: error.message })),
+            Effect.catch((error) => Effect.logWarning(logKeys.settings.notWritten, { folder: sessionFolderOf(options.folders.sessions, id), cause: error.message })),
           );
 
         /**
@@ -642,10 +645,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           Effect.gen(function* () {
             const scope = yield* Scope.fork(parent.scope);
             return yield* Effect.gen(function* () {
-              const file = storeFileOf(options.directory, id);
+              const file = storeFileOf(options.folders.sessions, id);
               // The blobs (inputs' images and files, stored outputs) are kept in the brand's blobs folder, which every session and host
               // shares, so a session continued from its facts has them; a session made before then also reads those in its own folder.
-              const blobs = BlobsInFolder(blobsFolderOf(brand, options.home), [join(sessionFolderOf(options.directory, id), "blobs")]);
+              const blobs = BlobsInFolder(options.folders.blobs, [join(sessionFolderOf(options.folders.sessions, id), "blobs")]);
               // The configuration's seam lists, with permission following the session's mode (`FromHost.permissionMode`). Its tool
               // sources are not used: the session's tools are the world's and its MCP servers'.
               const additionalFolders = [...(options.additionalFolders ?? []), ...parent.additional];
@@ -724,8 +727,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               );
 
             const record = recordFor(entry.cwd, text, entry.additional);
-            yield* writeRecord(options.directory, entry.id, record).pipe(Effect.catch(failed("writing the session's record at its first prompt")));
-            yield* Effect.logInfo(logKeys.record.written, { file: recordFileOf(options.directory, entry.id), cwd: record.cwd, titled: record.title !== undefined });
+            yield* writeRecord(options.folders.sessions, entry.id, record).pipe(Effect.catch(failed("writing the session's record at its first prompt")));
+            yield* Effect.logInfo(logKeys.record.written, { file: recordFileOf(options.folders.sessions, entry.id), cwd: record.cwd, titled: record.title !== undefined });
             yield* settingsWritten(entry.id, entry.configuration, yield* Ref.get(entry.permissionMode), `${draft.model.provider}/${draft.model.model}`);
             const opened = yield* startSession(entry.id, entry.world, entry.permissionMode, { scope: entry.scope, mcp: entry.mcp, configuration: entry.configuration, cwd: entry.cwd, additional: entry.additional }, (session, context, follow) =>
               Effect.gen(function* () {
@@ -735,7 +738,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 return { feed };
               }),
             ).pipe(Effect.catch(failed("opening the draft at its first prompt")));
-            yield* Effect.logInfo(logKeys.session.opened, { file: storeFileOf(options.directory, entry.id), model: `${draft.model.provider}/${draft.model.model}` });
+            yield* Effect.logInfo(logKeys.session.opened, { file: storeFileOf(options.folders.sessions, entry.id), model: `${draft.model.provider}/${draft.model.model}` });
             const now = new Date(yield* Clock.currentTimeMillis).toISOString();
             yield* send(entry.id, { sessionUpdate: "session_info_update", title: record.title ?? null, updatedAt: now });
             return opened satisfies Opened;
@@ -750,10 +753,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               yield* say("Nothing to export: this session has had no turn yet.");
               return { stopReason: "end_turn" as const };
             }
-            const path = join(entry.cwd, folderOf(brand), "exports", `${entry.id}.md`);
+            const path = join(entry.cwd, options.folders.project, "exports", `${entry.id}.md`);
             const markdown = markdownOf(yield* state.opened.session.facts);
             const fs = yield* FileSystem.FileSystem;
-            yield* fs.makeDirectory(join(entry.cwd, folderOf(brand), "exports"), { recursive: true }).pipe(
+            yield* fs.makeDirectory(join(entry.cwd, options.folders.project, "exports"), { recursive: true }).pipe(
               Effect.andThen(fs.writeFileString(path, markdown)),
               Effect.catch((error) =>
                 Effect.logError(logKeys.export.failed, { path, doing: "writing the transcript", cause: error.message }).pipe(
@@ -826,8 +829,8 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
 
         /** Returns the title in the session's record; undefined when it has no record (the CLI made it), or a record that does not read, which is logged. */
         const recordedTitle = (sessionId: AcpSessionId) => {
-          const file = recordFileOf(options.directory, sessionId);
-          return readRecord(options.directory, sessionId).pipe(
+          const file = recordFileOf(options.folders.sessions, sessionId);
+          return readRecord(options.folders.sessions, sessionId).pipe(
             Effect.flatMap((record) => {
               const read = record === undefined ? undefined : readSessionRecord(record);
               return record !== undefined && read === undefined
@@ -843,10 +846,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
         /** Sends what the host sends of a session started from its facts, once the client knows it: the commands, its title and last write, and, through the feed, its usage. */
         const announce = (entry: Entry, opened: Opened) =>
           Effect.gen(function* () {
-            yield* send(entry.id, { sessionUpdate: "available_commands_update", availableCommands: [exportCommandOf(brand), mcpCommand] });
+            yield* send(entry.id, { sessionUpdate: "available_commands_update", availableCommands: [exportCommandOf(options.folders.project), mcpCommand] });
             const title = yield* recordedTitle(entry.id);
             const fs = yield* FileSystem.FileSystem;
-            const written = yield* fs.stat(storeFileOf(options.directory, entry.id)).pipe(
+            const written = yield* fs.stat(storeFileOf(options.folders.sessions, entry.id)).pipe(
               Effect.map((info) => Option.getOrUndefined(info.mtime)),
               Effect.orElseSucceed(() => undefined),
             );
@@ -885,7 +888,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               yield* Effect.logWarning(logKeys.session.refused, { doing: method, cause: "the session is already loaded on this connection" });
               return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, `Session ${sessionId} is already loaded on this connection`, { sessionId }));
             }
-            const file = storeFileOf(options.directory, sessionId);
+            const file = storeFileOf(options.folders.sessions, sessionId);
 
             const notStarted = (doing: string) => (error: { readonly message: string }) =>
               Effect.logError(logKeys.session.notLoaded, { doing: `${method}: ${doing}`, file, cause: error.message }).pipe(
@@ -895,7 +898,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             const stored = yield* (yield* FileSystem.FileSystem).exists(file).pipe(Effect.catch(notStarted("looking for the session's facts file")));
             if (!stored) {
               yield* Effect.logWarning(logKeys.session.notStored, { doing: method, file, cause: "the session directory has no facts file for the session" });
-              return yield* Effect.fail(rpcError(ErrorCode.ResourceNotFound, `Session ${sessionId} not found in ${options.directory}`, { sessionId }));
+              return yield* Effect.fail(rpcError(ErrorCode.ResourceNotFound, `Session ${sessionId} not found in ${options.folders.sessions}`, { sessionId }));
             }
             yield* Ref.update(starting, (all) => HashSet.add(all, sessionId));
             return yield* Effect.gen(function* () {
@@ -1031,7 +1034,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 const self = yield* Effect.fiber;
                 yield* Effect.forkIn(
                   Fiber.await(self).pipe(
-                    Effect.andThen(send(id, { sessionUpdate: "available_commands_update", availableCommands: [exportCommandOf(brand), mcpCommand] })),
+                    Effect.andThen(send(id, { sessionUpdate: "available_commands_update", availableCommands: [exportCommandOf(options.folders.project), mcpCommand] })),
                     Effect.annotateLogs({ session: id }),
                   ),
                   connectionScope,
@@ -1050,10 +1053,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           "session/list": (params) =>
             traced(
               Effect.gen(function* () {
-                const stored = yield* recordedSessions(options.directory).pipe(
+                const stored = yield* recordedSessions(options.folders.sessions).pipe(
                   Effect.catchTag("DirectoryUnreadable", (error) =>
-                    Effect.logError(logKeys.session.notListed, { directory: options.directory, doing: "reading the session directory", cause: error.message }).pipe(
-                      Effect.andThen(Effect.fail(rpcError(ErrorCode.InternalError, `The session directory ${options.directory} could not be read: ${error.message}`))),
+                    Effect.logError(logKeys.session.notListed, { directory: options.folders.sessions, doing: "reading the session directory", cause: error.message }).pipe(
+                      Effect.andThen(Effect.fail(rpcError(ErrorCode.InternalError, `The session directory ${options.folders.sessions} could not be read: ${error.message}`))),
                     ),
                   ),
                 );

@@ -26,7 +26,8 @@ import { BunRuntime, BunServices, BunStdio } from "@effect/platform-bun";
 import { Console, ConfigProvider, Effect, Layer } from "effect";
 import { Command } from "effect/cli";
 import * as Agent from "effective-acp/agent";
-import { type Brand, brandFrom, sessionsFolderOf } from "../agent-host/brand.ts";
+import { type Brand, brandFrom } from "../agent-host/brand.ts";
+import { type BrandFolderPaths, brandFoldersFor } from "../agent-host/brand-folders.ts";
 import { KeyedAndLocalCatalog } from "../agent-host/catalog.ts";
 import { LauncherLogs, launcherLogOptionsFrom } from "../agent-host/launcher-logs.ts";
 import { OtlpSpansAndMetrics } from "../instrumentation/telemetry.ts";
@@ -44,12 +45,22 @@ export const launcherFlags = {
 
 export type LauncherOptions = Command.Command.Config.Infer<typeof launcherFlags>;
 
-/** Returns where sessions are kept: the folder given, else the brand's sessions folder (`sessionsFolderOf`). */
-export const sessionsDirectoryOf = (given: string | undefined, brand: Brand): string => (given ? resolve(given) : sessionsFolderOf(brand));
+/**
+ * Returns the brand's folders for the launcher's options: `--config-dir`, `--data-dir` (refused when
+ * not absolute) and `--sessions-dir` (resolved from the working folder) moved as given; `home` is the
+ * home folder they are under, this process's when left out.
+ */
+export const launcherFolders = (options: LauncherOptions, brand: Brand, home?: string) =>
+  brandFoldersFor(brand, {
+    home,
+    ...(options.configDir === undefined ? {} : { configDir: resolve(options.configDir) }),
+    dataDir: options.dataDir,
+    ...(options.sessionsDir ? { sessionsDir: resolve(options.sessionsDir) } : {}),
+  });
 
-/** Returns the host's options from the launcher's options. */
-export const hostOptionsOf = (options: LauncherOptions, brand: Brand, home?: string): HostOptions => ({
-  directory: sessionsDirectoryOf(options.sessionsDir, brand),
+/** Returns the host's options from the launcher's options and the brand's folders. */
+export const hostOptionsOf = (options: LauncherOptions, brand: Brand, folders: BrandFolderPaths): HostOptions => ({
+  folders,
   world: options.localTools ? "local" : "editor",
   model: options.model,
   configFlags: options,
@@ -57,12 +68,11 @@ export const hostOptionsOf = (options: LauncherOptions, brand: Brand, home?: str
   strictToolInput: options.strictToolInput,
   additionalFolders: options.addDir,
   brand,
-  ...(home === undefined ? {} : { home }),
 });
 
 /** Loads, once, the part of each session's configuration that no session's folder changes; fails when it cannot be used. */
-export const launchChecked = (options: LauncherOptions, brand: Brand, home?: string) =>
-  launchConfiguration(undefined, acpDefaults(options), options, { name: brand.name, ...(home === undefined ? {} : { home }) });
+export const launchChecked = (options: LauncherOptions, brand: Brand, folders: BrandFolderPaths) =>
+  launchConfiguration(undefined, acpDefaults(options), options, { name: brand.name, configDir: folders.config });
 
 /** Sends what the command line prints to stderr, because stdout carries the protocol. */
 const toStderr: Console.Console = (() => {
@@ -75,27 +85,33 @@ const toStderr: Console.Console = (() => {
  * program, else the one `env` names, else the default). It returns when stdin closes.
  */
 export const launch = (args: ReadonlyArray<string>, env: Readonly<Record<string, string | undefined>>, brand: Brand = brandFrom(env)) => {
+  /** Logs and prints why a launch was refused, in the launcher's log once it is open, else to stderr only. */
+  const refused = (error: { readonly message: string }) =>
+    Effect.logError(logKeys.launch.refused, { cause: "the configuration cannot be used", problem: error.message }).pipe(
+      Effect.andThen(Console.error(`The configuration cannot be used: ${error.message}`)),
+    );
+  // The launcher's log file is opened once the flags are read, so that --data-dir moves it.
   const launcher = Command.make(`${brand.name}-acp`, launcherFlags, (options) =>
-    launchChecked(options, brand).pipe(
-      Effect.tapError((error) =>
-        Effect.logError(logKeys.launch.refused, { cause: "the configuration cannot be used", problem: error.message }).pipe(
-          Effect.andThen(Console.error(`The configuration cannot be used: ${error.message}`)),
+    launcherFolders(options, brand).pipe(
+      Effect.tapError(refused),
+      Effect.flatMap((folders) =>
+        launchChecked(options, brand, folders).pipe(
+          Effect.tapError(refused),
+          Effect.andThen(
+            Agent.runStdio({
+              info: { name: brand.name, version: brand.version },
+              implementations: [makeHost(hostOptionsOf(options, brand, folders))],
+            }),
+          ),
+          Effect.provide(LauncherLogs(launcherLogOptionsFrom(env, folders.logs, brand))),
         ),
-      ),
-      Effect.andThen(
-        Agent.runStdio({
-          info: { name: brand.name, version: brand.version },
-          implementations: [makeHost(hostOptionsOf(options, brand))],
-        }),
       ),
     ),
   ).pipe(Command.withDescription("The agent over ACP, on stdin and stdout, as an editor launches it."));
   return Command.runWith(launcher, { version: brand.version })(args).pipe(
     Effect.provideService(ConfigProvider.ConfigProvider, launchVariables(brand, ["ACP"], env)),
     Effect.provideService(Console.Console, toStderr),
-    Effect.provide(
-      Layer.mergeAll(KeyedAndLocalCatalog, LauncherLogs(launcherLogOptionsFrom(env, brand)).pipe(Layer.provideMerge(BunServices.layer)), BunStdio.layer, OtlpSpansAndMetrics(`${brand.name}-acp`)),
-    ),
+    Effect.provide(Layer.mergeAll(KeyedAndLocalCatalog, BunStdio.layer, OtlpSpansAndMetrics(`${brand.name}-acp`)).pipe(Layer.provideMerge(BunServices.layer))),
   );
 };
 

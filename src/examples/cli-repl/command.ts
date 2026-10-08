@@ -8,6 +8,7 @@
  * command is refused until a model is picked.
  */
 
+import type { BrandFolders } from "../../agent-host/brand-folders.ts";
 import type { Effect, FileSystem, Path, Terminal } from "effect";
 import type { CliError } from "effect/cli";
 import type { LayerSource } from "../../agent-config/file.ts";
@@ -55,7 +56,7 @@ export type DoneWithoutModel = Done | { readonly _tag: "Picked"; readonly target
 export const said = (text: string): Done => ({ _tag: "Said", text });
 
 /** The services commands need: the terminal for pickers, the file system, and the model catalog; in a session, also the loop's services. */
-export type Needs = Terminal.Terminal | FileSystem.FileSystem | Path.Path | ModelCatalog;
+export type Needs = Terminal.Terminal | FileSystem.FileSystem | Path.Path | ModelCatalog | BrandFolders;
 
 /** A command's error, shown to the user (`invalid.ts`); the user cancelling a picker (Ctrl+C); or the session store failing to record a change. */
 export type Failure = CliError.UserError | Terminal.QuitError | SessionStoreFailed;

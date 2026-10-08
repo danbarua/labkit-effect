@@ -20,7 +20,7 @@ import { typing } from "../../../tests/support/terminal.ts";
 import { test, testFolder } from "../../../tests/support/test.ts";
 import { cliOf, runCommand, withResumeValue } from "./index.ts";
 import { saidFormatter } from "./invalid.ts";
-import { storeFolderOf } from "./session.ts";
+import { brandFoldersOf } from "../../agent-host/brand-folders.ts";
 
 const invoke = async (args: ReadonlyArray<string>, env: Record<string, string> = {}) => {
   // Run in the test's folder, where the CLI writes its logs and sessions.
@@ -151,7 +151,7 @@ test("at a terminal with no model, the REPL opens without a model, and /exit sav
   const { exit, logged } = await atTerminal(["--session-id", id], ["/exit"]);
   expect(Exit.isSuccess(exit)).toBe(true);
   expect(logged).toEqual(["No model selected · /model to pick one · /help for commands · /exit to quit", "ERROR: No model selected.\nHINT: Pick one with /model."]);
-  expect(existsSync(sessionFolderOf(storeFolderOf(defaultBrand), id))).toBe(false);
+  expect(existsSync(sessionFolderOf(brandFoldersOf(defaultBrand).sessions, id))).toBe(false);
 });
 
 test("at a terminal, a model without an API key opens the REPL without a model, with a hint to use /model", async () => {

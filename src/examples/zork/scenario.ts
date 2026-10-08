@@ -12,7 +12,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Clock, Data, Effect, Layer, Ref, Schema } from "effect";
 import { AgentContextAssembler, WholeConversation } from "../../agent-context/assembler.ts";
-import { Brand, logsFolderOf, sessionsFolderOf } from "../../agent-host/brand.ts";
+import { Brand } from "../../agent-host/brand.ts";
+import { brandFoldersOf } from "../../agent-host/brand-folders.ts";
 import { type InvalidLevel, warnInvalidLevels } from "../../agent-host/log-level.ts";
 import { LogsToFile } from "../../agent-host/logs.ts";
 import { SessionServices } from "../../agent-host/services.ts";
@@ -128,18 +129,18 @@ const optionsOf = (
   source?: ToolSource, request?: Request, feedback?: Effect.Effect<ReadonlyArray<string>>,
 ) => {
   const sessionId = `zork-${role}-${game}`;
-  const home = setup.home ?? homedir();
+  const folders = brandFoldersOf(brand, { home: setup.home ?? homedir() });
   return {
     sessionId,
     target: { provider: player.target.provider, model: player.target.model },
     settings: player.target.settings ?? {},
     system: prompt,
     persist: true,
-    root: sessionsFolderOf(brand, home),
+    root: folders.sessions,
     record: { host: "zork", game, role, cwd: process.cwd() },
     services: servicesOf(player, request, feedback),
     boltOns: source === undefined ? [] : [{ sources: [source] }],
-    logs: LogsToFile(join(logsFolderOf(brand, home), `${sessionId}.log`), "labkit-zork"),
+    logs: LogsToFile(join(folders.logs, `${sessionId}.log`), "labkit-zork"),
     host: Headless,
   };
 };

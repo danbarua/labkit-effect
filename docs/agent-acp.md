@@ -650,7 +650,7 @@ The host logs each event under `log-keys.ts`, with the ids it is about as log an
 
   | Flag | Default | Meaning |
   | --- | --- | --- |
-  | `--sessions-dir` | `~/.local/share/<brand>/sessions/<version>` | Where sessions are kept: a folder shared with the CLI, of which `session/list` lists the sessions that the ACP host made. It moves the sessions alone: blobs and logs stay in the brand's folders. |
+  | `--sessions-dir` | `~/.local/share/<brand>/sessions/<version>` | Where sessions are kept: a folder shared with the CLI, of which `session/list` lists the sessions that the ACP host made. It moves the sessions alone: blobs and logs stay in the brand's folders, which `--data-dir` moves (`agent-host.md`, The brand's folders). |
   | `--local-tools` | off | The tools on the local disk instead of through the editor. |
   | `--retries` | 1 | How many times an incomplete turn is asked again for its answer; 0 never. |
 

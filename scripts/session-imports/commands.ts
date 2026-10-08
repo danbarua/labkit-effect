@@ -30,7 +30,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { brandFrom, dataFolderOf } from "../../src/agent-host/brand.ts";
+import { brandFrom } from "../../src/agent-host/brand.ts";
+import { brandFoldersOf } from "../../src/agent-host/brand-folders.ts";
 
 /** One command in the corpus. */
 export interface CorpusCommand {
@@ -48,7 +49,7 @@ export interface CorpusCommand {
 }
 
 /** The corpus's folder: `<data folder>/session-imports`. */
-export const corpusFolder = join(dataFolderOf(brandFrom(process.env)), "session-imports");
+export const corpusFolder = join(brandFoldersOf(brandFrom(process.env)).data, "session-imports");
 export const corpusFile = join(corpusFolder, "commands.jsonl");
 const indexFile = join(corpusFolder, "transcripts.json");
 /** The version of what is read from each transcript; an index of an earlier version has every transcript read again. 2: the model. */

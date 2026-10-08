@@ -98,6 +98,7 @@ export const launchFlags = {
   ),
   settings: textFlag("settings", "Settings as JSON, or a JSON or YAML file, applied over the configuration files"),
   configDir: textFlag("config-dir", "Configuration folder; its .yml files are read in name order (default ~/.config/<brand>)"),
+  dataDir: textFlag("data-dir", "Where the agent keeps what it writes: sessions, blobs and logs (default ~/.local/share/<brand>)"),
   settingSources: textFlag("setting-sources", "Settings files to read, comma-separated: user, project, local (default user)"),
 };
 
@@ -187,7 +188,7 @@ const flagLayer = (flags: ConfigFlags, before: ReadonlyArray<LayerSource>): Laye
 };
 
 /** The folders' options for a host whose flags are `flags`: the user's folder is `--config-dir` (or its variable) when given. */
-const folderOptionsOf = (flags: ConfigFlags, options: { readonly home?: string; readonly name?: string }) => ({
+const folderOptionsOf = (flags: ConfigFlags, options: { readonly home?: string; readonly name?: string; readonly configDir?: string }) => ({
   ...options,
   ...(flags.configDir === undefined ? {} : { configDir: resolve(flags.configDir) }),
 });
@@ -200,10 +201,12 @@ const folderOptionsOf = (flags: ConfigFlags, options: { readonly home?: string; 
 export const userFolderOf = (flags: ConfigFlags, options: { readonly home?: string; readonly name?: string } = {}): string =>
   configFolders("", folderOptionsOf(flags, options)).user;
 
-/** Where a host's layers come from, besides its flags: the home and brand name of the user's folder, and whether the project's folder is trusted. */
+/** Where a host's layers come from, besides its flags: the home and brand name of the user's folder, or the folder itself (`BrandFolders`' `config`), and whether the project's folder is trusted. */
 export interface LayerOptions {
   readonly home?: string;
   readonly name?: string;
+  /** The user's configuration folder, resolved (`agent-host/brand-folders.ts`); `--config-dir` names the same folder when given. */
+  readonly configDir?: string;
   /** Whether the project's folder is trusted (`trust.ts`), so that its files may be read; not trusted when left out. */
   readonly projectTrusted?: boolean;
 }

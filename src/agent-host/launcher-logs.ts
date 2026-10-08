@@ -5,7 +5,7 @@
  * written, the lines go to stderr, so the launcher does not stop because of its log.
  */
 
-import { type Brand, brandFrom, envPrefixOf, logsFolderOf } from "./brand.ts";
+import { type Brand, brandFrom, envPrefixOf } from "./brand.ts";
 import { type InvalidLevel, levelFrom, levelNames, logLevelVariableOf, withInvalidLevelWarning } from "./log-level.ts";
 import { redactedValue, redactorOf, type Secrets, withTooShortWarning, secretsOf } from "./redaction.ts";
 import { resolve } from "node:path";
@@ -48,7 +48,7 @@ const wholeNumber = (value: string | undefined, least: number): number | undefin
 /**
  * Returns the options from the environment, each variable after the brand's prefix (`LABKIT_` for
  * labkit). Defaults are in parentheses:
- * - `ACP_LOG_DIR` (`~/.local/share/<brand>/logs`, `logsFolderOf`);
+ * - `ACP_LOG_DIR` (`logs`, the brand's logs folder: `BrandFolders`' `logs`);
  * - `ACP_LOG_LEVEL`, else `LOG_LEVEL`, the level every entry point reads (`debug`; `log-level.ts`);
  * - `ACP_LOG_MAX_BYTES` (10 MiB);
  * - `ACP_LOG_BACKUPS` (4).
@@ -57,12 +57,12 @@ const wholeNumber = (value: string | undefined, least: number): number | undefin
  * passed over for the next variable, else the default, and is reported once the log is open. The
  * secrets come from the environment (`redaction.ts` `secretsOf`); the launch id is generated.
  */
-export const launcherLogOptionsFrom = (env: Readonly<Record<string, string | undefined>>, brand: Brand = brandFrom(env)): LauncherLogOptions => {
+export const launcherLogOptionsFrom = (env: Readonly<Record<string, string | undefined>>, logs: string, brand: Brand = brandFrom(env)): LauncherLogOptions => {
   const prefix = `${envPrefixOf(brand)}ACP_LOG_`;
   const [dir, maxBytes, backups] = [env[`${prefix}DIR`], env[`${prefix}MAX_BYTES`], env[`${prefix}BACKUPS`]];
   const { level, invalid } = levelFrom(env, [`${prefix}LEVEL`, logLevelVariableOf(brand)], "Debug");
   return {
-    dir: dir ? resolve(dir) : logsFolderOf(brand),
+    dir: dir ? resolve(dir) : logs,
     level,
     invalidLevels: invalid,
     maxBytes: wholeNumber(maxBytes, 1) ?? 10 * 1024 * 1024,

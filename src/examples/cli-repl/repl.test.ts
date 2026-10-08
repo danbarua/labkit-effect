@@ -1,5 +1,7 @@
 /** The REPL: what it prints, its keys, and the REPL without a model. */
 
+import { defaultBrand } from "../../agent-host/brand.ts";
+import { brandFoldersLayer, brandFoldersOf } from "../../agent-host/brand-folders.ts";
 import { expect } from "bun:test";
 import { observe, open, opened } from "../../../tests/support/drive.ts";
 import { json } from "../../../tests/support/received.ts";
@@ -38,6 +40,10 @@ const replied = (text: string, ending: string, printed = false) => {
   observe(session, { _tag: "ModelResponded", turn: "turn-1", provider: "boring", model: "boring-1", parts: [{ _tag: "Text", text }], ending: { _tag: ending }, metadata: json({}) });
   return replyOf(session.journal, () => printed);
 };
+
+
+/** The brand's folders under the test's own folder. */
+const testFolders = () => brandFoldersLayer(brandFoldersOf(defaultBrand, { home: testFolder() }));
 
 test("after a turn the answer is printed, with a note when it was cut short or interrupted", () => {
   expect(replied("1, 2, 3", "Complete")).toBe("1, 2, 3");
@@ -126,7 +132,7 @@ const typedTo = async (model: ReturnType<typeof thinkingThenOk>, lines: Readonly
       const config = { sessionId: "s1", target: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") }, configuration: { layers: [] } } as unknown as Config;
       yield* repl(session, config, undefined, true, { configFolder: configFolder(), view: shown, commandLine: {} }).pipe(Effect.provideService(EffectTerminal.Terminal, yield* typing(lines)));
       return yield* TestConsole.logLines;
-    }).pipe(Effect.provide(services(model)), Effect.provideService(ModelStreamInterval, Millis.make(0))),
+    }).pipe(Effect.provide(Layer.merge(services(model), testFolders())), Effect.provideService(ModelStreamInterval, Millis.make(0))),
   ).finally(() => {
     process.stdout.write = write;
   });
@@ -187,7 +193,7 @@ const waited = (lines: ReadonlyArray<string>, first?: string, sources: ReadonlyA
       const view = yield* viewOf("on");
       const picked = yield* withoutModel(noModel, first, { configFolder: configFolder(), view, commandLine }, []).pipe(Effect.provideService(EffectTerminal.Terminal, yield* typing(lines)));
       return { picked, logged: yield* TestConsole.logLines, thinking: yield* Ref.get(view.thinking) };
-    }).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, catalogOf(sources), TestConsole.layer))),
+    }).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, catalogOf(sources), TestConsole.layer, testFolders()))),
   );
 
 const banner = "No model selected · /model to pick one · /help for commands · /exit to quit";

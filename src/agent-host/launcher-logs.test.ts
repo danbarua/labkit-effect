@@ -8,8 +8,14 @@ import { join } from "node:path";
 import { Cause, Console, Effect, Layer } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test, testFolder } from "../../tests/support/test.ts";
-import { type LauncherLogOptions, LauncherLogs, launcherLogOptionsFrom, recordLimit } from "./launcher-logs.ts";
+import { type LauncherLogOptions, LauncherLogs, launcherLogOptionsFrom as optionsWithLogs, recordLimit } from "./launcher-logs.ts";
 import { secretsOf } from "./redaction.ts";
+
+/** The brand's logs folder, as the launcher is given it (`BrandFolders`' `logs`). */
+const brandLogs = join(homedir(), ".local", "share", "labkit", "logs");
+
+/** The launcher's log options from `env`, the brand's logs folder being `brandLogs`. */
+const launcherLogOptionsFrom = (env: Readonly<Record<string, string | undefined>>) => optionsWithLogs(env, brandLogs);
 
 /** A pid no process has: above the highest a system gives. */
 const stoppedPid = 99_999_999;
@@ -72,7 +78,7 @@ test.each([
   expect((await linesOf(fileOf(dir))).map((line) => line.level)).toEqual([...written]);
 });
 
-test("launcherLogOptionsFrom reads the log folder, level, size limit and backup count from the environment, uses the defaults for unset variables, and collects credential values for redaction, listing credential values shorter than 8 characters separately", () => {
+test("launcherLogOptionsFrom reads the log folder (the brand's logs folder by default), level, size limit and backup count from the environment, uses the defaults for unset variables, and collects credential values for redaction, listing credential values shorter than 8 characters separately", () => {
   expect(launcherLogOptionsFrom({})).toMatchObject({ dir: join(homedir(), ".local", "share", "labkit", "logs"), level: "Debug", maxBytes: 10 * 1024 * 1024, backups: 4, keep: 20, secrets: { values: [], tooShort: [] } });
   const options = launcherLogOptionsFrom({
     LABKIT_ACP_LOG_DIR: "/tmp/acp-logs",

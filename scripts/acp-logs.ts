@@ -7,9 +7,12 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { brandFrom, envPrefixOf } from "../src/agent-host/brand.ts";
+import { brandFoldersOf } from "../src/agent-host/brand-folders.ts";
 import { launcherLogOptionsFrom } from "../src/agent-host/launcher-logs.ts";
 
-const { dir } = launcherLogOptionsFrom(process.env);
+const brand = brandFrom(process.env);
+const { dir } = launcherLogOptionsFrom(process.env, brandFoldersOf(brand, { dataDir: process.env[`${envPrefixOf(brand)}ACP_DATA_DIR`] || undefined }).logs, brand);
 const errorsOnly = process.argv.includes("--errors");
 const notable = new Set(["warning", "error", "fatal"]);
 
