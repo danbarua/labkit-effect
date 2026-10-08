@@ -43,7 +43,7 @@ export type TurnObservation = Extract<
 >;
 
 /** Observations delivered to the call they name. */
-export type CallObservation = Extract<Observation, { _tag: "PermissionAsked" | "PermissionAnswered" | "ToolCallDispatched" | "ToolEnded" }>;
+export type CallObservation = Extract<Observation, { _tag: "PermissionAsked" | "PermissionAnswered" | "PermissionFailed" | "ToolCallDispatched" | "ToolEnded" }>;
 
 /** What a conversation turn tells the agent. */
 export type ToAgent =

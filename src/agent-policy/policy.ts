@@ -5,7 +5,7 @@
  */
 
 import { Schema } from "effect";
-import { Millis } from "../agent-machine/names.ts";
+import { FailureText, Millis } from "../agent-machine/names.ts";
 import { Received } from "../agent-machine/received.ts";
 import type { EffectRequest } from "../agent-machine/request.ts";
 
@@ -20,6 +20,8 @@ export type Verdict = typeof Verdict.Type;
 export const PolicyMessage = Schema.Union([
   /** The answer to the policy's question, as the person or client gave it. */
   Schema.TaggedStruct("Answered", { answer: Received }),
+  /** The policy's question has no answer, because asking it failed as `problem` says. */
+  Schema.TaggedStruct("AskingFailed", { problem: FailureText }),
   /** The clock reached `at`. */
   Schema.TaggedStruct("Tick", { at: Millis }),
 ]);

@@ -23,6 +23,7 @@ export const askPerson: Policy<unknown> = {
       ? { _tag: "Waiting", state: request.call, asks: receivedJson({ question: "run?", tool: request.tool }) }
       : { _tag: "Decided", verdict: { _tag: "Continue" } },
   receive: (state, message) => {
+    if (message._tag === "AskingFailed") return { _tag: "Decided", verdict: { _tag: "Veto", reason: receivedJson({ problem: message.problem }) } };
     if (message._tag !== "Answered") return { _tag: "Waiting", state, asks: undefined };
     return asText(message.answer) === "yes"
       ? { _tag: "Decided", verdict: { _tag: "Continue" } }

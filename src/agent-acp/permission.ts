@@ -6,16 +6,14 @@
  * option): the turn goes on, and the model decides what to do next.
  */
 
-import { Data } from "effect";
 import type { RequestPermissionRequest, RequestPermissionResponse, SessionId, ToolCallContent } from "effective-acp/schema/v1";
 import { PermissionOptionId, ToolCallId } from "effective-acp/schema/v1";
 import type { Received } from "../agent-machine/received.ts";
 import { markdownOf } from "../agent-host/command-detail.ts";
-import { answerCancelled, answerPicking, type CommandNeed, type Explained, explainedAt, type PermissionQuestion } from "../agent-policy/permissions.ts";
+import { answerCancelled, answerPicking, type CommandNeed, type Explained, explainedAt, OptionId, type PermissionQuestion } from "../agent-policy/permissions.ts";
 import { type Call, type Presented, rawOf } from "./projection.ts";
 
 /** A response that picks no option the question offered; the host answers -32602. */
-export class InvalidAnswer extends Data.TaggedError("InvalidAnswer")<{ readonly reason: string }> {}
 
 /** Whether `content` has a diff of the file that `path` (as the command writes it) names: the same path, or one that ends with it. */
 const diffed = (content: ReadonlyArray<ToolCallContent>, path: string): boolean => {
@@ -76,16 +74,6 @@ export function requestOf(sessionId: SessionId, call: Call, question: Permission
   };
 }
 
-/**
- * Returns the answer that `response` gives to `question`, as `PermissionAnswered` records it: the
- * outcome as ACP gives it, the option selected or `cancelled`.
- */
-export function answerOf(response: RequestPermissionResponse, question: PermissionQuestion): Received | InvalidAnswer {
-  const { outcome } = response;
-  if (outcome.outcome === "cancelled") return answerCancelled;
-  const chosen: string = outcome.optionId;
-  const picked = question.options.find((option) => option.optionId === chosen);
-  return picked === undefined
-    ? new InvalidAnswer({ reason: `${chosen} is not an option offered for ${question.tool}.` })
-    : answerPicking(picked.optionId);
-}
+/** Returns the answer that `response` gives, as `PermissionAnswered` records it: the outcome as ACP gives it, the option selected or `cancelled`. */
+export const answerOf = (response: RequestPermissionResponse): Received =>
+  response.outcome.outcome === "cancelled" ? answerCancelled : answerPicking(OptionId.make(response.outcome.optionId));

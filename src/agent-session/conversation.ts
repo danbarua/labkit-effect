@@ -127,6 +127,7 @@ function messages(fact: Fact, texts: ReturnType<typeof inputTexts>, calls: Calls
     case "ToolEnded":
     case "PermissionAsked":
     case "PermissionAnswered":
+    case "PermissionFailed":
     case "CompactionWindow":
     case "McpServerChanged":
       return [];

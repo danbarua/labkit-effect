@@ -341,7 +341,8 @@ runs (`session.streamed`): `ModelDelta`, `ModelPartArrived` and `ModelResponseEn
 | `ModelResponded`: a `Thinking` part | `agent_thought_chunk` with the part's text that no delta of its request sent |
 | `ToolCallArrived`; a `ToolCall` part of `ModelPartArrived` or `ModelResponded` | `tool_call`, `pending`, with the presentation's title, kind, locations and content, the tool's name (`name`) and the call's input (`rawInput`); once for each call |
 | `PermissionAsked` | `tool_call_update`, `pending` |
-| `PermissionAnswered` | `tool_call_update` with `_meta["labkit.dev/permission"]`: the outcome as ACP's `RequestPermissionOutcome` gives it, live and on replay alike. A selected option is `{ outcome: "selected", optionId, name, kind }`; a cancelled request is `{ outcome: "cancelled" }`. ACP has no field for it, and a replay asks no question, so a client shows a replayed call's answer from it. The key follows labkit's own (`labkit.dev/baseline`, `labkit.dev/failure`). A call that was asked and ends with no answer recorded (its turn was cancelled or interrupted first) is sent `{ outcome: "cancelled" }` before its `ToolEnded` update. |
+| `PermissionAnswered` | `tool_call_update` with `_meta["labkit.dev/permission"]`: the outcome as ACP's `RequestPermissionOutcome` gives it, live and on replay alike. A selected option is `{ outcome: "selected", optionId, name, kind }`, without `name` and `kind` when the question did not offer it; a cancelled request is `{ outcome: "cancelled" }`. ACP has no field for it, and a replay asks no question, so a client shows a replayed call's answer from it. The key follows labkit's own (`labkit.dev/baseline`, `labkit.dev/failure`). A call that was asked and ends with no answer recorded (its turn was cancelled or interrupted first) is sent `{ outcome: "cancelled" }` before its `ToolEnded` update. |
+| `PermissionFailed` | nothing: ACP has no outcome for a request that failed. The call's `ToolEnded` update says why it did not run. |
 | `ToolCallDispatched` | `tool_call_update`, `in_progress` |
 | `ToolEnded` | `tool_call_update`, `completed` when it succeeded and `failed` otherwise, with the presentation's content and locations, its title and kind where they changed, and what it returned or why it failed (`rawOutput`) |
 | anything else | nothing |
@@ -463,7 +464,8 @@ the load showed is not shown again, and a later request's deltas are sent once.
 - It merges the two into the projection (`live`), from `start` or from the state a load gives, and
   sends each update in the order the projection gives.
 - Each `PermissionAsked` is asked of the client as `session/request_permission`, in a fiber of its
-  own so the updates go on. The answer is recorded as `PermissionAnswered`.
+  own so the updates go on. The answer is recorded as `PermissionAnswered`; a request that fails, as
+  `PermissionFailed`.
 - It is the one sender of the session's `usage_update` (`usage.ts`), sent when the numbers can
   change: as it takes a `ModelResponded` (used, cost), a `ModelChangeTaken` (size) and a `TurnEnded`
   (whatever ended the turn), after that fact's own updates. The update reflects the facts through
@@ -485,9 +487,13 @@ the load showed is not shown again, and a later request's deltas are sent once.
   vetoes the call, the model is told that the question was cancelled before it was answered, and
   nothing is remembered for the session. When the client answers `cancelled` without cancelling the
   turn, the turn goes on, and the model decides what to do next.
-- A request that the client fails, a connection that closes, or an option the question did not
-  offer refuses the call once: the answer recorded is the question's reject-once option. Each is
-  logged as a warning with its cause.
+- A request that the client fails, or a connection that closes, leaves the question without an
+  answer. That is recorded as `PermissionFailed`, with what failed, and logged as a warning; no
+  option is recorded. The policy vetoes the call, and the model is told that the question could not
+  be asked, and why. The call is sent no permission outcome, because ACP has none for it.
+- An answer that selects an option the question did not offer is recorded as the client gave it,
+  and logged as a warning. The policy vetoes the call. The outcome sent with the call is
+  `{ outcome: "selected", optionId }`, without a name or kind.
 - A call that ends while its question is still out (its turn was cancelled) has its request
   cancelled.
 

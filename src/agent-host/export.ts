@@ -13,7 +13,7 @@
 import { Array as Arr } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { Decision, Ending } from "../agent-machine/decision.ts";
-import type { CallId, ModelName, ProviderName, Seq, ToolName } from "../agent-machine/names.ts";
+import type { CallId, FailureText, ModelName, ProviderName, Seq, ToolName } from "../agent-machine/names.ts";
 import type { InputSource, Observation, ToolFailure, ToolOutcome } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { answerIn, optionPicked, questionIn } from "../agent-policy/permissions.ts";
@@ -108,9 +108,10 @@ const outcome = (tool: ToolName, ended: ToolOutcome | undefined): ReadonlyArray<
 };
 
 /** Returns the permission question asked before a call ran, and its answer, in one line. */
-const permission = (asked: Received, answered: Received | undefined): string => {
+const permission = (asked: Received, answered: Received | undefined, failed: FailureText | undefined): string => {
   const question = questionIn(asked);
   const asks = question === undefined ? `Permission asked: ${asText(asked)}` : `Permission asked (${question.options.map((option) => option.name).join(" / ")})`;
+  if (failed !== undefined) return `${asks}; it could not be asked: ${failed}`;
   if (answered === undefined) return `${asks}; no answer is recorded.`;
   if (answerIn(answered)?.outcome === "cancelled") return `${asks}; cancelled before an answer.`;
   const option = question === undefined ? undefined : optionPicked(question, answered);
@@ -149,6 +150,7 @@ interface Index {
   readonly changes: ReadonlyMap<Seq, Observed<"ModelChangeArrived">>;
   readonly asked: ReadonlyMap<CallId, Received>;
   readonly answered: ReadonlyMap<CallId, Received>;
+  readonly failed: ReadonlyMap<CallId, FailureText>;
   readonly ended: ReadonlyMap<CallId, ToolOutcome>;
   /** The calls a recorded response holds. */
   readonly responded: ReadonlySet<CallId>;
@@ -163,6 +165,7 @@ const indexOf = (facts: ReadonlyArray<Fact>): Index => {
     changes: new Map(each("ModelChangeArrived").map(({ seq, observation }) => [seq, observation])),
     asked: new Map(each("PermissionAsked").map(({ observation }) => [observation.call, observation.asks])),
     answered: new Map(each("PermissionAnswered").map(({ observation }) => [observation.call, observation.answer])),
+    failed: new Map(each("PermissionFailed").map(({ observation }) => [observation.call, observation.problem])),
     ended: new Map(each("ToolEnded").map(({ observation }) => [observation.call, observation.outcome])),
     responded: new Set(
       each("ModelResponded").flatMap(({ observation }) => observation.parts.flatMap((part) => (part._tag === "ToolCall" ? [part.call] : []))),
@@ -175,7 +178,7 @@ const toolCall = (index: Index, call: Call): ReadonlyArray<string> => {
   return [
     `#### Tool call \`${call.tool}\` (\`${call.call}\`)`,
     call.input.body._tag === "Text" ? fenced(call.input.body.text, languageOf(call.input)) : asText(call.input),
-    ...(asked === undefined ? [] : [permission(asked, index.answered.get(call.call))]),
+    ...(asked === undefined ? [] : [permission(asked, index.answered.get(call.call), index.failed.get(call.call))]),
     ...outcome(call.tool, index.ended.get(call.call)),
   ];
 };
@@ -305,6 +308,7 @@ const observed = (
     case "ModelChangeArrived":
     case "PermissionAsked":
     case "PermissionAnswered":
+    case "PermissionFailed":
     case "ToolEnded":
     // These observations are not part of the conversation.
     case "CompactionWindow":

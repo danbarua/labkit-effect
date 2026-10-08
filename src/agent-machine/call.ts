@@ -23,6 +23,7 @@ export const callTable: Table<CallState, CallMessage, Send> = {
     CallOpened: (state, message) => becomes({ _tag: "Running", call: state.call, step: message.step, began: false }),
     PermissionAsked: "ignored",
     PermissionAnswered: "ignored",
+    PermissionFailed: "ignored",
     ToolCallDispatched: "ignored",
     ToolEnded: "ignored",
   },
@@ -31,6 +32,8 @@ export const callTable: Table<CallState, CallMessage, Send> = {
     PermissionAsked: (state) => becomes(state),
     /** The policy that asked decides whether the call runs. */
     PermissionAnswered: (state) => becomes(state),
+    /** The policy that asked decides whether the call runs without an answer. */
+    PermissionFailed: (state) => becomes(state),
     /** The tool began to run; the call waits for its end. */
     ToolCallDispatched: (state) => becomes({ ...state, began: true }),
     ToolEnded: (state) => ({
@@ -45,6 +48,7 @@ export const callTable: Table<CallState, CallMessage, Send> = {
     CallOpened: "ignored",
     PermissionAsked: "ignored",
     PermissionAnswered: "ignored",
+    PermissionFailed: "ignored",
     ToolCallDispatched: "ignored",
     ToolEnded: "ignored",
   },

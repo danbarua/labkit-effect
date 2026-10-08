@@ -81,7 +81,7 @@ decide it and report `TurnStarted`.
 | Decision | Request | Observed outcome |
 | --- | --- | --- |
 | `AskModel` (a turn's first step), `TellModel` (each later step) | `RequestModelResponse` | `ModelRequestDispatched` when the request is made, then `ModelResponded`, `ModelFailed` or `ModelVetoed` |
-| none: every proposed call is requested | `RunTool` | `PermissionAsked` and `PermissionAnswered` when a policy asks first, `ToolCallDispatched` when the tool begins to run, then `ToolEnded` (`Succeeded` or `Failed`) |
+| none: every proposed call is requested | `RunTool` | `PermissionAsked`, then `PermissionAnswered` or `PermissionFailed`, when a policy asks first, `ToolCallDispatched` when the tool begins to run, then `ToolEnded` (`Succeeded` or `Failed`) |
 | none: the model gave a response with no tool calls | `BeforeTurnEnded` | input, if any, then `TurnEndReviewed` |
 | none: the turn was interrupted | `StopTurnWork` | each request under way reports how far it got |
 

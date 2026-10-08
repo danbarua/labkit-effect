@@ -599,6 +599,7 @@ export function permissions(
       return ask({ _tag: "Tool", tool: request.tool, kind, options: toolOptions(request.tool) });
     },
     receive: (question, message) => {
+      if (message._tag === "AskingFailed") return veto(`The question about this call to ${question.tool} could not be asked: ${message.problem}`);
       if (message._tag !== "Answered") return { _tag: "Waiting", state: question, asks: undefined };
       if (answerIn(message.answer)?.outcome === "cancelled") return veto(`The question about this call to ${question.tool} was cancelled before it was answered.`);
       const picked = optionPicked(question, message.answer);

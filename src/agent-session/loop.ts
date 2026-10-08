@@ -56,7 +56,7 @@ import type { Origin } from "../agent-machine/origin.ts";
 import type { EffectRequest } from "../agent-machine/request.ts";
 import { emptyHeld, type Held as Throttled, throttle, type ThrottleInput } from "../agent-machine/throttle.ts";
 import { ContextAssembler, MaxHolds, ModelClient, ModelProvider, ModelRequestPolicies, type NamedPolicy, ToolCallPolicies, ToolRunner, TurnEndHooks, Turns } from "./contracts.ts";
-import { every, type EveryState, type Policy, type PolicyStep, type Verdict } from "../agent-policy/policy.ts";
+import { every, type EveryState, type Policy, type PolicyMessage, type PolicyStep, type Verdict } from "../agent-policy/policy.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { logKeys } from "./log-keys.ts";
 import { asText, receivedJson, receivedText } from "./received.ts";
@@ -418,7 +418,7 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
   /**
    * Returns the tool call policies' verdict on a call, as the facts stand. While the policies wait,
    * each question is recorded (`PermissionAsked`), and the next answer recorded for the call
-   * (`PermissionAnswered`) is given to them. A policy that waits without asking is a defect, because
+   * (`PermissionAnswered`) is given to them, or the failure to answer it (`PermissionFailed`). A policy that waits without asking is a defect, because
    * nothing would answer it.
    */
   const reviewed = (
@@ -429,16 +429,19 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
         const { policy, nameAt } = yield* policiesNow(yield* ToolCallPolicies);
         const answers = yield* PubSub.subscribe(recorded);
         const report = yield* Report;
-        const answer = firstMatching(answers, (fact) =>
-          fact._tag === "Observed" && fact.observation._tag === "PermissionAnswered" && fact.observation.call === request.call ? Option.some(fact.observation.answer) : Option.none(),
-        );
+        const answer = firstMatching(answers, (fact): Option.Option<PolicyMessage> => {
+          if (fact._tag !== "Observed" || !("call" in fact.observation) || fact.observation.call !== request.call) return Option.none();
+          if (fact.observation._tag === "PermissionAnswered") return Option.some({ _tag: "Answered", answer: fact.observation.answer });
+          if (fact.observation._tag === "PermissionFailed") return Option.some({ _tag: "AskingFailed", problem: fact.observation.problem });
+          return Option.none();
+        });
         /** Returns the decided step that `step` reaches once each question is recorded and answered. */
         const decided = (step: PolicyStep<EveryState>): Effect.Effect<Extract<PolicyStep<EveryState>, { _tag: "Decided" }>> => {
           if (step._tag === "Decided") return Effect.succeed(step);
           if (step.asks === undefined) return Effect.die(new Error(`A tool call policy waited on ${request.call} without asking anything`));
           return report({ _tag: "PermissionAsked", call: request.call, asks: step.asks }, policyPart("tool call policy", nameAt(step.state.index))).pipe(
             Effect.andThen(answer),
-            Effect.flatMap((answered) => decided(policy.receive(step.state, { _tag: "Answered", answer: answered }))),
+            Effect.flatMap((message) => decided(policy.receive(step.state, message))),
           );
         };
         const step = yield* decided(policy.start(request));

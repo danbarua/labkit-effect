@@ -28,8 +28,8 @@ A policy is a state machine for one request.
 - A verdict is `Continue` or `Veto { reason }`.
 - `Waiting` can carry `asks`: what the policy wants answered. The layer that shows the question to
   a person interprets it.
-- `receive(state, message)` handles a message while the policy waits: an answer (`Answered`) or a
-  clock tick (`Tick`). It returns a verdict, or waits again. Waiting is how a policy delays an
+- `receive(state, message)` handles a message while the policy waits: an answer (`Answered`), a
+  question that could not be asked (`AskingFailed`, with what failed), or a clock tick (`Tick`). It returns a verdict, or waits again. Waiting is how a policy delays an
   effect.
 
 A policy can decide by any means: fixed rules, parsing a command, a model's judgement, or asking a
@@ -63,7 +63,7 @@ When the policy asks, it offers four options:
 | `reject-once` | `reject_once` | This call is vetoed. |
 | `reject-session` | `reject_always` | This call is vetoed. Later calls to the tool are vetoed without a question, in every mode, `bypassPermissions` included. |
 
-An answer that names no offered option vetoes the call. So does the answer `cancelled` (`{ outcome: "cancelled" }`, as ACP gives it), which an answerer gives when the turn that asked was cancelled; the model is told that the question was cancelled before it was answered.
+An answer that names no offered option vetoes the call. So does the answer `cancelled` (`{ outcome: "cancelled" }`, as ACP gives it), which an answerer gives when the turn that asked was cancelled; the model is told that the question was cancelled before it was answered. A question that could not be asked (`AskingFailed`) vetoes the call too, and the model is told what failed.
 
 The policy reads session answers from the session's facts (`PermissionAsked`, `PermissionAnswered`).
 A process that resumes the session from its facts therefore applies the same answers.
@@ -249,7 +249,7 @@ Tool calls are reviewed before they run:
 
 - While the policies wait, the loop records each question as `PermissionAsked`, with the origin
   `tool call policy <name>`. It gives the policies the next `PermissionAnswered` recorded for the
-  call.
+  call as `Answered`, or the next `PermissionFailed` as `AskingFailed`.
 - A vetoed call ends `Failed { Vetoed { reason } }` and never starts. The model receives the reason
   as the call's result.
 - A call that is still waiting for an answer when its turn stops, or when the process ends, ends

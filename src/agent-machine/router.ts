@@ -283,6 +283,7 @@ export function deliver(world: World, seq: Seq, observation: Observation): Deliv
       }
       case "PermissionAsked":
       case "PermissionAnswered":
+      case "PermissionFailed":
       case "ToolCallDispatched":
       case "ToolEnded": {
         const machine = world.calls.get(observation.call);

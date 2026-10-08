@@ -1138,7 +1138,7 @@ test("each lifecycle point logs its event with the connection, request, session,
   expect(failing.logged.find((each) => each.key === logKeys.permission.failed)).toMatchObject({
     level: "Warn",
     annotations: { call: "call-1" },
-    details: { doing: "asking the client session/request_permission", answer: "reject_once", cause: expect.stringMatching(/\S/) },
+    details: { tool: "write_file", doing: "asking the client session/request_permission", cause: "JsonRpcError: Internal error" },
   });
   expect(failing.logged.find((each) => each.key === logKeys.prompt.settled)).toMatchObject({
     level: "Warn",
@@ -2222,6 +2222,37 @@ test("a file read over 256 KiB is cut before a character, not inside it; a call'
   expect(asText(read.output)).toBe(`${"a".repeat(maxFileBytes - 1)}\n[Cut at 256 KiB: ${omitted} bytes left out. Read the rest with line and limit.]`);
   const announced = log.updates.find((update) => update.sessionUpdate === "tool_call" && update.toolCallId === "plan-1");
   expect(announced !== undefined && "title" in announced ? announced.title : undefined).toBe("update_plan: ls");
+});
+
+test("a client that fails a permission request leaves the question without an answer: PermissionFailed is recorded with what failed, not an option; the call does not run, no outcome is sent live or on a load, and the turn goes on", async () => {
+  const host = startHost({ script: [answer(writeNotes()), answer({ _tag: "Text", text: "I could not write it." })] });
+  const { app, log } = sdkClient(() => {
+    throw new Error("The dialog crashed.");
+  });
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    return { sessionId, prompted: await ctx.request("session/prompt", say(sessionId, "Write hello")) };
+  });
+  await host.stop();
+  expect(result.prompted.stopReason).toBe("end_turn");
+  expect(log.files).toEqual([]);
+  const observed = (await factsOn(storeFileOf(host.directory, result.sessionId))).flatMap((fact) => (fact._tag === "Observed" ? [fact.observation] : []));
+  expect(observed.filter((observation) => observation._tag === "PermissionAnswered")).toEqual([]);
+  expect(observed.find((observation) => observation._tag === "PermissionFailed")).toMatchObject({ call: "call-1", problem: "JsonRpcError: Internal error" });
+  const ended = observed.find((observation) => observation._tag === "ToolEnded");
+  expect(ended?._tag === "ToolEnded" && ended.outcome._tag === "Failed" && ended.outcome.reason._tag === "Vetoed" ? asText(ended.outcome.reason.reason) : undefined).toStartWith(
+    "The question about this call to write_file could not be asked: ",
+  );
+  expect(permissionOutcomes(log.updates)).toEqual([]);
+  const second = startHost({});
+  const reloaded = sdkClient();
+  await reloaded.app.connectWith(second.stream, async (ctx) => {
+    await initialize(ctx);
+    await ctx.request("session/load", { sessionId: result.sessionId, cwd: second.cwd, mcpServers: [] });
+  });
+  await second.stop();
+  expect(permissionOutcomes(reloaded.log.updates)).toEqual([]);
 });
 
 test("a call that ends while its permission request is out, its turn cancelled, has the request cancelled at the client, and is sent the outcome cancelled live and on a load", async () => {

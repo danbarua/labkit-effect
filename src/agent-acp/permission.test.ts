@@ -3,14 +3,14 @@
 import { expect } from "bun:test";
 import { test } from "../../tests/support/test.ts";
 import { TerminalId, PermissionOptionId, SessionId } from "effective-acp/schema/v1";
-import { CallId, ToolName } from "../agent-machine/names.ts";
+import { CallId, FailureText, ToolName } from "../agent-machine/names.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { type Explained, type PermissionQuestion, permissions, questionIn } from "../agent-policy/permissions.ts";
-import { receivedJson } from "../agent-session/received.ts";
+import { asText, receivedJson } from "../agent-session/received.ts";
 import { ShellCommand, WordText } from "../agent-policy/command-segments.ts";
 import { CodeText, NeedText } from "../agent-policy/command-units.ts";
 import { Explanation } from "../agent-policy/sed-script.ts";
-import { answerOf, InvalidAnswer, requestOf } from "./permission.ts";
+import { answerOf, requestOf } from "./permission.ts";
 
 const call = { call: CallId.make("c1"), tool: ToolName.make("write_file"), input: receivedJson({ path: "a.ts", text: "hi" }) };
 
@@ -48,27 +48,28 @@ test("the policy's option that rejects for the session is offered to the client 
 });
 
 test("the option selected is the answer that picks it; the policy takes it as the option says", () => {
-  const picking = (optionId: string) => answerOf({ outcome: { outcome: "selected", optionId: PermissionOptionId.make(optionId) } }, question);
-  const answers = ["allow-once", "allow-session", "reject-once"].map(picking);
-  expect(answers.map((answer) => (answer instanceof InvalidAnswer ? answer : decided(answer)))).toEqual(["Continue", "Continue", "Veto"]);
+  const picking = (optionId: string) => answerOf({ outcome: { outcome: "selected", optionId: PermissionOptionId.make(optionId) } });
+  expect(["allow-once", "allow-session", "reject-once"].map((optionId) => decided(picking(optionId)))).toEqual(["Continue", "Continue", "Veto"]);
+  expect(picking("reject-once").body).toEqual({ _tag: "Text", text: '{"outcome":"selected","optionId":"reject-once"}' } as never);
 });
 
 test("a cancelled request is recorded as cancelled, as ACP gives it, not as an option selected; the policy vetoes the call", () => {
-  const noReject: PermissionQuestion = { ...question, options: question.options.filter((option) => option.kind !== "reject_once") };
-  for (const asked of [question, noReject]) {
-    const answer = answerOf({ outcome: { outcome: "cancelled" } }, asked);
-    if (answer instanceof InvalidAnswer) throw answer;
-    expect(answer.body).toEqual({ _tag: "Text", text: '{"outcome":"cancelled"}' } as never);
-    expect(decided(answer)).toBe("Veto");
-  }
-  const selected = answerOf({ outcome: { outcome: "selected", optionId: PermissionOptionId.make("reject-once") } }, question);
-  if (selected instanceof InvalidAnswer) throw selected;
-  expect(selected.body).toEqual({ _tag: "Text", text: '{"outcome":"selected","optionId":"reject-once"}' } as never);
+  const answer = answerOf({ outcome: { outcome: "cancelled" } });
+  expect(answer.body).toEqual({ _tag: "Text", text: '{"outcome":"cancelled"}' } as never);
+  expect(decided(answer)).toBe("Veto");
 });
 
-test("an option the question did not offer is an invalid answer", () => {
-  const unknown = answerOf({ outcome: { outcome: "selected", optionId: PermissionOptionId.make("allow-forever") } }, question);
-  expect(unknown instanceof InvalidAnswer ? unknown.reason : "valid").toBe("allow-forever is not an option offered for write_file.");
+test("an option the question did not offer is recorded as the client selected it, and the policy vetoes the call", () => {
+  const unknown = answerOf({ outcome: { outcome: "selected", optionId: PermissionOptionId.make("allow-forever") } });
+  expect(unknown.body).toEqual({ _tag: "Text", text: '{"outcome":"selected","optionId":"allow-forever"}' } as never);
+  expect(decided(unknown)).toBe("Veto");
+});
+
+test("a question that could not be asked vetoes the call, saying what failed", () => {
+  if (asked._tag !== "Waiting") throw new Error("the policy asked nothing");
+  const step = policy.receive(asked.state, { _tag: "AskingFailed", problem: FailureText.make("The connection closed.") });
+  expect(step).toMatchObject({ _tag: "Decided", verdict: { _tag: "Veto" } });
+  expect(step._tag === "Decided" && step.verdict._tag === "Veto" ? asText(step.verdict.reason) : undefined).toBe("The question about this call to write_file could not be asked: The connection closed.");
 });
 
 test("a question about a command adds to the call's content a text block naming each program that needs permission and why", () => {

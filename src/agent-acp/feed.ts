@@ -9,8 +9,10 @@
  * - Each `PermissionAsked` it takes is asked of the client as `session/request_permission`
  *   (`requestOf`), in a fiber of its own so the updates go on. The answer (`answerOf`) is recorded
  *   as `PermissionAnswered`.
- * - A client that fails the request, a connection that closes, or an answer that fits no option
- *   counts as the reject-once option, and is logged as a warning with its cause.
+ * - A client that fails the request, or a connection that closes, leaves the question without an
+ *   answer: that is recorded as `PermissionFailed`, with what failed, and logged as a warning. An
+ *   answer that names an option the question did not offer is recorded as the client gave it, and
+ *   logged as a warning; the policy vetoes the call.
  * - A call that ends while its question is still out (its turn was cancelled) has its request
  *   cancelled.
  * - The feed is the one sender of the session's `usage_update` (`usage.ts`). It sends it when the
@@ -29,15 +31,16 @@ import type { AgentConnection } from "effective-acp/agent";
 import type { V1Version } from "effective-acp/protocol";
 import type { SessionId, SessionUpdate } from "effective-acp/schema/v1";
 import type { Fact } from "../agent-machine/fact.ts";
-import { type CallId, type TurnId, Via } from "../agent-machine/names.ts";
+import { type CallId, FailureText, type TurnId, Via } from "../agent-machine/names.ts";
+import type { Observation } from "../agent-machine/observation.ts";
 import type { Origin } from "../agent-machine/origin.ts";
 import { segmentsOf } from "../agent-host/command-parser.ts";
 import type { Folders } from "../agent-policy/command-units.ts";
-import { answerPicking, explainedOf, OptionId, type PermissionQuestion, questionIn } from "../agent-policy/permissions.ts";
+import { explainedOf, OptionId, type PermissionQuestion, questionIn } from "../agent-policy/permissions.ts";
 import type { Services, Session } from "../agent-session/loop.ts";
 import { reportedBy } from "../agent-session/origin.ts";
 import { logKeys } from "./log-keys.ts";
-import { answerOf, InvalidAnswer, requestOf } from "./permission.ts";
+import { answerOf, requestOf } from "./permission.ts";
 import { next, type Present, type ProjectionInput, type ProjectionState, start } from "./projection.ts";
 import { type UsageUpdate, usageUpdate } from "./usage.ts";
 
@@ -69,10 +72,6 @@ export interface Feed {
   readonly usage: Effect.Effect<void>;
 }
 
-/** Returns the answer that picks the option refusing this call once, which a failed question records. */
-const rejectOnce = (question: PermissionQuestion) =>
-  answerPicking(question.options.find((option) => option.kind === "reject_once")?.optionId ?? OptionId.make("reject-once"));
-
 /** Returns the seq of the last of `facts`; 0 when there are none (seq starts at 1). */
 const lastSeqOf = (facts: ReadonlyArray<Fact>): number => facts.at(-1)?.seq ?? 0;
 
@@ -103,55 +102,36 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
     const ask = (call: CallId, question: PermissionQuestion, during: TurnId | undefined) =>
       Effect.gen(function* () {
         const known = (yield* Ref.get(state)).calls.get(call);
-        const answer = yield* Effect.gen(function* () {
-          // The projection announces a call before its question (`ToolCallArrived` is recorded first).
-          if (known === undefined) {
-            yield* Effect.logWarning(logKeys.permission.failed, {
-              tool: question.tool,
-              doing: "presenting the call to ask about",
-              cause: "the call was never announced",
-              answer: "reject_once",
-            });
-            return rejectOnce(question);
-          }
-          yield* Effect.logInfo(logKeys.permission.asked, { tool: question.tool, options: question.options.map((option) => option.optionId) });
-          const explained = question._tag === "Command" ? explainedOf(question, segmentsOf, options.folders) : undefined;
-          const asked = yield* connection.client["session/request_permission"](requestOf(sessionId, known.call, question, known.shown, explained)).pipe(Effect.result);
-          if (asked._tag === "Failure") {
-            const error = asked.failure;
-            yield* Effect.logWarning(logKeys.permission.failed, {
-              tool: question.tool,
-              doing: "asking the client session/request_permission",
-              cause: `${error._tag}: ${error.message}`,
-              answer: "reject_once",
-            });
-            return rejectOnce(question);
-          }
-          const picked = answerOf(asked.success, question);
-          if (picked instanceof InvalidAnswer) {
-            yield* Effect.logWarning(logKeys.permission.failed, {
-              tool: question.tool,
-              doing: "reading the client's answer to session/request_permission",
-              cause: picked.reason,
-              answer: "reject_once",
-            });
-            return rejectOnce(question);
-          }
-          const outcome = asked.success.outcome;
-          yield* Effect.logInfo(logKeys.permission.answered, {
-            tool: question.tool,
-            outcome: outcome.outcome,
-            ...(outcome.outcome === "selected" ? { option: outcome.optionId } : {}),
-          });
-          return picked;
+        /** Records `observation`, the answer or why there is none; a store that fails is logged. */
+        const record = (observation: Extract<Observation, { _tag: "PermissionAnswered" | "PermissionFailed" }>) =>
+          session.observe(observation).pipe(
+            Effect.provideContext(context),
+            reportedBy(acpUser),
+            Effect.catchTag("SessionStoreFailed", (error) =>
+              Effect.logError(logKeys.permission.failed, { tool: question.tool, doing: "recording the answer", cause: error.message }),
+            ),
+          );
+        /** Records that the question could not be asked, because of `problem`, and logs it with what was being done. */
+        const failed = (doing: string, problem: string) =>
+          Effect.logWarning(logKeys.permission.failed, { tool: question.tool, doing, cause: problem }).pipe(
+            Effect.andThen(record({ _tag: "PermissionFailed", call, problem: FailureText.make(problem) })),
+          );
+        // The projection announces a call before its question (`ToolCallArrived` is recorded first).
+        if (known === undefined) return yield* failed("presenting the call to ask about", "The call was never announced to the client.");
+        yield* Effect.logInfo(logKeys.permission.asked, { tool: question.tool, options: question.options.map((option) => option.optionId) });
+        const explained = question._tag === "Command" ? explainedOf(question, segmentsOf, options.folders) : undefined;
+        const asked = yield* connection.client["session/request_permission"](requestOf(sessionId, known.call, question, known.shown, explained)).pipe(Effect.result);
+        if (asked._tag === "Failure") return yield* failed("asking the client session/request_permission", `${asked.failure._tag}: ${asked.failure.message}`);
+        const outcome = asked.success.outcome;
+        const offered = outcome.outcome === "cancelled" || question.options.some((option) => option.optionId === OptionId.make(outcome.optionId));
+        // An option the question did not offer is recorded as the client gave it; the policy vetoes the call.
+        yield* (offered ? Effect.logInfo : Effect.logWarning)(logKeys.permission.answered, {
+          tool: question.tool,
+          outcome: outcome.outcome,
+          ...(outcome.outcome === "selected" ? { option: outcome.optionId } : {}),
+          ...(offered ? {} : { problem: `${outcome.outcome === "selected" ? outcome.optionId : ""} is not an option offered for ${question.tool}` }),
         });
-        yield* session.observe({ _tag: "PermissionAnswered", call, answer }).pipe(
-          Effect.provideContext(context),
-          reportedBy(acpUser),
-          Effect.catchTag("SessionStoreFailed", (error) =>
-            Effect.logError(logKeys.permission.failed, { tool: question.tool, doing: "recording the answer", cause: error.message }),
-          ),
-        );
+        yield* record({ _tag: "PermissionAnswered", call, answer: answerOf(asked.success) });
       }).pipe(
         Effect.annotateLogs({ call, ...(during === undefined ? {} : { turn: during }) }),
         Effect.ensuring(Ref.update(asking, HashMap.remove(call))),

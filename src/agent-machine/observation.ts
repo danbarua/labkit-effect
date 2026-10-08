@@ -326,11 +326,17 @@ export const Observation = Schema.Union([
   Schema.TaggedStruct("ToolCallArrived", { turn: TurnId, call: CallId, tool: ToolName, input: Received }),
   /**
    * Before a call runs, a policy asks for an answer, such as a person's permission. `asks` is the
-   * question as the policy states it. The call waits for `PermissionAnswered`.
+   * question as the policy states it. The call waits for `PermissionAnswered` or `PermissionFailed`.
    */
   Schema.TaggedStruct("PermissionAsked", { call: CallId, asks: Received }),
   /** The answer to the question asked before `call` runs, as the answerer gave it. */
   Schema.TaggedStruct("PermissionAnswered", { call: CallId, answer: Received }),
+  /**
+   * The question asked before `call` runs has no answer, because asking it failed: the client failed
+   * the request, or the connection closed. `problem` says what failed. The policy that asked decides
+   * whether the call runs.
+   */
+  Schema.TaggedStruct("PermissionFailed", { call: CallId, problem: FailureText }),
   /** The tool that the call names began to run. */
   Schema.TaggedStruct("ToolCallDispatched", { call: CallId }),
   /** A tool call ended. */
