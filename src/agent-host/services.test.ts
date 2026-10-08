@@ -53,3 +53,21 @@ test("an additional folder counts as inside the working folder: from ~, relative
   expect(await judged("cat /data/x.csv", ["/data"])).toBe("runs");
   expect(await judged("cat /data2/x.csv", ["/data"])).toBe("asks");
 });
+
+test("additional folders that can change while the session runs are read at each call", async () => {
+  const shared: Array<string> = [];
+  const judged = (command: string) =>
+    runTest(
+      Effect.gen(function* () {
+        const facts: ReadonlyArray<Fact> = [
+          { _tag: "Observed", seq: Seq.make(1), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation: boringOpening([spec("run_command", "execute")]) },
+        ];
+        const policy = yield* permissionsFor("default", true, undefined, "/work/project", Effect.sync(() => [...shared]))(facts);
+        const step = policy.start({ _tag: "RunTool", call: CallId.make("c1"), tool: ToolName.make("run_command"), input: receivedJson({ command }) });
+        return step._tag === "Waiting" ? "asks" : step.verdict._tag === "Continue" ? "runs" : "vetoed";
+      }),
+    );
+  expect(await judged("cat /data/x.csv")).toBe("asks");
+  shared.push("/data");
+  expect(await judged("cat /data/x.csv")).toBe("runs");
+});

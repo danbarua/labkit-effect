@@ -253,14 +253,14 @@ export const cliOf = (brand: Brand, invalidLevels: ReadonlyArray<InvalidLevel> =
         const config: Config = yield* checked({ ...unresolved, target });
         // A prompt given on the command line was not sent when the REPL opened without a model, so it is dropped.
         const first = Result.isSuccess(found) ? options.prompt : undefined;
-        return yield* withCliSession(config, LogsToFile(logFileOf(brand, config.sessionId), `${brand.name}-cli`), terminal(context.view), (session, mcp) =>
-          Effect.andThen(warnInvalidLevels(invalidLevels), repl(session, config, first, interactive, context, mcp)),
+        return yield* withCliSession(config, LogsToFile(logFileOf(brand, config.sessionId), `${brand.name}-cli`), terminal(context.view), (session, mcp, added) =>
+          Effect.andThen(warnInvalidLevels(invalidLevels), repl(session, config, first, interactive, context, mcp, added)),
         );
       }
       const config: Config = yield* checked({ ...unresolved, target: yield* targetOf(named, "--model") });
       if (!options.print)
-        return yield* withCliSession(config, LogsToFile(logFileOf(brand, config.sessionId), `${brand.name}-cli`), interactive ? terminal(context.view) : Headless, (session, mcp) =>
-          Effect.andThen(warnInvalidLevels(invalidLevels), repl(session, config, options.prompt, interactive, context, mcp)),
+        return yield* withCliSession(config, LogsToFile(logFileOf(brand, config.sessionId), `${brand.name}-cli`), interactive ? terminal(context.view) : Headless, (session, mcp, added) =>
+          Effect.andThen(warnInvalidLevels(invalidLevels), repl(session, config, options.prompt, interactive, context, mcp, added)),
         );
       // Piped input is read only when no prompt was given: a shell that leaves stdin open would
       // otherwise keep a prompted run waiting for an end of input that never comes.

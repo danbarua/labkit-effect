@@ -58,8 +58,9 @@ model.
           `touch`, `curl -o`, `find -delete`, `xargs rm`, and the like) are lifted only by path
           rules, `Read(...)` and `Edit(...)`, as in Claude Code (2026-10-08); additional folders
           (settings, `--add-dir`, ACP's `additionalDirectories`) count as inside, for commands and
-          the file tools, which are asked about a path outside every folder as a command is. To do:
-          the REPL's `/add-dir`; the
+          the file tools, which are asked about a path outside every folder as a command is; the
+          REPL's `/add-dir` adds one for the session. To do: `/add-dir` remembering a folder (where it
+          is saved is not decided: the project's local settings, as Claude Code, or the user's); the
           programs the guide lists as not checked (`docs/guide/permissions.md`).
         - The harness tells the agent of changes to files it has read (Dan, 2026-10-08): with every
           path going through one place (`path-resolver.ts`), the harness knows what the agent read
@@ -426,8 +427,10 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       - captures from zork's two sessions are checked by reading the code, not by a live game.
 
 - [ ] Additional directories (Claude Code's `/add-dir`, ACP's additional directories): folders a
-      session may use at the same trust level as its working folder. Claude Code asks whether the
-      directory is added for this session or remembered (Dan, 2026-10-07).
+      session may use at the same trust level as its working folder. Built: the settings'
+      `additionalDirectories`, `--add-dir`, ACP's `additionalDirectories` and the REPL's `/add-dir`
+      (for the session). To do: remembering a folder `/add-dir` adds, which Claude Code offers
+      (Dan, 2026-10-07); where it is saved is not decided.
 - [ ] A session is not bound to its working folder for ever (Dan, 2026-10-07): moving it to another
       folder forks it and rewrites its turn zero, which records the working folder. Waits for forks,
       below.

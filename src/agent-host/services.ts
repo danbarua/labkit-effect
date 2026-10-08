@@ -47,22 +47,29 @@ export const SessionServices = <E, R>(runner: Layer.Layer<ToolRunner, E, R>) =>
  * by its tool's kind, and a call to a command tool by the programs its command runs, split by the
  * host's command parser (`command-parser.ts`), with `settings`' rules, and the paths a program reads
  * judged against `workingFolder`, the `additional` folders that count as inside it (absolute, from
- * `~`, or relative to the working folder), and this process's home folder. `canAsk` is whether anyone can
+ * `~`, or relative to the working folder; read at each call when they can change), and this
+ * process's home folder. `canAsk` is whether anyone can
  * answer a question before a call runs. `mode` is read at each call, so a host that lets the user
  * change it applies the change from the next call. A tool call policy (`ToolCallPolicies`).
  */
 export const permissionsFor =
-  (mode: PermissionMode | Effect.Effect<PermissionMode>, canAsk: boolean, settings: PermissionSettings = defaultPermissionSettings, workingFolder?: string, additional: ReadonlyArray<string> = []): PolicyOfFacts =>
+  (
+    mode: PermissionMode | Effect.Effect<PermissionMode>,
+    canAsk: boolean,
+    settings: PermissionSettings = defaultPermissionSettings,
+    workingFolder?: string,
+    additional: ReadonlyArray<string> | Effect.Effect<ReadonlyArray<string>> = [],
+  ): PolicyOfFacts =>
   (facts) =>
     Effect.flatMap(immutableToolCatalogOf(facts), (tools) =>
       Effect.map(
-        Effect.isEffect(mode) ? mode : Effect.succeed(mode),
-        (now) =>
+        Effect.all([Effect.isEffect(mode) ? mode : Effect.succeed(mode), Effect.isEffect(additional) ? additional : Effect.succeed(additional)]),
+        ([now, folders]) =>
           permissions(now, canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts, {
             settings,
             segmentsOf,
             pathInputsOf: (name) => tools.find((tool) => tool.name === name)?.paths ?? [],
-            ...(workingFolder === undefined ? {} : { folders: foldersOf(workingFolder, additional) }),
+            ...(workingFolder === undefined ? {} : { folders: foldersOf(workingFolder, folders) }),
           }) as Policy<unknown>,
       ),
     );

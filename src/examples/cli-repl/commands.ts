@@ -12,6 +12,7 @@ import type { McpServers } from "../../agent-mcp/servers.ts";
 import type { Session } from "../../agent-session/loop.ts";
 import { optionsOf } from "../../agent-session/configuration/options.ts";
 import { type CommandContext, type Done, type DoneWithoutModel, type Offered, type ReplCommand, said } from "./command.ts";
+import { addDir } from "./commands/add-dir.ts";
 import { effort } from "./commands/effort.ts";
 import { exportCommand } from "./commands/export.ts";
 import { mcp } from "./commands/mcp.ts";
@@ -45,7 +46,7 @@ const exit: ReplCommand = {
 };
 
 /** The REPL's commands, in `/help` order. */
-export const commands: ReadonlyArray<ReplCommand> = [model, switchCommand, effort, settings, tools, exportCommand, mcp, helpCommand, exit];
+export const commands: ReadonlyArray<ReplCommand> = [model, switchCommand, effort, settings, tools, addDir, exportCommand, mcp, helpCommand, exit];
 
 /** The error for a line that starts with `/` but names no command. */
 export const noCommand = (line: string) => invalid(`Unknown command: ${line.trim().split(/\s+/)[0] ?? line}.`, "Type /help to list the commands.");

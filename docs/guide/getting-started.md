@@ -41,7 +41,8 @@ labkit --help                                  # every option
 
 In a conversation, `/help` lists the commands: `/model` chooses the model, `/effort` the reasoning
 effort, `/settings` shows and changes settings, `/export` writes the session as Markdown, `/tools`
-lists the tools, `/mcp` shows the MCP servers, and `/exit` ends the conversation.
+lists the tools, `/add-dir` lets the agent work in another folder for the session, `/mcp` shows the
+MCP servers, and `/exit` ends the conversation.
 
 The first time you run `labkit` in a folder that has its own `.env` file or `.labkit/` settings, it
 asks whether to trust the folder ([Trusted folders](trusted-folders.md)).

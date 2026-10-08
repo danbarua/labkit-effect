@@ -37,6 +37,7 @@ import { InputText, type TurnId, Via } from "../../agent-machine/names.ts";
 import type { SettingsChange } from "../../agent-machine/settings.ts";
 import { gitTools, isRepositoryRoot } from "../../agent-tools/git.ts";
 import { additionalDirectoriesOf } from "../../agent-config/builtins.ts";
+import { type AddedFolders, makeAddedFolders } from "./added-folders.ts";
 import { foldersOf } from "../../agent-host/services.ts";
 import { workspaceTools } from "../../agent-tools/workspace.ts";
 import type { Session } from "../../agent-session/loop.ts";
@@ -111,9 +112,13 @@ const gitOf = (config: Config) => (isRepositoryRoot(process.cwd()) ? gitTools(pr
  * give: `SessionServices` with the configuration's `models:` overrides, and the configuration's
  * policies and turn-end hooks.
  */
-const servicesOf = (config: Config) => {
+const servicesOf = (config: Config, added: AddedFolders) => {
   // The CLI uses its own tool sources (the workspace's and the MCP servers'), not the configuration's.
-  const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(config.configuration, { canAsk: config.canAsk, workingFolder: process.cwd(), additionalFolders: config.additionalFolders });
+  const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(config.configuration, {
+    canAsk: config.canAsk,
+    workingFolder: process.cwd(),
+    additionalFolders: Effect.map(added.list, (folders) => [...config.additionalFolders, ...folders]),
+  });
   return Layer.mergeAll(SessionServices(SourcedToolRunner).pipe(Layer.provide(Layer.succeed(ModelOverrides, config.configuration.models))), seamLayer(lists));
 };
 
@@ -198,7 +203,12 @@ const serversBoltOn = (mcp: McpServers): BoltOn => ({
  * opened or written stops the session with an error. What `use` records comes from the user,
  * through the CLI.
  */
-export const withCliSession = <A, E, R, L, H>(config: Config, logs: Layer.Layer<never, never, L>, host: Host<H>, use: (session: Session, mcp: McpServers) => Effect.Effect<A, E, R>) =>
+export const withCliSession = <A, E, R, L, H>(
+  config: Config,
+  logs: Layer.Layer<never, never, L>,
+  host: Host<H>,
+  use: (session: Session, mcp: McpServers, added: AddedFolders) => Effect.Effect<A, E, R>,
+) =>
   Effect.gen(function* () {
     const root = storeFolderOf(yield* Brand);
     const workspace = workspaceOf(config);
@@ -207,6 +217,7 @@ export const withCliSession = <A, E, R, L, H>(config: Config, logs: Layer.Layer<
     const mcp = yield* startMcpServers(givenOf(config.configuration), [{ uri: pathToFileURL(process.cwd()).href, name: basename(process.cwd()) }]);
     yield* requiredRunning(config.configuration, mcp);
     const folder = yield* folderBoltOn(workspace, gitOf(config));
+    const added = yield* makeAddedFolders;
     return yield* withSession(
       {
         sessionId: config.sessionId,
@@ -217,12 +228,12 @@ export const withCliSession = <A, E, R, L, H>(config: Config, logs: Layer.Layer<
         persist: config.persist,
         root,
         record: cliRecord(process.cwd()),
-        services: servicesOf(config),
-        boltOns: [folder, serversBoltOn(mcp)],
+        services: servicesOf(config, added),
+        boltOns: [folder, serversBoltOn(mcp), { notices: [added.notices] }],
         logs,
         host,
       },
-      (session) => use(session, mcp),
+      (session) => use(session, mcp, added),
     );
   }).pipe(
     reportedBy({ _tag: "User", via: Via.make("cli") }),

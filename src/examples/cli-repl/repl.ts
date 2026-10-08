@@ -21,6 +21,7 @@
  */
 
 import type { McpServers } from "../../agent-mcp/servers.ts";
+import type { AddedFolders } from "./added-folders.ts";
 import { Console, Deferred, Effect, FileSystem, HashMap, Option, PubSub, Queue, Ref } from "effect";
 import { homedir } from "node:os";
 import { Brand } from "../../agent-host/brand.ts";
@@ -372,19 +373,20 @@ export interface ReplContext {
 }
 
 /** Builds the commands' context: the working folder, the configuration layers, and the MCP servers. */
-const commandContext = (context: ReplContext, layers: CommandContext["layers"], mcp?: McpServers): CommandContext => ({
+const commandContext = (context: ReplContext, layers: CommandContext["layers"], mcp?: McpServers, addedFolders?: AddedFolders): CommandContext => ({
   folder: process.cwd(),
   configFolder: context.configFolder,
   view: context.view,
   layers,
   commandLine: context.commandLine,
   ...(mcp === undefined ? {} : { mcp }),
+  ...(addedFolders === undefined ? {} : { addedFolders }),
 });
 
 /** Option+T at the prompt: shows or hides thinking, with a note saying which. */
 const thinkingKey = (view: View): KeyBinding => ({ matches: isOptionT, run: toggleThinking(view) });
 
-export const repl = (session: Session, config: Config, first: string | undefined, interactive: boolean, context: ReplContext, mcp?: McpServers) =>
+export const repl = (session: Session, config: Config, first: string | undefined, interactive: boolean, context: ReplContext, mcp?: McpServers, addedFolders?: AddedFolders) =>
   Effect.scoped(Effect.gen(function* () {
     yield* Console.log(`${config.target.provider}/${config.target.model} · /help for commands · /exit to quit · log: ${logFileOf(yield* Brand, config.sessionId)}`);
     if (first !== undefined) yield* turn(session, first, context.view);
@@ -396,7 +398,7 @@ export const repl = (session: Session, config: Config, first: string | undefined
       if (input.trim() === "") return true;
       if (input.startsWith("/")) {
         // A command's error is printed, and the REPL continues.
-        const done = yield* runInSession(session, input, commandContext(context, config.configuration.layers, mcp)).pipe(
+        const done = yield* runInSession(session, input, commandContext(context, config.configuration.layers, mcp, addedFolders)).pipe(
           Effect.catchTag("UserError", (error) => Effect.succeed(said(String(error.userMessage)))),
         );
         if (done._tag === "Said") yield* Console.log(done.text);

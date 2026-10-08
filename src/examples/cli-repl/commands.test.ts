@@ -171,7 +171,7 @@ test("an invalid command prints an error and changes nothing, and an unknown com
 test("completion offers commands, models, setting names not yet on the line, and the values the model supports", async () => {
   const { printed } = await session(["(offered)", "/model grok-4.7", "/model claude-sonnet-5-5", "(offered)"]);
   const complete = completions(JSON.parse(printed[0] ?? "") as Parameters<typeof completions>[0]);
-  expect(complete("/")).toEqual(["/model ", "/switch ", "/effort ", "/settings ", "/tools", "/export", "/mcp ", "/help", "/exit", "/quit"]);
+  expect(complete("/")).toEqual(["/model ", "/switch ", "/effort ", "/settings ", "/tools", "/add-dir ", "/export", "/mcp ", "/help", "/exit", "/quit"]);
   expect(complete("/se")).toEqual(["/settings "]);
   expect(complete("/model openai/gpt-6-s")).toEqual(["/model openai/gpt-6-sol"]);
   expect(complete("/model xai/")).toEqual([]);

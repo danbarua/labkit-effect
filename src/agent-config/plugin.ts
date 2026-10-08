@@ -45,8 +45,12 @@ export interface FromHost {
   readonly permissionMode?: Effect.Effect<PermissionMode> | undefined;
   /** The folder the session works in, as an absolute path: the permission policy reads a path outside it as one that needs permission. */
   readonly workingFolder?: string | undefined;
-  /** Folders the host adds to the working folder for this session (`--add-dir`, ACP's `additionalDirectories`), as absolute paths. */
-  readonly additionalFolders?: ReadonlyArray<string> | undefined;
+  /**
+   * Folders the host adds to the working folder for this session (`--add-dir`, ACP's
+   * `additionalDirectories`, the REPL's `/add-dir`), as absolute paths; an effect when they can change
+   * while the session runs, read at each call.
+   */
+  readonly additionalFolders?: ReadonlyArray<string> | Effect.Effect<ReadonlyArray<string>> | undefined;
 }
 
 /** A plug-in's settings: a struct, each of its settings with a default (`Schema.withDecodingDefaultKey`). */
