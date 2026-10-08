@@ -499,6 +499,13 @@ const changers: ReadonlyMap<WordText, Changer> = new Map([
   [WordText.make("wget"), changer("writes", "none", { outputs: named("-O", "--output-document", "-P", "--directory-prefix", "-o", "--output-file", "-a", "--append-output") })],
 ]);
 
+/** What an `mv` given `named` operands moves: into the folder `-t` names (`into`), else the operands but the last to the last. */
+const movesOf = (named: ReadonlyArray<Word>, into: Word | undefined): Moves | undefined => {
+  if (into !== undefined) return { sources: named, destination: into, into: true };
+  const last = named.at(-1);
+  return last !== undefined && named.length >= 2 ? { sources: named.slice(0, -1), destination: last, into: false } : undefined;
+};
+
 /** What a program in `changers` changes and reads, from its words; `fed` when `xargs` gives it more operands on its input. Undefined for any other program. */
 const changesOf = (base: WordText, words: ReadonlyArray<Word>, fed: boolean): (Pick<Touches, "changes" | "fed" | "moves"> & { readonly reads: ReadonlyArray<Word> }) | undefined => {
   const known = changers.get(base);
@@ -523,17 +530,7 @@ const changesOf = (base: WordText, words: ReadonlyArray<Word>, fed: boolean): (P
   const changed = known.operands === "every" ? paths : destination;
   const others = known.operands === "last" ? paths.slice(0, paths.length - destination.length) : [];
   const files = (words: ReadonlyArray<Word>): ReadonlyArray<Word> => words.flatMap((word) => present(fileOf(word)));
-  const [into] = outputs;
-  const named = files(paths);
-  const last = named.at(-1);
-  const moves: Moves | undefined =
-    base !== WordText.make("mv") || fed
-      ? undefined
-      : into !== undefined
-        ? { sources: named, destination: into, into: true }
-        : last !== undefined && named.length >= 2
-          ? { sources: named.slice(0, -1), destination: last, into: false }
-          : undefined;
+  const moves = base === WordText.make("mv") && !fed ? movesOf(files(paths), outputs[0]) : undefined;
   return {
     changes: files([...changed, ...outputs]).map((word) => ({ verb: known.verb, word })),
     fed: fed && known.operands === "every" ? known.verb : undefined,

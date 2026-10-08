@@ -236,7 +236,8 @@ const describeAddress = (address: SedScript): Explanation => {
 /** A command's addresses, in plain English: when it has none, "every line", or "those lines" inside a block. */
 const describeAddresses = (command: SedCommand, inBlock: boolean): Explanation => {
   const text = command.addresses;
-  if (text === "") return said(command.negated ? "no line" : inBlock ? "those lines" : "every line");
+  if (text === "" && command.negated) return said("no line");
+  if (text === "") return said(inBlock ? "those lines" : "every line");
   const split = /^(\/(?:[^/\\]|\\.)*\/[IM]*|[^,]+?)\s*(?:,\s*(.+))?$/.exec(text);
   const first = scriptOf(split?.[1] ?? text);
   const second = split?.[2] === undefined ? undefined : scriptOf(split[2]);

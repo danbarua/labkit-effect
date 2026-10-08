@@ -6,8 +6,10 @@ permission policy (`agent-policy`), the tools (`agent-tools`), the hosts' record
 changed (`agent-host/recorded-changes.ts`), and the previews of a write (`agent-host/command-writes.ts`)
 all read it, so each of them sees a command the same way.
 
-It is an abstract layer: data and pure functions. It imports only `Schema` from `effect` and its own
-files, and its strings are branded (`scripts/abstract-layers.ts`; `bun run check:brands`).
+It is not an abstract layer: the environment is live (the session's processes, its environment
+variables, git), so the module may use Effect's services and run effects. It is held to the rules of
+functional code (`oxlint.config.ts`, `functionalModules`). The policy, an abstract layer, imports
+its pure parts.
 
 ## Files
 

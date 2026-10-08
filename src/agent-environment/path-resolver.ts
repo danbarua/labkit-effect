@@ -38,6 +38,12 @@ export const normalised = (path: Text): ReadonlyArray<WordText> =>
 
 const isUnder = (path: ReadonlyArray<WordText>, folder: ReadonlyArray<WordText>): boolean => path.length >= folder.length && folder.every((part, at) => path[at] === part);
 
+/** `value` as an absolute path: from the home folder (`~/…`), as written (`/…`), or from `from`, else the working folder. */
+const absoluteOf = (value: Text, fromHome: boolean, folders: Folders, from: WordText | undefined): Text => {
+  if (fromHome) return `${folders.home}${value.slice(1)}`;
+  return value.startsWith("/") ? value : `${from ?? folders.working}/${value}`;
+};
+
 /** Resolves `word`, a path as a command writes it, against `folders`: a relative path from `from` (the working folder unless a `cd` moved), inside judged against the working folder and the additional ones. */
 export const resolvePath = (word: Word, folders: Folders | undefined, from?: WordText): ResolvedPath => {
   if (word.literal === undefined && /[$`]/.test(word.text)) return { _tag: "Unresolved", why: "not written out" };
@@ -45,7 +51,7 @@ export const resolvePath = (word: Word, folders: Folders | undefined, from?: Wor
   const fromHome = value === "~" || value.startsWith("~/");
   if (value.startsWith("~") && !fromHome) return { _tag: "Unresolved", why: "another user's home folder" };
   if (folders === undefined) return { _tag: "Local", full: undefined, inside: !(fromHome || value.startsWith("/")) && normalised(value)[0] !== WordText.make("..") };
-  const absolute = fromHome ? `${folders.home}${value.slice(1)}` : value.startsWith("/") ? value : `${from ?? folders.working}/${value}`;
+  const absolute = absoluteOf(value, fromHome, folders, from);
   const parts = normalised(absolute);
   const inside = [folders.working, ...(folders.additional ?? [])].some((folder) => isUnder(parts, normalised(folder)));
   return { _tag: "Local", full: WordText.make(`/${parts.join("/")}`), inside };

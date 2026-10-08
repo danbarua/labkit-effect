@@ -3,6 +3,6 @@
  * applies the abstract-layer lint rules to each folder, and `scripts/check-brands.ts` checks the
  * schemas in each folder. Both read this list, so a renamed or added layer changes both checks.
  */
-export const abstractLayers = ["agent-machine", "agent-environment", "agent-policy"] as const;
+export const abstractLayers = ["agent-machine", "agent-policy"] as const;
 
 export type AbstractLayer = (typeof abstractLayers)[number];

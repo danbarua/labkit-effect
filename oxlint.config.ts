@@ -21,7 +21,6 @@ const effectSchemaOnly = { name: "effect", allowImportNames: ["Schema"], message
 /** The modules each abstract layer may import, besides `Schema` from effect and its own files. */
 const importsAllowed: Record<AbstractLayer, { readonly group: ReadonlyArray<string>; readonly message: string }> = {
   "agent-machine": { group: ["*", "!effect", "!./*"], message: "agent-machine imports only `Schema` from effect, and its own files." },
-  "agent-environment": { group: ["*", "!effect", "!./*"], message: "agent-environment imports only `Schema` from effect, and its own files." },
   "agent-policy": {
     group: ["*", "!effect", "!./*", "!../agent-machine/*", "!../agent-environment/*"],
     message: "agent-policy imports only `Schema` from effect, agent-machine, agent-environment, and its own files.",
@@ -48,7 +47,7 @@ const functional = {
 } as const;
 
 /** The modules under `src/` held to `functional`, besides the abstract layers. */
-const functionalModules = ["agent-process", "agent-config", "agent-tools", "agent-host", "agent-mcp", "agent-context", "agent-session", "agent-acp", "examples", "instrumentation"] as const;
+const functionalModules = ["agent-environment", "agent-process", "agent-config", "agent-tools", "agent-host", "agent-mcp", "agent-context", "agent-session", "agent-acp", "examples", "instrumentation"] as const;
 
 /**
  * Files that are glue to an imperative API, where mutable state or loops are needed. Each entry
