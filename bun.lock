@@ -10,7 +10,7 @@
         "@effect/ai-openai-compat": "4.0.0",
         "@logtape/logtape": "^2.3.9",
         "effect": "^4.0.0",
-        "effective-acp": "0.2.1",
+        "effective-acp": "0.4.0",
         "es-git": "^0.7.0",
         "yaml": "2.9.1",
       },
@@ -162,7 +162,7 @@
 
     "effect": ["effect@4.0.0", "", {}, "sha512-ooc1TG5t+FfzgYnFz2ff6BBKyZ7EwBRVXC7c4RhQUAD6/TZ2gTXXMeb4WX7a19ozQo4J73/QW+S00YAIresoMQ=="],
 
-    "effective-acp": ["effective-acp@0.2.1", "", { "peerDependencies": { "effect": "^4.0.0" } }, "sha512-/t5u8a6JcYQVvJPLumNGq8kkYAD2zkufkqTDN1s1i7XdNJ0Zvyjhlw21GNSXhUf7f54kdSy2MdNVGsvPf/o66g=="],
+    "effective-acp": ["effective-acp@0.4.0", "", { "peerDependencies": { "effect": "^4.0.0" } }, "sha512-ULCG7NM7To2+TktolDasJkZ57g8iQc4qZD1798KPn28e9kSUCYw8IakyCdyLpDGppwu4HtZ6HYTD0KOOyVPyDQ=="],
 
     "es-git": ["es-git@0.7.0", "", { "optionalDependencies": { "es-git-android-arm-eabi": "0.7.0", "es-git-android-arm64": "0.7.0", "es-git-darwin-arm64": "0.7.0", "es-git-darwin-x64": "0.7.0", "es-git-linux-arm64-gnu": "0.7.0", "es-git-linux-arm64-musl": "0.7.0", "es-git-linux-x64-gnu": "0.7.0", "es-git-linux-x64-musl": "0.7.0", "es-git-win32-arm64-msvc": "0.7.0", "es-git-win32-x64-msvc": "0.7.0" } }, "sha512-jAoLAkfNt6hHDuXYjiB6fcs5XPrBq4crEoQNlIYDeXkY+EmkEB20EBSRg/ynnzbF6us06GgC1p7nTU2s79lcMw=="],
 
