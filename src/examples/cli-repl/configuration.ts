@@ -7,7 +7,8 @@
  */
 
 import { Effect, type FileSystem } from "effect";
-import type { ConfigInvalid, Configuration, LayerSource } from "../../agent-config/file.ts";
+import type { Configuration, LayerSource } from "../../agent-config/file.ts";
+import type { ConfigInvalid } from "../../agent-config/folders.ts";
 import { type ConfigFlags, launchConfiguration, userFolderOf } from "../../agent-host/launch.ts";
 import { type FolderNotTrusted, isTrusted, type TrustFileInvalid } from "../../agent-host/trust.ts";
 

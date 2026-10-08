@@ -33,7 +33,8 @@
 import { isAbsolute, resolve } from "node:path";
 import { Config, ConfigProvider, Effect, FileSystem, Option } from "effect";
 import { Command, Flag } from "effect/cli";
-import { ConfigInvalid, type Configuration, configFolders, fileLayer, fileLayers, type FileSource, fileSources, type LayerSource, loadConfiguration } from "../agent-config/file.ts";
+import { type Configuration, fileLayer, fileLayers, type FileSource, fileSources, type LayerSource, loadConfiguration } from "../agent-config/file.ts";
+import { ConfigInvalid, configFolders } from "../agent-config/folders.ts";
 import { merged } from "../agent-config/merge.ts";
 import type { PermissionMode } from "../agent-policy/permissions.ts";
 import { type Brand, envPrefixOf } from "./brand.ts";

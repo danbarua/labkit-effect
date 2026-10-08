@@ -33,7 +33,8 @@ mcpServers:
 | --- | --- |
 | `plugin.ts` | What a plug-in is, the seams, and `FromHost` (what the host provides that a file cannot). |
 | `builtins.ts` | The built-in plug-ins: `loopBreaker`, `permissions`, `maxTurnRequests`, `retryIncomplete`, `maxBudget`, `credentials`. |
-| `file.ts` | The configuration folders (`configFolders`), their files' layers (`fileLayers`, `fileLayer`), decoding (`loadConfiguration`), and the MCP servers. |
+| `folders.ts` | The configuration folders (`configFolders`) and the error that refuses a configuration (`ConfigInvalid`). It imports nothing else from the agent but the brand, so a program that imports the brand's folders (`agent-host/brand-folders.ts`) does not load the configuration. |
+| `file.ts` | The configuration files' layers (`fileLayers`, `fileLayer`), decoding (`loadConfiguration`), and the MCP servers. |
 | `merge.ts` | Merging layers of parsed values. |
 | `seams.ts` | `seamListsOf`: the lists that a configuration gives a session, and the layer that provides them. |
 | `effective.ts` | `effective-settings.json`: what a configuration resolved to, and which layer wrote each value. |

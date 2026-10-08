@@ -19,7 +19,7 @@
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { Context, Effect, Layer } from "effect";
-import { ConfigInvalid, configFolders } from "../agent-config/file.ts";
+import { ConfigInvalid, configFolders } from "../agent-config/folders.ts";
 import { type Brand, folderOf, sessionsVersion } from "./brand.ts";
 
 export interface BrandFolderPaths {

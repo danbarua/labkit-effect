@@ -9,7 +9,7 @@
  *
  * A folder's files are its `.yml` and `.yaml` files, read in the order of their names, so a name can
  * start with a sorting prefix (`10_policies.yml`, `20_mcp.yml`). A name that starts with `.` is not
- * read. A folder that does not exist adds no layer. `<name>` is `configName` unless the caller gives
+ * read. A folder that does not exist adds no layer. `<name>` is `configName` (`folders.ts`) unless the caller gives
  * another. `docs/agent-config.md` lists what a layer holds.
  *
  * - Only a trusted layer, the user's own, may name extensions or MCP servers, because both run code
@@ -21,56 +21,26 @@
 
 import type { McpServerStdio } from "../agent-mcp/client.ts";
 import type { McpServerRemote } from "../agent-mcp/http.ts";
-import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { Array as Arr, Data, Duration, Effect, FileSystem, Order, Schema } from "effect";
+import { Array as Arr, Duration, Effect, FileSystem, Order, Schema } from "effect";
 import { Yaml } from "effect/encoding";
-import { defaultBrand } from "../agent-host/brand.ts";
 import { builtins } from "./builtins.ts";
+import { ConfigInvalid, configFolders, type FolderOptions } from "./folders.ts";
 import { merged } from "./merge.ts";
 import { type AnyPlugin, type Seam, seams } from "./plugin.ts";
 import { ModelOverride } from "../agent-session/configuration/well-known-models.ts";
-
-/** The name of the configuration's folders unless a caller gives another: the default brand's (`agent-host/brand.ts`). */
-export const configName = defaultBrand.name;
 
 /** Which configuration files: the user's, the project's (kept with the project), or the user's own for the project (`local`, kept out of the project's history). */
 export type FileSource = "user" | "project" | "local";
 
 export const fileSources: ReadonlyArray<FileSource> = ["user", "project", "local"];
 
-/** Where configuration files are read from: the user's folder (`configDir`, else `~/.config/<name>`), and the project's (`<project>/.<name>`). */
-export interface FolderOptions {
-  readonly name?: string;
-  /** The home whose `.config/<name>` is the user's folder; this process's when left out. */
-  readonly home?: string;
-  /** The user's folder, in place of `<home>/.config/<name>`. */
-  readonly configDir?: string;
-}
-
-/** Returns the folders that configuration files are read from: the user's, and the project's. */
-export const configFolders = (project: string, options: FolderOptions = {}): { readonly user: string; readonly project: string } => {
-  const name = options.name ?? configName;
-  return { user: options.configDir ?? join(options.home ?? homedir(), ".config", name), project: join(project, `.${name}`) };
-};
-
 /** Whether a file named `file` is a configuration file: its name ends `.yml` or `.yaml`, and does not start with `.`. */
 const isConfigFile = (file: string): boolean => !file.startsWith(".") && /\.ya?ml$/.test(file);
 
 /** Whether a file named `file` is one of the user's own files for a project (`*.local.yml`), which is kept out of the project's history. */
 const isLocal = (file: string): boolean => /\.local\.ya?ml$/.test(file);
-
-/** A configuration that cannot be used: the layer, the path in it, and the problem. */
-export class ConfigInvalid extends Data.TaggedError("ConfigInvalid")<{
-  readonly file: string;
-  readonly path: string;
-  readonly problem: string;
-}> {
-  override get message(): string {
-    return `${this.file}: ${this.path === "" ? "" : `${this.path}: `}${this.problem}`;
-  }
-}
 
 /** One layer: the name that an error gives it (its file, or "the command line"), its value as parsed, and whether it is trusted to load extensions and start MCP servers. */
 export interface LayerSource {
