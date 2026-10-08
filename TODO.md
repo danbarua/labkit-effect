@@ -103,7 +103,8 @@ model.
           the call recorded, for every file whose text it writes at a path it writes out (`sed -i`
           and `printf … > f` included; after a `cd`, in each folder the path may lead from). To do:
           `printf`'s text is not shown before it runs; a path the shell expands (`"$F"`) is not
-          recorded. An `mv` is recorded as a move (`FileMoved`), one line, once the disk shows it.
+          recorded. An `mv` is recorded as a move (`FileMoved`), one line, once the disk shows it. A
+          file git ignores is recorded by its size (`FileWritten`), not as a diff.
           Open (Dan, 2026-10-08): `cp` and builds; git records the meaningful diffs anyway, and a
           whole file is better named in a line than shown as a diff.
         - Code is shown as written: a one-line `python3 -c '…; …'` stays on one line. Formatting it

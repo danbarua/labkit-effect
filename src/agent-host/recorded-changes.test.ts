@@ -4,6 +4,7 @@ import { expect } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
+import * as git from "es-git";
 import { Effect, Layer, Logger } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test, testFolder } from "../../tests/support/test.ts";
@@ -112,6 +113,32 @@ test("an mv is recorded as a move, not as text, once the disk shows it: renamed,
     [{ _tag: "FileMoved", from: at("c.txt"), to: at("d.txt"), replaced: true }],
     "Reported",
   ]);
+});
+
+test("a file git ignores is recorded by its size, not its text: created, then appended to; one the call did not write records nothing; a tracked file keeps its diff", async () => {
+  const at = (name: string) => join(testFolder(), name);
+  mkdirSync(testFolder(), { recursive: true });
+  await git.initRepository(testFolder(), { initialHead: "main" });
+  writeFileSync(at(".gitignore"), "*.log\n");
+  writeFileSync(at("kept.log"), "old\n");
+  const { results } = await ran([
+    ["run_command", { command: "echo one > out.log" }],
+    ["run_command", { command: "echo two >> out.log" }],
+    ["run_command", { command: "cd sub || echo x > kept.txt" }],
+    ["run_command", { command: "echo seen > notes.txt" }],
+  ]);
+  expect(results as unknown).toEqual([
+    [{ _tag: "FileWritten", path: at("out.log"), bytes: 4 }],
+    [{ _tag: "FileWritten", path: at("out.log"), bytes: 8, before: 4 }],
+    [{ _tag: "FileChanged", path: at("kept.txt"), change: "created", patch: "x\n" }],
+    [{ _tag: "FileChanged", path: at("notes.txt"), change: "created", patch: "seen\n" }],
+  ]);
+});
+
+test("a working folder that an enclosing repository ignores is not ignored output: its files keep their diffs", async () => {
+  // The test's folder is under this repository's logs/, which its .gitignore ignores.
+  const { results } = await ran([["run_command", { command: "echo one > out.log" }]]);
+  expect(results as unknown).toEqual([[{ _tag: "FileChanged", path: join(testFolder(), "out.log"), change: "created", patch: "one\n" }]]);
 });
 
 test("a patch over 32 KiB is kept to its first lines that fit, and the bytes left out are recorded", async () => {

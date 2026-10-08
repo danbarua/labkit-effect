@@ -347,6 +347,12 @@ test("an ended call that moved a file is printed with one line for the move, not
   expect(Bun.stripANSI(printed).split("\n").slice(2)).toEqual(["    Moved `/w/a.txt` to `/w/b.txt`."]);
 });
 
+test("an ended call that wrote a file git ignores is printed with one line for its size, not a diff", () => {
+  const text = (value: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text: value } }) as never;
+  const printed = shownEnded("run_command", '{"command":"npm test > out.log"}', { _tag: "Succeeded", output: text(""), details: [{ _tag: "FileWritten", path: "/w/out.log" as never, bytes: 120 as never }] });
+  expect(Bun.stripANSI(printed).split("\n").slice(2)).toEqual(["    Wrote 120 bytes to `/w/out.log`, which git ignores."]);
+});
+
 /** A model that calls `echo` in its first response, and answers in any later one. */
 const callsEcho = () => {
   let requests = 0;

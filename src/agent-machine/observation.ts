@@ -88,10 +88,14 @@ export type ToolFailure = typeof ToolFailure.Type;
  * - `FileMoved`: the call moved the file or folder at `from` to `to`, as the disk showed before and
  *   after it ran. `replaced` when something was at `to` before, which the move replaced. A move is
  *   recorded as a line, not as the moved file's text.
+ * - `FileWritten`: the call wrote the file at `path`, which git ignores (a log, build output), so it
+ *   is recorded by its size, not its text: `bytes` once the call ran, and `before`, its size before
+ *   (absent when it did not exist).
  */
 export const ToolDetail = Schema.Union([
   Schema.TaggedStruct("FileChanged", { path: FullPath, change: Schema.Literals(["created", "updated"]), patch: Received, cut: Schema.optionalKey(ByteCount) }),
   Schema.TaggedStruct("FileMoved", { from: FullPath, to: FullPath, replaced: Schema.optionalKey(Schema.Literal(true)) }),
+  Schema.TaggedStruct("FileWritten", { path: FullPath, bytes: ByteCount, before: Schema.optionalKey(ByteCount) }),
 ]);
 export type ToolDetail = typeof ToolDetail.Type;
 

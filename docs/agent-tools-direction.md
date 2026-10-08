@@ -119,7 +119,8 @@ The hosts record it for their own tools where the calls run (`agent-host/recorde
 `write_file` and `edit_file` by their path inputs, `terminal_command` and `run_command` for each
 file their command writes at a path it writes out (`writtenFiles`): a redirect's target, `tee`'s and
 `sed -i`'s, whether or not the words show the text. The second is `FileMoved`: a command's `mv`, as
-the disk shows it, recorded as a line (moved from X to Y) rather than as the file's text. ACP shows a finished call's diffs from it, live
+the disk shows it, recorded as a line (moved from X to Y) rather than as the file's text. The third is
+`FileWritten`: a file git ignores (a log, build output), recorded by its size. ACP shows a finished call's diffs from it, live
 and replayed alike, and the REPL prints them under the call (`docs/agent-acp.md`). Other harnesses keep the same two parts per result: Claude Code's
 `toolUseResult`, Codex's `FileChange`, opencode's `metadata`, omp's `details`.
 

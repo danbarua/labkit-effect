@@ -44,6 +44,12 @@ const keptOf = (text: string): { readonly kept: string; readonly cut: number } =
 export const movedLine = (detail: Extract<ToolDetail, { readonly _tag: "FileMoved" }>): string =>
   `Moved ${codeSpan(detail.from)} to ${codeSpan(detail.to)}${detail.replaced === true ? ", replacing what was there" : ""}.`;
 
+/** What a display says of a `FileWritten`: one line, with the path as a Markdown code span. */
+export const writtenLine = (detail: Extract<ToolDetail, { readonly _tag: "FileWritten" }>): string =>
+  detail.before === undefined
+    ? `Wrote ${detail.bytes} bytes to ${codeSpan(detail.path)}, which git ignores.`
+    : `Wrote to ${codeSpan(detail.path)}, which git ignores: ${detail.bytes} bytes, ${detail.before} before.`;
+
 /** What a display says of a `FileChanged` whose patch was cut; undefined when it was kept whole. */
 export const patchCutNote = (detail: Extract<ToolDetail, { readonly _tag: "FileChanged" }>): string | undefined =>
   detail.cut === undefined ? undefined : `The diff of ${detail.path} was cut at ${maxPatchBytes / 1024} KiB: ${detail.cut} more bytes are not shown.`;

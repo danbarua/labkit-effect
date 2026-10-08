@@ -1051,3 +1051,20 @@ test("a call's moved files are one line each, not diffs: from where to where, an
     { type: "content", content: { type: "text", text: "Moved `/w/c.txt` to `/w/d.txt`, replacing what was there." } },
   ]);
 });
+
+test("a call's writes to files git ignores are one line each, by size, not diffs", () => {
+  const text = (value: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text: value } }) as never;
+  expect(
+    changedFiles({
+      _tag: "Succeeded",
+      output: text(""),
+      details: [
+        { _tag: "FileWritten", path: "/w/out.log" as never, bytes: 4 as never },
+        { _tag: "FileWritten", path: "/w/out.log" as never, bytes: 8 as never, before: 4 as never },
+      ],
+    }) as unknown,
+  ).toEqual([
+    { type: "content", content: { type: "text", text: "Wrote 4 bytes to `/w/out.log`, which git ignores." } },
+    { type: "content", content: { type: "text", text: "Wrote to `/w/out.log`, which git ignores: 8 bytes, 4 before." } },
+  ]);
+});

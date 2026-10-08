@@ -26,7 +26,7 @@ import { homedir } from "node:os";
 import { BrandFolders } from "../../agent-host/brand-folders.ts";
 import { terminalOf } from "../../agent-host/command-detail.ts";
 import { type ShownWrite, shownWrites } from "../../agent-host/command-writes.ts";
-import { currentOnDisk, movedLine, patchCutNote } from "../../agent-tools/file-change.ts";
+import { currentOnDisk, movedLine, patchCutNote, writtenLine } from "../../agent-tools/file-change.ts";
 import { unifiedDiff } from "../../agent-tools/line-diff.ts";
 import { WordText } from "../../agent-policy/command-segments.ts";
 import type { Detail, Folders } from "../../agent-policy/command-units.ts";
@@ -221,6 +221,7 @@ const changedLines = (outcome: ToolOutcome): ReadonlyArray<string> =>
     ? []
     : (outcome.details ?? []).flatMap((detail) => {
         if (detail._tag === "FileMoved") return [movedLine(detail)];
+        if (detail._tag === "FileWritten") return [writtenLine(detail)];
         const note = patchCutNote(detail);
         const lines = detail.change === "created" ? unifiedDiff(detail.path, undefined, asText(detail.patch)) : asText(detail.patch).split("\n").filter((line) => line !== "");
         return note === undefined ? lines : [...lines, `(${note})`];

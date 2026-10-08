@@ -20,7 +20,7 @@
 
 import { existsSync, mkdtempSync, readFileSync, readlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import * as git from "es-git";
 import { Effect, Schema } from "effect";
 import { ToolName } from "../agent-machine/names.ts";
@@ -650,6 +650,33 @@ export const repositoryLine = (worktree: boolean): string => `The working folder
 
 /** Whether `folder` is the root of a git repository: it holds `.git`, a folder or a file. */
 export const isRepositoryRoot = (folder: string): boolean => existsSync(join(folder, ".git"));
+
+/** The nearest folder that exists at or above `folder`: where git looks for the repository of a file that may not exist yet. */
+const existingAncestor = (folder: string): string => (existsSync(folder) || dirname(folder) === folder ? folder : existingAncestor(dirname(folder)));
+
+/**
+ * Whether git ignores the file at `full` (a full path), by the `.gitignore` files and the rules of
+ * the repository that holds it, as es-git reads them. False when no repository holds it, and when
+ * that repository ignores the working folder `working` itself (a scratch folder under a project's
+ * ignored `logs/`): the files there are the work in a folder git does not track, not output that a
+ * project ignores. A repository that cannot be read is warned of, naming the file and why, and the
+ * file counts as not ignored.
+ */
+export const ignoredByGit = (full: string, working: string): Effect.Effect<boolean> =>
+  Effect.tryPromise({ try: () => git.discoverRepository(existingAncestor(dirname(full))), catch: (cause) => ({ _tag: "RepositoryNotRead" as const, message: cause instanceof Error ? cause.message : String(cause) }) }).pipe(
+    Effect.map((repo): boolean => {
+      const root = repo.workdir();
+      if (root === null || root === undefined) return false;
+      const within = relative(root, working);
+      const workingIgnored = within !== "" && !within.startsWith("..") && !isAbsolute(within) && repo.isPathIgnored(within);
+      return !workingIgnored && repo.isPathIgnored(relative(root, full));
+    }),
+    Effect.catch((error) =>
+      /could not find repository/i.test(error.message)
+        ? Effect.succeed(false)
+        : Effect.logWarning(logKeys.tools.repositoryNotOpened, { folder: dirname(full), cause: error.message, used: "not ignored" }).pipe(Effect.as(false)),
+    ),
+  );
 
 /**
  * Returns the system text for the repository at `root`, opening it once to ask es-git whether it is

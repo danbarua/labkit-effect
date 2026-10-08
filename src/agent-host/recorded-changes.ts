@@ -14,15 +14,17 @@
  * which of the two reads it is (in the editor world, the editor's text, unsaved changes included,
  * with whether the file exists before the call from the disk), else from the disk. A text over 256
  * KiB (`maxCurrentBytes`), or one that could not be read, is not known, so nothing is recorded of its
- * file, and a warning says so. The patch is cut at 32 KiB (`fileChanged`). A move is recorded as
+ * file, and a warning says so. The patch is cut at 32 KiB (`fileChanged`). A file that git ignores (a
+ * log, build output; `ignoredByGit`) is not read: it is recorded by its size (`FileWritten`), when
+ * its size or its modification time changed. A move is recorded as
  * `FileMoved`, not as text: the disk is checked before the call (the source is there; where it goes,
  * into a folder the destination names or to the destination itself, and whether something is there)
  * and after it (the source is gone, and something is where it went). A failed call records nothing. An MCP server's tool source is not wrapped: the operator who installs a server trusts it.
  */
 
 import { basename, join } from "node:path";
-import { Effect, FileSystem } from "effect";
-import { FullPath, type ToolName } from "../agent-machine/names.ts";
+import { Effect, FileSystem, Option } from "effect";
+import { ByteCount, FullPath, type ToolName } from "../agent-machine/names.ts";
 import type { ToolDetail } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
 import type { Folders } from "../agent-policy/command-units.ts";
@@ -31,6 +33,7 @@ import { logKeys } from "../agent-session/log-keys.ts";
 import { parseJson } from "../agent-session/received.ts";
 import type { ToolSource } from "../agent-session/tool-sources.ts";
 import { type Current, currentOnDisk, fileChanged, maxCurrentBytes } from "../agent-tools/file-change.ts";
+import { ignoredByGit } from "../agent-tools/git.ts";
 import { fullPathIn } from "../agent-tools/paths.ts";
 import { type PlannedMove, plannedMoves, writtenFiles } from "./command-writes.ts";
 
@@ -56,6 +59,12 @@ interface MoveBefore {
   readonly from: string;
   readonly to: string;
   readonly occupied: boolean;
+}
+
+/** A file's size in bytes and its modification time in milliseconds, when the disk gives one. */
+interface Sized {
+  readonly bytes: number;
+  readonly modified: number | undefined;
 }
 
 /** `current`, or not known when its text is over `maxCurrentBytes`. */
@@ -97,6 +106,23 @@ export const recordingChanges =
           const occupied = yield* there(tool, to);
           return occupied === undefined ? undefined : { from: move.from, to, occupied };
         });
+      /** The size and modification time of the file at `full`; undefined when nothing is there; "unknown", warned of, when the disk could not be read. */
+      const sizeOf = (tool: ToolName, full: string): Effect.Effect<Sized | undefined | "unknown"> =>
+        fs.stat(full).pipe(
+          Effect.map((info): Sized => ({ bytes: Number(info.size), modified: Option.getOrUndefined(info.mtime)?.getTime() })),
+          Effect.catch((error) =>
+            error.reason._tag === "NotFound"
+              ? Effect.undefined
+              : Effect.logWarning(logKeys.tools.changeNotRecorded, { tool, full, reason: `it could not be checked: ${error.message}` }).pipe(Effect.as("unknown" as const)),
+          ),
+        );
+      /** After the call: a file git ignores that the call wrote, by its size, when its size or its modification time changed. */
+      const afterWrite = (tool: ToolName, full: string, before: Sized | undefined): Effect.Effect<ReadonlyArray<ToolDetail>> =>
+        Effect.map(sizeOf(tool, full), (after) =>
+          after === undefined || after === "unknown" || (before !== undefined && before.bytes === after.bytes && before.modified === after.modified)
+            ? []
+            : [{ _tag: "FileWritten", path: FullPath.make(full), bytes: ByteCount.make(after.bytes), ...(before === undefined ? {} : { before: ByteCount.make(before.bytes) }) }],
+        );
       /** After the call: the move, when the source is gone and something is where it went. */
       const afterMove = (tool: ToolName, move: MoveBefore): Effect.Effect<ReadonlyArray<ToolDetail>> =>
         Effect.gen(function* () {
@@ -131,7 +157,16 @@ export const recordingChanges =
             const command = commandOf(tool, input);
             const moves = command === undefined ? [] : moving(command);
             if (files.length === 0 && moves.length === 0) return yield* source.run(tool, input, call);
-            const before = yield* Effect.forEach(files, (file) => Effect.flatMap(file.read(file.full, "before"), (text) => Effect.map(known(capped(text), tool, file.full), (current) => ({ ...file, before: current }))));
+            // A file git ignores (a log, build output) is recorded by its size; any other, by its text.
+            const ignored = yield* Effect.forEach(files, (file) => Effect.map(ignoredByGit(file.full, recording.root), (yes) => ({ file, yes })));
+            const sized = yield* Effect.forEach(
+              ignored.filter((each) => each.yes),
+              ({ file }) => Effect.map(sizeOf(tool, file.full), (size) => ({ full: file.full, size })),
+            );
+            const before = yield* Effect.forEach(
+              ignored.filter((each) => !each.yes),
+              ({ file }) => Effect.flatMap(file.read(file.full, "before"), (text) => Effect.map(known(capped(text), tool, file.full), (current) => ({ ...file, before: current }))),
+            );
             const movesBefore = (yield* Effect.forEach(moves, (move) => beforeMove(tool, move))).flatMap((move) => (move === undefined ? [] : [move]));
             const outcome = yield* source.run(tool, input, call);
             if (outcome._tag !== "Succeeded") return outcome;
@@ -140,8 +175,9 @@ export const recordingChanges =
                 ? Effect.succeed([])
                 : Effect.flatMap(file.read(file.full, "after"), (text) => Effect.map(known(capped(text), tool, file.full), (after) => (after._tag === "Text" ? fileChanged(file.full, file.before, after.text) : []))),
             );
+            const written = yield* Effect.forEach(sized, ({ full, size }) => (size === "unknown" ? Effect.succeed([]) : afterWrite(tool, full, size)));
             const moved = yield* Effect.forEach(movesBefore, (move) => afterMove(tool, move));
-            const all = [...(outcome.details ?? []), ...details.flat(), ...moved.flat()];
+            const all = [...(outcome.details ?? []), ...details.flat(), ...written.flat(), ...moved.flat()];
             return all.length === 0 ? outcome : { ...outcome, details: all };
           }).pipe(Effect.annotateLogs({ call })),
       };
