@@ -30,7 +30,7 @@ export const catalogModels: Readonly<Record<string, Readonly<Record<string, Capa
       }
     },
     "claude-sonnet-4-5": {
-      "context": 1000000,
+      "context": 200000,
       "output": 64000,
       "input": [
         "text",
@@ -142,7 +142,7 @@ export const catalogModels: Readonly<Record<string, Readonly<Record<string, Capa
       }
     },
     "claude-sonnet-4-5-20250929": {
-      "context": 1000000,
+      "context": 200000,
       "output": 64000,
       "input": [
         "text",
@@ -226,6 +226,37 @@ export const catalogModels: Readonly<Record<string, Readonly<Record<string, Capa
         "output": 5,
         "cacheRead": 0.1,
         "cacheWrite": 1.25
+      }
+    },
+    "claude-haiku-5-5": {
+      "context": 1000000,
+      "output": 128000,
+      "input": [
+        "text",
+        "image",
+        "pdf"
+      ],
+      "reasoning": true,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "price": {
+        "input": 0.1,
+        "output": 0.5,
+        "cacheRead": 0.01,
+        "cacheWrite": 0.125,
+        "above": {
+          "context": 100000,
+          "input": 0.5,
+          "output": 2.5,
+          "cacheRead": 0.05,
+          "cacheWrite": 0.625
+        }
       }
     },
     "claude-sonnet-4-6": {

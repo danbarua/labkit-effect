@@ -8,7 +8,9 @@
  * `well-known-models.measured.json` names the models to include, by provider, and for each holds what
  * was measured against the provider and is not in the catalog: the kinds of input it took when sent
  * them, the price of an hour-long cache write, and the thinking modes it takes besides the provider's
- * default and `disabled` (`thinking: ["between_tools"]`). What was measured wins. A measured
+ * default and `disabled` (`thinking: ["between_tools"]`). It also holds a price that the catalog
+ * gives and the provider's own pricing contradicts: Claude Sonnet 5.5's cache reads are $0.20 per
+ * million tokens, where models.dev gave $0.10 on 2026-10-08. What was measured wins. A measured
  * difference in efforts is not kept here: a user's configuration overrides it (`models:`, as
  * `src/agent-config/fixtures/user/40_models.yml` shows).
  *
