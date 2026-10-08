@@ -893,7 +893,7 @@ test("additionalDirectories count as inside the working folder: a command readin
   expect(result.refused).toMatchObject({ code: -32602, message: "additionalDirectories must be absolute paths: relative/folder" });
 });
 
-test("the editor world offers read_file and write_file as the client advertised fs; read_file reads through fs/read_text_file, a path outside the working folder is refused, and a client with no fs has no file tools", async () => {
+test("the editor world offers read_file and write_file as the client advertised fs; read_file reads through fs/read_text_file, a path outside the working folder is asked about with only that call to allow, and a client with no fs has no file tools", async () => {
   const host = startHost({
     script: [
       answer({ _tag: "ToolCall", call: "read-1", tool: "read_file", input: { path: "a.txt", intent: "Read a.txt." } }, { _tag: "ToolCall", call: "read-2", tool: "read_file", input: { path: "../outside.txt", intent: "Read a file outside." } }),
@@ -908,15 +908,20 @@ test("the editor world offers read_file and write_file as the client advertised 
     return created.sessionId;
   });
   await host.stop();
-  expect(log.asked).toEqual([]);
-  expect(log.files).toEqual([{ method: "fs/read_text_file", path: join(host.cwd, "a.txt"), sessionId }]);
+  expect(log.asked.map((asked) => [asked.toolCall.toolCallId, asked.options.map((option) => option.optionId)])).toEqual([["read-2", ["allow-once", "reject-once"]]]);
+  expect(JSON.stringify(log.asked[0]?.toolCall.content)).toContain("This call needs permission: it reads outside the working folder: ../outside.txt.");
+  // The client allowed it once: the file outside is read through the editor too.
+  expect(log.files).toEqual([
+    { method: "fs/read_text_file", path: join(host.cwd, "a.txt"), sessionId },
+    { method: "fs/read_text_file", path: join(testFolder(), "outside.txt"), sessionId },
+  ]);
   const facts = await factsOn(storeFileOf(host.directory, sessionId));
   expect((await Effect.runPromise(immutableToolCatalogOf(facts))).map((tool): string => tool.name)).toEqual(["read_file", "update_plan"]);
   const ended = observed(facts).flatMap((fact) => (fact.observation._tag === "ToolEnded" ? [fact.observation] : []));
   expect(ended).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ call: "read-1", outcome: expect.objectContaining({ _tag: "Succeeded", output: expect.objectContaining({ body: { _tag: "Text", text: "alpha" } }) }) }),
-      expect.objectContaining({ call: "read-2", outcome: { _tag: "Failed", reason: expect.objectContaining({ _tag: "InputRejected" }) } }),
+      expect.objectContaining({ call: "read-2", outcome: expect.objectContaining({ _tag: "Succeeded" }) }),
     ]),
   );
 

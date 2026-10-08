@@ -108,7 +108,13 @@ export type Grant = typeof Grant.Type;
  * in the facts, with the call.
  */
 export const PermissionQuestion = Schema.Union([
-  Schema.TaggedStruct("Tool", { tool: ToolName, kind: ToolKind, options: Schema.Array(PermissionOption) }),
+  Schema.TaggedStruct("Tool", {
+    tool: ToolName,
+    kind: ToolKind,
+    options: Schema.Array(PermissionOption),
+    /** Why the call needs permission when it is not its kind alone: it reads or changes a path outside the working folder. */
+    why: Schema.optionalKey(NeedText),
+  }),
   Schema.TaggedStruct("Command", {
     tool: ToolName,
     kind: ToolKind,
@@ -204,6 +210,11 @@ const CommandInput = Schema.Struct({ command: ShellCommand });
 const commandIn = (input: Received): ShellCommand | undefined => fromJson(CommandInput, input)?.command;
 
 const onlyReads: ReadonlyArray<ToolKind> = ["read", "search", "think", "fetch"];
+/** What a tool of each kind that changes files does to its paths; any other kind writes them. */
+const changeByKind: ReadonlyMap<ToolKind, UnitPath["access"]> = new Map<ToolKind, UnitPath["access"]>([
+  ["delete", "deletes"],
+  ["move", "moves"],
+]);
 const editsFiles: ReadonlyArray<ToolKind> = ["edit", "delete", "move"];
 
 const option = (id: Parameters<typeof OptionId.make>[0], name: Parameters<typeof OptionName.make>[0], kind: PermissionOption["kind"]): PermissionOption => ({
@@ -292,6 +303,8 @@ export interface CommandJudging {
   readonly settings: PermissionSettings;
   readonly segmentsOf: SegmentsOf;
   readonly folders?: Folders;
+  /** The names of a tool's inputs that are paths (`ToolSpec.paths`): a call's paths are judged as a command's are. */
+  readonly pathInputsOf?: (tool: ToolName) => ReadonlyArray<Parameters<typeof WordText.make>[0]>;
 }
 
 /**
@@ -372,6 +385,28 @@ const pathJudging = (judging: CommandJudging, units: ReadonlyArray<Unit>) => {
 
 const present = <A>(value: A | undefined): ReadonlyArray<A> => (value === undefined ? [] : [value]);
 const wordText = (word: Word): WordText => word.literal ?? word.text;
+
+/**
+ * The paths a call to `tool` names in its path inputs (`CommandJudging.pathInputsOf`), judged against
+ * the path rules and the working folders: the deny rule one is refused by (a read by `Read(...)`, a
+ * change by `Edit(...)`, as `kind` says which it is), and why the call needs permission when one is
+ * outside the folders and no path allow rule matches it.
+ */
+const toolPaths = (input: Received, tool: ToolName, kind: ToolKind, judging: CommandJudging): { readonly deniedBy: PathRule | undefined; readonly outside: NeedText | undefined } => {
+  const names = judging.pathInputsOf?.(tool) ?? [];
+  const given = fromJson(Schema.Record(WordText, Schema.Unknown), input) ?? {};
+  const words = names.flatMap((name) => {
+    const value = given[WordText.make(name)];
+    return typeof value === "string" && value !== "" ? [{ text: WordText.make(value), literal: WordText.make(value) }] : [];
+  });
+  const access: UnitPath["access"] = onlyReads.includes(kind) ? "reads" : (changeByKind.get(kind) ?? "writes");
+  const unitsOfPaths: ReadonlyArray<Unit> = [{ words: [], grant: undefined, writes: [], changesOutside: [], opaque: undefined, outside: [], paths: words.map((word) => ({ access, word })), detail: undefined }];
+  const judged = pathJudging(judging, unitsOfPaths);
+  const deniedBy = words.map((word) => judged.deniedBy({ access, word }, 0)).find((rule) => rule !== undefined);
+  const outside = words.filter((word) => judged.leaves(word, 0) && !judged.allows({ access, word }, 0)).map((word) => word.text);
+  if (outside.length === 0) return { deniedBy, outside: undefined };
+  return { deniedBy, outside: NeedText.make(`it ${access} outside the working folder: ${listed(outside)}`) };
+};
 
 /** The rules in `list` about tools and programs, read; path rules (`Read(...)`, `Edit(...)`) are not among them. */
 const programRules = (list: ReadonlyArray<PermissionRule>): ReadonlyArray<ParsedRule> => list.filter((rule) => pathRuleOf(rule) === undefined).map(parseRule);
@@ -510,6 +545,15 @@ export function permissions(
       const rules = (list: ReadonlyArray<PermissionRule>) => programRules(list).filter((rule) => rule.words === undefined && namesTool(rule, request.tool, false));
       const denyRule = rules(commands?.settings.deny ?? [])[0];
       if (denyRule !== undefined) return veto(`${request.tool} is denied by the rule ${denyRule.rule}.`);
+      // A tool's path inputs are judged as a command's paths: a deny rule refuses, and a path outside the
+      // working folders is asked about, with only this call to allow, unless a path rule or a rule for the tool allows it.
+      const paths = commands === undefined ? undefined : toolPaths(request.input, request.tool, kind, commands);
+      if (paths?.deniedBy !== undefined) return veto(`${request.tool} is denied by the rule ${paths.deniedBy.rule}.`);
+      if (paths?.outside !== undefined && rules(commands?.settings.allow ?? []).length === 0 && mode !== "bypassPermissions") {
+        if (mode === "dontAsk") return veto(`${request.tool} needs permission, and the permission mode is dontAsk: ${paths.outside}.`);
+        if (!canAsk) return veto(`${request.tool} needs permission, and no one is there to answer: ${paths.outside}. --permission-mode bypassPermissions lets it run.`);
+        return ask({ _tag: "Tool", tool: request.tool, kind, options: commandOptions([]), why: paths.outside });
+      }
       if (onlyReads.includes(kind)) return proceed;
       const sessionAnswer = sessionAnswersFor(facts, request.tool).tool;
       // A session rejection applies in every mode, so it is checked before the mode.

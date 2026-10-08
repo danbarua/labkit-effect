@@ -298,3 +298,36 @@ test("a cd moves where later relative paths lead: after a cd outside the working
   // The paths find gives are under its starting points, which are find's own reads.
   expect(judged("find . -exec rm {} \\;", { facts: rm, allow: ["command(find:*)"], folders: project }).step).toBe("runs");
 });
+
+/** What the policy does with a call to a file tool of `kind` whose `path` input is `path`, in /home/dan/project. */
+const fileCall = (kind: ToolKind, path: string, options: { mode?: PermissionMode; allow?: ReadonlyArray<string>; deny?: ReadonlyArray<string>; canAsk?: boolean; additional?: ReadonlyArray<string> } = {}) => {
+  const settings = { ...defaultPermissionSettings, allow: (options.allow ?? []).map((rule) => PermissionRule.make(rule)), deny: (options.deny ?? []).map((rule) => PermissionRule.make(rule)) };
+  const folders = { ...project, additional: (options.additional ?? []).map((folder) => WordText.make(folder)) };
+  const step = permissions(options.mode ?? "default", options.canAsk ?? true, () => kind, [], { settings, segmentsOf, folders, pathInputsOf: () => ["path"] }).start({
+    _tag: "RunTool",
+    call: CallId.make("c1"),
+    tool: ToolName.make(kind === "read" ? "read_file" : "write_file"),
+    input: receivedJson({ path }),
+  });
+  if (step._tag === "Waiting") return step.asks === undefined ? "asks" : questionIn(step.asks);
+  return step.verdict._tag === "Continue" ? "runs" : step.verdict.reason.body._tag === "Text" ? step.verdict.reason.body.text : "vetoed";
+};
+
+test("a file tool's path outside the working folders is asked about, with only that call to allow, in every mode but bypassPermissions; a path rule or an additional folder lets it run", () => {
+  expect(fileCall("read", "src/a.ts")).toBe("runs");
+  expect(fileCall("read", "~/notes.md")).toMatchObject({ _tag: "Tool", why: "it reads outside the working folder: ~/notes.md", options: [{ optionId: "allow-once" }, { optionId: "reject-once" }] });
+  expect(fileCall("read", "~/notes.md", { allow: ["Read(~/notes.md)"] })).toBe("runs");
+  expect(fileCall("read", "/data/x.csv", { additional: ["/data"] })).toBe("runs");
+  expect(fileCall("edit", "src/a.ts", { mode: "acceptEdits" })).toBe("runs");
+  expect(fileCall("edit", "../other/a.ts", { mode: "acceptEdits" })).toMatchObject({ _tag: "Tool", why: "it writes outside the working folder: ../other/a.ts" });
+  expect(fileCall("edit", "../other/a.ts", { mode: "acceptEdits", allow: ["Edit(~/other/**)"] })).toBe("runs");
+  expect(fileCall("edit", "../other/a.ts", { mode: "bypassPermissions" })).toBe("runs");
+  expect(fileCall("read", "~/notes.md", { mode: "dontAsk" })).toBe("read_file needs permission, and the permission mode is dontAsk: it reads outside the working folder: ~/notes.md.");
+  expect(fileCall("read", "~/notes.md", { canAsk: false })).toBe("read_file needs permission, and no one is there to answer: it reads outside the working folder: ~/notes.md. --permission-mode bypassPermissions lets it run.");
+});
+
+test("a deny path rule refuses a file tool's read or write of a path it matches, in every mode", () => {
+  expect(fileCall("read", ".env", { deny: ["Read(./.env)"], mode: "bypassPermissions" })).toBe("read_file is denied by the rule Read(./.env).");
+  expect(fileCall("edit", "config/.env", { deny: ["Edit(./.env)"], mode: "bypassPermissions" })).toBe("write_file is denied by the rule Edit(./.env).");
+  expect(fileCall("read", "config/.env", { deny: ["Edit(./.env)"] })).toBe("runs");
+});

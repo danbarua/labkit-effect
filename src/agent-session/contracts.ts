@@ -45,6 +45,8 @@ export const ToolSpec = Schema.Struct({
   kind: ToolKind,
   replay: ToolReplay,
   constrained: Schema.optionalKey(Schema.Literal(true)),
+  /** The names of its inputs that are paths to files or folders, which the permission policy judges. */
+  paths: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 export type ToolSpec = typeof ToolSpec.Type;
 

@@ -31,6 +31,7 @@
 import type { Environment } from "../agent-process/environment.ts";
 import { Effect, FileSystem, HashMap, Option, Ref } from "effect";
 import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { type Current, currentOnDisk, type PlannedWrite, plannedWrites, type ShownWrite, shownWrites } from "../agent-host/command-writes.ts";
 import { logKeys as hostLogKeys } from "../agent-host/log-keys.ts";
 import { ShellCommand, WordText } from "../agent-policy/command-segments.ts";
@@ -43,7 +44,7 @@ import type { ToolSource } from "../agent-session/tool-sources.ts";
 import { parseJson } from "../agent-session/received.ts";
 import { described } from "../agent-tools/described.ts";
 import { gitTools, isRepositoryRoot } from "../agent-tools/git.ts";
-import { inside, inWorkspace } from "../agent-tools/in-workspace.ts";
+import { inWorkspace } from "../agent-tools/in-workspace.ts";
 import { type AnyTool, type CurrentCall, anyTool, sourceOf } from "../agent-tools/tool.ts";
 import { maxReadBytes, workingFolderLine, workspaceTools } from "../agent-tools/workspace.ts";
 import { Editor, editFile, readFile, runCommand, updatePlan, writeFile } from "./editor-tools.ts";
@@ -166,7 +167,7 @@ export const editorWorld: World<FileSystem.FileSystem> = {
         if (readNow) return writesBefore(call, command);
         return Ref.get(writes).pipe(Effect.map((all) => Option.getOrElse(HashMap.get(all, call), () => [])));
       };
-      const inFolder = inWorkspace(cwd, additional);
+      const inFolder = inWorkspace(cwd);
       const tools: ReadonlyArray<AnyTool<Editor | CurrentCall>> = [
         ...(fs?.readTextFile === true ? [anyTool(described(inFolder(readFile)))] : []),
         ...(fs?.writeTextFile === true ? [anyTool(described(inFolder(writeFile)))] : []),
@@ -205,8 +206,8 @@ export const editorWorld: World<FileSystem.FileSystem> = {
             ];
             return content.length === 0 ? shown : ({ ...shown, content } satisfies Presented);
           }
-          const at = typeof input["path"] === "string" ? inside(cwd, input["path"]) : undefined;
-          if (at === undefined || "problem" in at) return shown;
+          const at = typeof input["path"] === "string" ? { full: resolve(cwd, input["path"]) } : undefined;
+          if (at === undefined) return shown;
           const located: Presented = { ...shown, locations: [{ path: at.full }] };
           const edited = call.tool === "edit_file" && typeof input["old_text"] === "string" && typeof input["new_text"] === "string";
           return edited && (outcome === undefined || outcome._tag === "Succeeded")

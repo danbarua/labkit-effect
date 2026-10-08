@@ -68,6 +68,14 @@ An answer that names no offered option vetoes the call.
 The policy reads session answers from the session's facts (`PermissionAsked`, `PermissionAnswered`).
 A process that resumes the session from its facts therefore applies the same answers.
 
+A tool whose inputs include paths (`ToolSpec.paths`, from the `pathOf` marker on its input schema:
+`read_file`, `write_file`, `edit_file`, `list_dir`) has those paths judged as a command's are
+(`CommandJudging.pathInputsOf`): a deny path rule refuses a read (`Read`) or a change (`Edit`, as the
+tool's kind says) in every mode; a path outside the working folders is asked about, offering only
+this call, unless a path allow rule matches it, an allow rule names the tool, or the mode is
+`bypassPermissions`; it is vetoed in `dontAsk` and when no one can answer. The question says why
+(`Tool.why`). The tools themselves resolve paths and refuse none (`inWorkspace`).
+
 When no one can answer (`canAsk` is false, as in the CLI's print mode), a call that would be asked
 about is vetoed. The veto's reason names the permission modes that let the call run:
 `acceptEdits or bypassPermissions` for a tool that changes files, and `bypassPermissions` for any

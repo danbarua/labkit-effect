@@ -27,3 +27,10 @@ export const FolderPath = Schema.NonEmptyString.annotate({ description: "The fol
 
 /** Returns what the input `schema` is a path to, or undefined when the input is not a path. */
 export const pathOf = (schema: Schema.Top): PathOf | undefined => Schema.resolveAnnotations(schema)?.pathOf;
+
+/** Returns the names of the path inputs among `fields`, with what each is a path to. */
+export const pathInputsOf = (fields: Readonly<Record<string, Schema.Top>>): ReadonlyArray<readonly [string, PathOf]> =>
+  Object.entries(fields).flatMap(([name, field]) => {
+    const of = pathOf(field);
+    return of === undefined ? [] : [[name, of] as const];
+  });

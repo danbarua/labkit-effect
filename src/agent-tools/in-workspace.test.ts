@@ -1,6 +1,7 @@
 /** `inWorkspace`, around a tool that records the input it runs with. */
 
 import { expect } from "bun:test";
+import { resolve } from "node:path";
 import { Effect, Schema } from "effect";
 import { test } from "../../tests/support/test.ts";
 import { ToolName } from "../agent-machine/names.ts";
@@ -42,14 +43,11 @@ test("inWorkspace resolves each path input against the root, and passes the othe
   ]);
 });
 
-test("inWorkspace refuses a path outside the root before the tool runs, saying it is not inside the working folder", async () => {
+test("inWorkspace does not refuse a path outside the root: it resolves it against the root and runs the tool, leaving the path to the permission policy", async () => {
   const { tool, ran } = recording();
   const wrapped = inWorkspace(root)(tool);
-  const refused = await Effect.runPromise(Effect.flip(wrapped.run({ path: "../other/a.ts", count: 1 })));
-  expect(refused).toMatchObject({ _tag: "Rejected", problem: `../other/a.ts is not inside the working folder, ${root}.` });
-  const absolute = await Effect.runPromise(Effect.flip(wrapped.run({ path: "src/a.ts", at: "/etc", count: 1 })));
-  expect(absolute).toMatchObject({ _tag: "Rejected", problem: `/etc is not inside the working folder, ${root}.` });
-  expect(ran).toEqual([]);
+  await Effect.runPromise(wrapped.run({ path: "../other/a.ts", at: "/etc", count: 1 }));
+  expect(ran).toEqual([{ path: resolve(root, "../other/a.ts"), at: "/etc", count: 1 }]);
 });
 
 test("inWorkspace describes a file path and a folder path as relative to the working folder, and changes no other input", () => {
@@ -59,8 +57,8 @@ test("inWorkspace describes a file path and a folder path as relative to the wor
   expect(offered).toEqual({
     type: "object",
     properties: {
-      path: { type: "string", minLength: 1, description: "The file's path: relative to the working folder, or absolute inside it." },
-      at: { type: "string", minLength: 1, description: 'The folder\'s path: relative to the working folder, or absolute inside it. "." is the working folder.' },
+      path: { type: "string", minLength: 1, description: "The file's path: relative to the working folder, or absolute." },
+      at: { type: "string", minLength: 1, description: 'The folder\'s path: relative to the working folder, or absolute. "." is the working folder.' },
       count: { type: "integer" },
     },
     required: ["path", "count"],

@@ -152,6 +152,10 @@ editor.
 
 `readOnly` replaces the list of programs that run without a question.
 
+The file tools (`read_file`, `write_file`, `edit_file`, `list_dir`) follow the same paths: a file
+outside your folder is asked about, with only that call to allow, unless a path rule allows it; a
+path deny rule refuses it in every mode.
+
 `additionalDirectories` lists folders whose files count as inside your folder: a command and the
 file tools may read and change files there as they do in your folder, and the agent is told of
 them. A folder is absolute, from `~`, or relative to

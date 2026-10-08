@@ -41,10 +41,12 @@ const needShown =
   };
 
 /** A command question's reasons, as a Markdown text block: each program that needs permission, why, and what helps judge it, then the notes about the command. */
-const needsBlock = (question: PermissionQuestion, content: ReadonlyArray<ToolCallContent>, explained: Explained): ReadonlyArray<ToolCallContent> =>
-  question._tag === "Command"
+const needsBlock = (question: PermissionQuestion, content: ReadonlyArray<ToolCallContent>, explained: Explained): ReadonlyArray<ToolCallContent> => {
+  if (question._tag === "Tool") return question.why === undefined ? [] : [{ type: "content", content: { type: "text", text: `This call needs permission: ${question.why}.` } }];
+  return question._tag === "Command"
     ? [{ type: "content", content: { type: "text", text: ["This command needs permission:", "", ...question.needs.flatMap(needShown(content, explained)), ...explained.notes.flatMap((note) => ["", note])].join("\n") } }]
     : [];
+};
 
 const nothingExplained: Explained = { programs: [], notes: [] };
 

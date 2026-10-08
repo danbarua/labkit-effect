@@ -252,7 +252,7 @@ test("bound to a repository, the git tools are not offered repository, every inp
 test("an unbound git tool is offered repository as a folder path, which inWorkspace describes as relative to the working folder", () => {
     const [status] = gitToolsWith((tool) => anyTool(described(inWorkspace("/work")(tool))));
     expect(status?.spec.input).toMatchObject({
-        properties: {repository: {description: 'The folder\'s path: relative to the working folder, or absolute inside it. "." is the working folder.'}},
+        properties: {repository: {description: 'The folder\'s path: relative to the working folder, or absolute. "." is the working folder.'}},
         required: ["repository", "intent"],
     });
 });

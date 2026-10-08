@@ -3,7 +3,7 @@
 import { expect } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
 import { runTest } from "../../tests/support/run.ts";
@@ -52,7 +52,7 @@ test("a tool's input schema is its Schema's with a description for each input, c
   expect(catalog.find((tool) => tool.name === "read_file")?.input).toEqual({
     type: "object",
     properties: {
-      path: { type: "string", minLength: 1, description: "The file's path: relative to the working folder, or absolute inside it." },
+      path: { type: "string", minLength: 1, description: "The file's path: relative to the working folder, or absolute." },
       line: { type: "integer", minimum: 1, description: "Optional: the first line to read, 1-based. Default: 1." },
       limit: { type: "integer", minimum: 1, description: "Optional: the number of lines to read. Default: to the end of the file." },
       intent: { type: "string", minLength: 1, description: "What this call is for, in one sentence. The user sees it as the call's title." },
@@ -140,9 +140,8 @@ test("read_file reads a file, or the lines asked for", async () => {
   expect(await call("read_file", { path: "src/a.txt", line: 2, limit: 2 })).toBe("two\nthree");
 });
 
-test("a call that cannot run says why: a path outside the working folder, a missing file, a result over 256 KiB, input that does not fit, or no such tool", async () => {
-  expect(await call("read_file", { path: "../outside.txt" })).toBe(`rejected: ../outside.txt is not inside the working folder, ${root}.`);
-  expect(await call("read_file", { path: "/etc/hosts" })).toBe(`rejected: /etc/hosts is not inside the working folder, ${root}.`);
+test("a call that cannot run says why: a missing file, a result over 256 KiB, input that does not fit, or no such tool; a path outside the working folder is the permission policy's to judge, not the tool's", async () => {
+  expect(await call("read_file", { path: "../missing-outside.txt" })).toStartWith(`reported: ${resolve(root, "../missing-outside.txt")}:`);
   expect(await call("read_file", { path: "missing.txt" })).toStartWith(`reported: ${root}/missing.txt:`);
   expect(await call("read_file", { path: "big.txt" })).toBe("rejected: The result is over 256 KiB. Read fewer lines, for example line 1 and limit 100.");
   expect(await call("read_file", { line: 1 })).toStartWith("rejected: read_file does not take this input:");
@@ -152,7 +151,6 @@ test("a call that cannot run says why: a path outside the working folder, a miss
 test("write_file creates or replaces a file inside the workspace, whose folder exists", async () => {
   expect(await call("write_file", { path: "src/b.txt", text: "hello" })).toBe(`Wrote 5 bytes to ${root}/src/b.txt.`);
   expect(await call("read_file", { path: "src/b.txt" })).toBe("hello");
-  expect(await call("write_file", { path: "../escape.txt", text: "x" })).toBe(`rejected: ../escape.txt is not inside the working folder, ${root}.`);
   expect(await call("write_file", { path: "nowhere/c.txt", text: "x" })).toStartWith(`reported: ${root}/nowhere/c.txt:`);
 });
 

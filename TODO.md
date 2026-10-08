@@ -58,8 +58,8 @@ model.
           `touch`, `curl -o`, `find -delete`, `xargs rm`, and the like) are lifted only by path
           rules, `Read(...)` and `Edit(...)`, as in Claude Code (2026-10-08); additional folders
           (settings, `--add-dir`, ACP's `additionalDirectories`) count as inside, for commands and
-          the file tools. To do: the file tools ask about a path outside every folder instead of
-          refusing it (path rules step 4); the REPL's `/add-dir`; the
+          the file tools, which are asked about a path outside every folder as a command is. To do:
+          the REPL's `/add-dir`; the
           programs the guide lists as not checked (`docs/guide/permissions.md`).
         - The harness tells the agent of changes to files it has read (Dan, 2026-10-08): with every
           path going through one place (`path-resolver.ts`), the harness knows what the agent read

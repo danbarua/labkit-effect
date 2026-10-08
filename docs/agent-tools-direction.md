@@ -32,7 +32,7 @@ work is listed in order at the end. Text in quotation marks is Dan's, verbatim.
 
   | Wrapper | What it does |
   | --- | --- |
-  | `inWorkspace` | Resolves relative paths against the working folder, and refuses a path outside it. |
+  | `inWorkspace` | Resolves relative paths against the working folder. The permission policy judges a path outside it, as it judges a command's (Dan, 2026-10-08: option B). |
   | `described` | Adds an `intent` input: one sentence that says what the call is for. A UI shows it as the call's title. The input is named `intent`, not `description`, because many tools (MCP tools among them) have a `description` input of their own. |
   | `bound` | Removes an input from what the model is offered, and supplies its value itself. The git tool bound to a workspace supplies `repository`: the model never sees that input. |
   | A permission check, a classifier | Decides whether a call runs. |

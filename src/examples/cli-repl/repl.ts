@@ -183,7 +183,7 @@ const shown = (question: PermissionQuestion, input: string, writes: ReadonlyArra
         }),
         ...explained.notes.map((note) => `  \x1b[2m${note}\x1b[0m`),
       ].join("\n")
-    : `Run ${question.tool} (${question.kind})? ${input}`;
+    : `Run ${question.tool} (${question.kind})? ${input}${question.why === undefined ? "" : `\n  ${question.why}`}`;
 
 /** Returns the first line of `text`, cut to `width` characters, and how many lines follow it. */
 const oneLine = (text: string, width = 200): string => {

@@ -17,6 +17,7 @@ import { logKeys } from "../agent-session/log-keys.ts";
 import { parseJson, receivedText } from "../agent-session/received.ts";
 import type { ToolSource } from "../agent-session/tool-sources.ts";
 import { type Decoded, decoderOf, ignoredNote, jsonSchemaOf } from "../agent-session/tool-input.ts";
+import { pathInputsOf } from "./paths.ts";
 
 /** The call's input does not fit, or names a path that the tool does not accept: the model reads the problem. */
 export class Rejected extends Data.TaggedError("Rejected")<{ readonly problem: string }> {}
@@ -50,9 +51,15 @@ export interface AnyTool<R> {
   readonly run: (input: unknown) => Effect.Effect<string, Rejected | Reported, R>;
 }
 
+/** The names of `input`'s path inputs (`paths.ts`), for the spec, when it has any. */
+const pathsOf = (input: Schema.Struct<Fields>): { readonly paths?: ReadonlyArray<string> } => {
+  const names = pathInputsOf(input.fields).map(([name]) => name);
+  return names.length === 0 ? {} : { paths: names };
+};
+
 /** Returns `tool` as a list of tools holds it: what the model is offered, how its input is decoded, and how it runs. */
 export const anyTool = <F extends Fields, R>(tool: Tool<F, R>): AnyTool<R> => ({
-  spec: { name: tool.name, description: tool.description, input: jsonSchemaOf(tool.input), kind: tool.kind, replay: tool.replay },
+  spec: { name: tool.name, description: tool.description, input: jsonSchemaOf(tool.input), kind: tool.kind, replay: tool.replay, ...pathsOf(tool.input) },
   decode: (input, strict) => decoderOf(tool.input, strict)(input),
   // The input is what `decode` returned, so it has the tool's type.
   run: (input) => tool.run(input as Schema.Struct<F>["Type"]),

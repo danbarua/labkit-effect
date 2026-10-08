@@ -6,7 +6,7 @@
  * to the process's working folder, and checks nothing about where it is. `workspaceTools(root)`
  * applies two wrappers:
  * - `inWorkspace(root)` (`in-workspace.ts`) wraps the file tools: it resolves their paths against the
- *   root, and refuses a path outside it.
+ *   root; the permission policy judges a path outside it.
  * - `described` (`described.ts`) wraps every tool: it adds a required `intent` input.
  *
  * `workspaceTools(root)` returns the catalog, the tool source that runs a call given the file
@@ -268,7 +268,7 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
   // What `run_command` is given: what the host composed (`commandEnvironment`), else this process's without its credentials.
   const environment = options.environment ?? withoutCredentials(process.env).env;
   const additional = options.additional ?? [];
-  const bound = inWorkspace(root, additional);
+  const bound = inWorkspace(root);
   const tools = [
     anyTool(described(bound(readFile))),
     anyTool(described(bound(listDir))),

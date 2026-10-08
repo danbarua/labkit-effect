@@ -61,6 +61,7 @@ export const permissionsFor =
           permissions(now, canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts, {
             settings,
             segmentsOf,
+            pathInputsOf: (name) => tools.find((tool) => tool.name === name)?.paths ?? [],
             ...(workingFolder === undefined ? {} : { folders: foldersOf(workingFolder, additional) }),
           }) as Policy<unknown>,
       ),
