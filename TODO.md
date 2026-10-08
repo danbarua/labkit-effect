@@ -67,8 +67,8 @@ model.
           `--exclude-dir`, `--glob '!…'`) for the folders that deny rules name inside the folders
           searched, so that `rg KEY .` runs without `secrets/` instead of being refused. The
           session records both the command written and the command run, since a rewrite is a
-          substitution. Not decided: how the agent is told that the command that ran differs from
-          the one it wrote.
+          substitution, and the call's structured result tells the agent that the command was
+          rewritten and why (Dan, 2026-10-08). Waits for tool results with details, below.
         - MCP tools' path inputs are not judged by path rules. An operator installs and configures
           an MCP server, so the server is trusted, and it is where an agent's access to an external
           system is authorized: an agent that may not read a file may be allowed to pass the file's
@@ -410,6 +410,11 @@ with no model, its attachments as pointers and one line for each tool call (`dig
       - the tools, and the tool calls and results the next turn may bring;
       - room for writing a compaction summary.
 - [ ] Anthropic's own compaction (the compaction block, beta `compact-2026-09-04`).
+- [ ] The agent is told where it is after a compaction (Dan, 2026-10-08): the first user message
+      after a compaction carries a system notice with the date and time now, when the last message
+      was, the git status, the working folders (the working folder and the folders added), and
+      memories and the like. A folder added with `/add-dir` whose message the compaction summarised
+      away is named there again.
 - [ ] A summarizer that asks a model to write a text summary with our own prompt.
 
 ### Sessions
