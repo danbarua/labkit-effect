@@ -117,7 +117,8 @@ records and the model is never sent (`docs/agent-machine.md`, `docs/agent-sessio
 detail is `FileChanged`: a text file created, with its whole text, or updated, with a unified diff.
 The hosts record it for their own tools where the calls run (`agent-host/recorded-changes.ts`):
 `write_file` and `edit_file` by their path inputs, `terminal_command` and `run_command` for each
-file whose text their words show (`writtenFiles`). ACP shows a finished call's diffs from it, live
+file their command writes at a path it writes out (`writtenFiles`): a redirect's target, `tee`'s and
+`sed -i`'s, whether or not the words show the text. ACP shows a finished call's diffs from it, live
 and replayed alike, and the REPL prints them under the call (`docs/agent-acp.md`). Other harnesses keep the same two parts per result: Claude Code's
 `toolUseResult`, Codex's `FileChange`, opencode's `metadata`, omp's `details`.
 

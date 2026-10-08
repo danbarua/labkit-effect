@@ -99,9 +99,11 @@ model.
           no model recorded; `ask-rate` reports them as Claude's (from Claude Code) or OpenAI's (from
           Codex).
         - A file a command writes is shown as a diff: before it runs, in the editor's call and the
-          REPL's question; once it has run, in every host, from what the call recorded. To do:
-          `printf` is not shown as a diff. Open (Dan, 2026-10-08): `sed -i`, `mv` and builds, whose
-          words do not show the text; git records the meaningful diffs anyway.
+          REPL's question, when its words show the text; once it has run, in every host, from what
+          the call recorded, for every file it writes at a path it writes out (`sed -i` and
+          `printf … > f` included). To do: `printf`'s text is not shown before it runs. Open (Dan,
+          2026-10-08): `mv` and builds, which write no path a redirect or `sed -i` names; git
+          records the meaningful diffs anyway.
         - Code is shown as written: a one-line `python3 -c '…; …'` stays on one line. Formatting it
           (Python's `ast.unparse`, a JavaScript formatter) would run a program on the host.
         - `awk` judged by its program, as `sed` is (no `system()`, no pipes, no `print >`).

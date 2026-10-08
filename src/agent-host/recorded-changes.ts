@@ -6,7 +6,7 @@
  *
  * | Tool | Files |
  * | --- | --- |
- * | a command tool (the permission settings' `commandTools`) | each file its command writes text to, where its words show the path (`writtenFiles`) |
+ * | a command tool (the permission settings' `commandTools`) | each file its command writes, where its words show the path (`writtenFiles`): a redirect's target, `tee`'s, `sed -i`'s |
  * | a tool whose kind changes files (`edit`, `delete`, `move`; `editsFiles`) | each file its path inputs name (`ToolSpec.paths`), resolved from the working folder as the tools resolve them (`fullPathIn`) |
  *
  * Each file's text is read just before the call runs and, once the call has succeeded, again: a

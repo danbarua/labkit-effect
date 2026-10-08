@@ -65,6 +65,23 @@ test("a command tool records each file its command writes, from the disk's text 
   expect(results as unknown).toEqual([[{ _tag: "FileChanged", path: full, change: "updated", patch: [`--- ${full}`, `+++ ${full}`, "@@ -1,1 +1,1 @@", "-old", "+new"].join("\n") }], "Reported", []]);
 });
 
+test("a command whose words do not show the text it writes is recorded too: sed -i's file, and printf's redirect target; a path the shell expands is not", async () => {
+  const sedded = join(testFolder(), "s.txt");
+  const printed = join(testFolder(), "p.txt");
+  mkdirSync(testFolder(), { recursive: true });
+  writeFileSync(sedded, "alpha\nbeta\n");
+  const { results } = await ran([
+    ["run_command", { command: "sed -i.bak 's/beta/gamma/' s.txt" }],
+    ["run_command", { command: "printf 'one\\ntwo\\n' > p.txt" }],
+    ["run_command", { command: 'F=q.txt; printf x > "$F"' }],
+  ]);
+  expect(results as unknown).toEqual([
+    [{ _tag: "FileChanged", path: sedded, change: "updated", patch: [`--- ${sedded}`, `+++ ${sedded}`, "@@ -1,2 +1,2 @@", " alpha", "-beta", "+gamma"].join("\n") }],
+    [{ _tag: "FileChanged", path: printed, change: "created", patch: "one\ntwo\n" }],
+    [],
+  ]);
+});
+
 test("a patch over 32 KiB is kept to its first lines that fit, and the bytes left out are recorded", async () => {
   const line = `${"x".repeat(99)}\n`;
   const { results } = await ran([["write_file", { path: "big.txt", text: line.repeat(400) }]]);

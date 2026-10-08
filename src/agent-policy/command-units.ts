@@ -966,11 +966,22 @@ const segmentUnits = (segment: Segment, functions: ReadonlySet<WordText>, seen: 
   return [...(teed === undefined ? resolved : resolved.map((each) => (each.words[0] === segment.words[0] ? { ...each, detail: teed } : each))), ...written];
 };
 
+/** Whether a `cd`, `pushd` or `popd` among `units` before the one at `at` may have moved the folder its relative paths lead from. */
+const movedBefore = (units: ReadonlyArray<Unit>, at: number): boolean =>
+  units.slice(0, at).some((before) => ["cd", "pushd", "popd"].includes(basename(before.words[0]?.literal ?? WordText.make(""))));
+
 /** The texts a command's units write to files, in order, each with whether a `cd`, `pushd` or `popd` before it may have moved the folder its path is relative to. */
 export const textsWritten = (units: ReadonlyArray<Unit>): ReadonlyArray<{ readonly writes: Writes; readonly moved: boolean }> =>
-  units.flatMap((each, at) =>
-    each.detail?._tag === "Writes" ? [{ writes: each.detail, moved: units.slice(0, at).some((before) => ["cd", "pushd", "popd"].includes(basename(before.words[0]?.literal ?? WordText.make("")))) }] : [],
-  );
+  units.flatMap((each, at) => (each.detail?._tag === "Writes" ? [{ writes: each.detail, moved: movedBefore(units, at) }] : []));
+
+/**
+ * The paths a command's units write files at, in order, as written, each with whether a `cd`,
+ * `pushd` or `popd` before it may have moved the folder its path is relative to: a redirect's target,
+ * `tee`'s, `sed -i`'s, and the rest that `paths` records as written. A file deleted, moved or only
+ * changed (`chmod`) is not among them, nor a path a program is given as it runs (`xargs`).
+ */
+export const filesWritten = (units: ReadonlyArray<Unit>): ReadonlyArray<{ readonly word: Word; readonly moved: boolean }> =>
+  units.flatMap((each, at) => each.paths.flatMap((path) => (path.access === "writes" && path.word !== undefined ? [{ word: path.word, moved: movedBefore(units, at) }] : [])));
 
 const unitsAt = (command: ShellCommand, segmentsOf: SegmentsOf, depth: number, folders: Folders | undefined): Units => {
   const split = segmentsOf(command);
