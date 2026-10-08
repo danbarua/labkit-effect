@@ -15,7 +15,7 @@ import { receivedJson } from "../agent-session/received.ts";
 import { jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { described } from "../agent-tools/described.ts";
 import { anyTool, type Tool } from "../agent-tools/tool.ts";
-import { next as nextIn, type Present, presentFrom, type ProjectionContext, type ProjectionInput, type ProjectionState, project as projectIn, start } from "./projection.ts";
+import { next as nextIn, type Present, presentFrom, type ProjectionContext, type ProjectionInput, type ProjectionState, project as projectIn, start, changedFiles } from "./projection.ts";
 import { logKeys } from "./log-keys.ts";
 
 /** `project` and `next`, run: the presentations here read nothing. `next` drops its log: the tests that read a log use `projectLogged`. */
@@ -970,4 +970,25 @@ test("a session loaded and gone on with: the replay names each message as live d
   expect(later).toEqual([said("Two.", `${second}:0`)]);
   // A second load sends the ids that the first load and the live turn after it sent.
   expect(project(session.journal, replay).updates).toEqual([...loaded.updates, user("two", `${two}`), ...later]);
+});
+
+test("a call's changed files are diffs from its details: a created file from no text, an update as one diff per hunk, and a cut patch followed by how much was left out", () => {
+  const text = (value: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text: value } }) as never;
+  const patch = ["--- /w/a.txt", "+++ /w/a.txt", "@@ -1,1 +1,1 @@", "-one", "+two", "@@ -20,1 +20,1 @@", "-x", "+y"].join("\n");
+  expect(
+    changedFiles({
+      _tag: "Succeeded",
+      output: text("done"),
+      details: [
+        { _tag: "FileChanged", path: "/w/new.txt" as never, change: "created", patch: text("hi\n") },
+        { _tag: "FileChanged", path: "/w/a.txt" as never, change: "updated", patch: text(patch), cut: 120 as never },
+      ],
+    }) as unknown,
+  ).toEqual([
+    { type: "diff", path: "/w/new.txt", oldText: null, newText: "hi\n" },
+    { type: "diff", path: "/w/a.txt", oldText: "one\n", newText: "two\n" },
+    { type: "diff", path: "/w/a.txt", oldText: "x\n", newText: "y\n" },
+    { type: "content", content: { type: "text", text: "The diff of /w/a.txt was cut at 32 KiB: 120 more bytes are not shown." } },
+  ]);
+  expect(changedFiles({ _tag: "Failed", reason: { _tag: "NotRun" } })).toEqual([]);
 });

@@ -14,6 +14,7 @@ import {
   AgentName,
   CallId,
   AdjustmentReason,
+  ByteCount,
   FailureText,
   FolderPath,
   FullPath,
@@ -82,10 +83,11 @@ export type ToolFailure = typeof ToolFailure.Type;
  * is one kind of thing a call does, so a display branches on what happened, not on which tool ran.
  *
  * - `FileChanged`: the call created the text file at `path` (`patch` is the file's whole text), or
- *   updated it (`patch` is a unified diff of the change, with three lines of context).
+ *   updated it (`patch` is a unified diff of the change, with three lines of context). A patch over
+ *   32 KiB is cut at the end of a line: `cut` is the number of bytes left out after it.
  */
 export const ToolDetail = Schema.Union([
-  Schema.TaggedStruct("FileChanged", { path: FullPath, change: Schema.Literals(["created", "updated"]), patch: Received }),
+  Schema.TaggedStruct("FileChanged", { path: FullPath, change: Schema.Literals(["created", "updated"]), patch: Received, cut: Schema.optionalKey(ByteCount) }),
 ]);
 export type ToolDetail = typeof ToolDetail.Type;
 

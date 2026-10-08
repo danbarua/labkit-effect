@@ -26,7 +26,7 @@ import { homedir } from "node:os";
 import { Brand } from "../../agent-host/brand.ts";
 import { terminalOf } from "../../agent-host/command-detail.ts";
 import { type ShownWrite, shownWrites } from "../../agent-host/command-writes.ts";
-import { currentOnDisk } from "../../agent-tools/file-change.ts";
+import { currentOnDisk, patchCutNote } from "../../agent-tools/file-change.ts";
 import { unifiedDiff } from "../../agent-tools/line-diff.ts";
 import { WordText } from "../../agent-policy/command-segments.ts";
 import type { Detail, Folders } from "../../agent-policy/command-units.ts";
@@ -215,11 +215,15 @@ const endedAs = (outcome: ToolOutcome): string => {
   }
 };
 
-/** The diff of each file a call changed, from its details: an update's patch, and a created file's text as lines added. */
+/** The diff of each file a call changed, from its details: an update's patch, and a created file's text as lines added, each followed by a note when its patch was cut. */
 const changedLines = (outcome: ToolOutcome): ReadonlyArray<string> =>
   outcome._tag !== "Succeeded"
     ? []
-    : (outcome.details ?? []).flatMap((detail) => (detail.change === "created" ? unifiedDiff(detail.path, undefined, asText(detail.patch)) : asText(detail.patch).split("\n")));
+    : (outcome.details ?? []).flatMap((detail) => {
+        const note = patchCutNote(detail);
+        const lines = detail.change === "created" ? unifiedDiff(detail.path, undefined, asText(detail.patch)) : asText(detail.patch).split("\n").filter((line) => line !== "");
+        return note === undefined ? lines : [...lines, `(${note})`];
+      });
 
 /** How an ended tool call is printed: the tool and its input, then how it ended, then the diff of each file it changed, coloured and indented. */
 export const shownEnded = (tool: string, input: string, outcome: ToolOutcome): string =>

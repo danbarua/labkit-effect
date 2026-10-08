@@ -98,8 +98,8 @@ export const hunksOf = (patch: string): ReadonlyArray<{ readonly before: string;
       continue;
     }
     const hunk = hunks.at(-1);
-    // Lines before the first hunk are the header.
-    if (hunk === undefined) continue;
+    // Lines before the first hunk are the header; an empty line is none of a hunk's (a context line starts with a space).
+    if (hunk === undefined || line === "") continue;
     if (line.startsWith("-")) hunk.before.push(line.slice(1));
     else if (line.startsWith("+")) hunk.after.push(line.slice(1));
     else {

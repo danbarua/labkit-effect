@@ -9,7 +9,7 @@
  */
 
 import { Effect, FileSystem } from "effect";
-import { FullPath } from "../agent-machine/names.ts";
+import { ByteCount, FullPath } from "../agent-machine/names.ts";
 import type { ToolDetail } from "../agent-machine/observation.ts";
 import { type Fields, type Tool, withDetails } from "./tool.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
@@ -18,6 +18,38 @@ import { unifiedDiff } from "./line-diff.ts";
 
 /** The largest current text that is read: 256 KiB, as the file tools read. */
 export const maxCurrentBytes = 256 * 1024;
+
+/** The largest patch that is kept whole: 32 KiB. A larger one is cut at the end of a line, and the bytes left out are recorded (`FileChanged`'s `cut`); git shows a large diff whole. */
+export const maxPatchBytes = 32 * 1024;
+
+/** `text` cut to its first lines that fit in `maxPatchBytes`, and the number of bytes left out after them. */
+const keptOf = (text: string): { readonly kept: string; readonly cut: number } => {
+  const total = Buffer.byteLength(text);
+  if (total <= maxPatchBytes) return { kept: text, cut: 0 };
+  const lines = text.split("\n");
+  const fits = lines.reduce<{ readonly bytes: number; readonly count: number; readonly full: boolean }>(
+    (sofar, line) => {
+      const bytes = sofar.bytes + Buffer.byteLength(line) + 1;
+      return sofar.full || bytes > maxPatchBytes ? { ...sofar, full: true } : { bytes, count: sofar.count + 1, full: false };
+    },
+    { bytes: 0, count: 0, full: false },
+  );
+  const kept = lines
+    .slice(0, fits.count)
+    .map((line) => `${line}\n`)
+    .join("");
+  return { kept, cut: total - Buffer.byteLength(kept) };
+};
+
+/** What a display says of a `FileChanged` whose patch was cut; undefined when it was kept whole. */
+export const patchCutNote = (detail: Extract<ToolDetail, { readonly _tag: "FileChanged" }>): string | undefined =>
+  detail.cut === undefined ? undefined : `The diff of ${detail.path} was cut at ${maxPatchBytes / 1024} KiB: ${detail.cut} more bytes are not shown.`;
+
+/** A patch as `FileChanged` holds it: cut to `maxPatchBytes`, with the bytes left out when it is cut. */
+const patchOf = (text: string): { readonly patch: ReturnType<typeof receivedText>; readonly cut?: ByteCount } => {
+  const { kept, cut } = keptOf(text);
+  return { patch: receivedText(kept), ...(cut === 0 ? {} : { cut: ByteCount.make(cut) }) };
+};
 
 /** A file's text before a change: none (`Missing`, a new file), its text, or why it is not known. */
 export type Current = { readonly _tag: "Missing" } | { readonly _tag: "Text"; readonly text: string } | { readonly _tag: "Unknown"; readonly reason: string };
@@ -39,14 +71,14 @@ export const currentOnDisk = (fs: FileSystem.FileSystem, full: string, path: str
 
 /**
  * The details of changing the file at `full` from `before` to `after`: the file created (from
- * `Missing`) with its whole text, or updated with a unified diff. None when the text is the same, and
- * none when `before` is not known, since what changed is not known.
+ * `Missing`) with its whole text, or updated with a unified diff, each cut to `maxPatchBytes`. None
+ * when the text is the same, and none when `before` is not known, since what changed is not known.
  */
 export const fileChanged = (full: string, before: Current, after: string): ReadonlyArray<ToolDetail> => {
   if (before._tag === "Unknown" || (before._tag === "Text" && before.text === after)) return [];
   const path = FullPath.make(full);
-  if (before._tag === "Missing") return [{ _tag: "FileChanged", path, change: "created", patch: receivedText(after) }];
-  return [{ _tag: "FileChanged", path, change: "updated", patch: receivedText(unifiedDiff(full, before.text, after).join("\n")) }];
+  if (before._tag === "Missing") return [{ _tag: "FileChanged", path, change: "created", ...patchOf(after) }];
+  return [{ _tag: "FileChanged", path, change: "updated", ...patchOf(unifiedDiff(full, before.text, after).join("\n")) }];
 };
 
 /**

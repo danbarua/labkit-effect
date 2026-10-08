@@ -166,6 +166,14 @@ test("write_file and edit_file record what they changed: a file created, with it
   expect(await detailsOf("write_file", { path: "src/d.txt", text: "one\nthree\n" })).toBeUndefined();
 });
 
+test("a patch over 32 KiB is kept to its first lines that fit, and the bytes left out are recorded", async () => {
+  const line = `${"x".repeat(99)}\n`;
+  const text = line.repeat(400);
+  const details = (await detailsOf("write_file", { path: "src/big.txt", text })) ?? [];
+  expect(details.map((detail) => ({ change: detail.change, kept: Buffer.byteLength(detail.patch), cut: detail.cut })) as unknown).toEqual([{ change: "created", kept: 327 * 100, cut: 73 * 100 }]);
+  expect(details[0]?.patch.endsWith(line)).toBe(true);
+});
+
 test("with writtenBy, run_command records each file its command writes, from its text before the command ran and after; a failed command records nothing", async () => {
   const full = join(root, "src", "w.txt");
   writeFileSync(full, "old\n");

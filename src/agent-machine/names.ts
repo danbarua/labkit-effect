@@ -103,6 +103,10 @@ export type StopReason = typeof StopReason.Type;
 export const FailureText = Schema.String.pipe(Schema.brand("agent-machine/FailureText"));
 export type FailureText = typeof FailureText.Type;
 
+/** A number of bytes. */
+export const ByteCount = Schema.Int.pipe(Schema.brand("agent-machine/ByteCount"));
+export type ByteCount = typeof ByteCount.Type;
+
 /** A number of tokens. */
 export const TokenCount = Schema.Int.pipe(Schema.brand("agent-machine/TokenCount"));
 export type TokenCount = typeof TokenCount.Type;

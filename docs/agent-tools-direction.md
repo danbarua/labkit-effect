@@ -122,24 +122,37 @@ shows a finished call's diffs from it, live and replayed alike, and the REPL pri
 call (`docs/agent-acp.md`). Other harnesses keep the same two parts per result: Claude Code's
 `toolUseResult`, Codex's `FileChange`, opencode's `metadata`, omp's `details`.
 
-The patch is kept with the result, in the facts. A file the tools change is at most 256 KiB, and
-the CLI keeps no blob store across processes (`Blobs` in memory), so a patch moved to the blob store
-would be lost when a CLI session is continued.
+The patch is kept with the result, in the facts, cut at 32 KiB at the end of a line, with the
+bytes left out recorded (`cut`), as omp cuts its stored diffs. Dan: "There are diff tools (git, lol)
+that handle big diffs." The REPL prints what was kept and how much was left out; there is nothing
+past 32 KiB for it to expand.
+
+**The tool runner reads the files (Dan, 2026-10-08).** "Yes, that way everything goes through the
+trust layer (and we can enforce size limits in one place)." Not built. The design proposed:
+
+- A wrapper around the session's tool runner finds the files a call will change from the same
+  judgments the permission policy makes: a tool's path inputs (`ToolSpec.paths`) for a tool whose
+  kind changes files, and the files a command writes text to (`writtenFiles`) for a command tool.
+- It reads each file's text just before the call runs and once it has run, through a reader each
+  world supplies: the editor's text for the editor's file tools, the disk for commands and the
+  workspace's tools. It records `FileChanged` from the two, and holds the size limits (256 KiB read,
+  32 KiB kept).
+- The tools then return their text alone, and `recordingWrites` and the file tools' own reads go.
+
+The other way, every tool's reads and writes through one files service, also sees what the agent
+reads, which the harness's notices of changed files want, but it means rewriting every tool.
 
 **Not built.**
 
 - A `deleted` change: no tool deletes a file yet.
-- A large patch kept in the blob store, once the CLI keeps its blobs with the session.
-- A command's other changes: the files a program writes where its words do not show the text
-  (`sed -i`, `mv`, a build), which today say nothing once the call has ended.
 
 **Open.**
 
-- Whether the text before a write is read by the tool runner, for every tool, or by each tool, as
-  it is now.
-- How large a patch is kept whole before it is cut; none is cut while the 256 KiB limits hold.
-- Whether `details` are also what the harness tells the agent of changes to files it has read
-  (`TODO.md`, the harness telling the agent of file changes).
+- A command's other changes, the files a program writes where its words do not show the text
+  (`sed -i`, `mv`, a build), which say nothing once the call has ended. Dan: this would be an
+  enhancement on "the agent ran this bash command", and git records the meaningful diffs anyway.
+- Details tell the harness's notices of changed files which changes the agent made itself
+  (`TODO.md`); Dan: "If we have the information to do so, then we should do so!"
 - A rewritten search tells the agent that its command was rewritten and why in its result
   (`TODO.md`).
 

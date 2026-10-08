@@ -313,3 +313,19 @@ test("an ended call that changed files is printed with each file's diff, from wh
     "    +hi",
   ]);
 });
+
+test("an ended call whose patch was cut is printed with the diff kept and how much was left out", () => {
+  const text = (value: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text: value } }) as never;
+  const printed = shownEnded("write_file", '{"path":"big.txt"}', {
+    _tag: "Succeeded",
+    output: text("Wrote 40000 bytes to /w/big.txt."),
+    details: [{ _tag: "FileChanged", path: "/w/big.txt" as never, change: "created", patch: text("one\n"), cut: 39996 as never }],
+  });
+  expect(Bun.stripANSI(printed).split("\n").slice(2)).toEqual([
+    "    --- /dev/null",
+    "    +++ /w/big.txt",
+    "    @@ -0,0 +1,1 @@",
+    "    +one",
+    "    (The diff of /w/big.txt was cut at 32 KiB: 39996 more bytes are not shown.)",
+  ]);
+});

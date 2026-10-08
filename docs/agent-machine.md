@@ -138,8 +138,9 @@ After a response with no tool calls, the turn asks the layers around the core fo
   third.
 - A call that succeeded records its output, the text the model is sent, and, when its tool gives
   them, the details of what it did (`ToolDetail`), which the model is never sent. `FileChanged` is
-  a text file created, with its whole text, or updated, with a unified diff of the change. A failed
-  call records no details.
+  a text file created, with its whole text, or updated, with a unified diff of the change. A patch
+  over 32 KiB is cut at the end of a line, and the bytes left out are recorded with it (`cut`). A
+  failed call records no details.
 - A call that arrives while the response streams runs at once, without waiting for the rest of the
   response. When the response is recorded, it holds the call as one of its parts and does not run it
   again. The calls of one response run at the same time.

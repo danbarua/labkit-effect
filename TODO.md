@@ -77,7 +77,9 @@ model.
         - The harness tells the agent of changes to files it has read (Dan, 2026-10-08): with every
           path going through one place (`path-resolver.ts`), the harness knows what the agent read
           and when, so it can say at the start of a turn that a file changed since (the user edited
-          it, a build rewrote it) before the agent spends turns finding out.
+          it, a build rewrote it) before the agent spends turns finding out. A call's details
+          (`FileChanged`) say which changes the agent made itself, so those are not told as news:
+          "If we have the information to do so, then we should do so!" (Dan, 2026-10-08).
         - Jev classifies what the rules cannot decide, from the exo-project skeleton (`01_3`).
         - Models are told to use the write and edit tools instead of `python -c` and heredocs.
         - A here-document's body fed to a shell (`bash <<'EOF'`) is opaque; it could be split as
@@ -120,8 +122,9 @@ model.
           policy does not gate a pointer: it is a relative path, inside the working folder.
         - Tool results with details (Dan, 2026-10-08). Built: `FileChanged` from the file tools and
           from commands' writes whose text their words show, shown by ACP live and replayed alike
-          and by the REPL. To do: what `docs/agent-tools-direction.md` lists as not built (a
-          `deleted` change, large patches in the blob store, commands' other changes).
+          and by the REPL; a patch over 32 KiB cut, with the bytes left out recorded. To do: the
+          tool runner reading the files for every tool (`docs/agent-tools-direction.md`), and a
+          `deleted` change.
         - The opinionated harness runs a composite command itself (Dan, 2026-10-07): it splits the
           command into its programs and their order, runs each, and returns to the model the result
           the command asked for (the output of `… | tail`), with each program's exit code and a
