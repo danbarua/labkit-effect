@@ -27,25 +27,24 @@ const model = ModelName.make("streamer");
 
 /** A client that streams an event, thinking, text in two deltas and a tool call, in an attempt's span, and responds with its token use. */
 const streaming = Layer.succeed(ModelClient, {
-  respond: (_target, _context, turn) =>
-    Effect.gen(function* () {
-      const passOn = yield* ModelStream;
-      yield* passOn({ _tag: "Chunk", chunk: receivedJson({ type: "message_start" }) });
-      yield* passOn({ _tag: "Delta", kind: "Thinking", text: "Let me see." });
-      yield* passOn({ _tag: "Delta", kind: "Text", text: "Hello" });
-      yield* passOn({ _tag: "Delta", kind: "Text", text: " there" });
-      yield* passOn({ _tag: "Part", part: { _tag: "ToolCall", call: CallId.make("call-1"), tool: ToolName.make("read_file"), input: receivedJson({ path: "a.ts" }) } });
-      return {
-        _tag: "ModelResponded" as const,
-        turn,
-        provider,
-        model,
-        parts: [{ _tag: "Text" as const, text: ModelText.make("Hello there") }],
-        ending: { _tag: "Complete" as const },
-        usage: { input: TokenCount.make(120), output: TokenCount.make(30), cacheRead: TokenCount.make(100) },
-        metadata: receivedJson({}),
-      };
-    }).pipe(Effect.withSpan("agent.model.attempt", { attributes: { provider, model } })),
+  respond: Effect.fn("agent.model.attempt", { attributes: { provider, model } })(function* (_target, _context, turn) {
+    const passOn = yield* ModelStream;
+    yield* passOn({ _tag: "Chunk", chunk: receivedJson({ type: "message_start" }) });
+    yield* passOn({ _tag: "Delta", kind: "Thinking", text: "Let me see." });
+    yield* passOn({ _tag: "Delta", kind: "Text", text: "Hello" });
+    yield* passOn({ _tag: "Delta", kind: "Text", text: " there" });
+    yield* passOn({ _tag: "Part", part: { _tag: "ToolCall", call: CallId.make("call-1"), tool: ToolName.make("read_file"), input: receivedJson({ path: "a.ts" }) } });
+    return {
+      _tag: "ModelResponded" as const,
+      turn,
+      provider,
+      model,
+      parts: [{ _tag: "Text" as const, text: ModelText.make("Hello there") }],
+      ending: { _tag: "Complete" as const },
+      usage: { input: TokenCount.make(120), output: TokenCount.make(30), cacheRead: TokenCount.make(100) },
+      metadata: receivedJson({}),
+    };
+  }),
 });
 
 test("an attempt's span marks its first event, first thinking, first text and each tool call parsed; the request's span holds the token use; time to first token and tokens are counted by model", async () => {
