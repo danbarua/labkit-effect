@@ -10,8 +10,9 @@
  * | a tool whose kind changes files (`edit`, `delete`, `move`; `editsFiles`) | each file its path inputs name (`ToolSpec.paths`), resolved from the working folder as the tools resolve them (`fullPathIn`) |
  *
  * Each file's text is read just before the call runs and, once the call has succeeded, again: a
- * command's from the disk, which a command writes; a path input's through the world's reader (the
- * editor's text, unsaved changes included, in the editor world), else from the disk. A text over 256
+ * command's from the disk, which a command writes; a path input's through the world's reader, told
+ * which of the two reads it is (in the editor world, the editor's text, unsaved changes included,
+ * with whether the file exists before the call from the disk), else from the disk. A text over 256
  * KiB (`maxCurrentBytes`), or one that could not be read, is not known, so nothing is recorded of its
  * file, and a warning says so. The patch is cut at 32 KiB (`fileChanged`). A failed call records
  * nothing. An MCP server's tool source is not wrapped: the operator who installs a server trusts it.
@@ -36,14 +37,14 @@ export interface Recording {
   readonly folders: Folders;
   /** The command tools' names (the permission settings' `commandTools`). */
   readonly commandTools: ReadonlyArray<string>;
-  /** A path input's file text, as the world's tools read and write it; from the disk when left out. */
-  readonly fileText?: ((full: string) => Effect.Effect<Current>) | undefined;
+  /** A path input's file text before or after the call, as the world's tools read and write it; from the disk when left out. */
+  readonly fileText?: ((full: string, when: "before" | "after") => Effect.Effect<Current>) | undefined;
 }
 
-/** A file a call changes, and how its text is read. */
+/** A file a call changes, and how its text is read before and after the call. */
 interface Changed {
   readonly full: string;
-  readonly read: (full: string) => Effect.Effect<Current>;
+  readonly read: (full: string, when: "before" | "after") => Effect.Effect<Current>;
 }
 
 /** `current`, or not known when its text is over `maxCurrentBytes`. */
@@ -83,13 +84,13 @@ export const recordingChanges =
           Effect.gen(function* () {
             const files = changedBy(tool, input);
             if (files.length === 0) return yield* source.run(tool, input, call);
-            const before = yield* Effect.forEach(files, (file) => Effect.flatMap(file.read(file.full), (text) => Effect.map(known(capped(text), tool, file.full), (current) => ({ ...file, before: current }))));
+            const before = yield* Effect.forEach(files, (file) => Effect.flatMap(file.read(file.full, "before"), (text) => Effect.map(known(capped(text), tool, file.full), (current) => ({ ...file, before: current }))));
             const outcome = yield* source.run(tool, input, call);
             if (outcome._tag !== "Succeeded") return outcome;
             const details = yield* Effect.forEach(before, (file) =>
               file.before._tag === "Unknown"
                 ? Effect.succeed([])
-                : Effect.flatMap(file.read(file.full), (text) => Effect.map(known(capped(text), tool, file.full), (after) => (after._tag === "Text" ? fileChanged(file.full, file.before, after.text) : []))),
+                : Effect.flatMap(file.read(file.full, "after"), (text) => Effect.map(known(capped(text), tool, file.full), (after) => (after._tag === "Text" ? fileChanged(file.full, file.before, after.text) : []))),
             );
             const all = [...(outcome.details ?? []), ...details.flat()];
             return all.length === 0 ? outcome : { ...outcome, details: all };

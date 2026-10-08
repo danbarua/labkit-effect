@@ -81,11 +81,10 @@ export interface WorldSession {
   readonly sources: ReadonlyArray<ToolSource>;
   readonly present: Present;
   /**
-   * A file's text as the world's file tools read and write it, for recording what they change
-   * (`agent-host/recorded-changes.ts`): the editor's text, unsaved changes included, in the editor
-   * world; from the disk when left out.
+   * A file's text before or after a call, as the world's file tools read and write it, for recording
+   * what they change (`agent-host/recorded-changes.ts`); from the disk when left out.
    */
-  readonly fileText?: ((full: string) => Effect.Effect<Current>) | undefined;
+  readonly fileText?: ((full: string, when: "before" | "after") => Effect.Effect<Current>) | undefined;
 }
 
 export interface World<R = never> {
@@ -228,7 +227,16 @@ export const editorWorld: World<FileSystem.FileSystem> = {
             : located;
         });
 
-      return { system: yield* systemFor(cwd, git, additional), sources: [source, ...(git === undefined ? [] : [yield* git.source])], present, fileText: (full) => currentOf(full, full) };
+      // Before a call, whether its file exists is the disk's and its text the editor's (`currentOf`). After it has succeeded, the
+      // file's text is the editor's: the editor may keep what it wrote unsaved, so the disk does not say whether it exists.
+      const fileText = (full: string, when: "before" | "after"): Effect.Effect<Current> =>
+        when === "before"
+          ? currentOf(full, full)
+          : connection.client["fs/read_text_file"]({ sessionId, path: full }).pipe(
+              Effect.map(({ content }): Current => ({ _tag: "Text", text: content })),
+              Effect.catch((error) => Effect.succeed<Current>({ _tag: "Unknown", reason: `the editor could not read its text: ${error.message}` })),
+            );
+      return { system: yield* systemFor(cwd, git, additional), sources: [source, ...(git === undefined ? [] : [yield* git.source])], present, fileText };
     }),
 };
 

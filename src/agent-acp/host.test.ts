@@ -8,7 +8,8 @@
 
 import { expect } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
+import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import * as git from "es-git";
 import { BunServices } from "@effect/platform-bun";
@@ -267,8 +268,8 @@ type Ran = { readonly output: string; readonly exitCode: number } | "runs on";
 
 /**
  * The SDK's client: serves `fs/*` from its buffers, which start as `contents`, answers permission with `permission`, records each
- * update. A write sets the file's buffer and, as an editor saves it, writes the file under the test's folder. `until(check)`
- * resolves once `check` holds of the updates recorded: the host's updates after an answer come once it is written.
+ * update. A write sets the file's buffer, unsaved: nothing is written to the disk. `until(check)` resolves once `check` holds of the
+ * updates recorded: the host's updates after an answer come once it is written.
  */
 function sdkClient(
   permission: (request: acp.RequestPermissionRequest) => acp.RequestPermissionResponse | Promise<acp.RequestPermissionResponse> = () => ({
@@ -294,10 +295,6 @@ function sdkClient(
     .onRequest("fs/write_text_file", (ctx) => {
       log.files.push({ method: "fs/write_text_file", path: ctx.params.path, sessionId: ctx.params.sessionId, content: ctx.params.content });
       buffers.set(ctx.params.path, ctx.params.content);
-      if (ctx.params.path.startsWith(`${testFolder()}/`)) {
-        mkdirSync(dirname(ctx.params.path), { recursive: true });
-        writeFileSync(ctx.params.path, ctx.params.content);
-      }
       return {};
     })
     .onRequest("terminal/create", (ctx) => {
@@ -493,6 +490,29 @@ test("session/cancel during a turn ends its prompt cancelled, and the session ta
     { by: "session/cancel" },
     { by: "$/cancel_request" },
   ]);
+});
+
+test("read_file reads a file the prompt attached through its blob:// pointer, from the blob store the session stored it in", async () => {
+  const csv = "a,b\n1,2\n";
+  const pointer = `blob://${createHash("sha256").update(csv).digest("hex")}.csv`;
+  const host = startHost({
+    script: [answer({ _tag: "ToolCall", call: "read-1", tool: "read_file", input: { path: pointer, intent: "Read the runs." } }), answer({ _tag: "Text", text: "Two columns." })],
+  });
+  const sessionId = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx);
+    const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", {
+      sessionId: created.sessionId,
+      prompt: [
+        { type: "text", text: "How many columns?" },
+        { type: "resource", resource: { uri: "file:///work/runs.csv", text: csv, mimeType: "text/csv" } },
+      ],
+    });
+    return created.sessionId;
+  });
+  await host.stop();
+  const ended = observed(await factsOn(storeFileOf(host.directory, sessionId))).find((fact) => fact.observation._tag === "ToolEnded")?.observation;
+  expect(ended).toMatchObject({ _tag: "ToolEnded", call: "read-1", outcome: { _tag: "Succeeded", output: { body: { text: csv } } } });
 });
 
 test("a prompt's image and embedded file are attached to the input, their bytes in the brand's blobs folder, named for their type; a load replays each as a link in the input's message", async () => {
@@ -2489,8 +2509,7 @@ test("a call with properties its tool does not take runs without them and says w
   const strict = await run(true);
   expect(strict.ended).toMatchObject({ status: "failed" });
   expect(JSON.stringify(strict.ended)).toContain("write_file does not take this input");
-  // Nothing is written; the file's text was read before the call, to record what it would change.
-  expect(strict.files.filter((each) => each.method === "fs/write_text_file")).toEqual([]);
+  expect(strict.files).toEqual([]);
 });
 
 test("session/new starts with the model the configuration names; its overrides decide the efforts offered, and what the session knows of the model", async () => {
