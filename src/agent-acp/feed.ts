@@ -24,6 +24,11 @@
  * - `caughtUp` completes once the feed has taken every fact the session had when it was asked. By
  *   then each of their updates has been sent, so a prompt answers after its turn's updates, its
  *   usage included.
+ * - `holding` runs an effect while the feed sends nothing, given the last fact it has taken and its
+ *   projection's state, which the effect reads and does not change: what the effect sends (for a
+ *   `session/load` of a session this connection holds, a replay of the facts through that one and
+ *   the text sent of responses not yet recorded) and the feed's own updates do not interleave, and
+ *   the feed goes on after it with what arrived meanwhile, so nothing is sent twice.
  */
 
 import { type Context, Effect, Fiber, HashMap, Option, PubSub, Queue, Ref, References, type Scope, Semaphore, Stream, SubscriptionRef } from "effect";
@@ -70,6 +75,13 @@ export interface Feed {
   readonly caughtUp: Effect.Effect<void>;
   /** Sends the session's `usage_update` as of the facts the feed has taken, unless it is the one sent last. */
   readonly usage: Effect.Effect<void>;
+  /**
+   * Runs `during` while the feed sends nothing, given the seq of the last fact the feed has taken
+   * (every update of the facts through it has been sent; 0 when it has taken none) and the state of
+   * its projection as of then (what it has sent of responses not yet recorded among it,
+   * `sentNotRecorded`). What arrives meanwhile is taken, and sent, once `during` ends.
+   */
+  readonly holding: <A, E, R>(during: (now: { readonly taken: number; readonly state: ProjectionState }) => Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 }
 
 /** Returns the seq of the last of `facts`; 0 when there are none (seq starts at 1). */
@@ -93,6 +105,8 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
     const state = yield* Ref.make<ProjectionState>(options.initial ?? start);
     // The turn under way: the turn of the last `TurnStarted` taken.
     const turn = yield* Ref.make<TurnId | undefined>(undefined);
+    // Held while an input is taken, and by `holding`: the feed's updates and what `holding` sends do not interleave.
+    const sending = yield* Semaphore.make(1);
 
     const send = (update: SessionUpdate) =>
       connection
@@ -203,7 +217,7 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
     const annotated = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideService(effect, References.CurrentLogAnnotations, options.annotations);
     yield* Effect.forkScoped(annotated(forward(facts)));
     yield* Effect.forkScoped(annotated(forward(streamed)));
-    yield* Effect.forkScoped(annotated(Effect.forever(Queue.take(inbox).pipe(Effect.flatMap(take)))));
+    yield* Effect.forkScoped(annotated(Effect.forever(Queue.take(inbox).pipe(Effect.flatMap((input) => sending.withPermit(take(input)))))));
 
     return {
       caughtUp: Effect.gen(function* () {
@@ -211,5 +225,11 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
         yield* SubscriptionRef.changes(taken).pipe(Stream.filter((seq) => seq >= recorded), Stream.runHead);
       }),
       usage: sendUsage(),
+      holding: (during) =>
+        sending.withPermit(
+          Effect.gen(function* () {
+            return yield* during({ taken: yield* SubscriptionRef.get(taken), state: yield* Ref.get(state) });
+          }),
+        ),
     };
   });

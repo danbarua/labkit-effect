@@ -27,7 +27,8 @@
  *   continued. Its facts are replayed through the projection (`replay`) before the answer, and the
  *   feed continues from the state they leave. `session/resume` does the same and replays nothing.
  *   After either answer: `available_commands_update`, `session_info_update` and, through the feed,
- *   `usage_update`.
+ *   `usage_update`. A session this connection holds already goes on as it is, its turn under way
+ *   included: load replays its facts as they stand, resume nothing, and nothing is started again.
  * - `session/list` lists the stored sessions that have the host's record (`session-record.ts`).
  * - `session/cancel` is `Session.cancel`, and so is a prompt request that the client cancels
  *   (`$/cancel_request`). A prompt interrupted by the end of the connection leaves its turn running
@@ -48,7 +49,7 @@ import { describe } from "../agent-mcp/server-machine.ts";
 import { basename, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ChildProcessSpawner } from "effect/process";
-import { Clock, Context, type Duration, Effect, Exit, Fiber, FileSystem, HashMap, HashSet, Layer, Option, type Path, Ref, Schema, Scope, Semaphore, Stream } from "effect";
+import { Array as Arr, Clock, Context, Deferred, type Duration, Effect, Exit, Fiber, FileSystem, HashMap, Layer, Option, Order, type Path, Ref, Schema, Scope, Semaphore, Stream } from "effect";
 import * as Agent from "effective-acp/agent";
 import { ErrorCode, type JsonRpcErrorObject } from "effective-acp/json-rpc";
 import * as Protocol from "effective-acp/protocol";
@@ -91,7 +92,7 @@ import { type Change, changeOf, configOptions, InvalidChange, permissionId, perm
 import { PermissionMode } from "../agent-policy/permissions.ts";
 import { acpUser, type Feed, startFeed } from "./feed.ts";
 import { logKeys } from "./log-keys.ts";
-import { presentFrom, type ProjectionState, project, start } from "./projection.ts";
+import { presentFrom, type ProjectionState, project, sentNotRecorded, start } from "./projection.ts";
 import { acpHost, InvalidCursor, pageOf, readSessionRecord, recordFor } from "./session-record.ts";
 import { noticeOf, stopOf } from "./stop-reason.ts";
 import { editorWorld, type World, type WorldSession, workspaceWorld } from "./world.ts";
@@ -273,6 +274,8 @@ interface Entry {
   /** The entry's scope, from `session/new` (or load, or resume) to `session/close`: its MCP servers, and its open session's scope, are in it. */
   readonly scope: Scope.Closeable;
   readonly mcp: McpServers;
+  /** The MCP servers the client named when it made, loaded or resumed the session; the configuration's own are not among them. */
+  readonly clientServers: ReadonlyArray<McpServer>;
   /** Held while the draft opens and while a configuration change is applied, so that neither change is lost. */
   readonly lock: Semaphore.Semaphore;
   readonly state: Ref.Ref<EntryState>;
@@ -283,6 +286,15 @@ interface Entry {
   /** The session's configuration: its seam lists, and its MCP servers. */
   readonly configuration: Configured;
 }
+
+/**
+ * Returns what identifies a client's MCP server: its name and how it is reached (the command and its arguments, or the transport
+ * and URL). Its environment and headers are left out: they do not say which server it is, and may hold credentials.
+ */
+const serverIdentityOf = (server: McpServer): string => {
+  if ("command" in server) return `${server.name}: ${[server.command, ...server.args].join(" ")}`;
+  return `${server.name}: ${server.type} ${"url" in server ? server.url : ""}`.trimEnd();
+};
 
 /**
  * Returns the model that the next turn will ask: the one `modelOf` returns, with each change that
@@ -404,8 +416,11 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
         // What is known of each model, and how its settings apply: the local server is asked once per connection.
         const modelKnowledge = yield* Layer.buildWithScope(Layer.mergeAll(KnownWithLocalServer, SettlingWithLocalServer), connectionScope);
         const entries = yield* Ref.make(HashMap.empty<string, Entry>());
-        /** The sessions that `session/load` or `session/resume` is starting: not yet among `entries`, and not to be started twice. */
-        const starting = yield* Ref.make(HashSet.empty<string>());
+        /**
+         * The sessions that a `session/load` or `session/resume` is starting or reopening, each with what completes when it is
+         * done: a session is not started twice, and a second request for it waits for the first.
+         */
+        const starting = yield* Ref.make(HashMap.empty<string, Deferred.Deferred<void>>());
 
         const traced = <A, E, X>(effect: Effect.Effect<A, E, X>, session?: string) =>
           effect.pipe(Effect.annotateLogs({ connection: connectionId, ...(session === undefined ? {} : { session }) }));
@@ -425,6 +440,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           connection
             .notify("session/update", { sessionId, update })
             .pipe(Effect.catch((error) => Effect.logWarning(logKeys.update.notSent, { kind: update.sessionUpdate, cause: error.message })));
+
+        /** The commands the host answers without the model (`/export`, `/mcp`), sent once the client knows a session it made, loaded or resumed. */
+        const commandsUpdate: SessionUpdate = { sessionUpdate: "available_commands_update", availableCommands: [exportCommandOf(options.folders.project), mcpCommand] };
 
         /**
          * Whether the client advertised notices (`clientCapabilities.session.notices`; omitted or
@@ -846,7 +864,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
         /** Sends what the host sends of a session started from its facts, once the client knows it: the commands, its title and last write, and, through the feed, its usage. */
         const announce = (entry: Entry, opened: Opened) =>
           Effect.gen(function* () {
-            yield* send(entry.id, { sessionUpdate: "available_commands_update", availableCommands: [exportCommandOf(options.folders.project), mcpCommand] });
+            yield* send(entry.id, commandsUpdate);
             const title = yield* recordedTitle(entry.id);
             const fs = yield* FileSystem.FileSystem;
             const written = yield* fs.stat(storeFileOf(options.folders.sessions, entry.id)).pipe(
@@ -859,8 +877,114 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           });
 
         /**
-         * Handles `session/load` or `session/resume`: starts the stored session on this connection, with the world opened for `cwd` and
-         * `mcpServers`.
+         * Answers `session/load` or `session/resume` of a session this connection holds already (`entry`). The session goes on as it
+         * is, with its working folder, folders and MCP servers. Those `asked` names (an omitted list names nothing) are not applied:
+         * where they differ from the session's, a warning gives both. Nothing is opened or started, and a turn under way goes on and
+         * ends as it would have.
+         *
+         * - A draft has no facts: load replays nothing. After the answer, `available_commands_update`.
+         * - An open session: once its feed has caught up, the feed is held (`Feed.holding`) while load sends the replay of the facts
+         *   through the last one the feed has taken, then the text the feed has sent of responses not recorded yet, each message in
+         *   one chunk (`sentNotRecorded`); resume sends nothing. The feed is held until the answer is written. So the answer follows
+         *   the replay, and the feed's updates follow the answer, from where it was: a response streaming meanwhile goes on live
+         *   after the answer, with the text the replay did not have. Then `announce`.
+         *
+         * The replay is sent with `send`, as the feed's updates are, so the answer's count of updates (`effective-acp/replayed`) is
+         * theirs.
+         */
+        const reopenHeld = (
+          method: "session/load" | "session/resume",
+          entry: Entry,
+          asked: { readonly cwd: string; readonly mcpServers?: ReadonlyArray<McpServer> | undefined; readonly additionalDirectories?: ReadonlyArray<string> | undefined },
+        ) =>
+          Effect.gen(function* () {
+            // Servers by what identifies them, and folders, each in one order, so that only a different set differs.
+            const askedServers = asked.mcpServers === undefined ? undefined : Arr.sort(asked.mcpServers.map(serverIdentityOf), Order.String);
+            const keptServers = Arr.sort(entry.clientServers.map(serverIdentityOf), Order.String);
+            const askedFolders = asked.additionalDirectories === undefined ? undefined : Arr.sort(asked.additionalDirectories, Order.String);
+            const keptFolders = Arr.sort(entry.additional, Order.String);
+            const cwdDiffers = asked.cwd !== entry.cwd;
+            const serversDiffer = askedServers !== undefined && askedServers.join("\n") !== keptServers.join("\n");
+            const foldersDiffer = askedFolders !== undefined && askedFolders.join("\n") !== keptFolders.join("\n");
+            if (cwdDiffers || serversDiffer || foldersDiffer) {
+              yield* Effect.logWarning(logKeys.session.reopenedAsIs, {
+                doing: method,
+                cause: "the session is already open on this connection, so the working folder, MCP servers and additional directories the request names are not applied",
+                asked: {
+                  ...(cwdDiffers ? { cwd: asked.cwd } : {}),
+                  ...(serversDiffer ? { mcpServers: askedServers } : {}),
+                  ...(foldersDiffer ? { additionalDirectories: askedFolders } : {}),
+                },
+                kept: {
+                  ...(cwdDiffers ? { cwd: entry.cwd } : {}),
+                  ...(serversDiffer ? { mcpServers: keptServers } : {}),
+                  ...(foldersDiffer ? { additionalDirectories: keptFolders } : {}),
+                },
+              });
+            }
+            // The lock is held while a draft opens at its first prompt: a draft opening now is taken once it is open.
+            const state = yield* entry.lock.withPermit(Ref.get(entry.state));
+            // The updates follow the response: the response is written before this handler's fiber ends.
+            const self = yield* Effect.fiber;
+            const replayed = yield* Deferred.make<number>();
+            if (state._tag === "Draft") {
+              yield* Deferred.succeed(replayed, 0);
+              yield* Effect.forkIn(
+                Fiber.await(self).pipe(
+                  Effect.flatMap((exit) => (Exit.isSuccess(exit) ? send(entry.id, commandsUpdate) : Effect.void)),
+                  Effect.annotateLogs({ session: entry.id }),
+                ),
+                connectionScope,
+              );
+            } else {
+              const { opened } = state;
+              yield* opened.feed.caughtUp;
+              // The facts the feed has taken, replayed, then what the feed has sent of responses not recorded yet: the client has had that
+              // text, which the facts do not hold until the response is recorded. The feed sends the rest of it after the answer.
+              const replay = (feed: { readonly taken: number; readonly state: ProjectionState }) =>
+                Effect.gen(function* () {
+                  if (method === "session/resume") return 0;
+                  const facts = (yield* opened.session.facts).filter((fact) => fact.seq <= feed.taken);
+                  const { updates } = yield* project(facts, { mode: "replay", present: entry.world.present });
+                  const all = [...updates, ...sentNotRecorded(feed.state)];
+                  yield* Effect.forEach(all, (update) => send(entry.id, update), { discard: true });
+                  return all.length;
+                });
+              yield* Effect.forkIn(
+                opened.feed
+                  .holding((feed) =>
+                    Effect.gen(function* () {
+                      const sent = yield* Effect.exit(replay(feed));
+                      yield* Deferred.done(replayed, sent);
+                      // Held until the answer is written: nothing of the feed's comes between the replay and the answer.
+                      return Exit.isSuccess(sent) ? yield* Fiber.await(self) : sent;
+                    }),
+                  )
+                  .pipe(
+                    // A holder interrupted before it replayed does not leave the request waiting.
+                    Effect.ensuring(Deferred.interrupt(replayed)),
+                    Effect.flatMap((answered) => (Exit.isSuccess(answered) ? announce(entry, opened) : Effect.void)),
+                    Effect.annotateLogs({ session: entry.id }),
+                  ),
+                connectionScope,
+              );
+            }
+            const count = yield* Deferred.await(replayed);
+            const turn = state._tag === "Open" ? yield* state.opened.session.turn : undefined;
+            yield* Effect.logInfo(logKeys.session.reopened, {
+              doing: method,
+              was: state._tag === "Open" ? "open" : "a draft",
+              replayed: count,
+              ...(turn === undefined ? {} : { turnUnderWay: turn }),
+              cwd: entry.cwd,
+            });
+            return { configOptions: (yield* configurationOf(entry)).options };
+          });
+
+        /**
+         * Handles `session/load` or `session/resume`. A session this connection holds already goes on as it is (`reopenHeld`); a request
+         * for one that another request is starting waits for that one, then looks again. Otherwise it starts the stored session on
+         * this connection, with the world opened for `cwd` and `mcpServers`.
          *
          * 1. A turn that its facts left running is ended, with nothing run again.
          * 2. On load, the facts as they are then are sent as the projection replays them, before the answer.
@@ -870,11 +994,18 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
          */
         const reopen = (
           method: "session/load" | "session/resume",
-          params: { readonly sessionId: AcpSessionId; readonly cwd: string; readonly additionalDirectories: ReadonlyArray<string>; readonly mcpServers: ReadonlyArray<McpServer> },
+          // The lists as the request names them: left out when it names none.
+          params: {
+            readonly sessionId: AcpSessionId;
+            readonly cwd: string;
+            readonly additionalDirectories?: ReadonlyArray<string> | null | undefined;
+            readonly mcpServers?: ReadonlyArray<McpServer> | null | undefined;
+          },
         ) =>
           Effect.gen(function* () {
-            const { sessionId, cwd, mcpServers } = params;
-            const additional = params.additionalDirectories;
+            const { sessionId, cwd } = params;
+            const mcpServers = params.mcpServers ?? [];
+            const additional = params.additionalDirectories ?? [];
             if (!isAbsolute(cwd)) {
               yield* Effect.logWarning(logKeys.session.refused, { doing: method, cwd, cause: "the working folder is not an absolute path" });
               return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, `cwd must be an absolute path: ${cwd}`));
@@ -884,10 +1015,19 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               yield* Effect.logWarning(logKeys.session.refused, { doing: method, cwd, additionalDirectories: additional, cause: "an additional directory is not an absolute path" });
               return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, `additionalDirectories must be absolute paths: ${notAbsolute}`));
             }
-            if (HashMap.has(yield* Ref.get(entries), sessionId) || HashSet.has(yield* Ref.get(starting), sessionId)) {
-              yield* Effect.logWarning(logKeys.session.refused, { doing: method, cause: "the session is already loaded on this connection" });
-              return yield* Effect.fail(rpcError(ErrorCode.InvalidParams, `Session ${sessionId} is already loaded on this connection`, { sessionId }));
-            }
+            // One request at a time starts or reopens a session: a request for one that another is starting waits for it, then looks again.
+            const claim = yield* Deferred.make<void>();
+            const claimed: Effect.Effect<void> = Effect.gen(function* () {
+              const before = yield* Ref.modify(starting, (all): readonly [Deferred.Deferred<void> | undefined, HashMap.HashMap<string, Deferred.Deferred<void>>] => {
+                const now = HashMap.get(all, sessionId);
+                return Option.isSome(now) ? [now.value, all] : [undefined, HashMap.set(all, sessionId, claim)];
+              });
+              if (before === undefined) return;
+              yield* Effect.logDebug(logKeys.session.waiting, { doing: method });
+              yield* Deferred.await(before);
+              yield* claimed;
+            });
+            yield* claimed;
             const file = storeFileOf(options.folders.sessions, sessionId);
 
             const notStarted = (doing: string) => (error: { readonly message: string }) =>
@@ -895,13 +1035,22 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 Effect.andThen(Effect.fail(rpcError(-32000, `Session ${sessionId} could not be started: ${error.message}`, { sessionId }))),
               );
 
-            const stored = yield* (yield* FileSystem.FileSystem).exists(file).pipe(Effect.catch(notStarted("looking for the session's facts file")));
-            if (!stored) {
-              yield* Effect.logWarning(logKeys.session.notStored, { doing: method, file, cause: "the session directory has no facts file for the session" });
-              return yield* Effect.fail(rpcError(ErrorCode.ResourceNotFound, `Session ${sessionId} not found in ${options.folders.sessions}`, { sessionId }));
-            }
-            yield* Ref.update(starting, (all) => HashSet.add(all, sessionId));
             return yield* Effect.gen(function* () {
+              // A session this connection holds already goes on as it is. The entries are set before the claim is let go, so a session
+              // that another request started is among them.
+              const held = HashMap.get(yield* Ref.get(entries), sessionId);
+              if (Option.isSome(held)) {
+                return yield* reopenHeld(method, held.value, {
+                  cwd,
+                  mcpServers: params.mcpServers ?? undefined,
+                  additionalDirectories: params.additionalDirectories ?? undefined,
+                });
+              }
+              const stored = yield* (yield* FileSystem.FileSystem).exists(file).pipe(Effect.catch(notStarted("looking for the session's facts file")));
+              if (!stored) {
+                yield* Effect.logWarning(logKeys.session.notStored, { doing: method, file, cause: "the session directory has no facts file for the session" });
+                return yield* Effect.fail(rpcError(ErrorCode.ResourceNotFound, `Session ${sessionId} not found in ${options.folders.sessions}`, { sessionId }));
+              }
               const configuration = yield* configurationFor(cwd, mcpServers, method);
               const worldAlone = yield* (world as World<R | FileSystem.FileSystem>).open({
                 sessionId,
@@ -940,6 +1089,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 world: sessionWorld,
                 scope,
                 mcp,
+                clientServers: mcpServers,
                 lock: yield* Semaphore.make(1),
                 state: yield* Ref.make<EntryState>({ _tag: "Open", opened }),
                 prompt: yield* Ref.make<Fiber.Fiber<unknown, unknown> | undefined>(undefined),
@@ -965,7 +1115,17 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               return { configOptions: configured };
               }).pipe(Effect.onError(() => Scope.close(scope, Exit.void)));
             }).pipe(
-              Effect.ensuring(Ref.update(starting, (all) => HashSet.remove(all, sessionId))),
+              // Let go once this request is answered (its handler's fiber has ended), so a request that waited is answered after it. The
+              // entry, if the session started, is set by then: whoever waits for the claim finds it.
+              Effect.ensuring(
+                Effect.gen(function* () {
+                  const self = yield* Effect.fiber;
+                  yield* Effect.forkIn(
+                    Fiber.await(self).pipe(Effect.andThen(Ref.update(starting, (all) => HashMap.remove(all, sessionId))), Effect.andThen(Deferred.succeed(claim, undefined))),
+                    connectionScope,
+                  );
+                }),
+              ),
             );
           });
 
@@ -1016,6 +1176,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   world: sessionWorld,
                   scope,
                   mcp,
+                  clientServers: mcpServers,
                   lock: yield* Semaphore.make(1),
                   state: yield* Ref.make<EntryState>({ _tag: "Draft", draft }),
                   prompt: yield* Ref.make<Fiber.Fiber<unknown, unknown> | undefined>(undefined),
@@ -1034,7 +1195,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 const self = yield* Effect.fiber;
                 yield* Effect.forkIn(
                   Fiber.await(self).pipe(
-                    Effect.andThen(send(id, { sessionUpdate: "available_commands_update", availableCommands: [exportCommandOf(options.folders.project), mcpCommand] })),
+                    Effect.andThen(send(id, commandsUpdate)),
                     Effect.annotateLogs({ session: id }),
                   ),
                   connectionScope,
@@ -1044,11 +1205,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               }),
             ),
 
-          "session/load": ({ sessionId, cwd, mcpServers, additionalDirectories }) =>
-            traced(reopen("session/load", { sessionId, cwd, mcpServers, additionalDirectories: additionalDirectories ?? [] }), sessionId),
+          "session/load": ({ sessionId, cwd, mcpServers, additionalDirectories }) => traced(reopen("session/load", { sessionId, cwd, mcpServers, additionalDirectories }), sessionId),
 
-          "session/resume": ({ sessionId, cwd, mcpServers, additionalDirectories }) =>
-            traced(reopen("session/resume", { sessionId, cwd, mcpServers: mcpServers ?? [], additionalDirectories: additionalDirectories ?? [] }), sessionId),
+          "session/resume": ({ sessionId, cwd, mcpServers, additionalDirectories }) => traced(reopen("session/resume", { sessionId, cwd, mcpServers, additionalDirectories }), sessionId),
 
           "session/list": (params) =>
             traced(

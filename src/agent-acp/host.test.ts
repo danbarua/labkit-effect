@@ -160,6 +160,8 @@ interface HostRun {
   readonly stream: acp.Stream;
   /** Every message the agent wrote, as JSON, in the order it wrote them: what the client's own handlers may see a tick later. */
   readonly wire: Array<Record<string, unknown>>;
+  /** Resolves once `check` holds, checked each time the agent writes a message to the wire or logs. */
+  readonly when: (check: () => boolean) => Promise<void>;
   /** Ends the connection: the agent reads the end of its input. */
   readonly hangUp: () => Promise<void>;
   /** Completes when `Agent.run` returns. */
@@ -196,6 +198,13 @@ function startHost(
   const toClient = new TransformStream<Uint8Array, Uint8Array>();
   const [toSdk, tapped] = toClient.readable.tee();
   const wire: Array<Record<string, unknown>> = [];
+  const waiting: Array<{ readonly check: () => boolean; readonly resolve: () => void }> = [];
+  const checkWaiting = () => {
+    for (const waiter of waiting.filter((each) => each.check())) {
+      waiting.splice(waiting.indexOf(waiter), 1);
+      waiter.resolve();
+    }
+  };
   void (async () => {
     const decoder = new TextDecoder();
     let rest = "";
@@ -204,6 +213,7 @@ function startHost(
       const lines = rest.split("\n");
       rest = lines.pop() ?? "";
       for (const line of lines) if (line.trim() !== "") wire.push(JSON.parse(line) as Record<string, unknown>);
+      checkWaiting();
     }
   })();
   const writer = toAgent.writable.getWriter();
@@ -231,6 +241,7 @@ function startHost(
   const capture = Logger.make((log) => {
     const [key, details] = Array.isArray(log.message) ? log.message : [log.message];
     logged.push({ level: log.logLevel, key, details, annotations: { ...log.fiber.getRef(References.CurrentLogAnnotations) } });
+    checkWaiting();
   });
   const fiber = Effect.runFork(
     Agent.run({ wire: fromWebStreams(toAgent.readable, toClient.writable), info, implementations: [host] }).pipe(
@@ -247,6 +258,12 @@ function startHost(
     cwd,
     stream: acp.ndJsonStream(new WritableStream({ write: (chunk) => writer.write(chunk) }), toSdk),
     wire,
+    when: (check) => {
+      if (check()) return Promise.resolve();
+      const { promise, resolve } = Promise.withResolvers<void>();
+      waiting.push({ check, resolve });
+      return promise;
+    },
     hangUp: () => writer.close(),
     ended: Effect.runPromise(Fiber.await(fiber)).then(() => undefined),
     stop: () => Effect.runPromise(Fiber.interrupt(fiber)),
@@ -1391,7 +1408,7 @@ test("a server the configuration says is required that does not connect refuses 
       created: await failure(ctx.request("session/new", { cwd: host.cwd, mcpServers: [] })),
       loaded: await failure(ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] })),
       resumed: await failure(ctx.request("session/resume", { sessionId, cwd: host.cwd, mcpServers: [] })),
-      // Nothing was left of the refused load: loading again is refused for the server, not as already loaded.
+      // Nothing was left of the refused load: loading again is refused for the server, not answered as a session the connection holds.
       again: await failure(ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] })),
     };
   });
@@ -2141,7 +2158,7 @@ test("a session directory that cannot be read answers session/list -32603 with t
   });
 });
 
-test("session/load of an unknown session is -32002, a relative cwd -32602, a session already loaded -32602, and one whose facts another process holds -32000, which leaves nothing open", async () => {
+test("session/load of an unknown session is -32002, a relative cwd -32602, and one whose facts another process holds -32000, which leaves nothing open", async () => {
   const stored = await storedSession("One", [[{ _tag: "Text", text: "One." }]]);
   writeFileSync(`${stored.file}.lock`, String(process.pid));
   const host = startHost({ world: echoWorld });
@@ -2153,17 +2170,13 @@ test("session/load of an unknown session is -32002, a relative cwd -32602, a ses
     const locked = await failure(load(stored.sessionId));
     rmSync(`${stored.file}.lock`);
     const loaded = await load(stored.sessionId);
-    const again = await failure(load(stored.sessionId));
-    const resumed = await failure(ctx.request("session/resume", { sessionId: stored.sessionId, cwd: host.cwd }));
-    return { unknown, relative, locked, loaded, again, resumed };
+    return { unknown, relative, locked, loaded };
   });
   await host.stop();
   expect(result.unknown).toMatchObject({ code: -32002, data: { sessionId: "no-such-session" } });
   expect(result.relative).toMatchObject({ code: -32602, message: "cwd must be an absolute path: work" });
   expect(result.locked).toMatchObject({ code: -32000, message: expect.stringContaining(`is open in another process (pid ${process.pid})`) });
   expect(result.loaded.configOptions).toBeDefined();
-  expect(result.again).toMatchObject({ code: -32602, message: expect.stringContaining("already loaded") });
-  expect(result.resumed).toMatchObject({ code: -32602, message: expect.stringContaining("already loaded") });
   expect(host.logged.find((each) => each.key === logKeys.session.notStored)).toMatchObject({
     level: "Warn",
     annotations: { session: "no-such-session", connection: expect.any(String) },
@@ -2174,11 +2187,7 @@ test("session/load of an unknown session is -32002, a relative cwd -32602, a ses
     annotations: { session: stored.sessionId, connection: expect.any(String) },
     details: { file: stored.file, cause: expect.stringContaining("another process") },
   });
-  expect(host.logged.filter((each) => each.key === logKeys.session.refused).map((each) => each.details)).toMatchObject([
-    { doing: "session/load", cwd: "work" },
-    { doing: "session/load", cause: expect.stringContaining("already loaded") },
-    { doing: "session/resume", cause: expect.stringContaining("already loaded") },
-  ]);
+  expect(host.logged.filter((each) => each.key === logKeys.session.refused).map((each) => each.details)).toMatchObject([{ doing: "session/load", cwd: "work" }]);
   expect(host.logged.filter((each) => each.key === logKeys.session.loaded)).toHaveLength(1);
 });
 
@@ -2370,25 +2379,241 @@ test("the local world offers the workspace tools, and the settings written say t
   expect(written.host).toMatchObject({ world: "local" });
 });
 
-test("a session/load of a session still starting on this connection is -32602", async () => {
+/** The updates among `messages` of the agent's wire. */
+const updatesIn = (messages: ReadonlyArray<Record<string, unknown>>): Array<Update> => messages.flatMap((message) => (isUpdateNotification(message) ? [message.params.update] : []));
+
+/** The length of the agent's wire once it holds every update the client has had so far: a mark from which to read what the agent writes next. */
+const wireMark = async (host: HostRun, log: ClientLog): Promise<number> => {
+  const seen = log.updates.length;
+  await host.when(() => updatesIn(host.wire).length >= seen);
+  return host.wire.length;
+};
+
+/** The updates the agent wrote from `from` (up to `to`): those before its first answer with config options, and those after it. */
+const aroundAnswer = (host: HostRun, from: number, to?: number) => {
+  const written = host.wire.slice(from, to);
+  const at = written.findIndex((message) => typeof message["result"] === "object" && message["result"] !== null && "configOptions" in message["result"]);
+  expect(at).toBeGreaterThanOrEqual(0);
+  return { before: updatesIn(written.slice(0, at)), after: updatesIn(written.slice(at + 1)) };
+};
+
+/** The kinds of update that carry a session's history: what a replay sends. */
+const historyKinds: ReadonlyArray<string> = ["user_message_chunk", "agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update"];
+
+/** The text of the agent's messages among `updates`, joined. */
+const agentText = (updates: ReadonlyArray<Update>) =>
+  updates.map((update) => (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text" ? update.content.text : "")).join("");
+
+test("a session prompted on a connection and loaded on it again has its facts replayed as they stand before the answer, which has its config options and counts them, and only the commands and its title follow; a resume then sends no history before its answer; neither starts it again, and the next prompt is sent once", async () => {
+  const host = startHost({ world: echoWorld, script: [...echoTurn.map((pieces) => answer(...pieces)), answer({ _tag: "Text", text: "Again." })] });
+  const { app, log, until } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(sessionId, "Echo ping"));
+    const beforeLoad = await wireMark(host, log);
+    const seenBeforeLoad = log.updates.length;
+    const loaded = await ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] });
+    await until((updates) => updates.slice(seenBeforeLoad).some((update) => update.sessionUpdate === "session_info_update"));
+    const beforeResume = await wireMark(host, log);
+    const seenBeforeResume = log.updates.length;
+    const resumed = await ctx.request("session/resume", { sessionId, cwd: host.cwd });
+    await until((updates) => updates.slice(seenBeforeResume).some((update) => update.sessionUpdate === "session_info_update"));
+    const beforePrompt = await wireMark(host, log);
+    const prompted = await ctx.request("session/prompt", say(sessionId, "Again"));
+    return { sessionId, beforeLoad, beforeResume, beforePrompt, loaded, resumed, prompted };
+  });
+  await host.stop();
+  const facts = await factsOn(storeFileOf(host.directory, result.sessionId));
+  // The facts of the first turn: those before the second prompt's input.
+  const second = facts.findIndex((fact) => fact._tag === "Observed" && fact.observation._tag === "InputArrived" && fact.observation.text === "Again");
+  const replay = replayOf(facts.slice(0, second));
+  expect(kinds(replay)).toEqual(["user_message_chunk", "agent_thought_chunk", "tool_call:pending", "tool_call_update:in_progress", "tool_call_update:completed", "agent_message_chunk"]);
+  const load = aroundAnswer(host, result.beforeLoad, result.beforeResume);
+  expect(load.before).toHaveLength(replay.length);
+  expect(load.before).toMatchObject(replay);
+  expect(result.loaded._meta?.["effective-acp/replayed"]).toBe(load.before.length);
+  expect(result.loaded.configOptions?.find((option) => option.id === "model")).toMatchObject({ currentValue: "openai/gpt-6-sol" });
+  expect(kinds(load.after).filter((kind) => !announced.includes(kind))).toEqual([]);
+  expect(kinds(load.after)).toEqual(expect.arrayContaining(["available_commands_update", "session_info_update"]));
+  const resume = aroundAnswer(host, result.beforeResume, result.beforePrompt);
+  expect(resume.before.filter((update) => historyKinds.includes(update.sessionUpdate))).toEqual([]);
+  expect(result.resumed.configOptions?.find((option) => option.id === "model")).toMatchObject({ currentValue: "openai/gpt-6-sol" });
+  expect(kinds(resume.after).filter((kind) => !announced.includes(kind))).toEqual([]);
+  // One feed sends the next turn: its text once.
+  expect(result.prompted.stopReason).toBe("end_turn");
+  expect(agentText(updatesIn(host.wire.slice(result.beforePrompt)))).toBe("Again.");
+  expect(endings(facts)).toEqual(["Completed", "Completed"]);
+  expect(observed(facts).filter((fact) => fact.observation._tag === "TurnInterrupted")).toEqual([]);
+  expect(host.logged.filter((each) => each.key === logKeys.session.loaded || each.key === logKeys.session.resumed)).toEqual([]);
+  expect(host.logged.filter((each) => each.key === logKeys.session.reopened).map((each) => ({ level: each.level, details: each.details }))).toEqual([
+    { level: "Info", details: { doing: "session/load", was: "open", replayed: replay.length, cwd: host.cwd } },
+    { level: "Info", details: { doing: "session/resume", was: "open", replayed: 0, cwd: host.cwd } },
+  ]);
+  expect(host.logged.filter((each) => each.level === "Warn" || each.level === "Error" || each.level === "Fatal")).toEqual([]);
+});
+
+test("a session loaded on its connection while its prompt runs goes on: the prompt ends end_turn with nothing interrupted; the replay before the answer is what is recorded, then the text sent so far of the response streaming, in one chunk of its message; the rest of it comes live after the answer, with no gap and nothing twice", async () => {
+  const started = Deferred.makeUnsafe<void>();
+  const release = Deferred.makeUnsafe<void>();
+  // Streams "Ha" and "lf", says it started, waits for `release`, streams "way", then answers "Halfway".
+  const halfway: Reply = (turn, target) =>
+    Effect.gen(function* () {
+      const stream = yield* ModelStream;
+      yield* stream({ _tag: "Delta", kind: "Text", text: "Ha" });
+      yield* stream({ _tag: "Delta", kind: "Text", text: "lf" });
+      yield* Deferred.succeed(started, undefined);
+      yield* Deferred.await(release);
+      yield* stream({ _tag: "Delta", kind: "Text", text: "way" });
+      return yield* answer({ _tag: "Text", text: "" })(turn, target).pipe(Effect.map((responded) => ({ ...responded, parts: [toPart({ _tag: "Text", text: "Halfway" })] })));
+    });
+  const host = startHost({ world: echoWorld, script: [halfway] });
+  const { app, log, until } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    const prompting = ctx.request("session/prompt", say(sessionId, "Go on"));
+    await Effect.runPromise(Deferred.await(started));
+    await until((updates) => agentText(updates) === "Half");
+    const beforeLoad = await wireMark(host, log);
+    const loaded = await ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] });
+    await Effect.runPromise(Deferred.succeed(release, undefined));
+    const prompted = await prompting;
+    return { sessionId, beforeLoad, loaded, prompted };
+  });
+  await host.stop();
+  expect(result.prompted.stopReason).toBe("end_turn");
+  const facts = await factsOn(storeFileOf(host.directory, result.sessionId));
+  expect(endings(facts)).toEqual(["Completed"]);
+  expect(observed(facts).filter((fact) => fact.observation._tag === "TurnInterrupted")).toEqual([]);
+  // Live before the load: the response's text so far, in its message.
+  const liveBefore = updatesIn(host.wire.slice(0, result.beforeLoad));
+  const message = liveBefore.find((update) => update.sessionUpdate === "agent_message_chunk");
+  const messageId = message !== undefined && "messageId" in message ? message.messageId : undefined;
+  expect(messageId).toEqual(expect.any(String));
+  // The replay: what was recorded (the input), then that text, in one chunk under the same message.
+  const load = aroundAnswer(host, result.beforeLoad);
+  expect(kinds(load.before)).toEqual(["user_message_chunk", "agent_message_chunk"]);
+  expect(load.before[0]).toMatchObject({ content: { type: "text", text: "Go on" } });
+  expect(load.before[1]).toMatchObject({ messageId, content: { type: "text", text: agentText(liveBefore) } });
+  expect(result.loaded._meta?.["effective-acp/replayed"]).toBe(load.before.length);
+  // After the answer, the same message goes on live with the rest, then the prompt's answer: the replay and what follows make the
+  // text the client was sent live, with no gap and nothing twice.
+  const liveAfter = load.after.filter((update) => update.sessionUpdate === "agent_message_chunk");
+  expect(liveAfter.every((update) => "messageId" in update && update.messageId === messageId)).toBe(true);
+  expect(agentText(liveBefore) + agentText(load.after)).toBe("Halfway");
+  expect(agentText(load.before) + agentText(load.after)).toBe("Halfway");
+  const written = writtenBy(host);
+  expect(written.indexOf("answer options")).toBeLessThan(written.indexOf("agent_message_chunk way"));
+  expect(written.indexOf("agent_message_chunk way")).toBeLessThan(written.indexOf("answer end_turn"));
+  expect(host.logged.filter((each) => each.key === logKeys.session.reopened).map((each) => each.details)).toEqual([
+    { doing: "session/load", was: "open", replayed: 2, turnUnderWay: expect.anything(), cwd: host.cwd },
+  ]);
+  expect(host.logged.filter((each) => each.level === "Warn" || each.level === "Error" || each.level === "Fatal")).toEqual([]);
+});
+
+test("a draft loaded and resumed on the connection that made it is answered with its config options and then the commands, replaying nothing; its first prompt then opens it", async () => {
+  const host = startHost({ world: echoWorld, script: [answer({ _tag: "Text", text: "Hi." })] });
+  const { app, log, until } = sdkClient();
+  const result = await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await until((updates) => updates.length === 1);
+    const beforeLoad = await wireMark(host, log);
+    const loaded = await ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] });
+    await until((updates) => updates.length === 2);
+    const beforeResume = await wireMark(host, log);
+    const resumed = await ctx.request("session/resume", { sessionId, cwd: host.cwd });
+    await until((updates) => updates.length === 3);
+    const beforePrompt = await wireMark(host, log);
+    const prompted = await ctx.request("session/prompt", say(sessionId, "Hi"));
+    return { sessionId, beforeLoad, beforeResume, beforePrompt, loaded, resumed, prompted };
+  });
+  await host.stop();
+  const commandsOnly = { before: [], after: [expect.objectContaining({ sessionUpdate: "available_commands_update" })] };
+  expect(aroundAnswer(host, result.beforeLoad, result.beforeResume)).toEqual(commandsOnly);
+  expect(result.loaded._meta?.["effective-acp/replayed"]).toBe(0);
+  expect(result.loaded.configOptions?.find((option) => option.id === "model")).toMatchObject({ currentValue: "openai/gpt-6-sol" });
+  expect(aroundAnswer(host, result.beforeResume, result.beforePrompt)).toEqual(commandsOnly);
+  expect(result.resumed.configOptions?.find((option) => option.id === "model")).toMatchObject({ currentValue: "openai/gpt-6-sol" });
+  expect(result.prompted.stopReason).toBe("end_turn");
+  expect(endings(await factsOn(storeFileOf(host.directory, result.sessionId)))).toEqual(["Completed"]);
+  expect(host.logged.filter((each) => each.key === logKeys.session.reopened).map((each) => each.details)).toEqual([
+    { doing: "session/load", was: "a draft", replayed: 0, cwd: host.cwd },
+    { doing: "session/resume", was: "a draft", replayed: 0, cwd: host.cwd },
+  ]);
+  expect(host.logged.filter((each) => each.level === "Warn" || each.level === "Error" || each.level === "Fatal")).toEqual([]);
+});
+
+test("a session/load of a session still starting on this connection waits for that start, then is answered after it with the replay of the session it started, which is not started again", async () => {
   const stored = await storedSession("Echo ping", echoTurn);
+  const replay = replayOf(await factsOn(stored.file));
   const opening = Deferred.makeUnsafe<void>();
   const release = Deferred.makeUnsafe<void>();
+  let opened = 0;
   const slowWorld: World = {
-    open: (given) => Deferred.succeed(opening, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.andThen(echoWorld.open(given))),
+    open: (given) =>
+      Effect.sync(() => opened++).pipe(Effect.andThen(Deferred.succeed(opening, undefined)), Effect.andThen(Deferred.await(release)), Effect.andThen(echoWorld.open(given))),
   };
   const host = startHost({ world: slowWorld });
   const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {
     await initialize(ctx, {});
     const first = ctx.request("session/load", { sessionId: stored.sessionId, cwd: host.cwd, mcpServers: [] });
     await Effect.runPromise(Deferred.await(opening));
-    const second = await failure(ctx.request("session/load", { sessionId: stored.sessionId, cwd: host.cwd, mcpServers: [] }));
+    const second = ctx.request("session/load", { sessionId: stored.sessionId, cwd: host.cwd, mcpServers: [] });
+    await host.when(() => host.logged.some((each) => each.key === logKeys.session.waiting));
     await Effect.runPromise(Deferred.succeed(release, undefined));
-    await first;
-    return second;
+    return { first: await first, second: await second };
   });
   await host.stop();
-  expect(result).toMatchObject({ code: -32602, message: expect.stringContaining("already loaded") });
+  expect(opened).toBe(1);
+  expect(result.first.configOptions).toBeDefined();
+  expect(result.second.configOptions).toBeDefined();
+  const answers = host.wire.flatMap((message, index) => (typeof message["result"] === "object" && message["result"] !== null && "configOptions" in message["result"] ? [index] : []));
+  expect(answers).toHaveLength(2);
+  // Each answer follows its own replay: the second's comes after the first answer.
+  const [firstAnswer, secondAnswer] = answers;
+  expect(updatesIn(host.wire.slice(0, firstAnswer))).toMatchObject(replay);
+  expect(updatesIn(host.wire.slice(firstAnswer, secondAnswer)).filter((update) => historyKinds.includes(update.sessionUpdate))).toMatchObject(replay);
+  expect(host.logged.filter((each) => each.key === logKeys.session.loaded)).toHaveLength(1);
+  expect(host.logged.filter((each) => each.key === logKeys.session.reopened).map((each) => each.details)).toEqual([
+    { doing: "session/load", was: "open", replayed: replay.length, cwd: host.cwd },
+  ]);
+});
+
+test("a load of a session this connection holds that names another working folder and another MCP server is answered as the session is, with a warning giving the values asked and those kept; no second world is opened and no server started", async () => {
+  let opened = 0;
+  const countingWorld: World = { open: (given) => Effect.sync(() => opened++).pipe(Effect.andThen(echoWorld.open(given))) };
+  const host = startHost({ world: countingWorld, script: [answer({ _tag: "Text", text: "One." })] });
+  const elsewhere = join(testFolder(), "elsewhere");
+  const extra: acp.McpServer = { name: "extra", command: "/no/such/server", args: ["--stdio"], env: [{ name: "TOKEN", value: "secret" }] };
+  const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(sessionId, "One"));
+    return await ctx.request("session/load", { sessionId, cwd: elsewhere, mcpServers: [extra] });
+  });
+  await host.stop();
+  expect(result.configOptions?.find((option) => option.id === "model")).toMatchObject({ currentValue: "openai/gpt-6-sol" });
+  expect(opened).toBe(1);
+  expect(host.logged.filter((each) => each.key === mcpLogKeys.server.changed)).toEqual([]);
+  // The server's environment is not logged: it does not say which server it is, and may hold credentials.
+  expect(host.logged.filter((each) => each.level === "Warn" || each.level === "Error" || each.level === "Fatal")).toEqual([
+    {
+      level: "Warn",
+      key: logKeys.session.reopenedAsIs,
+      details: {
+        doing: "session/load",
+        cause: expect.stringContaining("already open on this connection"),
+        asked: { cwd: elsewhere, mcpServers: ["extra: /no/such/server --stdio"] },
+        kept: { cwd: host.cwd, mcpServers: [] },
+      },
+      annotations: expect.objectContaining({ connection: expect.any(String) }),
+    },
+  ]);
+  expect(host.logged.filter((each) => each.key === logKeys.session.reopened).map((each) => each.details)).toEqual([
+    { doing: "session/load", was: "open", replayed: expect.any(Number), cwd: host.cwd },
+  ]);
 });
 
 /** A request that says it started, waits for `release`, then answers with `pieces`. */

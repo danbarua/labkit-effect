@@ -236,11 +236,15 @@ model.
       session (`host.json`: the ACP host, the working folder, a title from the first prompt), written at turn zero; `session/load` (the
       stored facts replayed before the answer), `session/resume` (no replay) and `session/list`
       (by working folder, newest first, paged), with `session_info_update`; a turn the facts left
-      running is ended, not gone on with; `session/close`; additional directories. To do:
-      `session/fork` (it waits for the core: Forks, under Sessions); `session/delete`. Open: the permission
-      mode is not in the host's record, so a reopened session starts at the launcher's mode; ACP has
-      no update for how a turn ended, so a replay of a turn that ended without an answer
-      (interrupted, failed) shows what its finished requests sent and nothing of how it ended.
+      running is ended, not gone on with; a load or resume of a session the connection holds
+      already answers it as it stands, its turn under way going on; `session/close`; additional
+      directories. To do: `session/fork` (it waits for the core: Forks, under Sessions);
+      `session/delete`. Open: the permission mode is not in the host's record, so a reopened session
+      starts at the launcher's mode; ACP has no update for how a turn ended, so a replay of a turn
+      that ended without an answer (interrupted, failed) shows what its finished requests sent and
+      nothing of how it ended; effective-acp 0.4.0 counts a load's replayed updates by session, not
+      by request, so of two loads of one session answered at once, the second's
+      `_meta["effective-acp/replayed"]` leaves out its replay (the fix is effective-acp's).
 - [ ] The ACP host in JetBrains. In VS Code (labkit-web's client, `bun run vscode:dev`; 2026-10-07):
       the session's config options as selects (permission mode, model, effort), its title from the
       first prompt, a tool call and how it ended, the answer, and the context gauge and cost from
