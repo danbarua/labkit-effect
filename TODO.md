@@ -112,6 +112,14 @@ model.
         - `awk` judged by its program, as `sed` is (no `system()`, no pipes, no `print >`).
         - Git judged by its action, as `sed` is by its script: which git actions read, which write
           the working tree or the history, and which reach a remote (Dan, 2026-10-07).
+        - A command written for GNU tools and bash, run on macOS and zsh (Dan, 2026-10-08): agents are
+          trained to write `bash` and GNU forms (`mv -t`, `sed -i ''` against `sed -i`, `date -d`), and a
+          harness that reads the command's intent (`bash-segments`) can run what it means on the
+          host instead of failing and spending a turn on the error. Git is a function call in this
+          runtime (es-git), not a `git` process.
+        - A command's full output, kept where the agent can reach it (Dan, 2026-10-08): a command
+          whose output it cut (`| tail -n 80`) or saved (`> out.log`) leaves a pointer to the whole
+          output in the conversation's context, with the per-session folder below.
         - A temporary folder for each session (Dan, 2026-10-08): a private folder the agent may
           write anything to without a question, named by a virtual URL (`tmp://`, as omp's
           `local://`), and counted as inside the working folder. Writing to `/tmp` and the like is
