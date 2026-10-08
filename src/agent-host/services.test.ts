@@ -15,12 +15,12 @@ import { inSession, makeSessionContext } from "./session-context.ts";
 
 const spec = (name: string, kind: ToolKind): ToolSpec => ({ name: ToolName.make(name), description: name, input: { type: "object" }, kind, replay: "safe" });
 
-/** Runs `effect` in the context of a session working in `/work/project`, with the folders `additional` and the facts `facts`, as a host makes it (`session-context.ts`). */
+/** Runs `effect` in the context of a session working in `/work/project`, with the launcher's folders `additional` and the facts `facts`, as a host makes it (`session-context.ts`). */
 const inProject =
   (additional: ReadonlyArray<string>, facts: ReadonlyArray<Fact>) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.gen(function* () {
-      const made = yield* makeSessionContext({ session: SessionId.make("s1"), working: "/work/project", additional });
+      const made = yield* makeSessionContext({ session: SessionId.make("s1"), working: "/work/project", given: [{ from: { _tag: "Launcher" }, folders: additional }] });
       yield* made.storeOpened(Effect.succeed(facts));
       return yield* inSession(made.context)(effect);
     });
@@ -71,7 +71,7 @@ test("a folder the user added to the session counts as inside the working folder
       Effect.gen(function* () {
         const facts: ReadonlyArray<Fact> = [
           { _tag: "Observed", seq: Seq.make(1), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation: boringOpening([spec("run_command", "execute")]) },
-          ...added.map((folder, at): Fact => ({ _tag: "Observed", seq: Seq.make(2 + at), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation: { _tag: "FolderAdded", folder: FolderPath.make(folder) } })),
+          ...added.map((folder, at): Fact => ({ _tag: "Observed", seq: Seq.make(2 + at), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation: { _tag: "FolderAdded", folder: FolderPath.make(folder), from: { _tag: "User" } } })),
         ];
         const policy = yield* permissionsFor("default", true)(facts).pipe(inProject([], facts));
         const step = policy.start({ _tag: "RunTool", call: CallId.make("c1"), tool: ToolName.make("run_command"), input: receivedJson({ command }) });

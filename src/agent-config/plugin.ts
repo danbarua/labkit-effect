@@ -1,7 +1,8 @@
 /**
  * What a plug-in is: a name (`use`, its key in a configuration file), a Schema for its settings with
  * a default for every setting that has one (a budget has none), the seams it adds to, and a function
- * that makes its entries from its settings and what the host provides (`FromHost`).
+ * that makes its entries from its settings, what the host provides (`FromHost`), and the name that
+ * the configuration lists the entry by.
  *
  * A seam is one of the ordered lists that a session's logic plugs into (`agent-session`): the tool
  * call policies, the model request policies, the turn-end hooks, what is known of models, how
@@ -9,6 +10,7 @@
  * two seams is listed in each.
  */
 
+import type { EntryName } from "../agent-machine/names.ts";
 import type { EnvironmentTransform } from "../agent-process/environment.ts";
 import type { PermissionMode } from "../agent-policy/permissions.ts";
 import type { Effect, Schema, Scope } from "effect";
@@ -60,7 +62,7 @@ export interface Plugin<S extends Settings = Settings, On extends Seam = Seam> {
   readonly use: string;
   readonly settings: S;
   readonly on: ReadonlyArray<On>;
-  readonly entries: (settings: S["Type"], host: FromHost) => Pick<Entries, On>;
+  readonly entries: (settings: S["Type"], host: FromHost, name: EntryName) => Pick<Entries, On>;
 }
 
 /** Returns a plug-in named `use`, on the seams `on`. */
@@ -68,7 +70,7 @@ export const plugin = <S extends Settings, const On extends Seam>(
   use: string,
   settings: S,
   on: ReadonlyArray<On>,
-  entries: (settings: S["Type"], host: FromHost) => Pick<Entries, On>,
+  entries: (settings: S["Type"], host: FromHost, name: EntryName) => Pick<Entries, On>,
 ): Plugin<S, On> => ({ use, settings, on, entries });
 
 /** A plug-in with its settings and seams types erased, as a registry holds it. Its entries are made with settings that its own Schema decoded. */
@@ -76,5 +78,5 @@ export interface AnyPlugin {
   readonly use: string;
   readonly settings: Schema.Top & { readonly fields: Schema.Struct.Fields; readonly DecodingServices: never };
   readonly on: ReadonlyArray<Seam>;
-  readonly entries: (settings: never, host: FromHost) => Partial<Entries>;
+  readonly entries: (settings: never, host: FromHost, name: EntryName) => Partial<Entries>;
 }

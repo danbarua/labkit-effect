@@ -62,19 +62,20 @@ The same id is ACP's `sessionId` and the core's `SessionId`: one id with two lif
 never gets a prompt leaves nothing on disk, so `session/list` lists only sessions that had a turn.
 
 The host advertises `sessionCapabilities.additionalDirectories`. The `additionalDirectories` of
-`session/new`, `session/load` and `session/resume` are folders that count as inside the working
-folder, after those of the launcher's `--add-dir` and before the settings' `additionalDirectories`:
-for the permission policy (`docs/agent-policy.md`), for the file tools, which take a path inside
-any of them (`inWorkspace`), and in the system text, which names them. Each must be an absolute path, as `cwd` must,
-or the request is refused (-32602, naming it). A new session's are kept in its record.
+`session/new`, `session/load` and `session/resume` are the client's folders that count as inside
+the working folder, after those of the launcher's `--add-dir` and before each permissions entry's
+`additionalDirectories`: for the permission policy (`docs/agent-policy.md`), for the file tools,
+which take a path inside any of them (`inWorkspace`), and in the system text, which names them.
+Each must be an absolute path, as `cwd` must, or the request is refused (-32602, naming it). A new
+session's are kept in its record.
 
 ### The session's context
 
 `session/new`, `session/load` and `session/resume` make the session's context (`SessionContext`,
 `docs/agent-environment.md`) when they create the session's entry, with
-`agent-host/session-context.ts`: the session's id, `cwd` as its working folder, its folders (the
-launcher's `--add-dir`, the request's `additionalDirectories`, then the settings'), and its
-environment, made once from the configuration's `commandEnvironment`. The entry keeps the context
+`agent-host/session-context.ts`: the session's id, `cwd` as its working folder, the folders that
+each source gives (the launcher's `--add-dir`, the request's `additionalDirectories`, then each
+permissions entry's), and its environment, made once from the configuration's `commandEnvironment`. The entry keeps the context
 until `session/close` or the end of the connection.
 
 - The context is made before the world is opened. The world, the MCP servers, the session's
@@ -85,8 +86,16 @@ until `session/close` or the end of the connection.
 - The world reads the session's id, its working folder, its folders and its environment from the
   context when it is opened (`WorldOpening` carries none of them).
 - The MCP servers' processes receive the context's environment, each with its own `env` set over it.
-- A draft has no store, so its folders are those the host gives. Once the store opens, the folders
-  that the facts record (`FolderAdded`) follow them.
+- A draft has no store, so its folders are those its open will record. Once the store opens, the
+  folders are projected from the facts.
+- Each open records what it changes of the session's working folder and its additional folders
+  (`changesAtOpen`, `docs/agent-host.md`), before any turn runs: a new session at its first prompt,
+  after `SessionOpened`; a session that `session/load` or `session/resume` starts once its store is
+  open, before a turn that its facts left running is ended. A session loaded or resumed in another
+  `cwd` records `SessionHomed` with it, and the model's next request tells it of the move. A session
+  that this connection holds already (`reopenHeld`) records nothing: it goes on as it is, and the
+  host logs the folders the request named that it did not apply. These facts project to no update,
+  live or on a replay.
 
 ### `session/new`
 
@@ -561,14 +570,15 @@ the load showed is not shown again, and a later request's deltas are sent once.
 A world (`world.ts`) is what the host does not know of a session. Given the client's MCP servers,
 the connection and whether tool input is strict (`WorldOpening`), and the session's context, from
 which it reads the session's id, its working folder, its folders and its environment, a world gives
-the session's system prompt, its tool sources (`ToolSource`), their presentation (`Present`), and
+its part of the session's system prompt, its tool sources (`ToolSource`), their presentation (`Present`), and
 the environment its commands run with (`WorldSession.environment`, `docs/agent-environment.md`). A
 host can give a world of its own (`HostOptions.world`); the host provides the session's context
 when it opens the world.
 
-Both worlds below send one line of system prompt, which names the working folder
-(`workingFolderLine` in `agent-tools/workspace.ts`). Their tool descriptions refer to "the working
-folder" without naming it. Each tool input has a description that states what it means, whether it
+Every request's system prompt starts with the line that names the working folder and the additional
+folders, made from the session's facts (`workingFolderLine`, `agent-session/configuration/session-home.ts`).
+Both worlds below add the git tools' line to it when the working folder is a repository's root, and
+nothing otherwise. Their tool descriptions refer to "the working folder" without naming it. Each tool input has a description that states what it means, whether it
 is optional, and its default. The descriptions and limits shared with the workspace tools come from
 `agent-tools/workspace.ts`.
 

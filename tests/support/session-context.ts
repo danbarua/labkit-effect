@@ -20,8 +20,9 @@ export const testSessionId = SessionId.make("test-session");
  * A session's context: the session `session` (`testSessionId` when left out), working in `working`
  * (`/work/project` when left out), whose folders are `folders` (the working folder and the home
  * folder `/home/test` when left out), and whose environment is `environment`. `folders` may be an
- * effect, read at each use. When `environment` is left out, the environment is the one a host's
- * builder makes by default (`defaultCommandEnvironment`): this process's environment when the
+ * effect, read at each use. The folders have no sources, so `foldersFrom` returns all of them,
+ * whatever sources its reader includes. When `environment` is left out, the environment is the one a
+ * host's builder makes by default (`defaultCommandEnvironment`): this process's environment when the
  * context is made, without its credential variables.
  */
 export const testSessionContext = (
@@ -33,11 +34,13 @@ export const testSessionContext = (
   } = {},
 ): SessionContext["Service"] => {
   const working = options.working ?? "/work/project";
-  const folders = options.folders ?? { working: WordText.make(working), home: WordText.make("/home/test") };
+  const given = options.folders ?? { working: WordText.make(working), home: WordText.make("/home/test") };
+  const folders = Effect.isEffect(given) ? given : Effect.succeed(given);
   return {
     session: options.session === undefined ? testSessionId : SessionId.make(options.session),
     working,
-    folders: Effect.isEffect(folders) ? folders : Effect.succeed(folders),
+    folders,
+    foldersFrom: () => folders,
     environment: options.environment ?? environmentWith(defaultCommandEnvironment),
   };
 };

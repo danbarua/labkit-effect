@@ -94,8 +94,14 @@ with it. It is the session's machinery; what a host's own machinery adds is a li
   numbering. The store and the tool sources are `withSession`'s.
 - A bolt-on (`BoltOn`) adds tool sources, a part of the opening system text, notice providers, and
   work that starts once the session is open. The CLI's bolt-ons are its working folder's tools (the
-  workspace's and the git tools) and its MCP servers. Zork's adventurer's bolt-on is the game's
-  world tools.
+  workspace's and the git tools, whose part of the system text is the git tools' line) and its MCP
+  servers. Zork's adventurer's bolt-on is the game's world tools. No bolt-on names the working
+  folder: every request's system prompt starts with the line made from the session's facts
+  (`docs/agent-session.md`).
+- Each open records what it changes of the session's working folder and its additional folders
+  (`MadeSessionContext.changesAtOpen`, below): a new session after `SessionOpened`, a continued one
+  first, before a turn that a previous run left unfinished is gone on with or ended. The facts are
+  recorded with the origin that the host gives the session's other observations.
 - The host (`Host`) follows the session from its opening, and chooses whether a turn that a
   previous run left unfinished is gone on with or ended. `Headless` follows nothing and goes on.
 - When the run is interrupted during a turn, the interruption is recorded and the turn is waited
@@ -114,21 +120,38 @@ with it. It is the session's machinery; what a host's own machinery adds is a li
 every host. It is the one place where a session's folders and its environment are assembled.
 
 - `makeSessionContext(place)` makes the context of the session at `place`: the session's id, its
-  working folder, and the folders that count as inside it as the host gives them, in order: the
-  launcher's (`--add-dir`), the client's (ACP's `additionalDirectories`), then the configuration's
-  (`additionalDirectories` of the permissions plug-in, `additionalDirectoriesOf`). A folder from `~`
-  is resolved from this process's home folder, and a relative one from the working folder.
-- The context's folders are read at each use. They are the folders `place` gives, then the folders
-  the user added to the session (`FolderAdded`), read from the session's facts.
-- The host gives the context the session's facts once the session's store is open
-  (`storeOpened`). Before then the session has no facts. Giving a second store is a defect.
+  working folder, and the folders that each source other than the user gives (`given`), in order.
+  A source that `given` does not list gives no folders.
+
+  | Host | Sources it gives, in order |
+  | --- | --- |
+  | CLI | `Launcher` (`--add-dir`), then each permissions entry (`permissionFoldersOf`) |
+  | ACP | `Launcher` (the launcher's `--add-dir`), `Client` (`additionalDirectories`), then each permissions entry |
+  | Zork, fizzbuzz | none |
+
+  A folder from `~` is resolved from this process's home folder, and a relative one from the
+  working folder.
+- `changesAtOpen(facts)` returns what the host records when it opens the session over `facts`
+  (`agent-session/configuration/session-home.ts`):
+  1. `SessionHomed` with the working folder, when the facts record no working folder or another
+     one;
+  2. for each source other than the user, those that `given` lists and then those that only the
+     facts name: a `FolderRemoved` for each folder that the facts have from the source and that it
+     no longer gives, then a `FolderAdded` for each folder that it gives and that the facts do not
+     have from it.
+
+  Nothing is returned when nothing differs. The folders that the user added stay as they are. A
+  session continued in the CLI loses the ACP client's folders, and a session continued in ACP loses
+  the CLI's `--add-dir` folders unless the ACP launcher gives them too.
+- The context's folders are projected from the session's facts at each use, with the changes that
+  the open has not recorded yet. The host gives the context the session's facts once the session's
+  store is open (`storeOpened`). Before then the session has no facts, and its folders are the ones
+  its open will record. Giving a second store is a defect.
 - The context's environment is made once, by `makeSessionContext`: the transforms that `place`
   gives (`commandEnvironment`, the configuration's list) are applied in order to this process's
   environment (`environmentWith`). When `place` gives none, the transforms are
   `defaultCommandEnvironment`: this process's environment without its credential variables. The
   environment also names this process's variables that it does not have (`leftOut`).
-- `openingFolders(place)` returns the folders of `place` before the user adds any: the folders
-  that the opening system text names (`workingFolderLine`).
 - `inSession(context)` runs an effect in the session: it provides `SessionContext`, annotates each
   log line with `session`, and annotates each span with `session` and `cwd` (the working folder).
   The fibers that the effect starts inherit all three, the loop's requests among them.

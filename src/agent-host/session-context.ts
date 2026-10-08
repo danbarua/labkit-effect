@@ -1,19 +1,20 @@
 /**
  * The context of a session (`agent-environment/session-context.ts`), as every host makes it: the one
  * place where a session's folders and its environment are assembled. A host makes the context where
- * the session's resources start (`makeSessionContext`), and runs the session's work in it
- * (`inSession`).
+ * the session's resources start (`makeSessionContext`), records what its open changes before any
+ * turn runs (`MadeSessionContext.changesAtOpen`), and runs the session's work in it (`inSession`).
  *
- * A session's folders, all absolute, are read from the session at each use:
+ * A session's folders, all absolute, are projected from its facts at each use
+ * (`agent-session/configuration/session-home.ts`):
  *
  * | Folder | From |
  * | --- | --- |
- * | the working folder | the host: the CLI's folder, ACP's `cwd` |
+ * | the working folder | the host: the CLI's folder, ACP's `cwd`, which each open records (`SessionHomed`) |
  * | the home folder | this process's home folder |
- * | the additional folders, in order | the launcher's (`--add-dir`), the client's (ACP's `additionalDirectories`), the configuration's (`additionalDirectories` of the permissions plug-in), then those the user added to the session (`FolderAdded`), read from its facts |
+ * | the additional folders, in the order they were added | the launcher's (`--add-dir`), the client's (ACP's `additionalDirectories`) and each permissions entry's (`additionalDirectories`), which each open records (`FolderAdded`, `FolderRemoved`), and the user's (`/add-dir`) |
  *
- * An additional folder from `~` is resolved from the home folder; a relative one from the working
- * folder.
+ * A host gives a folder absolute, from `~` (resolved from the home folder), or relative to the
+ * working folder (resolved from it).
  */
 
 import { homedir } from "node:os";
@@ -24,17 +25,24 @@ import { WordText } from "../agent-environment/command-segments.ts";
 import type { Folders } from "../agent-environment/command-units.ts";
 import { SessionContext } from "../agent-environment/session-context.ts";
 import type { Fact } from "../agent-machine/fact.ts";
-import type { SessionId } from "../agent-machine/names.ts";
+import { FolderPath, type SessionId } from "../agent-machine/names.ts";
+import type { FolderSource } from "../agent-machine/observation.ts";
 import { type EnvironmentTransform, processEnvironmentWith, removeCredentials } from "../agent-process/environment.ts";
-import { foldersAddedOf } from "../agent-session/configuration/session-setup.ts";
+import { changesAtOpen, folded, type GivenFolders, type HomeChange, homeOf } from "../agent-session/configuration/session-home.ts";
+
+/** The folders that one source other than the user gives a session, as the host has them: absolute, from `~`, or relative to the working folder. */
+export interface GivenPlaces {
+  readonly from: GivenFolders["from"];
+  readonly folders: ReadonlyArray<string>;
+}
 
 /** Where a session works, as its host knows it before the session has facts. */
 export interface SessionPlace {
   readonly session: SessionId;
   /** The working folder, as an absolute path. */
   readonly working: string;
-  /** The folders that count as inside the working folder, in order (the module's table): absolute, from `~`, or relative to the working folder. */
-  readonly additional: ReadonlyArray<string>;
+  /** The folders that each source other than the user gives, in order. A source that is not listed gives none. */
+  readonly given: ReadonlyArray<GivenPlaces>;
   /**
    * The transforms of this process's environment that make the session's environment, in order: the
    * configuration's `commandEnvironment`. `defaultCommandEnvironment` when left out.
@@ -59,21 +67,9 @@ export const environmentWith = (transforms: ReadonlyArray<EnvironmentTransform>)
   return { _tag: "Known", variables, leftOut: Arr.sort(leftOut, Order.String) };
 };
 
-/** The working folder, the home folder, and `additional` resolved against them (`~/x` from the home folder, a relative path from the working folder). */
-const foldersOf = (working: string, additional: ReadonlyArray<string>): Folders => {
-  const home = homedir();
-  return {
-    working: WordText.make(working),
-    home: WordText.make(home),
-    additional: additional.map((folder) => WordText.make(folder === "~" || folder.startsWith("~/") ? join(home, folder.slice(1)) : resolve(working, folder))),
-  };
-};
-
-/**
- * The folders of the session at `place` before the user adds any: what the opening system text names
- * (`workingFolderLine`), which the folders added later do not change.
- */
-export const openingFolders = (place: Pick<SessionPlace, "working" | "additional">): Folders => foldersOf(place.working, place.additional);
+/** Returns `folder` as an absolute path: from the home folder `home` when it starts with `~`, else from the working folder `working`. */
+const absolute = (folder: string, working: string, home: string): FolderPath =>
+  FolderPath.make(folder === "~" || folder.startsWith("~/") ? join(home, folder.slice(1)) : resolve(working, folder));
 
 /** A session's context, and how its host gives it the session's facts. */
 export interface MadeSessionContext {
@@ -84,29 +80,50 @@ export interface MadeSessionContext {
    * prompt. Giving a second store is a defect.
    */
   readonly storeOpened: (facts: Effect.Effect<ReadonlyArray<Fact>>) => Effect.Effect<void>;
+  /**
+   * Returns what the host records when it opens the session over `facts`, before any turn runs:
+   * `SessionHomed` when the facts name no working folder or another one, and the additional folders
+   * that each source other than the user now gives or no longer gives (`changesAtOpen`). A new
+   * session records them after `SessionOpened`; a continued one records them first.
+   */
+  readonly changesAtOpen: (facts: ReadonlyArray<Fact>) => ReadonlyArray<HomeChange>;
 }
 
 /**
- * Makes the context of the session at `place`: its folders, read at each use (the module's table),
- * and its environment, made now from `place.commandEnvironment`.
+ * Makes the context of the session at `place`: its environment, made now from
+ * `place.commandEnvironment`, and its folders, projected at each use from the session's facts (the
+ * module's table). Until the open's changes are recorded, the folders include them, so a draft that
+ * has no store yet has the folders that its open will record.
  */
 export const makeSessionContext = (place: SessionPlace): Effect.Effect<MadeSessionContext> =>
   Effect.gen(function* () {
     const store = yield* Deferred.make<Effect.Effect<ReadonlyArray<Fact>>>();
     const environment = yield* Effect.sync(() => environmentWith(place.commandEnvironment ?? defaultCommandEnvironment));
+    const home = homedir();
+    const working = FolderPath.make(place.working);
+    const given: ReadonlyArray<GivenFolders> = place.given.map((each) => ({ from: each.from, folders: each.folders.map((folder) => absolute(folder, place.working, home)) }));
+    const changes = (facts: ReadonlyArray<Fact>) => changesAtOpen(facts, working, given);
     const facts = Effect.flatMap(
       Deferred.poll(store),
       Option.match({ onNone: () => Effect.succeed<ReadonlyArray<Fact>>([]), onSome: (read) => Effect.flatten(read) }),
     );
+    const foldersFrom = (include: (from: FolderSource) => boolean): Effect.Effect<Folders> =>
+      Effect.map(facts, (all) => ({
+        working: WordText.make(place.working),
+        home: WordText.make(home),
+        additional: folded(homeOf(all), changes(all)).additional.flatMap((each) => (include(each.from) ? [WordText.make(each.folder)] : [])),
+      }));
     return {
       context: {
         session: place.session,
         working: place.working,
-        folders: Effect.map(facts, (all) => foldersOf(place.working, [...place.additional, ...foldersAddedOf(all)])),
+        folders: foldersFrom(() => true),
+        foldersFrom,
         environment,
       },
       storeOpened: (read) =>
         Effect.flatMap(Deferred.succeed(store, read), (given) => (given ? Effect.void : Effect.die(new Error(`Session ${place.session} was given a second store`)))),
+      changesAtOpen: changes,
     };
   });
 

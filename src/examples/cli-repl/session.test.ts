@@ -1,7 +1,7 @@
 /**
  * What the CLI records of a session, which stored sessions `--continue` and the `--resume` picker
- * offer, what a CLI session's log lines carry, and the environment that a CLI session's MCP servers
- * receive.
+ * offer, what a CLI session's log lines carry, the environment that a CLI session's MCP servers
+ * receive, and what each open records of the session's folders.
  */
 
 import { expect } from "bun:test";
@@ -15,7 +15,8 @@ import { type LayerSource, loadConfiguration } from "../../agent-config/file.ts"
 import { defaultBrand } from "../../agent-host/brand.ts";
 import { brandFoldersLayer, brandFoldersOf } from "../../agent-host/brand-folders.ts";
 import { Headless } from "../../agent-host/with-session.ts";
-import { ModelName, ProviderName } from "../../agent-machine/names.ts";
+import type { Fact } from "../../agent-machine/fact.ts";
+import { FolderPath, ModelName, ProviderName } from "../../agent-machine/names.ts";
 import { logKeys as processLogKeys } from "../../agent-process/log-keys.ts";
 import { withoutCredentials } from "../../agent-process/environment.ts";
 import { cliDefaults } from "./configuration.ts";
@@ -121,4 +122,49 @@ test("the log lines of a CLI session's MCP server carry the session's id (sessio
   const { logged } = await mcpRun("cli-mcp-logged", {});
   const environment = logged.filter(({ message }) => Array.isArray(message) && message[0] === processLogKeys.process.environment);
   expect(environment.map(({ session }) => session)).toEqual(["cli-mcp-logged"]);
+});
+
+/** Opens the CLI session `cli-folders` in memory with `--add-dir` `added`, continuing `continues` when given, and returns its facts. */
+const openedWithFolders = async (added: ReadonlyArray<string>, continues?: ReadonlyArray<Fact>) => {
+  const configuration = { ...(await runTest(loadConfiguration([]))), layers: [] };
+  const config: Config = {
+    sessionId: "cli-folders",
+    target: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") },
+    settings: {},
+    system: undefined,
+    ...(continues === undefined ? {} : { continues }),
+    persist: false,
+    configuration,
+    canAsk: false,
+    additionalFolders: added,
+    strictToolInput: false,
+  };
+  return runTest(
+    withCliSession(config, Layer.empty, Headless, (session) => session.facts).pipe(
+      Effect.provide(Layer.mergeAll(BunServices.layer, brandFoldersLayer(brandFoldersOf(defaultBrand, { home: testFolder() })))),
+    ),
+  );
+};
+
+/** The observations among `facts` that change the session's working folder or its folders, after the first `skip`. */
+const homeChanges = (facts: ReadonlyArray<Fact>, skip = 0) =>
+  facts.slice(skip).flatMap((fact) =>
+    fact._tag === "Observed" && (fact.observation._tag === "SessionHomed" || fact.observation._tag === "FolderAdded" || fact.observation._tag === "FolderRemoved") ? [fact.observation] : [],
+  );
+
+test("each open of a CLI session records what --add-dir changes of its folders: a new session its working folder and each folder; a reopen with another folder one FolderRemoved and one FolderAdded; a reopen with the same folders nothing", async () => {
+  const first = join(testFolder(), "first");
+  const second = join(testFolder(), "second");
+  const opened = await openedWithFolders([first]);
+  expect(homeChanges(opened)).toEqual([
+    { _tag: "SessionHomed", working: FolderPath.make(process.cwd()) },
+    { _tag: "FolderAdded", folder: FolderPath.make(first), from: { _tag: "Launcher" } },
+  ]);
+  const moved = await openedWithFolders([second], opened);
+  expect(homeChanges(moved, opened.length)).toEqual([
+    { _tag: "FolderRemoved", folder: FolderPath.make(first), from: { _tag: "Launcher" } },
+    { _tag: "FolderAdded", folder: FolderPath.make(second), from: { _tag: "Launcher" } },
+  ]);
+  const same = await openedWithFolders([second], moved);
+  expect(homeChanges(same, moved.length)).toEqual([]);
 });

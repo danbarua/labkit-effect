@@ -93,7 +93,7 @@ const played = (inputs: ReadonlyArray<string>, setup: Setup, summaries: Summarie
   const id = SessionId.make(setup.session ?? "fizzbuzz");
   return Effect.gen(function* () {
     // The game has no working folder of its own: the session works in this process's, which its spans and log lines do not name.
-    const made = yield* makeSessionContext({ session: id, working: process.cwd(), additional: [] });
+    const made = yield* makeSessionContext({ session: id, working: process.cwd(), given: [] });
     return yield* Effect.provideService(SessionContext, made.context)(
       Effect.gen(function* () {
         const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));

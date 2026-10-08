@@ -12,7 +12,7 @@ test("by default the folders are under the home folder: configuration in .config
   expect(brandFoldersOf(acme, { home: "/home/a" })).toEqual({
     config: "/home/a/.config/acme",
     data: "/home/a/.local/share/acme",
-    sessions: "/home/a/.local/share/acme/sessions/v0.1.0",
+    sessions: "/home/a/.local/share/acme/sessions/v0.2.0",
     blobs: "/home/a/.local/share/acme/blobs",
     logs: "/home/a/.local/share/acme/logs",
     project: ".acme",
@@ -20,7 +20,7 @@ test("by default the folders are under the home folder: configuration in .config
 });
 
 test("--data-dir moves sessions, blobs and logs together; --sessions-dir moves the sessions alone; --config-dir moves the configuration alone", () => {
-  expect(brandFoldersOf(acme, { home: "/home/a", dataDir: "/srv/acme" })).toMatchObject({ config: "/home/a/.config/acme", sessions: "/srv/acme/sessions/v0.1.0", blobs: "/srv/acme/blobs", logs: "/srv/acme/logs" });
+  expect(brandFoldersOf(acme, { home: "/home/a", dataDir: "/srv/acme" })).toMatchObject({ config: "/home/a/.config/acme", sessions: "/srv/acme/sessions/v0.2.0", blobs: "/srv/acme/blobs", logs: "/srv/acme/logs" });
   expect(brandFoldersOf(acme, { home: "/home/a", sessionsDir: "/tmp/sessions" })).toMatchObject({ sessions: "/tmp/sessions", blobs: "/home/a/.local/share/acme/blobs", logs: "/home/a/.local/share/acme/logs" });
   expect(brandFoldersOf(acme, { home: "/home/a", configDir: "/etc/acme" })).toMatchObject({ config: "/etc/acme", data: "/home/a/.local/share/acme" });
 });

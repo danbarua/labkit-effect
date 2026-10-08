@@ -13,6 +13,7 @@
 
 import { Context, type Effect } from "effect";
 import type { SessionId } from "../agent-machine/names.ts";
+import type { FolderSource } from "../agent-machine/observation.ts";
 import type { KnownEnvironment } from "./command-environment.ts";
 import type { Folders } from "./command-units.ts";
 
@@ -24,11 +25,18 @@ export class SessionContext extends Context.Service<
     /** The working folder, as an absolute path. */
     readonly working: string;
     /**
-     * The folders that paths are judged against, all absolute: the working folder, the home folder,
-     * and the additional folders. Read it at each use: the user can add a folder while the session
-     * runs (the CLI's `/add-dir`).
+     * The session's folders, all absolute: the working folder, the home folder, and the additional
+     * folders from every source. The recording of what a call changes, the previews of a write and
+     * the explanations of a permission question read them. Read them at each use: the user can add a
+     * folder while the session runs (the CLI's `/add-dir`).
      */
     readonly folders: Effect.Effect<Folders>;
+    /**
+     * The working folder, the home folder, and the additional folders whose source `include` accepts,
+     * read at each use. A permissions entry judges paths against the folders from the user, the
+     * launcher, the client and the entry itself.
+     */
+    readonly foldersFrom: (include: (from: FolderSource) => boolean) => Effect.Effect<Folders>;
     /**
      * The environment variables of each process that the harness starts for the session: a command
      * the model runs on the local disk (`run_command`), and an MCP server, whose own `env` is set over

@@ -17,7 +17,7 @@ import { Deferred, Effect, Fiber, Layer, Logger, References } from "effect";
 import * as Agent from "effective-acp/agent";
 import { fromWebStreams } from "effective-acp/stdio";
 import { type Brand, defaultBrand } from "../agent-host/brand.ts";
-import { brandFoldersOf } from "../agent-host/brand-folders.ts";
+import { brandFoldersLayer, brandFoldersOf } from "../agent-host/brand-folders.ts";
 import { blobNameOf } from "../agent-session/blobs.ts";
 import type { ConfigFlags } from "../agent-host/launch.ts";
 import type { Environment } from "../agent-process/environment.ts";
@@ -29,7 +29,17 @@ import { startFakeHttpServer } from "../../tests/support/mcp-http-server.ts";
 import { undescribedInputs } from "../../tests/support/tool-input.ts";
 import { answerNow } from "../agent-host/incomplete.ts";
 import { SessionServices } from "../agent-host/services.ts";
-import { CallId, FailureText, Millis, ModelName, ModelText, ProviderName, StopReason, ThinkingText, TokenCount, ToolName, type TurnId } from "../agent-machine/names.ts";
+import { CallId, FailureText, FolderPath, Millis, ModelName, ModelText, ProviderName, SessionId, StopReason, ThinkingText, TokenCount, ToolName, type TurnId, Via } from "../agent-machine/names.ts";
+import { BoringContextAssembler, BoringModelProvider } from "../../tests/support/boring.ts";
+import { makeSessionContext } from "../agent-host/session-context.ts";
+import { Headless, withSession } from "../agent-host/with-session.ts";
+import { homeOf } from "../agent-session/configuration/session-home.ts";
+import { reportedBy } from "../agent-session/origin.ts";
+import { SourcedToolRunner } from "../agent-session/tool-sources.ts";
+import { CountingTurnsInStore } from "../agent-session/turns.ts";
+import { addDir } from "../examples/cli-repl/commands/add-dir.ts";
+import { cliRecord } from "../examples/cli-repl/session.ts";
+import { viewOf } from "../examples/cli-repl/view.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { ModelPart, Observation, ToolOutcome } from "../agent-machine/observation.ts";
 import { ModelClient, type ModelContext, type Target, ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
@@ -2088,6 +2098,78 @@ test("session/resume starts the stored session and replays nothing, then sends t
     annotations: { session: stored.sessionId },
     details: { cwd: elsewhere, replayed: 0, turnsLeftRunning: [] },
   });
+});
+
+test("a stored session loaded in another cwd records SessionHomed with it; the next request carries the move as a message, and its system prompt still names the folder of the first turn", async () => {
+  const stored = await storedSession("Echo ping", echoTurn);
+  const elsewhere = join(testFolder(), "elsewhere");
+  const host = startHost({ world: echoWorld, script: [answer({ _tag: "Text", text: "Moved." })] });
+  await sdkClient().app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, {});
+    await ctx.request("session/load", { sessionId: stored.sessionId, cwd: elsewhere, mcpServers: [] });
+    await ctx.request("session/prompt", say(stored.sessionId, "Again"));
+  });
+  await host.stop();
+  const facts = await factsOn(stored.file);
+  const homed = observed(facts).flatMap((fact) => (fact.observation._tag === "SessionHomed" ? [fact.observation.working as string] : []));
+  expect(homed).toEqual([stored.cwd, elsewhere]);
+  const moved = `The session moved from the working folder ${stored.cwd} to ${elsewhere}.`;
+  expect(JSON.stringify(host.contexts[0]?.messages)).toContain(moved);
+  expect(host.contexts[0]?.system).toBe(`The working folder is ${stored.cwd}. Test.`);
+});
+
+test("a session made in the CLI, with a folder added by /add-dir, keeps the folder when ACP loads it: the system prompt names it, and a command that reads there is not asked about", async () => {
+  const cwd = join(testFolder(), "work");
+  const shared = join(testFolder(), "shared");
+  mkdirSync(cwd, { recursive: true });
+  mkdirSync(shared, { recursive: true });
+  const sessionId = crypto.randomUUID();
+  // The CLI's session machinery (`withSession`) and its /add-dir command, with the session saved where the ACP host reads it.
+  await Effect.runPromise(
+    Effect.flatMap(makeSessionContext({ session: SessionId.make(sessionId), working: cwd, given: [{ from: { _tag: "Launcher" }, folders: [] }] }), (context) =>
+      withSession(
+        {
+          context,
+          target: { provider: openai, model: sol },
+          settings: {},
+          persist: true,
+          root: join(testFolder(), "sessions"),
+          record: cliRecord(cwd),
+          services: Layer.mergeAll(BoringModelProvider, BoringContextAssembler, CountingTurnsInStore, SourcedToolRunner, Layer.succeed(ModelClient, { respond: () => Effect.die("no model is asked") })),
+          boltOns: [],
+          logs: Logger.layer([]),
+          host: Headless,
+        },
+        (session) =>
+          Effect.gen(function* () {
+            const commandContext = { folder: cwd, configFolder: join(testFolder(), "config"), view: yield* viewOf("on"), layers: [], commandLine: {} };
+            return yield* addDir.inSession(session, [shared], commandContext);
+          }),
+      ),
+    ).pipe(
+      reportedBy({ _tag: "User", via: Via.make("cli") }),
+      Effect.provide(Layer.mergeAll(BunServices.layer, catalog(), brandFoldersLayer(brandFoldersOf(defaultBrand, { home: join(testFolder(), "home") })))),
+    ),
+  );
+  const host = startHost({
+    script: [
+      answer({ _tag: "ToolCall", call: "read-1", tool: "terminal_command", input: { command: `cat ${shared}/notes.md`, intent: "Read the shared notes." } }),
+      answer({ _tag: "Text", text: "Read." }),
+    ],
+  });
+  const { app, log } = sdkClient();
+  await app.connectWith(host.stream, async (ctx) => {
+    await initialize(ctx, { terminal: true, fs: { readTextFile: true } });
+    await ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(sessionId, "Read the notes"));
+  });
+  await host.stop();
+  expect(log.asked).toEqual([]);
+  const facts = await factsOn(storeFileOf(host.directory, sessionId));
+  expect(homeOf(facts).additional).toEqual([{ folder: FolderPath.make(shared), from: { _tag: "User" } }]);
+  expect(host.contexts[0]?.system).toContain(`These folders count as inside it too: ${shared}.`);
+  const ended = observed(facts).flatMap((fact) => (fact.observation._tag === "ToolEnded" ? [fact.observation] : []));
+  expect(ended.find((each) => each.call === "read-1")?.outcome._tag).toBe("Succeeded");
 });
 
 test("session/list gives the sessions with a record, latest first, by working folder and a page at a time; a session with no record is not listed but loads; a cursor it did not give is -32602", async () => {

@@ -10,9 +10,11 @@
  * - `described` (`described.ts`) wraps every tool: it adds a required `intent` input.
  *
  * `workspaceTools(root)` returns the catalog, the tool source that runs a call given the file
- * system and the session's context, and the system text that names the root as the working folder
- * (`workingFolderLine`). The descriptions call the root "the working folder" and
- * do not name it. A tool's description states what the tool does and its limits; each input's
+ * system and the session's context, and the text that names the root as the working folder
+ * (`workingFolderLine`). The descriptions call the root "the working folder" and do not name it. A
+ * host does not send that text: every request's system prompt starts with the line made from the
+ * session's facts, which names the working folder and the additional folders
+ * (`immutableSystemPromptOf`). A tool's description states what the tool does and its limits; each input's
  * description states what the input means, whether it is optional, and its default.
  *
  * `read_file` reads UTF-8 text, at most 256 KiB in one result; `line` (1-based) and `limit` (a
@@ -39,6 +41,7 @@ import { resolve } from "node:path";
 import { Array as Arr, Chunk, Duration, Effect, FileSystem, Option, Order, Schema, Stream } from "effect";
 import { SessionContext } from "../agent-environment/session-context.ts";
 import { ToolName } from "../agent-machine/names.ts";
+import { workingFolderLine } from "../agent-session/configuration/session-home.ts";
 import { described } from "./described.ts";
 import { inWorkspace } from "./in-workspace.ts";
 import { blobReads } from "./blob-reads.ts";
@@ -54,13 +57,6 @@ export const commandSeconds = 120;
 
 /** The longest time that a call can give a command. */
 export const maxCommandSeconds = 600;
-
-/**
- * The system text that names the working folder. The tool descriptions refer to "the working folder"
- * without naming it, so a host that offers these tools sends this text as well.
- */
-export const workingFolderLine = (folder: string, additional: ReadonlyArray<string> = []): string =>
-  `The working folder is ${folder}.${additional.length === 0 ? "" : ` These folders count as inside it too: ${additional.join(", ")}.`}`;
 
 export const ReadFile = Schema.Struct({
   path: FilePath,
@@ -265,10 +261,8 @@ export function workspaceTools(
   root: string,
   options: {
     readonly strictInput?: boolean;
-    readonly additional?: ReadonlyArray<string>;
   } = {},
 ) {
-  const additional = options.additional ?? [];
   const bound = inWorkspace(root);
   const tools: ReadonlyArray<AnyTool<FileSystem.FileSystem | SessionContext>> = [
     anyTool(described(blobReads(bound(readFile)))),
@@ -280,6 +274,6 @@ export function workspaceTools(
   return {
     catalog: tools.map((tool) => tool.spec),
     source: sourceOf(tools, { strictInput: options.strictInput ?? false }),
-    system: workingFolderLine(root, additional),
+    system: workingFolderLine(root),
   };
 }

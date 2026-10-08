@@ -126,7 +126,7 @@ const servicesOf = (player: Player, request?: Request, feedback: Effect.Effect<R
 
 /** Makes the context of the session of `role` in the game `game`, `zork-<role>-<game>`, which works in this process's working folder. */
 const contextOf = (game: string, role: "engine" | "adventurer") =>
-  makeSessionContext({ session: SessionId.make(`zork-${role}-${game}`), working: process.cwd(), additional: [] });
+  makeSessionContext({ session: SessionId.make(`zork-${role}-${game}`), working: process.cwd(), given: [] });
 
 /** One of a game's two sessions, in its `context`, as `withSession` runs it. `source` is the adventurer's bolt-on, the world's tools. */
 const optionsOf = (

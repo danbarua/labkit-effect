@@ -314,7 +314,9 @@ const observed = (
     case "CompactionWindow":
     case "InputCancelled":
     case "McpServerChanged":
+    case "SessionHomed":
     case "FolderAdded":
+    case "FolderRemoved":
     case "ModelRequestDispatched":
     case "ModelFailed":
     case "ModelAttemptFailed":

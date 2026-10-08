@@ -264,7 +264,9 @@ export function deliver(world: World, seq: Seq, observation: Observation): Deliv
       case "InputCancelled":
         return { world: withdrawn(world, observation.input), outputs: none };
       case "McpServerChanged":
+      case "SessionHomed":
       case "FolderAdded":
+      case "FolderRemoved":
         // No machine acts on it: the session records it for its record and its host.
         return { world, outputs: none };
       case "ModelResponded":

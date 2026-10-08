@@ -86,7 +86,7 @@ const program = Effect.gen(function* () {
 });
 
 const result = await Effect.runPromise(
-  Effect.flatMap(makeSessionContext({ session: SessionId.make("mcp-everything"), working: process.cwd(), additional: [] }), (made) => inSession(made.context)(program)).pipe(
+  Effect.flatMap(makeSessionContext({ session: SessionId.make("mcp-everything"), working: process.cwd(), given: [] }), (made) => inSession(made.context)(program)).pipe(
     Effect.scoped,
     Effect.provide(Layer.mergeAll(BunServices.layer, withLogLevel(logLevelOf(process.env), Logger.layer([log, otlpLogger("labkit-probe")])), OtlpSpansAndMetrics("labkit-probe"))),
   ),

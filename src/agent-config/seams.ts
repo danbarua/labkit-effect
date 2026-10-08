@@ -6,6 +6,7 @@
  */
 
 import { Effect, Layer } from "effect";
+import { EntryName } from "../agent-machine/names.ts";
 import { Settling, type SettlingSource } from "../agent-session/configuration/options.ts";
 import { KnownModels, type ModelKnowledge } from "../agent-session/configuration/well-known-models.ts";
 import { MaxHolds, ModelRequestPolicies, type NamedPolicy, ToolCallPolicies, type TurnEndHook, TurnEndHooks } from "../agent-session/contracts.ts";
@@ -29,7 +30,7 @@ export interface SeamLists {
 /** Returns the entries of `seam` that the configuration lists, in order; undefined when it does not list the seam. */
 const listOf = <S extends Seam>(configuration: Configuration, seam: S, host: FromHost): ReadonlyArray<Entries[S]> | undefined =>
   configuration.lists[seam]?.map((entry) => {
-    const made = entry.plugin.entries(entry.settings as never, host)[seam];
+    const made = entry.plugin.entries(entry.settings as never, host, EntryName.make(entry.name))[seam];
     // A plug-in is registered on a seam only when it says so (`on`), and its entries are typed by it.
     if (made === undefined) throw new Error(`${entry.plugin.use} is listed on ${seam} but gives it no entry`);
     return made as Entries[S];

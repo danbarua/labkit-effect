@@ -2,7 +2,7 @@
  * What the ACP host does not know of a session: the world it works in. From the session's context
  * (`SessionContext`: its id, its working folder, its folders and its environment), the MCP servers
  * the client named and the connection (the client's capabilities, its `fs/*` methods), a world
- * returns the session's system prompt, its tool sources (`ToolSource`: the tools and what runs a call
+ * returns its part of the session's system prompt, its tool sources (`ToolSource`: the tools and what runs a call
  * to one), how their calls are shown (`Present`), and the environment its commands run with. The
  * core records what happened, and never sees the world.
  *
@@ -51,7 +51,7 @@ import { inWorkspace } from "../agent-tools/in-workspace.ts";
 import { blobReads } from "../agent-tools/blob-reads.ts";
 import { fullPathIn } from "../agent-tools/paths.ts";
 import { type AnyTool, type CurrentCall, anyTool, sourceOf } from "../agent-tools/tool.ts";
-import { maxReadBytes, workingFolderLine, workspaceTools } from "../agent-tools/workspace.ts";
+import { maxReadBytes, workspaceTools } from "../agent-tools/workspace.ts";
 import { Editor, editFile, readFile, runCommand, updatePlan, writeFile } from "./editor-tools.ts";
 import { changedFiles, oneLine, type Present, type Presented, presentFrom } from "./projection.ts";
 
@@ -111,9 +111,13 @@ const aboutOf = (input: Readonly<Record<string, unknown>>): string | undefined =
 /** The git tools bound to the working folder `cwd`, when it is the root of a git repository; undefined otherwise. */
 const gitToolsAt = (cwd: string, strictInput: boolean) => (isRepositoryRoot(cwd) ? gitTools(cwd, { strictInput }) : undefined);
 
-/** Returns the system text for the working folder `cwd`: the line that names it, and the git tools' line when it is a repository's root. */
-const systemFor = (cwd: string, git: ReturnType<typeof gitToolsAt>, additional: ReadonlyArray<string> = []): Effect.Effect<string> =>
-  Effect.map(git === undefined ? Effect.succeed("") : Effect.map(git.system, (line) => ` ${line}`), (line) => `${workingFolderLine(cwd, additional)}${line}`);
+/**
+ * Returns the world's system text: the git tools' line when the working folder is a repository's
+ * root, else none. The line that names the working folder and the additional folders is the
+ * session's own: every request's system prompt starts with it, made from the session's facts
+ * (`immutableSystemPromptOf`).
+ */
+const systemFor = (git: ReturnType<typeof gitToolsAt>): Effect.Effect<string | undefined> => (git === undefined ? Effect.undefined : git.system);
 
 /**
  * The tools that go through the editor (`editor-tools.ts`), for the methods the client advertised:
@@ -146,8 +150,6 @@ export const editorWorld: World<FileSystem.FileSystem | SessionContext> = {
       // The session's folders, which a command's writes are judged against, read at each use.
       const { session, working: cwd, folders } = yield* SessionContext;
       const sessionId = SessionId.make(session);
-      // The world is opened before the session's store, so these are the folders the host gives: those the system text names.
-      const additional = (yield* folders).additional ?? [];
       // The terminal each command ran in, by call: shown in the call as it runs, and when it has ended.
       const terminals = yield* Ref.make(HashMap.empty<CallId, TerminalId>());
       // What each command writes to files, with their text before it ran: read once, before it runs.
@@ -248,7 +250,7 @@ export const editorWorld: World<FileSystem.FileSystem | SessionContext> = {
               Effect.catch((error) => Effect.succeed<Current>({ _tag: "Unknown", reason: `the editor could not read its text: ${error.message}` })),
             );
       return {
-        system: yield* systemFor(cwd, git, additional),
+        system: yield* systemFor(git),
         sources: [source, ...(git === undefined ? [] : [yield* git.source])],
         present,
         fileText,
@@ -266,13 +268,11 @@ export const workspaceWorld: World<FileSystem.FileSystem | SessionContext> = {
   open: ({ strictInput }) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const { working: cwd, folders, environment } = yield* SessionContext;
-      // The world is opened before the session's store, so these are the folders the host gives: those the system text names.
-      const additional = (yield* folders).additional ?? [];
-      const workspace = workspaceTools(cwd, { strictInput, additional });
+      const { working: cwd, environment } = yield* SessionContext;
+      const workspace = workspaceTools(cwd, { strictInput });
       const git = gitToolsAt(cwd, strictInput);
       return {
-        system: yield* systemFor(cwd, git, additional),
+        system: yield* systemFor(git),
         sources: [yield* workspace.source.pipe(Effect.provideService(FileSystem.FileSystem, fs)), ...(git === undefined ? [] : [yield* git.source])],
         present: presentFrom([...workspace.catalog, ...(git?.catalog ?? [])]),
         environment,

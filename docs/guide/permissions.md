@@ -162,7 +162,8 @@ path deny rule refuses it in every mode.
 `additionalDirectories` lists folders whose files count as inside your folder: a command and the
 file tools may read and change files there as they do in your folder, and the agent is told of
 them. A folder is absolute, from `~`, or relative to
-your folder:
+your folder. With two permissions entries, each counts only its own `additionalDirectories`: a
+change in a folder that only the second names is asked about by the first.
 
 ```yaml
 plugins:
@@ -175,8 +176,10 @@ plugins:
 `--add-dir <folder>` adds one for a session, at the terminal or in the ACP launcher, and is
 repeatable. In a conversation, `/add-dir <folder>` adds one from the next tool call on, and tells the
 agent; `/add-dir` alone lists them. A folder added with `/add-dir` stays added when you continue the
-session (`--continue`, `--resume`). An editor can name more for each session it opens (ACP's
-`additionalDirectories`).
+session (`--continue`, `--resume`), in the terminal or in an editor. An editor can name more for
+each session it opens (ACP's `additionalDirectories`). When you continue a session with other
+`--add-dir` folders, other settings or another editor's folders, the session's folders follow them,
+and the agent is told what changed.
 
 ## What labkit does not check
 

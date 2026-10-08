@@ -73,7 +73,7 @@ const name = [stamp, provider, model, ...said].join("-");
 const run = runFolder("live-turn", name);
 
 const facts = await Effect.runPromise(
-  Effect.flatMap(makeSessionContext({ session: SessionId.make("live"), working: process.cwd(), additional: [] }), (made) =>
+  Effect.flatMap(makeSessionContext({ session: SessionId.make("live"), working: process.cwd(), given: [] }), (made) =>
     inSession(made.context)(
       Effect.gen(function* () {
         const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));

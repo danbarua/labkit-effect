@@ -18,7 +18,8 @@ import { openSession } from "../../agent-session/loop.ts";
 import { EphemeralSessionStore } from "../../agent-session/session-store.ts";
 import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
 import { receivedJson } from "../../agent-session/received.ts";
-import { foldersAddedOf, openedWith } from "../../agent-session/configuration/session-setup.ts";
+import { openedWith } from "../../agent-session/configuration/session-setup.ts";
+import { homeOf } from "../../agent-session/configuration/session-home.ts";
 import { CountingTurns } from "../../agent-session/turns.ts";
 import { completions, offered, runInSession } from "./commands.ts";
 import { inForce } from "./model-settings.ts";
@@ -34,8 +35,9 @@ const configFolder = () => join(testFolder(), "config");
 /**
  * Runs `lines` in order (commands, or input for the model) as `brand` (labkit by default), with the
  * configuration layers `layers`, in a session that opens with `tools`. The CLI's context assembler
- * builds each model request. Returns what each command printed, the target, the tools and the
- * messages of each model request, the session's facts, and whether thinking is shown at the end.
+ * builds each model request. Returns what each command printed, the target, the tools, the messages
+ * and the system prompt of each model request, the session's facts, and whether thinking is shown at
+ * the end.
  */
 const session = (
   lines: ReadonlyArray<string>,
@@ -48,12 +50,14 @@ const session = (
   const asked: Array<Target> = [];
   const sent: Array<ReadonlyArray<ToolSpec>> = [];
   const messages: Array<unknown> = [];
+  const systems: Array<string | undefined> = [];
   const recording = Layer.succeed(ModelClient, {
     respond: (target, context, turn) =>
       Effect.sync(() => {
         asked.push(target);
         sent.push(context.tools);
         messages.push(context.messages);
+        systems.push(context.system);
         return {
           _tag: "ModelResponded" as const,
           turn,
@@ -89,7 +93,7 @@ const session = (
         }
         else yield* ask(opened, line);
       }
-      return { printed, asked, sent, messages, facts: yield* opened.facts, thinking: yield* Ref.get(view.thinking) };
+      return { printed, asked, sent, messages, systems, facts: yield* opened.facts, thinking: yield* Ref.get(view.thinking) };
     }).pipe(
       // No command here prompts; the terminal is provided because `/model` and `/settings` alone could.
       Effect.orDie,
@@ -317,12 +321,21 @@ test("/settings reports a setting the model does not have in a single error line
   expect(printed[1]).toBe("ERROR: openai/gpt-5 has no thinking setting.");
 });
 
-test("/add-dir records an existing folder as a fact of the session and lists the folders added; it refuses a path that is no folder, and the model is told of each folder once, where it was added", async () => {
+test("/add-dir records an existing folder as a fact of the session and lists the folders added; it refuses a path that is no folder; the model is told of a folder added before the first turn in the system prompt, and of one added later once, where it was added", async () => {
   const folder = testFolder();
   const shared = join(folder, "shared");
+  const later = join(folder, "later");
   mkdirSync(shared, { recursive: true });
+  mkdirSync(later, { recursive: true });
   writeFileSync(join(folder, "a.txt"), "a");
-  const { printed, messages, facts } = await session(["/add-dir", "/add-dir shared", `/add-dir ${shared}`, "/add-dir missing", "/add-dir a.txt", "/add-dir", "hello", "hello again"]);
+  // The session's working folder is recorded after its opening, as every host records it when it first opens a session.
+  const homed = [{ _tag: "SessionHomed", working: FolderPath.make(folder) }];
+  const { printed, messages, systems, facts } = await session(
+    ["/add-dir", "/add-dir shared", `/add-dir ${shared}`, "/add-dir missing", "/add-dir a.txt", "/add-dir", "hello", "/add-dir later", "hello again"],
+    defaultBrand,
+    { effort: "low" },
+    homed,
+  );
   expect(printed).toEqual([
     "No folders are added. Type /add-dir <folder> to add one.",
     `Added ${shared}: the agent may read and change files there, for this session.`,
@@ -330,9 +343,17 @@ test("/add-dir records an existing folder as a fact of the session and lists the
     `ERROR: No such folder: ${join(folder, "missing")}.`,
     `ERROR: Not a folder: ${join(folder, "a.txt")}.`,
     `Added folders:\n  ${shared}`,
+    `Added ${later}: the agent may read and change files there, for this session.`,
   ]);
-  expect(foldersAddedOf(facts)).toEqual([FolderPath.make(shared)]);
-  const told = `The user added the folder ${shared}: it counts as inside the working folder, so you may read and change files there.`;
-  // Each request carries the notice once: the first where it was added, the second in the conversation it repeats.
-  expect(messages.map((each) => JSON.stringify(each).split(told).length - 1)).toEqual([1, 1]);
+  expect(homeOf(facts).additional).toEqual([
+    { folder: FolderPath.make(shared), from: { _tag: "User" } },
+    { folder: FolderPath.make(later), from: { _tag: "User" } },
+  ]);
+  // Added before the first turn: every request's system prompt names it, and no message does.
+  expect(systems).toEqual([`The working folder is ${folder}. These folders count as inside it too: ${shared}.`, `The working folder is ${folder}. These folders count as inside it too: ${shared}.`]);
+  const told = (added: string) => `The user added the folder ${added}: it counts as inside the working folder, so you may read and change files there.`;
+  const count = (added: string) => messages.map((each) => JSON.stringify(each).split(told(added)).length - 1);
+  expect(count(shared)).toEqual([0, 0]);
+  // Added after the first turn: the next request carries the message once, where it was added.
+  expect(count(later)).toEqual([0, 1]);
 });

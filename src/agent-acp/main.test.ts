@@ -132,19 +132,19 @@ const foldersOf = async (env: Readonly<Record<string, string>>, brand: Brand = d
 test("sessions are kept in --sessions-dir (LABKIT_ACP_SESSIONS_DIR), else in ~/.local/share/<brand>/sessions; for another brand, its variable and folder", async () => {
   const acme = { name: "acme", version: "1.0.0" };
   const directory = async (env: Readonly<Record<string, string>>, brand: Brand = defaultBrand, args: ReadonlyArray<string> = []) => (await foldersOf(env, brand, args)).sessions;
-  expect(await directory({})).toBe(join(homedir(), ".local", "share", "labkit", "sessions", "v0.1.0"));
-  expect(await directory({}, acme)).toBe(join(homedir(), ".local", "share", "acme", "sessions", "v0.1.0"));
-  expect(await directory({ LABKIT_ACP_SESSIONS_DIR: "" })).toBe(join(homedir(), ".local", "share", "labkit", "sessions", "v0.1.0"));
+  expect(await directory({})).toBe(join(homedir(), ".local", "share", "labkit", "sessions", "v0.2.0"));
+  expect(await directory({}, acme)).toBe(join(homedir(), ".local", "share", "acme", "sessions", "v0.2.0"));
+  expect(await directory({ LABKIT_ACP_SESSIONS_DIR: "" })).toBe(join(homedir(), ".local", "share", "labkit", "sessions", "v0.2.0"));
   expect(await directory({ LABKIT_ACP_SESSIONS_DIR: "/tmp/elsewhere" })).toBe("/tmp/elsewhere");
   expect(await directory({ LABKIT_ACP_SESSIONS_DIR: "/tmp/elsewhere" }, defaultBrand, ["--sessions-dir", "/tmp/given"])).toBe("/tmp/given");
-  expect(await directory({ LABKIT_ACP_SESSIONS_DIR: "/tmp/elsewhere" }, acme)).toBe(join(homedir(), ".local", "share", "acme", "sessions", "v0.1.0"));
+  expect(await directory({ LABKIT_ACP_SESSIONS_DIR: "/tmp/elsewhere" }, acme)).toBe(join(homedir(), ".local", "share", "acme", "sessions", "v0.2.0"));
   expect(await directory({ ACME_ACP_SESSIONS_DIR: "/tmp/acme" }, acme)).toBe("/tmp/acme");
 });
 
 test("--sessions-dir moves the sessions alone; --data-dir (LABKIT_ACP_DATA_DIR) moves sessions, blobs and logs together, and a relative one is refused", async () => {
   const share = join(homedir(), ".local", "share", "labkit");
   expect(await foldersOf({}, defaultBrand, ["--sessions-dir", "/tmp/given"])).toMatchObject({ sessions: "/tmp/given", blobs: join(share, "blobs"), logs: join(share, "logs") });
-  expect(await foldersOf({ LABKIT_ACP_DATA_DIR: "/srv/labkit" })).toMatchObject({ sessions: "/srv/labkit/sessions/v0.1.0", blobs: "/srv/labkit/blobs", logs: "/srv/labkit/logs" });
+  expect(await foldersOf({ LABKIT_ACP_DATA_DIR: "/srv/labkit" })).toMatchObject({ sessions: "/srv/labkit/sessions/v0.2.0", blobs: "/srv/labkit/blobs", logs: "/srv/labkit/logs" });
   const relative = await runTest(launcherFolders((await launcherOptions(["--data-dir", "data"], {}))!, defaultBrand).pipe(Effect.flip));
   expect(relative).toMatchObject({ _tag: "ConfigInvalid", file: "--data-dir" });
 });

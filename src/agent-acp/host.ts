@@ -64,7 +64,7 @@ import { markdownOf } from "../agent-host/export.ts";
 import { KnownWithLocalServer, localServer, SettlingWithLocalServer } from "../agent-host/local-server.ts";
 import { readRecord, RecordFailed, recordedSessions, recordFileOf, writeRecord } from "../agent-host/record.ts";
 import { SessionServices } from "../agent-host/services.ts";
-import { additionalDirectoriesOf, commandToolsOf } from "../agent-config/builtins.ts";
+import { commandToolsOf, permissionFoldersOf } from "../agent-config/builtins.ts";
 import { recordingChanges } from "../agent-host/recorded-changes.ts";
 import { inSession, type MadeSessionContext, makeSessionContext, type SessionPlace } from "../agent-host/session-context.ts";
 import { SessionContext } from "../agent-environment/session-context.ts";
@@ -276,6 +276,8 @@ interface Entry {
   readonly context: SessionContext["Service"];
   /** Gives the context the session's facts once the session's store is open (`startSession`). */
   readonly storeOpened: MadeSessionContext["storeOpened"];
+  /** What opening the session records of its working folder and its additional folders (`startSession`, `open`). */
+  readonly changesAtOpen: MadeSessionContext["changesAtOpen"];
   /** The folders the client named with the working folder (`additionalDirectories`), absolute. */
   readonly additional: ReadonlyArray<string>;
   /** Its world, with the MCP servers' tools after the world's own. */
@@ -653,14 +655,22 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
         /**
          * Starts the session `id` over its facts file, in a scope of its own forked from the entry's: its services, the core's
          * session, then `go`. `go` starts the session's feed (`follow`, from the projection state it passes) at the point from
-         * which the feed is to send what is recorded. Any failure closes the scope, so nothing is left open.
+         * which the feed is to send what is recorded. `homed` records what this open changes of the session's working folder and
+         * its additional folders (`changesAtOpen`): a session continued from its facts records it before `go`, so before a turn
+         * left running is ended; a new session records it in `go`, after its opening. Any failure closes the scope, so nothing is
+         * left open.
          */
         const startSession = <A extends { readonly feed: Feed }, E, X>(
           id: AcpSessionId,
           world: WorldSession,
           permissionMode: Ref.Ref<PermissionMode>,
-          parent: Pick<Entry, "scope" | "mcp" | "configuration" | "context" | "storeOpened">,
-          go: (session: Session, context: Context.Context<Services>, follow: (initial: ProjectionState) => Effect.Effect<Feed>) => Effect.Effect<A, E, X>,
+          parent: Pick<Entry, "scope" | "mcp" | "configuration" | "context" | "storeOpened" | "changesAtOpen">,
+          go: (
+            session: Session,
+            context: Context.Context<Services>,
+            follow: (initial: ProjectionState) => Effect.Effect<Feed>,
+            homed: Effect.Effect<void, SessionStoreFailed>,
+          ) => Effect.Effect<A, E, X>,
         ) =>
           Effect.gen(function* () {
             const scope = yield* Scope.fork(parent.scope);
@@ -694,6 +704,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const session = yield* openSession.pipe(Effect.provideContext(context), Effect.annotateSpans({ host: acpHost }), Scope.provide(scope));
               // The session's folders read its facts from its store, now that it is open.
               yield* parent.storeOpened(session.facts);
+              const homed = Effect.flatMap(session.facts, (now) =>
+                Effect.forEach(parent.changesAtOpen(now), (change) => session.observe(change).pipe(Effect.provideContext(context), reportedBy(acpUser)), { discard: true }),
+              );
+              if ((yield* session.facts).length > 0) yield* homed;
 
               const follow = (initial: ProjectionState) =>
                 startFeed({
@@ -719,7 +733,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                     yield* Effect.logInfo(logKeys.config.made, { model: change.model, permissionMode: change.permissionMode });
                   }),
               });
-              const made = yield* go(session, context, follow);
+              const made = yield* go(session, context, follow, homed);
               // Once the session's facts have their opening, its MCP servers' states, and each change of them, are recorded (`McpServers.changes`).
               yield* parent.mcp.changes.pipe(
                 Stream.runForEach((change) =>
@@ -754,11 +768,12 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             yield* writeRecord(options.folders.sessions, entry.id, record).pipe(Effect.catch(failed("writing the session's record at its first prompt")));
             yield* Effect.logInfo(logKeys.record.written, { file: recordFileOf(options.folders.sessions, entry.id), cwd: record.cwd, titled: record.title !== undefined });
             yield* settingsWritten(entry.id, entry.configuration, yield* Ref.get(entry.permissionMode), `${draft.model.provider}/${draft.model.model}`);
-            const opened = yield* startSession(entry.id, entry.world, entry.permissionMode, entry, (session, context, follow) =>
+            const opened = yield* startSession(entry.id, entry.world, entry.permissionMode, entry, (session, context, follow, homed) =>
               Effect.gen(function* () {
                 // The feed starts first: the session has no facts yet, so the feed sends everything from the opening on, live.
                 const feed = yield* follow(start);
                 yield* session.observe(opening(draft, SessionId.make(entry.id))).pipe(Effect.provideContext(context), reportedBy(acpUser));
+                yield* homed;
                 return { feed };
               }),
             ).pipe(Effect.catch(failed("opening the draft at its first prompt")));
@@ -1136,14 +1151,14 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           });
 
         /**
-         * Where the session `session` works: `cwd`, and the folders that count as inside it, as given: the launcher's, the session's
-         * (`additional`), then the settings'; and the transforms of the environment of the processes it starts, a command on the local
-         * disk and an MCP server, which the configuration lists (`commandEnvironment`).
+         * Where the session `session` works: `cwd`, and the folders that count as inside it, by source: the launcher's, the
+         * client's (`additional`), then each permissions entry's; and the transforms of the environment of the processes it
+         * starts, a command on the local disk and an MCP server, which the configuration lists (`commandEnvironment`).
          */
         const placeOf = (session: SessionId, cwd: string, additional: ReadonlyArray<string>, configuration: Configured): SessionPlace => ({
           session,
           working: cwd,
-          additional: [...(options.additionalFolders ?? []), ...additional, ...additionalDirectoriesOf(configuration)],
+          given: [{ from: { _tag: "Launcher" }, folders: options.additionalFolders ?? [] }, { from: { _tag: "Client" }, folders: additional }, ...permissionFoldersOf(configuration)],
           commandEnvironment: seamListsOf(configuration, { canAsk: true }).commandEnvironment,
         });
 

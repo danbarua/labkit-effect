@@ -58,10 +58,11 @@ model.
         - Reads and changes outside the working folder (built: writes, `rm`, `mv`, `cp`, `chmod`,
           `touch`, `curl -o`, `find -delete`, `xargs rm`, and the like) are lifted only by path
           rules, `Read(...)` and `Edit(...)`, as in Claude Code (2026-10-08); additional folders
-          (settings, `--add-dir`, ACP's `additionalDirectories`) count as inside, for commands and
-          the file tools, which are asked about a path outside every folder as a command is; the
-          REPL's `/add-dir` adds one to the session as a fact of it (`FolderAdded`), so a continued
-          session keeps it. To do: the programs the guide lists as not checked
+          (each permissions entry's `additionalDirectories`, for that entry only; `--add-dir`; ACP's
+          `additionalDirectories`) count as inside, for commands and the file tools, which are asked
+          about a path outside every folder as a command is; each open records what it changes of
+          them, and the REPL's `/add-dir` adds one, as facts of the session (`FolderAdded`,
+          `FolderRemoved`), so a continued session keeps the user's. To do: the programs the guide lists as not checked
           (`docs/guide/permissions.md`).
         - Searches rewritten to leave out denied folders (Dan, 2026-10-08): with the command parsed
           (`bash-segments`), labkit adds exclusions to `find`, `grep -r` and `rg` (`-not -path`,
@@ -245,7 +246,7 @@ model.
       that answers whole) announces a call before its response's text, which is known only when the
       response ends; the host's own replies to `/export` and `/mcp` carry no `messageId`.
 - [ ] The ACP host's sessions across processes. Built: each session's facts in a file
-      (`FileBackedSessionStore`, `~/.local/share/labkit/sessions/v0.1.0`); the host's record of a
+      (`FileBackedSessionStore`, `~/.local/share/labkit/sessions/v0.2.0`); the host's record of a
       session (`host.json`: the ACP host, the working folder, a title from the first prompt), written at turn zero; `session/load` (the
       stored facts replayed before the answer), `session/resume` (no replay) and `session/list`
       (by working folder, newest first, paged), with `session_info_update`; a turn the facts left
@@ -445,12 +446,29 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 ### Sessions
 
 - [ ] Where a host keeps what it writes (Dan, 2026-10-06): `~/.local/share/<brand>/`. Built:
-      every host's sessions in `sessions/v0.1.0/` (a change to their shape moves them to the next
-      version's folder, so no session store has to read an older shape), each with a record that
+      every host's sessions in `sessions/v0.2.0/` (a change to their shape moves them to the next
+      version's folder, so no session store reads an older shape), each with a record that
       names the host that made it; the blobs of both hosts' sessions in `blobs/`, each file
       `<id>.<extension>`; the log files in `logs/`. To do: large tool outputs spooled to disk, and a
       human-readable formatting of the logs beside the JSONL. Continuing a session in another host than the one that made it waits for a
       session's tools to change during it.
+- [ ] The session's working folder and its folders, as facts (Dan, 2026-10-08). Built: each open
+      records `SessionHomed` and the folders that each source adds or no longer gives
+      (`FolderAdded`, `FolderRemoved`); the system prompt names those of the facts before the first
+      turn; later ones are messages to the model (`docs/agent-session.md`). To do:
+      - `/rm-dir <folder>`: the user removes a folder that they added (`FolderRemoved` from the
+        user).
+      - `/mv <folder>`: the session moves to another working folder (`SessionHomed`), which the
+        model is told of as a move. `SessionContext.working` then becomes an effect, read from the
+        facts at each use.
+      - `SessionGitHomed`: the git repository that the session works in, as a fact. It would move the
+        git tools' line out of the opening's system prompt, beside the working folder's line.
+      - ACP calls `seamListsOf` twice: once for the session's environment (`placeOf`), and once
+        when the session starts, with the permission mode and the live tools' paths. The tools'
+        paths need the world's and the MCP servers' catalog, which need the context, which needs
+        the environment. Options: `FromHost.toolPaths` becomes an effect read from a `Deferred`
+        that is given after `withServers`, or the `commandEnvironment` entries are made without
+        `FromHost`.
 - [ ] Provider usage (Dan, 2026-10-06). What is built is in `src/instrumentation/README.md`. To do:
       a summarizer's requests are not in the facts, so their tokens and cost are in no session's
       totals; on a failed request after a fallback, the request's span names the model it asked,

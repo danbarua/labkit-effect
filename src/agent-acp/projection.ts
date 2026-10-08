@@ -745,7 +745,9 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
         case "NoticeInserted":
         case "CompactionWindow":
         case "McpServerChanged":
+        case "SessionHomed":
         case "FolderAdded":
+        case "FolderRemoved":
           return Effect.succeed(nothing(state));
         default:
           return observation satisfies never;
@@ -812,7 +814,9 @@ function inLiveOrder(inputs: ReadonlyArray<ProjectionInput>): ReadonlyArray<Proj
         case "NoticeInserted":
         case "CompactionWindow":
         case "McpServerChanged":
+        case "SessionHomed":
         case "FolderAdded":
+        case "FolderRemoved":
           return found;
         default:
           return observation satisfies never;

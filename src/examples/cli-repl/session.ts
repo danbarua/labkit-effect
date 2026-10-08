@@ -11,8 +11,11 @@
  * credential variables). When the folder is the root of a git repository, the git tools
  * (`agent-tools/git.ts`) come next, bound to it. Then come the tools of the MCP servers the configuration names
  * (`configuration.ts`). The system prompt starts with the line that names that folder as the working
- * folder, which the tool descriptions refer to, and the line that says it is a repository's root
- * when it is one; the `--system-prompt` and `--append-system-prompt` text follows. The
+ * folder, which the tool descriptions refer to, with the additional folders (`--add-dir`'s, each
+ * permissions entry's `additionalDirectories`, and `/add-dir`'s before the first turn): each request
+ * makes it from the session's facts, which each open records. The line that says the folder is a
+ * repository's root, when it is one, and the `--system-prompt` and `--append-system-prompt` text
+ * follow. The
  * policies and turn-end hooks come from the configuration (`agent-config`); by default, permission
  * follows `--permission-mode`.
  */
@@ -39,9 +42,9 @@ import type { Fact } from "../../agent-machine/fact.ts";
 import { InputText, SessionId, type TurnId, Via } from "../../agent-machine/names.ts";
 import type { SettingsChange } from "../../agent-machine/settings.ts";
 import { gitTools, isRepositoryRoot } from "../../agent-tools/git.ts";
-import { additionalDirectoriesOf, commandToolsOf } from "../../agent-config/builtins.ts";
+import { commandToolsOf, permissionFoldersOf } from "../../agent-config/builtins.ts";
 import type { ToolSpec } from "../../agent-session/contracts.ts";
-import { inSession, makeSessionContext, openingFolders } from "../../agent-host/session-context.ts";
+import { type GivenPlaces, inSession, makeSessionContext } from "../../agent-host/session-context.ts";
 import { recordingChanges } from "../../agent-host/recorded-changes.ts";
 import { workspaceTools } from "../../agent-tools/workspace.ts";
 import type { Session } from "../../agent-session/loop.ts";
@@ -69,7 +72,7 @@ export interface Config {
   readonly configuration: Configuration & { readonly layers: ReadonlyArray<LayerSource> };
   /** Whether someone can answer a permission question: true for the REPL at a terminal. */
   readonly canAsk: boolean;
-  /** The folders that count as inside the working folder for this session (`--add-dir`). */
+  /** The folders that count as inside the working folder for this session, the launcher's (`--add-dir`). */
   readonly additionalFolders: ReadonlyArray<string>;
   /**
    * Whether a tool call with input properties the tool does not define is refused
@@ -90,19 +93,15 @@ export const cliRecord = (cwd: string) => ({ host: cliHost, cwd });
 /** Whether a stored session's record says that the CLI made it in the working folder `cwd`. */
 export const madeIn = (record: unknown, cwd: string): boolean => Predicate.isReadonlyObject(record) && record["host"] === cliHost && record["cwd"] === cwd;
 
-/** The folders that count as inside the working folder for a CLI session: `--add-dir`'s, then the configuration's (`additionalDirectories`). */
-const additionalOf = (config: Config): ReadonlyArray<string> => [...config.additionalFolders, ...additionalDirectoriesOf(config.configuration)];
-
 /**
- * The workspace tools for the working folder, whose system text names the folders that count as
- * inside it; their commands run with the session's environment, which the configuration's
- * `commandEnvironment` makes.
+ * The folders that count as inside the working folder for a CLI session, by source: the launcher's
+ * (`--add-dir`), then each permissions entry's (`additionalDirectories`). The CLI has no client, so
+ * a session continued in the CLI has no client's folders.
  */
-const workspaceOf = (config: Config) =>
-  workspaceTools(process.cwd(), {
-    strictInput: config.strictToolInput,
-    additional: openingFolders({ working: process.cwd(), additional: additionalOf(config) }).additional ?? [],
-  });
+const givenOf = (config: Config): ReadonlyArray<GivenPlaces> => [{ from: { _tag: "Launcher" }, folders: config.additionalFolders }, ...permissionFoldersOf(config.configuration)];
+
+/** The workspace tools for the working folder; their commands run with the session's environment, which the configuration's `commandEnvironment` makes. */
+const workspaceOf = (config: Config) => workspaceTools(process.cwd(), { strictInput: config.strictToolInput });
 
 /** The git tools bound to the working folder, when it is the root of a git repository; undefined otherwise. */
 const gitOf = (config: Config) => (isRepositoryRoot(process.cwd()) ? gitTools(process.cwd(), { strictInput: config.strictToolInput }) : undefined);
@@ -127,7 +126,7 @@ const servicesOf = (config: Config, lists: SeamLists) => {
 };
 
 /** The configuration's MCP servers, in the form `startMcpServers` takes. */
-const givenOf = (configuration: Configuration): ReadonlyArray<GivenServer> =>
+const serversOf = (configuration: Configuration): ReadonlyArray<GivenServer> =>
   configuration.mcpServers.map((server) => ({ server: "url" in server ? server : { ...server, cwd: server.cwd ?? process.cwd() }, connectTimeout: server.connectTimeout }));
 
 /**
@@ -166,7 +165,7 @@ const requiredRunning = (configuration: Configuration, mcp: McpServers) =>
 
 /**
  * The working folder's bolt-on: the workspace tools, the git tools when the folder is a repository's
- * root, and the system text that names the folder (and says it is a repository's root).
+ * root, and the system text that says it is a repository's root, when it is one.
  */
 const folderBoltOn = (config: Config, workspace: ReturnType<typeof workspaceOf>, git: ReturnType<typeof gitOf>) =>
   Effect.gen(function* (): Effect.fn.Return<BoltOn, never, FileSystem.FileSystem> {
@@ -174,7 +173,7 @@ const folderBoltOn = (config: Config, workspace: ReturnType<typeof workspaceOf>,
     const recorded = recordingChanges({ commandTools: commandToolsOf(config.configuration) });
     return {
       sources: yield* Effect.forEach([yield* workspace.source, ...(git === undefined ? [] : [yield* git.source])], recorded),
-      system: [workspace.system, ...(git === undefined ? [] : [yield* git.system])].join(" "),
+      system: git === undefined ? undefined : yield* git.system,
     };
   });
 
@@ -222,14 +221,14 @@ export const withCliSession = <A, E, R, L, H>(
     const context = yield* makeSessionContext({
       session: SessionId.make(config.sessionId),
       working: process.cwd(),
-      additional: additionalOf(config),
+      given: givenOf(config),
       commandEnvironment: lists.commandEnvironment,
     });
     return yield* inSession(context.context)(
       Effect.gen(function* () {
         yield* written(config, context.context.environment, root);
         // The MCP servers start in the session's scope, before its services, because their tools are among them.
-        const mcp = yield* startMcpServers(givenOf(config.configuration), [{ uri: pathToFileURL(process.cwd()).href, name: basename(process.cwd()) }]);
+        const mcp = yield* startMcpServers(serversOf(config.configuration), [{ uri: pathToFileURL(process.cwd()).href, name: basename(process.cwd()) }]);
         yield* requiredRunning(config.configuration, mcp);
         const folder = yield* folderBoltOn(config, workspace, gitOf(config));
         return yield* withSession(

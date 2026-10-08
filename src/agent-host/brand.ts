@@ -47,7 +47,7 @@ export const folderOf = (brand: Brand): string => `.${brand.name}`;
 
 /**
  * The version of the sessions' shape: their facts and their folders. A change to the shape moves
- * sessions to the next version's folder, so that no session store has to read an older shape. The
- * sessions in an older version's folder are left where they are.
+ * sessions to the next version's folder, so that no session store reads an older shape. The sessions
+ * in an older version's folder are left where they are, and no host reads them.
  */
-export const sessionsVersion = "v0.1.0";
+export const sessionsVersion = "v0.2.0";

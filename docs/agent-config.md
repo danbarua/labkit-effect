@@ -91,7 +91,10 @@ caller builds itself (`fileLayer(file, false)`).
 | `cli` | The CLI's own settings: `view.thinking` (`on`, `off`), whether it shows the model's thinking; `on` when no layer sets it. It changes nothing in a request. |
 
 - A seam's entries become the session's list for that seam, in the same order. Each entry is made by
-  its plug-in from its settings, which are the same on every list the entry is on.
+  its plug-in from its settings, which are the same on every list the entry is on, and the name it
+  is listed by. A `permissions` entry's `additionalDirectories` count as inside the working folder
+  for that entry only: the host records them as that entry's folders (`permissionFoldersOf`), and
+  the entry judges paths against the folders from the user, the launcher, the client and itself.
 - Two of one plug-in with different settings are two names in `plugins`, each with `use`.
 - A seam that no layer lists is not provided: the host's own list, or the seam's default, stands.
 - No built-in plug-in is on `knownModels`, `settling` or `toolSources` yet.

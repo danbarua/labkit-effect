@@ -4,7 +4,10 @@
  * - each response is an assistant message with its text and tool calls, followed by a user message
  *   with a result for every call it made (sent as `tool-output.ts` describes);
  * - each notice is an instruction message, at the place where it was inserted;
- * - each folder the user added is an instruction message saying so, at the place where it was added.
+ * - each change of the session's working folder or additional folders recorded after TurnZero (the
+ *   first `TurnStarted`) is an instruction message saying so, at the place where it was recorded
+ *   (`changeTextOf`, `configuration/session-home.ts`). A change recorded before TurnZero is not a
+ *   message: the system prompt names the folders that those changes leave.
  *
  * Consecutive messages from one role are merged into one. A response's thinking and the parts that
  * the harness does not recognise stay in their place, marked with the provider that produced them;
@@ -15,9 +18,10 @@ import { Array as Arr, Option } from "effect";
 import { outcomeAsSent } from "./tool-output.ts";
 import type { BlobRef } from "../agent-machine/blob.ts";
 import type { Fact } from "../agent-machine/fact.ts";
-import { type CallId, NoticeText, type Seq } from "../agent-machine/names.ts";
+import type { CallId, NoticeText, Seq } from "../agent-machine/names.ts";
 import type { Observation, ToolOutcome } from "../agent-machine/observation.ts";
 import type { ContextMessage, ContextPart } from "./contracts.ts";
+import { changeTextOf, homeOf, turnZeroOf } from "./configuration/session-home.ts";
 import { sentIn } from "./sent.ts";
 
 /** Returns each input's text and its attached files, by the input's sequence number. */
@@ -60,8 +64,23 @@ function outcomeOf(call: CallId, calls: Calls): ToolOutcome {
   return ended === undefined ? { _tag: "Failed", reason: { _tag: calls.dispatched.has(call) ? "Indeterminate" : "NotRun" } } : outcomeAsSent(ended);
 }
 
+/** What the messages of a fact are projected with: the inputs' texts, how the calls ended, and the whole session's facts with the position of TurnZero. */
+interface Session {
+  readonly texts: ReturnType<typeof inputTexts>;
+  readonly calls: Calls;
+  readonly all: ReadonlyArray<Fact>;
+  readonly turnZero: Seq | undefined;
+}
+
+/** Returns the message that tells the model of a change of the session's folders recorded at `seq`: none before TurnZero. */
+function homeChanged(seq: Seq, change: Parameters<typeof changeTextOf>[0], session: Session): ReadonlyArray<ContextMessage> {
+  if (session.turnZero === undefined || seq < session.turnZero) return [];
+  return [noticeMessage([changeTextOf(change, homeOf(session.all.filter((fact) => fact.seq < seq)))])];
+}
+
 /** Returns the messages that one fact adds to the conversation. */
-function messages(fact: Fact, texts: ReturnType<typeof inputTexts>, calls: Calls): ReadonlyArray<ContextMessage> {
+function messages(fact: Fact, session: Session): ReadonlyArray<ContextMessage> {
+  const { texts, calls } = session;
   // Each input is its text, then the files that came with it.
   const inputs = (seqs: ReadonlyArray<Seq>): ContextMessage => ({
     role: "user",
@@ -107,8 +126,10 @@ function messages(fact: Fact, texts: ReturnType<typeof inputTexts>, calls: Calls
       ];
     case "NoticeInserted":
       return [noticeMessage([observation.text])];
+    case "SessionHomed":
     case "FolderAdded":
-      return [noticeMessage([NoticeText.make(`The user added the folder ${observation.folder}: it counts as inside the working folder, so you may read and change files there.`)])];
+    case "FolderRemoved":
+      return homeChanged(fact.seq, observation, session);
     case "SessionOpened":
     case "InputArrived":
     case "InputCancelled":
@@ -151,9 +172,8 @@ export function merged(messages: ReadonlyArray<ContextMessage>): ReadonlyArray<C
  * up in `all`, which defaults to `facts`; pass the whole session when `facts` is part of it.
  */
 export function conversationOf(facts: ReadonlyArray<Fact>, all: ReadonlyArray<Fact> = facts): ReadonlyArray<ContextMessage> {
-  const texts = inputTexts(all);
-  const calls = callsOf(all);
-  return merged(facts.flatMap((fact) => messages(fact, texts, calls).filter((added) => added.parts.length > 0)));
+  const session: Session = { texts: inputTexts(all), calls: callsOf(all), all, turnZero: turnZeroOf(all) };
+  return merged(facts.flatMap((fact) => messages(fact, session).filter((added) => added.parts.length > 0)));
 }
 
 /**

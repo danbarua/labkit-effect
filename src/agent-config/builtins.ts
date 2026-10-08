@@ -26,7 +26,8 @@ import { defaultMaxTurnRequests } from "../agent-policy/max-turn-requests.ts";
 import { defaultPermissionSettings, PermissionMode } from "../agent-policy/permissions.ts";
 import type { Configuration } from "./file.ts";
 import { PermissionRule, ReadOnlyPrefix } from "../agent-policy/permission-rules.ts";
-import { ToolName } from "../agent-machine/names.ts";
+import { EntryName, ToolName } from "../agent-machine/names.ts";
+import type { GivenPlaces } from "../agent-host/session-context.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { type AnyPlugin, plugin } from "./plugin.ts";
 
@@ -55,8 +56,10 @@ export const loopBreaker = plugin(
  * path rules `Read(<path>)` and `Edit(<path>)`); the read-only programs that command tools run without
  * a question; which tools run shell commands; and the additional folders that count as inside the
  * working folder (`additionalDirectories`: absolute, from `~`, or relative to the working folder).
- * The host reads `additionalDirectories` (`additionalDirectoriesOf`) into the session's folders
- * (`agent-host/session-context.ts`), which the policy judges paths against.
+ * The host gives each entry's `additionalDirectories` (`permissionFoldersOf`) to the session's
+ * folders as that entry's (`agent-host/session-context.ts`). An entry judges paths against the
+ * working folder, the home folder, and the additional folders from the user, the launcher, the
+ * client and itself: a folder that only another permissions entry names is outside for it.
  */
 export const permissions = plugin(
   "permissions",
@@ -69,19 +72,23 @@ export const permissions = plugin(
     additionalDirectories: defaulted(Schema.Array(Schema.String), []),
   }),
   ["toolCalls"],
-  (given, host) => {
-    // The host reads `additionalDirectories` into the session's folders (`additionalDirectoriesOf`), which the policy reads from the session's context.
+  (given, host, name) => {
+    // The host gives `additionalDirectories` to the session's folders as this entry's (`permissionFoldersOf`); the policy reads them from the session's context.
     const { mode, additionalDirectories: _, ...settings } = given;
-    return { toolCalls: permissionsFor(host.permissionMode ?? mode, host.canAsk, settings, host.toolPaths) };
+    return { toolCalls: permissionsFor(host.permissionMode ?? mode, host.canAsk, settings, host.toolPaths, name) };
   },
 );
 
-/** The folders that `configuration`'s permissions plug-in counts as inside the working folder (`additionalDirectories`), as written. */
-export const additionalDirectoriesOf = (configuration: Configuration): ReadonlyArray<string> =>
-  (configuration.lists.toolCalls ?? []).flatMap((entry) => {
+/**
+ * The folders that each of `configuration`'s permissions entries counts as inside the working folder
+ * (`additionalDirectories`), as written, in the order that `toolCalls` lists the entries: each as the
+ * folders of that entry, by the name it is listed by.
+ */
+export const permissionFoldersOf = (configuration: Configuration): ReadonlyArray<GivenPlaces> =>
+  (configuration.lists.toolCalls ?? []).flatMap((entry): ReadonlyArray<GivenPlaces> => {
     const settings: unknown = entry.settings;
     if (entry.plugin.use !== permissions.use || typeof settings !== "object" || settings === null || !("additionalDirectories" in settings) || !Array.isArray(settings.additionalDirectories)) return [];
-    return settings.additionalDirectories.filter((folder): folder is string => typeof folder === "string");
+    return [{ from: { _tag: "Permissions", entry: EntryName.make(entry.name) }, folders: settings.additionalDirectories.filter((folder): folder is string => typeof folder === "string") }];
   });
 
 /** The command tools of `configuration`'s permissions plug-in (`commandTools`), whose calls are judged and recorded by their commands; the default ones when it names none. */

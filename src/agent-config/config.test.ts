@@ -12,7 +12,9 @@ import { observe, open, opened } from "../../tests/support/drive.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { test, testFolder, testOrigin } from "../../tests/support/test.ts";
 import type { Fact } from "../agent-machine/fact.ts";
-import { CallId, Seq, type ToolKind, ToolName, TurnId } from "../agent-machine/names.ts";
+import { CallId, Seq, SessionId, type ToolKind, ToolName, TurnId } from "../agent-machine/names.ts";
+import { inSession, makeSessionContext } from "../agent-host/session-context.ts";
+import { permissionFoldersOf } from "./builtins.ts";
 import type { EffectRequest } from "../agent-machine/request.ts";
 import type { PermissionMode } from "../agent-policy/permissions.ts";
 import { every, type Policy } from "../agent-policy/policy.ts";
@@ -525,6 +527,35 @@ test("a seam's list gives the session its entries in the order the configuration
     ["permissions", "vetoed: change needs permission, and the permission mode is dontAsk."],
     ["loopBreaker", "runs"],
   ]);
+});
+
+test("with two permissions entries, each judges paths against its own additionalDirectories: a write into a folder that only the second names asks", async () => {
+  const configuration = await load([
+    write(
+      "user/permissions.yml",
+      "plugins:\n  first: { use: permissions, mode: acceptEdits, additionalDirectories: [/data/first] }\n  second: { use: permissions, mode: acceptEdits, additionalDirectories: [/data/second] }\ntoolCalls: [first, second]\n",
+    ),
+  ]);
+  const writing: ToolSpec = { ...spec("write_file", "edit"), paths: ["path"] };
+  const opening: Fact = { _tag: "Observed", seq: Seq.make(1), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation: boringOpening([writing]) };
+  const verdicts = (path: string) =>
+    runTest(
+      Effect.gen(function* () {
+        const made = yield* makeSessionContext({ session: SessionId.make("s1"), working: "/work/project", given: permissionFoldersOf(configuration) });
+        // The facts as a host's open records them: the opening, then the working folder and each entry's folders.
+        const recorded = made.changesAtOpen([opening]).map((observation, index): Fact => ({ _tag: "Observed", seq: Seq.make(index + 2), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation }));
+        const all = [opening, ...recorded];
+        yield* made.storeOpened(Effect.succeed(all));
+        const named = seamListsOf(configuration, { canAsk: true }).toolCalls ?? [];
+        const request: EffectRequest = { _tag: "RunTool", call: CallId.make("c1"), tool: ToolName.make("write_file"), input: receivedJson({ path }) };
+        const each = yield* Effect.forEach(named, (entry) => Effect.map(entry.policy(all), (policy) => [entry.name, verdictOf(policy, request)] as const)).pipe(inSession(made.context));
+        const policies = yield* Effect.forEach(named, (entry) => entry.policy(all)).pipe(inSession(made.context));
+        return { each, together: verdictOf(every(policies), request) };
+      }),
+    );
+  expect(await verdicts("/data/second/out.txt")).toEqual({ each: [["first", "asks"], ["second", "runs"]], together: "asks" });
+  expect(await verdicts("/data/first/out.txt")).toEqual({ each: [["first", "runs"], ["second", "asks"]], together: "asks" });
+  expect(await verdicts("/work/project/out.txt")).toEqual({ each: [["first", "runs"], ["second", "runs"]], together: "runs" });
 });
 
 test("a configuration folder's files are its .yml and .yaml files, in the order of their names, a later file overriding an earlier one; a name starting with . and other files are not read", async () => {

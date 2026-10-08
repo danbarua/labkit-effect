@@ -135,7 +135,7 @@ const run = runFolder("attachments-live", name);
 const blobFolder = join(run, "blobs");
 
 const facts = await Effect.runPromise(
-  Effect.flatMap(makeSessionContext({ session: SessionId.make("attachments"), working: process.cwd(), additional: [] }), (made) =>
+  Effect.flatMap(makeSessionContext({ session: SessionId.make("attachments"), working: process.cwd(), given: [] }), (made) =>
     inSession(made.context)(
       Effect.gen(function* () {
         const blobs = yield* Blobs;

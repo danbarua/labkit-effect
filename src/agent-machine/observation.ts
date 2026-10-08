@@ -15,6 +15,7 @@ import {
   CallId,
   AdjustmentReason,
   ByteCount,
+  EntryName,
   FailureText,
   FolderPath,
   FullPath,
@@ -40,6 +41,21 @@ export const InputSource = Schema.Union([
   Schema.TaggedStruct("Agent", { agent: AgentName }),
 ]);
 export type InputSource = typeof InputSource.Type;
+
+/**
+ * What gave a session one of its additional folders:
+ * - `User`: the user, during the session (the CLI's `/add-dir`);
+ * - `Launcher`: the program that started the host (`--add-dir`);
+ * - `Client`: the ACP client, with the session's working folder (`additionalDirectories`);
+ * - `Permissions`: the configuration's permissions entry listed as `entry` (its `additionalDirectories`).
+ */
+export const FolderSource = Schema.Union([
+  Schema.TaggedStruct("User", {}),
+  Schema.TaggedStruct("Launcher", {}),
+  Schema.TaggedStruct("Client", {}),
+  Schema.TaggedStruct("Permissions", { entry: EntryName }),
+]);
+export type FolderSource = typeof FolderSource.Type;
 
 /** One part of a model's response. */
 export const ModelPart = Schema.Union([
@@ -249,11 +265,21 @@ export const Observation = Schema.Union([
     ]),
   }),
   /**
-   * The user added `folder`, an absolute path, to the session's folders. From then on, a path in it
-   * counts as inside the working folder for the permission policy, and the model is told so at this
-   * place in the conversation. No machine acts on it.
+   * The session's working folder is `working`, an absolute path: the folder the host opened the
+   * session in. The host records it when it opens the session and the facts name no working folder or
+   * another one. The working folder is the `working` of the last `SessionHomed`. No machine acts on it.
    */
-  Schema.TaggedStruct("FolderAdded", { folder: FolderPath }),
+  Schema.TaggedStruct("SessionHomed", { working: FolderPath }),
+  /**
+   * `from` added `folder`, an absolute path, to the session's additional folders. From then on, a
+   * path in it counts as inside the working folder. No machine acts on it.
+   */
+  Schema.TaggedStruct("FolderAdded", { folder: FolderPath, from: FolderSource }),
+  /**
+   * `from` no longer gives `folder`, which it added earlier (`FolderAdded`). The folder stays among
+   * the session's additional folders only while another source gives it. No machine acts on it.
+   */
+  Schema.TaggedStruct("FolderRemoved", { folder: FolderPath, from: FolderSource }),
   /**
    * A request for a model response was sent to `provider` for `model`. `sent` is what the request
    * carried (the system prompt, the tools and the conversation), as the layer that assembled them

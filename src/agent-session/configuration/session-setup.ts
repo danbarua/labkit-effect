@@ -3,19 +3,20 @@
  * - `openedWith` makes the `SessionOpened` observation from the model, system prompt and tools that
  *   a session starts with.
  * - The readers return, from a session's facts: the model that it asks now (the latest change of
- *   model taken, or the model it opened with), its settings, and the system prompt and tools that it
- *   opened with.
+ *   model taken, or the model it opened with), its settings, the system prompt that every request
+ *   sends, and the tools that it opened with.
  *
  * Every request reads these from the facts, so the facts are the one place where they are held.
  */
 
 import { Effect, Schema } from "effect";
 import type { Fact } from "../../agent-machine/fact.ts";
-import type { FolderPath, SessionId } from "../../agent-machine/names.ts";
+import type { SessionId } from "../../agent-machine/names.ts";
 import type { ModelTarget, Observation } from "../../agent-machine/observation.ts";
 import { changed, type ModelSettings } from "../../agent-machine/settings.ts";
 import { type Target, ToolSpec } from "../contracts.ts";
 import { asText, parseJson, receivedJson, receivedText } from "../received.ts";
+import { homeLineOf } from "./session-home.ts";
 import { settingOf } from "./settings.ts";
 
 /** Tools as they are recorded: each tool's name, description, and the JSON Schema of its input. */
@@ -105,18 +106,19 @@ export const modelOf = (facts: ReadonlyArray<Fact>): Effect.Effect<Target> => {
 };
 
 /**
- * ImmutableSystemPrompt: returns the system prompt that the session opened with, if any. Every
- * request uses it; nothing records a system prompt after the opening.
+ * ImmutableSystemPrompt: returns the system prompt of every request of the session, if it has one:
+ * the line that names the working folder and the additional folders as the facts before TurnZero
+ * leave them (`homeLineOf`, `session-home.ts`), then the system prompt that the session opened with.
+ * A space joins the two, because the opening's text starts with the git tools' line when the working
+ * folder is a repository's root, and that line goes on from the working folder's line. The facts
+ * before TurnZero do not change once a turn has started, and nothing records a system prompt after
+ * the opening, so every request sends the same text.
  */
 export const immutableSystemPromptOf = (facts: ReadonlyArray<Fact>): string | undefined => {
   const system = openingOf(facts)?.system;
-  return system === undefined ? undefined : asText(system);
+  const parts = [homeLineOf(facts), system === undefined ? undefined : asText(system)].filter((part) => part !== undefined);
+  return parts.length === 0 ? undefined : parts.join(" ");
 };
-
-/** Returns the folders the user added to the session (`FolderAdded`), in the order they were added, each once. */
-export const foldersAddedOf = (facts: ReadonlyArray<Fact>): ReadonlyArray<FolderPath> => [
-  ...new Set(facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "FolderAdded" ? [fact.observation.folder] : []))),
-];
 
 /**
  * ImmutableToolCatalog: returns the tools that the session opened with. Every request uses them;

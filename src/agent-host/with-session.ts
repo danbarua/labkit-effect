@@ -17,6 +17,10 @@
  * - When the run is interrupted during a turn, the interruption is recorded and the turn is waited
  *   for; a second interrupt (Ctrl+C) exits at once.
  *
+ * - Each open records what it changes of the session's working folder and additional folders
+ *   (`MadeSessionContext.changesAtOpen`): a new session after its opening, a continued one before a
+ *   turn that a previous run left unfinished is gone on with or ended.
+ *
  * - The host makes the session's context (`SessionContext`: its id, its working folder, its folders
  *   and its environment, `session-context.ts`) before it calls `withSession`, so that the host's own
  *   machinery (the CLI's MCP servers) runs in it too. Everything `withSession` runs runs in it
@@ -49,8 +53,12 @@ import { inSession, type MadeSessionContext } from "./session-context.ts";
 export interface BoltOn {
   /** Tool sources, after those of the bolt-ons before it. */
   readonly sources?: ReadonlyArray<ToolSource>;
-  /** A part of the opening system text, after those of the bolt-ons before it. */
-  readonly system?: string;
+  /**
+   * A part of the opening system text, after those of the bolt-ons before it. The line that names
+   * the working folder and the additional folders is not a bolt-on's: every request's system prompt
+   * starts with it, made from the session's facts (`immutableSystemPromptOf`).
+   */
+  readonly system?: string | undefined;
   /** Notice providers (`agent-context/assemble.ts`), after those of the bolt-ons before it. */
   readonly notices?: ReadonlyArray<NoticeProvider>;
   /** Work started once the session's opening is recorded, with the session's services, which lasts as long as the session, such as recording an MCP server's state changes. */
@@ -142,6 +150,8 @@ export const withSession = <A, E, R, SE, SR, L, H>(options: SessionOptions<SE, S
           prompt: (input) => session.prompt(input).pipe(Effect.provideContext(context), within),
           cancel: session.cancel.pipe(Effect.provideContext(context), within),
         };
+        // What this open changes of the session's working folder and its additional folders, recorded before any turn runs.
+        const homed = Effect.flatMap(bound.facts, (now) => Effect.forEach(made.changesAtOpen(now), bound.observe, { discard: true }));
         return yield* Effect.gen(function* () {
           yield* options.host.follow(bound);
           const facts = yield* bound.facts;
@@ -149,7 +159,9 @@ export const withSession = <A, E, R, SE, SR, L, H>(options: SessionOptions<SE, S
             const system = [...boltOns.flatMap((boltOn) => (boltOn.system === undefined ? [] : [boltOn.system])), ...(options.system === undefined ? [] : [options.system])];
             const model = { ...options.target, settings: changed({}, options.settings) };
             yield* bound.observe(openedWith({ session: sessionId, model, system: system.length === 0 ? undefined : system.join("\n\n"), tools: yield* offeredTools }));
+            yield* homed;
           } else {
+            yield* homed;
             const left = leftRunning(facts);
             if (left === undefined) yield* bound.goOn;
             else if ((yield* options.host.choose(left)) === "go on") {

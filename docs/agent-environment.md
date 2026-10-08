@@ -32,7 +32,8 @@ so code that reads it compiles only where a host provides it.
 | --- | --- |
 | `session` | The session's id (`SessionId`). |
 | `working` | The working folder, as an absolute path. |
-| `folders` | An effect that returns the folders that paths are judged against (`Folders`): the working folder, the home folder, and the additional folders, all absolute. |
+| `folders` | An effect that returns the session's folders (`Folders`): the working folder, the home folder, and the additional folders from every source, all absolute. |
+| `foldersFrom` | Returns an effect that returns the working folder, the home folder, and the additional folders whose source the given function accepts. |
 | `environment` | The environment variables of each process that the harness starts for the session (`KnownEnvironment`, below). |
 
 Each host makes the context once, where the session's resources start, with the builder in
@@ -58,11 +59,28 @@ What runs inside the session reads the context:
 The loop runs each request in a fiber that inherits the context from the fiber that recorded the
 observation, so a tool or a policy that a plug-in adds reads the id of the session it runs in.
 
-`folders` is read at each use. The additional folders are those the host gives (the launcher's, the
-client's and the configuration's) followed by the folders that the user added to the session
-(`FolderAdded`), which are read from the session's facts at each use. Nothing keeps a copy of the
-facts. Before the session's store is open, the session has no facts, so `folders` returns the
-folders the host gives: an ACP session has no store until its first prompt.
+`folders` and `foldersFrom` are read at each use. The additional folders are projected from the
+session's facts (`agent-session/configuration/session-home.ts`): each `FolderAdded` adds a folder
+from its source, and each `FolderRemoved` takes the folder away from that source. Nothing keeps a
+copy of the facts. A source (`FolderSource`) is one of these:
+
+| Source | Gives |
+| --- | --- |
+| `User` | the folders the user adds during the session (the CLI's `/add-dir`) |
+| `Launcher` | the launcher's `--add-dir` |
+| `Client` | the ACP client's `additionalDirectories` |
+| `Permissions` | a permissions entry's `additionalDirectories`, by the name that the configuration lists the entry by |
+
+Each open records the folders that the host gives from each source other than `User`
+(`docs/agent-host.md`). Until it has recorded them, `folders` includes them: an ACP session has no
+store until its first prompt, and its folders are then the ones its open will record.
+
+Who reads which folders:
+
+| Reader | Folders |
+| --- | --- |
+| the recording of what a call changes, the previews of a write, the explanation of a permission question | `folders`: every source |
+| a permissions entry (`permissionsFor`) | `foldersFrom`: `User`, `Launcher`, `Client`, and the entry's own `Permissions` folders. A folder that only another permissions entry names is outside the working folder for it. |
 
 ## The session's environment
 

@@ -122,6 +122,10 @@ export type AdjustmentReason = typeof AdjustmentReason.Type;
 export const PolicyName = Schema.String.pipe(Schema.brand("agent-machine/PolicyName"));
 export type PolicyName = typeof PolicyName.Type;
 
+/** The name that a configuration lists one of its plug-in entries by: its key in `plugins`, or the plug-in's own name. */
+export const EntryName = Schema.String.pipe(Schema.brand("agent-machine/EntryName"));
+export type EntryName = typeof EntryName.Type;
+
 /** Identifies one compaction window. The policy or party that compacted assigns it. */
 export const WindowId = Schema.String.pipe(Schema.brand("agent-machine/WindowId"));
 export type WindowId = typeof WindowId.Type;

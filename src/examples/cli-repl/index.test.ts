@@ -107,7 +107,7 @@ test("a required MCP server that fails to start stops the session from opening, 
   expect(result.code).not.toBe(0);
   expect(result.stdout + result.stderr).toContain("Required MCP servers are not running: missing (it failed: its process could not be started:");
   // The resolved configuration was written to the session's folder before the failure.
-  const sessions = join(testFolder(), ".local/share/labkit/sessions/v0.1.0");
+  const sessions = join(testFolder(), ".local/share/labkit/sessions/v0.2.0");
   const [session] = readdirSync(sessions);
   const effective = JSON.parse(readFileSync(join(sessions, session ?? "", "effective-settings.json"), "utf8")) as { readonly layers: ReadonlyArray<{ readonly name: string }>; readonly host: { readonly model: string }; readonly mcpServers: ReadonlyArray<{ readonly required: boolean }> };
   expect(effective.layers.map((layer) => layer.name)).toEqual(["the CLI's defaults", "--mcp-config", "the command line"]);

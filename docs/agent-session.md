@@ -14,7 +14,7 @@ the provider adapters, the stores where a session's facts are kept, and the sess
 | What a request carries | `conversation.ts`, `tool-output.ts`, `turn-context.ts`, `sent.ts`, `received.ts` |
 | Tools | `tool-sources.ts`, `tool-input.ts` |
 | Providers | `provider-call.ts`, `shaping.ts`, `model-fallback.ts`, `providers/` (Anthropic Messages, OpenAI Responses, xAI, Chat Completions) |
-| Configuration | `configuration/`: the model and settings read from the facts, the well-known models, the options a host offers, and the gate for a user's changes |
+| Configuration | `configuration/`: the model and settings read from the facts, the session's working folder and additional folders read from the facts (`session-home.ts`), the well-known models, the options a host offers, and the gate for a user's changes |
 | Usage | `accounting.ts`: the context gauge, a response's cost by component, and a session's totals, read from the facts |
 | Shared | `first-answer.ts` (an ordered list of sources where the first that knows answers), `log-keys.ts` |
 
@@ -175,6 +175,41 @@ that started a turn completes it:
 A fallback chain's change of model does not go through the gate. It is observed at once, and the
 core takes it between steps.
 
+## The working folder and the additional folders
+
+`configuration/session-home.ts` projects the session's working folder and its additional folders
+from its facts, in order (`homeOf`):
+
+| Fact | Effect on the projection |
+| --- | --- |
+| `SessionHomed { working }` | The working folder becomes `working`: the last one recorded is the working folder. |
+| `FolderAdded { folder, from }` | `folder` is added from the source `from`, unless that source gives it already. |
+| `FolderRemoved { folder, from }` | `folder` is taken away from the source `from`. Another source may still give it. |
+
+A host records these facts each time it opens a session, before any turn runs (`changesAtOpen`,
+`docs/agent-host.md`). The user adds folders during the session (`FolderAdded` from `User`).
+
+What the model is told depends on TurnZero, the first `TurnStarted`:
+
+- The system prompt of every request starts with the line that names the working folder and the
+  additional folders as the facts before TurnZero leave them (`homeLineOf`). A later fact before
+  TurnZero replaces an earlier one: a session reopened in another folder before its first turn names
+  that folder, and the model is not told of a move. The opening's system prompt follows the line,
+  after a space. The facts before TurnZero do not change once a turn has started, so every request
+  sends the same system prompt (`immutableSystemPromptOf`).
+- Each of these facts recorded after TurnZero is an instruction message at the place where it was
+  recorded (`changeTextOf`, `conversation.ts`):
+
+  | Fact | Message |
+  | --- | --- |
+  | `FolderAdded` from `User` | The user added the folder: it counts as inside the working folder. |
+  | `FolderAdded` from another source | The folder was added to the session's folders. |
+  | `FolderRemoved` | The folder was removed, and whether it still counts as inside the working folder. |
+  | `SessionHomed` | The session moved from the previous working folder to the new one. |
+
+Every host records `SessionHomed` when it first opens a session. A session that no host opened (a
+test's) has no working folder, and its system prompt has no line for it.
+
 ## A tool's output as the model is sent it
 
 A tool's output is recorded as received. `tool-output.ts` decides how the conversation sends it. An
@@ -238,6 +273,9 @@ back into the core's observations:
 - **The facts are the one place.** Every request reads the model, its settings, the system prompt
   and the tools from the facts, so a session that continues from its facts behaves as the original
   session would have.
+- **The folders are a projection.** No source records a set of folders. A source adds a folder or
+  removes one, and the session's folders are the fold of those facts. A session that moves keeps its
+  history, and the model is told that the working folder is another one.
 - **Only safe tools run again.** A tool call that may change something is not repeated when a
   session continues after a crash, because what it would change may have changed since; the model
   looks before it asks again.
@@ -248,7 +286,9 @@ back into the core's observations:
   the loop and the operations a host calls.
 - `file-session-store.test.ts`: the stores.
 - `configuration/*.test.ts`: the gate, the model choice, settings and options.
-- `tool-output.test.ts`, `conversation.test.ts`, `shaping.test.ts`: what a request carries.
+- `tool-output.test.ts`, `conversation.test.ts`, `shaping.test.ts`: what a request carries. The
+  working folder and the additional folders as the model is told of them:
+  `agent-host/with-session.test.ts`, `examples/cli-repl/commands.test.ts`, `agent-acp/host.test.ts`.
 - `permission.test.ts`, `model-request-policy.test.ts`, `loop-breaker.test.ts`: policies in the
   loop.
 - `providers/*.test.ts`: each adapter.
