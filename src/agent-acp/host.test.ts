@@ -1605,7 +1605,7 @@ test("session/load in a new process replays the stored turn in order before its 
   });
 });
 
-test("session/load replays a turn's messages with the ids that live sent them, and its call with its tool's name, its input and its raw output", async () => {
+test("session/load replays a turn's messages with the ids that live sent them, and its call with its tool's name, its input and its raw output; its answer counts the updates replayed", async () => {
   const first = startHost({ world: echoWorld, script: echoTurn.map((pieces) => answer(...pieces)) });
   const live = sdkClient();
   const sessionId = await live.app.connectWith(first.stream, async (ctx) => {
@@ -1616,12 +1616,14 @@ test("session/load replays a turn's messages with the ids that live sent them, a
   });
   await first.stop();
   const host = startHost({ world: echoWorld });
-  await sdkClient().app.connectWith(host.stream, async (ctx) => {
+  const answered = await sdkClient().app.connectWith(host.stream, async (ctx) => {
     await initialize(ctx, {});
-    await ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] });
+    return await ctx.request("session/load", { sessionId, cwd: host.cwd, mcpServers: [] });
   });
   await host.stop();
   const replayed = updatesBeforeAnswer(host);
+  // An effective-acp client waits for this many of the session's updates before its load completes (AN17).
+  expect(answered._meta?.["effective-acp/replayed"]).toBe(replayed.length);
   /** Each message the updates begin, in order: its kind and its id. */
   const messagesIn = (updates: ReadonlyArray<Update>) => [
     ...new Set(updates.flatMap((update) => ("messageId" in update ? [`${update.sessionUpdate} ${update.messageId}`] : []))),
