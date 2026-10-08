@@ -44,3 +44,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # The Rust build output of native/ crates.
 native/*/target/
+
+# agent harness bits
+.omp/mcp.json
