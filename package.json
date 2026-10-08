@@ -5,8 +5,9 @@
   "scripts": {
     "acp:dev": "bun src/agent-acp/main.ts",
     "acp:logs": "bun scripts/acp-logs.ts",
-    "check": "bun run native:check && bun run native:test && bun run vidaimock:install && bun run typecheck && bun run lint && bun run check:brands && bun run check:schemas && bun test",
+    "check": "bun run native:check && bun run native:test && bun run vidaimock:install && bun run typecheck && bun run lint && bun run check:brands && bun run check:dependencies && bun run check:schemas && bun test",
     "check:brands": "bun scripts/check-brands.ts",
+    "check:dependencies": "bun scripts/check-dependencies.ts",
     "check:schemas": "bun scripts/config-schema.ts --check",
     "cli": "bun run src/examples/cli-repl/index.ts",
     "cli:watch": "bun --watch src/examples/cli-repl/index.ts",

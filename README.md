@@ -56,7 +56,7 @@ agent's design is in [docs/agent-acp.md](docs/agent-acp.md).
 ## For developers
 
 ```sh
-bun run check          # builds and tests the command parser, then typecheck, lint, schemas and tests
+bun run check          # builds and tests the command parser, then typecheck, lint, schemas, dependencies and tests
 bun cli --help         # the CLI from this checkout (it reads this checkout's .env, as Bun always does)
 bun run commands:import && bun run commands:ask-rate   # measure the permission policy over saved sessions
 bun scripts/trajectories/sweep.ts claude-code          # replay saved sessions through the core
