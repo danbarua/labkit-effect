@@ -35,6 +35,9 @@ do not appear in it.
 ## Commands
 
 - `bun run check`: typecheck, lint and tests. Run it before committing.
+- `bun run native:build`: after a change to `native/bash-segments`, builds the command parser and
+  copies it to `native/bash-segments/bash_segments.wasm`, which is committed; `check` fails until the
+  committed module is the one the crate builds.
 - Don't pipe `bun test`: redirect its output to a file under `logs/commands/` and read the file.
 - `bun cli` is a REPL and waits for input. From an agent's shell, use
   `bun --silent cli -p "<prompt>" --model <model>`.

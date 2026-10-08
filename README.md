@@ -26,8 +26,6 @@ It is being built. It is used day to day at the terminal, and in VS Code for tes
 
 ```sh
 bun install
-rustup target add wasm32-unknown-unknown   # once: the command parser is built to WebAssembly
-bun run native:build
 bun link                                   # puts the labkit command on your PATH
 export ANTHROPIC_API_KEY=…                 # or OPENAI_API_KEY, XAI_API_KEY, or a server at localhost:8000
 labkit                                     # in the folder you want to work in

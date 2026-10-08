@@ -1,0 +1,6 @@
+# The toolchain the committed module (bash_segments.wasm) is built with: the same toolchain, the
+# locked dependencies and remapped paths (scripts/native.ts) build the same bytes on every machine.
+[toolchain]
+channel = "1.99.0"
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"

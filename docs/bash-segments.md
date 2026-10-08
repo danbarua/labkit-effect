@@ -65,10 +65,23 @@ mode.
 
 ## How the host calls it
 
-`bun run native:build` compiles the crate to `wasm32-unknown-unknown`
-(`native/bash-segments/target/wasm32-unknown-unknown/release/bash_segments.wasm`, not committed).
-`bun run check` builds and tests it first; without `cargo` or the `wasm32` target it stops with an
-ERROR and a HINT (`scripts/native.ts`).
+The module is committed (`native/bash-segments/bash_segments.wasm`), so a checkout, and a project
+that depends on this repository by git, has the command parser without Rust. `bun run native:build`
+compiles the crate to `wasm32-unknown-unknown` and copies the module there; a change to the crate is
+committed with the module it builds. `bun run check` builds it again and fails when the module
+differs from the committed one (`native:check`), then runs the crate's tests; without `cargo` it
+stops with an ERROR and a HINT (`scripts/native.ts`).
+
+The build is reproducible, so the check holds on any machine:
+
+- the toolchain is pinned (`native/bash-segments/rust-toolchain.toml`: Rust 1.99.0, with the
+  `wasm32-unknown-unknown` target, which rustup installs on first use);
+- the dependencies are the crate's `Cargo.lock` (`--locked`);
+- the paths compiled into the module (the source files that panic messages name) are remapped from
+  this machine's folders to fixed ones: Cargo's home to `/cargo`, the crate to `/bash-segments`. The
+  module names no folder of the machine that built it.
+
+Built from two folders, the module was the same bytes (2026-10-08).
 
 The module exports three functions with a C ABI, and the host (`command-parser.ts`) calls them
 synchronously:

@@ -5,7 +5,7 @@
   "scripts": {
     "acp:dev": "bun src/agent-acp/main.ts",
     "acp:logs": "bun scripts/acp-logs.ts",
-    "check": "bun run native:build && bun run native:test && bun run vidaimock:install && bun run typecheck && bun run lint && bun run check:brands && bun run check:schemas && bun test",
+    "check": "bun run native:check && bun run native:test && bun run vidaimock:install && bun run typecheck && bun run lint && bun run check:brands && bun run check:schemas && bun test",
     "check:brands": "bun scripts/check-brands.ts",
     "check:schemas": "bun scripts/config-schema.ts --check",
     "cli": "bun run src/examples/cli-repl/index.ts",
@@ -24,6 +24,7 @@
     "zork:spectator": "bun run src/examples/zork-spectator/index.ts",
     "zork:spectator:scripted": "bun run src/examples/zork-spectator/scripted.ts",
     "native:build": "bun scripts/native.ts build",
+    "native:check": "bun scripts/native.ts check",
     "native:test": "bun scripts/native.ts test",
     "commands:import": "bun scripts/session-imports/commands.ts",
     "commands:ask-rate": "bun scripts/session-imports/ask-rate.ts",

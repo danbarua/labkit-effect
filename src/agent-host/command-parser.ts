@@ -1,10 +1,11 @@
 /**
- * The host's command parser: the WebAssembly module of the Rust crate `native/bash-segments` (built by
- * `bun run native:build`), loaded on first use and then called synchronously. `segmentsOf` writes a
+ * The host's command parser: the WebAssembly module of the Rust crate `native/bash-segments`
+ * (`bash_segments.wasm`, committed beside the crate; `bun run native:build` builds it again), loaded on
+ * first use and then called synchronously. `segmentsOf` writes a
  * command into the module's memory, calls its `segments_json`, reads the JSON it returns, and decodes
  * it as `agent-policy/command-segments.ts`'s `Segments`.
  *
- * When the module is not built, does not load, traps, or answers in a form that is not known, the
+ * When the module is missing, does not load, traps, or answers in a form that is not known, the
  * command is `Unparsed` with the reason, so that the permission policy asks about it.
  */
 
@@ -12,8 +13,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { Schema } from "effect";
 import { Segments, type SegmentsOf, UnparsedReason } from "../agent-policy/command-segments.ts";
 
-/** Where `bun run native:build` writes the module. */
-export const modulePath = new URL("../../native/bash-segments/target/wasm32-unknown-unknown/release/bash_segments.wasm", import.meta.url).pathname;
+/** The committed module, which `bun run native:build` writes. */
+export const modulePath = new URL("../../native/bash-segments/bash_segments.wasm", import.meta.url).pathname;
 
 interface ParserExports {
   readonly memory: WebAssembly.Memory;
@@ -44,7 +45,7 @@ const unprovided = (module: WebAssembly.Module): Record<string, Record<string, (
 };
 
 const load = (): Loaded => {
-  if (!existsSync(modulePath)) return { _tag: "NotLoaded", reason: `The command parser is not built (${modulePath}). Run bun run native:build.` };
+  if (!existsSync(modulePath)) return { _tag: "NotLoaded", reason: `The command parser is missing (${modulePath}): it is committed with the repository, and bun run native:build builds it again.` };
   try {
     const module = new WebAssembly.Module(readFileSync(modulePath));
     const instance = new WebAssembly.Instance(module, unprovided(module));

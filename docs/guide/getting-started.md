@@ -3,13 +3,11 @@
 ## Install
 
 labkit runs from a checkout of this repository, with [Bun](https://bun.sh). Its command parser
-is written in Rust and built to WebAssembly, so building it needs Rust installed with rustup and the
-`wasm32-unknown-unknown` target.
+is written in Rust and committed as WebAssembly, so running labkit needs no Rust; changing the parser
+does (`docs/bash-segments.md`).
 
 ```sh
 bun install
-rustup target add wasm32-unknown-unknown
-bun run native:build     # the command parser; without it, labkit asks before every command
 bun link                 # puts the labkit command on your PATH
 ```
 
