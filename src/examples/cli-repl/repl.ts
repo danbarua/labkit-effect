@@ -15,8 +15,8 @@
  *
  * Each tool call is printed when it ends: the tool and its input, then its result or why it failed.
  * Before a tool call that needs permission, the REPL asks the user and records the answer
- * (`PermissionAsked`, `PermissionAnswered`); Ctrl+C at the question rejects the call. During a turn,
- * Ctrl+C interrupts it and other keys are ignored (`turn-keys.ts`), except Option+T, which shows or
+ * (`PermissionAsked`, `PermissionAnswered`). Ctrl+C at the question cancels the turn, as Ctrl+C does
+ * during it: no answer is recorded, and the call does not run. During a turn, Ctrl+C interrupts it and other keys are ignored (`turn-keys.ts`), except Option+T, which shows or
  * hides thinking (`view.ts`).
  */
 
@@ -36,7 +36,7 @@ import { immutableToolCatalogOf } from "../../agent-session/configuration/sessio
 import { Prompt } from "effect/cli";
 import type { Fact } from "../../agent-machine/fact.ts";
 import { segmentsOf } from "../../agent-host/command-parser.ts";
-import { answerPicking, type Explained, explainedAt, explainedOf, OptionId, type PermissionQuestion, questionIn } from "../../agent-policy/permissions.ts";
+import { answerPicking, type Explained, explainedAt, explainedOf, type PermissionQuestion, questionIn } from "../../agent-policy/permissions.ts";
 import type { CallId, TurnId } from "../../agent-machine/names.ts";
 import type { ToolOutcome } from "../../agent-machine/observation.ts";
 import type { Services, Session } from "../../agent-session/loop.ts";
@@ -308,7 +308,6 @@ const following = (session: Session, view: View, stdin?: NodeJS.ReadStream) =>
         const { call, asks } = fact.observation;
         const question = questionIn(asks);
         if (question === undefined) return;
-        const rejecting = question.options.find((option) => option.kind === "reject_once")?.optionId ?? OptionId.make("reject-once");
         yield* endLine;
         // The command waits for the answer, so its files are read before it runs.
         const writes = question._tag === "Command" ? yield* shownWrites(question.command, folders, (full, path) => currentOnDisk(disk, full, path)) : [];
@@ -316,8 +315,10 @@ const following = (session: Session, view: View, stdin?: NodeJS.ReadStream) =>
         const message = shown(question, inputOf(yield* session.facts, call), writes, explained);
         const picked = yield* keys
           .lend(Prompt.Select({ message, choices: question.options.map((option) => ({ title: option.name, value: option.optionId })) }))
-          .pipe(Effect.catchTag("QuitError", () => Effect.succeed(rejecting)));
-        yield* session.observe({ _tag: "PermissionAnswered", call, answer: answerPicking(picked) });
+          .pipe(Effect.asSome, Effect.catchTag("QuitError", () => Effect.succeedNone));
+        // Quitting the question cancels the turn: nobody answered it, so no answer is recorded.
+        if (Option.isNone(picked)) return yield* session.cancel;
+        yield* session.observe({ _tag: "PermissionAnswered", call, answer: answerPicking(picked.value) });
       });
     const take = (input: ProjectionInput) =>
       Effect.gen(function* () {

@@ -25,3 +25,16 @@ export const typing = (lines: ReadonlyArray<string>) =>
       display: () => Effect.void,
     });
   });
+
+/** A terminal whose input has ended, and shows nothing: every prompt fails with `QuitError`, as one does when Ctrl+C quits it. */
+export const quitting = Effect.gen(function* () {
+  const keys = yield* Queue.unbounded<Terminal.UserInput, Cause.Done>();
+  yield* Queue.end(keys);
+  return Terminal.make({
+    columns: Effect.succeed(80),
+    rows: Effect.succeed(24),
+    readInput: Effect.succeed(keys),
+    readLine: Effect.fail(new Terminal.QuitError()),
+    display: () => Effect.void,
+  });
+});

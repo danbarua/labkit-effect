@@ -11,10 +11,15 @@ import { existsSync, readFileSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
 import { Effect, Layer, Ref, Terminal as EffectTerminal } from "effect";
+import { BoringModelProvider, boringOpening } from "../../../tests/support/boring.ts";
+import { smolCatalog, SmolToolRunner } from "../../../tests/support/smol-tools.ts";
+import { permissions } from "../../agent-policy/permissions.ts";
+import type { Policy } from "../../agent-policy/policy.ts";
+import type { Observation } from "../../agent-machine/observation.ts";
 import { TestConsole } from "effect/testing";
 import { type CatalogSource, KeyedAndLocalCatalog, ModelCatalog } from "../../agent-host/catalog.ts";
-import { Millis, ModelName, ModelText, ProviderName, SessionId, ThinkingText } from "../../agent-machine/names.ts";
-import { ModelClient, ToolRunner } from "../../agent-session/contracts.ts";
+import { CallId, Millis, ModelName, ModelText, ProviderName, SessionId, StopReason, ThinkingText, ToolName } from "../../agent-machine/names.ts";
+import { ModelClient, ToolCallPolicies, ToolRunner } from "../../agent-session/contracts.ts";
 import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
 import { openedWith } from "../../agent-session/configuration/session-setup.ts";
 import { openSession } from "../../agent-session/loop.ts";
@@ -24,7 +29,7 @@ import { EphemeralSessionStore } from "../../agent-session/session-store.ts";
 import { CountingTurns } from "../../agent-session/turns.ts";
 import { BoringContextAssembler } from "../../../tests/support/boring.ts";
 import { runTest } from "../../../tests/support/run.ts";
-import { typing } from "../../../tests/support/terminal.ts";
+import { quitting, typing } from "../../../tests/support/terminal.ts";
 import { CannotAsk } from "./models.ts";
 import { replyOf, repl, terminal, withoutModel, shownEnded } from "./repl.ts";
 import { type View, viewOf } from "./view.ts";
@@ -334,4 +339,61 @@ test("an ended call whose patch was cut is printed with the diff kept and how mu
     "    +one",
     "    (The diff of /w/big.txt was cut at 32 KiB: 39996 more bytes are not shown.)",
   ]);
+});
+
+/** A model that calls `echo` in its first response, and answers in any later one. */
+const callsEcho = () => {
+  let requests = 0;
+  return Layer.succeed(ModelClient, {
+    respond: (target, _context, turn) =>
+      Effect.sync(() => ({
+        _tag: "ModelResponded" as const,
+        turn,
+        provider: target.provider,
+        model: target.model,
+        parts: (requests += 1) > 1
+          ? [{ _tag: "Text" as const, text: ModelText.make("done") }]
+          : [{ _tag: "ToolCall" as const, call: CallId.make("c1"), tool: ToolName.make("echo"), input: receivedJson({ text: "hi" }) }],
+        stop: StopReason.make("end_turn"),
+        ending: { _tag: "Complete" as const },
+        metadata: receivedJson({}),
+      })),
+  });
+};
+
+test("Ctrl+C at a permission question cancels the turn: no answer is recorded, the call does not run, and the turn ends interrupted", async () => {
+  const { observed, decided } = await runTest(
+    Effect.gen(function* () {
+      const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
+      yield* terminal(yield* viewOf("on"), keyboard()).follow(session).pipe(Effect.provideService(EffectTerminal.Terminal, yield* quitting));
+      yield* session.observe(boringOpening(smolCatalog));
+      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "echo hi" } as unknown as Observation);
+      yield* session.idle;
+      const facts = yield* session.facts;
+      return {
+        observed: facts.flatMap((fact) => (fact._tag === "Observed" ? [fact.observation] : [])),
+        decided: facts.flatMap((fact) => (fact._tag === "Decided" ? [fact.decision] : [])),
+      };
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          BunServices.layer,
+          TestConsole.layer,
+          BoringModelProvider,
+          BoringContextAssembler,
+          callsEcho(),
+          SmolToolRunner,
+          CountingTurns,
+          Layer.succeed(ToolCallPolicies, [{ name: "permissions", policy: (facts) => Effect.succeed(permissions("default", true, () => "other", facts) as Policy<unknown>) }]),
+        ),
+      ),
+    ),
+  );
+  const tags = observed.map((each) => each._tag);
+  expect(tags).toContain("PermissionAsked");
+  expect(tags).toContain("TurnInterrupted");
+  expect(tags).not.toContain("PermissionAnswered");
+  expect(tags).not.toContain("ToolCallDispatched");
+  expect(observed.find((each) => each._tag === "ToolEnded")).toMatchObject({ call: "c1", outcome: { _tag: "Failed", reason: { _tag: "NotRun" } } });
+  expect(decided.find((each) => each._tag === "TurnEnded")).toMatchObject({ ending: { _tag: "Interrupted" } });
 });
