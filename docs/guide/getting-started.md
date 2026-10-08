@@ -45,14 +45,35 @@ MCP servers, and `/exit` ends the conversation.
 The first time you run `labkit` in a folder that has its own `.env` file or `.labkit/` settings, it
 asks whether to trust the folder ([Trusted folders](trusted-folders.md)).
 
-## What labkit keeps
+## What labkit keeps, and where
 
 | What | Where |
 | --- | --- |
 | Your settings | `~/.config/labkit/*.yml` |
 | The folders you trust | `~/.config/labkit/trusted-folders.json` |
 | Each session, so that you can carry on with it | `~/.local/share/labkit/sessions/` |
-| Each session's log | `~/.local/share/labkit/logs/` |
+| The images and files that sessions refer to | `~/.local/share/labkit/blobs/` |
+| Each session's log | `~/.local/share/labkit/logs/` ([Logs and telemetry](logs-and-telemetry.md)) |
+| A session you export with `/export` | `.labkit/exports/` in the folder you work in |
+
+Two things decide these paths:
+
+- `labkit` is the brand: the name the agent goes by. A program that ships the agent under another
+  name passes its own brand, and every folder and variable is named after it instead. For one run,
+  `LABKIT_BRAND` names another brand.
+- `~/.config/` and `~/.local/share/` are the default locations of the XDG Base Directory
+  specification: a program's settings go in the first, and what it writes in the second. labkit
+  does not read `XDG_CONFIG_HOME` or `XDG_DATA_HOME`. To move the folders, use the options below.
+
+| Option | Variable: `labkit` / the ACP agent | What it moves |
+| --- | --- | --- |
+| `--config-dir <folder>` | `LABKIT_CONFIG_DIR` / `LABKIT_ACP_CONFIG_DIR` | Your settings, and the folders you trust |
+| `--data-dir <folder>` | `LABKIT_DATA_DIR` / `LABKIT_ACP_DATA_DIR` | Sessions, blobs and logs, together |
+| `--sessions-dir <folder>` | the ACP agent only: `LABKIT_ACP_SESSIONS_DIR` | Sessions alone; blobs and logs stay in the data folder |
+
+`--config-dir` and `--data-dir` take an absolute path. `--setting-sources` moves nothing: it chooses
+whether labkit also reads a folder's own settings, in `.labkit/` in that folder
+([Trusted folders](trusted-folders.md)).
 
 ## Asking before it acts
 
