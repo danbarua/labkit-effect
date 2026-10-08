@@ -6,7 +6,8 @@
  * A host reads a file's current text before the command runs (`currentOnDisk` in
  * `agent-tools/file-change.ts`, or through the editor), and the diff is between that text and the text the command leaves (`newTextOf`). A write
  * is not shown as a diff when:
- * - a `cd`, `pushd` or `popd` comes before it in the command, which may change which file it writes;
+ * - its path may name more than one file, or an unknown one: a `cd` or `pushd` before it that may or
+ *   may not have moved the folder it leads from, or a `popd` or `cd -` (`placesOf`);
  * - its path names another user's home folder (`~name/…`);
  * - the current text cannot be read, or the file is larger than `maxCurrentBytes`; the reason is
  *   shown, with the text the command writes.
@@ -16,9 +17,8 @@
  */
 
 import { Effect } from "effect";
-import { join, resolve } from "node:path";
-import { ShellCommand } from "../agent-policy/command-segments.ts";
-import { filesWritten, type Folders, textsWritten, unitsOf, type Writes } from "../agent-policy/command-units.ts";
+import { ShellCommand, type Word } from "../agent-policy/command-segments.ts";
+import { filesWritten, type Folders, type Place, placesOf, relativePath, textsWritten, unitsOf, type Writes } from "../agent-policy/command-units.ts";
 import type { Current } from "../agent-tools/file-change.ts";
 import { resolvePath } from "../agent-policy/path-resolver.ts";
 import { segmentsOf } from "./command-parser.ts";
@@ -28,43 +28,53 @@ export type PlannedWrite =
   | { readonly _tag: "Planned"; readonly full: string; readonly writes: Writes }
   | { readonly _tag: "NotShown"; readonly writes: Writes; readonly reason: string };
 
-/** Why a write to `path` is not resolved to a file, or its full path: a `cd` before it (`moved`) or another user's home folder leaves it unknown. */
-const fullOf = (path: string, moved: boolean, folders: Folders): { readonly full: string } | { readonly reason: string } => {
-  if (moved) return { reason: "a cd earlier in the command may change which file it writes" };
-  if (path.startsWith("~") && path !== "~" && !path.startsWith("~/")) return { reason: "its path names another user's home folder" };
-  return { full: path.startsWith("~") ? join(folders.home, path.slice(1)) : resolve(folders.working, path) };
-};
-
-/** The writes of `command` whose text its words show, in order, judged against `folders`. */
-export const plannedWrites = (command: ShellCommand, folders: Folders): ReadonlyArray<PlannedWrite> => {
-  const split = unitsOf(command, segmentsOf, folders);
-  if (split._tag === "Unparsed") return [];
-  return textsWritten(split.units).map(({ writes, moved }): PlannedWrite => {
-    const found = fullOf(writes.path, moved, folders);
-    return "full" in found ? { _tag: "Planned", full: found.full, writes } : { _tag: "NotShown", writes, reason: found.reason };
+/**
+ * The full paths `word`, written by the unit at `at`, may name: one for each folder a relative path
+ * may lead from there (`placesOf`); none when that is not known, the shell expands the word, or it
+ * names another user's home folder.
+ */
+const fullsOf = (word: Word, place: Place | undefined, folders: Folders): ReadonlyArray<string> => {
+  if (place === undefined || (relativePath(word) && place.unknown)) return [];
+  return (relativePath(word) ? place.bases : [undefined]).flatMap((base) => {
+    const resolved = resolvePath(word, folders, base);
+    return resolved._tag === "Local" && resolved.full !== undefined ? [resolved.full] : [];
   });
 };
 
 /**
- * The full paths of the files that `command` writes (`filesWritten`), each once, resolved as the
- * permission policy resolves them (`resolvePath`): what a command tool records, by reading each file
- * before the command runs and after (`agent-host/recorded-changes.ts`). The text written need not be
- * in the command's words, so `sed -i` and `printf … > f` are recorded too. A write after a `cd`, to a
- * path the shell expands (`"$F"`), or to another user's home folder is not.
+ * The writes of `command` whose text its words show, in order, judged against `folders`. A write is
+ * shown as a diff only when its path names one file: not after a `cd` that may or may not have moved
+ * the folder it leads from, nor to another user's home folder.
+ */
+export const plannedWrites = (command: ShellCommand, folders: Folders): ReadonlyArray<PlannedWrite> => {
+  const split = unitsOf(command, segmentsOf, folders);
+  if (split._tag === "Unparsed") return [];
+  const places = placesOf(split.units, folders);
+  return textsWritten(split.units).map(({ writes, at }): PlannedWrite => {
+    const word: Word = { text: writes.path, literal: writes.path };
+    if (resolvePath(word, folders)._tag === "Unresolved") return { _tag: "NotShown", writes, reason: "its path names another user's home folder" };
+    const fulls = fullsOf(word, places[at], folders);
+    const [full] = fulls;
+    return fulls.length === 1 && full !== undefined ? { _tag: "Planned", full, writes } : { _tag: "NotShown", writes, reason: "a cd earlier in the command may change which file it writes" };
+  });
+};
+
+/**
+ * The full paths of the files whose text `command` writes (`filesWritten`), each once: what a command
+ * tool records, by reading each file before the command runs and after
+ * (`agent-host/recorded-changes.ts`). The text need not be in the command's words, so `sed -i` and
+ * `printf … > f` are recorded too. After a `cd` that may or may not have moved, a relative path names
+ * a file in each folder it may lead from, and each is read: only a file that changed is recorded. A
+ * path the shell expands (`"$F"`), or one after a move that cannot be followed (`popd`, `cd -`), is
+ * not recorded.
  */
 export const writtenFiles =
   (folders: Folders) =>
   (command: string): ReadonlyArray<string> => {
     const split = unitsOf(ShellCommand.make(command), segmentsOf, folders);
     if (split._tag === "Unparsed") return [];
-    return [
-      ...new Set(
-        filesWritten(split.units).flatMap(({ word, moved }) => {
-          const resolved = moved ? undefined : resolvePath(word, folders);
-          return resolved?._tag === "Local" && resolved.full !== undefined ? [resolved.full] : [];
-        }),
-      ),
-    ];
+    const places = placesOf(split.units, folders);
+    return [...new Set(filesWritten(split.units).flatMap(({ word, at }) => fullsOf(word, places[at], folders)))];
   };
 
 /** The text the file holds after `writes`, given its `current` text. */

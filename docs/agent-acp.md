@@ -616,7 +616,10 @@ the file tools' paths are resolved against the working folder (`agent-tools/in-w
   (`FileChanged`), from its text on the disk just before the command ran and once it has run, so the
   diff is of what the command wrote, `$…` expanded. A command whose words do not show the text it
   writes (`sed -i`, `printf … > f`) shows no diff before it runs; once it succeeds, each file it wrote
-  at a path it writes out is recorded and shown the same way. The command writes the disk, not the editor's
+  at a path it writes out is recorded and shown the same way. After a `cd` that may or may not have
+  moved (`cd sub && …`), a relative path is read in each folder it may lead from, and only the file
+  that changed is recorded. A file that a program puts whole (`cp`'s destination, `curl -o`'s) is not
+  recorded as a diff. The command writes the disk, not the editor's
   buffer, so when the editor has unsaved changes to the file, the diff in the question (from the
   editor's text) and the diff recorded (from the disk) differ. Once the call has ended,
   live and on a replay alike, it shows those diffs, and says what it wrote of each file it recorded

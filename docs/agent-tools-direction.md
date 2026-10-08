@@ -146,9 +146,10 @@ agent reads, as the harness's notices of changed files want.
 
 **Open.**
 
-- A command's other changes, the files a program writes where its words do not show the text
-  (`sed -i`, `mv`, a build), which say nothing once the call has ended. Dan: this would be an
-  enhancement on "the agent ran this bash command", and git records the meaningful diffs anyway.
+- A command's other changes: the files a program puts whole (`cp`, `curl -o`) and a build's, which
+  say nothing once the call has ended. Dan: this would be an enhancement on "the agent ran this bash
+  command", and git records the meaningful diffs anyway. A whole file shown as a diff would be as long
+  as the file; a line that says what happened (moved from X to Y) costs far fewer tokens.
 - Details tell the harness's notices of changed files which changes the agent made itself
   (`TODO.md`); Dan: "If we have the information to do so, then we should do so!"
 - A rewritten search tells the agent that its command was rewritten and why in its result

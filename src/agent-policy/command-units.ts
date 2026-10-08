@@ -125,6 +125,8 @@ export interface UnitPath {
   readonly word: Word | undefined;
   readonly givenBy?: "xargs" | "find";
   readonly recursive?: boolean;
+  /** Set when a program in `changers` puts a file at the path whole (a copy, a link, a download) or moves it, rather than writing its text: `cp`'s destination, `curl -o`'s file, `mv`'s operands. */
+  readonly whole?: true;
 }
 
 export type Units = { readonly _tag: "Units"; readonly units: ReadonlyArray<Unit> } | { readonly _tag: "Unparsed"; readonly reason: UnparsedReason };
@@ -196,7 +198,7 @@ const unit = (words: ReadonlyArray<Word>, grant: ReadonlyArray<WordText> | undef
       ...(touches.recursiveReads ?? []).map((word): UnitPath => ({ access: "reads", word, recursive: true })),
       ...(touches.fedReads === true ? [{ access: "reads" as const, word: undefined, givenBy: touches.fedBy ?? "xargs" }] : []),
       ...written.map((word): UnitPath => ({ access: "writes", word })),
-      ...(touches.changes ?? []).map((change): UnitPath => ({ access: change.verb, word: change.word })),
+      ...(touches.changes ?? []).map((change): UnitPath => ({ access: change.verb, word: change.word, whole: true })),
       ...(touches.fed === undefined ? [] : [{ access: touches.fed, word: undefined, givenBy: touches.fedBy ?? "xargs" }]),
     ],
     detail: touches.detail,
@@ -966,22 +968,56 @@ const segmentUnits = (segment: Segment, functions: ReadonlySet<WordText>, seen: 
   return [...(teed === undefined ? resolved : resolved.map((each) => (each.words[0] === segment.words[0] ? { ...each, detail: teed } : each))), ...written];
 };
 
-/** Whether a `cd`, `pushd` or `popd` among `units` before the one at `at` may have moved the folder its relative paths lead from. */
-const movedBefore = (units: ReadonlyArray<Unit>, at: number): boolean =>
-  units.slice(0, at).some((before) => ["cd", "pushd", "popd"].includes(basename(before.words[0]?.literal ?? WordText.make(""))));
+/**
+ * Where a unit's relative paths may lead from: the folders they may be resolved from (`undefined`:
+ * the working folder), and whether that is not known.
+ */
+export interface Place {
+  readonly bases: ReadonlyArray<WordText | undefined>;
+  readonly unknown: boolean;
+}
 
-/** The texts a command's units write to files, in order, each with whether a `cd`, `pushd` or `popd` before it may have moved the folder its path is relative to. */
-export const textsWritten = (units: ReadonlyArray<Unit>): ReadonlyArray<{ readonly writes: Writes; readonly moved: boolean }> =>
-  units.flatMap((each, at) => (each.detail?._tag === "Writes" ? [{ writes: each.detail, moved: movedBefore(units, at) }] : []));
+/** Whether `word` is a relative path: one that does not start with `/` or `~`. */
+export const relativePath = (word: Word): boolean => !/^[/~]/.test(word.literal ?? word.text);
 
 /**
- * The paths a command's units write files at, in order, as written, each with whether a `cd`,
- * `pushd` or `popd` before it may have moved the folder its path is relative to: a redirect's target,
- * `tee`'s, `sed -i`'s, and the rest that `paths` records as written. A file deleted, moved or only
- * changed (`chmod`) is not among them, nor a path a program is given as it runs (`xargs`).
+ * Where each of `units`' relative paths may lead from, in order. A `cd` or `pushd` to a folder written
+ * out adds that folder to the folders a later relative path may lead from, since the command may or
+ * may not have moved by then (`cd x || true`). After a `popd`, a `cd -`, or a `cd` to a folder not
+ * written out, where a relative path leads is not known.
  */
-export const filesWritten = (units: ReadonlyArray<Unit>): ReadonlyArray<{ readonly word: Word; readonly moved: boolean }> =>
-  units.flatMap((each, at) => each.paths.flatMap((path) => (path.access === "writes" && path.word !== undefined ? [{ word: path.word, moved: movedBefore(units, at) }] : [])));
+export const placesOf = (units: ReadonlyArray<Unit>, folders: Folders | undefined): ReadonlyArray<Place> =>
+  units.reduce<Place & { readonly at: ReadonlyArray<Place> }>(
+    (state, unit) => {
+      const here = { bases: state.bases, unknown: state.unknown };
+      const program = unit.words[0]?.literal;
+      const name = program === undefined ? "" : basename(program);
+      if (name === "popd") return { bases: state.bases, unknown: true, at: [...state.at, here] };
+      if (name !== "cd" && name !== "pushd") return { ...state, at: [...state.at, here] };
+      const target = unit.paths[0]?.word;
+      const moved = state.bases.flatMap((base) => {
+        if (target === undefined || folders === undefined) return [];
+        const resolved = resolvePath(target, folders, base);
+        return resolved._tag === "Local" && resolved.full !== undefined ? [resolved.full] : [];
+      });
+      const lost = target === undefined || resolvePath(target, folders)._tag === "Unresolved" || (folders !== undefined && moved.length === 0);
+      return { bases: [...state.bases, ...moved], unknown: state.unknown || lost, at: [...state.at, here] };
+    },
+    { bases: [undefined], unknown: false, at: [] },
+  ).at;
+
+/** The texts a command's units write to files, in order, each with the position of its unit. */
+export const textsWritten = (units: ReadonlyArray<Unit>): ReadonlyArray<{ readonly writes: Writes; readonly at: number }> =>
+  units.flatMap((each, at) => (each.detail?._tag === "Writes" ? [{ writes: each.detail, at }] : []));
+
+/**
+ * The paths at which a command's units write a file's text, in order, as written, each with the
+ * position of its unit: a redirect's target, `tee`'s, `sed -i`'s, `sort -o`'s, `dd of=`'s. A file a
+ * program puts whole (`cp`'s destination, `curl -o`'s), deletes, moves or only changes (`chmod`) is
+ * not among them, nor a path a program is given as it runs (`xargs`).
+ */
+export const filesWritten = (units: ReadonlyArray<Unit>): ReadonlyArray<{ readonly word: Word; readonly at: number }> =>
+  units.flatMap((each, at) => each.paths.flatMap((path) => (path.access === "writes" && path.whole !== true && path.word !== undefined ? [{ word: path.word, at }] : [])));
 
 const unitsAt = (command: ShellCommand, segmentsOf: SegmentsOf, depth: number, folders: Folders | undefined): Units => {
   const split = segmentsOf(command);

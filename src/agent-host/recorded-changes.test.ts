@@ -82,6 +82,18 @@ test("a command whose words do not show the text it writes is recorded too: sed 
   ]);
 });
 
+test("after a cd, a relative path is read in each folder it may lead from, and only the file that changed is recorded; a file a program copies whole (cp) is not recorded as a diff", async () => {
+  const inSub = join(testFolder(), "sub", "c.txt");
+  mkdirSync(join(testFolder(), "sub"), { recursive: true });
+  writeFileSync(inSub, "one\n");
+  writeFileSync(join(testFolder(), "c.txt"), "root\n");
+  const { results } = await ran([
+    ["run_command", { command: "cd sub && sed -i.bak 's/one/two/' c.txt" }],
+    ["run_command", { command: "cp sub/c.txt d.txt" }],
+  ]);
+  expect(results as unknown).toEqual([[{ _tag: "FileChanged", path: inSub, change: "updated", patch: [`--- ${inSub}`, `+++ ${inSub}`, "@@ -1,1 +1,1 @@", "-one", "+two"].join("\n") }], []]);
+});
+
 test("a patch over 32 KiB is kept to its first lines that fit, and the bytes left out are recorded", async () => {
   const line = `${"x".repeat(99)}\n`;
   const { results } = await ran([["write_file", { path: "big.txt", text: line.repeat(400) }]]);

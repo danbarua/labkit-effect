@@ -100,10 +100,11 @@ model.
           Codex).
         - A file a command writes is shown as a diff: before it runs, in the editor's call and the
           REPL's question, when its words show the text; once it has run, in every host, from what
-          the call recorded, for every file it writes at a path it writes out (`sed -i` and
-          `printf … > f` included). To do: `printf`'s text is not shown before it runs. Open (Dan,
-          2026-10-08): `mv` and builds, which write no path a redirect or `sed -i` names; git
-          records the meaningful diffs anyway.
+          the call recorded, for every file whose text it writes at a path it writes out (`sed -i`
+          and `printf … > f` included; after a `cd`, in each folder the path may lead from). To do:
+          `printf`'s text is not shown before it runs; a path the shell expands (`"$F"`) is not
+          recorded. Open (Dan, 2026-10-08): `cp` and builds; git records the meaningful diffs
+          anyway, and a whole file is better named in a line than shown as a diff.
         - Code is shown as written: a one-line `python3 -c '…; …'` stays on one line. Formatting it
           (Python's `ast.unparse`, a JavaScript formatter) would run a program on the host.
         - `awk` judged by its program, as `sed` is (no `system()`, no pipes, no `print >`).

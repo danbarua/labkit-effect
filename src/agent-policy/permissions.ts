@@ -52,7 +52,7 @@ import { FailureText, ToolKind, ToolName } from "../agent-machine/names.ts";
 import { MediaType, type Received, ReceivedText } from "../agent-machine/received.ts";
 import { type SegmentsOf, ShellCommand, type Word, WordText } from "./command-segments.ts";
 import { commandNotes, notesOf } from "./command-explainers.ts";
-import { Detail, type Folders, NeedText, type OutsideChange, type Unit, type UnitPath, unitsOf } from "./command-units.ts";
+import { Detail, type Folders, NeedText, type OutsideChange, placesOf, relativePath, type Unit, type UnitPath, unitsOf } from "./command-units.ts";
 import { Explanation } from "./sed-script.ts";
 import { defaultReadOnly, namesProgram, namesTool, type ParsedRule, parseRule, type PathRule, pathRuleOf, PermissionRule, type ReadOnlyPrefix, readOnlyNames, ruleNamesProgram } from "./permission-rules.ts";
 import { changeReaches, matchesPath } from "./path-patterns.ts";
@@ -357,27 +357,8 @@ const pathJudging = (judging: CommandJudging, units: ReadonlyArray<Unit>) => {
   const folders = judging.folders;
   const allow = judging.settings.allow.flatMap((rule) => present(pathRuleOf(rule)));
   const deny = judging.settings.deny.flatMap((rule) => present(pathRuleOf(rule)));
-  const relative = (word: Word): boolean => !/^[/~]/.test(word.literal ?? word.text);
-  // For each unit, the folders a relative path may be resolved from (undefined: the working folder), and whether that is not known.
-  type Placed = { readonly bases: ReadonlyArray<WordText | undefined>; readonly unknown: boolean };
-  const placed = units.reduce<Placed & { readonly at: ReadonlyArray<Placed> }>(
-    (state, unit) => {
-      const here = { bases: state.bases, unknown: state.unknown };
-      const program = unit.words[0]?.literal;
-      const name = program === undefined ? "" : program.slice(program.lastIndexOf("/") + 1);
-      if (name === "popd") return { bases: state.bases, unknown: true, at: [...state.at, here] };
-      if (name !== "cd" && name !== "pushd") return { ...state, at: [...state.at, here] };
-      const target = unit.paths[0]?.word;
-      const moved = state.bases.flatMap((base) => {
-        if (target === undefined || folders === undefined) return [];
-        const resolved = resolvePath(target, folders, base);
-        return resolved._tag === "Local" && resolved.full !== undefined ? [resolved.full] : [];
-      });
-      const lost = target === undefined || resolvePath(target, folders)._tag === "Unresolved" || (folders !== undefined && moved.length === 0);
-      return { bases: [...state.bases, ...moved], unknown: state.unknown || lost, at: [...state.at, here] };
-    },
-    { bases: [undefined], unknown: false, at: [] },
-  ).at;
+  const relative = relativePath;
+  const placed = placesOf(units, folders);
   const basesAt = (word: Word, at: number): ReadonlyArray<WordText | undefined> => (relative(word) ? (placed[at]?.bases ?? [undefined]) : [undefined]);
   const fullsOf = (word: Word, at: number): ReadonlyArray<WordText | undefined> =>
     basesAt(word, at).map((base) => {
