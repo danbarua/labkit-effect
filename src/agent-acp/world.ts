@@ -31,7 +31,7 @@
 import type { Environment } from "../agent-process/environment.ts";
 import { Effect, FileSystem, HashMap, Option, Ref } from "effect";
 import { homedir } from "node:os";
-import { type PlannedWrite, plannedWrites, type ShownWrite, shownWrites } from "../agent-host/command-writes.ts";
+import { type PlannedWrite, plannedWrites, type ShownWrite, shownWrites, writtenFiles } from "../agent-host/command-writes.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
 import { type Current, currentOnDisk } from "../agent-tools/file-change.ts";
 import { ShellCommand, WordText } from "../agent-policy/command-segments.ts";
@@ -169,7 +169,7 @@ export const editorWorld: World<FileSystem.FileSystem> = {
         return Ref.get(writes).pipe(Effect.map((all) => Option.getOrElse(HashMap.get(all, call), () => [])));
       };
       const inFolder = inWorkspace(cwd);
-      const tools: ReadonlyArray<AnyTool<Editor | CurrentCall>> = [
+      const tools: ReadonlyArray<AnyTool<Editor | CurrentCall | FileSystem.FileSystem>> = [
         ...(fs?.readTextFile === true ? [anyTool(described(inFolder(readFile)))] : []),
         ...(fs?.writeTextFile === true ? [anyTool(described(inFolder(writeFile)))] : []),
         ...(fs?.readTextFile === true && fs.writeTextFile === true ? [anyTool(described(inFolder(editFile)))] : []),
@@ -195,16 +195,19 @@ export const editorWorld: World<FileSystem.FileSystem> = {
           const shown: Presented = { ...base, ...(about === undefined || base.title !== call.tool ? {} : { title: `${call.tool}: ${oneLine(about)}` }) };
           const terminalId = Option.getOrUndefined(HashMap.get(yield* Ref.get(terminals), call.call));
           if (call.tool === "terminal_command") {
-            // Before the command runs, its writes are read; once it has ended, the writes read before it ran are shown, after a success.
             const command = typeof input["command"] === "string" ? ShellCommand.make(input["command"]) : undefined;
-            const before = yield* writesShown(call.call, command, outcome === undefined && mode === "live");
-            // A replayed call's files were not read before it ran, so it says what it wrote instead of showing a diff.
-            const written = mode === "replay" && before.length === 0 && command !== undefined && outcome?._tag === "Succeeded" ? plannedWrites(command, folders).map(wroteContent) : [];
-            const content = [
-              ...(outcome === undefined || outcome._tag === "Succeeded" ? before.flatMap(writeContent) : []),
-              ...written,
-              ...(terminalId === undefined ? [] : [{ type: "terminal" as const, terminalId }]),
-            ];
+            const terminal = terminalId === undefined ? [] : [{ type: "terminal" as const, terminalId }];
+            // Before the command has ended, its writes are read, before it runs, and shown from that.
+            if (outcome === undefined) {
+              const content = [...(yield* writesShown(call.call, command, mode === "live")).flatMap(writeContent), ...terminal];
+              return content.length === 0 ? shown : ({ ...shown, content } satisfies Presented);
+            }
+            // Once it has ended, the files it changed are shown from what it recorded (`changedFiles`); a
+            // write it recorded nothing of (its text before was not known, or it was recorded before
+            // commands kept their writes) says what it wrote.
+            const recorded = new Set<string>(outcome._tag === "Succeeded" ? (outcome.details ?? []).map((detail) => detail.path) : []);
+            const unrecorded = outcome._tag === "Succeeded" && command !== undefined ? plannedWrites(command, folders).filter((planned) => planned._tag !== "Planned" || !recorded.has(planned.full)) : [];
+            const content = [...changedFiles(outcome), ...unrecorded.map(wroteContent), ...terminal];
             return content.length === 0 ? shown : ({ ...shown, content } satisfies Presented);
           }
           const at = typeof input["path"] === "string" ? { full: fullPathIn(cwd, input["path"]) } : undefined;
@@ -232,7 +235,8 @@ export const workspaceWorld: World<FileSystem.FileSystem> = {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const additional = additionalFolders ?? [];
-      const workspace = workspaceTools(cwd, { strictInput, additional, ...(environment === undefined ? {} : { environment }) });
+      const writtenBy = writtenFiles({ working: WordText.make(cwd), home: WordText.make(homedir()) });
+      const workspace = workspaceTools(cwd, { strictInput, additional, writtenBy, ...(environment === undefined ? {} : { environment }) });
       const git = gitToolsAt(cwd, strictInput);
       return {
         system: yield* systemFor(cwd, git, additional),

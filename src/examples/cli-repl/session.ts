@@ -39,6 +39,7 @@ import { gitTools, isRepositoryRoot } from "../../agent-tools/git.ts";
 import { additionalDirectoriesOf } from "../../agent-config/builtins.ts";
 import type { ToolSpec } from "../../agent-session/contracts.ts";
 import { foldersOf } from "../../agent-host/services.ts";
+import { writtenFiles } from "../../agent-host/command-writes.ts";
 import { workspaceTools } from "../../agent-tools/workspace.ts";
 import type { Session } from "../../agent-session/loop.ts";
 import { SourcedToolRunner } from "../../agent-session/tool-sources.ts";
@@ -95,11 +96,13 @@ export const madeIn = (record: unknown, cwd: string): boolean => Predicate.isRea
 
 /**
  * The workspace tools for the working folder; their commands run with the environment the
- * configuration builds (`commandEnvironment`).
+ * configuration builds (`commandEnvironment`), and record the files they write text to
+ * (`writtenFiles`).
  */
 const workspaceOf = (config: Config) =>
   workspaceTools(process.cwd(), {
     strictInput: config.strictToolInput,
+    writtenBy: writtenFiles(foldersOf(process.cwd(), [])),
     additional: foldersOf(process.cwd(), [...config.additionalFolders, ...additionalDirectoriesOf(config.configuration)]).additional ?? [],
     environment: processEnvironmentWith(seamListsOf(config.configuration, { canAsk: config.canAsk }).commandEnvironment ?? [removeCredentials()]),
   });

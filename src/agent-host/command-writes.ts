@@ -17,7 +17,7 @@
 
 import { Effect } from "effect";
 import { join, resolve } from "node:path";
-import type { ShellCommand } from "../agent-policy/command-segments.ts";
+import { ShellCommand } from "../agent-policy/command-segments.ts";
 import { type Folders, textsWritten, unitsOf, type Writes } from "../agent-policy/command-units.ts";
 import type { Current } from "../agent-tools/file-change.ts";
 import { segmentsOf } from "./command-parser.ts";
@@ -38,6 +38,11 @@ export const plannedWrites = (command: ShellCommand, folders: Folders): Readonly
     return { _tag: "Planned", full: path.startsWith("~") ? join(folders.home, path.slice(1)) : resolve(folders.working, path), writes };
   });
 };
+
+/** The full paths of the files that `command` writes text to and whose paths it shows (`plannedWrites`), each once: what a command tool records (`recordingWrites`). */
+export const writtenFiles =
+  (folders: Folders) =>
+  (command: string): ReadonlyArray<string> => [...new Set(plannedWrites(ShellCommand.make(command), folders).flatMap((planned) => (planned._tag === "Planned" ? [planned.full] : [])))];
 
 /** The text the file holds after `writes`, given its `current` text. */
 export const newTextOf = (current: Exclude<Current, { readonly _tag: "Unknown" }>, writes: Writes): string =>

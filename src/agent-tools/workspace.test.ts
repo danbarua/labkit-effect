@@ -166,6 +166,25 @@ test("write_file and edit_file record what they changed: a file created, with it
   expect(await detailsOf("write_file", { path: "src/d.txt", text: "one\nthree\n" })).toBeUndefined();
 });
 
+test("with writtenBy, run_command records each file its command writes, from its text before the command ran and after; a failed command records nothing", async () => {
+  const full = join(root, "src", "w.txt");
+  writeFileSync(full, "old\n");
+  const recording = workspaceTools(root, { writtenBy: (command) => (command.includes("w.txt") ? [full, full] : []) });
+  const ran = (command: string) =>
+    runTest(
+      Effect.gen(function* () {
+        const outcome = yield* (yield* ToolRunner).run(ToolName.make("run_command"), receivedJson({ intent: "A test call.", command } as never), CallId.make("call-1"));
+        return outcome._tag === "Succeeded" ? (outcome.details ?? []).map((detail) => ({ ...detail, patch: asText(detail.patch) })) : outcome.reason._tag;
+      }).pipe(Effect.provide(Layer.effect(ToolRunner, recording.source).pipe(Layer.provide(BunServices.layer)))),
+    );
+  // The file is named twice, and recorded once.
+  expect((await ran("echo new > src/w.txt")) as unknown).toEqual([
+    { _tag: "FileChanged", path: full, change: "updated", patch: [`--- ${full}`, `+++ ${full}`, "@@ -1,1 +1,1 @@", "-old", "+new"].join("\n") },
+  ]);
+  expect(await ran("echo again > src/w.txt; exit 1")).toBe("Reported");
+  expect(await ran("echo hi")).toEqual([]);
+});
+
 test("write_file creates or replaces a file inside the workspace, whose folder exists", async () => {
   expect(await call("write_file", { path: "src/b.txt", text: "hello" })).toBe(`Wrote 5 bytes to ${root}/src/b.txt.`);
   expect(await call("read_file", { path: "src/b.txt" })).toBe("hello");

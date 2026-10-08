@@ -34,6 +34,12 @@ export class CurrentCall extends Context.Service<CurrentCall, CallId>()("agent-t
 /** What a call returns: the text the model is sent, or that text and the details of what the call did (`ToolDetail`), which the model is never sent. */
 export type ToolOutput = string | { readonly text: string; readonly details: ReadonlyArray<ToolDetail> };
 
+/** Returns `output` with `details` added to its own. */
+export const withDetails = (output: ToolOutput, details: ReadonlyArray<ToolDetail>): ToolOutput => {
+  if (details.length === 0) return output;
+  return typeof output === "string" ? { text: output, details } : { ...output, details: [...output.details, ...details] };
+};
+
 /** Returns `output` with `note` appended to its text. */
 export const withNote = (output: ToolOutput, note: string): ToolOutput => (typeof output === "string" ? `${output}${note}` : { ...output, text: `${output.text}${note}` });
 

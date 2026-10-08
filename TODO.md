@@ -68,7 +68,7 @@ model.
           searched, so that `rg KEY .` runs without `secrets/` instead of being refused. The
           session records both the command written and the command run, since a rewrite is a
           substitution, and the call's structured result tells the agent that the command was
-          rewritten and why (Dan, 2026-10-08). Waits for tool results with details, below.
+          rewritten and why (Dan, 2026-10-08).
         - MCP tools' path inputs are not judged by path rules. An operator installs and configures
           an MCP server, so the server is trusted, and it is where an agent's access to an external
           system is authorized: an agent that may not read a file may be allowed to pass the file's
@@ -118,14 +118,10 @@ model.
           (`shaping.ts`), which say the model can follow one with a tool, but no tool can: `read_file`
           of `blob://ab12` reads `<working folder>/blob:/ab12` and finds nothing. The permission
           policy does not gate a pointer: it is a relative path, inside the working folder.
-        - Tool results with details (Dan, 2026-10-08): a result has the text the model sees and
-          details for the harness and its displays, which the model never sees, as Claude Code's
-          `toolUseResult`, Codex's `FileChange`, opencode's `metadata` and omp's `details` do. A
-          file change's details are its patch (Codex's size: the diff for an update, the content for
-          a new file), stored with the result (large ones in the blob store), so a loaded session
-          shows the same diff as the live one, `write_file` and `edit_file` included, and a
-          replayed command's "Wrote config.yml." goes. To write up first, in
-          `docs/agent-tools-direction.md`, then build.
+        - Tool results with details (Dan, 2026-10-08). Built: `FileChanged` from the file tools and
+          from commands' writes whose text their words show, shown by ACP live and replayed alike
+          and by the REPL. To do: what `docs/agent-tools-direction.md` lists as not built (a
+          `deleted` change, large patches in the blob store, commands' other changes).
         - The opinionated harness runs a composite command itself (Dan, 2026-10-07): it splits the
           command into its programs and their order, runs each, and returns to the model the result
           the command asked for (the output of `… | tail`), with each program's exit code and a

@@ -561,10 +561,12 @@ the file tools' paths are resolved against the working folder (`agent-tools/in-w
   has no text before (`oldText: null`). When the text before cannot be read (the read fails, the
   file is over 256 KiB, a `cd` comes first in the command), the call says why no diff is shown, and
   the permission question shows the text the command writes. A note follows a diff whose text the
-  shell expands (`$…`) before writing it. A session that is loaded shows no diff for the calls it
-  replays, since their files were read after the commands ran: each says what it wrote
-  (`Wrote config.yml.`, `Added to the end of notes.md.`). A file's text before is not recorded in
-  the session's facts.
+  shell expands (`$…`) before writing it. A command that succeeds records each such file it changed
+  (`FileChanged`), from its text read before the command ran and its text on the disk once the
+  command has run, so the diff is of what the command wrote, `$…` expanded. Once the call has ended,
+  live and on a replay alike, it shows those diffs, and says what it wrote of each file it recorded
+  nothing of (`Wrote config.yml.`, `Added to the end of notes.md.`): its text before was not known,
+  a `cd` came first, or the call was recorded before commands kept their writes.
 
 ### `workspaceWorld`
 
@@ -663,9 +665,9 @@ The host logs each event under `log-keys.ts`, with the ids it is about as log an
   watching, and what the turn had begun should not run unseen.
 - **One projection for live and replay.** The two differ only in the mode, so a loaded session and a
   live one show the same text, and the live feed continues from the replay's state. A file a call
-  changed is shown from the patch the call recorded, never from the file as it is now. A command's
-  write is the exception: live, it shows the file's diff, read from the disk before the command runs;
-  on a replay it says what it wrote, since a command records no patch yet.
+  changed is shown from the patch the call recorded, never from the file as it is now. Before a call
+  has ended, live shows what the call is about to do (an edit's input, a command's writes read from
+  the files), which a replay has no call for.
 - **Tool calls go through the editor.** The model then sees unsaved buffers, and the editor shows and
   controls what changes. `workspaceWorld` is a stopgap that bypasses it.
 - **A cancelled permission request refuses the call once.** The turn goes on, and the model asks

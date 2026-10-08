@@ -40,7 +40,7 @@ import { ToolName } from "../agent-machine/names.ts";
 import { type Environment, withoutCredentials } from "../agent-process/environment.ts";
 import { described } from "./described.ts";
 import { inWorkspace } from "./in-workspace.ts";
-import { currentOnDisk, fileChanged } from "./file-change.ts";
+import { currentOnDisk, fileChanged, recordingWrites } from "./file-change.ts";
 import { FilePath, FolderPath } from "./paths.ts";
 import { anyTool, Rejected, Reported, sourceOf, type Tool } from "./tool.ts";
 
@@ -265,9 +265,18 @@ export const runCommand = (root: string, environment: Environment): Tool<typeof 
 /**
  * The workspace tools for the folder `root`. With `strictInput`, a call whose input has properties
  * its tool does not take is refused; without (the default), it runs without them, and its result
- * says which were ignored.
+ * says which were ignored. With `writtenBy`, `run_command` records the files its command writes.
  */
-export function workspaceTools(root: string, options: { readonly strictInput?: boolean; readonly environment?: Environment; readonly additional?: ReadonlyArray<string> } = {}) {
+export function workspaceTools(
+  root: string,
+  options: {
+    readonly strictInput?: boolean;
+    readonly environment?: Environment;
+    readonly additional?: ReadonlyArray<string>;
+    /** The full paths of the files a command writes text to, from its words; with it, `run_command` records them (`recordingWrites`). */
+    readonly writtenBy?: (command: string) => ReadonlyArray<string>;
+  } = {},
+) {
   // What `run_command` is given: what the host composed (`commandEnvironment`), else this process's without its credentials.
   const environment = options.environment ?? withoutCredentials(process.env).env;
   const additional = options.additional ?? [];
@@ -277,7 +286,7 @@ export function workspaceTools(root: string, options: { readonly strictInput?: b
     anyTool(described(bound(listDir))),
     anyTool(described(bound(writeFile))),
     anyTool(described(bound(editFile))),
-    anyTool(described(runCommand(root, environment))),
+    anyTool(described(options.writtenBy === undefined ? runCommand(root, environment) : recordingWrites(options.writtenBy)(runCommand(root, environment)))),
   ];
   return {
     catalog: tools.map((tool) => tool.spec),

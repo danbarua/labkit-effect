@@ -7,7 +7,7 @@
  */
 
 import { expect } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import * as git from "es-git";
@@ -813,7 +813,12 @@ test("a command that writes text to a file shows the file's diff in its call: be
   });
   mkdirSync(host.cwd, { recursive: true });
   writeFileSync(join(host.cwd, "config.yml"), "name: on disk\n");
-  const { app, log } = sdkClient(undefined, { [join(host.cwd, "config.yml")]: "name: in the editor\n" });
+  // The editor's terminal writes the files as the shell would.
+  const { app, log } = sdkClient(undefined, { [join(host.cwd, "config.yml")]: "name: in the editor\n" }, () => {
+    writeFileSync(join(host.cwd, "config.yml"), "name: new\n");
+    appendFileSync(join(host.cwd, "new.txt"), "hi\n");
+    return { output: "", exitCode: 0 };
+  });
   await app.connectWith(host.stream, async (ctx) => {
     await initialize(ctx, { fs: { readTextFile: true, writeTextFile: true }, terminal: true });
     const created = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
@@ -867,13 +872,16 @@ test("a loaded session shows the diffs of the files that write_file and edit_fil
   expect(lastContent(reloaded.log.updates, "edit-1") as unknown).toEqual(edited);
 });
 
-test("a loaded session shows no diff for the writes it replays, whose files were read after the commands ran: it says what each wrote", async () => {
+test("a loaded session shows a command's writes from what its call recorded: the diff that live showed, though the file has changed since", async () => {
   const first = startHost({
     script: [answer({ _tag: "ToolCall", call: "append-1", tool: "terminal_command", input: { command: "echo two >> log.txt", intent: "Append." } }), answer({ _tag: "Text", text: "Appended." })],
   });
   mkdirSync(first.cwd, { recursive: true });
   writeFileSync(join(first.cwd, "log.txt"), "one\n");
-  const live = sdkClient(undefined, { [join(first.cwd, "log.txt")]: "one\n" });
+  const live = sdkClient(undefined, { [join(first.cwd, "log.txt")]: "one\n" }, () => {
+    appendFileSync(join(first.cwd, "log.txt"), "two\n");
+    return { output: "", exitCode: 0 };
+  });
   const sessionId = await live.app.connectWith(first.stream, async (ctx) => {
     await initialize(ctx, { fs: { readTextFile: true, writeTextFile: true }, terminal: true });
     const created = await ctx.request("session/new", { cwd: first.cwd, mcpServers: [] });
@@ -883,19 +891,43 @@ test("a loaded session shows no diff for the writes it replays, whose files were
   await first.stop();
   const contentOf = (updates: ReadonlyArray<Update>) =>
     updates.flatMap((update) => ((update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") && update.toolCallId === "append-1" ? (update.content ?? []) : []));
-  expect(contentOf(live.log.updates)).toContainEqual({ type: "diff", path: join(first.cwd, "log.txt"), oldText: "one\n", newText: "one\ntwo\n" });
-  // The command ran: the file now holds what it appended.
-  writeFileSync(join(first.cwd, "log.txt"), "one\ntwo\n");
+  const appended = { type: "diff", path: join(first.cwd, "log.txt"), oldText: "one\n", newText: "one\ntwo\n" };
+  expect(contentOf(live.log.updates) as unknown).toContainEqual(appended);
+  writeFileSync(join(first.cwd, "log.txt"), "changed since\n");
   const second = startHost({});
-  const reloaded = sdkClient(undefined, { [join(first.cwd, "log.txt")]: "one\ntwo\n" });
+  const reloaded = sdkClient(undefined, { [join(first.cwd, "log.txt")]: "changed since\n" });
   await reloaded.app.connectWith(second.stream, async (ctx) => {
     await initialize(ctx, { fs: { readTextFile: true, writeTextFile: true }, terminal: true });
     await ctx.request("session/load", { sessionId, cwd: second.cwd, mcpServers: [] });
   });
   await second.stop();
-  expect(reloaded.log.updates.some((update) => "toolCallId" in update && update.toolCallId === "append-1")).toBe(true);
-  expect(contentOf(reloaded.log.updates).filter((content) => content.type === "diff")).toEqual([]);
-  expect(contentOf(reloaded.log.updates)).toContainEqual({ type: "content", content: { type: "text", text: "Added to the end of log.txt." } });
+  expect(contentOf(reloaded.log.updates).filter((content) => content.type === "diff") as unknown).toEqual([appended]);
+});
+
+test("a command's write that its call recorded nothing of says what it wrote once the call has ended, live and on a replay: here a cd comes first, so which file it writes is not known", async () => {
+  const first = startHost({
+    script: [answer({ _tag: "ToolCall", call: "write-1", tool: "terminal_command", input: { command: "cd sub && echo hi > notes.md", intent: "Write." } }), answer({ _tag: "Text", text: "Written." })],
+  });
+  const live = sdkClient();
+  const sessionId = await live.app.connectWith(first.stream, async (ctx) => {
+    await initialize(ctx, { fs: { readTextFile: true, writeTextFile: true }, terminal: true });
+    const created = await ctx.request("session/new", { cwd: first.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "Write"));
+    return created.sessionId;
+  });
+  await first.stop();
+  const ended = (updates: ReadonlyArray<Update>) =>
+    updates.flatMap((update) => ((update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") && update.toolCallId === "write-1" && update.status === "completed" ? (update.content ?? []) : []));
+  const wrote = { type: "content", content: { type: "text", text: "Wrote notes.md." } };
+  expect(ended(live.log.updates) as unknown).toContainEqual(wrote);
+  const second = startHost({});
+  const reloaded = sdkClient();
+  await reloaded.app.connectWith(second.stream, async (ctx) => {
+    await initialize(ctx, { fs: { readTextFile: true, writeTextFile: true }, terminal: true });
+    await ctx.request("session/load", { sessionId, cwd: second.cwd, mcpServers: [] });
+  });
+  await second.stop();
+  expect(ended(reloaded.log.updates) as unknown).toContainEqual(wrote);
 });
 
 test("additionalDirectories count as inside the working folder: a command reading there is not asked about, read_file reads there, and the system text names them; the folders are kept in the session's record and listed; a relative one is refused", async () => {

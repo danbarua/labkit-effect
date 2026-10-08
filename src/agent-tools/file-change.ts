@@ -1,6 +1,8 @@
 /**
  * What a tool records of a file it changes (`FileChanged`, `ToolDetail`): the file's text before the
- * change, read from the local disk (`currentOnDisk`), and the change from it to the text after.
+ * change, read from the local disk (`currentOnDisk`), and the change from it to the text after. A
+ * command tool records the files its command writes text to (`recordingWrites`), as its host names
+ * them from the command's words.
  *
  * A file that does not exist is new: only a read that finds no file means that; a read that fails
  * for another reason does not. A file larger than `maxCurrentBytes` is not read.
@@ -9,6 +11,7 @@
 import { Effect, FileSystem } from "effect";
 import { FullPath } from "../agent-machine/names.ts";
 import type { ToolDetail } from "../agent-machine/observation.ts";
+import { type Fields, type Tool, withDetails } from "./tool.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
 import { receivedText } from "../agent-session/received.ts";
 import { unifiedDiff } from "./line-diff.ts";
@@ -45,3 +48,38 @@ export const fileChanged = (full: string, before: Current, after: string): Reado
   if (before._tag === "Missing") return [{ _tag: "FileChanged", path, change: "created", patch: receivedText(after) }];
   return [{ _tag: "FileChanged", path, change: "updated", patch: receivedText(unifiedDiff(full, before.text, after).join("\n")) }];
 };
+
+/**
+ * The details of the files a command wrote, from each file's text `before` the command ran and its
+ * text on the disk now. A file named twice is recorded once, from its first text before. A file
+ * whose text before or now is not known records nothing.
+ */
+export const filesWritten = (fs: FileSystem.FileSystem, written: ReadonlyArray<{ readonly full: string; readonly before: Current }>): Effect.Effect<ReadonlyArray<ToolDetail>> => {
+  const once = written.filter((each, at) => written.findIndex((other) => other.full === each.full) === at);
+  return Effect.map(
+    Effect.forEach(once, ({ full, before }) => Effect.map(currentOnDisk(fs, full, full), (now) => (now._tag === "Text" ? fileChanged(full, before, now.text) : []))),
+    (all) => all.flat(),
+  );
+};
+
+/**
+ * Returns `tool`, which runs the shell command in its `command` input, recording the text files the
+ * command writes (`FileChanged`). `writtenBy` returns their full paths, from the command's words.
+ * Each file's text is read from the disk before the command runs and once it has run. A call that
+ * fails records nothing.
+ */
+export const recordingWrites =
+  (writtenBy: (command: string) => ReadonlyArray<string>) =>
+  <F extends Fields, R>(tool: Tool<F, R>): Tool<F, R | FileSystem.FileSystem> => ({
+    ...tool,
+    run: (input) =>
+      Effect.gen(function* () {
+        const command: unknown = (input as Readonly<Record<string, unknown>>)["command"];
+        const files = typeof command === "string" ? writtenBy(command) : [];
+        if (files.length === 0) return yield* tool.run(input);
+        const fs = yield* FileSystem.FileSystem;
+        const before = yield* Effect.forEach(files, (full) => Effect.map(currentOnDisk(fs, full, full), (text) => ({ full, before: text })));
+        const output = yield* tool.run(input);
+        return withDetails(output, yield* filesWritten(fs, before));
+      }),
+  });
