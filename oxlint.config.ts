@@ -72,6 +72,8 @@ export default defineConfig({
   ignorePatterns: ["repos/**"],
   extends: [recommended],
   jsPlugins: ["./scripts/oxlint/abstract-layers.js"],
+  // All code: a cast through `unknown` or `any` turns off the check that the types exist to make.
+  rules: { "abstract/no-double-cast": "error" },
   overrides: [
     {
       files: functionalModules.map((module) => `src/${module}/**`),

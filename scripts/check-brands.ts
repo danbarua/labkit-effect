@@ -13,7 +13,7 @@
  */
 
 import { API, type Type, TypeFlags, type UnionOrIntersectionType } from "typescript/unstable/async";
-import { SyntaxKind } from "typescript/unstable/ast";
+import { isVariableDeclaration, type Node, type VariableDeclaration } from "typescript/unstable/ast";
 import { type AbstractLayer, abstractLayers } from "./abstract-layers.ts";
 
 const root = process.cwd();
@@ -37,8 +37,8 @@ async function unbranded(type: Type | undefined, path: string, seen: ReadonlySet
     return undefined;
   }
   if (type.flags & TypeFlags.Object) {
-    if ((await checker.isArrayType(type)) || (await checker.isTupleType(type))) {
-      for (const element of await checker.getTypeArguments(type as never)) {
+    if (type.isTypeReference() && ((await checker.isArrayType(type)) || (await checker.isTupleType(type)))) {
+      for (const element of await checker.getTypeArguments(type)) {
         const found = await unbranded(element, `${path}[]`, within);
         if (found !== undefined) return found;
       }
@@ -64,14 +64,14 @@ const schemasIn = new Map<AbstractLayer, number>(abstractLayers.map((layer) => [
 for (const file of files) {
   const source = await program.getSourceFile(file);
   if (source === undefined) continue;
-  const declarations: Array<{ name: { getText: (file: unknown) => string } }> = [];
-  const walk = (node: { kind: number; forEachChild: (visit: (child: never) => void) => void }): void => {
-    if (node.kind === SyntaxKind.VariableDeclaration) declarations.push(node as never);
-    node.forEachChild(walk as never);
+  const declarations: Array<VariableDeclaration> = [];
+  const walk = (node: Node): void => {
+    if (isVariableDeclaration(node)) declarations.push(node);
+    node.forEachChild(walk);
   };
-  source.forEachChild(walk as never);
+  source.forEachChild(walk);
   for (const declaration of declarations) {
-    const type = await checker.getTypeAtLocation(declaration.name as never);
+    const type = await checker.getTypeAtLocation(declaration.name);
     const decoded = type && (await checker.getPropertyOfType(type, "Type"));
     if (decoded === undefined) continue;
     const layer = layerOf(file);

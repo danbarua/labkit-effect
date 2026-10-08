@@ -44,12 +44,27 @@ const unprovided = (module: WebAssembly.Module): Record<string, Record<string, (
   return imports;
 };
 
+/**
+ * The module's exports as the parser calls them, or which of them the module does not export in that
+ * kind (the memory as a memory, the others as functions). A WebAssembly function carries no
+ * signature, so each is taken as the parser calls it once it is known to be a function.
+ */
+const parserExportsOf = (exports: WebAssembly.Instance["exports"]): ParserExports | { readonly missing: ReadonlyArray<string> } => {
+  const { memory, segments_alloc: alloc, segments_free: free, segments_json: json } = exports;
+  if (memory instanceof WebAssembly.Memory && typeof alloc === "function" && typeof free === "function" && typeof json === "function")
+    return { memory, segments_alloc: alloc as ParserExports["segments_alloc"], segments_free: free as ParserExports["segments_free"], segments_json: json as ParserExports["segments_json"] };
+  const found = { memory: memory instanceof WebAssembly.Memory, segments_alloc: typeof alloc === "function", segments_free: typeof free === "function", segments_json: typeof json === "function" };
+  return { missing: Object.entries(found).flatMap(([name, ok]) => (ok ? [] : [name])) };
+};
+
 const load = (): Loaded => {
   if (!existsSync(modulePath)) return { _tag: "NotLoaded", reason: `The command parser is missing (${modulePath}): it is committed with the repository, and bun run native:build builds it again.` };
   try {
     const module = new WebAssembly.Module(readFileSync(modulePath));
     const instance = new WebAssembly.Instance(module, unprovided(module));
-    return { _tag: "Loaded", exports: instance.exports as unknown as ParserExports };
+    const exports = parserExportsOf(instance.exports);
+    if ("missing" in exports) return { _tag: "NotLoaded", reason: `The command parser did not load (${modulePath}): it does not export ${exports.missing.join(", ")} as the parser calls them; bun run native:build builds it again.` };
+    return { _tag: "Loaded", exports };
   } catch (error) {
     return { _tag: "NotLoaded", reason: `The command parser did not load (${modulePath}): ${String(error)}` };
   }

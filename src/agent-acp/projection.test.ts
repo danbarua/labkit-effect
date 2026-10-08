@@ -8,10 +8,10 @@ import { json } from "../../tests/support/received.ts";
 import { test } from "../../tests/support/test.ts";
 import { MessageId, type SessionUpdate } from "effective-acp/schema/v1";
 import type { Fact } from "../agent-machine/fact.ts";
-import { CallId, ToolName } from "../agent-machine/names.ts";
+import { ByteCount, CallId, FullPath, ToolName } from "../agent-machine/names.ts";
 import { CapturedObservation } from "../agent-machine/observation.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
-import { receivedJson } from "../agent-session/received.ts";
+import { receivedJson, receivedText } from "../agent-session/received.ts";
 import { jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { described } from "../agent-tools/described.ts";
 import { anyTool, type Tool } from "../agent-tools/tool.ts";
@@ -94,7 +94,7 @@ const chunk = (sessionUpdate: "user_message_chunk" | "agent_message_chunk" | "ag
 const user = (text: string, id?: string) => chunk("user_message_chunk", text, id);
 const said = (text: string, id?: string) => chunk("agent_message_chunk", text, id);
 const thought = (text: string, id?: string) => chunk("agent_thought_chunk", text, id);
-const output = (text: string) => [{ type: "content", content: { type: "text", text } }];
+const output = (text: string) => [{ type: "content" as const, content: { type: "text" as const, text } }];
 /** `call` announced: its title and kind as presented, its tool's name, and its input as given. */
 const announced = (call: TestCall, title: string, kind?: string) => ({
   sessionUpdate: "tool_call",
@@ -186,7 +186,7 @@ test("replay of a recorded turn sends the input, then each response's parts, the
   const { session } = listing();
   const [input] = seqsOf(session.journal, "InputArrived");
   const [first, second] = seqsOf(session.journal, "ModelRequestDispatched");
-  expect(project(session.journal, replay).updates).toEqual([
+  expect(project(session.journal, replay).updates as unknown).toEqual([
     user("list the files", `${input}`),
     thought("I should list them.", `${first}:0`),
     said("Listing.", `${first}:1`),
@@ -194,7 +194,7 @@ test("replay of a recorded turn sends the input, then each response's parts, the
     updated("c1", "in_progress"),
     updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
     said("One file: a.ts.", `${second}:0`),
-  ] as never);
+  ]);
 });
 
 test("on replay only the user's inputs are echoed: what a turn-end hook gave, from the system, is not", () => {
@@ -206,7 +206,7 @@ test("on replay only the user's inputs are echoed: what a turn-end hook gave, fr
   fact(dispatched());
   fact(responded([answer("One file: a.ts.")]));
   const updates = project(session.journal, replay).updates;
-  expect(updates.filter((update) => update.sessionUpdate === "user_message_chunk")).toEqual([user("list the files", `${seqsOf(session.journal, "InputArrived")[0]}`)] as never);
+  expect(updates.filter((update) => update.sessionUpdate === "user_message_chunk") as unknown).toEqual([user("list the files", `${seqsOf(session.journal, "InputArrived")[0]}`)]);
   expect(joined(updates, "agent_thought_chunk")).toBe("The files are a.ts.");
   expect(joined(updates, "agent_message_chunk")).toBe("One file: a.ts.");
 });
@@ -214,7 +214,7 @@ test("on replay only the user's inputs are echoed: what a turn-end hook gave, fr
 test("live with deltas, each request's end item before its ModelResponded: no echo of the input, each delta once as it comes with the id that replay gives its message, and nothing at ModelResponded", () => {
   const { inputs, session } = listing(deltas);
   const [first, second] = seqsOf(session.journal, "ModelRequestDispatched");
-  expect(project(inputs, live).updates).toEqual([
+  expect(project(inputs, live).updates as unknown).toEqual([
     thought("I should ", `${first}:0`),
     thought("list them.", `${first}:0`),
     said("List", `${first}:1`),
@@ -224,7 +224,7 @@ test("live with deltas, each request's end item before its ModelResponded: no ec
     updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
     said("One file", `${second}:0`),
     said(": a.ts.", `${second}:0`),
-  ] as never);
+  ]);
 });
 
 test("ModelResponded taken before its end item and before the last deltas: the rest of the text from it, in the message its deltas began, and the late deltas dropped", () => {
@@ -254,7 +254,7 @@ test("two requests in a turn, the first's ModelResponded taken after the second'
     ...facts.slice(secondDispatched + 1),
   ];
   const updates = project(inputs, live).updates;
-  expect(unnamed(updates.filter((update) => update.sessionUpdate !== "tool_call_update"))).toEqual([
+  expect(unnamed(updates.filter((update) => update.sessionUpdate !== "tool_call_update")) as unknown).toEqual([
     announced(ls, "ls", "read"),
     thought("I should "),
     thought("list them."),
@@ -262,7 +262,7 @@ test("two requests in a turn, the first's ModelResponded taken after the second'
     said("ing."),
     said("One file"),
     said(": a.ts."),
-  ] as never);
+  ]);
 });
 
 test("live with no deltas, from a scripted client or a whole answer: each part whole when ModelResponded is taken, the same updates as on replay, which takes the response before its call", () => {
@@ -347,12 +347,12 @@ test("a failed request, its turn's end and the next turn: the failed request's d
 test("what is captured of a turn after its TurnEnded is dropped: its text was sent from its facts", () => {
   const { session, items } = listing(deltas);
   const updates = project([...session.journal, ...items], live).updates;
-  expect(unnamed(updates.filter((update) => update.sessionUpdate !== "tool_call_update"))).toEqual([
+  expect(unnamed(updates.filter((update) => update.sessionUpdate !== "tool_call_update")) as unknown).toEqual([
     announced(ls, "ls", "read"),
     thought("I should list them."),
     said("Listing."),
     said("One file: a.ts."),
-  ] as never);
+  ]);
 });
 
 test("a captured item that overtakes its turn's TurnStarted is not lost, and its text is not sent again", () => {
@@ -484,11 +484,11 @@ test("a call that fails: failed, with the tool's error as its content and, as re
   fact(responded([{ _tag: "ToolCall", ...rm }]));
   fact({ _tag: "ToolCallDispatched", call: "c1" });
   fact({ _tag: "ToolEnded", call: "c1", outcome: { _tag: "Failed", reason: { _tag: "Reported", error: json({ error: "no such file" }) } } });
-  expect(project(inputs, live).updates).toEqual([
+  expect(project(inputs, live).updates as unknown).toEqual([
     announced(rm, "rm", "delete"),
     updated("c1", "in_progress"),
     updated("c1", "failed", { content: output('{"error":"no such file"}'), rawOutput: { error: "no such file" } }),
-  ] as never);
+  ]);
 });
 
 test("a call a policy vetoed: pending while asked, then failed with the reason, as its content and its raw output, and never in progress", () => {
@@ -500,17 +500,17 @@ test("a call a policy vetoed: pending while asked, then failed with the reason, 
   fact({ _tag: "PermissionAsked", call: "c1", asks: json({ tool: "rm" }) });
   fact({ _tag: "PermissionAnswered", call: "c1", answer: json({ optionId: "reject-once" }) });
   fact({ _tag: "ToolEnded", call: "c1", outcome: { _tag: "Failed", reason: { _tag: "Vetoed", reason: { mediaType: "text/plain", body: { _tag: "Text", text: "The user said no." } } } } });
-  expect(project(inputs, live).updates).toEqual([
+  expect(project(inputs, live).updates as unknown).toEqual([
     announced(rm, "rm", "delete"),
     updated("c1", "pending"),
     updated("c1", "failed", { content: output("Not run: The user said no."), rawOutput: "The user said no." }),
-  ] as never);
+  ]);
 });
 
 test("a call announced by ToolCallArrived is not announced again by its part or its response, even after it ended", () => {
   const { inputs } = listing();
   const updates = project(inputs, live).updates;
-  expect(updates.filter((update) => update.sessionUpdate === "tool_call")).toEqual([announced(ls, "ls", "read")] as never);
+  expect(updates.filter((update) => update.sessionUpdate === "tool_call") as unknown).toEqual([announced(ls, "ls", "read")]);
   expect(updates.at(-1)).toMatchObject(said("One file: a.ts."));
 });
 
@@ -520,14 +520,14 @@ test("a host's presentation is shown in place of the default: title, kind and lo
       title: outcome === undefined ? `List ${call.tool}` : "Listed",
       kind: outcome === undefined ? "search" : "read",
       locations: [{ path: "/work" }],
-      content: (outcome === undefined ? output("listing /work") : output("1 file")) as never,
+      content: outcome === undefined ? output("listing /work") : output("1 file"),
     });
   const { inputs } = listing();
-  expect(project(inputs, { mode: "live", present }).updates.slice(0, 3)).toEqual([
+  expect(project(inputs, { mode: "live", present }).updates.slice(0, 3) as unknown).toEqual([
     { ...announced(ls, "List ls", "search"), locations: [{ path: "/work" }], content: output("listing /work") },
     updated("c1", "in_progress"),
     updated("c1", "completed", { title: "Listed", kind: "read", locations: [{ path: "/work" }], content: output("1 file"), rawOutput: ["a.ts"] }),
-  ] as never);
+  ]);
 });
 
 test("projecting stored facts gives the state to go on from live: a call already shown is not shown again, and the next turn's deltas are sent once", () => {
@@ -544,13 +544,13 @@ test("projecting stored facts gives the state to go on from live: a call already
   fact(dispatched());
   stream(delta("Text", "One "), delta("Text", "file."), ended());
   fact(responded([answer("One file.")]));
-  expect(unnamed(project(inputs.slice(from), live, loaded.state).updates)).toEqual([
+  expect(unnamed(project(inputs.slice(from), live, loaded.state).updates) as unknown).toEqual([
     said("Listing."),
     updated("c1", "in_progress"),
     updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
     said("One "),
     said("file."),
-  ] as never);
+  ]);
 });
 
 /** The updates of `inputs` in the order given, each through `next`: what a replay gave without `inLiveOrder`. */
@@ -582,13 +582,13 @@ test("a call that arrived, ran and ended before its response was recorded is rep
   // As the loop records them: the call's facts, its end included, before the ModelResponded that holds it.
   expect(ahead(session.journal, "ToolEnded", "ModelResponded")).toBe(true);
   const loaded = project(session.journal, replay).updates;
-  expect(unnamed(loaded.slice(1, 6))).toEqual([
+  expect(unnamed(loaded.slice(1, 6)) as unknown).toEqual([
     thought("I should list them."),
     said("Listing."),
     announced(ls, "ls", "read"),
     updated("c1", "in_progress"),
     updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
-  ] as never);
+  ]);
   expect(kinds(withoutInputs(loaded))).toEqual(kinds(project(inputs, live).updates));
   expect(kinds(withoutInputs(inStoredOrder(session.journal, replay).updates))).not.toEqual(kinds(project(inputs, live).updates));
 });
@@ -610,7 +610,7 @@ test("several requests in a turn: each response is taken before its own request'
   fact(dispatched());
   fact(responded([answer("Two files.")]));
   const loaded = project(session.journal, replay);
-  expect(unnamed(loaded.updates)).toEqual([
+  expect(unnamed(loaded.updates) as unknown).toEqual([
     user("list the files"),
     thought("I should list them."),
     said("Listing."),
@@ -622,7 +622,7 @@ test("several requests in a turn: each response is taken before its own request'
     updated("c2", "in_progress"),
     updated("c2", "completed", { content: output('["b.ts"]'), rawOutput: ["b.ts"] }),
     said("Two files."),
-  ] as never);
+  ]);
   expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
 });
 
@@ -640,7 +640,7 @@ test("a response with two calls and text between them: each call is announced at
   fact(responded([answer("Listing."), { _tag: "ToolCall", ...ls }, answer("Removing."), { _tag: "ToolCall", ...rm }]));
   // The whole response comes first, its calls announced in part order; then the calls' facts as recorded,
   // whose ToolCallArrived announce nothing more.
-  expect(unnamed(project(session.journal, replay).updates)).toEqual([
+  expect(unnamed(project(session.journal, replay).updates) as unknown).toEqual([
     user("list, then remove a.ts"),
     said("Listing."),
     announced(ls, "ls", "read"),
@@ -650,7 +650,7 @@ test("a response with two calls and text between them: each call is announced at
     updated("c2", "in_progress"),
     updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
     updated("c2", "completed", { content: output('"removed"'), rawOutput: "removed" }),
-  ] as never);
+  ]);
 });
 
 test("what has no call in its request is left in place: a request without calls, a request with no response, and a response with no request, whose messages its own seq names, with a warning", () => {
@@ -669,14 +669,14 @@ test("what has no call in its request is left in place: a request without calls,
   const [request] = seqsOf(session.journal, "ModelRequestDispatched");
   const [, unpaired] = seqsOf(session.journal, "ModelResponded");
   expect(loaded.updates).toEqual(inStoredOrder(session.journal, replay).updates);
-  expect(loaded.updates).toEqual([
+  expect(loaded.updates as unknown).toEqual([
     user("hi", `${hi}`),
     thought("Greet.", `${request}:0`),
     said("Hello.", `${request}:1`),
     user("remove a.ts", `${remove}`),
     announced(rm, "rm", "delete"),
     said("Removing.", `${unpaired}:0`),
-  ] as never);
+  ]);
   expect(loaded.logged).toEqual([{ level: "Warn", key: logKeys.update.noDispatch, details: { response: unpaired }, annotations: { turn: "turn-2" } }]);
   expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
 });
@@ -697,12 +697,12 @@ test("a request the harness answered as interrupted, as the core records it: the
   const loaded = project(session.journal, replay);
   // The response moves before the arrival and announces the call from its part; the arrival then announces nothing, as a call is announced once, so the updates are those of the stored order.
   expect(loaded.updates).toEqual(inStoredOrder(session.journal, replay).updates);
-  expect(unnamed(loaded.updates)).toEqual([
+  expect(unnamed(loaded.updates) as unknown).toEqual([
     user("remove a.ts"),
     announced(rm, "rm", "delete"),
     updated("c1", "in_progress"),
     updated("c1", "failed", { content: output("How it ended was not observed") }),
-  ] as never);
+  ]);
   expect(loaded.updates.filter((update) => update.sessionUpdate === "tool_call")).toHaveLength(1);
   expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
 });
@@ -720,12 +720,12 @@ test("a request the harness answered as interrupted whose call had ended before 
   fact(responded([{ _tag: "ToolCall", ...rm }], "Indeterminate"));
   const loaded = project(session.journal, replay);
   expect(loaded.updates).toEqual(inStoredOrder(session.journal, replay).updates);
-  expect(unnamed(loaded.updates)).toEqual([
+  expect(unnamed(loaded.updates) as unknown).toEqual([
     user("remove a.ts"),
     announced(rm, "rm", "delete"),
     updated("c1", "in_progress"),
     updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
-  ] as never);
+  ]);
   expect(loaded.updates.filter((update) => update.sessionUpdate === "tool_call")).toHaveLength(1);
   expect(loaded.state).toEqual(inStoredOrder(session.journal, replay).state);
 });
@@ -743,12 +743,12 @@ test("captured items mixed into a replay keep their place and change nothing it 
 test("live does not reorder: a call recorded before its response is sent at its fact", () => {
   const { session } = listing();
   const updates = project(session.journal, live).updates;
-  expect(unnamed(updates.slice(0, 4))).toEqual([
+  expect(unnamed(updates.slice(0, 4)) as unknown).toEqual([
     announced(ls, "ls", "read"),
     updated("c1", "in_progress"),
     updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
     thought("I should list them."),
-  ] as never);
+  ]);
 });
 
 test("a part its deltas sent only some of: the rest of it is sent, and each part of that kind after it whole", () => {
@@ -783,7 +783,7 @@ test("a request ends at its response: a second response with no request between 
   fact({ _tag: "ToolCallArrived", turn: "turn-1", ...rm("c2") });
   fact(responded([answer("Removed.")]));
   // The second response has no request, which logs a warning: taken here, not printed.
-  expect(unnamed(projectLogged(session.journal, replay).updates)).toEqual([user("remove a.ts"), announced(rm("c1"), "rm", "delete"), announced(rm("c2"), "rm", "delete"), said("Removed.")] as never);
+  expect(unnamed(projectLogged(session.journal, replay).updates) as unknown).toEqual([user("remove a.ts"), announced(rm("c1"), "rm", "delete"), announced(rm("c2"), "rm", "delete"), said("Removed.")]);
 });
 
 test("a call whose part arrives on the streamed feed before its ToolCallArrived is announced at its place, before the text that streams after it", () => {
@@ -792,7 +792,7 @@ test("a call whose part arrives on the streamed feed before its ToolCallArrived 
   fact(dispatched());
   stream(arrived({ _tag: "ToolCall", ...ls }), delta("Text", "Listing."));
   fact({ _tag: "ToolCallArrived", turn: "turn-1", ...ls });
-  expect(unnamed(project(inputs, live).updates)).toEqual([announced(ls, "ls", "read"), said("Listing.")] as never);
+  expect(unnamed(project(inputs, live).updates) as unknown).toEqual([announced(ls, "ls", "read"), said("Listing.")]);
 });
 
 test("after a request answered before its end item, the next request of the turn sends its deltas as they come", () => {
@@ -810,7 +810,7 @@ test("after a request answered before its end item, the next request of the turn
     ...facts.slice(secondDispatched + 1),
   ];
   const updates = project(inputs, live).updates;
-  expect(unnamed(updates.filter((update) => update.sessionUpdate === "agent_message_chunk"))).toEqual([said("List"), said("ing."), said("One file"), said(": a.ts.")] as never);
+  expect(unnamed(updates.filter((update) => update.sessionUpdate === "agent_message_chunk")) as unknown).toEqual([said("List"), said("ing."), said("One file"), said(": a.ts.")]);
 });
 
 test("whitespace that ends a request's text is sent in that request's message, from its response, and not with the next request's text", () => {
@@ -826,7 +826,7 @@ test("whitespace that ends a request's text is sent in that request's message, f
   fact(responded([answer("Done.")]));
   const [first, second] = seqsOf(session.journal, "ModelRequestDispatched");
   const updates = project(inputs, live).updates;
-  expect(updates.filter((update) => update.sessionUpdate === "agent_message_chunk")).toEqual([said("Listing.", `${first}:0`), said("\n", `${first}:0`), said("Done.", `${second}:0`)] as never);
+  expect(updates.filter((update) => update.sessionUpdate === "agent_message_chunk") as unknown).toEqual([said("Listing.", `${first}:0`), said("\n", `${first}:0`), said("Done.", `${second}:0`)]);
   expect(messages(updates)).toEqual(messages(project(session.journal, replay).updates));
 });
 
@@ -862,7 +862,7 @@ test("the default presentation titles a call to a described tool by its intent, 
     replay: "unsafe",
   };
   const catalog = [anyTool(described(look)).spec, issue];
-  const titled = (tool: string, input: object) => Effect.runSync(presentFrom(catalog)({ call: CallId.make("c1"), tool: ToolName.make(tool), input: receivedJson(input as never) })).title;
+  const titled = (tool: string, input: { readonly [key: string]: Schema.Json }) => Effect.runSync(presentFrom(catalog)({ call: CallId.make("c1"), tool: ToolName.make(tool), input: receivedJson(input) })).title;
   expect(titled("look", { path: ".", intent: "Look at\n  the working folder." })).toBe("Look at the working folder.");
   expect(titled("look", { path: "." })).toBe("look");
   expect(titled("create_issue", { intent: "A reason of several paragraphs." })).toBe("create_issue");
@@ -892,7 +892,7 @@ test("a call's tool_call carries its tool's name and its input; its end, what it
   for (const ended of outcomes) fact({ _tag: "ToolEnded", ...ended });
   fact(responded([ls, cat, rm, shot].map((call) => ({ _tag: "ToolCall", ...call }))));
   const sent = announcedAndEnded(project(inputs, live).updates);
-  expect(sent).toEqual([
+  expect(sent as unknown).toEqual([
     announced(ls, "ls", "read"),
     announced(cat, "cat"),
     announced(rm, "rm", "delete"),
@@ -907,7 +907,7 @@ test("a call's tool_call carries its tool's name and its input; its end, what it
         { type: "content", content: { type: "resource_link", uri: `blob://${blob}.png`, name: `${blob}.png`, mimeType: "image/png", size: 70000 } },
       ],
     }),
-  ] as never);
+  ]);
   expect(announcedAndEnded(project(session.journal, replay).updates)).toEqual(sent);
 });
 
@@ -919,7 +919,7 @@ test("a call announced again with another input than the client has: a tool_call
   stream(arrived({ _tag: "ToolCall", ...ls }));
   fact({ _tag: "ToolCallArrived", turn: "turn-1", ...src });
   fact(responded([{ _tag: "ToolCall", ...src }]));
-  expect(project(inputs, live).updates).toEqual([announced(ls, "ls", "read"), { sessionUpdate: "tool_call_update", toolCallId: "c1", rawInput: { path: "src" } }] as never);
+  expect(project(inputs, live).updates as unknown).toEqual([announced(ls, "ls", "read"), { sessionUpdate: "tool_call_update", toolCallId: "c1", rawInput: { path: "src" } }]);
 });
 
 test("a call's input and output that claim JSON and do not parse: rawInput and rawOutput carry their text, and a warning says so", () => {
@@ -960,7 +960,7 @@ test("a response's thinking, its text, a call and its text after the call are th
   // The response taken after "Do": the rest of the part from it goes in the message that "Do" began.
   const at = session.journal.findIndex((input) => input._tag === "Observed" && input.observation._tag === "ModelResponded");
   const early = [...session.journal.slice(0, at), ...items.slice(0, 6), session.journal[at] as Fact, ...items.slice(6), ...session.journal.slice(at + 1)];
-  expect(project(early, live).updates.filter((update) => update.sessionUpdate === "agent_message_chunk").slice(-2)).toEqual([said("Do", `${request}:2`), said("ne.", `${request}:2`)] as never);
+  expect(project(early, live).updates.filter((update) => update.sessionUpdate === "agent_message_chunk").slice(-2) as unknown).toEqual([said("Do", `${request}:2`), said("ne.", `${request}:2`)]);
 });
 
 test("two responses of only text with nothing between them, the second asked after the first was unfinished, are two messages, live and on replay", () => {
@@ -974,7 +974,7 @@ test("two responses of only text with nothing between them, the second asked aft
   fact(responded([answer("Done.")]));
   const [first, second] = seqsOf(session.journal, "ModelRequestDispatched");
   expect(project(inputs, live).updates).toEqual([said("Let me check.", `${first}:0`), said("Done.", `${second}:0`)]);
-  expect(withoutInputs(project(session.journal, replay).updates)).toEqual([said("Let me check.", `${first}:0`), said("Done.", `${second}:0`)] as never);
+  expect(withoutInputs(project(session.journal, replay).updates) as unknown).toEqual([said("Let me check.", `${first}:0`), said("Done.", `${second}:0`)]);
 });
 
 test("a fallback that answers after the first provider failed with 503: the request's first dispatch names its messages, in every merge of the feeds and on replay", () => {
@@ -1015,15 +1015,14 @@ test("a session loaded and gone on with: the replay names each message as live d
 });
 
 test("a call's changed files are diffs from its details: a created file from no text, an update as one diff per hunk, and a cut patch followed by how much was left out", () => {
-  const text = (value: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text: value } }) as never;
   const patch = ["--- /w/a.txt", "+++ /w/a.txt", "@@ -1,1 +1,1 @@", "-one", "+two", "@@ -20,1 +20,1 @@", "-x", "+y"].join("\n");
   expect(
     changedFiles({
       _tag: "Succeeded",
-      output: text("done"),
+      output: receivedText("done"),
       details: [
-        { _tag: "FileChanged", path: "/w/new.txt" as never, change: "created", patch: text("hi\n") },
-        { _tag: "FileChanged", path: "/w/a.txt" as never, change: "updated", patch: text(patch), cut: 120 as never },
+        { _tag: "FileChanged", path: FullPath.make("/w/new.txt"), change: "created", patch: receivedText("hi\n") },
+        { _tag: "FileChanged", path: FullPath.make("/w/a.txt"), change: "updated", patch: receivedText(patch), cut: ByteCount.make(120) },
       ],
     }) as unknown,
   ).toEqual([
@@ -1036,14 +1035,13 @@ test("a call's changed files are diffs from its details: a created file from no 
 });
 
 test("a call's moved files are one line each, not diffs: from where to where, and whether it replaced what was there", () => {
-  const text = (value: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text: value } }) as never;
   expect(
     changedFiles({
       _tag: "Succeeded",
-      output: text(""),
+      output: receivedText(""),
       details: [
-        { _tag: "FileMoved", from: "/w/a.txt" as never, to: "/w/b.txt" as never },
-        { _tag: "FileMoved", from: "/w/c.txt" as never, to: "/w/d.txt" as never, replaced: true },
+        { _tag: "FileMoved", from: FullPath.make("/w/a.txt"), to: FullPath.make("/w/b.txt") },
+        { _tag: "FileMoved", from: FullPath.make("/w/c.txt"), to: FullPath.make("/w/d.txt"), replaced: true },
       ],
     }) as unknown,
   ).toEqual([
@@ -1053,14 +1051,13 @@ test("a call's moved files are one line each, not diffs: from where to where, an
 });
 
 test("a call's writes to files git ignores are one line each, by size, not diffs", () => {
-  const text = (value: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text: value } }) as never;
   expect(
     changedFiles({
       _tag: "Succeeded",
-      output: text(""),
+      output: receivedText(""),
       details: [
-        { _tag: "FileWritten", path: "/w/out.log" as never, bytes: 4 as never },
-        { _tag: "FileWritten", path: "/w/out.log" as never, bytes: 8 as never, before: 4 as never },
+        { _tag: "FileWritten", path: FullPath.make("/w/out.log"), bytes: ByteCount.make(4) },
+        { _tag: "FileWritten", path: FullPath.make("/w/out.log"), bytes: ByteCount.make(8), before: ByteCount.make(4) },
       ],
     }) as unknown,
   ).toEqual([

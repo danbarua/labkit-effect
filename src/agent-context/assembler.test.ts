@@ -21,6 +21,7 @@ import { Report } from "../agent-session/report.ts";
 import { CountingTurns } from "../agent-session/turns.ts";
 import { BoringModelProvider, boringOpening } from "../../tests/support/boring.ts";
 import { observe, open, opened } from "../../tests/support/drive.ts";
+import { userInput } from "../../tests/support/observations.ts";
 import { anthropicAt } from "../../tests/support/providers.ts";
 import { anthropicStream } from "../../tests/support/streams.ts";
 import { runTest } from "../../tests/support/run.ts";
@@ -85,7 +86,7 @@ test("a later request carries each earlier notice where it was sent, and a new o
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.idle;
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
+      yield* session.observe(userInput("What is 2 + 3?"));
       yield* session.idle;
       return yield* session.facts;
     }).pipe(

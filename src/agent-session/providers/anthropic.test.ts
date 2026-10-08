@@ -1,5 +1,6 @@
 /** The Anthropic Messages adapter: how the core's types are shaped into its wire format. */
 
+import { userInput } from "../../../tests/support/observations.ts";
 import { afterAll, expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
 import { anthropicAt } from "../../../tests/support/providers.ts";
@@ -9,7 +10,6 @@ import { ModelClient, type ModelContext } from "../contracts.ts";
 import { logKeys } from "../log-keys.ts";
 import { json } from "../../../tests/support/received.ts";
 import { receivedJson } from "../received.ts";
-import type { Observation } from "../../agent-machine/observation.ts";
 import { BoringModelProvider } from "../../../tests/support/boring.ts";
 import { CountingTurns } from "../turns.ts";
 import { AnthropicModelClient } from "./anthropic-client.ts";
@@ -53,7 +53,7 @@ async function toolResultSent(call: { name: string; input: unknown }) {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.idle;
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "go" } as unknown as Observation);
+      yield* session.observe(userInput("go"));
       yield* session.idle;
     }).pipe(
       Effect.provide(
@@ -265,7 +265,7 @@ test("a tool turn sends the catalog, then the call and its result, as Messages b
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.idle;
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
+      yield* session.observe(userInput("What is 2 + 3?"));
       yield* session.idle;
     }).pipe(
       Effect.provide(
@@ -344,7 +344,7 @@ test("thinking, an empty one included, and blocks nobody knows go back to the pr
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.idle;
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
+      yield* session.observe(userInput("What is 2 + 3?"));
       yield* session.idle;
     }).pipe(
       Effect.provide(

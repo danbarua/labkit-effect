@@ -69,6 +69,6 @@ export const test = Object.assign(
       (name: string, run: (...args: ReadonlyArray<unknown>) => unknown): void => {
         const file = callerFile();
         bunTest.each(rows.map((row) => (Array.isArray(row) ? [...(row as ReadonlyArray<unknown>)] : [row])))(name, named(file, name, run));
-      }) as unknown as typeof bunTest.each,
+      }) as typeof bunTest.each,
   },
 );

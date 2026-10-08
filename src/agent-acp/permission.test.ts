@@ -50,18 +50,18 @@ test("the policy's option that rejects for the session is offered to the client 
 test("the option selected is the answer that picks it; the policy takes it as the option says", () => {
   const picking = (optionId: string) => answerOf({ outcome: { outcome: "selected", optionId: PermissionOptionId.make(optionId) } });
   expect(["allow-once", "allow-session", "reject-once"].map((optionId) => decided(picking(optionId)))).toEqual(["Continue", "Continue", "Veto"]);
-  expect(picking("reject-once").body).toEqual({ _tag: "Text", text: '{"outcome":"selected","optionId":"reject-once"}' } as never);
+  expect(picking("reject-once").body as unknown).toEqual({ _tag: "Text", text: '{"outcome":"selected","optionId":"reject-once"}' });
 });
 
 test("a cancelled request is recorded as cancelled, as ACP gives it, not as an option selected; the policy vetoes the call", () => {
   const answer = answerOf({ outcome: { outcome: "cancelled" } });
-  expect(answer.body).toEqual({ _tag: "Text", text: '{"outcome":"cancelled"}' } as never);
+  expect(answer.body as unknown).toEqual({ _tag: "Text", text: '{"outcome":"cancelled"}' });
   expect(decided(answer)).toBe("Veto");
 });
 
 test("an option the question did not offer is recorded as the client selected it, and the policy vetoes the call", () => {
   const unknown = answerOf({ outcome: { outcome: "selected", optionId: PermissionOptionId.make("allow-forever") } });
-  expect(unknown.body).toEqual({ _tag: "Text", text: '{"outcome":"selected","optionId":"allow-forever"}' } as never);
+  expect(unknown.body as unknown).toEqual({ _tag: "Text", text: '{"outcome":"selected","optionId":"allow-forever"}' });
   expect(decided(unknown)).toBe("Veto");
 });
 

@@ -1,5 +1,6 @@
 /** The loop breaker in the loop: a model that repeats a call is told so, then its turn is stopped by a model request policy. */
 
+import { userInput } from "../../tests/support/observations.ts";
 import { expect } from "bun:test";
 import { Effect, Layer, Logger } from "effect";
 import { BoringContextAssembler, BoringModelProvider, boringOpening } from "../../tests/support/boring.ts";
@@ -7,7 +8,6 @@ import { runTest } from "../../tests/support/run.ts";
 import { smolCatalog, SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { test } from "../../tests/support/test.ts";
 import { CallId, StopReason, ToolName } from "../agent-machine/names.ts";
-import type { Observation } from "../agent-machine/observation.ts";
 import { repeatedCalls, repeatingTurns } from "../agent-policy/loop-breaker.ts";
 import { ModelClient, ModelRequestPolicies, ToolCallPolicies } from "./contracts.ts";
 import { openSession } from "./loop.ts";
@@ -46,7 +46,7 @@ test("calls 1 and 2 run, calls 3 to 5 are vetoed with a reason the model reads, 
     Effect.gen(function* () {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "echo hi" } as unknown as Observation);
+      yield* session.observe(userInput("echo hi"));
       yield* session.idle;
       return yield* session.facts;
     }).pipe(

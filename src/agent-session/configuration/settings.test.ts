@@ -7,7 +7,7 @@ import { type Capabilities, capabilitiesOf, type KnownEffort } from "./well-know
 import { afterAll, expect } from "bun:test";
 import { Effect, Layer } from "effect";
 import { ModelName, ProviderName, SessionId, TokenCount } from "../../agent-machine/names.ts";
-import type { Observation } from "../../agent-machine/observation.ts";
+import { modelChange, userInput } from "../../../tests/support/observations.ts";
 import { changed, type ModelSettings } from "../../agent-machine/settings.ts";
 import { openSession, type Session } from "../loop.ts";
 import { EphemeralSessionStore } from "../session-store.ts";
@@ -169,11 +169,11 @@ test("Anthropic: Haiku 5.5 returns no progress updates, so progress_only is sent
 });
 
 test("Anthropic: an output limit above the model's, which the API refuses, is sent as the model's own", () => {
-  expect(anthropic("claude-haiku-4-5", { maxOutputTokens: TokenCount.make(128_000) })).toEqual({
+  expect(anthropic("claude-haiku-4-5", { maxOutputTokens: TokenCount.make(128_000) }) as unknown).toEqual({
     fields: { max_tokens: 64_000 },
     headers: {},
     adjusted: [{ adjusted: { _tag: "MaxOutputTokens", asked: 128_000, used: 64_000 }, reason: "this model's output limit is 64000 tokens" }],
-  } as never);
+  });
   expect(anthropic("claude-haiku-4-5", { maxOutputTokens: TokenCount.make(8000) })).toEqual({ fields: {}, headers: {}, adjusted: [] });
   expect(anthropic("claude-haiku-5-5", { maxOutputTokens: TokenCount.make(200_000) }).fields).toEqual({ max_tokens: 128_000 });
 });
@@ -317,18 +317,18 @@ test("a change of settings names each setting it changes: default removes one, a
 test("a session's settings are each as last said: by its opening, or by a change of model taken", async () => {
   const session = open();
   observe(session, { ...opened, model: { ...opened.model, settings: { thinking: "disabled", observe: "all" } } });
-  expect(await Effect.runPromise(modelOf(session.journal))).toEqual({
+  expect((await Effect.runPromise(modelOf(session.journal))) as unknown).toEqual({
     provider: "boring",
     model: "boring-1",
     settings: { thinking: "disabled", observe: "all" },
-  } as never);
+  });
   observe(session, { _tag: "ModelChangeArrived", provider: "other", model: "other-1", settings: { effort: "high", thinking: "default" } });
   observe(session, { _tag: "ModelChangeArrived", provider: "third", model: "third-1" });
-  expect(await Effect.runPromise(modelOf(session.journal))).toEqual({
+  expect((await Effect.runPromise(modelOf(session.journal))) as unknown).toEqual({
     provider: "third",
     model: "third-1",
     settings: { observe: "all", effort: "high" },
-  } as never);
+  });
 });
 
 test("what a model adjusted is its setting from then on; what was said stands for another model, and saying it again puts the adjustment aside", async () => {
@@ -344,15 +344,15 @@ test("what a model adjusted is its setting from then on; what was said stands fo
     adjusted: { _tag: "Effort", asked: "max", used: "high" },
     reason: "the nearest effort this model supports (minimal, low, medium, high)",
   });
-  expect(await settingsNow()).toEqual({ effort: "high", observe: "all" } as never);
+  expect((await settingsNow()) as unknown).toEqual({ effort: "high", observe: "all" });
   // Another model is asked what was said: max.
   observe(session, { _tag: "ModelChangeArrived", provider: "openai", model: "gpt-5.5" });
   observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "down", error: { mediaType: "text/plain", body: { _tag: "Text", text: "down" } } });
-  expect(await settingsNow()).toEqual({ effort: "max", observe: "all" } as never);
+  expect((await settingsNow()) as unknown).toEqual({ effort: "max", observe: "all" });
   observe(session, { _tag: "ModelChangeArrived", provider: "openai", model: "gpt-5" });
-  expect(await settingsNow()).toEqual({ effort: "high", observe: "all" } as never);
+  expect((await settingsNow()) as unknown).toEqual({ effort: "high", observe: "all" });
   observe(session, { _tag: "ModelChangeArrived", provider: "openai", model: "gpt-5", settings: { effort: "max" } });
-  expect(await settingsNow()).toEqual({ effort: "max", observe: "all" } as never);
+  expect((await settingsNow()) as unknown).toEqual({ effort: "max", observe: "all" });
 });
 
 test("a setting adjusted with nothing used in its place is no longer sent to that model", async () => {
@@ -367,7 +367,7 @@ test("a setting adjusted with nothing used in its place is no longer sent to tha
     adjusted: { _tag: "Effort", asked: "high" },
     reason: "not sent while thinking is disabled",
   });
-  expect((await Effect.runPromise(modelOf(session.journal))).settings).toEqual({ thinking: "disabled" } as never);
+  expect(((await Effect.runPromise(modelOf(session.journal))).settings) as unknown).toEqual({ thinking: "disabled" });
 });
 
 const stops: Array<() => unknown> = [];
@@ -386,9 +386,9 @@ test("settings carried over a change of model are translated for each model, rec
   });
   stops.push(() => server.stop(true));
   const ask = (session: Session, text: string) =>
-    session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text } as unknown as Observation).pipe(Effect.andThen(session.idle));
+    session.observe(userInput(text)).pipe(Effect.andThen(session.idle));
   const switchTo = (session: Session, model: string) =>
-    session.observe({ _tag: "ModelChangeArrived", provider: "anthropic", model } as unknown as Observation).pipe(Effect.andThen(session.idle));
+    session.observe(modelChange("anthropic", model)).pipe(Effect.andThen(session.idle));
   const facts = await runTest(
     Effect.gen(function* () {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));

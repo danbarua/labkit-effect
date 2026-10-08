@@ -49,6 +49,7 @@ test("an entry written some other way drops only itself, and so does a value in 
 /** Runs `use` with `fetch` replaced by `stub`, and restores it afterwards. */
 const withFetch = async <A>(stub: (url: unknown, init?: RequestInit) => Promise<Response>, use: () => Promise<A>): Promise<A> => {
   const original = globalThis.fetch;
+  // oxlint-disable-next-line abstract/no-double-cast -- the stub implements fetch's call signature only; typeof fetch also declares the preconnect member, which the stub does not provide.
   globalThis.fetch = stub as unknown as typeof fetch;
   try {
     return await use();

@@ -27,6 +27,7 @@ const printed = (parts: ReadonlyArray<typeof answer | typeof thinking>, ending: 
     Effect.gen(function* () {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(openedWith({ session: SessionId.make("s1"), model: target, system: undefined, tools: [] }));
+      // oxlint-disable-next-line abstract/no-double-cast -- printOnce reads only sessionId and target of its Config; the other fields are not used by print mode.
       const config = { sessionId: "s1", target } as unknown as Config;
       const result = yield* Effect.result(printOnce(session, config, "Go", "json", false));
       const lines = yield* TestConsole.logLines;

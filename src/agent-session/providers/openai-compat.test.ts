@@ -1,5 +1,6 @@
 /** The OpenAI-compatible Chat Completions adapter: how the core's types are shaped into its wire format and back. */
 
+import { userInput } from "../../../tests/support/observations.ts";
 import { afterAll, expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
 import { Effect, Layer, Logger } from "effect";
@@ -9,7 +10,6 @@ import { ModelStream, type Streamed } from "../model-stream.ts";
 import { ModelClient, type ModelContext } from "../contracts.ts";
 import { logKeys } from "../log-keys.ts";
 import { receivedJson } from "../received.ts";
-import type { Observation } from "../../agent-machine/observation.ts";
 import { BoringModelProvider } from "../../../tests/support/boring.ts";
 import { CountingTurns } from "../turns.ts";
 import { openSession } from "../loop.ts";
@@ -54,7 +54,7 @@ async function turn(responses: ReadonlyArray<unknown>) {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.idle;
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
+      yield* session.observe(userInput("What is 2 + 3?"));
       yield* session.idle;
       return yield* session.facts;
     }).pipe(
@@ -289,8 +289,8 @@ test.each([
       { id: "u1", choices: [{ index: 0, delta: {}, finish_reason: "stop", ...onChoice }], ...onChunk },
     ]);
   const { facts } = await turn([usageAt]);
-  const responded = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "ModelResponded");
-  expect((responded as unknown as { readonly observation: { readonly usage: unknown } }).observation.usage).toEqual(usage);
+  const responded = facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "ModelResponded" ? [fact.observation] : [])).at(0);
+  expect(responded?.usage as unknown).toEqual(usage);
 });
 
 test("two responses with nothing between them are one message: the later one's field goes back, and the earlier one's is logged as left out", async () => {
@@ -355,7 +355,7 @@ test("a stream that ends with no finish_reason was cut short: the request fails,
     Effect.gen(function* () {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening());
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
+      yield* session.observe(userInput("hi"));
       yield* session.idle;
       return yield* session.facts;
     }).pipe(

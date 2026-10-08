@@ -4,6 +4,7 @@
  * against it in `vidaimock.test.ts`.
  */
 
+import { userInput } from "../../../tests/support/observations.ts";
 import { afterAll, expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
 import { OpenAiClient as OpenAiCompatClient } from "@effect/ai-openai-compat";
@@ -12,7 +13,6 @@ import { TestClock } from "effect/testing";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { ModelName, ProviderName, TurnId } from "../../agent-machine/names.ts";
-import type { Observation } from "../../agent-machine/observation.ts";
 import { ModelClient } from "../contracts.ts";
 import { conversationOf } from "../conversation.ts";
 import { openSession } from "../loop.ts";
@@ -303,7 +303,7 @@ test("a stream closed after a tool call of it was passed on is not made again: t
     Effect.gen(function* () {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
+      yield* session.observe(userInput("What is 2 + 3?"));
       yield* session.idle;
       return yield* session.facts;
     }).pipe(

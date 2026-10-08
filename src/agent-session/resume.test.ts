@@ -3,11 +3,11 @@
  * whose process ended would have left them: no record is read or written.
  */
 
+import { userInput } from "../../tests/support/observations.ts";
 import { expect } from "bun:test";
 import { Effect, Layer } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 import { ModelText, StopReason } from "../agent-machine/names.ts";
-import type { Observation } from "../agent-machine/observation.ts";
 import { WholeSessionAssembler } from "../../tests/support/boring.ts";
 import { observe, open, opened, type DrivenMachines } from "../../tests/support/drive.ts";
 import { json } from "../../tests/support/received.ts";
@@ -66,7 +66,7 @@ const resumed = (facts: ReadonlyArray<Fact>, then?: string, turns = 1) => {
       yield* endTurnLeftRunning(session);
       const settled = yield* session.facts;
       if (then !== undefined) {
-        yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: then } as unknown as Observation);
+        yield* session.observe(userInput(then));
         yield* session.idle;
       }
       return { settled: settled.slice(facts.length), after: (yield* session.facts).slice(settled.length), seen };

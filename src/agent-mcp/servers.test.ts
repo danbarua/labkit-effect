@@ -5,6 +5,8 @@ import { BunServices } from "@effect/platform-bun";
 import { Effect, Fiber, Logger, Layer, Ref, Stream } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
+import { CallId, ToolName } from "../agent-machine/names.ts";
+import { receivedJson } from "../agent-session/received.ts";
 import { logKeys } from "./log-keys.ts";
 import { startMcpServers } from "./servers.ts";
 
@@ -45,7 +47,7 @@ test("a server that stops produces one notice, and one more when it is reconnect
       const recorded = yield* servers.changes.pipe(Stream.take(1), Stream.runCollect);
       yield* servers.notices.notices;
       const source = servers.sources[0]!;
-      yield* source.run("exit" as never, { mediaType: "application/json", body: { _tag: "Text", text: "{}" } } as never, "c1" as never).pipe(Effect.ignore);
+      yield* source.run(ToolName.make("exit"), receivedJson({}), CallId.make("c1")).pipe(Effect.ignore);
       yield* Effect.sleep("300 millis");
       const stopped = yield* servers.notices.notices;
       const again = yield* servers.reconnect("fake");

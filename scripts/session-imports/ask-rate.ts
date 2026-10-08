@@ -95,7 +95,9 @@ corpus.forEach((command, id) => {
   const step = judge(command.command, id, facts, command.cwd);
   const inSession = outcomeOf(step);
   if (step._tag === "Waiting" && step.asks !== undefined && inSession.question?.options.some((option) => option.optionId === "allow-session") === true) {
+    // oxlint-disable-next-line abstract/no-double-cast -- a Fact also needs seq, time and origin, which this replay does not record; permissions reads only the observation of an Observed fact
     facts.push({ _tag: "Observed", observation: { _tag: "PermissionAsked", call: CallId.make(`c${id}`), asks: step.asks } } as unknown as Fact);
+    // oxlint-disable-next-line abstract/no-double-cast -- a Fact also needs seq, time and origin, which this replay does not record; permissions reads only the observation of an Observed fact
     facts.push({ _tag: "Observed", observation: { _tag: "PermissionAnswered", call: CallId.make(`c${id}`), answer: answerPicking(OptionId.make("allow-session")) } } as unknown as Fact);
   }
   for (const group of ["all", `source: ${command.source}`, `model: ${modelOf(command)}`, `project: ${projectOf(command)}`]) {

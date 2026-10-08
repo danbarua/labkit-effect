@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import * as git from "es-git";
-import { Effect, Layer, Logger } from "effect";
+import { Effect, Layer, Logger, type Schema } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { TestSessionContext } from "../../tests/support/session-context.ts";
 import { test, testFolder } from "../../tests/support/test.ts";
@@ -19,7 +19,7 @@ import { workspaceTools } from "../agent-tools/workspace.ts";
 import { recordingChanges } from "./recorded-changes.ts";
 
 /** Runs each call in order through the workspace tools of the test's folder, wrapped by `recordingChanges` (unless `wrapped` is false); returns each call's details, with their patches as text, or its failure's tag. */
-const ran = (calls: ReadonlyArray<readonly [string, object]>, options: { readonly wrapped?: boolean; readonly fileText?: (full: string) => Effect.Effect<Current> } = {}) => {
+const ran = (calls: ReadonlyArray<readonly [string, { readonly [key: string]: Schema.Json }]>,options: { readonly wrapped?: boolean; readonly fileText?: (full: string) => Effect.Effect<Current> } = {}) => {
   const root = testFolder();
   const logged: Array<unknown> = [];
   return runTest(
@@ -30,7 +30,7 @@ const ran = (calls: ReadonlyArray<readonly [string, object]>, options: { readonl
           ? bare
           : yield* recordingChanges({ commandTools: ["run_command"], fileText: options.fileText })(bare);
       const results = yield* Effect.forEach(calls, ([tool, input]) =>
-        Effect.map(source.run(ToolName.make(tool), receivedJson({ intent: "A test call.", ...input } as never), CallId.make("call-1")), (outcome) =>
+        Effect.map(source.run(ToolName.make(tool), receivedJson({ intent: "A test call.", ...input }), CallId.make("call-1")), (outcome) =>
           outcome._tag === "Succeeded" ? (outcome.details ?? []).map((detail) => (detail._tag === "FileChanged" ? { ...detail, patch: asText(detail.patch) } : detail)) : outcome.reason._tag,
         ),
       );
@@ -155,7 +155,7 @@ test("a patch over 32 KiB is kept to its first lines that fit, and the bytes lef
   const line = `${"x".repeat(99)}\n`;
   const { results } = await ran([["write_file", { path: "big.txt", text: line.repeat(400) }]]);
   const [details] = results;
-  expect(Array.isArray(details) ? details.map((detail) => (detail._tag === "FileChanged" ? { change: detail.change, kept: Buffer.byteLength(detail.patch), cut: detail.cut } : detail)) : details).toEqual([{ change: "created", kept: 327 * 100, cut: 73 * 100 }] as never);
+  expect((Array.isArray(details) ? details.map((detail) => (detail._tag === "FileChanged" ? { change: detail.change, kept: Buffer.byteLength(detail.patch), cut: detail.cut } : detail)) : details) as unknown).toEqual([{ change: "created", kept: 327 * 100, cut: 73 * 100 }]);
 });
 
 test("a path input's text is read through the world's reader; a text over 256 KiB is not known, so nothing is recorded of its file, and a warning says so", async () => {

@@ -188,7 +188,7 @@ export const runCommand: Tool<typeof RunCommand.fields, Editor | CurrentCall | S
             Effect.flatMap((ended) => connection.client["terminal/output"]({ sessionId, terminalId }).pipe(Effect.map(({ output, truncated }) => ({ output, truncated, exited: ended })))),
           ),
         ({ terminalId }) => connection.client["terminal/release"]({ sessionId, terminalId }).pipe(Effect.ignore),
-      ).pipe(Effect.mapError((error) => failed("terminal_command", input.command)(error as never)));
+      ).pipe(Effect.mapError(failed("terminal_command", input.command)));
       const ending = Option.match(exited, {
         onNone: () => `[Still running after ${seconds} seconds: stopped.]`,
         onSome: ({ exitCode, signal }) => (typeof exitCode === "number" ? `[Exit code ${exitCode}.]` : `[Stopped by signal ${signal ?? "unknown"}.]`),

@@ -23,7 +23,6 @@ import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { logLevelOf, withLogLevel } from "../../src/agent-host/log-level.ts";
 import { Fact } from "../../src/agent-machine/fact.ts";
 import { ModelName, ProviderName, SessionId, TestName } from "../../src/agent-machine/names.ts";
-import type { Observation } from "../../src/agent-machine/observation.ts";
 import { ModelSettings } from "../../src/agent-machine/settings.ts";
 import { openSession } from "../../src/agent-session/loop.ts";
 import { inSession, makeSessionContext } from "../../src/agent-host/session-context.ts";
@@ -36,6 +35,7 @@ import { XAiModelClient, xAiClient } from "../../src/agent-session/providers/xai
 import { openedWith } from "../../src/agent-session/configuration/session-setup.ts";
 import { TurnContextAssembler } from "../../src/agent-session/turn-context.ts";
 import { CountingTurns } from "../../src/agent-session/turns.ts";
+import { userInput } from "../../tests/support/observations.ts";
 import { SmolToolRunner, smolCatalog } from "../../tests/support/smol-tools.ts";
 import { capturingHttp } from "../../src/instrumentation/http-captures.ts";
 import { TelemetryToFiles } from "../../src/instrumentation/telemetry.ts";
@@ -87,14 +87,13 @@ const facts = await Effect.runPromise(
           }),
         );
         yield* session.idle;
-        yield* session.observe({
-          _tag: "InputArrived",
-          from: { _tag: "User" },
-          // Hard enough that a model which thinks as it sees fit does think.
-          text:
+        // Hard enough that a model which thinks as it sees fit does think.
+        yield* session.observe(
+          userInput(
             "Of 1873, 4127, 2946, 6054, 3381 and 7519, exactly two are the smallest and largest primes in the list. " +
-            "Work out which, add those two with the tool, then tell me the result.",
-        } as unknown as Observation);
+              "Work out which, add those two with the tool, then tell me the result.",
+          ),
+        );
         yield* session.idle;
         return yield* session.facts;
       }),

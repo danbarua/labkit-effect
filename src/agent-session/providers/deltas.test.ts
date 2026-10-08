@@ -4,10 +4,11 @@
  * ends with `ModelResponseEnded`, however it ended. The same for each provider's adapter.
  */
 
+import { userInput } from "../../../tests/support/observations.ts";
 import { afterAll, expect } from "bun:test";
 import { Effect, Layer, PubSub } from "effect";
 import { Millis } from "../../agent-machine/names.ts";
-import type { CapturedObservation, Observation } from "../../agent-machine/observation.ts";
+import type { CapturedObservation } from "../../agent-machine/observation.ts";
 import { BoringModelProvider, boringOpening } from "../../../tests/support/boring.ts";
 import { anthropicAt, openAiAt, openAiCompatAt } from "../../../tests/support/providers.ts";
 import { runTest } from "../../../tests/support/run.ts";
@@ -50,7 +51,7 @@ const streamedIn = (client: Layer.Layer<ModelClient>) =>
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       const streamed = yield* session.streamed;
       yield* session.observe(boringOpening(smolCatalog));
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
+      yield* session.observe(userInput("What is 2 + 3?"));
       yield* session.idle;
       return yield* PubSub.takeAll(streamed);
     }).pipe(

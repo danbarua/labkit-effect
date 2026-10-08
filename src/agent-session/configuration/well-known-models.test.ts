@@ -20,7 +20,7 @@ test("a well-known model's settings type takes the efforts it takes, thinking di
   // @ts-expect-error gpt-5-pro takes only high
   const proLow: SettingsFor<"openai", "gpt-5-pro"> = { effort: "low" };
   // claude-sonnet-5-5 was measured to think only between tool calls; claude-fable-5-1 was not.
-  const sonnet: SettingsFor<"anthropic", "claude-sonnet-5-5"> = { effort: "max", thinking: "between_tools", maxOutputTokens: undefined as never };
+  const sonnet: SettingsFor<"anthropic", "claude-sonnet-5-5"> = { effort: "max", thinking: "between_tools" };
   // @ts-expect-error claude-fable-5-1 does not take none, so thinking cannot be disabled
   const fableOff: SettingsFor<"anthropic", "claude-fable-5-1"> = { thinking: "disabled" };
   // claude-haiku-4-5 takes a budget, which each effort but minimal is sent as, and can turn its thinking off.

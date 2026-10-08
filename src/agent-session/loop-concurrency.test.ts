@@ -1,9 +1,9 @@
 /** The loop takes observations while a request is being carried out. */
 
+import { userInput } from "../../tests/support/observations.ts";
 import { expect } from "bun:test";
 import { Deferred, Effect, Layer } from "effect";
 import { ModelText, StopReason, TurnId } from "../agent-machine/names.ts";
-import type { Observation } from "../agent-machine/observation.ts";
 import { ModelClient, type ModelContext } from "./contracts.ts";
 import { openSession } from "./loop.ts";
 import { EphemeralSessionStore } from "./session-store.ts";
@@ -47,7 +47,7 @@ function gated(gates: ReadonlyArray<Deferred.Deferred<void>>) {
 const services = (model: Layer.Layer<ModelClient>) =>
   Layer.mergeAll(BoringModelProvider, TurnContextAssembler, model, CountingTurns, SmolToolRunner);
 
-const input = (text: string) => ({ _tag: "InputArrived", from: { _tag: "User" }, text }) as unknown as Observation;
+const input = (text: string) => userInput(text);
 
 /**
  * What was recorded, in order, without `ModelRequestDispatched`: the request is made in a fiber of

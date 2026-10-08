@@ -4,9 +4,9 @@
  */
 
 import { expect } from "bun:test";
-import { Millis } from "../../src/agent-machine/names.ts";
+import { CallId, Millis, ToolName, TurnId } from "../../src/agent-machine/names.ts";
 import type { EffectRequest } from "../../src/agent-machine/request.ts";
-import { receivedText } from "../../src/agent-session/received.ts";
+import { receivedJson, receivedText } from "../../src/agent-session/received.ts";
 import { every, type Policy, type PolicyMessage, type PolicyStep } from "../../src/agent-policy/policy.ts";
 import { askPerson, budgetSpent, denyTools, notBefore } from "../../src/examples/policies.ts";
 import { observe, open, opened } from "../support/drive.ts";
@@ -18,9 +18,8 @@ function decide<State>(policy: Policy<State>, request: EffectRequest, messages: 
   return messages.reduce<PolicyStep<State>>((step, message) => (step._tag === "Waiting" ? policy.receive(step.state, message) : step), policy.start(request));
 }
 
-const runTool = (call: string, tool: string) =>
-  ({ _tag: "RunTool", call, tool, input: json({}) }) as unknown as EffectRequest;
-const askModel = (turn: string) => ({ _tag: "RequestModelResponse", turn }) as unknown as EffectRequest;
+const runTool = (call: string, tool: string): EffectRequest => ({ _tag: "RunTool", call: CallId.make(call), tool: ToolName.make(tool), input: receivedJson({}) });
+const askModel = (turn: string): EffectRequest => ({ _tag: "RequestModelResponse", turn: TurnId.make(turn) });
 
 test("every vetoes a denied tool before the person is asked, with by giving the vetoing policy's position; a call to another tool waits for the person's answer", () => {
   const policy = every([denyTools(["rm"]), askPerson]);

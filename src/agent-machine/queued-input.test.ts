@@ -2,6 +2,7 @@ import { expect } from "bun:test";
 import { test } from "../../tests/support/test.ts";
 import { json } from "../../tests/support/received.ts";
 import type { Fact } from "./fact.ts";
+import { TurnId } from "./names.ts";
 import { observe, open, opened, type DrivenMachines } from "../../tests/support/drive.ts";
 
 function tags(facts: ReadonlyArray<Fact>): Array<string> {
@@ -45,7 +46,7 @@ test("input from another agent while a tool runs is given to the turn when the b
     from: { _tag: "Agent", agent: "reviewer" },
     text: "the flaky test is in b.ts",
   });
-  expect(session.world.turns.get("turn-1" as never)?.mailbox as unknown).toEqual([
+  expect(session.world.turns.get(TurnId.make("turn-1"))?.mailbox as unknown).toEqual([
     { message: { _tag: "Steer", input: interjection }, seq: interjection },
   ]);
 

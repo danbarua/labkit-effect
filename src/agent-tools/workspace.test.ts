@@ -1,6 +1,7 @@
 /** The workspace tools, run on a folder made for the test. */
 
 import { expect } from "bun:test";
+import type { Schema } from "effect";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -27,10 +28,10 @@ const { catalog, source, system } = workspaceTools(root);
 const runner = Layer.effect(ToolRunner, source);
 
 /** What a call of `tool` with `input` and an intent gives: its output, or its failure. */
-const call = (tool: string, input: object) =>
+const call = (tool: string, input: Readonly<Record<string, Schema.Json>>) =>
   runTest(
     Effect.gen(function* () {
-      const outcome = yield* (yield* ToolRunner).run(ToolName.make(tool), receivedJson({ intent: "A test call.", ...input } as never), CallId.make("call-1"));
+      const outcome = yield* (yield* ToolRunner).run(ToolName.make(tool), receivedJson({ intent: "A test call.", ...input }), CallId.make("call-1"));
       if (outcome._tag === "Succeeded") return asText(outcome.output);
       const reason = outcome.reason;
       return reason._tag === "InputRejected" ? `rejected: ${reason.problem}` : reason._tag === "Reported" ? `reported: ${asText(reason.error)}` : reason._tag;
@@ -153,7 +154,7 @@ test("a call that cannot run says why: a missing file, a result over 256 KiB, in
 });
 
 test("read_file reads a blob:// pointer from the blob store as text, with line and limit; a pointer to bytes that are not text, to no blob, or that is no pointer is refused", async () => {
-  const read = (paths: ReadonlyArray<{ readonly path: string; readonly line?: number; readonly limit?: number }>) =>
+  const read = (paths: ReadonlyArray<Readonly<Record<string, Schema.Json>> & { readonly path: string }>) =>
     runTest(
       Effect.gen(function* () {
         const blobs = yield* Blobs;
@@ -162,7 +163,7 @@ test("read_file reads a blob:// pointer from the blob store as text, with line a
         const pointers: Readonly<Record<string, string>> = { csv: blobUriOf(csv.id, csv.mediaType), png: blobUriOf(png.id, png.mediaType) };
         return yield* Effect.forEach(paths, (input) =>
           Effect.gen(function* () {
-            const outcome = yield* (yield* ToolRunner).run(ToolName.make("read_file"), receivedJson({ intent: "A test call.", ...input, path: pointers[input.path] ?? input.path } as never), CallId.make("call-1"));
+            const outcome = yield* (yield* ToolRunner).run(ToolName.make("read_file"), receivedJson({ intent: "A test call.", ...input, path: pointers[input.path] ?? input.path }), CallId.make("call-1"));
             if (outcome._tag === "Succeeded") return asText(outcome.output);
             return outcome.reason._tag === "InputRejected" ? `rejected: ${outcome.reason.problem}` : outcome.reason._tag;
           }),

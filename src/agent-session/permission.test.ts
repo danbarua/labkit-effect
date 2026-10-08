@@ -1,5 +1,6 @@
 /** A tool call that waits for permission in the loop: what is asked and answered is recorded, and the answer decides whether it runs. */
 
+import { userInput } from "../../tests/support/observations.ts";
 import { expect } from "bun:test";
 import { Effect, Layer, PubSub } from "effect";
 import { BoringContextAssembler, BoringModelProvider, boringOpening } from "../../tests/support/boring.ts";
@@ -61,7 +62,7 @@ const answeredWith = (option: string) =>
         ),
       );
       yield* session.observe(boringOpening(smolCatalog));
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "echo hi" } as unknown as Observation);
+      yield* session.observe(userInput("echo hi"));
       yield* session.idle;
       const observed = (yield* session.facts).flatMap((fact) => (fact._tag === "Observed" ? [fact.observation] : []));
       const askedBy = (yield* session.facts).flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "PermissionAsked" ? [fact.origin] : []));
@@ -126,7 +127,7 @@ const reviewedBy = (policy: Policy<unknown>, answer: (call: CallId) => ReadonlyA
         ),
       );
       yield* session.observe(boringOpening(smolCatalog));
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "echo hi" } as unknown as Observation);
+      yield* session.observe(userInput("echo hi"));
       yield* session.idle;
       return (yield* session.facts).flatMap((fact) => (fact._tag === "Observed" ? [fact.observation] : []));
     }).pipe(

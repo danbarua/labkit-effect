@@ -1,8 +1,9 @@
 /**
  * Rules for functional code: no `let` or `var`, no loop statements, no call or assignment that
  * changes a value in place (`a.b = …`, `a.b++`, `delete a.b`); a log event named from a log key
- * table, not by a string; and, for the abstract layers
- * (`scripts/abstract-layers.ts`), every string branded. The rules read syntax only: a method named
+ * table, not by a string; for the abstract layers
+ * (`scripts/abstract-layers.ts`), every string branded; and, for all code, no cast through
+ * `unknown` or `any` (`x as unknown as T`) and no cast to `never`. The rules read syntax only: a method named
  * `push` or `set` on a type of our own is reported too, but a function of a module imported from
  * effect (`Ref.set`) is not.
  */
@@ -94,6 +95,21 @@ export default {
           context.report({ node, message: "The `string` type: use a branded string." });
         },
       }),
+    },
+    "no-double-cast": {
+      create: (context) => {
+        const unwrapped = (node) => (node?.type === "ParenthesizedExpression" ? unwrapped(node.expression) : node);
+        const cast = (node) => node?.type === "TSAsExpression" || node?.type === "TSTypeAssertion";
+        const toAnything = (node) => node.typeAnnotation.type === "TSUnknownKeyword" || node.typeAnnotation.type === "TSAnyKeyword";
+        const fix =
+          "Build a value of the type, decode it at the boundary (`Schema.decodeUnknown…`), widen the other side to `unknown` (`expect(x as unknown).toEqual(…)`), or, where no checked form exists, write why on the line above: `// oxlint-disable-next-line abstract/no-double-cast -- <reason>`.";
+        const check = (node) => {
+          const inner = unwrapped(node.expression);
+          if (cast(inner) && toAnything(inner)) context.report({ node, message: `A cast through \`unknown\` or \`any\` stops the compiler checking the value. ${fix}` });
+          if (node.typeAnnotation.type === "TSNeverKeyword") context.report({ node, message: `A cast to \`never\` is accepted anywhere, so the compiler checks nothing there. ${fix}` });
+        };
+        return { TSAsExpression: check, TSTypeAssertion: check };
+      },
     },
     "branded-schema-string": {
       create: (context) => ({

@@ -160,7 +160,7 @@ test("a call that arrives while the response streams is run at once; the respons
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "list the files" });
   const call = { call: "c1", tool: "ls", input: json({ path: "." }) };
   observe(session, { _tag: "ToolCallArrived", turn: "turn-1", ...call });
-  expect(session.requests.at(-1)).toEqual({ _tag: "RunTool", ...call } as never);
+  expect(session.requests.at(-1) as unknown).toEqual({ _tag: "RunTool", ...call });
   observe(session, { _tag: "ToolCallDispatched", call: "c1" });
   observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json(["a.ts"]) } });
   // The tool has ended and the response has not: the step waits for the response.
@@ -196,7 +196,7 @@ test("a response's calls that did not arrive while it streamed are run when the 
       { _tag: "ToolCall", call: "c2", tool: "ls", input: json({}) },
     ],
   });
-  expect(session.requests.flatMap((request) => (request._tag === "RunTool" ? [request.call] : []))).toEqual(["c1", "c2"] as never);
+  expect(session.requests.flatMap((request) => (request._tag === "RunTool" ? [request.call] : [])) as unknown).toEqual(["c1", "c2"]);
   observe(session, { _tag: "ToolEnded", call: "c2", outcome: { _tag: "Succeeded", output: json([]) } });
   expect(tags(session).at(-1)).toBe("ToolEnded");
   observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Succeeded", output: json([]) } });

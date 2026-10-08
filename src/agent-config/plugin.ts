@@ -76,7 +76,7 @@ export const plugin = <S extends Settings, const On extends Seam>(
 /** A plug-in with its settings and seams types erased, as a registry holds it. Its entries are made with settings that its own Schema decoded. */
 export interface AnyPlugin {
   readonly use: string;
-  readonly settings: Schema.Top & { readonly fields: Schema.Struct.Fields; readonly DecodingServices: never };
+  readonly settings: Schema.Top & { readonly fields: { readonly [key: string]: Schema.Top & { readonly DecodingServices: never } }; readonly DecodingServices: never };
   readonly on: ReadonlyArray<Seam>;
   readonly entries: (settings: never, host: FromHost, name: EntryName) => Partial<Entries>;
 }

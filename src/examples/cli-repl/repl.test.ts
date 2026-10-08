@@ -15,19 +15,19 @@ import { BoringModelProvider, boringOpening } from "../../../tests/support/borin
 import { smolCatalog, SmolToolRunner } from "../../../tests/support/smol-tools.ts";
 import { permissions } from "../../agent-policy/permissions.ts";
 import type { Policy } from "../../agent-policy/policy.ts";
-import type { Observation } from "../../agent-machine/observation.ts";
 import { TestConsole } from "effect/testing";
 import { type CatalogSource, KeyedAndLocalCatalog, ModelCatalog } from "../../agent-host/catalog.ts";
-import { CallId, Millis, ModelName, ModelText, ProviderName, SessionId, StopReason, ThinkingText, ToolName } from "../../agent-machine/names.ts";
+import { ByteCount, CallId, FullPath, Millis, ModelName, ModelText, ProviderName, SessionId, StopReason, ThinkingText, ToolName } from "../../agent-machine/names.ts";
 import { ModelClient, ToolCallPolicies, ToolRunner } from "../../agent-session/contracts.ts";
 import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
 import { openedWith } from "../../agent-session/configuration/session-setup.ts";
 import { openSession } from "../../agent-session/loop.ts";
 import { ModelStream, ModelStreamInterval } from "../../agent-session/model-stream.ts";
-import { receivedJson } from "../../agent-session/received.ts";
+import { receivedJson, receivedText } from "../../agent-session/received.ts";
 import { EphemeralSessionStore } from "../../agent-session/session-store.ts";
 import { CountingTurns } from "../../agent-session/turns.ts";
 import { BoringContextAssembler } from "../../../tests/support/boring.ts";
+import { userInput } from "../../../tests/support/observations.ts";
 import { runTest } from "../../../tests/support/run.ts";
 import { quitting, typing } from "../../../tests/support/terminal.ts";
 import { CannotAsk } from "./models.ts";
@@ -134,7 +134,17 @@ const typedTo = async (model: ReturnType<typeof thinkingThenOk>, lines: Readonly
       yield* session.observe(opening);
       const shown = view ?? (yield* viewOf("on"));
       yield* terminal(shown, stdin).follow(session);
-      const config = { sessionId: "s1", target: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") }, configuration: { layers: [] } } as unknown as Config;
+      const config: Config = {
+        sessionId: "s1",
+        target: { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") },
+        settings: {},
+        system: undefined,
+        persist: false,
+        configuration: { lists: {}, mcpServers: [], models: new Map(), cli: { view: { thinking: "on" } }, layers: [] },
+        canAsk: false,
+        additionalFolders: [],
+        strictToolInput: false,
+      };
       yield* repl(session, config, undefined, true, { configFolder: configFolder(), view: shown, commandLine: {} }).pipe(Effect.provideService(EffectTerminal.Terminal, yield* typing(lines)));
       return yield* TestConsole.logLines;
     }).pipe(Effect.provide(Layer.merge(services(model), testFolders())), Effect.provideService(ModelStreamInterval, Millis.make(0))),
@@ -278,6 +288,7 @@ test("Option+T at the prompt hides thinking and inserts no character", async () 
 
 /** A fake terminal input stream, for the keys the REPL reads itself during a turn. */
 const keyboard = () =>
+  // oxlint-disable-next-line abstract/no-double-cast -- a fake stdin for turn-keys.ts, which reads only isTTY, setRawMode, resume, pause, and on/off for "data" of a NodeJS.ReadStream; the NodeJS.ReadStream type has many more members
   Object.assign(new EventEmitter(), { isTTY: true, setRawMode: () => undefined, resume: () => undefined, pause: () => undefined }) as unknown as NodeJS.ReadStream;
 
 test("Option+T during a turn hides the rest of the thinking and prints a note", async () => {
@@ -300,13 +311,13 @@ test("without a model, a model that does not support the command-line settings i
 });
 
 test("an ended call that changed files is printed with each file's diff, from what it recorded: an update's patch, a created file's lines added", () => {
-  const text = (value: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text: value } }) as never;
+  const text = (value: string) => receivedText(value);
   const printed = shownEnded("edit_file", '{"path":"a.txt"}', {
     _tag: "Succeeded",
     output: text("Edited /w/a.txt."),
     details: [
-      { _tag: "FileChanged", path: "/w/a.txt" as never, change: "updated", patch: text("--- /w/a.txt\n+++ /w/a.txt\n@@ -1 +1 @@\n-alpha\n+beta") },
-      { _tag: "FileChanged", path: "/w/new.txt" as never, change: "created", patch: text("hi\n") },
+      { _tag: "FileChanged", path: FullPath.make("/w/a.txt"), change: "updated", patch: text("--- /w/a.txt\n+++ /w/a.txt\n@@ -1 +1 @@\n-alpha\n+beta") },
+      { _tag: "FileChanged", path: FullPath.make("/w/new.txt"), change: "created", patch: text("hi\n") },
     ],
   });
   // Without its colours.
@@ -326,11 +337,11 @@ test("an ended call that changed files is printed with each file's diff, from wh
 });
 
 test("an ended call whose patch was cut is printed with the diff kept and how much was left out", () => {
-  const text = (value: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text: value } }) as never;
+  const text = (value: string) => receivedText(value);
   const printed = shownEnded("write_file", '{"path":"big.txt"}', {
     _tag: "Succeeded",
     output: text("Wrote 40000 bytes to /w/big.txt."),
-    details: [{ _tag: "FileChanged", path: "/w/big.txt" as never, change: "created", patch: text("one\n"), cut: 39996 as never }],
+    details: [{ _tag: "FileChanged", path: FullPath.make("/w/big.txt"), change: "created", patch: text("one\n"), cut: ByteCount.make(39996) }],
   });
   expect(Bun.stripANSI(printed).split("\n").slice(2)).toEqual([
     "    --- /dev/null",
@@ -342,14 +353,14 @@ test("an ended call whose patch was cut is printed with the diff kept and how mu
 });
 
 test("an ended call that moved a file is printed with one line for the move, not a diff", () => {
-  const text = (value: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text: value } }) as never;
-  const printed = shownEnded("run_command", '{"command":"mv a.txt b.txt"}', { _tag: "Succeeded", output: text(""), details: [{ _tag: "FileMoved", from: "/w/a.txt" as never, to: "/w/b.txt" as never }] });
+  const text = (value: string) => receivedText(value);
+  const printed = shownEnded("run_command", '{"command":"mv a.txt b.txt"}', { _tag: "Succeeded", output: text(""), details: [{ _tag: "FileMoved", from: FullPath.make("/w/a.txt"), to: FullPath.make("/w/b.txt") }] });
   expect(Bun.stripANSI(printed).split("\n").slice(2)).toEqual(["    Moved `/w/a.txt` to `/w/b.txt`."]);
 });
 
 test("an ended call that wrote a file git ignores is printed with one line for its size, not a diff", () => {
-  const text = (value: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text: value } }) as never;
-  const printed = shownEnded("run_command", '{"command":"npm test > out.log"}', { _tag: "Succeeded", output: text(""), details: [{ _tag: "FileWritten", path: "/w/out.log" as never, bytes: 120 as never }] });
+  const text = (value: string) => receivedText(value);
+  const printed = shownEnded("run_command", '{"command":"npm test > out.log"}', { _tag: "Succeeded", output: text(""), details: [{ _tag: "FileWritten", path: FullPath.make("/w/out.log"), bytes: ByteCount.make(120) }] });
   expect(Bun.stripANSI(printed).split("\n").slice(2)).toEqual(["    Wrote 120 bytes to `/w/out.log`, which git ignores."]);
 });
 
@@ -379,7 +390,7 @@ test("Ctrl+C at a permission question cancels the turn: no answer is recorded, t
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* terminal(yield* viewOf("on"), keyboard()).follow(session).pipe(Effect.provideService(EffectTerminal.Terminal, yield* quitting));
       yield* session.observe(boringOpening(smolCatalog));
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "echo hi" } as unknown as Observation);
+      yield* session.observe(userInput("echo hi"));
       yield* session.idle;
       const facts = yield* session.facts;
       return {

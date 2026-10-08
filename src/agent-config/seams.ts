@@ -30,6 +30,7 @@ export interface SeamLists {
 /** Returns the entries of `seam` that the configuration lists, in order; undefined when it does not list the seam. */
 const listOf = <S extends Seam>(configuration: Configuration, seam: S, host: FromHost): ReadonlyArray<Entries[S]> | undefined =>
   configuration.lists[seam]?.map((entry) => {
+    // oxlint-disable-next-line abstract/no-double-cast -- `AnyPlugin` erases each plug-in's settings type, so `entries` takes `never`; `entry.settings` was decoded by this same plug-in's schema (`agent-config/file.ts`). Binding the settings at decode time would remove the cast.
     const made = entry.plugin.entries(entry.settings as never, host, EntryName.make(entry.name))[seam];
     // A plug-in is registered on a seam only when it says so (`on`), and its entries are typed by it.
     if (made === undefined) throw new Error(`${entry.plugin.use} is listed on ${seam} but gives it no entry`);

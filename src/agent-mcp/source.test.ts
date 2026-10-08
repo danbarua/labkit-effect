@@ -18,7 +18,7 @@ const fake = { name: "fake", command: process.execPath, args: [new URL("../../te
 
 test("a server's tools are offered under mcp__<server>, with characters that providers do not accept replaced by _; a tool whose offered name is too long or duplicates another is not offered, with the reason", () => {
   expect(namespaceOf("my server.v2")).toBe("mcp__my_server_v2");
-  const tool = (name: string) => ({ name, inputSchema: { type: "object" } }) as unknown as McpSchema.Tool;
+  const tool = (name: string): McpSchema.Tool => ({ name, inputSchema: { type: "object" } });
   const { source, omitted } = mcpToolSource({ name: "gh" } as McpServer, [tool("search.code"), tool("search_code"), tool("x".repeat(60)), tool("get")]);
   expect(source.tools.map((each) => each.name as string)).toEqual(["search_code", "get"]);
   expect(omitted).toEqual([
@@ -28,7 +28,7 @@ test("a server's tools are offered under mcp__<server>, with characters that pro
 });
 
 test("a tool that says it only reads is of kind read and safe to run again; one that says it is idempotent is idempotent; others are other and unsafe", () => {
-  const tool = (name: string, annotations: object) => ({ name, inputSchema: { type: "object" }, annotations }) as unknown as McpSchema.Tool;
+  const tool = (name: string, annotations: NonNullable<McpSchema.Tool["annotations"]>): McpSchema.Tool => ({ name, inputSchema: { type: "object" }, annotations });
   const { source } = mcpToolSource({ name: "s" } as McpServer, [tool("read", { readOnlyHint: true }), tool("put", { idempotentHint: true }), tool("rm", {})]);
   expect(source.tools.map((each) => [each.name as string, each.kind, each.replay])).toEqual([
     ["read", "read", "safe"],
@@ -61,10 +61,11 @@ test("a call runs on the server and its result is recorded as the server sent it
 /** A server stub whose `call` answers `result`, counting its calls. */
 const stubServer = (result: Readonly<Record<string, unknown>>) => {
   const calls = { count: 0 };
+  // oxlint-disable-next-line abstract/no-double-cast -- mcpToolSource reads only the server's name and call; the stub implements those two of McpServer's members.
   const server = { name: "stub", call: () => Effect.sync(() => (calls.count += 1)).pipe(Effect.as(result)) } as unknown as McpServer;
   return { server, calls };
 };
-const stubTool = { name: "act", inputSchema: { type: "object" } } as unknown as McpSchema.Tool;
+const stubTool: McpSchema.Tool = { name: "act", inputSchema: { type: "object" } };
 
 test("a call whose input is JSON but not an object is refused as InputRejected, and the server is not called", async () => {
   const { server, calls } = stubServer({ content: [] });

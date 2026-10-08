@@ -3,6 +3,7 @@
 import { expect } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, Stream } from "effect";
+import type { McpSchema } from "effect/ai";
 import fc from "fast-check";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
@@ -14,7 +15,7 @@ const fake = { name: "fake", command: process.execPath, args: [new URL("../../te
 
 test("a server connects on each run of its process, is ready with its tools, fails or exits with its run; what arrives about an earlier run changes nothing", () => {
   const steps = (events: Parameters<typeof stepMcpServer>[1][]) => events.reduce((state, event) => stepMcpServer(state, event).state, initialMcpServerState);
-  const tools = [{ name: "echo" }] as never;
+  const tools: ReadonlyArray<McpSchema.Tool> = [{ name: "echo", inputSchema: { type: "object" } }];
   // A stdio server's run is its process.
   expect(steps([runEventOf({ _tag: "Starting", run: 1 })])).toEqual({ _tag: "Connecting", run: 1 });
   expect(steps([runEventOf({ _tag: "Starting", run: 1 }), { _tag: "Connected", run: 1, tools }])).toEqual({ _tag: "Ready", run: 1, tools });
@@ -137,7 +138,7 @@ test("for any events, the run a server's state names never goes back, and what a
 });
 
 test("Connected for a run that has already failed, exited or needs authorization leaves the server in that state", () => {
-  const tools = [{ name: "echo" }] as never;
+  const tools: ReadonlyArray<McpSchema.Tool> = [{ name: "echo", inputSchema: { type: "object" } }];
   const ended: ReadonlyArray<McpServerState> = [
     { _tag: "Failed", run: 1, reason: "no answer" },
     { _tag: "Exited", run: 1, reason: "its process exited with code 7" },

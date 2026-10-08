@@ -175,7 +175,7 @@ const pluginsOf = (layers: ReadonlyArray<LayerSource>, value: unknown, registry:
             const field = plugin.settings.fields[key];
             if (field === undefined) return Effect.fail(invalid([...path, key], `${use} has no setting ${key}; its settings are: ${Object.keys(plugin.settings.fields).join(", ")}`));
             // A plug-in's settings decode with no services (`AnyPlugin`), and so does each of them.
-            const alone = Schema.Struct({ [key]: field }) as unknown as Schema.Codec<unknown, unknown>;
+            const alone = Schema.Struct({ [key]: field });
             return Schema.decodeEffect(alone)({ [key]: setting }).pipe(Effect.mapError((error) => invalid([...path, key], problemOf(error))));
           },
           { discard: true },

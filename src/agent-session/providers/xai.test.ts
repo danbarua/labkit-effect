@@ -3,10 +3,10 @@
  * back, and its own compaction. `grok-stream.json` is a stream xAI sent, with its text shortened.
  */
 
+import { userInput } from "../../../tests/support/observations.ts";
 import { afterAll, expect } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { ModelName, ProviderName, WindowId } from "../../agent-machine/names.ts";
-import type { Observation } from "../../agent-machine/observation.ts";
 import { ContextAssembler, type ModelContext, ModelProvider } from "../contracts.ts";
 import { openSession } from "../loop.ts";
 import { EphemeralSessionStore } from "../session-store.ts";
@@ -30,7 +30,7 @@ afterAll(() => {
 });
 
 const grok = { provider: ProviderName.make("xai"), model: ModelName.make("grok-4.7") };
-const input = { _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation;
+const input = userInput("What is 2 + 3?");
 
 /** A server that sends `first` as its first answer, as it is, and each later one as `openAiStream` makes it. */
 function serving(first: Response, later: unknown) {
@@ -80,7 +80,7 @@ const answers = { status: "completed", output: [{ type: "message", role: "assist
 test("Grok's stream as it sends it: the reasoning item is Thinking and the call a ToolCall, and both go back as received", async () => {
   const provider = serving(asEvents(grokStream), answers);
   const facts = await session(provider.url, {});
-  const completed = grokStream.at(-1) as unknown as { response: { output: ReadonlyArray<Record<string, unknown>> } };
+  const completed = Schema.decodeUnknownSync(Schema.Struct({ response: Schema.Struct({ output: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)) }) }))(grokStream.at(-1));
   const [reasoning, call] = completed.response.output;
   const responses = facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "ModelResponded" ? [fact.observation] : []));
   expect(responses as unknown).toMatchObject([

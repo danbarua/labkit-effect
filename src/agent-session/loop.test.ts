@@ -1,12 +1,12 @@
 /** The loop around the core, with stub services: what it does regardless of which adapters run. */
 
+import { userInput } from "../../tests/support/observations.ts";
 import { expect } from "bun:test";
 import { test } from "../../tests/support/test.ts";
 import { Effect, Layer, Logger, PubSub, References } from "effect";
 import { ModelName, ModelText, ProviderName, SessionId, StopReason, TokenCount, TurnId } from "../agent-machine/names.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { CurrentWork, type Work } from "./work.ts";
-import type { Observation } from "../agent-machine/observation.ts";
 import { BoringContextAssembler, BoringModelProvider } from "../../tests/support/boring.ts";
 import { CountingTurns, CountingTurnsInStore } from "./turns.ts";
 import { MaxHolds, ModelClient, ModelProvider, TurnEndHooks } from "./contracts.ts";
@@ -55,7 +55,7 @@ test("while a request is carried out, CurrentWork and every log line name its se
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening());
       yield* session.idle;
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
+      yield* session.observe(userInput("hi"));
       yield* session.idle;
     }).pipe(
       Effect.provide(
@@ -116,7 +116,7 @@ async function answeringTurn(hooks: ReadonlyArray<() => ReadonlyArray<string>>, 
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening());
       yield* session.idle;
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
+      yield* session.observe(userInput("hi"));
       yield* session.idle;
       return yield* session.facts;
     }).pipe(
@@ -192,7 +192,7 @@ test("an interruption while the turn-end hooks run stops them: their feedback is
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening());
       yield* session.idle;
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
+      yield* session.observe(userInput("hi"));
       yield* Effect.promise(() => hookRunning.promise);
       yield* session.observe({ _tag: "TurnInterrupted", turn: TurnId.make("turn-1") });
       yield* session.idle;
@@ -234,7 +234,7 @@ test("a subscriber receives every fact recorded after it subscribed, in order", 
         yield* session.observe(boringOpening());
         yield* session.idle;
         const subscription = yield* session.subscribe;
-        yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
+        yield* session.observe(userInput("hi"));
         yield* session.idle;
         return { received: yield* PubSub.takeAll(subscription), facts: yield* session.facts };
       }),
@@ -250,7 +250,7 @@ test("a request that dies of a defect is logged with what it died of, and record
     Effect.gen(function* () {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening());
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hello" } as unknown as Observation);
+      yield* session.observe(userInput("hello"));
       yield* session.idle;
       return yield* session.facts;
     }).pipe(
@@ -285,7 +285,7 @@ test("a session opened under a host's span annotations has them on its turn's an
       // Observed outside the annotations, as a host's other fibers (an ACP prompt's) do.
       yield* session.observe(boringOpening());
       yield* session.idle;
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
+      yield* session.observe(userInput("hi"));
       yield* session.idle;
     }).pipe(Effect.provide(Layer.mergeAll(stubProvider, answering, BoringContextAssembler, CountingTurns, SmolToolRunner, SpansTo((line) => void spans.push(line))))),
   );
@@ -335,7 +335,7 @@ test("a session reopened over the facts of an earlier run ends its span with the
         const session = yield* openSession;
         if (facts.length === 0) yield* session.observe(boringOpening());
         yield* session.idle;
-        yield* Effect.forEach(inputs, (text) => session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text } as unknown as Observation).pipe(Effect.andThen(session.idle)), { discard: true });
+        yield* Effect.forEach(inputs, (text) => session.observe(userInput(text)).pipe(Effect.andThen(session.idle)), { discard: true });
         return yield* session.facts;
       }).pipe(
         Effect.provide(Layer.mergeAll(sonnet, priced, BoringContextAssembler, CountingTurnsInStore, SmolToolRunner, SpansTo((line) => void spans.push(line))).pipe(Layer.provideMerge(store))),

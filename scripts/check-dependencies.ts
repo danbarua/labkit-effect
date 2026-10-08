@@ -17,7 +17,7 @@
 
 import { builtinModules } from "node:module";
 import { API } from "typescript/unstable/async";
-import { SyntaxKind } from "typescript/unstable/ast";
+import { type Node, SyntaxKind } from "typescript/unstable/ast";
 
 const root = process.cwd();
 const manifest = (await Bun.file(`${root}/package.json`).json()) as {
@@ -35,10 +35,6 @@ const packageOf = (specifier: string): string | undefined => {
   return builtins.has(named) ? undefined : named;
 };
 
-interface Node {
-  readonly kind: number;
-  readonly forEachChild: (visit: (child: Node) => void) => void;
-}
 interface Literal extends Node {
   readonly text: string;
 }
@@ -79,7 +75,7 @@ for (const file of files) {
     }
     node.forEachChild(walk);
   };
-  (source as unknown as Node).forEachChild(walk);
+  source.forEachChild(walk);
 }
 
 await api.close();

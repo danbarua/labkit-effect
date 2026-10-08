@@ -14,7 +14,7 @@
  *   reason.
  */
 
-import { Effect, type Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import type { McpSchema } from "effect/ai";
 import { FailureText, ToolName } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
@@ -40,12 +40,15 @@ export interface McpToolSource {
   readonly omitted: ReadonlyArray<{ readonly tool: string; readonly reason: string }>;
 }
 
-const specOf = (name: string, tool: McpSchema.Tool): ToolSpec => {
+/** A server's input schema as JSON; none when it holds a value that JSON cannot carry. */
+const jsonOf = Schema.decodeUnknownOption(Schema.Json);
+
+const specOf = (name: string, tool: McpSchema.Tool, input: Schema.Json): ToolSpec => {
   const hints = tool.annotations;
   return {
     name: ToolName.make(name),
     description: tool.description ?? tool.title ?? "",
-    input: tool.inputSchema as unknown as Schema.Json,
+    input,
     kind: hints?.readOnlyHint === true ? "read" : "other",
     replay: replayOf(hints),
   };
@@ -63,20 +66,21 @@ const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
 /** Returns `server`'s `tools` (those it listed when it was ready) as a tool source. */
 export const mcpToolSource = (server: McpServer, tools: ReadonlyArray<McpSchema.Tool>): McpToolSource => {
   const namespace = namespaceOf(server.name);
-  const named = tools.map((tool) => ({ tool, name: offerable(tool.name) }));
-  const omitted = named.flatMap(({ tool, name }, index) => {
+  const named = tools.map((tool) => ({ tool, name: offerable(tool.name), input: jsonOf(tool.inputSchema) }));
+  const omitted = named.flatMap(({ tool, name, input }, index) => {
+    if (Option.isNone(input)) return [{ tool: tool.name, reason: `${tool.name}'s input schema holds a value that JSON cannot carry` }];
     if (`${namespace}__${name}`.length > maxToolName) return [{ tool: tool.name, reason: `${namespace}__${name} is longer than ${maxToolName} characters` }];
     if (named.findIndex((other) => other.name === name) !== index) return [{ tool: tool.name, reason: `${tool.name} is offered as ${name}, as another of the server's tools is` }];
     return [];
   });
-  const kept = named.filter(({ tool }) => !omitted.some((each) => each.tool === tool.name));
+  const kept = named.flatMap(({ tool, name, input }) => (Option.isSome(input) && !omitted.some((each) => each.tool === tool.name) ? [{ tool, name, input: input.value }] : []));
   const own = new Map(kept.map(({ tool, name }) => [name, tool.name] as const));
   const reported = (text: string): ToolOutcome => ({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(text) } });
   return {
     omitted,
     source: {
       namespace,
-      tools: kept.map(({ tool, name }) => specOf(name, tool)),
+      tools: kept.map(({ tool, name, input }) => specOf(name, tool, input)),
       run: (tool, input) => {
         const name = own.get(tool);
         if (name === undefined) return Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "NotFound" } });

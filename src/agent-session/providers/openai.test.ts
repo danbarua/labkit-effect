@@ -1,10 +1,10 @@
 /** The OpenAI Responses adapter: how the core's types are shaped into its wire format and back. */
 
+import { userInput } from "../../../tests/support/observations.ts";
 import { afterAll, expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
 import { Effect, Layer } from "effect";
 import { ModelName, ProviderName, TurnId } from "../../agent-machine/names.ts";
-import type { Observation } from "../../agent-machine/observation.ts";
 import { ModelClient, type ModelContext } from "../contracts.ts";
 import { logKeys } from "../log-keys.ts";
 import { asText } from "../received.ts";
@@ -33,7 +33,7 @@ async function turn(responses: ReadonlyArray<unknown>) {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
       yield* session.idle;
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation);
+      yield* session.observe(userInput("What is 2 + 3?"));
       yield* session.idle;
       return yield* session.facts;
     }).pipe(

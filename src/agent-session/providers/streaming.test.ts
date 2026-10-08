@@ -3,6 +3,7 @@
  * records, and what is passed on while a response arrives.
  */
 
+import { userInput } from "../../../tests/support/observations.ts";
 import { afterAll, expect } from "bun:test";
 import { Effect, Layer, Logger, PubSub } from "effect";
 import { Millis, TurnId } from "../../agent-machine/names.ts";
@@ -25,11 +26,12 @@ import { runTest } from "../../../tests/support/run.ts";
 import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
 import { anthropicStream, openAiStream } from "../../../tests/support/streams.ts";
 import { test } from "../../../tests/support/test.ts";
+import type { Json } from "../shaping.ts";
 
-const fold = (events: ReadonlyArray<unknown>) =>
+const fold = (events: ReadonlyArray<Json>) =>
   events.reduce<{ state: typeof nothingYet; completed: Array<unknown>; failed: Array<unknown>; notApplied: Array<string>; unparsed: Array<unknown> }>(
     (done, event) => {
-      const next = assemble(done.state, event as never);
+      const next = assemble(done.state, event);
       return {
         state: next.state,
         completed: next.completed === undefined ? done.completed : [...done.completed, next.completed],
@@ -147,7 +149,7 @@ const serving = (respond: (request: number) => Response) => {
   return server.url;
 };
 
-const input = { _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation;
+const input = userInput("What is 2 + 3?");
 
 const parts = (facts: ReadonlyArray<{ _tag: string; observation?: Observation }>) =>
   facts.flatMap((fact) => (fact.observation?._tag === "ModelResponded" ? [fact.observation.parts.map((part) => part._tag)] : []));
@@ -471,7 +473,7 @@ test("interrupted while a response streams and its tool runs: both are stopped a
       yield* Effect.promise(() => toolBegan.promise);
       yield* session.observe({ _tag: "TurnInterrupted", turn: TurnId.make("turn-1") });
       yield* session.idle;
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "Stop adding." } as unknown as Observation);
+      yield* session.observe(userInput("Stop adding."));
       yield* session.idle;
       return yield* session.facts;
     }).pipe(

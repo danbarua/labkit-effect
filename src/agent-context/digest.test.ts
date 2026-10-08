@@ -1,10 +1,11 @@
 /** The digest of a compacted span: attachments as their pointers, one line for each tool call. */
 
 import { expect } from "bun:test";
+import type { Schema } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
 import type { BlobRef } from "../agent-machine/blob.ts";
-import { CallId, ToolName } from "../agent-machine/names.ts";
+import { CallId, ModelName, ProviderName, ToolName } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import { MediaType } from "../agent-machine/received.ts";
 import type { ContextMessage } from "../agent-session/contracts.ts";
@@ -15,9 +16,9 @@ import { DigestSummarizer, digestOf, type ToolDigests } from "./digest.ts";
 const image = { id: "1ec195f71ba3ca69bc4055d456b5511969a3f553805ce317ea43654f6ea9153e", mediaType: "image/png", size: 1495, name: "halves.png" } as BlobRef;
 const pdf = { id: "b55a6d4541e919924a51e3052bc74c6a8ae122fc5da22f77103fafe060ccbe13", mediaType: "application/pdf", size: 601, name: "papaya.pdf" } as BlobRef;
 
-const call = (id: string, tool: string, input: unknown) => ({ _tag: "ToolCall" as const, call: CallId.make(id), tool: ToolName.make(tool), input: receivedJson(input as never) });
+const call = (id: string, tool: string, input: Schema.Json) => ({ _tag: "ToolCall" as const, call: CallId.make(id), tool: ToolName.make(tool), input: receivedJson(input) });
 const result = (id: string, outcome: ToolOutcome) => ({ _tag: "ToolResult" as const, call: CallId.make(id), outcome });
-const succeeded = (output: unknown): ToolOutcome => ({ _tag: "Succeeded", output: receivedJson(output as never) });
+const succeeded = (output: Schema.Json): ToolOutcome => ({ _tag: "Succeeded", output: receivedJson(output) });
 
 const span: ReadonlyArray<ContextMessage> = [
   { role: "user", parts: [{ _tag: "Text", text: "Look at these, then check the repo." }, { _tag: "File", blob: image }, { _tag: "File", blob: pdf }] },
@@ -89,6 +90,6 @@ test("a tool's image kept in the blob store is listed with the attachments; a sp
     { role: "user", parts: [result("c1", stored)] },
   ];
   expect(digestOf(messages).split("\n")[1]).toBe(blobPointer({ id: image.id, mediaType: image.mediaType, size: image.size }));
-  const summary = await runTest(DigestSummarizer().summarize([], [{ role: "user", parts: [{ _tag: "Text", text: "hello" }] }], undefined as never, undefined as never));
+  const summary = await runTest(DigestSummarizer().summarize([], [{ role: "user", parts: [{ _tag: "Text", text: "hello" }] }], { provider: ProviderName.make("boring"), model: ModelName.make("boring-1") }, { system: undefined, tools: [] }));
   expect(summary).toEqual(receivedText(""));
 });

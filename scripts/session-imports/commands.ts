@@ -30,6 +30,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { brandFrom } from "../../src/agent-host/brand.ts";
 import { brandFoldersOf } from "../../src/agent-host/brand-folders.ts";
 
@@ -59,6 +60,20 @@ type Json = null | boolean | number | string | ReadonlyArray<Json> | { readonly 
 type Row = { readonly [key: string]: Json };
 const isRow = (value: Json | undefined): value is Row => typeof value === "object" && value !== null && !Array.isArray(value);
 const text = (value: Json | undefined): string => (typeof value === "string" ? value : "");
+/** Decodes a row of `commands.jsonl`. A row whose fields differ from `CorpusCommand` throws, and the script stops. */
+const decodeCorpusCommand = Schema.decodeUnknownSync(
+  Schema.Struct({
+    key: Schema.String,
+    source: Schema.Literals(["claude-code", "codex", "omp"]),
+    session: Schema.String,
+    transcript: Schema.String,
+    timestamp: Schema.String,
+    cwd: Schema.String,
+    command: Schema.String,
+    model: Schema.optionalKey(Schema.String),
+    failed: Schema.optionalKey(Schema.Boolean),
+  }),
+);
 const rows = (file: string): ReadonlyArray<Row> =>
   readFileSync(file, "utf8")
     .split("\n")
@@ -195,7 +210,10 @@ const transcriptsIn = (folder: string): ReadonlyArray<string> =>
 
 if (import.meta.main) {
   mkdirSync(corpusFolder, { recursive: true });
-  const entries = new Map<string, CorpusCommand>((existsSync(corpusFile) ? rows(corpusFile) : []).map((row) => [text(row["key"]), row as unknown as CorpusCommand]));
+  const entries = new Map<string, CorpusCommand>((existsSync(corpusFile) ? rows(corpusFile) : []).map((row): [string, CorpusCommand] => {
+    const command = decodeCorpusCommand(row);
+    return [command.key, command];
+  }));
   const stored = existsSync(indexFile) ? (JSON.parse(readFileSync(indexFile, "utf8")) as { readonly version?: number; readonly transcripts?: Record<string, string> }) : {};
   const index: Record<string, string> = stored.version === indexVersion ? { ...stored.transcripts } : {};
   const added: Record<string, number> = {};

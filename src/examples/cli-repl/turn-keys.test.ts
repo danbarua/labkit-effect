@@ -30,6 +30,7 @@ const terminal = () => {
 
 test("during a turn the terminal is in raw mode: Ctrl+C interrupts, Ctrl+D and other keys are ignored, a permission prompt borrows the keys, and the turn's end restores line mode", async () => {
   const stdin = terminal();
+  // oxlint-disable-next-line abstract/no-double-cast -- turnKeys uses only isTTY, setRawMode, on, off, pause and resume of its input, which the fake terminal implements.
   const keys = turnKeys(stdin as unknown as NodeJS.ReadStream);
   let interrupts = 0;
   keys.hold(() => (interrupts += 1));
@@ -52,6 +53,7 @@ test("during a turn the terminal is in raw mode: Ctrl+C interrupts, Ctrl+D and o
 
 test("during a turn, keys other than Ctrl+C go to the key handler as the text the terminal sent", () => {
   const stdin = terminal();
+  // oxlint-disable-next-line abstract/no-double-cast -- turnKeys uses only isTTY, setRawMode, on, off, pause and resume of its input, which the fake terminal implements.
   const keys = turnKeys(stdin as unknown as NodeJS.ReadStream);
   const passed: Array<string> = [];
   let interrupts = 0;

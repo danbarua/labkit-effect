@@ -23,6 +23,7 @@ const user = (text: string): ContextMessage => ({ role: "user", parts: [{ _tag: 
 /** A session driven by hand: `compact` reads its facts and records what it observes in them. */
 const drivenSession = () => {
   const driven = open();
+  // oxlint-disable-next-line abstract/no-double-cast -- the stand-in implements only `facts` and `observe`, the members compact reads; Session declares the loop's other members.
   const session = {
     facts: Effect.sync(() => [...driven.journal]),
     observe: (observation: unknown) => Effect.sync(() => void observe(driven, observation)),
@@ -31,6 +32,7 @@ const drivenSession = () => {
 };
 
 /** `compact` over a driven session, which needs none of the loop's services that `Session`'s type asks for. */
+// oxlint-disable-next-line abstract/no-double-cast -- the requirements of compact's Effect are the services the Session type implies; the test provides only Summaries, so the cast narrows the requirements to it.
 const compacting = (session: Session) => compact(session, summarizer, decidedBy) as unknown as Effect.Effect<WindowId, SessionStoreFailed, Summaries>;
 
 const summarizer: Summarizer = { name: SummarizerName.make("Fixed"), summarize: () => Effect.succeed(receivedText("A summary.")) };

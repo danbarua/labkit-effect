@@ -1,9 +1,9 @@
 /** Every recorded observation says where it came from. */
 
+import { userInput } from "../../tests/support/observations.ts";
 import { expect } from "bun:test";
 import { Cause, Effect, Exit, Layer } from "effect";
 import { CallId, ModelText, StopReason, ToolName } from "../agent-machine/names.ts";
-import type { Observation } from "../agent-machine/observation.ts";
 import { ModelClient } from "./contracts.ts";
 import { openSession } from "./loop.ts";
 import { EphemeralSessionStore } from "./session-store.ts";
@@ -40,7 +40,7 @@ const scripted = () => {
 const services = () =>
   Layer.mergeAll(BoringModelProvider, TurnContextAssembler, scripted(), CountingTurns, SmolToolRunner);
 
-const input = { _tag: "InputArrived", from: { _tag: "User" }, text: "What is 2 + 3?" } as unknown as Observation;
+const input = userInput("What is 2 + 3?");
 
 test("what the test gives the session is from the test; what the loop observes is from the provider, the tool or the harness", async () => {
   const facts = await runTest(

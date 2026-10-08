@@ -13,7 +13,7 @@ import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import * as git from "es-git";
 import { BunServices } from "@effect/platform-bun";
-import { Deferred, Effect, Fiber, Layer, Logger, References } from "effect";
+import { Deferred, Effect, Fiber, Layer, Logger, References, type Schema } from "effect";
 import * as Agent from "effective-acp/agent";
 import { fromWebStreams } from "effective-acp/stdio";
 import { type Brand, defaultBrand } from "../agent-host/brand.ts";
@@ -74,7 +74,7 @@ type Reply = (turn: TurnId, target: Target) => Effect.Effect<Responded>;
 type Piece =
   | { readonly _tag: "Thinking"; readonly text: string }
   | { readonly _tag: "Text"; readonly text: string }
-  | { readonly _tag: "ToolCall"; readonly call: string; readonly tool: string; readonly input: { readonly [key: string]: string | number } };
+  | { readonly _tag: "ToolCall"; readonly call: string; readonly tool: string; readonly input: { readonly [key: string]: Schema.Json } };
 
 const toPart = (piece: Piece): ModelPart => {
   switch (piece._tag) {
@@ -623,7 +623,7 @@ test("update_plan sends the whole plan to the editor as a plan update, without a
     { content: "Read the tests", status: "completed" },
     { content: "Fix the bug", status: "in_progress", priority: "high" },
   ];
-  const host = startHost({ script: [answer({ _tag: "ToolCall", call: "plan-1", tool: "update_plan", input: { entries, intent: "Plan the work." } as never }), answer({ _tag: "Text", text: "Planned." })] });
+  const host = startHost({ script: [answer({ _tag: "ToolCall", call: "plan-1", tool: "update_plan", input: { entries, intent: "Plan the work." } }), answer({ _tag: "Text", text: "Planned." })] });
   const { app, log } = sdkClient();
   const sessionId = await app.connectWith(host.stream, async (ctx) => {
     await initialize(ctx);

@@ -12,6 +12,7 @@ import { observe, open, opened } from "../../tests/support/drive.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { test, testFolder, testOrigin } from "../../tests/support/test.ts";
 import type { Fact } from "../agent-machine/fact.ts";
+import type { Observation } from "../agent-machine/observation.ts";
 import { CallId, Seq, SessionId, type ToolKind, ToolName, TurnId } from "../agent-machine/names.ts";
 import { inSession, makeSessionContext } from "../agent-host/session-context.ts";
 import { permissionFoldersOf } from "./builtins.ts";
@@ -62,11 +63,11 @@ const spec = (name: string, kind: ToolKind): ToolSpec => ({ name: ToolName.make(
 
 /** A session that opened with a tool that reads and one that edits, and two identical calls to `look` in turn-1. */
 const facts = (): ReadonlyArray<Fact> =>
-  [
+  ([
     boringOpening([spec("look", "read"), spec("change", "edit")]),
     { _tag: "ToolCallArrived", turn: TurnId.make("turn-1"), call: CallId.make("c1"), tool: ToolName.make("look"), input: receivedJson({}) },
     { _tag: "ToolCallArrived", turn: TurnId.make("turn-1"), call: CallId.make("c2"), tool: ToolName.make("look"), input: receivedJson({}) },
-  ].map((observation, index): Fact => ({ _tag: "Observed", seq: Seq.make(index + 1), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation: observation as never }));
+  ] satisfies ReadonlyArray<Observation>).map((observation, index): Fact => ({ _tag: "Observed", seq: Seq.make(index + 1), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation }));
 
 const run = (call: string, tool: string): EffectRequest => ({ _tag: "RunTool", call: CallId.make(call), tool: ToolName.make(tool), input: receivedJson({}) });
 

@@ -161,8 +161,7 @@ const gitTool = <F extends Fields & { readonly intent?: never }>(
   kind,
   replay: readOnly ? "safe" : "unsafe",
   description,
-  // The struct of `repository` and `fields` has the fields `WithRepository<F>`.
-  input: Schema.Struct({ repository: RepositoryPath, ...fields }) as unknown as Schema.Struct<WithRepository<F>>,
+  input: Schema.Struct<WithRepository<F>>({ repository: RepositoryPath, ...fields }),
   run: (input) =>
     Effect.tryPromise({
       // Every git tool's input has `repository`, as `WithRepository` requires.

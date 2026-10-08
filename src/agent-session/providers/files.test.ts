@@ -11,8 +11,8 @@ import { anthropicAt, openAiAt, openAiCompatAt, recordingServer } from "../../..
 import { runTest } from "../../../tests/support/run.ts";
 import { test } from "../../../tests/support/test.ts";
 import type { BlobRef } from "../../agent-machine/blob.ts";
-import { ModelName, ProviderName, TurnId } from "../../agent-machine/names.ts";
-import { MediaType } from "../../agent-machine/received.ts";
+import { CallId, ModelName, ProviderName, ToolName, TurnId } from "../../agent-machine/names.ts";
+import { MediaType, ReceivedText } from "../../agent-machine/received.ts";
 import { Blobs, BlobsInMemory } from "../blobs.ts";
 import { type ContextPart, ModelClient, ModelContext } from "../contracts.ts";
 import { blobPointer, notShown } from "../shaping.ts";
@@ -120,7 +120,7 @@ const ModelClientStub = Layer.succeed(ModelClient, {
       model: target.model,
       parts: [],
       ending: { _tag: "Complete" as const },
-      metadata: { mediaType: MediaType.make("application/json"), body: { _tag: "Text" as const, text: "{}" as never } },
+      metadata: { mediaType: MediaType.make("application/json"), body: { _tag: "Text" as const, text: ReceivedText.make("{}") } },
     }),
 });
 
@@ -142,8 +142,8 @@ const toolImage = (client: Layer.Layer<ModelClient>, provider: string, model: st
         tools: [],
         messages: [
           { role: "user", parts: [{ _tag: "Text", text: "Take a screenshot." }] },
-          { role: "assistant", parts: [{ _tag: "ToolCall", call: "c1" as never, tool: "screenshot" as never, input: { mediaType: MediaType.make("application/json"), body: { _tag: "Text", text: "{}" as never } } }] },
-          { role: "user", parts: [{ _tag: "ToolResult", call: "c1" as never, outcome: { _tag: "Succeeded", output } }] },
+          { role: "assistant", parts: [{ _tag: "ToolCall", call: CallId.make("c1"), tool: ToolName.make("screenshot"), input: { mediaType: MediaType.make("application/json"), body: { _tag: "Text", text: ReceivedText.make("{}") } } }] },
+          { role: "user", parts: [{ _tag: "ToolResult", call: CallId.make("c1"), outcome: { _tag: "Succeeded", output } }] },
         ],
       };
       yield* (yield* ModelClient).respond({ provider: ProviderName.make(provider), model: ModelName.make(model) }, context, TurnId.make("turn-1"));
@@ -155,7 +155,7 @@ test("a tool's image goes back in its result: an image block in Anthropic's tool
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
-      bodies.push((await request.json()) as never);
+      bodies.push((await request.json()) as { messages: Array<{ content: Array<Record<string, unknown>> }> });
       return anthropicStream({ content: [{ type: "text", text: "A chart." }], stop_reason: "end_turn" });
     },
   });

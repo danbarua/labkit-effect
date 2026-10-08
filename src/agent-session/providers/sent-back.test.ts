@@ -6,7 +6,7 @@
  */
 
 import { afterAll, expect } from "bun:test";
-import { Effect, Layer, Logger } from "effect";
+import { Effect, Layer, Logger, type Schema } from "effect";
 import { ModelName, ProviderName, ThinkingText, TurnId } from "../../agent-machine/names.ts";
 import { anthropicAt, openAiAt, openAiCompatAt } from "../../../tests/support/providers.ts";
 import { runTest } from "../../../tests/support/run.ts";
@@ -78,12 +78,12 @@ async function sent(client: keyof typeof clients, provider: string, model: strin
   return { body: bodies[0] ?? {}, omittedPart: left.flatMap(([, details]) => details.parts) };
 }
 
-const thinking = (provider: string, model: string, received: unknown): ContextPart => ({
+const thinking = (provider: string, model: string, received: Schema.Json): ContextPart => ({
   _tag: "Thinking",
   provider: ProviderName.make(provider),
   from: from(model),
   text: ThinkingText.make("Add them."),
-  received: receivedJson(received as never),
+  received: receivedJson(received),
 });
 
 const answer: ContextPart = { _tag: "Text", text: "Adding." };

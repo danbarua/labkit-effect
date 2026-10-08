@@ -139,6 +139,7 @@ interface Pending {
 type ErasedHandlers<R> = Readonly<Record<string, ((payload: unknown) => Effect.Effect<unknown, JsonRpcErrorObject, R>) | undefined>>;
 
 /** The JSON codec of one of a method's schemas. */
+// oxlint-disable-next-line abstract/no-double-cast -- effect/ai's MCP methods type each schema as `Schema.Top`, which does not say that it needs no services; every MCP method schema is plain JSON data and needs none.
 const json = (schema: Schema.Top) => Schema.toCodecJson(schema) as unknown as Schema.Codec<unknown, unknown>;
 
 const Id = Schema.declare(isJsonRpcId);

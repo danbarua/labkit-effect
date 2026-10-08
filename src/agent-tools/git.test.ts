@@ -4,7 +4,7 @@ import {mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "nod
 import {tmpdir} from "node:os";
 import {basename, join} from "node:path";
 import * as git from "es-git";
-import {Effect} from "effect";
+import {Effect, type Schema} from "effect";
 import {test} from "../../tests/support/test.ts";
 import {runTest} from "../../tests/support/run.ts";
 import {CallId, ToolName} from "../agent-machine/names.ts";
@@ -20,9 +20,9 @@ const fixture = async () => {
     const repo = await git.initRepository(root, {initialHead: "main"});
     repo.config().setString("user.name", "Tool Test");
     repo.config().setString("user.email", "test@example.com");
-    const call = async (name: string, input: object = {}, strictInput = false) => runTest(Effect.gen(function* () {
+    const call = async (name: string, input: Readonly<Record<string, Schema.Json>> = {}, strictInput = false) => runTest(Effect.gen(function* () {
         const source = yield* gitTools(root, {strictInput}).source;
-        const outcome = yield* source.run(ToolName.make(name), receivedJson({intent: "A test call.", ...input} as never), CallId.make("git-test"));
+        const outcome = yield* source.run(ToolName.make(name), receivedJson({intent: "A test call.", ...input}), CallId.make("git-test"));
         if (outcome._tag === "Succeeded") return asText(outcome.output);
         return outcome.reason._tag === "InputRejected" ? `rejected: ${outcome.reason.problem}` : outcome.reason._tag === "Reported" ? `reported: ${asText(outcome.reason.error)}` : outcome.reason._tag;
     }));

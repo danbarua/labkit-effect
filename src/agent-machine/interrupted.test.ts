@@ -24,7 +24,7 @@ test("an interruption during a step requests StopTurnWork; the turn ends when th
   observe(session, { _tag: "InputArrived", from: { _tag: "User" }, text: "and count them" });
   observe(session, { _tag: "TurnInterrupted", turn: "turn-1" });
   expect(tags(session).slice(-2)).toEqual(["InputArrived", "TurnInterrupted"]);
-  expect(session.requests.at(-1)).toEqual({ _tag: "StopTurnWork", turn: "turn-1" } as never);
+  expect(session.requests.at(-1) as unknown).toEqual({ _tag: "StopTurnWork", turn: "turn-1" });
   expect(session.world.agent.state._tag).toBe("Running");
   observe(session, stopped([{ _tag: "Text", text: "Listing" }]));
   expect(tags(session)).toEqual([
@@ -121,7 +121,7 @@ test("an interruption while the calls of a failed request run requests StopTurnW
   observe(session, { _tag: "ToolCallDispatched", call: "c1" });
   observe(session, { _tag: "ModelFailed", turn: "turn-1", failure: "overloaded", error: json({}) });
   observe(session, { _tag: "TurnInterrupted", turn: "turn-1" });
-  expect(session.requests.at(-1)).toEqual({ _tag: "StopTurnWork", turn: "turn-1" } as never);
+  expect(session.requests.at(-1) as unknown).toEqual({ _tag: "StopTurnWork", turn: "turn-1" });
   expect(tags(session).at(-1)).toBe("TurnInterrupted");
   observe(session, { _tag: "ToolEnded", call: "c1", outcome: { _tag: "Failed", reason: { _tag: "Indeterminate" } } });
   expect(tags(session).slice(-2)).toEqual(["ToolEnded", "TurnEnded"]);

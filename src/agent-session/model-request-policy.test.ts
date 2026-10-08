@@ -1,12 +1,12 @@
 /** A model request policy in the loop: a request it holds is not made, and the turn fails, telling the user to wait. */
 
+import { userInput } from "../../tests/support/observations.ts";
 import { expect } from "bun:test";
 import { Effect, Layer, Logger } from "effect";
 import { BoringContextAssembler, BoringModelProvider, boringOpening } from "../../tests/support/boring.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { smolCatalog, SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { test } from "../../tests/support/test.ts";
-import type { Observation } from "../agent-machine/observation.ts";
 import type { Policy } from "../agent-policy/policy.ts";
 import { ModelClient, ModelRequestPolicies } from "./contracts.ts";
 import { openSession } from "./loop.ts";
@@ -30,7 +30,7 @@ const heldTurn = async () => {
     Effect.gen(function* () {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening(smolCatalog));
-      yield* session.observe({ _tag: "InputArrived", from: { _tag: "User" }, text: "hi" } as unknown as Observation);
+      yield* session.observe(userInput("hi"));
       yield* session.idle;
       return yield* session.facts;
     }).pipe(

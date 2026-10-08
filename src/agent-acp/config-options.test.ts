@@ -27,31 +27,31 @@ const shown = (options: ReadonlyArray<SessionConfigOption>) =>
 test("an openai/gpt-5.5 configuration: the model, then each setting offered but observe and cache, each with its current value among its values", async () => {
   const options = await optionsOf("openai", "gpt-5.5", { effort: "medium", cache: "1h", maxOutputTokens: TokenCount.make(32768) });
   const shownOptions = shown(configOptions(options, models, 128000));
-  expect(shownOptions).toEqual([
+  expect(shownOptions as unknown).toEqual([
     { id: "model", category: "model", values: ["openai/gpt-5.5", "anthropic/claude-haiku-4-5"], now: "openai/gpt-5.5" },
     { id: "effort", category: "thought_level", values: ["default", "low", "medium", "high", "xhigh"], now: "medium" },
     { id: "thinking", category: "model_config", values: ["default", "disabled"], now: "default" },
     { id: "max_output_tokens", category: "model_config", values: ["default", "4096", "8192", "16384", "32768", "65536", "128000"], now: "32768" },
-  ] as never);
+  ]);
   for (const { values, now } of shownOptions) expect(values).toContain(now);
 });
 
 test("the model asked now is offered even when the catalog does not list it", async () => {
   const options = await optionsOf("localhost", "qwen/qwen3-8b", {});
   const [model] = shown(configOptions(options, models, undefined));
-  expect(model).toEqual({ id: "model", category: "model", values: ["openai/gpt-5.5", "anthropic/claude-haiku-4-5", "localhost/qwen/qwen3-8b"], now: "localhost/qwen/qwen3-8b" } as never);
+  expect(model as unknown).toEqual({ id: "model", category: "model", values: ["openai/gpt-5.5", "anthropic/claude-haiku-4-5", "localhost/qwen/qwen3-8b"], now: "localhost/qwen/qwen3-8b" });
 });
 
 test("an effort beyond the model's highest shows the nearest the model takes as current, and is not offered itself", async () => {
   const options = await optionsOf("openai", "gpt-5.5", { effort: "max" });
   const effort = shown(configOptions(options, models, 128000)).find((option) => option.id === "effort");
-  expect(effort).toEqual({ id: "effort", category: "thought_level", values: ["default", "low", "medium", "high", "xhigh"], now: "xhigh" } as never);
+  expect(effort as unknown).toEqual({ id: "effort", category: "thought_level", values: ["default", "low", "medium", "high", "xhigh"], now: "xhigh" });
 });
 
 test("a model that takes a thinking budget is offered efforts, as any other model is: its adapter sends each as a budget", async () => {
   const options = await optionsOf("anthropic", "claude-haiku-4-5", { effort: "medium" });
   const thought = shown(configOptions(options, models, 64000)).filter((option) => option.category === "thought_level");
-  expect(thought).toEqual([{ id: "effort", category: "thought_level", values: ["default", "low", "medium", "high", "xhigh", "max"], now: "medium" }] as never);
+  expect(thought as unknown).toEqual([{ id: "effort", category: "thought_level", values: ["default", "low", "medium", "high", "xhigh", "max"], now: "medium" }]);
 });
 
 test("the output limit offers the presets up to the model's limit, the limit, and the value in force, least first", async () => {
@@ -79,10 +79,10 @@ test("every value offered, taken as a change, gives a configuration whose option
 
 test("a change names only what was chosen: a setting alone, or the model alone; choosing default returns the setting to the provider's default", async () => {
   const options = await optionsOf("openai", "gpt-5.5", { effort: "medium" });
-  expect(changeOf("thinking", "disabled", options, models, 128000)).toEqual({ provider: "openai", model: "gpt-5.5", settings: { thinking: "disabled" } } as never);
-  expect(changeOf("max_output_tokens", "65536", options, models, 128000)).toEqual({ provider: "openai", model: "gpt-5.5", settings: { maxOutputTokens: 65536 } } as never);
-  expect(changeOf("model", "anthropic/claude-haiku-4-5", options, models, 128000)).toEqual({ provider: "anthropic", model: "claude-haiku-4-5" } as never);
-  expect(changeOf("effort", "default", options, models, 128000)).toEqual({ provider: "openai", model: "gpt-5.5", settings: { effort: "default" } } as never);
+  expect(changeOf("thinking", "disabled", options, models, 128000) as unknown).toEqual({ provider: "openai", model: "gpt-5.5", settings: { thinking: "disabled" } });
+  expect(changeOf("max_output_tokens", "65536", options, models, 128000) as unknown).toEqual({ provider: "openai", model: "gpt-5.5", settings: { maxOutputTokens: 65536 } });
+  expect(changeOf("model", "anthropic/claude-haiku-4-5", options, models, 128000) as unknown).toEqual({ provider: "anthropic", model: "claude-haiku-4-5" });
+  expect(changeOf("effort", "default", options, models, 128000) as unknown).toEqual({ provider: "openai", model: "gpt-5.5", settings: { effort: "default" } });
   // observe and cache are not options.
   expect(changeOf("cache", "5m", options, models, 128000)).toBeInstanceOf(InvalidChange);
 });
@@ -90,10 +90,10 @@ test("a change names only what was chosen: a setting alone, or the model alone; 
 test("a model value is found among the models offered, not split: a local model's name keeps its own slashes", async () => {
   const options = await optionsOf("openai", "gpt-5.5", {});
   const local = [...models, asked("localhost", "mlx-community/Qwen3-8B-4bit")];
-  expect(changeOf("model", "localhost/mlx-community/Qwen3-8B-4bit", options, local, 128000)).toEqual({
+  expect(changeOf("model", "localhost/mlx-community/Qwen3-8B-4bit", options, local, 128000) as unknown).toEqual({
     provider: "localhost",
     model: "mlx-community/Qwen3-8B-4bit",
-  } as never);
+  });
 });
 
 test("a value the option does not offer, or an id no option has, is an invalid change saying why", async () => {
@@ -117,5 +117,5 @@ test("a setting's current value that its values do not list is offered beside th
     offered: [{ _tag: "OneOf" as const, name: "effort" as const, values: ["low", "high"], now: "medium" }],
   };
   const effort = shown(configOptions(options, models, undefined)).find((option) => option.id === "effort");
-  expect(effort).toEqual({ id: "effort", category: "thought_level", values: ["low", "high", "medium"], now: "medium" } as never);
+  expect(effort as unknown).toEqual({ id: "effort", category: "thought_level", values: ["low", "high", "medium"], now: "medium" });
 });
