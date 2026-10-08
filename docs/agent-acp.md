@@ -333,7 +333,7 @@ runs (`session.streamed`): `ModelDelta`, `ModelPartArrived` and `ModelResponseEn
 
 | Input | Update |
 | --- | --- |
-| `InputArrived` from the user | `user_message_chunk`, on replay only: live, the client has what it sent |
+| `InputArrived` from the user | `user_message_chunk`, on replay only: live, the client has what it sent. Its text, then a `resource_link` for each file it carried (`blob://<id>.<extension>`, with the file's name, media type and size), in the same message |
 | `InputArrived` from the system (a turn-end hook's feedback) or another agent | nothing |
 | `ModelDelta` of `Text` or `Commentary`, live | `agent_message_chunk` with the delta's text |
 | `ModelDelta` of `Thinking`, live | `agent_thought_chunk` with the delta's text |
@@ -446,7 +446,8 @@ the load showed is not shown again, and a later request's deltas are sent once.
   run, or whose end was not observed has none: nothing more is recorded than its content says.
 - `rawInput` and `rawOutput` are the content as the facts hold it (`rawOf`): JSON, by its media type,
   as its value; other text as its text. Bytes (a tool's image in the blob store) have none: JSON
-  cannot carry them, and the content names them. Content that claims JSON and does not parse is
+  cannot carry them. The content names them, and links to them with a `resource_link`
+  (`blob://<id>.<extension>`) that a client can resolve to the bytes. Content that claims JSON and does not parse is
   carried as its text, and a warning says so.
 - `rawOutput` repeats what the default presentation's content gives as text, so a large output is
   sent twice in its call's end: a `read_file` of 256 KiB makes an update of about 512 KiB. Neither is

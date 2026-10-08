@@ -835,7 +835,7 @@ test("the default presentation titles a call to a described tool by its intent, 
 const announcedAndEnded = (updates: ReadonlyArray<SessionUpdate>) =>
   updates.filter((update) => update.sessionUpdate === "tool_call" || (update.sessionUpdate === "tool_call_update" && (update.status === "completed" || update.status === "failed")));
 
-test("a call's tool_call carries its tool's name and its input; its end, what it returned as recorded: JSON parsed, text as text, a failure's reason, and nothing for bytes; replay sends the same", () => {
+test("a call's tool_call carries its tool's name and its input; its end, what it returned as recorded: JSON parsed, text as text, a failure's reason, and for bytes no rawOutput but a link to them; replay sends the same", () => {
   const cat = { call: "c2", tool: "cat", input: json({ path: "a.ts" }) };
   const rm = { call: "c3", tool: "rm", input: json({ path: "a.ts" }) };
   const shot = { call: "c4", tool: "screenshot", input: json({}) };
@@ -863,8 +863,13 @@ test("a call's tool_call carries its tool's name and its input; its end, what it
     updated("c1", "completed", { content: output('["a.ts"]'), rawOutput: ["a.ts"] }),
     updated("c2", "completed", { content: output("export {};\n"), rawOutput: "export {};\n" }),
     updated("c3", "failed", { content: output("a.ts is read-only"), rawOutput: "a.ts is read-only" }),
-    // The bytes are in the blob store: the content names them, and JSON cannot carry them.
-    updated("c4", "completed", { content: output(`[70000 bytes of image/png: blob://${blob}]`) }),
+    // The bytes are in the blob store: the content names them and links to them, and JSON cannot carry them.
+    updated("c4", "completed", {
+      content: [
+        ...output(`[70000 bytes of image/png: blob://${blob}.png]`),
+        { type: "content", content: { type: "resource_link", uri: `blob://${blob}.png`, name: `${blob}.png`, mimeType: "image/png", size: 70000 } },
+      ],
+    }),
   ] as never);
   expect(announcedAndEnded(project(session.journal, replay).updates)).toEqual(sent);
 });

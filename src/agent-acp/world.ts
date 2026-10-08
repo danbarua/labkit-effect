@@ -45,6 +45,7 @@ import { parseJson } from "../agent-session/received.ts";
 import { described } from "../agent-tools/described.ts";
 import { gitTools, isRepositoryRoot } from "../agent-tools/git.ts";
 import { inWorkspace } from "../agent-tools/in-workspace.ts";
+import { blobReads } from "../agent-tools/blob-reads.ts";
 import { fullPathIn } from "../agent-tools/paths.ts";
 import { type AnyTool, type CurrentCall, anyTool, sourceOf } from "../agent-tools/tool.ts";
 import { maxReadBytes, workingFolderLine, workspaceTools } from "../agent-tools/workspace.ts";
@@ -170,7 +171,7 @@ export const editorWorld: World<FileSystem.FileSystem> = {
       };
       const inFolder = inWorkspace(cwd);
       const tools: ReadonlyArray<AnyTool<Editor | CurrentCall | FileSystem.FileSystem>> = [
-        ...(fs?.readTextFile === true ? [anyTool(described(inFolder(readFile)))] : []),
+        ...(fs?.readTextFile === true ? [anyTool(described(blobReads(inFolder(readFile))))] : []),
         ...(fs?.writeTextFile === true ? [anyTool(described(inFolder(writeFile)))] : []),
         ...(fs?.readTextFile === true && fs.writeTextFile === true ? [anyTool(described(inFolder(editFile)))] : []),
         anyTool(described(updatePlan)),

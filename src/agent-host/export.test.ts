@@ -106,7 +106,7 @@ test("a recorded session: each turn's input, thinking, answer, calls with their 
       "",
       "Tidy the folder.",
       "",
-      "- Attachment: [image/png, 2 KiB, plan.png: blob://ab12]",
+      "- Attachment: [image/png, 2 KiB, plan.png: blob://ab12.png]",
       "",
       "### Assistant",
       "",
@@ -209,7 +209,7 @@ test("a tool's output is cut after 8 KiB, never inside a character, with the num
   // "é" is two bytes, at 8191 and 8192: the cut falls inside it, so it goes before it.
   const over = `${"a".repeat(8191)}é${"b".repeat(100)}`;
   expect(shownOutput(plain(over))).toBe(lines("```", "a".repeat(8191), "```", "", "_Cut at 8 KiB: 102 bytes more were left out._").trimEnd());
-  expect(shownOutput({ mediaType: "image/png", body: { _tag: "Stored", id: "cd34", size: 70_000 } })).toBe("[70000 bytes of image/png: blob://cd34]");
+  expect(shownOutput({ mediaType: "image/png", body: { _tag: "Stored", id: "cd34", size: 70_000 } })).toBe("[70000 bytes of image/png: blob://cd34.png]");
   // Output holding a fence is fenced with a longer one, so it cannot close the block early.
   expect(shownOutput(plain("```\nx\n```"))).toBe(lines("````", "```", "x", "```", "````").trimEnd());
 });

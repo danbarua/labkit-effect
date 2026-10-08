@@ -19,7 +19,7 @@ test.each([
   [1024 * 1024, "1.0 MiB"],
   [1.25 * 1024 * 1024, "1.3 MiB"],
 ])("a file of %d bytes is pointed to as %s", (size, said) => {
-  expect(blobPointer(blob(size))).toBe(`[image/png, ${said}: blob://abc]`);
+  expect(blobPointer(blob(size))).toBe(`[image/png, ${said}: blob://abc.png]`);
 });
 
 test("a part left out that holds no text is described by its JSON", () => {

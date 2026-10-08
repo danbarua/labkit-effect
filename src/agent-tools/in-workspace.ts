@@ -12,7 +12,7 @@ import { fullPathIn, type PathOf, pathInputsOf } from "./paths.ts";
 import type { Fields, Tool } from "./tool.ts";
 
 /** What the model is told of each kind of path input. */
-const pathDescriptions: Readonly<Record<PathOf, string>> = {
+export const pathDescriptions: Readonly<Record<PathOf, string>> = {
   file: "The file's path: relative to the working folder, or absolute.",
   folder: 'The folder\'s path: relative to the working folder, or absolute. "." is the working folder.',
 };

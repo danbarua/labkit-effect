@@ -16,6 +16,7 @@ import { Deferred, Effect, Fiber, Layer, Logger, References } from "effect";
 import * as Agent from "effective-acp/agent";
 import { fromWebStreams } from "effective-acp/stdio";
 import { blobsFolderOf, type Brand, defaultBrand } from "../agent-host/brand.ts";
+import { blobNameOf } from "../agent-session/blobs.ts";
 import type { ConfigFlags } from "../agent-host/launch.ts";
 import type { Environment } from "../agent-process/environment.ts";
 import { type CatalogSource, ModelCatalog } from "../agent-host/catalog.ts";
@@ -483,7 +484,7 @@ test("session/cancel during a turn ends its prompt cancelled, and the session ta
   ]);
 });
 
-test("a prompt's image and embedded file are attached to the input, their bytes in the session's folder", async () => {
+test("a prompt's image and embedded file are attached to the input, their bytes in the brand's blobs folder, named for their type; a load replays each as a link in the input's message", async () => {
   const host = startHost({ script: [answer({ _tag: "Text", text: "Seen." })] });
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const sessionId = await sdkClient().app.connectWith(host.stream, async (ctx) => {
@@ -512,7 +513,21 @@ test("a prompt's image and embedded file are attached to the input, their bytes 
   });
   const attached = input !== undefined && input._tag === "InputArrived" ? (input.attachments ?? []) : [];
   // The brand's blobs folder, which every session and host shares, holds them.
-  for (const blob of attached) expect(await Bun.file(join(blobsFolderOf(defaultBrand, join(testFolder(), "home")), blob.id)).exists()).toBe(true);
+  for (const blob of attached) expect(await Bun.file(join(blobsFolderOf(defaultBrand, join(testFolder(), "home")), blobNameOf(blob.id, blob.mediaType))).exists()).toBe(true);
+  const second = startHost({});
+  const reloaded = sdkClient();
+  await reloaded.app.connectWith(second.stream, async (ctx) => {
+    await initialize(ctx);
+    await ctx.request("session/load", { sessionId, cwd: second.cwd, mcpServers: [] });
+  });
+  await second.stop();
+  const said = reloaded.log.updates.filter((update) => update.sessionUpdate === "user_message_chunk");
+  expect(said.map((update) => (update.sessionUpdate === "user_message_chunk" ? update.content : undefined)) as unknown).toEqual([
+    { type: "text", text: "What are these?\n[a.ts](file:///work/a.ts)" },
+    ...attached.map((blob) => ({ type: "resource_link", uri: `blob://${blobNameOf(blob.id, blob.mediaType)}`, name: blob.name, mimeType: blob.mediaType, size: blob.size })),
+  ]);
+  // One message: the links have the text's message id.
+  expect(new Set(said.map((update) => ("messageId" in update ? update.messageId : undefined))).size).toBe(1);
 });
 
 test("update_plan sends the whole plan to the editor as a plan update, without asking", async () => {

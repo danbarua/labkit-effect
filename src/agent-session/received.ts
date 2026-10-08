@@ -2,6 +2,7 @@
 
 import type { Schema } from "effect";
 import { MediaType, type Received, ReceivedText } from "../agent-machine/received.ts";
+import { blobUriOf } from "./blobs.ts";
 
 const json = MediaType.make("application/json");
 
@@ -41,7 +42,7 @@ export function asText(received: Received): string {
     case "Bytes":
       return `[${received.body.bytes.length} bytes of ${received.mediaType}]`;
     case "Stored":
-      return `[${received.body.size} bytes of ${received.mediaType}: blob://${received.body.id}]`;
+      return `[${received.body.size} bytes of ${received.mediaType}: ${blobUriOf(received.body.id, received.mediaType)}]`;
     default:
       return received.body satisfies never;
   }

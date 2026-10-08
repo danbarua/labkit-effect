@@ -11,7 +11,7 @@ import { type CallId, TokenCount, type ToolName, type TurnId } from "../agent-ma
 import type { ResponseEnding, ToolOutcome, Usage } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
 import type { ContextPart, ModelContext, Target, ToolSpec } from "./contracts.ts";
-import { Blobs } from "./blobs.ts";
+import { Blobs, blobUriOf, extensionOf } from "./blobs.ts";
 import { logKeys } from "./log-keys.ts";
 import { asText, parseJson } from "./received.ts";
 
@@ -344,10 +344,10 @@ export function usageOf(counts: {
   };
 }
 
-/** Returns the blobs that a part refers to: a file, or a tool output held in the store. */
-const blobsOf = (part: ContextPart): ReadonlyArray<BlobId> => {
-  if (part._tag === "File") return [part.blob.id];
-  if (part._tag === "ToolResult" && part.outcome._tag === "Succeeded" && part.outcome.output.body._tag === "Stored") return [part.outcome.output.body.id];
+/** Returns the blobs that a part refers to, by id and the extension of their media type: a file, or a tool output held in the store. */
+const blobsOf = (part: ContextPart): ReadonlyArray<readonly [BlobId, string]> => {
+  if (part._tag === "File") return [[part.blob.id, extensionOf(part.blob.mediaType)]];
+  if (part._tag === "ToolResult" && part.outcome._tag === "Succeeded" && part.outcome.output.body._tag === "Stored") return [[part.outcome.output.body.id, extensionOf(part.outcome.output.mediaType)]];
   return [];
 };
 
@@ -355,14 +355,10 @@ const blobsOf = (part: ContextPart): ReadonlyArray<BlobId> => {
 export const filesIn = (context: ModelContext): Effect.Effect<ReadonlyMap<BlobId, Uint8Array>> =>
   Effect.gen(function* () {
     const blobs = yield* Blobs;
-    const ids = [
-      ...new Set(
-        context.messages.flatMap((message) =>
-          message.parts.flatMap(blobsOf),
-        ),
-      ),
-    ];
-    const read = yield* Effect.forEach(ids, (id) => blobs.read(id).pipe(Effect.map((bytes) => [id, bytes] as const)));
+    const named = context.messages.flatMap((message) => message.parts.flatMap(blobsOf));
+    // One read for each blob, by id; the same bytes under two media types are one blob in memory.
+    const ids = named.filter(([id], at) => named.findIndex(([other]) => other === id) === at);
+    const read = yield* Effect.forEach(ids, ([id, extension]) => blobs.read(id, extension).pipe(Effect.map((bytes) => [id, bytes] as const)));
     return new Map(read.flatMap(([id, bytes]) => (bytes === undefined ? [] : [[id, bytes] as const])));
   });
 
@@ -373,12 +369,12 @@ const sizeOf = (bytes: number): string => {
   return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 };
 
-/** Returns a file as pointer text that the model can quote or follow with a tool: `[image/png, 68 KiB, a.png: blob://<id>]`. */
+/** Returns a file as pointer text that the model can quote, or read with `read_file` when it is text: `[image/png, 68 KiB, a.png: blob://<id>.png]`. */
 export function blobPointer(blob: BlobRef): string {
-  return `[${blob.mediaType}, ${sizeOf(blob.size)}${blob.name === undefined ? "" : `, ${blob.name}`}: blob://${blob.id}]`;
+  return `[${blob.mediaType}, ${sizeOf(blob.size)}${blob.name === undefined ? "" : `, ${blob.name}`}: ${blobUriOf(blob.id, blob.mediaType)}]`;
 }
 
-/** Returns the pointer for a file that the model is not sent, marked as not shown: `[not shown to you: image/png, 68 KiB, a.png: blob://<id>]`. */
+/** Returns the pointer for a file that the model is not sent, marked as not shown: `[not shown to you: image/png, 68 KiB, a.png: blob://<id>.png]`. */
 export const notShown = (blob: BlobRef): string => `[not shown to you: ${blobPointer(blob).slice(1)}`;
 
 /**

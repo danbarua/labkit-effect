@@ -145,7 +145,11 @@ The file store:
 
 `blobs.ts` keeps bytes outside the facts, by the SHA-256 of the bytes; the facts hold references.
 The hosts keep them in the brand's `blobs/` folder (`agent-host/brand.ts`, `blobsFolderOf`), one
-folder for every session, so a session that the other host continues has them. The CLI keeps the
+folder for every session, so a session that the other host continues has them. A blob's file is
+named `<id>.<extension>`, the extension from its media type (`extensionOf`: `png`, `csv`, `txt` for
+other text, `bin` for other bytes), so the operator can open it from the file system, and a pointer
+to it is `blob://<id>.<extension>` (`blobUriOf`). A store reads a file named for its id alone too,
+as blobs were named before. `read_file` reads a pointer to text (`agent-tools/blob-reads.ts`). The CLI keeps the
 blobs of a session that it does not save (`--no-session-persistence`) in memory.
 
 ## A user's change of configuration

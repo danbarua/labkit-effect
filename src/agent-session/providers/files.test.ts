@@ -107,7 +107,7 @@ test("Chat Completions: an image as image_url, a PDF as its pointer", async () =
   const content = (provider.bodies[0] as { messages: Array<{ content: Array<Record<string, unknown>> }> }).messages[0]?.content;
   expect(content?.[1]).toEqual({ type: "image_url", image_url: { url: `data:image/png;base64,${base64(png)}` } });
   expect(content?.[2]).toEqual({ type: "text", text: notShown(files[1] as BlobRef) });
-  expect(notShown(files[1] as BlobRef)).toMatch(/^\[not shown to you: application\/pdf, 15 B, report\.pdf: blob:\/\/[0-9a-f]{64}\]$/);
+  expect(notShown(files[1] as BlobRef)).toMatch(/^\[not shown to you: application\/pdf, 15 B, report\.pdf: blob:\/\/[0-9a-f]{64}\.pdf\]$/);
 });
 
 /** A model client that answers without sending anything, for the record's test. */

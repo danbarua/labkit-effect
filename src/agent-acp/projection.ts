@@ -43,12 +43,13 @@ import { MessageId, ToolCallId } from "effective-acp/schema/v1";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { CallId, ToolName, TurnId } from "../agent-machine/names.ts";
 import type { CapturedObservation, ModelPart, ToolFailure, ToolOutcome } from "../agent-machine/observation.ts";
-import type { Received } from "../agent-machine/received.ts";
+import type { BlobId, Received } from "../agent-machine/received.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
 import { asText, parseJson } from "../agent-session/received.ts";
 import { intentOf, isDescribed } from "../agent-tools/described.ts";
 import { patchCutNote } from "../agent-tools/file-change.ts";
 import { hunksOf } from "../agent-tools/line-diff.ts";
+import { blobNameOf, blobUriOf } from "../agent-session/blobs.ts";
 import { logKeys } from "./log-keys.ts";
 
 /** An input to the projection: a fact, or an item that a model request passed on while it ran. */
@@ -104,6 +105,21 @@ const failureText = (tool: ToolName, reason: ToolFailure): string => {
 
 const text = (value: string): ContentBlock => ({ type: "text", text: value });
 
+/** A blob as a `resource_link`: its pointer (`blob://<id>.<extension>`), the name it came with (else its pointer's name), its media type and its size. */
+const linkTo = (blob: { readonly id: BlobId; readonly mediaType: string; readonly size: number; readonly name?: string }): ContentBlock => ({
+  type: "resource_link",
+  uri: blobUriOf(blob.id, blob.mediaType),
+  name: blob.name ?? blobNameOf(blob.id, blob.mediaType),
+  mimeType: blob.mediaType,
+  size: blob.size,
+});
+
+/** A link to a call's output held in the blob store; none for an output held in the facts, or a call that has not succeeded. */
+const storedOutput = (outcome: ToolOutcome | undefined): ReadonlyArray<ToolCallContent> =>
+  outcome?._tag === "Succeeded" && outcome.output.body._tag === "Stored"
+    ? [{ type: "content", content: linkTo({ id: outcome.output.body.id, mediaType: outcome.output.mediaType, size: outcome.output.body.size }) }]
+    : [];
+
 /** Returns `text` on one line of at most 120 characters, for a title. */
 export const oneLine = (text: string): string => {
   const line = text.replace(/\s+/g, " ").trim();
@@ -145,7 +161,7 @@ const shownOf = (tool: ToolName, outcome: ToolOutcome | undefined): string | und
  * the call's intent, on one line, when `described` (`agent-tools/described.ts`) added that input to
  * its tool, and the tool's name otherwise; its kind from the catalog (none for a tool the
  * catalog does not have); and, once it ends, the diffs of the files it changed (`changedFiles`), then
- * its output, or why it failed, as text.
+ * its output, or why it failed, as text, and a link to its output when the blob store holds it.
  */
 export const presentFrom =
   (catalog: ReadonlyArray<ToolSpec>): Present =>
@@ -153,7 +169,7 @@ export const presentFrom =
     const spec = catalog.find((tool) => tool.name === call.tool);
     const kind = spec?.kind;
     const shown = shownOf(call.tool, outcome);
-    const content = [...changedFiles(outcome), ...(shown === undefined ? [] : [{ type: "content" as const, content: text(shown) }])];
+    const content = [...changedFiles(outcome), ...(shown === undefined ? [] : [{ type: "content" as const, content: text(shown) }]), ...storedOutput(outcome)];
     return Effect.succeed({
       title: titleOf(call, spec),
       ...(kind === undefined ? {} : { kind }),
@@ -557,11 +573,16 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
       switch (observation._tag) {
         case "InputArrived":
           // Only the user's input is echoed: a turn-end hook's feedback is input from the system, and another agent's is that agent's.
+          // Its text is followed by a link to each file it carried, in the same message.
           return Effect.succeed({
             state,
             updates:
               context.mode === "replay" && observation.from._tag === "User"
-                ? [{ sessionUpdate: "user_message_chunk", content: text(observation.text), messageId: MessageId.make(String(input.seq)) }]
+                ? [text(observation.text), ...(observation.attachments ?? []).map(linkTo)].map((content) => ({
+                    sessionUpdate: "user_message_chunk" as const,
+                    content,
+                    messageId: MessageId.make(String(input.seq)),
+                  }))
                 : [],
           });
         case "ModelRequestDispatched": {

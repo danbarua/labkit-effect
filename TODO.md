@@ -116,10 +116,10 @@ model.
           isolated temporary folder for each agent (2026-10-07), opt-out included. Virtual URLs need
           commands' paths found, which `command-units.ts` does.
         - Virtual URLs resolved from a registry of schemes (`path-resolver.ts`): `tmp://`,
-          `mcp://server/resource`, `blob://`. Today a request names files by `blob://<id>` pointers
-          (`shaping.ts`), which say the model can follow one with a tool, but no tool can: `read_file`
-          of `blob://ab12` reads `<working folder>/blob:/ab12` and finds nothing. The permission
-          policy does not gate a pointer: it is a relative path, inside the working folder.
+          `mcp://server/resource`, `blob://`. Today `read_file` reads a `blob://<id>.<extension>`
+          pointer to text itself (`blob-reads.ts`), and the permission policy does not gate a
+          pointer: it is a relative path, inside the working folder. A pointer reads any blob in the
+          brand's folder, a blob of another session's included, given its id.
         - Tool results with details (Dan, 2026-10-08). Built: `FileChanged` from the file tools and
           from commands' writes whose text their words show, shown by ACP live and replayed alike
           and by the REPL; a patch over 32 KiB cut, with the bytes left out recorded. To do: the
@@ -197,8 +197,10 @@ model.
       counting a request's input before it is sent (`anthropic-count.ts`, `openai-count.ts`; xAI has
       no endpoint). Live: all three read an attached image and PDF, and an image a tool returned;
       the counts before sending matched what the responses reported; the ACP host takes a prompt's
-      images and embedded files into the session's blob store, kept in its folder. Left: the
-      client half (sending, drawing, resolving `blob://`), labkit-web's.
+      images and embedded files into the blob store (the brand's `blobs/`, each file
+      `<id>.<extension>`), and `session/load` replays each as a `resource_link`, as it links a
+      stored tool output. Left: the client half (sending, drawing, resolving `blob://`),
+      labkit-web's (danbarua/labkit#636).
 - [ ] The host's services, shared by the CLI and the ACP host (`src/agent-host`). Built: the model
       catalog, the provider clients, the services a session runs with, the permission policy for a
       mode, where a host keeps its sessions and logs (`~/.local/share/<brand>/`), log lines to a file
@@ -218,7 +220,7 @@ model.
       user's input by its seq; a run of one kind of text in a response by its request's first
       dispatch and the run's place), the same live and on `session/load`; each call's tool name,
       input and raw output (`name`, `rawInput`, `rawOutput`). To do: the last plan sent again on
-      `session/load`; an input's attachments sent on `session/load`; `current_mode_update` (the host
+      `session/load`; `current_mode_update` (the host
       offers the permission mode as a config option instead). Open: live with no deltas (a server
       that answers whole) announces a call before its response's text, which is known only when the
       response ends; the host's own replies to `/export` and `/mcp` carry no `messageId`.

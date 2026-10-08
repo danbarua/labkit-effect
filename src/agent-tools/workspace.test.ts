@@ -12,6 +12,8 @@ import { undescribedInputs } from "../../tests/support/tool-input.ts";
 import { CallId, ToolName } from "../agent-machine/names.ts";
 import { ToolRunner } from "../agent-session/contracts.ts";
 import { asText, receivedJson } from "../agent-session/received.ts";
+import { Blobs, BlobsInMemory, blobUriOf } from "../agent-session/blobs.ts";
+import { MediaType } from "../agent-machine/received.ts";
 import { workspaceTools } from "./workspace.ts";
 
 const root = mkdtempSync(join(tmpdir(), "workspace-"));
@@ -52,7 +54,7 @@ test("a tool's input schema is its Schema's with a description for each input, c
   expect(catalog.find((tool) => tool.name === "read_file")?.input).toEqual({
     type: "object",
     properties: {
-      path: { type: "string", minLength: 1, description: "The file's path: relative to the working folder, or absolute." },
+      path: { type: "string", minLength: 1, description: "The file's path: relative to the working folder, or absolute, or a blob://<id>.<extension> pointer from the conversation." },
       line: { type: "integer", minimum: 1, description: "Optional: the first line to read, 1-based. Default: 1." },
       limit: { type: "integer", minimum: 1, description: "Optional: the number of lines to read. Default: to the end of the file." },
       intent: { type: "string", minLength: 1, description: "What this call is for, in one sentence. The user sees it as the call's title." },
@@ -191,6 +193,33 @@ test("with writtenBy, run_command records each file its command writes, from its
   ]);
   expect(await ran("echo again > src/w.txt; exit 1")).toBe("Reported");
   expect(await ran("echo hi")).toEqual([]);
+});
+
+test("read_file reads a blob:// pointer from the blob store as text, with line and limit; a pointer to bytes that are not text, to no blob, or that is no pointer is refused", async () => {
+  const read = (paths: ReadonlyArray<{ readonly path: string; readonly line?: number; readonly limit?: number }>) =>
+    runTest(
+      Effect.gen(function* () {
+        const blobs = yield* Blobs;
+        const csv = yield* blobs.store(new TextEncoder().encode("a,b\n1,2\n3,4\n"), MediaType.make("text/csv"), "runs.csv");
+        const png = yield* blobs.store(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff]), MediaType.make("image/png"));
+        const pointers: Readonly<Record<string, string>> = { csv: blobUriOf(csv.id, csv.mediaType), png: blobUriOf(png.id, png.mediaType) };
+        return yield* Effect.forEach(paths, (input) =>
+          Effect.gen(function* () {
+            const outcome = yield* (yield* ToolRunner).run(ToolName.make("read_file"), receivedJson({ intent: "A test call.", ...input, path: pointers[input.path] ?? input.path } as never), CallId.make("call-1"));
+            if (outcome._tag === "Succeeded") return asText(outcome.output);
+            return outcome.reason._tag === "InputRejected" ? `rejected: ${outcome.reason.problem}` : outcome.reason._tag;
+          }),
+        );
+      }).pipe(Effect.provide(Layer.mergeAll(runner.pipe(Layer.provide(BunServices.layer)), BlobsInMemory))),
+    );
+  const missing = `blob://${"0".repeat(64)}.txt`;
+  expect(await read([{ path: "csv" }, { path: "csv", line: 2, limit: 1 }, { path: "png" }, { path: missing }, { path: "blob://runs.csv" }])).toEqual([
+    "a,b\n1,2\n3,4\n",
+    "1,2",
+    expect.stringMatching(/^rejected: blob:\/\/[0-9a-f]{64}\.png is not text/),
+    `rejected: No blob is stored for ${missing}.`,
+    "rejected: blob://runs.csv is not a blob pointer: a pointer is blob://, then 64 hex digits, then . and its extension.",
+  ]);
 });
 
 test("write_file creates or replaces a file inside the workspace, whose folder exists", async () => {

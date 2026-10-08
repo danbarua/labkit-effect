@@ -40,15 +40,14 @@ import { ToolName } from "../agent-machine/names.ts";
 import { type Environment, withoutCredentials } from "../agent-process/environment.ts";
 import { described } from "./described.ts";
 import { inWorkspace } from "./in-workspace.ts";
+import { blobReads } from "./blob-reads.ts";
+import { maxReadBytes, maxReadText, selectedLines } from "./read-limits.ts";
 import { currentOnDisk, fileChanged, recordingWrites } from "./file-change.ts";
 import { FilePath, FolderPath } from "./paths.ts";
 import { anyTool, Rejected, Reported, sourceOf, type Tool } from "./tool.ts";
 
-/** The most bytes `read_file` returns in one result, `write_file` writes, and `run_command` returns. */
-export const maxReadBytes = 256 * 1024;
 
-/** `maxReadBytes` as the tool descriptions state it. */
-export const maxReadText = `${maxReadBytes / 1024} KiB`;
+export { maxReadBytes, maxReadText } from "./read-limits.ts";
 
 /** How long a command runs before it is stopped, unless the call says otherwise. */
 export const commandSeconds = 120;
@@ -144,12 +143,7 @@ export const readFile: Tool<typeof ReadFile.fields, FileSystem.FileSystem> = {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const text = yield* fs.readFileString(path).pipe(Effect.mapError(reported(path)));
-      const whole = line === undefined && limit === undefined;
-      const start = (line ?? 1) - 1;
-      const part = whole ? text : text.split("\n").slice(start, limit === undefined ? undefined : start + limit).join("\n");
-      if (Buffer.byteLength(part) <= maxReadBytes) return part;
-      const fewer = limit === undefined ? 100 : Math.max(1, Math.floor(limit / 2));
-      return yield* new Rejected({ problem: `The result is over ${maxReadText}. Read fewer lines, for example line ${line ?? 1} and limit ${fewer}.` });
+      return yield* selectedLines(text, line, limit);
     }),
 };
 
@@ -282,7 +276,7 @@ export function workspaceTools(
   const additional = options.additional ?? [];
   const bound = inWorkspace(root);
   const tools = [
-    anyTool(described(bound(readFile))),
+    anyTool(described(blobReads(bound(readFile)))),
     anyTool(described(bound(listDir))),
     anyTool(described(bound(writeFile))),
     anyTool(described(bound(editFile))),
