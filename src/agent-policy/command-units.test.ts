@@ -177,7 +177,7 @@ test("a program reading code from a here-document or here-string shows that code
 });
 
 test("a sed call carries its explanation, whether it is granted as sed or runs commands", () => {
-  expect(details("sed -n '/x/p' f")).toEqual([["sed", { _tag: "Explained", lines: [{ depth: 0, text: "Reads f:" }, { depth: 1, text: "Prints lines matching `x`." }] }]]);
+  expect(details("sed -n '/x/p' f")).toEqual([["sed", { _tag: "Explained", lines: [{ depth: 0, text: "Reads `f`:" }, { depth: 1, text: "Prints lines matching `x`." }] }]]);
   expect(details("sed 's/x/y/e' f")).toMatchObject([["sed", { _tag: "Explained" }]]);
 });
 

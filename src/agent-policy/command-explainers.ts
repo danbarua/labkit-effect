@@ -16,6 +16,7 @@
  * An explainer reads literal words only: a word that is not written out says nothing.
  */
 
+import { codeSpan } from "./code-span.ts";
 import { type Segment, type SegmentsOf, type ShellCommand, WordText } from "./command-segments.ts";
 import { type Folders, fullPathOf, judgesPathsOf, type Unit } from "./command-units.ts";
 import { Explanation } from "./sed-script.ts";
@@ -33,6 +34,9 @@ const wordsOf = (unit: Unit): ReadonlyArray<WordText> => unit.words.flatMap((wor
 /** Whether `args` has one of `options`, alone or (a one-letter option) in a cluster of short ones (`-rf`). */
 const hasOption = (args: ReadonlyArray<WordText>, ...options: ReadonlyArray<Text>): boolean =>
   args.some((arg) => options.includes(arg) || (/^-[A-Za-z]{2,}$/.test(arg) && options.some((option) => /^-[A-Za-z]$/.test(option) && arg.includes(option.slice(1)))));
+
+/** `word` as a Markdown code span (`codeSpan`), for a text that names a program, a path or a host. */
+const coded = (word: WordText): WordText => WordText.make(codeSpan(word));
 
 const listed = (items: ReadonlyArray<WordText>): Text => (items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
 
@@ -66,7 +70,7 @@ const gitDestructive: ReadonlyMap<WordText, (args: ReadonlyArray<WordText>) => R
   ],
 ]);
 
-const recursiveChange = (program: WordText): Explainer => (unit) => (hasOption(wordsOf(unit).slice(1), "-R", "--recursive") ? [said(`With -R, ${program} changes every file and folder inside the folders it names.`)] : []);
+const recursiveChange = (program: WordText): Explainer => (unit) => (hasOption(wordsOf(unit).slice(1), "-R", "--recursive") ? [said(`With ${codeSpan("-R")}, ${codeSpan(program)} changes every file and folder inside the folders it names.`)] : []);
 
 const destructiveBy: ReadonlyMap<WordText, Explainer> = new Map<WordText, Explainer>([
   [
@@ -120,25 +124,25 @@ export const network: Explainer = (unit) => {
   if (program === undefined) return [];
   if (webClients.has(program)) {
     const hosts = unique(args.flatMap((arg) => (hostOf(arg, false) === undefined ? [] : [hostOf(arg, false) ?? arg])));
-    return hosts.length === 0 ? [] : [said(`It ${sendsData(args) ? "sends data to" : "connects to"} ${listed(hosts)}.`)];
+    return hosts.length === 0 ? [] : [said(`It ${sendsData(args) ? "sends data to" : "connects to"} ${listed(hosts.map(coded))}.`)];
   }
   if (program === WordText.make("git")) {
     const [subcommand, ...rest] = args;
     const operands = rest.filter((arg) => !arg.startsWith("-"));
     if (subcommand === WordText.make("clone")) {
       const host = operands[0] === undefined ? undefined : (hostOf(operands[0], true) ?? undefined);
-      return [said(`It downloads a repository${host === undefined ? "" : ` from ${host}`}.`)];
+      return [said(`It downloads a repository${host === undefined ? "" : ` from ${codeSpan(host)}`}.`)];
     }
     const lead = subcommand === undefined ? undefined : gitRemote.get(subcommand);
-    return lead === undefined ? [] : [said(`${lead} ${operands[0] === undefined ? "the branch's remote" : `the remote ${operands[0]}`}.`)];
+    return lead === undefined ? [] : [said(`${lead} ${operands[0] === undefined ? "the branch's remote" : `the remote ${codeSpan(operands[0])}`}.`)];
   }
   if (program === WordText.make("ssh")) {
     const host = args.find((arg) => !arg.startsWith("-"));
-    return host === undefined ? [] : [said(`It connects to ${host}${args.indexOf(host) < args.length - 1 ? " and runs a command there" : ""}.`)];
+    return host === undefined ? [] : [said(`It connects to ${codeSpan(host)}${args.indexOf(host) < args.length - 1 ? " and runs a command there" : ""}.`)];
   }
   if (program === WordText.make("scp") || program === WordText.make("rsync")) {
     const hosts = unique(args.flatMap((arg) => (arg.startsWith("-") ? [] : (hostOf(arg, true) === undefined ? [] : [hostOf(arg, true) ?? arg]))));
-    return hosts.length === 0 ? [] : [said(`It copies files to or from ${listed(hosts)}.`)];
+    return hosts.length === 0 ? [] : [said(`It copies files to or from ${listed(hosts.map(coded))}.`)];
   }
   return [];
 };
@@ -208,7 +212,7 @@ export const paths: Explainer = (unit, folders) => {
   return written.flatMap((path) => {
     if (path.startsWith("/") || /[$`"'*?]/.test(path)) return [];
     const full = fullPathOf(path, folders);
-    return full === undefined || full === path ? [] : [said(`${path} is ${full}.`)];
+    return full === undefined || full === path ? [] : [said(`${codeSpan(path)} is ${codeSpan(full)}.`)];
   });
 };
 
@@ -226,7 +230,7 @@ export const notesOf = (unit: Unit, folders: Folders | undefined): ReadonlyArray
  * calls wherever they read or write, since the policy does not see where.
  */
 const grantsNote = (grants: ReadonlyArray<ReadonlyArray<WordText>>): ReadonlyArray<Explanation> => {
-  const named = (group: ReadonlyArray<ReadonlyArray<WordText>>): Text => listed(group.map((grant) => WordText.make(grant.join(" "))));
+  const named = (group: ReadonlyArray<ReadonlyArray<WordText>>): Text => listed(group.map((grant) => coded(WordText.make(grant.join(" ")))));
   const judged = grants.filter((grant) => grant[0] !== undefined && judgesPathsOf(grant[0]));
   const unjudged = grants.filter((grant) => !judged.includes(grant));
   const later = (group: ReadonlyArray<ReadonlyArray<WordText>>): Text => (group.length === 1 ? `later ${named(group)} commands` : `later commands that use them`);
@@ -254,7 +258,7 @@ const pipelineNotes = (segments: ReadonlyArray<Segment>): ReadonlyArray<Explanat
     const firstName = name(first?.words[0]?.literal);
     const lastName = name(segment.words[0]?.literal);
     if (pipefail || first === undefined || firstName === "" || lastName === "") return [];
-    return [said(`Only ${lastName}'s exit status counts: the pipeline from ${firstName} to ${lastName} succeeds when ${lastName} does, even if ${firstName} fails.`)];
+    return [said(`Only ${codeSpan(lastName)}'s exit status counts: the pipeline from ${codeSpan(firstName)} to ${codeSpan(lastName)} succeeds when ${codeSpan(lastName)} does, even if ${codeSpan(firstName)} fails.`)];
   });
 
 /** The notes about `command` as a whole: what the session grants it offers cover, and its pipelines' exit statuses. */

@@ -85,7 +85,7 @@ test("a question about a command adds to the call's content a text block naming 
   const presented = { title: "Clean the build", kind: "execute" as const, content: [{ type: "terminal" as const, terminalId: TerminalId.make("t1") }] };
   expect(requestOf(SessionId.make("s1"), call, command, presented).toolCall.content as unknown).toEqual([
     { type: "terminal", terminalId: "t1" },
-    { type: "content", content: { type: "text", text: "This command needs permission:\n\n- rm -rf build: it is not allowed yet" } },
+    { type: "content", content: { type: "text", text: "This command needs permission:\n\n- `rm -rf build`: it is not allowed yet" } },
   ]);
   expect(requestOf(SessionId.make("s1"), call, question, { title: "Write a.ts", kind: "edit" }).toolCall.content).toBeUndefined();
 });
@@ -108,7 +108,7 @@ test("a need's detail is Markdown indented under its item: code in a fence that 
       { program: WordText.make("python3 -c print(1)"), detail: { _tag: "Code", language: "python", code: CodeText.make("import sys\nprint(1)") }, notes: [] },
       {
         program: WordText.make("sed -n /x/p f"),
-        detail: { _tag: "Explained", lines: [{ depth: 0, text: Explanation.make("Reads f:") }, { depth: 1, text: Explanation.make("Prints lines matching `x`.") }] },
+        detail: { _tag: "Explained", lines: [{ depth: 0, text: Explanation.make("Reads `f`:") }, { depth: 1, text: Explanation.make("Prints lines matching `x`.") }] },
         notes: [],
       },
     ],
@@ -123,15 +123,15 @@ test("a need's detail is Markdown indented under its item: code in a fence that 
         text: [
           "This command needs permission:",
           "",
-          "- python3 -c print(1): it runs code written in the command",
+          "- `python3 -c print(1)`: it runs code written in the command",
           "",
           "  ```python",
           "  import sys",
           "  print(1)",
           "  ```",
-          "- sed -n /x/p f: it is not allowed yet",
+          "- `sed -n /x/p f`: it is not allowed yet",
           "",
-          "  Reads f:",
+          "  Reads `f`:",
           "  - Prints lines matching `x`.",
         ].join("\n"),
       },
@@ -156,8 +156,8 @@ test("a write that the call shows as a diff is named in the question, not repeat
   const diff = { type: "diff" as const, path: "/w/config.yml", oldText: "name: old\n", newText: "name: x\n" };
   const textOf = (content: ReadonlyArray<unknown> | null | undefined) => JSON.stringify(content?.at(-1));
   expect(requestOf(SessionId.make("s1"), call, writing, { title: "Write", content: [diff] }, explained).toolCall.content?.[0]).toEqual(diff);
-  expect(textOf(requestOf(SessionId.make("s1"), call, writing, { title: "Write", content: [diff] }, explained).toolCall.content)).toContain("The diff shows what it writes to config.yml.");
-  expect(textOf(requestOf(SessionId.make("s1"), call, writing, { title: "Write" }, explained).toolCall.content)).toContain("It writes this text to config.yml:\\n  ```\\n  name: x\\n  ```");
+  expect(textOf(requestOf(SessionId.make("s1"), call, writing, { title: "Write", content: [diff] }, explained).toolCall.content)).toContain("The diff shows what it writes to `config.yml`.");
+  expect(textOf(requestOf(SessionId.make("s1"), call, writing, { title: "Write" }, explained).toolCall.content)).toContain("It writes this text to `config.yml`:\\n  ```\\n  name: x\\n  ```");
 });
 
 test("a need's notes are a list under its item, and the question's notes are paragraphs after the list", () => {
@@ -182,7 +182,7 @@ test("a need's notes are a list under its item, and the question's notes are par
         text: [
           "This command needs permission:",
           "",
-          "- rm -rf build: it is not allowed yet",
+          "- `rm -rf build`: it is not allowed yet",
           "  - It deletes the files and folders it names.",
           "",
           "Allowing rm for the rest of the session lets later rm commands run without a question inside the working folder.",

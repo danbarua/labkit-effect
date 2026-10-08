@@ -920,7 +920,7 @@ test("a command that writes text to a file shows the file's diff in its call: be
   const created = { type: "diff", path: join(host.cwd, "new.txt"), oldText: null, newText: "hi\n" };
   const asked = log.asked.find((each) => each.toolCall.toolCallId === "write-1")?.toolCall.content ?? [];
   expect(asked.slice(0, 2) as unknown).toEqual([{ type: "diff", path: config, oldText: "name: in the editor\n", newText: "name: new\n" }, created]);
-  expect(JSON.stringify(asked.at(-1))).toContain("The diff shows what it writes to config.yml.");
+  expect(JSON.stringify(asked.at(-1))).toContain("The diff shows what it writes to `config.yml`.");
   const updates = log.updates.filter((update) => update.sessionUpdate === "tool_call_update" && update.toolCallId === "write-1" && "content" in update && update.content !== undefined);
   expect(updates.at(-1) as unknown).toMatchObject({
     status: "completed",
@@ -1081,7 +1081,7 @@ test("the editor world offers read_file and write_file as the client advertised 
   });
   await host.stop();
   expect(log.asked.map((asked) => [asked.toolCall.toolCallId, asked.options.map((option) => option.optionId)])).toEqual([["read-2", ["allow-once", "reject-once"]]]);
-  expect(JSON.stringify(log.asked[0]?.toolCall.content)).toContain("This call needs permission: it reads outside the working folder: ../outside.txt.");
+  expect(JSON.stringify(log.asked[0]?.toolCall.content)).toContain("This call needs permission: it reads outside the working folder: `../outside.txt`.");
   // The client allowed it once: the file outside is read through the editor too.
   expect(log.files).toEqual([
     { method: "fs/read_text_file", path: join(host.cwd, "a.txt"), sessionId },

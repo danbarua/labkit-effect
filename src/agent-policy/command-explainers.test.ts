@@ -28,16 +28,16 @@ test("git's actions that cannot be undone say so; git's other actions say nothin
     ["It deletes a stashed change. It cannot be got back."],
   ]);
   expect(notes("git push --force-with-lease origin main")).toEqual([
-    ["It replaces the remote branch with yours, unless the remote branch changed since you last fetched it. Commits on the remote that yours does not have are lost there.", "It sends your commits to the remote origin."],
+    ["It replaces the remote branch with yours, unless the remote branch changed since you last fetched it. Commits on the remote that yours does not have are lost there.", "It sends your commits to the remote `origin`."],
   ]);
   expect(notes("git reset HEAD a.txt && git checkout main && git status")).toEqual([]);
-  expect(notes("chmod -R 755 dist && dd if=img of=/dev/disk4")).toEqual([["With -R, chmod changes every file and folder inside the folders it names."], ["It writes straight to a device, replacing what is on it."]]);
+  expect(notes("chmod -R 755 dist && dd if=img of=/dev/disk4")).toEqual([["With `-R`, `chmod` changes every file and folder inside the folders it names."], ["It writes straight to a device, replacing what is on it."]]);
 });
 
 test("a command that connects to a host names it, and says when it sends data", () => {
-  expect(notes("curl -s https://example.com/a && curl -X POST -d x=1 https://api.example.com/v1")).toEqual([["It connects to example.com."], ["It sends data to api.example.com."]]);
-  expect(notes("git pull && git clone git@github.com:x/y.git")).toEqual([["It fetches commits from the branch's remote."], ["It downloads a repository from github.com."]]);
-  expect(notes("ssh build-box && scp a.txt build-box:/tmp/")).toEqual([["It connects to build-box."], ["It copies files to or from build-box."]]);
+  expect(notes("curl -s https://example.com/a && curl -X POST -d x=1 https://api.example.com/v1")).toEqual([["It connects to `example.com`."], ["It sends data to `api.example.com`."]]);
+  expect(notes("git pull && git clone git@github.com:x/y.git")).toEqual([["It fetches commits from the branch's remote."], ["It downloads a repository from `github.com`."]]);
+  expect(notes("ssh build-box && scp a.txt build-box:/tmp/")).toEqual([["It connects to `build-box`."], ["It copies files to or from `build-box`."]]);
 });
 
 test("installing packages says what it downloads and runs", () => {
@@ -50,22 +50,22 @@ test("installing packages says what it downloads and runs", () => {
 });
 
 test("a path outside the working folder written relatively is given in full; an absolute one or one not written out is not", () => {
-  expect(notes("cat ../lib/secret.txt ~/notes.md /etc/hosts")).toEqual([["../lib/secret.txt is /home/someone/play/lib/secret.txt.", "~/notes.md is /home/someone/notes.md."]]);
+  expect(notes("cat ../lib/secret.txt ~/notes.md /etc/hosts")).toEqual([["`../lib/secret.txt` is `/home/someone/play/lib/secret.txt`.", "`~/notes.md` is `/home/someone/notes.md`."]]);
   expect(notes('rm -f "$DIR"/x')).toEqual([["It deletes the files it names, without asking first. Deleted files do not go to the Trash."]]);
 });
 
 test("the command's notes: a pipeline's exit status is its last program's, unless pipefail is set first; and what the session grants offered cover", () => {
   const of = (command: string, grants: ReadonlyArray<ReadonlyArray<string>> = []) =>
     commandNotes(ShellCommand.make(command), segmentsOf, grants.map((grant) => grant.map((word) => WordText.make(word)))) as ReadonlyArray<string>;
-  expect(of("bun test | tail -20")).toEqual(["Only tail's exit status counts: the pipeline from bun to tail succeeds when tail does, even if bun fails."]);
+  expect(of("bun test | tail -20")).toEqual(["Only `tail`'s exit status counts: the pipeline from `bun` to `tail` succeeds when `tail` does, even if `bun` fails."]);
   expect(of("set -o pipefail; bun test | tail -20")).toEqual([]);
-  expect(of("rm -rf build", [["rm"]])).toEqual(["Allowing rm for the rest of the session lets later rm commands run without a question inside the working folder. Outside it, they are still asked about."]);
+  expect(of("rm -rf build", [["rm"]])).toEqual(["Allowing `rm` for the rest of the session lets later `rm` commands run without a question inside the working folder. Outside it, they are still asked about."]);
   expect(of("mkdir out && cp a out", [["mkdir"], ["cp"]])).toEqual([
-    "Allowing mkdir and cp for the rest of the session lets later commands that use them run without a question inside the working folder. Outside it, they are still asked about.",
+    "Allowing `mkdir` and `cp` for the rest of the session lets later commands that use them run without a question inside the working folder. Outside it, they are still asked about.",
   ]);
   // A program whose paths are not judged is not asked about outside the working folder either, and the note says so.
   expect(of("bun test && rm -rf build", [["bun", "test"], ["rm"]])).toEqual([
-    "Allowing rm for the rest of the session lets later rm commands run without a question inside the working folder. Outside it, they are still asked about.",
-    "Allowing bun test for the rest of the session lets later bun test commands run without a question. labkit does not see which files it reads or writes itself, so it does not ask about them, even outside the working folder.",
+    "Allowing `rm` for the rest of the session lets later `rm` commands run without a question inside the working folder. Outside it, they are still asked about.",
+    "Allowing `bun test` for the rest of the session lets later `bun test` commands run without a question. labkit does not see which files it reads or writes itself, so it does not ask about them, even outside the working folder.",
   ]);
 });

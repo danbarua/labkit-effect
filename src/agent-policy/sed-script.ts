@@ -19,6 +19,7 @@
  * `r` and `R` read them.
  */
 
+import { codeSpan } from "./code-span.ts";
 import { Schema } from "effect";
 
 /** A sed script, as written in a command. */
@@ -220,7 +221,7 @@ export const analyse = (script: SedScript): SedEffects | undefined => {
 
 type Text = Parameters<typeof Explanation.make>[0];
 const said = (text: Text): Explanation => Explanation.make(text);
-const quoted = (text: SedScript | undefined): Explanation => said(`\`${text ?? ""}\``);
+const quoted = (text: SedScript | undefined): Explanation => said(codeSpan(text ?? ""));
 
 /** One address, in plain English. */
 const describeAddress = (address: SedScript): Explanation => {
@@ -300,7 +301,7 @@ export const explain = (
   scripts: ReadonlyArray<ReadonlyArray<SedCommand>>,
   options: { readonly quiet: boolean; readonly inPlace: boolean; readonly files: ReadonlyArray<SedFile> },
 ): ReadonlyArray<ExplanationLine> => {
-  const files = options.files.join(", ");
+  const files = options.files.map(codeSpan).join(", ");
   const lead = said(options.inPlace ? `Edits ${files} in place:` : `Reads ${options.files.length === 0 ? "its input" : files}:`);
   const steps = scripts.flat().flatMap((command) => explainOne(command, options.quiet, 1));
   const output = options.quiet ? [] : [{ depth: 1, text: said(options.inPlace ? "Saves every line, after these changes." : "Prints every line, after these changes.") }];

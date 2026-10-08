@@ -75,7 +75,7 @@ test("after a grant is allowed for the session, a program it names runs in every
 
 test("a command that writes a file asks in default mode even when its program is allowed, and runs in acceptEdits mode", () => {
   const asked = judged("echo hi > notes.txt");
-  expect(asked.question).toMatchObject({ needs: [{ program: "a redirect", why: "it writes notes.txt" }], grants: [] });
+  expect(asked.question).toMatchObject({ needs: [{ program: "a redirect", why: "it writes `notes.txt`" }], grants: [] });
   expect(asked.question?.options.map((option) => option.kind)).toEqual(["allow_once", "reject_once"]);
   expect(judged("echo hi > notes.txt", { mode: "acceptEdits" }).step).toBe("runs");
   expect(judged("echo hi > /dev/null 2>&1").step).toBe("runs");
@@ -118,7 +118,7 @@ test("in dontAsk mode, or when no one can answer, a command that needs permissio
   });
   expect(judged("echo hi > out.txt", { canAsk: false })).toMatchObject({
     step: "vetoed",
-    reason: "run_command needs permission, and no one is there to answer: a redirect (it writes out.txt). --permission-mode acceptEdits or bypassPermissions lets it run.",
+    reason: "run_command needs permission, and no one is there to answer: a redirect (it writes `out.txt`). --permission-mode acceptEdits or bypassPermissions lets it run.",
   });
   expect(judged("rm x", { canAsk: false }).reason).toEndWith("--permission-mode bypassPermissions lets it run.");
   expect(judged("rm x", { mode: "bypassPermissions" }).step).toBe("runs");
@@ -148,7 +148,7 @@ test("when deny rules name programs, a command they cannot see (one that does no
 
 test("a program that reads outside the working folder is asked about, with only the call to allow, even when it is read-only or a rule allows the program; a Read rule matching the path lets it run", () => {
   expect(judged("cat ~/.aws/credentials").question).toMatchObject({
-    needs: [{ program: "cat ~/.aws/credentials", why: "it reads outside the working folder: ~/.aws/credentials" }],
+    needs: [{ program: "cat ~/.aws/credentials", why: "it reads outside the working folder: `~/.aws/credentials`" }],
     grants: [],
   });
   expect(judged("cat src/a.ts | grep -n TODO").step).toBe("runs");
@@ -163,7 +163,7 @@ test("sed is asked about once and can then be allowed for the session; a script 
   const allowed = answered("sed -n 1,5p a.txt", "allow-session");
   expect(judged("sed 's/a/b/g' b.txt", { facts: allowed }).step).toBe("runs");
   expect(judged("sed 's/a/b/e' b.txt", { facts: allowed }).question).toMatchObject({ grants: [] });
-  expect(judged("sed -i 's/a/b/' b.txt", { facts: allowed }).question).toMatchObject({ needs: [{ program: "sed -i 's/a/b/' b.txt", why: "it writes b.txt" }] });
+  expect(judged("sed -i 's/a/b/' b.txt", { facts: allowed }).question).toMatchObject({ needs: [{ program: "sed -i 's/a/b/' b.txt", why: "it writes `b.txt`" }] });
 });
 
 /** What the question about `command` shows besides its needs, worked out from its command. */
@@ -176,13 +176,13 @@ test("a question stores why each program needs permission; what helps judge a pr
   const python = explainedFor("python3 -c 'print(1)' > out.txt");
   expect(python?.needs as unknown).toEqual([
     { program: "python3 -c 'print(1)'", kind: "opaque", why: "it runs code written in the command" },
-    { program: "a redirect", kind: "writes", why: "it writes out.txt" },
+    { program: "a redirect", kind: "writes", why: "it writes `out.txt`" },
   ]);
   expect((python === undefined ? undefined : explainedAt(python.explained, python.needs, 0)?.detail) as unknown).toEqual({ _tag: "Code", language: "python", code: "print(1)" });
   const sed = explainedFor("sed -i 's/a/b/' f.txt");
   expect(sed === undefined ? undefined : [0, 1].map((at) => explainedAt(sed.explained, sed.needs, at)?.detail?._tag)).toEqual(["Explained", undefined]);
   const rm = explainedFor("rm -rf build");
-  expect(rm?.explained.notes as unknown).toEqual(["Allowing rm for the rest of the session lets later rm commands run without a question inside the working folder. Outside it, they are still asked about."]);
+  expect(rm?.explained.notes as unknown).toEqual(["Allowing `rm` for the rest of the session lets later `rm` commands run without a question inside the working folder. Outside it, they are still asked about."]);
   expect(judged("sed -n 1p f", { facts: answered("sed -n 2p f", "allow-session") }).step).toBe("runs");
 });
 
@@ -192,8 +192,8 @@ test("after a program is allowed for the session, it runs inside the working fol
   const allowed = answered("rm -rf dist", "allow-session");
   expect(judged("rm -rf build", { facts: allowed, folders: project }).step).toBe("runs");
   const outside = judged("rm -rf ~/Code/other", { facts: allowed, folders: project });
-  expect(outside.question).toMatchObject({ needs: [{ program: "rm -rf ~/Code/other", kind: "changesOutside", why: "it deletes outside the working folder: ~/Code/other" }], grants: [] });
-  expect(judged('rm -rf "$DIR"', { facts: allowed, folders: project }).question).toMatchObject({ needs: [{ kind: "changesOutside", why: 'it deletes outside the working folder: "$DIR"' }] });
+  expect(outside.question).toMatchObject({ needs: [{ program: "rm -rf ~/Code/other", kind: "changesOutside", why: "it deletes outside the working folder: `~/Code/other`" }], grants: [] });
+  expect(judged('rm -rf "$DIR"', { facts: allowed, folders: project }).question).toMatchObject({ needs: [{ kind: "changesOutside", why: 'it deletes outside the working folder: `"$DIR"`' }] });
   expect(judged("git ls-files | xargs rm", { facts: allowed, folders: project }).question).toMatchObject({
     needs: [{ kind: "notAllowed" }, { program: "rm", kind: "changesOutside", why: "it deletes the paths it reads from its input, which may be outside the working folder" }],
   });
@@ -202,7 +202,7 @@ test("after a program is allowed for the session, it runs inside the working fol
 test("acceptEdits lets a command write files inside the working folder, not outside it; a file that is not a file (/dev/null) is not asked about", () => {
   expect(judged("echo x >> notes.txt", { mode: "acceptEdits", folders: project }).step).toBe("runs");
   expect(judged("echo x >> ~/.zshrc", { mode: "acceptEdits", folders: project }).question).toMatchObject({
-    needs: [{ program: "a redirect", kind: "changesOutside", why: "it writes outside the working folder: ~/.zshrc" }],
+    needs: [{ program: "a redirect", kind: "changesOutside", why: "it writes outside the working folder: `~/.zshrc`" }],
   });
   expect(judged("git status > /dev/null 2>&1", { folders: project }).step).toBe("runs");
 });
@@ -211,7 +211,7 @@ test("a command that changes paths outside the working folder is asked about eve
   expect(judged("cd ~/other && rm -rf build", { facts: answered("rm -rf dist", "allow-session"), folders: project }).question).toMatchObject({
     needs: [
       { program: "cd ~/other", kind: "readsOutside" },
-      { program: "rm -rf build", kind: "changesOutside", why: "it deletes outside the working folder: build" },
+      { program: "rm -rf build", kind: "changesOutside", why: "it deletes outside the working folder: `build`" },
     ],
   });
   expect(judged("rm -rf /tmp/build", { allow: ["command(rm:*)"], folders: project }).question).toMatchObject({ needs: [{ kind: "changesOutside" }] });
@@ -224,7 +224,7 @@ test("a command that changes paths outside the working folder is asked about eve
 
 test("when no one can answer, a change outside the working folder is vetoed with a hint that names bypassPermissions, not acceptEdits", () => {
   expect(judged("echo x >> ~/.zshrc", { mode: "acceptEdits", canAsk: false, folders: project }).reason).toBe(
-    "run_command needs permission, and no one is there to answer: a redirect (it writes outside the working folder: ~/.zshrc). --permission-mode bypassPermissions lets it run.",
+    "run_command needs permission, and no one is there to answer: a redirect (it writes outside the working folder: `~/.zshrc`). --permission-mode bypassPermissions lets it run.",
   );
 });
 
@@ -244,7 +244,7 @@ test("a rule names a tool, exact words, a prefix (:*), or paths read (Read) or c
 test("an Edit rule matching a path lifts only that path: the others are still named, and the program still needs allowing; an allowed edit allows reading too", () => {
   const rm = answered("rm -rf dist", "allow-session");
   expect(judged("rm -rf /tmp/a ~/x", { facts: rm, allow: ["Edit(//tmp/**)"], folders: project }).question).toMatchObject({
-    needs: [{ kind: "changesOutside", why: "it deletes outside the working folder: ~/x" }],
+    needs: [{ kind: "changesOutside", why: "it deletes outside the working folder: `~/x`" }],
   });
   expect(judged("rm -rf /tmp/a", { allow: ["Edit(//tmp/**)"], folders: project }).question).toMatchObject({ needs: [{ kind: "notAllowed" }], grants: [["rm"]] });
   expect(judged("cat /tmp/a/log.txt", { allow: ["Edit(//tmp/**)"], folders: project }).step).toBe("runs");
@@ -263,8 +263,8 @@ test("a deny rule refuses a read or a change of a path it matches, inside the wo
 
 test("when deny rules name paths, a path they cannot see is asked about even in bypassPermissions: one not written out, or ones a program gets from its input", () => {
   const deny = { deny: ["Read(./.env)", "Edit(~/.ssh/**)"], folders: project, mode: "bypassPermissions" as const };
-  expect(judged('cat "$F"', deny).question).toMatchObject({ needs: [{ kind: "unseen", why: 'deny rules cannot see which file it reads: "$F" is not written out' }] });
-  expect(judged("git ls-files | xargs rm", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it deletes: xargs gives them as it runs" }] });
+  expect(judged('cat "$F"', deny).question).toMatchObject({ needs: [{ kind: "unseen", why: 'deny rules cannot see which file it reads: `"$F"` is not written out' }] });
+  expect(judged("git ls-files | xargs rm", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it deletes: `xargs` gives them as it runs" }] });
   expect(judged('cat "$F"', { folders: project, mode: "bypassPermissions" }).step).toBe("runs");
 });
 
@@ -281,20 +281,20 @@ test("a path deny rule sees past a cd, through find -exec and xargs, into a recu
   expect(judged("cd secrets && cat key", deny).reason).toBe("cd secrets is denied by the rule Read(secrets/**); cat key is denied by the rule Read(secrets/**).");
   expect(judged("cd src && cat ../secrets/key", deny).reason).toBe("cat ../secrets/key is denied by the rule Read(secrets/**).");
   expect(judged("cd src && cat a.ts", deny).step).toBe("runs");
-  expect(judged('cd "$D" && cat key', deny).question).toMatchObject({ needs: [{ kind: "unseen" }, { kind: "unseen", why: "deny rules cannot see which file it reads: a cd earlier in the command moves where key leads" }] });
+  expect(judged('cd "$D" && cat key', deny).question).toMatchObject({ needs: [{ kind: "unseen" }, { kind: "unseen", why: "deny rules cannot see which file it reads: a `cd` earlier in the command moves where `key` leads" }] });
   // The paths find -exec and xargs give are not seen.
-  expect(judged("find . -name .env -exec cat {} \\;", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it reads: find gives them as it runs" }] });
-  expect(judged("git ls-files | xargs cat", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it reads: xargs gives them as it runs" }] });
+  expect(judged("find . -name .env -exec cat {} \\;", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it reads: `find` gives them as it runs" }] });
+  expect(judged("git ls-files | xargs cat", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it reads: `xargs` gives them as it runs" }] });
   // A recursive search reaches an anchored pattern inside the folder it searches; one that matches at any depth is not seen there.
   expect(judged("rg KEY .", deny).reason).toBe("rg KEY . is denied by the rule Read(secrets/**).");
   expect(judged("rg TODO src", deny).step).toBe("runs");
   // A glob could name a denied file.
-  expect(judged("cat .en*", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it reads: .en* is a pattern" }] });
+  expect(judged("cat .en*", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it reads: `.en*` is a pattern" }] });
 });
 
 test("a cd moves where later relative paths lead: after a cd outside the working folder, a change there is a change outside it", () => {
   const rm = answered("rm -rf dist", "allow-session");
-  expect(judged("cd /tmp && rm -rf build", { facts: rm, allow: ["Read(//tmp/**)"], folders: project }).question).toMatchObject({ needs: [{ kind: "changesOutside", why: "it deletes outside the working folder: build" }] });
+  expect(judged("cd /tmp && rm -rf build", { facts: rm, allow: ["Read(//tmp/**)"], folders: project }).question).toMatchObject({ needs: [{ kind: "changesOutside", why: "it deletes outside the working folder: `build`" }] });
   // The paths find gives are under its starting points, which are find's own reads.
   expect(judged("find . -exec rm {} \\;", { facts: rm, allow: ["command(find:*)"], folders: project }).step).toBe("runs");
 });
@@ -315,15 +315,15 @@ const fileCall = (kind: ToolKind, path: string, options: { mode?: PermissionMode
 
 test("a file tool's path outside the working folders is asked about, with only that call to allow, in every mode but bypassPermissions; a path rule or an additional folder lets it run", () => {
   expect(fileCall("read", "src/a.ts")).toBe("runs");
-  expect(fileCall("read", "~/notes.md")).toMatchObject({ _tag: "Tool", why: "it reads outside the working folder: ~/notes.md", options: [{ optionId: "allow-once" }, { optionId: "reject-once" }] });
+  expect(fileCall("read", "~/notes.md")).toMatchObject({ _tag: "Tool", why: "it reads outside the working folder: `~/notes.md`", options: [{ optionId: "allow-once" }, { optionId: "reject-once" }] });
   expect(fileCall("read", "~/notes.md", { allow: ["Read(~/notes.md)"] })).toBe("runs");
   expect(fileCall("read", "/data/x.csv", { additional: ["/data"] })).toBe("runs");
   expect(fileCall("edit", "src/a.ts", { mode: "acceptEdits" })).toBe("runs");
-  expect(fileCall("edit", "../other/a.ts", { mode: "acceptEdits" })).toMatchObject({ _tag: "Tool", why: "it writes outside the working folder: ../other/a.ts" });
+  expect(fileCall("edit", "../other/a.ts", { mode: "acceptEdits" })).toMatchObject({ _tag: "Tool", why: "it writes outside the working folder: `../other/a.ts`" });
   expect(fileCall("edit", "../other/a.ts", { mode: "acceptEdits", allow: ["Edit(~/other/**)"] })).toBe("runs");
   expect(fileCall("edit", "../other/a.ts", { mode: "bypassPermissions" })).toBe("runs");
-  expect(fileCall("read", "~/notes.md", { mode: "dontAsk" })).toBe("read_file needs permission, and the permission mode is dontAsk: it reads outside the working folder: ~/notes.md.");
-  expect(fileCall("read", "~/notes.md", { canAsk: false })).toBe("read_file needs permission, and no one is there to answer: it reads outside the working folder: ~/notes.md. --permission-mode bypassPermissions lets it run.");
+  expect(fileCall("read", "~/notes.md", { mode: "dontAsk" })).toBe("read_file needs permission, and the permission mode is dontAsk: it reads outside the working folder: `~/notes.md`.");
+  expect(fileCall("read", "~/notes.md", { canAsk: false })).toBe("read_file needs permission, and no one is there to answer: it reads outside the working folder: `~/notes.md`. --permission-mode bypassPermissions lets it run.");
 });
 
 test("a deny path rule refuses a file tool's read or write of a path it matches, in every mode", () => {
@@ -340,7 +340,7 @@ test("a Read deny rule refuses a change as well as a read, in every mode, and th
   expect(judged("echo x > secrets/key", deny).reason).toBe(`a redirect is denied by the rule Read(secrets/**)${either}`);
   expect(judged("rm -rf ~", { ...deny, deny: ["Read(~/.ssh/**)"] }).reason).toBe(`rm -rf ~ is denied by the rule Read(~/.ssh/**)${either}`);
   // A change whose paths the rule cannot see is asked about, as a read's is.
-  expect(judged("git ls-files | xargs rm", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it deletes: xargs gives them as it runs" }] });
+  expect(judged("git ls-files | xargs rm", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it deletes: `xargs` gives them as it runs" }] });
   expect(judged("rm secrets/*", deny).reason).toBe(`rm secrets/* is denied by the rule Read(secrets/**)${either}`);
   expect(fileCall("edit", "secrets/key", { deny: ["Read(secrets/**)"], mode: "bypassPermissions" })).toBe(`write_file is denied by the rule Read(secrets/**)${either}`);
   expect(judged("cat secrets/key", { ...deny, deny: ["Edit(secrets/**)"] }).step).toBe("runs");

@@ -11,6 +11,7 @@
  * containing a fence does not end the block early.
  */
 
+import { codeSpan } from "../agent-policy/code-span.ts";
 import type { Detail } from "../agent-policy/command-units.ts";
 
 const fenced = (language: string, code: string): ReadonlyArray<string> => {
@@ -28,8 +29,8 @@ const expandsNote = "When the command runs, the shell replaces `$â€¦` and `` `â€
  */
 const writesLines = (detail: Extract<Detail, { _tag: "Writes" }>, diffShown: boolean): ReadonlyArray<string> =>
   diffShown
-    ? [`The diff shows what it ${detail.append ? "adds to" : "writes to"} ${detail.path}.`]
-    : [`It ${detail.append ? "adds this text to the end of" : "writes this text to"} ${detail.path}:`, ...fenced("", detail.text.replace(/\n$/, "")), ...(detail.expands ? [expandsNote] : [])];
+    ? [`The diff shows what it ${detail.append ? "adds to" : "writes to"} ${codeSpan(detail.path)}.`]
+    : [`It ${detail.append ? "adds this text to the end of" : "writes this text to"} ${codeSpan(detail.path)}:`, ...fenced("", detail.text.replace(/\n$/, "")), ...(detail.expands ? [expandsNote] : [])];
 
 /** `detail` as Markdown lines; `diffShown` when the call already shows the file's diff, so a write is not repeated as text. */
 export const markdownOf = (detail: Detail, diffShown = false): ReadonlyArray<string> => {

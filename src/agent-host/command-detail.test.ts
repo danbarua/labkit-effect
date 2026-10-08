@@ -10,7 +10,7 @@ const code = (text: string): Detail => ({ _tag: "Code", language: "bash", code: 
 const explained: Detail = {
   _tag: "Explained",
   lines: [
-    { depth: 0, text: Explanation.make("Reads f:") },
+    { depth: 0, text: Explanation.make("Reads `f`:") },
     { depth: 1, text: Explanation.make("On lines matching `x`:") },
     { depth: 2, text: Explanation.make("Deletes those lines.") },
   ],
@@ -26,6 +26,6 @@ test("a fence is one backtick longer than the longest run of backticks in the co
 });
 
 test("an explanation is a lead line and a nested list in Markdown, and lines indented by depth in the terminal", () => {
-  expect(markdownOf(explained)).toEqual(["Reads f:", "- On lines matching `x`:", "  - Deletes those lines."]);
-  expect(terminalOf(explained)).toEqual(["Reads f:", "  On lines matching `x`:", "    Deletes those lines."]);
+  expect(markdownOf(explained)).toEqual(["Reads `f`:", "- On lines matching `x`:", "  - Deletes those lines."]);
+  expect(terminalOf(explained)).toEqual(["Reads `f`:", "  On lines matching `x`:", "    Deletes those lines."]);
 });

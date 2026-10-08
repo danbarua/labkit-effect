@@ -34,14 +34,14 @@ const explained = (script: string, options: { quiet?: boolean; inPlace?: boolean
 };
 
 test("explain says what sed reads, then each command at its addresses, then that it prints every line unless it is quiet (-n)", () => {
-  expect(explained("s/a/b/g", { files: ["notes.txt"] })).toEqual(["Reads notes.txt:", "  Replaces every match of `a` with `b`, on every line.", "  Prints every line, after these changes."]);
+  expect(explained("s/a/b/g", { files: ["notes.txt"] })).toEqual(["Reads `notes.txt`:", "  Replaces every match of `a` with `b`, on every line.", "  Prints every line, after these changes."]);
   expect(explained("/^#/d; 5q")).toEqual(["Reads its input:", "  Deletes lines matching `^#`.", "  Stops after line 5.", "  Prints every line, after these changes."]);
-  expect(explained("1,10p", { quiet: true, files: ["f"] })).toEqual(["Reads f:", "  Prints lines 1 to 10."]);
+  expect(explained("1,10p", { quiet: true, files: ["f"] })).toEqual(["Reads `f`:", "  Prints lines 1 to 10."]);
 });
 
 test("explain says that sed edits its files in place with -i, and saves every line rather than printing it", () => {
   expect(explained("s/old/new/2", { inPlace: true, files: ["a.ts", "b.ts"] })).toEqual([
-    "Edits a.ts, b.ts in place:",
+    "Edits `a.ts`, `b.ts` in place:",
     "  Replaces match 2 of `old` with `new`, on every line.",
     "  Saves every line, after these changes.",
   ]);

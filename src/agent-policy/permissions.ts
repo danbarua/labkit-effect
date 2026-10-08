@@ -45,6 +45,7 @@
  * vetoed. The veto's reason names the permission modes that let the call run.
  */
 
+import { codeSpan } from "./code-span.ts";
 import { Schema } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 import { FailureText, ToolKind, ToolName } from "../agent-machine/names.ts";
@@ -247,6 +248,9 @@ const toolOptions = (tool: ToolName): ReadonlyArray<PermissionOption> => [
 const shownGrant = (grant: Grant): WordText => WordText.make(grant.join(" "));
 
 /** `items` as one phrase: `a`, `a and b`, `a, b and c`; past three, the first three and how many more. */
+/** `word` as a Markdown code span, for a reason that names a program or a path (`codeSpan`). */
+const coded = (word: WordText): WordText => WordText.make(codeSpan(word));
+
 const listed = (items: ReadonlyArray<WordText>): WordText => {
   const shown = items.length > 3 ? [...items.slice(0, 3), WordText.make(`${items.length - 3} more`)] : items;
   return WordText.make(shown.length <= 1 ? shown.join("") : `${shown.slice(0, -1).join(", ")} and ${shown.at(-1) ?? ""}`);
@@ -393,11 +397,11 @@ const pathJudging = (judging: CommandJudging, units: ReadonlyArray<Unit>) => {
     unseen: (path: UnitPath, at: number): NeedText | undefined => {
       if (!deny.some((rule) => covers(rule, path.access))) return undefined;
       const verb = path.access;
-      if (path.word === undefined) return NeedText.make(`deny rules cannot see which files it ${verb}: ${path.givenBy === "find" ? "find" : "xargs"} gives them as it runs`);
+      if (path.word === undefined) return NeedText.make(`deny rules cannot see which files it ${verb}: ${codeSpan(path.givenBy === "find" ? "find" : "xargs")} gives them as it runs`);
       const resolved = resolvePath(path.word, folders);
-      if (resolved._tag === "Unresolved") return NeedText.make(`deny rules cannot see which file it ${verb}: ${path.word.text} is ${resolved.why === "not written out" ? "not written out" : "in another user's home folder"}`);
-      if (isGlob(path.word)) return NeedText.make(`deny rules cannot see which files it ${verb}: ${path.word.text} is a pattern`);
-      if (relative(path.word) && placed[at]?.unknown === true) return NeedText.make(`deny rules cannot see which file it ${verb}: a cd earlier in the command moves where ${path.word.text} leads`);
+      if (resolved._tag === "Unresolved") return NeedText.make(`deny rules cannot see which file it ${verb}: ${codeSpan(path.word.text)} is ${resolved.why === "not written out" ? "not written out" : "in another user's home folder"}`);
+      if (isGlob(path.word)) return NeedText.make(`deny rules cannot see which files it ${verb}: ${codeSpan(path.word.text)} is a pattern`);
+      if (relative(path.word) && placed[at]?.unknown === true) return NeedText.make(`deny rules cannot see which file it ${verb}: a ${codeSpan("cd")} earlier in the command moves where ${codeSpan(path.word.text)} leads`);
       return resolved.full === undefined || folders === undefined ? NeedText.make(`deny rules cannot see which file it ${verb}: the working folder is not known`) : undefined;
     },
     allows: (path: UnitPath, at: number): boolean => {
@@ -431,7 +435,7 @@ const toolPaths = (input: Received, tool: ToolName, kind: ToolKind, judging: Com
   const denied = rule === undefined ? undefined : deniedByPath(tool, rule, access);
   const outside = words.filter((word) => judged.leaves(word, 0) && !judged.allows({ access, word }, 0)).map((word) => word.text);
   if (outside.length === 0) return { denied, outside: undefined };
-  return { denied, outside: NeedText.make(`it ${access} outside the working folder: ${listed(outside)}`) };
+  return { denied, outside: NeedText.make(`it ${access} outside the working folder: ${listed(outside.map((path) => coded(WordText.make(path))))}`) };
 };
 
 /** The rules in `list` about tools and programs, read; path rules (`Read(...)`, `Edit(...)`) are not among them. */
@@ -508,8 +512,8 @@ const commandStep = (
           });
           const own: ReadonlyArray<CommandNeed> = [
             ...(allowed(unit) ? [] : [unit.opaque === undefined ? { program, kind: "notAllowed" as const, why: NeedText.make("it is not allowed yet") } : { program, kind: "opaque" as const, why: unit.opaque }]),
-            ...(writes.length === 0 || mode === "acceptEdits" ? [] : [{ program, kind: "writes" as const, why: NeedText.make(`it writes ${listed(writes)}`) }]),
-            ...(readsOutside.length === 0 ? [] : [{ program, kind: "readsOutside" as const, why: NeedText.make(`it reads outside the working folder: ${listed(readsOutside)}`) }]),
+            ...(writes.length === 0 || mode === "acceptEdits" ? [] : [{ program, kind: "writes" as const, why: NeedText.make(`it writes ${listed(writes.map(coded))}`) }]),
+            ...(readsOutside.length === 0 ? [] : [{ program, kind: "readsOutside" as const, why: NeedText.make(`it reads outside the working folder: ${listed(readsOutside.map(coded))}`) }]),
             ...changesOutsideNeeds(program, changesOutside),
           ];
           return own;
@@ -526,7 +530,7 @@ const changesOutsideNeeds = (program: WordText, changes: ReadonlyArray<OutsideCh
   [...new Set(changes.map((change) => change.verb))].map((verb) => {
     const paths = changes.flatMap((change) => (change.verb === verb && change.path !== undefined ? [change.path] : []));
     const fed = changes.some((change) => change.verb === verb && change.path === undefined);
-    const named = paths.length === 0 ? [] : [`it ${verb} outside the working folder: ${listed(paths)}`];
+    const named = paths.length === 0 ? [] : [`it ${verb} outside the working folder: ${listed(paths.map(coded))}`];
     const input = fed ? [`it ${verb} the paths it reads from its input, which may be outside the working folder`] : [];
     return { program, kind: "changesOutside", why: NeedText.make([...named, ...input].join("; ")) };
   });
