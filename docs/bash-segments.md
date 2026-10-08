@@ -29,8 +29,8 @@ command, a function's definition, a `[[ ]]` test or a `(( ))` expression:
 | Field | What it holds |
 | --- | --- |
 | `kind` | `simple`, `function_definition`, `test` or `arithmetic`. |
-| `words` | The program and its arguments, each as written (`text`) and, when it is a literal string, its value with quotes and escapes removed (`literal`). |
-| `assignments` | The variables set before the command's name (`X=1 make`). An assignment after the name is an argument (`env X=1 …`, `make A=b`). |
+| `words` | The program and its arguments, each as written (`text`) and, when it is a literal string, its value with quotes and escapes removed (`literal`); otherwise its `parts`, below. |
+| `assignments` | The variables the command sets, each with its `name`, its `value` as a word (none for an array), and whether it is appended (`NAME+=value`): those set before the command's name (`X=1 make`), or in the shell when the command has no words. An assignment after the name is an argument (`env X=1 …`, `make A=b`). A `for` loop reports a segment with one assignment of its variable for each value it takes (none for a loop over the positional parameters). |
 | `redirects` | Its redirects (`op`, `fd`, `target`), then those of each compound command it is inside, innermost first. |
 | `fed_text` | Whether its input is a here-document or a here-string. |
 | `context` | Where it runs: `command`, `subshell`, `function_body`, `command_substitution` or `process_substitution`. |
@@ -47,6 +47,21 @@ A segment is reported wherever it is written:
 A word is literal when it has no parameter, command or arithmetic expansion, no tilde expansion,
 no unquoted `*`, `?` or `[`, and no brace expansion (`{a,b}`, `{1..3}`). A lone `{`, `}` or `{}` is
 literal.
+
+A word that is not literal has its parts, in order, each marked `quoted` when it is inside quotes
+(the shell neither splits nor globs it):
+
+| Part | What it holds |
+| --- | --- |
+| `text` | Text, with quotes and escapes removed: `value`. |
+| `tilde` | The folder a tilde names (`of`): `home` (`~`), `user` (`~bob`, with `user`), `working` (`~+`), `previous` (`~-`), `stack` (`~1`). |
+| `parameter` | A parameter expansion: the parameter's `name` (`HOME`, `1`, `?`, `@`) and what is done to its value (`op`): `value`; a default, an assignment of one, an alternative or an error, each with the word in parts (`word`), and `_if_unset` when it tests unset only; `length`; a pattern removed from the end or the start (`remove_suffix`, `remove_longest_suffix`, `remove_prefix`, `remove_longest_prefix`, with the `pattern` as written); `other` (an indirection, an index, a substring, a replacement, a case change). |
+| `command` | A command substitution: the `command` as written. Its segments are reported with the command's own. |
+| `arithmetic` | An arithmetic expansion: the `expression` as written. |
+
+The parser reports what each part is; what a word expands to is worked out by the harness
+(`src/agent-environment`), from the variables the command's environment and its own assignments
+give.
 
 ## Failing closed
 

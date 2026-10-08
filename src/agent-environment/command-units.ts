@@ -984,7 +984,7 @@ const segmentUnits = (segment: Segment, functions: ReadonlySet<WordText>, seen: 
   const detail: Writes | undefined = printed === undefined || output === undefined ? undefined : { _tag: "Writes", ...output, text: CodeText.make(printed.text), expands: printed.expands };
   const written = writes.length === 0 && reads.length === 0 ? [] : [unit([], undefined, { folders: seen.folders, writes, reads, ...(detail === undefined ? {} : { detail }) })];
   if (segment.kind !== "simple") return written;
-  const steered = steeringNeed(segment.assignments);
+  const steered = steeringNeed(segment.assignments.map((each) => WordText.make(`${each.name}=`)));
   if (steered !== undefined) return [opaque(segment.words, steered), ...written];
   const program = segment.words[0]?.literal;
   if (program !== undefined && functions.has(program)) return written;

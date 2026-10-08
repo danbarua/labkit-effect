@@ -1,14 +1,14 @@
 //! A command splits into every program it would run, wherever the program is written; a command
 //! that cannot be followed in full is `Unparsed`.
 
-use bash_segments::{Context, SegmentKind, Segments, segments_of};
+use bash_segments::{Context, ParameterOp, Part, SegmentKind, Segments, TildeOf, segments_of};
 
-/// Returns the literal program name of each simple command in `command`, in the order the segments are reported (`?` when the name is not literal).
+/// Returns the literal program name of each simple command in `command` that runs a program, in the order the segments are reported (`?` when the name is not literal).
 fn programs(command: &str) -> Vec<String> {
     match segments_of(command) {
         Segments::Parsed { segments } => segments
             .iter()
-            .filter(|segment| segment.kind == SegmentKind::Simple)
+            .filter(|segment| segment.kind == SegmentKind::Simple && !segment.words.is_empty())
             .map(|segment| segment.words.first().map_or("<none>".to_owned(), |word| word.literal.clone().unwrap_or("?".to_owned())))
             .collect(),
         Segments::Unparsed { reason } => panic!("{command} did not parse: {reason}"),
@@ -145,7 +145,8 @@ fn an_assignment_after_the_commands_name_is_an_argument_and_one_before_it_sets_a
         Segments::Parsed { segments } => {
             let words: Vec<_> = segments[0].words.iter().map(|word| word.literal.clone()).collect();
             assert_eq!(words, [Some("env".into()), Some("LD_PRELOAD=x.so".into()), Some("make".into()), Some("A=b".into()), Some("{}".into())]);
-            assert_eq!(segments[0].assignments, ["X=1"]);
+            let assigned: Vec<_> = segments[0].assignments.iter().map(|each| (each.name.clone(), each.value.as_ref().and_then(|value| value.literal.clone()))).collect();
+            assert_eq!(assigned, [("X".to_owned(), Some("1".to_owned()))]);
         }
         Segments::Unparsed { reason } => panic!("{reason}"),
     }
@@ -200,6 +201,79 @@ fn a_simple_command_in_a_pipeline_knows_its_place_and_a_substitution_in_it_does_
     }
     match segments_of("make build") {
         Segments::Parsed { segments } => assert_eq!(segments[0].pipe, None),
+        Segments::Unparsed { reason } => panic!("{reason}"),
+    }
+}
+
+/// The parts of the last segment's word at `at` (or its first redirect's target when `at` is none):
+/// the outer command's, since a substitution in its words is reported before it.
+fn parts(command: &str, at: Option<usize>) -> Vec<Part> {
+    match segments_of(command) {
+        Segments::Parsed { segments } => {
+            let outer = segments.last().expect("a segment");
+            let word = match at {
+                Some(at) => outer.words[at].clone(),
+                None => outer.redirects[0].target.clone().expect("a redirect target"),
+            };
+            assert!(word.literal.is_none(), "{command}: the word is literal");
+            word.parts
+        }
+        Segments::Unparsed { reason } => panic!("{command} did not parse: {reason}"),
+    }
+}
+
+fn text(value: &str, quoted: bool) -> Part {
+    Part::Text { value: value.to_owned(), quoted }
+}
+
+fn parameter(name: &str, op: ParameterOp, quoted: bool) -> Part {
+    Part::Parameter { name: name.to_owned(), op, word: None, pattern: None, quoted }
+}
+
+#[test]
+fn a_word_that_is_not_literal_has_its_parts_text_parameters_tildes_and_command_substitutions() {
+    assert_eq!(
+        parts(r#"printf x > "$HOME/$RANDOM.txt""#, None),
+        [parameter("HOME", ParameterOp::Value, true), text("/", true), parameter("RANDOM", ParameterOp::Value, true), text(".txt", true)]
+    );
+    assert_eq!(parts("cat ~/notes", Some(1)), [Part::Tilde { of: TildeOf::Home, user: None }, text("/notes", false)]);
+    assert_eq!(parts("cat ~bob/x", Some(1)), [Part::Tilde { of: TildeOf::User, user: Some("bob".to_owned()) }, text("/x", false)]);
+    assert_eq!(parts(r#"cp "$(pwd)/a" b"#, Some(1)), [Part::Command { command: "pwd".to_owned(), quoted: true }, text("/a", true)]);
+    assert_eq!(parts("echo $1 $?", Some(1)), [parameter("1", ParameterOp::Value, false)]);
+    assert_eq!(parts("echo *.ts", Some(1)), [text("*.ts", false)]);
+}
+
+#[test]
+fn a_parameters_operation_is_kept_with_its_word_in_parts_or_its_pattern_as_written() {
+    assert_eq!(
+        parts("echo ${DIR:-~/out}", Some(1)),
+        [Part::Parameter { name: "DIR".to_owned(), op: ParameterOp::Default, word: Some(vec![Part::Tilde { of: TildeOf::Home, user: None }, text("/out", false)]), pattern: None, quoted: false }]
+    );
+    assert_eq!(parts("echo ${F%.*}", Some(1)), [Part::Parameter { name: "F".to_owned(), op: ParameterOp::RemoveSuffix, word: None, pattern: Some(".*".to_owned()), quoted: false }]);
+    assert_eq!(parts("echo ${#F}", Some(1)), [parameter("F", ParameterOp::Length, false)]);
+    assert_eq!(parts("echo ${F/a/b}", Some(1)), [parameter("F", ParameterOp::Other, false)]);
+    assert_eq!(parts("echo ${!F}", Some(1)), [parameter("F", ParameterOp::Other, false)]);
+}
+
+#[test]
+fn a_variable_is_set_by_an_assignment_and_by_a_for_loop_once_for_each_value() {
+    match segments_of("F=a.txt; for f in x y; do cat \"$f\"; done; A=(1 2) B+=c") {
+        Segments::Parsed { segments } => {
+            let assigned: Vec<_> = segments
+                .iter()
+                .flat_map(|segment| segment.assignments.iter().map(|each| (each.name.clone(), each.value.as_ref().and_then(|value| value.literal.clone()), each.append)))
+                .collect();
+            assert_eq!(
+                assigned,
+                [
+                    ("F".to_owned(), Some("a.txt".to_owned()), false),
+                    ("f".to_owned(), Some("x".to_owned()), false),
+                    ("f".to_owned(), Some("y".to_owned()), false),
+                    ("A".to_owned(), None, false),
+                    ("B".to_owned(), Some("c".to_owned()), true),
+                ]
+            );
+        }
         Segments::Unparsed { reason } => panic!("{reason}"),
     }
 }

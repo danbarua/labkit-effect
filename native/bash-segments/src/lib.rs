@@ -4,7 +4,9 @@
 //! input is a here-document or a here-string.
 //!
 //! The walk is adapted from exo-project's structural profiler (spike 01_2). It reports structure
-//! only; deciding what a segment may do is the permission policy's (`src/agent-policy`).
+//! only: each word's parts (text, `~`, a parameter and what is done to it, a command substitution),
+//! and each variable a command sets. Working out what a segment does, and what its words expand to,
+//! is the harness's (`src/agent-environment`); deciding what it may do is the permission policy's.
 //!
 //! It fails closed. When any part of a command cannot be followed, the whole command is `Unparsed`
 //! with the reason, rather than split without that part: a tokenizer or parser error; a word that
@@ -17,7 +19,7 @@ use brush_parser::ast::{
     self, AndOr, AssignmentValue, Command, CommandPrefixOrSuffixItem, CompoundCommand, CompoundList, ExtendedTestExpr,
     IoFileRedirectKind, IoFileRedirectTarget, IoRedirect, Pipeline, Program, SimpleCommand,
 };
-use brush_parser::word::{self, WordPiece, WordPieceWithSource};
+use brush_parser::word::{self, Parameter, ParameterExpr, ParameterTestType, SpecialParameter, TildeExpr, WordPiece, WordPieceWithSource};
 use serde::Serialize;
 
 /// The result for one command.
@@ -34,8 +36,9 @@ pub struct Segment {
     pub kind: SegmentKind,
     /// The program and its arguments, as written. Empty for a command that only assigns variables.
     pub words: Vec<WordOut>,
-    /// The variables set for this command alone (`NAME=value cmd`), or in the shell when there are no words.
-    pub assignments: Vec<String>,
+    /// The variables set for this command alone (`NAME=value cmd`), or in the shell when there are no
+    /// words; for a `for` loop, one for each value its variable takes.
+    pub assignments: Vec<Assigned>,
     /// Its own redirects, then those of each compound command it is inside, innermost first.
     pub redirects: Vec<Redirect>,
     /// Whether its standard input is a here-document or a here-string, written in the command.
@@ -76,7 +79,7 @@ pub enum Context {
     ProcessSubstitution,
 }
 
-/// A word: its text as written, and its value when that is a literal string.
+/// A word: its text as written, its value when that is a literal string, and otherwise its parts.
 #[derive(Debug, Serialize, PartialEq, Clone)]
 pub struct WordOut {
     pub text: String,
@@ -85,6 +88,100 @@ pub struct WordOut {
     /// characters. Otherwise absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub literal: Option<String>,
+    /// The word's parts, in order, when it has no literal value.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<Part>,
+}
+
+/// A variable a command sets: its name, its value as a word (absent when it is an array or a loop
+/// over the positional parameters), and whether the value is appended (`NAME+=value`).
+#[derive(Debug, Serialize, PartialEq, Clone)]
+pub struct Assigned {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<WordOut>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub append: bool,
+}
+
+/// A part of a word, as the shell expands it. `quoted` when it is inside quotes, so that the shell
+/// neither splits nor globs it.
+#[derive(Debug, Serialize, PartialEq, Clone)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Part {
+    /// Text: its value, with quotes and escapes removed.
+    Text {
+        value: String,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        quoted: bool,
+    },
+    /// A tilde: the home folder (`~`), a user's (`~user`), the working folder (`~+`), the previous one
+    /// (`~-`), or a folder of the stack (`~1`).
+    Tilde {
+        of: TildeOf,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user: Option<String>,
+    },
+    /// A parameter expansion: the parameter's name (`HOME`, `1`, `?`, `@`), what is done to its value
+    /// (`op`), and that operation's word, in parts (a default, an alternative), or its pattern, as
+    /// written (what a removal removes).
+    Parameter {
+        name: String,
+        op: ParameterOp,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        word: Option<Vec<Part>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pattern: Option<String>,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        quoted: bool,
+    },
+    /// A command substitution: the command, as written. Its segments are reported with the command's.
+    Command {
+        command: String,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        quoted: bool,
+    },
+    /// An arithmetic expansion, as written.
+    Arithmetic {
+        expression: String,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        quoted: bool,
+    },
+}
+
+/// Which folder a tilde names.
+#[derive(Debug, Serialize, PartialEq, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum TildeOf {
+    Home,
+    User,
+    Working,
+    Previous,
+    Stack,
+}
+
+/// What a parameter expansion does to the parameter's value: `value` (`$V`, `${V}`); a default
+/// (`${V:-w}`, `${V-w}` when unset only), an assignment of one (`${V:=w}`, `${V=w}`), an alternative
+/// (`${V:+w}`, `${V+w}`), an error (`${V:?w}`); its length (`${#V}`); a pattern removed from its end
+/// (`${V%p}`, `${V%%p}`) or its start (`${V#p}`, `${V##p}`); or `other` (an indirection, an index, a
+/// substring, a replacement, a case change, a transform).
+#[derive(Debug, Serialize, PartialEq, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum ParameterOp {
+    Value,
+    Default,
+    DefaultIfUnset,
+    Assign,
+    AssignIfUnset,
+    Alternative,
+    AlternativeIfUnset,
+    Error,
+    Length,
+    RemoveSuffix,
+    RemoveLongestSuffix,
+    RemovePrefix,
+    RemoveLongestPrefix,
+    Other,
 }
 
 /// A redirect: its operator, the file descriptor it names, and its target.
@@ -171,7 +268,7 @@ impl Walker {
         self.context.pop();
     }
 
-    fn emit(&mut self, kind: SegmentKind, words: Vec<WordOut>, assignments: Vec<String>, mut redirects: Vec<Redirect>, pipe: Option<PipeSlot>) {
+    fn emit(&mut self, kind: SegmentKind, words: Vec<WordOut>, assignments: Vec<Assigned>, mut redirects: Vec<Redirect>, pipe: Option<PipeSlot>) {
         for outer in self.inherited.iter().rev() {
             redirects.extend(outer.iter().cloned());
         }
@@ -273,9 +370,13 @@ impl Walker {
             CompoundCommand::BraceGroup(group) => self.compound_list(&group.list),
             CompoundCommand::Subshell(subshell) => self.within(Context::Subshell, |walker| walker.compound_list(&subshell.list)),
             CompoundCommand::ForClause(clause) => {
-                for value in clause.values.iter().flatten() {
-                    self.word(value);
-                }
+                // The loop's variable takes each value in turn: an assignment for each, so that a later
+                // use sees every value it may have. Without a list it takes the positional parameters.
+                let assigned: Vec<Assigned> = match &clause.values {
+                    Some(values) => values.iter().map(|value| Assigned { name: clause.variable_name.clone(), value: Some(self.word(value)), append: false }).collect(),
+                    None => vec![Assigned { name: clause.variable_name.clone(), value: None, append: false }],
+                };
+                self.emit(SegmentKind::Simple, vec![], assigned, vec![], None);
                 self.compound_list(&clause.body.list);
             }
             CompoundCommand::WhileClause(clause) | CompoundCommand::UntilClause(clause) => {
@@ -331,7 +432,7 @@ impl Walker {
 
     /// Adds a simple command's `item` to its words, assignments or redirects. An assignment before the
     /// command's name sets a variable for it; one after the name is an argument (`env X=1`, `make A=b`).
-    fn item(&mut self, item: &CommandPrefixOrSuffixItem, before_name: bool, words: &mut Vec<WordOut>, assignments: &mut Vec<String>, redirects: &mut Vec<Redirect>) {
+    fn item(&mut self, item: &CommandPrefixOrSuffixItem, before_name: bool, words: &mut Vec<WordOut>, assignments: &mut Vec<Assigned>, redirects: &mut Vec<Redirect>) {
         match item {
             CommandPrefixOrSuffixItem::Word(word) => {
                 let word = self.word(word);
@@ -339,8 +440,13 @@ impl Walker {
             }
             CommandPrefixOrSuffixItem::AssignmentWord(assignment, written) => {
                 if before_name {
-                    self.assignment_value(&assignment.value);
-                    assignments.push(written.value.clone());
+                    let value = self.assignment_value(&assignment.value);
+                    let name = match &assignment.name {
+                        ast::AssignmentName::VariableName(name) => name.clone(),
+                        ast::AssignmentName::ArrayElementName(name, _) => name.clone(),
+                    };
+                    let scalar = matches!(assignment.name, ast::AssignmentName::VariableName(_));
+                    assignments.push(Assigned { name, value: if scalar { value } else { None }, append: assignment.append });
                 } else {
                     let word = self.word(written);
                     words.push(word);
@@ -352,17 +458,16 @@ impl Walker {
             }
             CommandPrefixOrSuffixItem::ProcessSubstitution(_, subshell) => {
                 // A process substitution's result is a path, passed as an argument.
-                words.push(WordOut { text: "<(…)".to_owned(), literal: None });
+                words.push(WordOut { text: "<(…)".to_owned(), literal: None, parts: Vec::new() });
                 self.within(Context::ProcessSubstitution, |walker| walker.compound_list(&subshell.list));
             }
         }
     }
 
-    fn assignment_value(&mut self, value: &AssignmentValue) {
+    /// Walks an assignment's value; returns it as a word when it is a scalar, none for an array.
+    fn assignment_value(&mut self, value: &AssignmentValue) -> Option<WordOut> {
         match value {
-            AssignmentValue::Scalar(word) => {
-                self.word(word);
-            }
+            AssignmentValue::Scalar(word) => Some(self.word(word)),
             AssignmentValue::Array(values) => {
                 for (key, word) in values {
                     if let Some(key) = key {
@@ -370,6 +475,7 @@ impl Walker {
                     }
                     self.word(word);
                 }
+                None
             }
         }
     }
@@ -390,7 +496,7 @@ impl Walker {
                     };
                     let target = match target {
                         IoFileRedirectTarget::Filename(word) | IoFileRedirectTarget::Duplicate(word) => Some(self.word(word)),
-                        IoFileRedirectTarget::Fd(fd) => Some(WordOut { text: fd.to_string(), literal: Some(fd.to_string()) }),
+                        IoFileRedirectTarget::Fd(fd) => Some(WordOut { text: fd.to_string(), literal: Some(fd.to_string()), parts: Vec::new() }),
                         IoFileRedirectTarget::ProcessSubstitution(_, subshell) => {
                             self.within(Context::ProcessSubstitution, |walker| walker.compound_list(&subshell.list));
                             None
@@ -446,11 +552,13 @@ impl Walker {
                 for piece in &pieces {
                     self.piece(piece, &text);
                 }
-                WordOut { literal: literal_of(&pieces), text }
+                let literal = literal_of(&pieces);
+                let parts = if literal.is_some() { Vec::new() } else { parts_of(&pieces, false) };
+                WordOut { literal, text, parts }
             }
             Err(error) => {
                 self.fail(format!("A word does not parse: {text}: {error}"));
-                WordOut { text, literal: None }
+                WordOut { text, literal: None, parts: Vec::new() }
             }
         }
     }
@@ -504,6 +612,108 @@ fn literal_of(pieces: &[WordPieceWithSource]) -> Option<String> {
         }
     }
     Some(value)
+}
+
+/// The parts of a word's `pieces`, in order; `quoted` when they are inside double quotes. Adjacent
+/// text with the same quoting is one part.
+fn parts_of(pieces: &[WordPieceWithSource], quoted: bool) -> Vec<Part> {
+    let mut parts: Vec<Part> = Vec::new();
+    for piece in pieces {
+        let next: Vec<Part> = match &piece.piece {
+            WordPiece::Text(text) => vec![Part::Text { value: text.clone(), quoted }],
+            WordPiece::SingleQuotedText(text) => vec![Part::Text { value: text.clone(), quoted: true }],
+            WordPiece::AnsiCQuotedText(text) => vec![Part::Text { value: text.clone(), quoted: true }],
+            WordPiece::EscapeSequence(escaped) => vec![Part::Text { value: escaped.strip_prefix('\\').unwrap_or(escaped).to_owned(), quoted: true }],
+            WordPiece::DoubleQuotedSequence(inner) | WordPiece::GettextDoubleQuotedSequence(inner) => parts_of(inner, true),
+            WordPiece::TildeExpansion(expr) => vec![tilde_of(expr)],
+            WordPiece::ParameterExpansion(expr) => vec![parameter_of(expr, quoted)],
+            WordPiece::CommandSubstitution(command) | WordPiece::BackquotedCommandSubstitution(command) => vec![Part::Command { command: command.clone(), quoted }],
+            WordPiece::ArithmeticExpression(expr) => vec![Part::Arithmetic { expression: expr.value.clone(), quoted }],
+        };
+        for part in next {
+            match (parts.last_mut(), &part) {
+                (Some(Part::Text { value, quoted: before }), Part::Text { value: more, quoted: now }) if before == now => value.push_str(more),
+                _ => parts.push(part),
+            }
+        }
+    }
+    parts
+}
+
+fn tilde_of(expr: &TildeExpr) -> Part {
+    match expr {
+        TildeExpr::Home => Part::Tilde { of: TildeOf::Home, user: None },
+        TildeExpr::UserHome(user) => Part::Tilde { of: TildeOf::User, user: Some(user.clone()) },
+        TildeExpr::WorkingDir => Part::Tilde { of: TildeOf::Working, user: None },
+        TildeExpr::OldWorkingDir => Part::Tilde { of: TildeOf::Previous, user: None },
+        TildeExpr::NthDirFromTopOfDirStack { .. } | TildeExpr::NthDirFromBottomOfDirStack { .. } => Part::Tilde { of: TildeOf::Stack, user: None },
+    }
+}
+
+/// A parameter's name as the shell writes it: `HOME`, `1`, `@`, `?`; with an index or as an array, `other`.
+fn parameter_name(parameter: &Parameter) -> Option<String> {
+    match parameter {
+        Parameter::Positional(n) => Some(n.to_string()),
+        Parameter::Named(name) => Some(name.clone()),
+        Parameter::Special(special) => Some(
+            match special {
+                SpecialParameter::AllPositionalParameters { concatenate: true } => "*",
+                SpecialParameter::AllPositionalParameters { concatenate: false } => "@",
+                SpecialParameter::PositionalParameterCount => "#",
+                SpecialParameter::LastExitStatus => "?",
+                SpecialParameter::CurrentOptionFlags => "-",
+                SpecialParameter::ProcessId => "$",
+                SpecialParameter::LastBackgroundProcessId => "!",
+                SpecialParameter::ShellName => "0",
+            }
+            .to_owned(),
+        ),
+        Parameter::NamedWithIndex { .. } | Parameter::NamedWithAllIndices { .. } => None,
+    }
+}
+
+/// The parts of an operation's `word` (a default, an alternative), parsed as a word is.
+fn word_parts(word: &Option<String>, quoted: bool) -> Option<Vec<Part>> {
+    let text = word.as_deref().unwrap_or("");
+    word::parse(text, &parser_options()).ok().map(|pieces| parts_of(&pieces, quoted))
+}
+
+fn parameter_of(expr: &ParameterExpr, quoted: bool) -> Part {
+    let other = |parameter: &Parameter| Part::Parameter { name: parameter_name(parameter).unwrap_or_default(), op: ParameterOp::Other, word: None, pattern: None, quoted };
+    let made = |parameter: &Parameter, indirect: bool, op: ParameterOp, word: Option<Vec<Part>>, pattern: Option<String>| match parameter_name(parameter) {
+        Some(name) if !indirect => Part::Parameter { name, op, word, pattern, quoted },
+        _ => other(parameter),
+    };
+    let tested = |test: &ParameterTestType, unset_or_null: ParameterOp, unset: ParameterOp| match test {
+        ParameterTestType::UnsetOrNull => unset_or_null,
+        ParameterTestType::Unset => unset,
+    };
+    match expr {
+        ParameterExpr::Parameter { parameter, indirect } => made(parameter, *indirect, ParameterOp::Value, None, None),
+        ParameterExpr::UseDefaultValues { parameter, indirect, test_type, default_value } => {
+            made(parameter, *indirect, tested(test_type, ParameterOp::Default, ParameterOp::DefaultIfUnset), word_parts(default_value, quoted), None)
+        }
+        ParameterExpr::AssignDefaultValues { parameter, indirect, test_type, default_value } => {
+            made(parameter, *indirect, tested(test_type, ParameterOp::Assign, ParameterOp::AssignIfUnset), word_parts(default_value, quoted), None)
+        }
+        ParameterExpr::UseAlternativeValue { parameter, indirect, test_type, alternative_value } => {
+            made(parameter, *indirect, tested(test_type, ParameterOp::Alternative, ParameterOp::AlternativeIfUnset), word_parts(alternative_value, quoted), None)
+        }
+        ParameterExpr::IndicateErrorIfNullOrUnset { parameter, indirect, .. } => made(parameter, *indirect, ParameterOp::Error, None, None),
+        ParameterExpr::ParameterLength { parameter, indirect } => made(parameter, *indirect, ParameterOp::Length, None, None),
+        ParameterExpr::RemoveSmallestSuffixPattern { parameter, indirect, pattern } => made(parameter, *indirect, ParameterOp::RemoveSuffix, None, pattern.clone()),
+        ParameterExpr::RemoveLargestSuffixPattern { parameter, indirect, pattern } => made(parameter, *indirect, ParameterOp::RemoveLongestSuffix, None, pattern.clone()),
+        ParameterExpr::RemoveSmallestPrefixPattern { parameter, indirect, pattern } => made(parameter, *indirect, ParameterOp::RemovePrefix, None, pattern.clone()),
+        ParameterExpr::RemoveLargestPrefixPattern { parameter, indirect, pattern } => made(parameter, *indirect, ParameterOp::RemoveLongestPrefix, None, pattern.clone()),
+        ParameterExpr::Substring { parameter, .. }
+        | ParameterExpr::Transform { parameter, .. }
+        | ParameterExpr::UppercaseFirstChar { parameter, .. }
+        | ParameterExpr::UppercasePattern { parameter, .. }
+        | ParameterExpr::LowercaseFirstChar { parameter, .. }
+        | ParameterExpr::LowercasePattern { parameter, .. }
+        | ParameterExpr::ReplaceSubstring { parameter, .. } => other(parameter),
+        _ => Part::Parameter { name: String::new(), op: ParameterOp::Other, word: None, pattern: None, quoted },
+    }
 }
 
 /// Whether unquoted `text` has a brace expansion: `{` with a `,` or `..` before its `}`. A lone `{`, `}`

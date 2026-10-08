@@ -18,7 +18,10 @@ test("the parser's module splits a command into every program it would run, each
   expect(programs("echo $(rm x)")).toEqual(["rm", "echo"]);
   const split = segmentsOf("echo $(rm x) > ~/.zshrc");
   expect(split._tag === "Parsed" ? split.segments.map((segment): string => segment.context) : []).toEqual(["command_substitution", "command"]);
-  expect((split._tag === "Parsed" ? split.segments[1]?.redirects : []) as unknown).toEqual([{ op: ">", target: { text: "~/.zshrc" } }]);
+  // A word that is not literal comes with its parts: here a tilde for the home folder, then text.
+  expect((split._tag === "Parsed" ? split.segments[1]?.redirects : []) as unknown).toEqual([
+    { op: ">", target: { text: "~/.zshrc", parts: [{ kind: "tilde", of: "home" }, { kind: "text", value: "/.zshrc" }] } },
+  ]);
 });
 
 test("a command that the parser cannot follow in full is Unparsed, with the reason", () => {
