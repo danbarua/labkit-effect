@@ -33,7 +33,7 @@ import { Effect, FileSystem, HashMap, Option, Ref } from "effect";
 import { homedir } from "node:os";
 import { type PlannedWrite, plannedWrites, type ShownWrite, shownWrites, writtenFiles } from "../agent-host/command-writes.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
-import { type Current, currentOnDisk } from "../agent-tools/file-change.ts";
+import { type Current, currentOnDisk, recordingWrites } from "../agent-tools/file-change.ts";
 import { ShellCommand, WordText } from "../agent-policy/command-segments.ts";
 import type { Folders } from "../agent-policy/command-units.ts";
 import type { AgentConnection } from "effective-acp/agent";
@@ -174,7 +174,8 @@ export const editorWorld: World<FileSystem.FileSystem> = {
         ...(fs?.writeTextFile === true ? [anyTool(described(inFolder(writeFile)))] : []),
         ...(fs?.readTextFile === true && fs.writeTextFile === true ? [anyTool(described(inFolder(editFile)))] : []),
         anyTool(described(updatePlan)),
-        ...(connection.profile.client.capabilities.terminal === true ? [anyTool(described(runCommand))] : []),
+        // A command records the files it writes from the disk, which it writes, read just before and after it runs; what is shown before it runs is read through the editor (`writesBefore`).
+        ...(connection.profile.client.capabilities.terminal === true ? [anyTool(described(recordingWrites(writtenFiles(folders))(runCommand)))] : []),
       ];
       const source = yield* sourceOf(tools, { strictInput }).pipe(Effect.provideService(Editor, { connection, sessionId, cwd, terminals, writesBefore, currentOf }));
 

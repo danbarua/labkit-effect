@@ -548,9 +548,10 @@ the file tools' paths are resolved against the working folder (`agent-tools/in-w
   permission is asked; a command's call shows its `terminal` from when it has one, and when it has
   ended.
 - A call that ended having recorded the files it changed (`FileChanged`: `write_file`, `edit_file`)
-  shows them from what it recorded, live and on a replay alike (`changedFiles`): a created file as a
-  `diff` from no text (`oldText: null`), an updated file as one `diff` for each hunk of its patch,
-  whose texts are the hunk's lines with three lines of context, not the whole file. A call recorded
+  shows them from what it recorded, live and on a replay alike (`changedFiles`), followed by its
+  output: a created file as a `diff` from no text (`oldText: null`), an updated file as one `diff`
+  for each hunk of its patch, whose texts are the hunk's lines with three lines of context, not the
+  whole file. A call recorded
   before calls kept what they changed shows the `edit_file` input's texts, as before it ended.
 - A command that writes text to a file where its words show the text (`cat > f <<'EOF'`,
   `echo x >> f`, `tee f <<< x`; `agent-host/command-writes.ts`) shows each such file's `diff` in its
@@ -562,8 +563,10 @@ the file tools' paths are resolved against the working folder (`agent-tools/in-w
   file is over 256 KiB, a `cd` comes first in the command), the call says why no diff is shown, and
   the permission question shows the text the command writes. A note follows a diff whose text the
   shell expands (`$…`) before writing it. A command that succeeds records each such file it changed
-  (`FileChanged`), from its text read before the command ran and its text on the disk once the
-  command has run, so the diff is of what the command wrote, `$…` expanded. Once the call has ended,
+  (`FileChanged`), from its text on the disk just before the command ran and once it has run, so the
+  diff is of what the command wrote, `$…` expanded. The command writes the disk, not the editor's
+  buffer, so when the editor has unsaved changes to the file, the diff in the question (from the
+  editor's text) and the diff recorded (from the disk) differ. Once the call has ended,
   live and on a replay alike, it shows those diffs, and says what it wrote of each file it recorded
   nothing of (`Wrote config.yml.`, `Added to the end of notes.md.`): its text before was not known,
   a `cd` came first, or the call was recorded before commands kept their writes.

@@ -140,8 +140,8 @@ const shownOf = (tool: ToolName, outcome: ToolOutcome | undefined): string | und
  * The default presentation over the session's tool catalog (`immutableToolCatalogOf`): as the title,
  * the call's intent, on one line, when `described` (`agent-tools/described.ts`) added that input to
  * its tool, and the tool's name otherwise; its kind from the catalog (none for a tool the
- * catalog does not have); and, once it ends, the diffs of the files it changed (`changedFiles`), or,
- * when it changed none, its output, or why it failed, as text.
+ * catalog does not have); and, once it ends, the diffs of the files it changed (`changedFiles`), then
+ * its output, or why it failed, as text.
  */
 export const presentFrom =
   (catalog: ReadonlyArray<ToolSpec>): Present =>
@@ -149,8 +149,7 @@ export const presentFrom =
     const spec = catalog.find((tool) => tool.name === call.tool);
     const kind = spec?.kind;
     const shown = shownOf(call.tool, outcome);
-    const changed = changedFiles(outcome);
-    const content = changed.length > 0 || shown === undefined ? changed : [{ type: "content" as const, content: text(shown) }];
+    const content = [...changedFiles(outcome), ...(shown === undefined ? [] : [{ type: "content" as const, content: text(shown) }])];
     return Effect.succeed({
       title: titleOf(call, spec),
       ...(kind === undefined ? {} : { kind }),

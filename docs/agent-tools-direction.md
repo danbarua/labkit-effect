@@ -116,7 +116,8 @@ has them, the details of what it did (`ToolOutput`, `ToolDetail`), which a succe
 records and the model is never sent (`docs/agent-machine.md`, `docs/agent-session.md`). The first
 detail is `FileChanged`: a text file created, with its whole text, or updated, with a unified diff.
 `write_file`, `edit_file`, `terminal_command` and `run_command` record it, a command for each file
-whose text its words show (`writtenFiles`), the text after read from the disk once it has run. ACP
+whose text its words show (`writtenFiles`), its text read from the disk just before and after the
+command runs (`recordingWrites`). ACP
 shows a finished call's diffs from it, live and replayed alike, and the REPL prints them under the
 call (`docs/agent-acp.md`). Other harnesses keep the same two parts per result: Claude Code's
 `toolUseResult`, Codex's `FileChange`, opencode's `metadata`, omp's `details`.

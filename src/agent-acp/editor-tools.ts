@@ -14,16 +14,16 @@
  * - A failure the editor reports is the call's failure, naming the method and the path or command.
  */
 
-import { Context, Duration, Effect, FileSystem, HashMap, Option, Ref, Schema } from "effect";
+import { Context, Duration, Effect, HashMap, Option, Ref, Schema } from "effect";
 import type { AgentConnection } from "effective-acp/agent";
 import type { V1Version } from "effective-acp/protocol";
 import { type SessionId, type TerminalId, ToolCallId } from "effective-acp/schema/v1";
 import { type CallId, ToolName } from "../agent-machine/names.ts";
 import type { ShownWrite } from "../agent-host/command-writes.ts";
 import { ShellCommand } from "../agent-policy/command-segments.ts";
-import { type Current, fileChanged, filesWritten } from "../agent-tools/file-change.ts";
+import { type Current, fileChanged } from "../agent-tools/file-change.ts";
 import { FilePath } from "../agent-tools/paths.ts";
-import { CurrentCall, Reported, Rejected, type Tool, withDetails } from "../agent-tools/tool.ts";
+import { CurrentCall, Reported, Rejected, type Tool } from "../agent-tools/tool.ts";
 import { commandSeconds, EditFile, maxReadBytes, maxReadText, ReadFile, RunCommand } from "../agent-tools/workspace.ts";
 
 /** The editor that a session's tools go through. */
@@ -157,7 +157,7 @@ export const updatePlan: Tool<typeof UpdatePlan.fields, Editor> = {
 };
 
 /** `terminal_command`: runs a shell command in a terminal of the editor's, in the working folder. */
-export const runCommand: Tool<typeof RunCommand.fields, Editor | CurrentCall | FileSystem.FileSystem> = {
+export const runCommand: Tool<typeof RunCommand.fields, Editor | CurrentCall> = {
   name: ToolName.make("terminal_command"),
   kind: "execute",
   replay: "unsafe",
@@ -168,7 +168,7 @@ export const runCommand: Tool<typeof RunCommand.fields, Editor | CurrentCall | F
       const { connection, sessionId, cwd, terminals, writesBefore } = yield* Editor;
       const call = yield* CurrentCall;
       const seconds = input.timeout_seconds ?? commandSeconds;
-      const written = yield* writesBefore(call, ShellCommand.make(input.command));
+      yield* writesBefore(call, ShellCommand.make(input.command));
       const { output, truncated, exited } = yield* Effect.acquireUseRelease(
         connection.client["terminal/create"]({ sessionId, command: "/bin/sh", args: ["-c", input.command], cwd, outputByteLimit: maxReadBytes }),
         ({ terminalId }) =>
@@ -190,9 +190,6 @@ export const runCommand: Tool<typeof RunCommand.fields, Editor | CurrentCall | F
       });
       const text = `${truncated ? `[The output's beginning was cut: its last ${maxReadText} follow.]\n` : ""}${output}${output.endsWith("\n") || output === "" ? "" : "\n"}${ending}`;
       // A command that exited 0 succeeded. One that exited otherwise, was stopped by a signal, or ran past its time failed, with its output.
-      if (!(Option.isSome(exited) && exited.value.exitCode === 0)) return yield* new Reported({ message: text });
-      // The files it wrote are recorded from their text read before it ran and their text on the disk, which it wrote, now.
-      const before = written.flatMap((write) => (write._tag === "Diff" ? [{ full: write.full, before: write.before === undefined ? { _tag: "Missing" as const } : { _tag: "Text" as const, text: write.before } }] : []));
-      return withDetails(text, yield* filesWritten(yield* FileSystem.FileSystem, before));
+      return Option.isSome(exited) && exited.value.exitCode === 0 ? text : yield* new Reported({ message: text });
     }),
 };

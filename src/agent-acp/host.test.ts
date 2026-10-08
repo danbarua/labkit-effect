@@ -804,7 +804,7 @@ test("edit_file replaces one occurrence through fs/*, shown as a diff; terminal_
   ]);
 });
 
-test("a command that writes text to a file shows the file's diff in its call: before the command runs, in the question, and after it succeeds; the text before is the editor's, and a new file's is none", async () => {
+test("a command that writes text to a file shows the file's diff in its call: before it runs and in the question from the editor's text, and once it has succeeded from what it recorded, the disk's text just before it ran; a new file's is none", async () => {
   const host = startHost({
     script: [
       answer({ _tag: "ToolCall", call: "write-1", tool: "terminal_command", input: { command: "cat > config.yml <<'EOF'\nname: new\nEOF\necho hi >> new.txt", intent: "Write the files." } }),
@@ -812,10 +812,15 @@ test("a command that writes text to a file shows the file's diff in its call: be
     ],
   });
   mkdirSync(host.cwd, { recursive: true });
-  writeFileSync(join(host.cwd, "config.yml"), "name: on disk\n");
-  // The editor's terminal writes the files as the shell would.
-  const { app, log } = sdkClient(undefined, { [join(host.cwd, "config.yml")]: "name: in the editor\n" }, () => {
-    writeFileSync(join(host.cwd, "config.yml"), "name: new\n");
+  const config = join(host.cwd, "config.yml");
+  writeFileSync(config, "name: on disk\n");
+  // The file is saved while the question is open; the editor's terminal then writes the files as the shell would.
+  const allowAfterSaving = () => {
+    writeFileSync(config, "name: saved while asked\n");
+    return { outcome: { outcome: "selected" as const, optionId: "allow-once" } };
+  };
+  const { app, log } = sdkClient(allowAfterSaving, { [config]: "name: in the editor\n" }, () => {
+    writeFileSync(config, "name: new\n");
     appendFileSync(join(host.cwd, "new.txt"), "hi\n");
     return { output: "", exitCode: 0 };
   });
@@ -825,15 +830,15 @@ test("a command that writes text to a file shows the file's diff in its call: be
     await ctx.request("session/prompt", say(created.sessionId, "Write"));
   });
   await host.stop();
-  const diffs = [
-    { type: "diff", path: join(host.cwd, "config.yml"), oldText: "name: in the editor\n", newText: "name: new\n" },
-    { type: "diff", path: join(host.cwd, "new.txt"), oldText: null, newText: "hi\n" },
-  ];
+  const created = { type: "diff", path: join(host.cwd, "new.txt"), oldText: null, newText: "hi\n" };
   const asked = log.asked.find((each) => each.toolCall.toolCallId === "write-1")?.toolCall.content ?? [];
-  expect(asked.slice(0, 2) as unknown).toEqual(diffs);
+  expect(asked.slice(0, 2) as unknown).toEqual([{ type: "diff", path: config, oldText: "name: in the editor\n", newText: "name: new\n" }, created]);
   expect(JSON.stringify(asked.at(-1))).toContain("The diff shows what it writes to config.yml.");
   const updates = log.updates.filter((update) => update.sessionUpdate === "tool_call_update" && update.toolCallId === "write-1" && "content" in update && update.content !== undefined);
-  expect(updates.at(-1) as unknown).toMatchObject({ status: "completed", content: [...diffs, { type: "terminal" }] });
+  expect(updates.at(-1) as unknown).toMatchObject({
+    status: "completed",
+    content: [{ type: "diff", path: config, oldText: "name: saved while asked\n", newText: "name: new\n" }, created, { type: "terminal" }],
+  });
 });
 
 test("a loaded session shows the diffs of the files that write_file and edit_file changed as live showed them once the calls ended: from what the calls recorded", async () => {
@@ -856,8 +861,9 @@ test("a loaded session shows the diffs of the files that write_file and edit_fil
   /** The content of the last update about `call` that has any. */
   const lastContent = (updates: ReadonlyArray<Update>, call: string) =>
     updates.flatMap((update) => ((update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") && update.toolCallId === call && update.content !== undefined && update.content !== null ? [update.content] : [])).at(-1);
-  const written = [{ type: "diff", path: join(first.cwd, "notes.txt"), oldText: null, newText: "one\ntwo\n" }];
-  const edited = [{ type: "diff", path: a, oldText: "first\nalpha\nlast\n", newText: "first\nbeta\nlast\n" }];
+  const said = (value: string) => ({ type: "content", content: { type: "text", text: value } });
+  const written = [{ type: "diff", path: join(first.cwd, "notes.txt"), oldText: null, newText: "one\ntwo\n" }, said(`Wrote 8 bytes to ${join(first.cwd, "notes.txt")}.`)];
+  const edited = [{ type: "diff", path: a, oldText: "first\nalpha\nlast\n", newText: "first\nbeta\nlast\n" }, said(`Edited ${a}.`)];
   expect(lastContent(live.log.updates, "write-1") as unknown).toEqual(written);
   expect(lastContent(live.log.updates, "edit-1") as unknown).toEqual(edited);
   // The files have changed since: the diffs come from what the calls recorded, not from the files.
