@@ -63,7 +63,7 @@ When the policy asks, it offers four options:
 | `reject-once` | `reject_once` | This call is vetoed. |
 | `reject-session` | `reject_always` | This call is vetoed. Later calls to the tool are vetoed without a question, in every mode, `bypassPermissions` included. |
 
-An answer that names no offered option vetoes the call.
+An answer that names no offered option vetoes the call. So does the answer `cancelled` (`{ outcome: "cancelled" }`, as ACP gives it), which an answerer gives when the turn that asked was cancelled; the model is told that the question was cancelled before it was answered.
 
 The policy reads session answers from the session's facts (`PermissionAsked`, `PermissionAnswered`).
 A process that resumes the session from its facts therefore applies the same answers.

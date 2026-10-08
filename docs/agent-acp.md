@@ -341,7 +341,7 @@ runs (`session.streamed`): `ModelDelta`, `ModelPartArrived` and `ModelResponseEn
 | `ModelResponded`: a `Thinking` part | `agent_thought_chunk` with the part's text that no delta of its request sent |
 | `ToolCallArrived`; a `ToolCall` part of `ModelPartArrived` or `ModelResponded` | `tool_call`, `pending`, with the presentation's title, kind, locations and content, the tool's name (`name`) and the call's input (`rawInput`); once for each call |
 | `PermissionAsked` | `tool_call_update`, `pending` |
-| `PermissionAnswered` | `tool_call_update` with `_meta["labkit.dev/permission"]`: the option the answer picked (`optionId`, `name`, `kind`), live and on replay alike. ACP has no field for it, and a replay asks no question, so a client shows a replayed call's answer from it. The key follows labkit's own (`labkit.dev/baseline`, `labkit.dev/failure`). |
+| `PermissionAnswered` | `tool_call_update` with `_meta["labkit.dev/permission"]`: the outcome as ACP's `RequestPermissionOutcome` gives it, live and on replay alike. A selected option is `{ outcome: "selected", optionId, name, kind }`; a cancelled request is `{ outcome: "cancelled" }`. ACP has no field for it, and a replay asks no question, so a client shows a replayed call's answer from it. The key follows labkit's own (`labkit.dev/baseline`, `labkit.dev/failure`). A call that was asked and ends with no answer recorded (its turn was cancelled or interrupted first) is sent `{ outcome: "cancelled" }` before its `ToolEnded` update. |
 | `ToolCallDispatched` | `tool_call_update`, `in_progress` |
 | `ToolEnded` | `tool_call_update`, `completed` when it succeeded and `failed` otherwise, with the presentation's content and locations, its title and kind where they changed, and what it returned or why it failed (`rawOutput`) |
 | anything else | nothing |
@@ -480,12 +480,14 @@ the load showed is not shown again, and a later request's deltas are sent once.
 - The request (`requestOf`) is the call as the host presents it, `pending`, with its input as
   `rawInput`, as the call's `tool_call` carried it (`rawOf`), and, where the presentation has no
   kind, the question's kind. Its options are exactly the question's, by id, name and kind.
-- A selected option is the answer that picks it (`answerOf`).
-- `cancelled` is the question's reject-once option: the call is refused, nothing is remembered for
-  the session, and the turn goes on. The model then decides what to do next.
-- A request that the client fails, a connection that closes, an option the question did not offer,
-  or a cancel where no option rejects once also refuses the call once. Each is logged as a warning
-  with its cause.
+- The answer is recorded as the client gives it (`answerOf`): the option selected, or `cancelled`.
+  ACP has the client answer `cancelled` when the turn that asked was cancelled. A `cancelled` answer
+  vetoes the call, the model is told that the question was cancelled before it was answered, and
+  nothing is remembered for the session. When the client answers `cancelled` without cancelling the
+  turn, the turn goes on, and the model decides what to do next.
+- A request that the client fails, a connection that closes, or an option the question did not
+  offer refuses the call once: the answer recorded is the question's reject-once option. Each is
+  logged as a warning with its cause.
 - A call that ends while its question is still out (its turn was cancelled) has its request
   cancelled.
 
@@ -676,8 +678,9 @@ The host logs each event under `log-keys.ts`, with the ids it is about as log an
   the files), which a replay has no call for.
 - **Tool calls go through the editor.** The model then sees unsaved buffers, and the editor shows and
   controls what changes. `workspaceWorld` is a stopgap that bypasses it.
-- **A cancelled permission request refuses the call once.** The turn goes on, and the model asks
-  what to do next.
+- **A cancelled permission request is recorded as cancelled.** ACP's `cancelled` says that the turn
+  was cancelled, not that the user refused, so it is not recorded as an option selected. The call
+  does not run.
 - **The connection's end leaves a turn running.** The host does not end it; the next load does.
 
 ## Tests

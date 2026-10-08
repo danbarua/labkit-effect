@@ -5,7 +5,7 @@ import { test } from "../../tests/support/test.ts";
 import { TerminalId, PermissionOptionId, SessionId } from "effective-acp/schema/v1";
 import { CallId, ToolName } from "../agent-machine/names.ts";
 import type { Received } from "../agent-machine/received.ts";
-import { type Explained, OptionId, OptionName, type PermissionQuestion, permissions, questionIn } from "../agent-policy/permissions.ts";
+import { type Explained, type PermissionQuestion, permissions, questionIn } from "../agent-policy/permissions.ts";
 import { receivedJson } from "../agent-session/received.ts";
 import { ShellCommand, WordText } from "../agent-policy/command-segments.ts";
 import { CodeText, NeedText } from "../agent-policy/command-units.ts";
@@ -53,25 +53,22 @@ test("the option selected is the answer that picks it; the policy takes it as th
   expect(answers.map((answer) => (answer instanceof InvalidAnswer ? answer : decided(answer)))).toEqual(["Continue", "Continue", "Veto"]);
 });
 
-test("a cancelled request is the refusal of this call alone: the reject-once option, not one that rejects for the session", () => {
-  const always: PermissionQuestion = {
-    ...question,
-    options: [{ optionId: OptionId.make("reject-session"), name: OptionName.make("Never"), kind: "reject_always" }, ...question.options],
-  };
-  const answer = answerOf({ outcome: { outcome: "cancelled" } }, always);
-  if (answer instanceof InvalidAnswer) throw answer;
-  expect(answer.body).toEqual({ _tag: "Text", text: '{"optionId":"reject-once"}' } as never);
-  expect(decided(answer)).toBe("Veto");
+test("a cancelled request is recorded as cancelled, as ACP gives it, not as an option selected; the policy vetoes the call", () => {
+  const noReject: PermissionQuestion = { ...question, options: question.options.filter((option) => option.kind !== "reject_once") };
+  for (const asked of [question, noReject]) {
+    const answer = answerOf({ outcome: { outcome: "cancelled" } }, asked);
+    if (answer instanceof InvalidAnswer) throw answer;
+    expect(answer.body).toEqual({ _tag: "Text", text: '{"outcome":"cancelled"}' } as never);
+    expect(decided(answer)).toBe("Veto");
+  }
+  const selected = answerOf({ outcome: { outcome: "selected", optionId: PermissionOptionId.make("reject-once") } }, question);
+  if (selected instanceof InvalidAnswer) throw selected;
+  expect(selected.body).toEqual({ _tag: "Text", text: '{"outcome":"selected","optionId":"reject-once"}' } as never);
 });
 
-test("an option the question did not offer, or a cancel with no option to reject once, is an invalid answer", () => {
+test("an option the question did not offer is an invalid answer", () => {
   const unknown = answerOf({ outcome: { outcome: "selected", optionId: PermissionOptionId.make("allow-forever") } }, question);
-  const noReject: PermissionQuestion = { ...question, options: question.options.filter((option) => option.kind !== "reject_once") };
-  const cancelled = answerOf({ outcome: { outcome: "cancelled" } }, noReject);
-  expect([unknown, cancelled].map((answer) => (answer instanceof InvalidAnswer ? answer.reason : "valid"))).toEqual([
-    "allow-forever is not an option offered for write_file.",
-    "The request was cancelled, and the question about write_file offers no option that rejects the call once.",
-  ]);
+  expect(unknown instanceof InvalidAnswer ? unknown.reason : "valid").toBe("allow-forever is not an option offered for write_file.");
 });
 
 test("a question about a command adds to the call's content a text block naming each program that needs permission and why", () => {

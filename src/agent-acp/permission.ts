@@ -11,7 +11,7 @@ import type { RequestPermissionRequest, RequestPermissionResponse, SessionId, To
 import { PermissionOptionId, ToolCallId } from "effective-acp/schema/v1";
 import type { Received } from "../agent-machine/received.ts";
 import { markdownOf } from "../agent-host/command-detail.ts";
-import { answerPicking, type CommandNeed, type Explained, explainedAt, type PermissionQuestion } from "../agent-policy/permissions.ts";
+import { answerCancelled, answerPicking, type CommandNeed, type Explained, explainedAt, type PermissionQuestion } from "../agent-policy/permissions.ts";
 import { type Call, type Presented, rawOf } from "./projection.ts";
 
 /** A response that picks no option the question offered; the host answers -32602. */
@@ -78,16 +78,11 @@ export function requestOf(sessionId: SessionId, call: Call, question: Permission
 
 /**
  * Returns the answer that `response` gives to `question`, as `PermissionAnswered` records it: the
- * option selected, or, for `cancelled`, the option that rejects this call once.
+ * outcome as ACP gives it, the option selected or `cancelled`.
  */
 export function answerOf(response: RequestPermissionResponse, question: PermissionQuestion): Received | InvalidAnswer {
   const { outcome } = response;
-  if (outcome.outcome === "cancelled") {
-    const reject = question.options.find((option) => option.kind === "reject_once");
-    return reject === undefined
-      ? new InvalidAnswer({ reason: `The request was cancelled, and the question about ${question.tool} offers no option that rejects the call once.` })
-      : answerPicking(reject.optionId);
-  }
+  if (outcome.outcome === "cancelled") return answerCancelled;
   const chosen: string = outcome.optionId;
   const picked = question.options.find((option) => option.optionId === chosen);
   return picked === undefined

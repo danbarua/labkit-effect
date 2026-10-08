@@ -47,7 +47,7 @@ import type { BlobId, Received } from "../agent-machine/received.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
 import { asText, parseJson } from "../agent-session/received.ts";
 import { intentOf, isDescribed } from "../agent-tools/described.ts";
-import { optionPicked, type PermissionQuestion, questionIn } from "../agent-policy/permissions.ts";
+import { answerIn, optionPicked, type PermissionQuestion, questionIn } from "../agent-policy/permissions.ts";
 import { patchCutNote } from "../agent-tools/file-change.ts";
 import { hunksOf } from "../agent-tools/line-diff.ts";
 import { blobNameOf, blobUriOf } from "../agent-session/blobs.ts";
@@ -335,7 +335,7 @@ export interface ProjectionState {
   readonly ended: ReadonlySet<TurnId>;
   /** The calls announced, as they were presented, each with the latest input it was announced with. */
   readonly calls: ReadonlyMap<CallId, { readonly call: Call; readonly shown: Presented }>;
-  /** The permission question each call was asked (`PermissionAsked`), for naming the option its answer picked. */
+  /** The permission question each call was asked (`PermissionAsked`) and has no answer to yet, for naming the option its answer selects. */
   readonly asked: ReadonlyMap<CallId, PermissionQuestion>;
 }
 
@@ -343,10 +343,25 @@ export const start: ProjectionState = { texts: new Map(), ended: new Set(), call
 
 /**
  * The key of a call's permission answer in a `tool_call_update`'s `_meta`, after labkit's own
- * (`labkit.dev/baseline`, `labkit.dev/failure`): the option the answer picked, by its id, name and kind.
- * ACP has no field for it, and a replayed call is asked no question, so a client shows the answer from it.
+ * (`labkit.dev/baseline`, `labkit.dev/failure`). The value is the outcome as ACP's
+ * `RequestPermissionOutcome` gives it: `{ outcome: "selected", optionId }`, with the option's `name`
+ * and `kind`, or `{ outcome: "cancelled" }`. A call that was asked and ended with no answer recorded
+ * (its turn was cancelled or interrupted first) is sent `cancelled` as it ends. ACP has no field for
+ * the outcome, and a replayed call is asked no question, so a client shows the answer from it.
  */
 export const permissionMetaKey = "labkit.dev/permission";
+
+/** A call's permission outcome, as `permissionMetaKey` sends it. */
+type PermissionOutcome =
+  | { readonly outcome: "selected"; readonly optionId: string; readonly name: string; readonly kind: string }
+  | { readonly outcome: "cancelled" };
+
+/** The `tool_call_update` that sends `call`'s permission outcome. */
+const permissionUpdate = (call: CallId, outcome: PermissionOutcome): SessionUpdate => ({
+  sessionUpdate: "tool_call_update",
+  toolCallId: ToolCallId.make(call),
+  _meta: { [permissionMetaKey]: outcome },
+});
 
 export interface Projected {
   readonly state: ProjectionState;
@@ -621,16 +636,14 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
           return Effect.succeed({ state: { ...state, asked }, updates: [status(observation.call, "pending")] });
         }
         case "PermissionAnswered": {
-          // The answer, live and on a replay alike: the option picked, named as the question offered it.
+          // The answer, live and on a replay alike: the option selected, named as the question offered it, or cancelled.
           const question = state.asked.get(observation.call);
-          const picked = question === undefined ? undefined : optionPicked(question, observation.answer);
-          if (picked === undefined) return Effect.succeed(nothing(state));
-          const answered: SessionUpdate = {
-            sessionUpdate: "tool_call_update",
-            toolCallId: ToolCallId.make(observation.call),
-            _meta: { [permissionMetaKey]: { optionId: picked.optionId, name: picked.name, kind: picked.kind } },
-          };
-          return Effect.succeed({ state, updates: [answered] });
+          if (question === undefined) return Effect.succeed(nothing(state));
+          const unasked = { ...state, asked: new Map([...state.asked].filter(([call]) => call !== observation.call)) };
+          if (answerIn(observation.answer)?.outcome === "cancelled") return Effect.succeed({ state: unasked, updates: [permissionUpdate(observation.call, { outcome: "cancelled" })] });
+          const picked = optionPicked(question, observation.answer);
+          if (picked === undefined) return Effect.succeed(nothing(unasked));
+          return Effect.succeed({ state: unasked, updates: [permissionUpdate(observation.call, { outcome: "selected", optionId: picked.optionId, name: picked.name, kind: picked.kind })] });
         }
         case "ToolCallDispatched":
           return Effect.succeed({ state, updates: [status(observation.call, "in_progress")] });
@@ -638,9 +651,12 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
           const known = state.calls.get(observation.call);
           const outcome = observation.outcome;
           const { raw, from } = rawOutputOf(outcome);
+          // A question still out when its call ends was not answered: its request ended cancelled.
+          const unanswered = state.asked.has(observation.call);
           const ended = (shown: Presented | undefined): Projected => ({
-            state,
+            state: unanswered ? { ...state, asked: new Map([...state.asked].filter(([call]) => call !== observation.call)) } : state,
             updates: [
+              ...(unanswered ? [permissionUpdate(observation.call, { outcome: "cancelled" })] : []),
               {
                 sessionUpdate: "tool_call_update",
                 toolCallId: ToolCallId.make(observation.call),

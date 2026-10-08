@@ -155,8 +155,15 @@ export const explainedAt = (explained: Explained, needs: ReadonlyArray<CommandNe
   return explained.programs.find((each) => each.program === need.program);
 };
 
-/** The answer (`PermissionAnswered.answer`): the id of the option picked. */
-export const PermissionAnswer = Schema.Struct({ optionId: OptionId });
+/**
+ * The answer (`PermissionAnswered.answer`), as ACP's `RequestPermissionOutcome` gives it: the option
+ * selected, by its id, or `cancelled`, which the answerer gives when the turn that asked was cancelled.
+ * An answer recorded as `{ optionId }` alone, without `outcome`, selected that option.
+ */
+export const PermissionAnswer = Schema.Union([
+  Schema.Struct({ outcome: Schema.optionalKey(Schema.Literal("selected")), optionId: OptionId }),
+  Schema.Struct({ outcome: Schema.Literal("cancelled") }),
+]);
 export type PermissionAnswer = typeof PermissionAnswer.Type;
 
 /** How commands are judged: the rules and read-only programs, which tools run shell commands, and the parser that splits a command. */
@@ -194,13 +201,19 @@ const fromJson = <S extends Schema.Top & { readonly DecodingServices: never }>(s
 /** Decodes the question in a `PermissionAsked`; returns undefined when this module did not ask it. */
 export const questionIn = (asks: Received): PermissionQuestion | undefined => fromJson(PermissionQuestion, asks);
 
-/** Returns the answer that picks `option`, in the form that `PermissionAnswered` holds. */
-export const answerPicking = (option: OptionId): Received => asJson(PermissionAnswer, { optionId: option });
+/** Returns the answer that selects `option`, in the form that `PermissionAnswered` holds. */
+export const answerPicking = (option: OptionId): Received => asJson(PermissionAnswer, { outcome: "selected", optionId: option });
 
-/** Returns the question's option that `answer` picks; undefined when the answer names no offered option. */
+/** The answer `cancelled`, in the form that `PermissionAnswered` holds. */
+export const answerCancelled: Received = asJson(PermissionAnswer, { outcome: "cancelled" });
+
+/** Decodes the answer in a `PermissionAnswered`; returns undefined when it is not one that this module reads. */
+export const answerIn = (answer: Received): PermissionAnswer | undefined => fromJson(PermissionAnswer, answer);
+
+/** Returns the question's option that `answer` selects; undefined when the answer is `cancelled` or names no offered option. */
 export const optionPicked = (question: PermissionQuestion, answer: Received): PermissionOption | undefined => {
-  const picked = fromJson(PermissionAnswer, answer);
-  return picked === undefined ? undefined : question.options.find((option) => option.optionId === picked.optionId);
+  const picked = answerIn(answer);
+  return picked === undefined || !("optionId" in picked) ? undefined : question.options.find((option) => option.optionId === picked.optionId);
 };
 
 /** A command's input, as the command tools take it: `{ "command": … }`. */
@@ -587,6 +600,7 @@ export function permissions(
     },
     receive: (question, message) => {
       if (message._tag !== "Answered") return { _tag: "Waiting", state: question, asks: undefined };
+      if (answerIn(message.answer)?.outcome === "cancelled") return veto(`The question about this call to ${question.tool} was cancelled before it was answered.`);
       const picked = optionPicked(question, message.answer);
       if (picked === undefined) return veto(`The answer named no option offered for ${question.tool}.`);
       return picked.kind === "allow_once" || picked.kind === "allow_always" ? proceed : veto(`The user rejected this call to ${question.tool}.`);

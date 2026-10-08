@@ -69,7 +69,7 @@ export interface Feed {
   readonly usage: Effect.Effect<void>;
 }
 
-/** Returns the answer that picks the option refusing this call once, which a failed or cancelled question records. */
+/** Returns the answer that picks the option refusing this call once, which a failed question records. */
 const rejectOnce = (question: PermissionQuestion) =>
   answerPicking(question.options.find((option) => option.kind === "reject_once")?.optionId ?? OptionId.make("reject-once"));
 

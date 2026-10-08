@@ -431,7 +431,7 @@ test("the first prompt opens the draft; thinking and text stream, write_file goe
   // The answer, as the session recorded it, is sent with the call: the option picked.
   expect(log.updates.find((update) => update.sessionUpdate === "tool_call_update" && update._meta !== undefined && update._meta !== null)).toMatchObject({
     toolCallId: "call-1",
-    _meta: { "labkit.dev/permission": { optionId: "allow-once", name: "Allow once", kind: "allow_once" } },
+    _meta: { "labkit.dev/permission": { outcome: "selected", optionId: "allow-once", name: "Allow once", kind: "allow_once" } },
   });
   const texts = log.updates.flatMap((update) => (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text" ? [update.content.text] : []));
   expect(texts.join("")).toBe("Writing.Done.");
@@ -452,7 +452,11 @@ test("the first prompt opens the draft; thinking and text stream, write_file goe
   expect(endings(facts)).toEqual(["Completed"]);
 });
 
-test("a client that answers a permission request cancelled refuses the call: the editor is not asked to write, and the turn goes on to its answer", async () => {
+/** Each call's permission outcome in `updates`, as `_meta["labkit.dev/permission"]` sent it. */
+const permissionOutcomes = (updates: ReadonlyArray<Update>) =>
+  updates.flatMap((update) => (update.sessionUpdate === "tool_call_update" && update._meta !== undefined && update._meta !== null && "labkit.dev/permission" in update._meta ? [[update.toolCallId, update._meta["labkit.dev/permission"]]] : []));
+
+test("a client that answers a permission request cancelled refuses the call: the answer is recorded as cancelled, not as an option, and sent so live and on a load; the editor is not asked to write, and the turn goes on to its answer", async () => {
   const host = startHost({ script: [answer(writeNotes()), answer({ _tag: "Text", text: "I did not write it." })] });
   const { app, log } = sdkClient(() => ({ outcome: { outcome: "cancelled" } }));
   const result = await app.connectWith(host.stream, async (ctx) => {
@@ -466,6 +470,18 @@ test("a client that answers a permission request cancelled refuses the call: the
   expect(kinds(log.updates)).toContain("tool_call_update:failed");
   expect(kinds(log.updates)).not.toContain("tool_call_update:in_progress");
   expect(host.targets).toHaveLength(2);
+  const facts = await factsOn(storeFileOf(host.directory, result.sessionId));
+  const answered = facts.find((fact) => fact._tag === "Observed" && fact.observation._tag === "PermissionAnswered");
+  expect(answered).toMatchObject({ observation: { answer: { body: { _tag: "Text", text: '{"outcome":"cancelled"}' } } } });
+  expect(permissionOutcomes(log.updates)).toEqual([["call-1", { outcome: "cancelled" }]]);
+  const second = startHost({});
+  const reloaded = sdkClient();
+  await reloaded.app.connectWith(second.stream, async (ctx) => {
+    await initialize(ctx);
+    await ctx.request("session/load", { sessionId: result.sessionId, cwd: second.cwd, mcpServers: [] });
+  });
+  await second.stop();
+  expect(permissionOutcomes(reloaded.log.updates)).toEqual([["call-1", { outcome: "cancelled" }]]);
 });
 
 test("session/cancel during a turn ends its prompt cancelled, and the session takes the next prompt; a prompt request the client cancels cancels its turn too", async () => {
@@ -938,8 +954,8 @@ test("a loaded session shows the diffs of the files that write_file and edit_fil
     updates.flatMap((update) => (update.sessionUpdate === "tool_call_update" && update._meta !== undefined && update._meta !== null ? [[update.toolCallId, update._meta["labkit.dev/permission"]]] : []));
   expect(answered(reloaded.log.updates)).toEqual(answered(live.log.updates));
   expect(answered(reloaded.log.updates)).toEqual([
-    ["write-1", { optionId: "allow-once", name: "Allow once", kind: "allow_once" }],
-    ["edit-1", { optionId: "allow-once", name: "Allow once", kind: "allow_once" }],
+    ["write-1", { outcome: "selected", optionId: "allow-once", name: "Allow once", kind: "allow_once" }],
+    ["edit-1", { outcome: "selected", optionId: "allow-once", name: "Allow once", kind: "allow_once" }],
   ]);
 });
 
@@ -1102,7 +1118,7 @@ test("each lifecycle point logs its event with the connection, request, session,
   // The loop logs each observation it records; a permission's question and answer with their text, for an audit of what was asked and answered.
   const recorded = (observation: string) => host.logged.find((each) => each.key === sessionLogKeys.loop.observationRecorded && (each.details as { observation?: string } | undefined)?.observation === observation);
   expect(recorded("PermissionAsked")).toMatchObject({ details: { details: { call: "call-1", asks: expect.stringContaining("write_file") } } });
-  expect(recorded("PermissionAnswered")).toMatchObject({ details: { details: { call: "call-1", answer: '{"optionId":"allow-once"}' } } });
+  expect(recorded("PermissionAnswered")).toMatchObject({ details: { details: { call: "call-1", answer: '{"outcome":"selected","optionId":"allow-once"}' } } });
   expect(of(logKeys.usage.sent)).toMatchObject({ details: { used: expect.any(Number), size: expect.any(Number) } });
   expect(of(logKeys.prompt.settled)).toMatchObject({
     level: "Info",
@@ -2208,7 +2224,7 @@ test("a file read over 256 KiB is cut before a character, not inside it; a call'
   expect(announced !== undefined && "title" in announced ? announced.title : undefined).toBe("update_plan: ls");
 });
 
-test("a call that ends while its permission request is out, its turn cancelled, has the request cancelled at the client", async () => {
+test("a call that ends while its permission request is out, its turn cancelled, has the request cancelled at the client, and is sent the outcome cancelled live and on a load", async () => {
   const host = startHost({
     script: [answer({ _tag: "ToolCall", call: "write-1", tool: "write_file", input: { path: "a.txt", content: "hi", intent: "Write a.txt." } }), answer({ _tag: "Text", text: "Done." })],
   });
@@ -2225,17 +2241,27 @@ test("a call that ends while its permission request is out, its turn cancelled, 
         }),
       );
     })
-    .onNotification("session/update", () => {});
-  const cancelled = await app.connectWith(host.stream, async (ctx) => {
+    .onNotification("session/update", (ctx) => void updates.push(ctx.params.update));
+  const updates: Array<Update> = [];
+  const { cancelled, sessionId } = await app.connectWith(host.stream, async (ctx) => {
     await initialize(ctx);
     const { sessionId } = await ctx.request("session/new", { cwd: host.cwd, mcpServers: [] });
     const prompt = ctx.request("session/prompt", say(sessionId, "Write it"));
     await asked.promise;
     await ctx.notify("session/cancel", { sessionId });
     await prompt;
-    return Promise.race([aborted.promise.then(() => true), Bun.sleep(2000).then(() => false)]);
+    return { sessionId, cancelled: await Promise.race([aborted.promise.then(() => true), Bun.sleep(2000).then(() => false)]) };
   });
   await host.stop();
+  expect(permissionOutcomes(updates)).toEqual([["write-1", { outcome: "cancelled" }]]);
+  const second = startHost({});
+  const reloaded = sdkClient();
+  await reloaded.app.connectWith(second.stream, async (ctx) => {
+    await initialize(ctx);
+    await ctx.request("session/load", { sessionId, cwd: second.cwd, mcpServers: [] });
+  });
+  await second.stop();
+  expect(permissionOutcomes(reloaded.log.updates)).toEqual([["write-1", { outcome: "cancelled" }]]);
   expect(cancelled).toBe(true);
 });
 

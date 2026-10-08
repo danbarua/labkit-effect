@@ -10,13 +10,13 @@
  * response was complete) is shown where it arrived (`ToolCallArrived`).
  */
 
-import { Array as Arr, Schema } from "effect";
+import { Array as Arr } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { Decision, Ending } from "../agent-machine/decision.ts";
 import type { CallId, ModelName, ProviderName, Seq, ToolName } from "../agent-machine/names.ts";
 import type { InputSource, Observation, ToolFailure, ToolOutcome } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
-import { PermissionAnswer, questionIn } from "../agent-policy/permissions.ts";
+import { answerIn, optionPicked, questionIn } from "../agent-policy/permissions.ts";
 import { contextGauge, costIn } from "../agent-session/accounting.ts";
 import { requestsIn } from "../agent-machine/turn-requests.ts";
 import { asText } from "../agent-session/received.ts";
@@ -112,8 +112,8 @@ const permission = (asked: Received, answered: Received | undefined): string => 
   const question = questionIn(asked);
   const asks = question === undefined ? `Permission asked: ${asText(asked)}` : `Permission asked (${question.options.map((option) => option.name).join(" / ")})`;
   if (answered === undefined) return `${asks}; no answer is recorded.`;
-  const picked = answered.body._tag === "Text" ? Schema.decodeOption(Schema.fromJsonString(PermissionAnswer))(answered.body.text) : undefined;
-  const option = picked?._tag === "Some" ? question?.options.find((each) => each.optionId === picked.value.optionId) : undefined;
+  if (answerIn(answered)?.outcome === "cancelled") return `${asks}; cancelled before an answer.`;
+  const option = question === undefined ? undefined : optionPicked(question, answered);
   return `${asks}; answered: ${option === undefined ? asText(answered) : option.name}.`;
 };
 
