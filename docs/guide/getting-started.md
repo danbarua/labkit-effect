@@ -31,7 +31,7 @@ Run `labkit` in the folder you want to work in:
 
 ```sh
 labkit                                         # a conversation at the terminal
-labkit -p "Summarise TODO.md" --model anthropic/claude-haiku-4-5   # one answer, then exit
+labkit -p "Summarise TODO.md" --model anthropic/claude-haiku-5-5   # one answer, then exit
 labkit --continue                              # carry on with the last session in this folder
 labkit --resume                                # pick a session to carry on with
 labkit --help                                  # every option

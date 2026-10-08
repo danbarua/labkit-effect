@@ -7,7 +7,7 @@ Run a text adventure with two AI models using the agent harness:
 bun run zork
 ```
 
-The Game Engine uses `claude-sonnet-5-5`; the Adventurer uses `claude-haiku-4-5`.
+The Game Engine uses `claude-sonnet-5-5`; the Adventurer uses `claude-haiku-5-5`.
 Override them with positional arguments: any Claude, GPT or Grok model that `bun cli models` lists.
 Each model is asked as the CLI asks it, with its provider's key: a GPT model reads `OPENAI_API_KEY`
 and a Grok model `XAI_API_KEY`, and the two may be of different providers:

@@ -24,8 +24,9 @@ export interface AdventurerRequest {
 export type Customisation = (request: AdventurerRequest) => ModelContext;
 
 /**
- * Claude Haiku 4.5 as the adventurer. Haiku sometimes answers in text when an action is due, and
- * sometimes moves through an exit that is not open. So, while the engine offers tools:
+ * Claude Haiku as the adventurer: Haiku 4.5, and Haiku 5.5, the default. Haiku 4.5 sometimes answers
+ * in text when an action is due, and sometimes moves through an exit that is not open. So, while the
+ * engine offers tools:
  *
  * - each offered tool is `constrained`, and `move` takes only the open exits, so Haiku cannot write a
  *   direction that the world rejects;
@@ -50,4 +51,5 @@ export const haikuAdventurer: Customisation = ({ state, context, lastChance }) =
 /** The adventurer's customisation, by `provider/model`. */
 export const adventurerCustomisations: Readonly<Record<string, Customisation>> = {
   "anthropic/claude-haiku-4-5": haikuAdventurer,
+  "anthropic/claude-haiku-5-5": haikuAdventurer,
 };

@@ -21,6 +21,13 @@
       "price": {
         "cacheWrite1h": 2
       }
+    },
+    "claude-haiku-5-5": {
+      "price": {
+        "cacheWrite1h": 0.2
+      },
+      "thinkingOffUpTo": "high",
+      "observe": ["all", "off"]
     }
   },
   "openai": {

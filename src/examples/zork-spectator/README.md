@@ -28,7 +28,7 @@ The page shows two pickers, Engine and Adventurer, each with the same models:
 | Label | Model | Key |
 | --- | --- | --- |
 | Sonnet | `claude-sonnet-5-5` | `ANTHROPIC_API_KEY` |
-| Haiku | `claude-haiku-4-5` | `ANTHROPIC_API_KEY` |
+| Haiku | `claude-haiku-5-5` | `ANTHROPIC_API_KEY` |
 | Grok | `grok-4.7` | `XAI_API_KEY` |
 | Grok Build | `grok-build-0.1` | `XAI_API_KEY` |
 | GPT Sol | `gpt-6.1-sol` | `OPENAI_API_KEY` |

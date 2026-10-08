@@ -8,7 +8,9 @@
  * `well-known-models.measured.json` names the models to include, by provider, and for each holds what
  * was measured against the provider and is not in the catalog: the kinds of input it took when sent
  * them, the price of an hour-long cache write, and the thinking modes it takes besides the provider's
- * default and `disabled` (`thinking: ["between_tools"]`). It also holds a price that the catalog
+ * default and `disabled` (`thinking: ["between_tools"]`), the highest effort at which its thinking can
+ * be turned off (`thinkingOffUpTo`), and the `observe` settings it takes where it refuses some
+ * (`observe`). It also holds a price that the catalog
  * gives and the provider's own pricing contradicts: Claude Sonnet 5.5's cache reads are $0.20 per
  * million tokens, where models.dev gave $0.10 on 2026-10-08. What was measured wins. A measured
  * difference in efforts is not kept here: a user's configuration overrides it (`models:`, as
@@ -48,7 +50,10 @@ const catalog = (from === undefined ? await fetch("https://models.dev/api.json")
     >;
   }
 >;
-const measured = JSON.parse(readFileSync(measuredPath, "utf8")) as Record<string, Record<string, { input?: Array<string>; price?: Json; thinking?: Array<string> }>>;
+const measured = JSON.parse(readFileSync(measuredPath, "utf8")) as Record<
+  string,
+  Record<string, { input?: Array<string>; price?: Json; thinking?: Array<string>; thinkingOffUpTo?: string; observe?: Array<string> }>
+>;
 
 /** The efforts the core names: `none` (thinking disabled, as a provider's effort), then the core's `Effort`. */
 const namedEfforts: ReadonlyArray<string> = ["none", ...Effort.literals];
@@ -110,6 +115,8 @@ const models = Object.fromEntries(
               input: ours.input ?? theirs.modalities.input,
               ...reasoningOf(`${provider}/${model}`, theirs.reasoning, theirs.reasoning_options),
               ...(ours.thinking === undefined ? {} : { thinking: ours.thinking }),
+              ...(ours.thinkingOffUpTo === undefined ? {} : { thinkingOffUpTo: ours.thinkingOffUpTo }),
+              ...(ours.observe === undefined ? {} : { observe: ours.observe }),
               price: { ...base, ...ours.price, ...(above === undefined ? {} : { above }) },
             },
           ],

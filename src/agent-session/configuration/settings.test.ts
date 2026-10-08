@@ -140,6 +140,34 @@ test("Anthropic: Haiku 4.5 can turn its thinking off, and thinks only when an ef
   });
 });
 
+test("Anthropic: Haiku 5.5 takes efforts and thinks by default; its thinking turns off at high effort or below, and is not turned off above, where the API refuses it", () => {
+  expect(anthropic("claude-haiku-5-5", { effort: "max" })).toEqual({ fields: { output_config: { effort: "max" } }, headers: {}, adjusted: [] });
+  expect(anthropic("claude-haiku-5-5", { thinking: "disabled" })).toEqual({ fields: { thinking: { type: "disabled" } }, headers: {}, adjusted: [] });
+  expect(anthropic("claude-haiku-5-5", { thinking: "disabled", effort: "high" })).toEqual({
+    fields: { thinking: { type: "disabled" }, output_config: { effort: "high" } },
+    headers: {},
+    adjusted: [],
+  });
+  for (const effort of ["xhigh", "max"] as const)
+    expect(anthropic("claude-haiku-5-5", { thinking: "disabled", effort })).toEqual({
+      fields: { output_config: { effort } },
+      headers: {},
+      adjusted: [{ adjusted: { _tag: "Thinking", asked: "disabled" }, reason: `this model's thinking cannot be disabled at ${effort} effort` }],
+    });
+  expect(anthropic("claude-haiku-5-5", { thinking: "between_tools" }).adjusted).toEqual([
+    { adjusted: { _tag: "Thinking", asked: "between_tools" }, reason: "this model has no between-tools thinking" },
+  ]);
+});
+
+test("Anthropic: Haiku 5.5 returns no progress updates, so progress_only is sent as off, which hides its thinking", () => {
+  expect(anthropic("claude-haiku-5-5", { observe: "progress_only" })).toEqual({
+    fields: { thinking: { type: "adaptive", display: "omitted" } },
+    headers: {},
+    adjusted: [{ adjusted: { _tag: "Observe", asked: "progress_only", used: "off" }, reason: "this model returns no progress updates" }],
+  });
+  expect(anthropic("claude-haiku-5-5", { observe: "all" }).fields).toEqual({ thinking: { type: "adaptive", display: "summarized" } });
+});
+
 test("Anthropic: an output limit above the model's, which the API refuses, is sent as the model's own", () => {
   expect(anthropic("claude-haiku-4-5", { maxOutputTokens: TokenCount.make(128_000) })).toEqual({
     fields: { max_tokens: 64_000 },
@@ -147,6 +175,7 @@ test("Anthropic: an output limit above the model's, which the API refuses, is se
     adjusted: [{ adjusted: { _tag: "MaxOutputTokens", asked: 128_000, used: 64_000 }, reason: "this model's output limit is 64000 tokens" }],
   } as never);
   expect(anthropic("claude-haiku-4-5", { maxOutputTokens: TokenCount.make(8000) })).toEqual({ fields: {}, headers: {}, adjusted: [] });
+  expect(anthropic("claude-haiku-5-5", { maxOutputTokens: TokenCount.make(200_000) }).fields).toEqual({ max_tokens: 128_000 });
 });
 
 test("Anthropic: a model of which nothing is known is sent each value as given", () => {
@@ -446,6 +475,8 @@ test("the values offered for a setting are the ones the model takes, as the prov
   expect(choicesFor(target("anthropic", "claude-sonnet-5-5"), anthropicSettle)).toMatchObject({ thinking: ["between_tools"], cache: ["off", "5m", "1h"] });
   // Haiku 4.5 takes a budget, which each effort but minimal is sent as, and can turn its thinking off.
   expect(choicesFor(target("anthropic", "claude-haiku-4-5"), anthropicSettle)).toMatchObject({ effort: ["low", "medium", "high", "xhigh", "max"], thinking: ["disabled"] });
+  // Haiku 5.5 takes efforts, can turn its thinking off, and returns no progress updates.
+  expect(choicesFor(target("anthropic", "claude-haiku-5-5"), anthropicSettle)).toMatchObject({ effort: ["low", "medium", "high", "xhigh", "max"], thinking: ["disabled"], observe: ["all", "off"] });
   // The Chat Completions adapter sends the effort and the output limit; a model nothing is known of is offered every effort.
   expect(choicesFor(target("localhost", "some-model"), openAiCompatSettle)).toEqual({
     effort: ["minimal", "low", "medium", "high", "xhigh", "max"],

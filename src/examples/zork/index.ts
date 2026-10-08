@@ -1,6 +1,6 @@
 /**
  * Run one round: `bun run zork [engine-model] [adventurer-model]`, each model named as `players.ts`
- * describes. By default the Engine is claude-sonnet-5-5 and the Adventurer claude-haiku-4-5.
+ * describes. By default the Engine is claude-sonnet-5-5 and the Adventurer claude-haiku-5-5.
  *
  * A game's two sessions are saved in `~/.local/share/labkit/sessions/` and log to
  * `~/.local/share/labkit/logs/zork-<role>-<game>.log`, at the level `LABKIT_LOG_LEVEL` names, info by
@@ -28,7 +28,7 @@ const orExit = <P extends Player>(found: P | Unavailable): P => {
   process.exit(2);
 };
 
-const [engineModel = "claude-sonnet-5-5", adventurerModel = "claude-haiku-4-5"] = process.argv.slice(2);
+const [engineModel = "claude-sonnet-5-5", adventurerModel = "claude-haiku-5-5"] = process.argv.slice(2);
 const { level, invalid } = logLevelOf(process.env);
 const game = await Effect.runPromise(
   play({ engine: orExit(playerFor(engineModel)), adventurer: orExit(adventurerFor(adventurerModel)), invalidLevels: invalid }).pipe(

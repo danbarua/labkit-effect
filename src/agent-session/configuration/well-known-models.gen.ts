@@ -97,6 +97,43 @@ export const wellKnownModels = {
         "cacheWrite": 1.25,
         "cacheWrite1h": 2
       }
+    },
+    "claude-haiku-5-5": {
+      "context": 1000000,
+      "output": 128000,
+      "input": [
+        "text",
+        "image",
+        "pdf"
+      ],
+      "reasoning": true,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "thinkingOffUpTo": "high",
+      "observe": [
+        "all",
+        "off"
+      ],
+      "price": {
+        "input": 0.1,
+        "output": 0.5,
+        "cacheRead": 0.01,
+        "cacheWrite": 0.125,
+        "cacheWrite1h": 0.2,
+        "above": {
+          "context": 100000,
+          "input": 0.5,
+          "output": 2.5,
+          "cacheRead": 0.05,
+          "cacheWrite": 0.625
+        }
+      }
     }
   },
   "openai": {

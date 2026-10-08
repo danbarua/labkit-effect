@@ -15,10 +15,14 @@
  *   place of an effort (Claude Haiku 4.5) is sent the effort as `thinking: { type: "enabled",
  *   budget_tokens }`, the budget for the effort in `budgets`, and no `output_config`.
  * - **thinking `disabled`**: sent as `type: "disabled"` to a model that can turn its thinking off
- *   (`turnsThinkingOff`: one that takes a budget); to any other, not sent.
+ *   (`turnsThinkingOff`: one that takes a budget, or lists the effort `none`), at an effort no higher
+ *   than the highest it was measured to take it at (`thinkingOffUpTo`; Claude Haiku 5.5 refuses it
+ *   above `high`); otherwise not sent.
  * - **thinking `between_tools`**: sent to a model measured to take it (Claude Sonnet 5.5), at `high`
  *   effort or below; otherwise not sent.
  * - **observe**: sent as the thinking's `display`. With thinking disabled there is nothing to return.
+ *   A model measured to refuse progress updates (`observe` without `progress_only`; Claude Haiku 5.5)
+ *   is sent `progress_only` as `off`, which hides the thinking as updates do.
  *   Between-tools thinking takes no `display` and returns its progress updates as text, so `off` is
  *   sent as `progress_only`. A model that takes a budget thinks only when an effort is given: without
  *   one, it is sent no `display`. Any other model is sent `type: "adaptive"` with the `display`, as it
@@ -27,7 +31,7 @@
  * A model of which nothing is known is sent each value as given, and the provider decides.
  */
 
-import type { Effort, ModelSettings, Observe } from "../../agent-machine/settings.ts";
+import { Effort, type ModelSettings, type Observe } from "../../agent-machine/settings.ts";
 import { TokenCount } from "../../agent-machine/names.ts";
 import type { Target } from "../contracts.ts";
 import { type Adjustment, effortFor, type Settled } from "../configuration/settings.ts";
@@ -73,6 +77,9 @@ const thinkingFor = (
 ): { readonly thinking: Thinking | undefined; readonly adjusted: ReadonlyArray<Adjustment> } => {
   const { thinking } = settings;
   const range = capabilities?.budget;
+  const highest = capabilities?.thinkingOffUpTo;
+  if (thinking === "disabled" && highest !== undefined && effort !== undefined && Effort.literals.indexOf(effort) > Effort.literals.indexOf(highest))
+    return { thinking: undefined, adjusted: [{ adjusted: { _tag: "Thinking", asked: "disabled" }, reason: `this model's thinking cannot be disabled at ${effort} effort` }] };
   if (thinking === "disabled" && turnsThinkingOff(capabilities) !== false) {
     // A budget model's effort is its budget, which thinking off leaves unsent.
     const unsent: ReadonlyArray<Adjustment> = range === undefined || settings.effort === undefined ? [] : [{ adjusted: { _tag: "Effort", asked: settings.effort }, reason: "not sent while thinking is disabled" }];
@@ -104,6 +111,10 @@ const displayFor = (
   capabilities: Capabilities | undefined,
 ): { readonly display: string | undefined; readonly thinking: Thinking | undefined; readonly adjusted: ReadonlyArray<Adjustment> } => {
   if (observe === undefined || thinking?.type === "disabled") return { display: undefined, thinking, adjusted: [] };
+  if (observe === "progress_only" && capabilities?.observe !== undefined && !capabilities.observe.includes(observe)) {
+    const hidden = displayFor("off", thinking, capabilities);
+    return { ...hidden, adjusted: [{ adjusted: { _tag: "Observe", asked: observe, used: "off" }, reason: "this model returns no progress updates" }, ...hidden.adjusted] };
+  }
   if (thinking?.type === "between_tools")
     return {
       display: undefined,

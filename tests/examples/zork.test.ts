@@ -63,6 +63,7 @@ test("Zork records engine-selected tools, inventory changes and an early Grue de
 
 test("Haiku's adventurer requests, as recorded, constrain each offered tool and let move take only the open exits; only a game turn's last chance requires a tool call; the reply after an action is unchanged", async () => {
   expect(adventurerCustomisations["anthropic/claude-haiku-4-5"]).toBe(haikuAdventurer);
+  expect(adventurerCustomisations["anthropic/claude-haiku-5-5"]).toBe(haikuAdventurer);
   // The narrowed move is the catalog's move with fewer directions.
   expect(moveInputJson(["north", "south", "east", "west", "up", "down", "n", "s", "e", "w", "u", "d"])).toEqual(catalog.find((tool) => tool.name === "move")!.input);
   // The world the latest game turn's message gave; the turn-end feedback after it is not JSON.
@@ -135,6 +136,7 @@ test("a player is named by its model, and needs its provider's key; Haiku's adve
   expect(playerFor("grok-4.7", {})).toEqual({ _tag: "KeyNotSet", model: "grok-4.7", variable: "XAI_API_KEY" });
   expect(playerFor("llama-3", keys)).toEqual({ _tag: "UnknownModel", named: "llama-3" });
   expect(adventurerFor("claude-haiku-4-5", keys)).toMatchObject({ customise: haikuAdventurer });
+  expect(adventurerFor("claude-haiku-5-5", keys)).toMatchObject({ target: { provider: "anthropic", model: "claude-haiku-5-5" }, customise: haikuAdventurer });
   expect(adventurerFor("claude-sonnet-5-5", keys)).not.toHaveProperty("customise");
 });
 

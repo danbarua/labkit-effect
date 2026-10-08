@@ -13,7 +13,12 @@
  * - PDF input for ten GPT-5 models the catalog lists as taking none (each read one when sent it);
  * - Anthropic's hour-long cache writes, at twice the input price (the catalog has the five-minute rate);
  * - the thinking modes a model takes besides the provider's default and `disabled`: Claude Sonnet 5.5
- *   thinks only between tool calls on request (`thinking: ["between_tools"]`).
+ *   thinks only between tool calls on request (`thinking: ["between_tools"]`);
+ * - the highest effort at which a model's thinking can be turned off: Claude Haiku 5.5 refuses
+ *   `disabled` at `xhigh` and `max` (`thinkingOffUpTo: "high"`, measured 2026-10-08);
+ * - the ways of returning its thinking that a model takes, where it does not take all of them: Claude
+ *   Haiku 5.5 refuses progress updates (`display: "updates"`), so it takes `observe` `all` and `off`
+ *   only (measured 2026-10-08).
  *
  * Where a provider takes efforts that the catalog does not list (xAI's models took `minimal` when
  * asked, 2026-10-01), a user's configuration overrides the catalog (`ModelOverrides`; the
@@ -35,7 +40,7 @@
 
 import { Context, Effect, Schema } from "effect";
 import type { ModelName, ProviderName } from "../../agent-machine/names.ts";
-import { Effort, type ModelSettings, type ThinkingMode } from "../../agent-machine/settings.ts";
+import { Effort, type ModelSettings, type Observe, type ThinkingMode } from "../../agent-machine/settings.ts";
 import { firstAnswer } from "../first-answer.ts";
 import { catalogModels } from "./catalog-models.gen.ts";
 import { wellKnownModels } from "./well-known-models.gen.ts";
@@ -74,6 +79,10 @@ export interface Capabilities {
   readonly efforts?: ReadonlyArray<KnownEffort>;
   /** The thinking modes that it takes besides the provider's default and `disabled`, as measured. */
   readonly thinking?: ReadonlyArray<KnownThinking>;
+  /** The highest effort at which its thinking can be turned off, as measured; the provider refuses `disabled` at a higher effort. Any effort when not given. */
+  readonly thinkingOffUpTo?: Effort;
+  /** The `observe` settings that it takes, as measured; every one when not given. */
+  readonly observe?: ReadonlyArray<Observe>;
   /** The budget of thinking tokens that it takes in place of efforts, when it takes one: at least `min`, and at most `max` when known. */
   readonly budget?: { readonly min: number; readonly max?: number };
   readonly price: Price & { readonly above?: Price & { readonly context: number } };

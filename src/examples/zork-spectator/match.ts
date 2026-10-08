@@ -22,7 +22,7 @@ export type Label = (typeof labels)[number];
 /** The model each label names, as `zork/players.ts` names it. */
 export const modelOf: Readonly<Record<Label, string>> = {
   Sonnet: "claude-sonnet-5-5",
-  Haiku: "claude-haiku-4-5",
+  Haiku: "claude-haiku-5-5",
   Grok: "grok-4.7",
   "Grok Build": "grok-build-0.1",
   "GPT Sol": "gpt-6.1-sol",
