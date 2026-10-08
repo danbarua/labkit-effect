@@ -331,3 +331,17 @@ test("a deny path rule refuses a file tool's read or write of a path it matches,
   expect(fileCall("edit", "config/.env", { deny: ["Edit(./.env)"], mode: "bypassPermissions" })).toBe("write_file is denied by the rule Edit(./.env).");
   expect(fileCall("read", "config/.env", { deny: ["Edit(./.env)"] })).toBe("runs");
 });
+
+test("a Read deny rule refuses a change as well as a read, in every mode, and the veto says why; an Edit deny rule does not refuse a read", () => {
+  const deny = { deny: ["Read(secrets/**)", "Read(~/.ssh/**)"], folders: project, mode: "bypassPermissions" as const };
+  const either = ": a path that may not be read may not be changed either.";
+  expect(judged("cat secrets/key", deny).reason).toBe("cat secrets/key is denied by the rule Read(secrets/**).");
+  expect(judged("rm secrets/key", deny).reason).toBe(`rm secrets/key is denied by the rule Read(secrets/**)${either}`);
+  expect(judged("echo x > secrets/key", deny).reason).toBe(`a redirect is denied by the rule Read(secrets/**)${either}`);
+  expect(judged("rm -rf ~", { ...deny, deny: ["Read(~/.ssh/**)"] }).reason).toBe(`rm -rf ~ is denied by the rule Read(~/.ssh/**)${either}`);
+  // A change whose paths the rule cannot see is asked about, as a read's is.
+  expect(judged("git ls-files | xargs rm", deny).question).toMatchObject({ needs: [{ kind: "unseen", why: "deny rules cannot see which files it deletes: xargs gives them as it runs" }] });
+  expect(judged("rm secrets/*", deny).reason).toBe(`rm secrets/* is denied by the rule Read(secrets/**)${either}`);
+  expect(fileCall("edit", "secrets/key", { deny: ["Read(secrets/**)"], mode: "bypassPermissions" })).toBe(`write_file is denied by the rule Read(secrets/**)${either}`);
+  expect(judged("cat secrets/key", { ...deny, deny: ["Edit(secrets/**)"] }).step).toBe("runs");
+});

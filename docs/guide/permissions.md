@@ -129,7 +129,7 @@ plugins:
 | `tool` | every call to the tool |
 | `tool(words)` | a command's program that is exactly these words |
 | `tool(words:*)` | a command's program that starts with these words |
-| `Read(path)` | the files a command reads that match the path |
+| `Read(path)` | the files a command reads that match the path; a denied read is a denied change |
 | `Edit(path)` | the files a command writes, changes or deletes that match the path; an allowed edit is an allowed read |
 
 Paths are Claude Code's: `//tmp/**` is from the root of the file system, `~/notes/**` from your home
@@ -144,7 +144,10 @@ editor.
 - **A deny rule** refuses the call in every mode, `bypassPermissions` included, wherever the program
   is in the command, including after `sudo`. A path deny rule refuses a read or a change of a path
   it matches, in your folder or outside it; deleting or moving a folder that holds a denied path is
-  refused too (`rm -rf ~` with `Edit(~/.ssh/**)`). When deny rules name programs or paths and labkit
+  refused too (`rm -rf ~` with `Edit(~/.ssh/**)`). A `Read(...)` deny rule refuses changes as well
+  as reads, since a file that may not be read may not be changed either: `Read(secrets/**)` refuses
+  `cat secrets/key`, `rm secrets/key` and an `edit_file` of `secrets/key`. An `Edit(...)` deny rule
+  refuses changes only. When deny rules name programs or paths and labkit
   cannot see them (a command that does not parse, a name or path not written out, paths `xargs`
   reads from its input), labkit asks even in `bypassPermissions`.
 - **An allow rule** runs the program without a question. A path allow rule lets a command read or

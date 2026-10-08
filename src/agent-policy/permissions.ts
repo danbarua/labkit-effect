@@ -313,10 +313,10 @@ export interface CommandJudging {
  * - a `cd` or `pushd` to a folder written out adds it, since the command may or may not have moved
  *   by then; after a `popd`, a `cd -`, or a `cd` to a folder not written out, where a relative path
  *   leads is not known;
- * - `deniedBy`: the deny rule a path is refused by: a read by a `Read(...)` rule it matches, or whose
- *   paths a recursive read reaches; a change by an `Edit(...)` rule whose paths it reaches
- *   (`changeReaches`: `rm -rf ~` reaches `~/.ssh/**`);
- * - `unseen`: why deny rules of its kind cannot see the path: not written out, another user's home
+ * - `deniedBy`: the deny rule a path is refused by (`covers`): a read by a `Read(...)` rule it
+ *   matches, or whose paths a recursive read reaches; a change by a `Read(...)` or `Edit(...)` rule
+ *   whose paths it reaches (`changeReaches`: `rm -rf ~` reaches `~/.ssh/**`);
+ * - `unseen`: why the deny rules that cover the path cannot see it: not written out, another user's home
  *   folder, a glob (`.en*`), after a move it cannot follow, or given as the program runs (`xargs`,
  *   `find -exec`);
  * - `allows`: whether an allow rule matches the path in every folder it may be in: a read by a
@@ -324,6 +324,17 @@ export interface CommandJudging {
  *   rule;
  * - `leaves`: whether a path may lead outside the working folder, in any folder it may be in.
  */
+/**
+ * Whether deny rule `rule` covers a path accessed as `access`: a `Read(...)` rule covers every
+ * access, since a path that may not be read may not be changed either; an `Edit(...)` rule covers
+ * changes only.
+ */
+const covers = (rule: PathRule, access: UnitPath["access"]): boolean => rule.access === "read" || access !== "reads";
+
+/** Why `subject` is refused by the path rule `rule` for a path accessed as `access`; a `Read(...)` rule refusing a change says that it covers changes. */
+const deniedByPath = (subject: WordText | ToolName, rule: PathRule, access: UnitPath["access"]) =>
+  `${subject} is denied by the rule ${rule.rule}${rule.access === "read" && access !== "reads" ? ": a path that may not be read may not be changed either" : ""}`;
+
 const pathJudging = (judging: CommandJudging, units: ReadonlyArray<Unit>) => {
   const folders = judging.folders;
   const allow = judging.settings.allow.flatMap((rule) => present(pathRuleOf(rule)));
@@ -363,10 +374,10 @@ const pathJudging = (judging: CommandJudging, units: ReadonlyArray<Unit>) => {
       if (path.word === undefined || folders === undefined) return undefined;
       const fulls = fullsOf(path.word, at).flatMap((full) => present(full));
       const reached = (rule: PathRule) => fulls.some((full) => (path.access === "reads" && path.recursive !== true ? matchesPath(rule.pattern, full, folders) : changeReaches(rule.pattern, full, folders)));
-      return deny.find((rule) => rule.access === (path.access === "reads" ? "read" : "edit") && reached(rule));
+      return deny.find((rule) => covers(rule, path.access) && reached(rule));
     },
     unseen: (path: UnitPath, at: number): NeedText | undefined => {
-      if (!deny.some((rule) => rule.access === (path.access === "reads" ? "read" : "edit"))) return undefined;
+      if (!deny.some((rule) => covers(rule, path.access))) return undefined;
       const verb = path.access;
       if (path.word === undefined) return NeedText.make(`deny rules cannot see which files it ${verb}: ${path.givenBy === "find" ? "find" : "xargs"} gives them as it runs`);
       const resolved = resolvePath(path.word, folders);
@@ -392,7 +403,7 @@ const wordText = (word: Word): WordText => word.literal ?? word.text;
  * change by `Edit(...)`, as `kind` says which it is), and why the call needs permission when one is
  * outside the folders and no path allow rule matches it.
  */
-const toolPaths = (input: Received, tool: ToolName, kind: ToolKind, judging: CommandJudging): { readonly deniedBy: PathRule | undefined; readonly outside: NeedText | undefined } => {
+const toolPaths = (input: Received, tool: ToolName, kind: ToolKind, judging: CommandJudging): { readonly denied: ReturnType<typeof deniedByPath> | undefined; readonly outside: NeedText | undefined } => {
   const names = judging.pathInputsOf?.(tool) ?? [];
   const given = fromJson(Schema.Record(WordText, Schema.Unknown), input) ?? {};
   const words = names.flatMap((name) => {
@@ -402,10 +413,11 @@ const toolPaths = (input: Received, tool: ToolName, kind: ToolKind, judging: Com
   const access: UnitPath["access"] = onlyReads.includes(kind) ? "reads" : (changeByKind.get(kind) ?? "writes");
   const unitsOfPaths: ReadonlyArray<Unit> = [{ words: [], grant: undefined, writes: [], changesOutside: [], opaque: undefined, outside: [], paths: words.map((word) => ({ access, word })), detail: undefined }];
   const judged = pathJudging(judging, unitsOfPaths);
-  const deniedBy = words.map((word) => judged.deniedBy({ access, word }, 0)).find((rule) => rule !== undefined);
+  const rule = words.map((word) => judged.deniedBy({ access, word }, 0)).find((each) => each !== undefined);
+  const denied = rule === undefined ? undefined : deniedByPath(tool, rule, access);
   const outside = words.filter((word) => judged.leaves(word, 0) && !judged.allows({ access, word }, 0)).map((word) => word.text);
-  if (outside.length === 0) return { deniedBy, outside: undefined };
-  return { deniedBy, outside: NeedText.make(`it ${access} outside the working folder: ${listed(outside)}`) };
+  if (outside.length === 0) return { denied, outside: undefined };
+  return { denied, outside: NeedText.make(`it ${access} outside the working folder: ${listed(outside)}`) };
 };
 
 /** The rules in `list` about tools and programs, read; path rules (`Read(...)`, `Edit(...)`) are not among them. */
@@ -436,8 +448,11 @@ const commandStep = (
   const denied = units.flatMap((unit, at) => {
     const rule = deny.find((each) => denies(each, unit));
     if (rule !== undefined) return [`${programOf(unit)} is denied by the rule ${rule.rule}`];
-    const pathRule = unit.paths.map((path) => paths.deniedBy(path, at)).find((each) => each !== undefined);
-    if (pathRule !== undefined) return [`${programOf(unit)} is denied by the rule ${pathRule.rule}`];
+    const pathDenied = unit.paths.flatMap((path) => {
+      const pathRule = paths.deniedBy(path, at);
+      return pathRule === undefined ? [] : [deniedByPath(programOf(unit), pathRule, path.access)];
+    })[0];
+    if (pathDenied !== undefined) return [pathDenied];
     const grant = unit.grant;
     return grant !== undefined && session.rejected.some((rejected) => sameGrant(rejected, grant)) ? [`${shownGrant(grant)} was rejected for the rest of the session`] : [];
   });
@@ -548,7 +563,7 @@ export function permissions(
       // A tool's path inputs are judged as a command's paths: a deny rule refuses, and a path outside the
       // working folders is asked about, with only this call to allow, unless a path rule or a rule for the tool allows it.
       const paths = commands === undefined ? undefined : toolPaths(request.input, request.tool, kind, commands);
-      if (paths?.deniedBy !== undefined) return veto(`${request.tool} is denied by the rule ${paths.deniedBy.rule}.`);
+      if (paths?.denied !== undefined) return veto(`${paths.denied}.`);
       if (paths?.outside !== undefined && rules(commands?.settings.allow ?? []).length === 0 && mode !== "bypassPermissions") {
         if (mode === "dontAsk") return veto(`${request.tool} needs permission, and the permission mode is dontAsk: ${paths.outside}.`);
         if (!canAsk) return veto(`${request.tool} needs permission, and no one is there to answer: ${paths.outside}. --permission-mode bypassPermissions lets it run.`);

@@ -62,6 +62,16 @@ model.
           REPL's `/add-dir` adds one for the session. To do: `/add-dir` remembering a folder (where it
           is saved is not decided: the project's local settings, as Claude Code, or the user's); the
           programs the guide lists as not checked (`docs/guide/permissions.md`).
+        - Searches rewritten to leave out denied folders (Dan, 2026-10-08): with the command parsed
+          (`bash-segments`), labkit adds exclusions to `find`, `grep -r` and `rg` (`-not -path`,
+          `--exclude-dir`, `--glob '!…'`) for the folders that deny rules name inside the folders
+          searched, so that `rg KEY .` runs without `secrets/` instead of being refused. Not
+          decided: how the agent is told that the command that ran differs from the one it wrote.
+        - MCP tools' path inputs are not judged by path rules. An operator installs and configures
+          an MCP server, so the server is trusted, and it is where an agent's access to an external
+          system is authorized: an agent that may not read a file may be allowed to pass the file's
+          path to an MCP server (Dan, 2026-10-08). To do: an operator naming an MCP tool's inputs
+          that are paths, for the tools whose paths should be judged.
         - The harness tells the agent of changes to files it has read (Dan, 2026-10-08): with every
           path going through one place (`path-resolver.ts`), the harness knows what the agent read
           and when, so it can say at the start of a turn that a file changed since (the user edited

@@ -184,6 +184,10 @@ is sent none, logged at DEBUG, and gets the same answer. A notice is a live even
 7. With no turn left running, the session goes on (`goOn`), so input left waiting starts its turn
    live.
 8. The host writes `effective-settings.json`, then answers with the session's config options.
+   effective-acp (0.4.0) adds `_meta["effective-acp/replayed"]` to a `session/load` answer: the
+   number of updates sent before the answer, which an effective-acp client waits for before its
+   load completes. The key works around a gap in ACP v1's HTTP transport, and is dropped when
+   labkit moves to ACP v2.
 9. After the answer, the host sends `available_commands_update`, `session_info_update` (the record's
    title, `null` when it has none or it does not read, and when the facts file was last written)
    and, through the feed, `usage_update`, unless the feed has sent the same numbers since it started.

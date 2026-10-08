@@ -70,8 +70,8 @@ A process that resumes the session from its facts therefore applies the same ans
 
 A tool whose inputs include paths (`ToolSpec.paths`, from the `pathOf` marker on its input schema:
 `read_file`, `write_file`, `edit_file`, `list_dir`) has those paths judged as a command's are
-(`CommandJudging.pathInputsOf`): a deny path rule refuses a read (`Read`) or a change (`Edit`, as the
-tool's kind says) in every mode; a path outside the working folders is asked about, offering only
+(`CommandJudging.pathInputsOf`): a deny path rule refuses a read (`Read`) or a change (`Read` or
+`Edit`, as the tool's kind says) in every mode; a path outside the working folders is asked about, offering only
 this call, unless a path allow rule matches it, an allow rule names the tool, or the mode is
 `bypassPermissions`; it is vetoed in `dontAsk` and when no one can answer. The question says why
 (`Tool.why`). The tools themselves resolve paths and refuse none (`inWorkspace`).
@@ -90,15 +90,16 @@ The permissions plug-in's settings hold rules (`permission-rules.ts`):
 | `<tool>` | every call to the tool |
 | `<tool>(<words>)` | a command tool's program that is exactly these words |
 | `<tool>(<words>:*)` | a command tool's program whose words start with these |
-| `Read(<path>)` | the paths a command reads that match the pattern |
+| `Read(<path>)` | the paths a command reads, writes, deletes, moves or changes that match the pattern |
 | `Edit(<path>)` | the paths a command writes, deletes, moves or changes that match the pattern |
 
 Path rules are Claude Code's (`path-patterns.ts`): `//` from the root, `~/` from the home folder,
 anything else from the working folder, then gitignore's matching; a pattern from a single `/` is
 refused. Each path a unit reads or changes (`Unit.paths`) is resolved by `path-resolver.ts`, the one
 place a path as written becomes a full path. A path deny rule vetoes a read that a `Read` pattern
-matches, or a change that reaches an `Edit` pattern (`changeReaches`: the path matches, or it is a
-folder holding the folder an anchored pattern starts from). A path allow rule lifts a read outside
+matches, or a change that reaches a `Read` or an `Edit` pattern (`changeReaches`: the path matches,
+or it is a folder holding the folder an anchored pattern starts from): a path that may not be read
+may not be changed either, and the veto says so. An `Edit` deny rule does not veto a read. A path allow rule lifts a read outside
 the working folder that a `Read` or `Edit` pattern matches, a change outside it, or a write inside
 it, that an `Edit` pattern matches; the paths it does not match are still named. A recursive read
 (`rg`, `grep -r`, `ls -R`; `UnitPath.recursive`) reaches an anchored pattern inside the folder it
