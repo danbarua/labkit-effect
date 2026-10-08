@@ -119,7 +119,9 @@ model.
           `mcp://server/resource`, `blob://`. Today `read_file` reads a `blob://<id>.<extension>`
           pointer to text itself (`blob-reads.ts`), and the permission policy does not gate a
           pointer: it is a relative path, inside the working folder. A pointer reads any blob in the
-          brand's folder, a blob of another session's included, given its id.
+          brand's folder, a blob of another session's included, given its id, and that is not
+          limited: "Hash-addressable content implies knowledge of content, i.e. passed by user or
+          another agent" (Dan, 2026-10-08).
         - Tool results with details (Dan, 2026-10-08). Built: `FileChanged` from the file tools and
           from commands' writes whose text their words show, shown by ACP live and replayed alike
           and by the REPL; a patch over 32 KiB cut, with the bytes left out recorded; the files read
