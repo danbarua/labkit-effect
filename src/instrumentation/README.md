@@ -41,7 +41,8 @@ changes what the loop does.
 The spans form one trace for each time a session is opened: `agent.session`, then each `agent.turn`
 under it, then each request's span under its turn (`agent.model.request`, `agent.tool.run`,
 `agent.turn.review`, `agent.turn.stop`), each `agent.model.attempt` of a fallback chain under its
-request, and the HTTP client's own `http.client` spans under those. A span's line has its name,
+request, and the HTTP client's own spans under those (client spans named by the request's method,
+`GET` or `POST`). A span's line has its name,
 trace, span and parent ids, start, end, duration in milliseconds, attributes, status and events. A
 log line written inside a span has that span's `traceId` and `spanId` (in Loki, the structured
 metadata `trace_id` and `span_id`).

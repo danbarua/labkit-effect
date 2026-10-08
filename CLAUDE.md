@@ -56,7 +56,7 @@ When you need to find information about Effect, start at `repos/effect/LLMS.md`
 and the Effect source code available in your environment.
 
 `repos/effect` is the Effect repository at the tag of the version installed
-(`effect@4.0.0`), vendored with `git subtree --squash`. It is reference
+(`effect@4.0.2`), vendored with `git subtree --squash`. It is reference
 material: read it for APIs, examples and implementation details; do not edit it
 or import from it. `~/Code/lib/effect` is an older beta and does not match what
 is installed.
