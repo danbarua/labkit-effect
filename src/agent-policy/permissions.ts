@@ -198,7 +198,7 @@ export const questionIn = (asks: Received): PermissionQuestion | undefined => fr
 export const answerPicking = (option: OptionId): Received => asJson(PermissionAnswer, { optionId: option });
 
 /** Returns the question's option that `answer` picks; undefined when the answer names no offered option. */
-const optionPicked = (question: PermissionQuestion, answer: Received): PermissionOption | undefined => {
+export const optionPicked = (question: PermissionQuestion, answer: Received): PermissionOption | undefined => {
   const picked = fromJson(PermissionAnswer, answer);
   return picked === undefined ? undefined : question.options.find((option) => option.optionId === picked.optionId);
 };

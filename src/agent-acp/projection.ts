@@ -47,6 +47,7 @@ import type { BlobId, Received } from "../agent-machine/received.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
 import { asText, parseJson } from "../agent-session/received.ts";
 import { intentOf, isDescribed } from "../agent-tools/described.ts";
+import { optionPicked, type PermissionQuestion, questionIn } from "../agent-policy/permissions.ts";
 import { patchCutNote } from "../agent-tools/file-change.ts";
 import { hunksOf } from "../agent-tools/line-diff.ts";
 import { blobNameOf, blobUriOf } from "../agent-session/blobs.ts";
@@ -334,9 +335,18 @@ export interface ProjectionState {
   readonly ended: ReadonlySet<TurnId>;
   /** The calls announced, as they were presented, each with the latest input it was announced with. */
   readonly calls: ReadonlyMap<CallId, { readonly call: Call; readonly shown: Presented }>;
+  /** The permission question each call was asked (`PermissionAsked`), for naming the option its answer picked. */
+  readonly asked: ReadonlyMap<CallId, PermissionQuestion>;
 }
 
-export const start: ProjectionState = { texts: new Map(), ended: new Set(), calls: new Map() };
+export const start: ProjectionState = { texts: new Map(), ended: new Set(), calls: new Map(), asked: new Map() };
+
+/**
+ * The key of a call's permission answer in a `tool_call_update`'s `_meta`, after labkit's own
+ * (`labkit.dev/baseline`, `labkit.dev/failure`): the option the answer picked, by its id, name and kind.
+ * ACP has no field for it, and a replayed call is asked no question, so a client shows the answer from it.
+ */
+export const permissionMetaKey = "labkit.dev/permission";
 
 export interface Projected {
   readonly state: ProjectionState;
@@ -605,8 +615,23 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
         }
         case "ToolCallArrived":
           return announce(state, { call: observation.call, tool: observation.tool, input: observation.input }, context);
-        case "PermissionAsked":
-          return Effect.succeed({ state, updates: [status(observation.call, "pending")] });
+        case "PermissionAsked": {
+          const question = questionIn(observation.asks);
+          const asked = question === undefined ? state.asked : new Map([...state.asked, [observation.call, question]]);
+          return Effect.succeed({ state: { ...state, asked }, updates: [status(observation.call, "pending")] });
+        }
+        case "PermissionAnswered": {
+          // The answer, live and on a replay alike: the option picked, named as the question offered it.
+          const question = state.asked.get(observation.call);
+          const picked = question === undefined ? undefined : optionPicked(question, observation.answer);
+          if (picked === undefined) return Effect.succeed(nothing(state));
+          const answered: SessionUpdate = {
+            sessionUpdate: "tool_call_update",
+            toolCallId: ToolCallId.make(observation.call),
+            _meta: { [permissionMetaKey]: { optionId: picked.optionId, name: picked.name, kind: picked.kind } },
+          };
+          return Effect.succeed({ state, updates: [answered] });
+        }
         case "ToolCallDispatched":
           return Effect.succeed({ state, updates: [status(observation.call, "in_progress")] });
         case "ToolEnded": {
@@ -644,7 +669,6 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
         case "ModelVetoed":
         case "ModelChangeArrived":
         case "SettingAdjusted":
-        case "PermissionAnswered":
         case "NoticeInserted":
         case "CompactionWindow":
         case "McpServerChanged":

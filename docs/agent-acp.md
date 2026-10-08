@@ -341,6 +341,7 @@ runs (`session.streamed`): `ModelDelta`, `ModelPartArrived` and `ModelResponseEn
 | `ModelResponded`: a `Thinking` part | `agent_thought_chunk` with the part's text that no delta of its request sent |
 | `ToolCallArrived`; a `ToolCall` part of `ModelPartArrived` or `ModelResponded` | `tool_call`, `pending`, with the presentation's title, kind, locations and content, the tool's name (`name`) and the call's input (`rawInput`); once for each call |
 | `PermissionAsked` | `tool_call_update`, `pending` |
+| `PermissionAnswered` | `tool_call_update` with `_meta["labkit.dev/permission"]`: the option the answer picked (`optionId`, `name`, `kind`), live and on replay alike. ACP has no field for it, and a replay asks no question, so a client shows a replayed call's answer from it. The key follows labkit's own (`labkit.dev/baseline`, `labkit.dev/failure`). |
 | `ToolCallDispatched` | `tool_call_update`, `in_progress` |
 | `ToolEnded` | `tool_call_update`, `completed` when it succeeded and `failed` otherwise, with the presentation's content and locations, its title and kind where they changed, and what it returned or why it failed (`rawOutput`) |
 | anything else | nothing |

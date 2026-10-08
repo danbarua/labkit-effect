@@ -422,11 +422,17 @@ test("the first prompt opens the draft; thinking and text stream, write_file goe
     "tool_call:pending",
     "tool_call_update:pending",
     "usage_update",
+    "tool_call_update",
     "tool_call_update:in_progress",
     "tool_call_update:completed",
     "agent_message_chunk",
     "usage_update",
   ]);
+  // The answer, as the session recorded it, is sent with the call: the option picked.
+  expect(log.updates.find((update) => update.sessionUpdate === "tool_call_update" && update._meta !== undefined && update._meta !== null)).toMatchObject({
+    toolCallId: "call-1",
+    _meta: { "labkit.dev/permission": { optionId: "allow-once", name: "Allow once", kind: "allow_once" } },
+  });
   const texts = log.updates.flatMap((update) => (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text" ? [update.content.text] : []));
   expect(texts.join("")).toBe("Writing.Done.");
   expect(log.asked).toHaveLength(1);
@@ -927,6 +933,14 @@ test("a loaded session shows the diffs of the files that write_file and edit_fil
   await second.stop();
   expect(lastContent(reloaded.log.updates, "write-1") as unknown).toEqual(written);
   expect(lastContent(reloaded.log.updates, "edit-1") as unknown).toEqual(edited);
+  // Each call's permission answer is replayed with it, as live sent it, though a replay asks no question.
+  const answered = (updates: ReadonlyArray<Update>) =>
+    updates.flatMap((update) => (update.sessionUpdate === "tool_call_update" && update._meta !== undefined && update._meta !== null ? [[update.toolCallId, update._meta["labkit.dev/permission"]]] : []));
+  expect(answered(reloaded.log.updates)).toEqual(answered(live.log.updates));
+  expect(answered(reloaded.log.updates)).toEqual([
+    ["write-1", { optionId: "allow-once", name: "Allow once", kind: "allow_once" }],
+    ["edit-1", { optionId: "allow-once", name: "Allow once", kind: "allow_once" }],
+  ]);
 });
 
 test("a loaded session shows a command's writes from what its call recorded: the diff that live showed, though the file has changed since", async () => {
