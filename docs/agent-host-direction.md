@@ -65,7 +65,7 @@ with the SDK's client.
 - A `models.yml` as one more source for the catalog. The catalog is a service, so a file source can
   be added; it is not in the first slice.
 - What a reopened session shows as a tool call's content (parked by Dan). The default presentation
-  shows a call's output as text.
+  shows the diffs of the files a call changed, from what it recorded, and its output as text.
 
 ## What the ACP host still needs of the core
 

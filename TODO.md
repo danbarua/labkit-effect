@@ -2,7 +2,7 @@
 
 What is to be built, by capability. What is built is described in `docs/<module>.md`; direction that
 is not yet work is in `docs/<module>-direction.md`. Delete an item when it is done or dropped. As of
-2026-10-07.
+2026-10-08.
 
 ## Build
 
@@ -37,9 +37,10 @@ model.
       for the session read from the facts; the CLI's `--permission-mode` and its REPL question;
       for ACP, the `session/request_permission` request and its answer, where the client's
       cancelled outcome is a refusal (`src/agent-acp/permission.ts`), asked by the host's feed; the
-      mode as an ACP option the user changes (`permission_mode`), from the next turn. To do: `plan`
-      and `auto`; rules by other tools' arguments (`write_file`'s path); resetting permissions; a change of
-      mode recorded in the session's facts (the ACP host keeps it only while the session is open).
+      mode as an ACP option the user changes (`permission_mode`), from the next turn; path rules
+      (`Read(...)`, `Edit(...)`) for the file tools' paths as for commands'. To do: `plan` and
+      `auto`; resetting permissions; a change of mode recorded in the session's facts (the ACP host
+      keeps it only while the session is open).
       - `run_command` (the CLI's and the ACP host's) runs any shell command, and permission is
         given per tool: "Allow for the rest of the session" on one call allows every command
         after it (`rm`, `git push`, `curl … | sh`), and `bypassPermissions` runs them all
@@ -97,10 +98,10 @@ model.
           `ask-rate` prints the table. 24,726 commands, from transcripts that no longer exist, have
           no model recorded; `ask-rate` reports them as Claude's (from Claude Code) or OpenAI's (from
           Codex).
-        - A file a command writes is shown as a diff (built: the editor's call and the REPL's question).
-          To do: the REPL shows no diff for a write it does not ask about (`acceptEdits`), since its
-          command tool does not read the file before it runs; the local tools' world
-          (`--local-tools`) shows none; `printf` and `sed -i` are not shown as diffs.
+        - A file a command writes is shown as a diff: before it runs, in the editor's call and the
+          REPL's question; once it has run, in every host, from what the call recorded. To do:
+          `printf` is not shown as a diff. Open (Dan, 2026-10-08): `sed -i`, `mv` and builds, whose
+          words do not show the text; git records the meaningful diffs anyway.
         - Code is shown as written: a one-line `python3 -c '…; …'` stays on one line. Formatting it
           (Python's `ast.unparse`, a JavaScript formatter) would run a program on the host.
         - `awk` judged by its program, as `sed` is (no `system()`, no pipes, no `print >`).
@@ -116,7 +117,11 @@ model.
           isolated temporary folder for each agent (2026-10-07), opt-out included. Virtual URLs need
           commands' paths found, which `command-units.ts` does.
         - Virtual URLs resolved from a registry of schemes (`path-resolver.ts`): `tmp://`,
-          `mcp://server/resource`, `blob://`. Today `read_file` reads a `blob://<id>.<extension>`
+          `mcp://server/resource`, `blob://`, and `gcs://bucket/path` for a Google Cloud Storage
+          bucket mounted as a virtual folder (Dan, 2026-10-08). `file://` could count as an absolute
+          path, so that a host whose editor runs as the user hands it a blob's absolute path
+          (`file:///…/blobs/<id>.<extension>`) where the web app is handed an HTTP URL for
+          `blob://` (Dan, 2026-10-08, an idea). Today `read_file` reads a `blob://<id>.<extension>`
           pointer to text itself (`blob-reads.ts`), and the permission policy does not gate a
           pointer: it is a relative path, inside the working folder. A pointer reads any blob in the
           brand's folder, a blob of another session's included, given its id, and that is not
@@ -231,8 +236,8 @@ model.
       session (`host.json`: the ACP host, the working folder, a title from the first prompt), written at turn zero; `session/load` (the
       stored facts replayed before the answer), `session/resume` (no replay) and `session/list`
       (by working folder, newest first, paged), with `session_info_update`; a turn the facts left
-      running is ended, not gone on with; `session/close`. To do: `session/fork` (it waits for the
-      core: Forks, under Sessions); `session/delete`; additional directories. Open: the permission
+      running is ended, not gone on with; `session/close`; additional directories. To do:
+      `session/fork` (it waits for the core: Forks, under Sessions); `session/delete`. Open: the permission
       mode is not in the host's record, so a reopened session starts at the launcher's mode; ACP has
       no update for how a turn ended, so a replay of a turn that ended without an answer
       (interrupted, failed) shows what its finished requests sent and nothing of how it ended.
@@ -425,9 +430,9 @@ with no model, its attachments as pointers and one line for each tool call (`dig
 - [ ] Where a host keeps what it writes (Dan, 2026-10-06): `~/.local/share/<brand>/`. Built:
       every host's sessions in `sessions/v0.1.0/` (a change to their shape moves them to the next
       version's folder, so no session store has to read an older shape), each with a record that
-      names the host that made it; the log files in `logs/`. To do: large tool outputs spooled to
-      disk, blobs (images, audio, other binary content), and a human-readable formatting of the logs
-      beside the JSONL. Continuing a session in another host than the one that made it waits for a
+      names the host that made it; the blobs of both hosts' sessions in `blobs/`, each file
+      `<id>.<extension>`; the log files in `logs/`. To do: large tool outputs spooled to disk, and a
+      human-readable formatting of the logs beside the JSONL. Continuing a session in another host than the one that made it waits for a
       session's tools to change during it.
 - [ ] Provider usage (Dan, 2026-10-06). What is built is in `src/instrumentation/README.md`. To do:
       a summarizer's requests are not in the facts, so their tokens and cost are in no session's
