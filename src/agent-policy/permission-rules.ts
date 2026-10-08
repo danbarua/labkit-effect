@@ -7,7 +7,7 @@
  * | `<tool>` | every call to the tool |
  * | `<tool>(<words>)` | a command tool's program that is exactly these words |
  * | `<tool>(<words>:*)` | a command tool's program whose words start with these |
- * | `Read(<path>)` | the paths a call reads that match the pattern (`path-patterns.ts`) |
+ * | `Read(<path>)` | the paths a call reads that match the pattern (`path-patterns.ts`); as a deny rule, also the paths it changes |
  * | `Edit(<path>)` | the paths a call writes, changes or deletes that match the pattern; an allowed edit is an allowed read too |
  *
  * Path rules are Claude Code's: `Read(~/.ssh/**)`, `Edit(//tmp/**)`, `Read(./.env)`. A program rule

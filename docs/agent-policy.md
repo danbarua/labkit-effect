@@ -90,7 +90,7 @@ The permissions plug-in's settings hold rules (`permission-rules.ts`):
 | `<tool>` | every call to the tool |
 | `<tool>(<words>)` | a command tool's program that is exactly these words |
 | `<tool>(<words>:*)` | a command tool's program whose words start with these |
-| `Read(<path>)` | the paths a command reads, writes, deletes, moves or changes that match the pattern |
+| `Read(<path>)` | the paths a command reads that match the pattern; as a deny rule, also the paths it writes, deletes, moves or changes |
 | `Edit(<path>)` | the paths a command writes, deletes, moves or changes that match the pattern |
 
 Path rules are Claude Code's (`path-patterns.ts`): `//` from the root, `~/` from the home folder,

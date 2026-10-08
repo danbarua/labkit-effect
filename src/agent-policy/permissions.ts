@@ -399,8 +399,8 @@ const wordText = (word: Word): WordText => word.literal ?? word.text;
 
 /**
  * The paths a call to `tool` names in its path inputs (`CommandJudging.pathInputsOf`), judged against
- * the path rules and the working folders: the deny rule one is refused by (a read by `Read(...)`, a
- * change by `Edit(...)`, as `kind` says which it is), and why the call needs permission when one is
+ * the path rules and the working folders: why one is refused by a deny rule (a read by `Read(...)`, a
+ * change by `Read(...)` or `Edit(...)`, as `kind` says which it is), and why the call needs permission when one is
  * outside the folders and no path allow rule matches it.
  */
 const toolPaths = (input: Received, tool: ToolName, kind: ToolKind, judging: CommandJudging): { readonly denied: ReturnType<typeof deniedByPath> | undefined; readonly outside: NeedText | undefined } => {
