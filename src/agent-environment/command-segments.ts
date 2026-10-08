@@ -11,15 +11,15 @@
 import { Schema } from "effect";
 
 /** A shell command, as a tool's input gives it. */
-export const ShellCommand = Schema.String.pipe(Schema.brand("agent-policy/ShellCommand"));
+export const ShellCommand = Schema.String.pipe(Schema.brand("agent-environment/ShellCommand"));
 export type ShellCommand = typeof ShellCommand.Type;
 
 /** A word of a command: as written, or its value with quotes and escapes removed. */
-export const WordText = Schema.String.pipe(Schema.brand("agent-policy/WordText"));
+export const WordText = Schema.String.pipe(Schema.brand("agent-environment/WordText"));
 export type WordText = typeof WordText.Type;
 
 /** Why a command was not split. */
-export const UnparsedReason = Schema.String.pipe(Schema.brand("agent-policy/UnparsedReason"));
+export const UnparsedReason = Schema.String.pipe(Schema.brand("agent-environment/UnparsedReason"));
 export type UnparsedReason = typeof UnparsedReason.Type;
 
 /** A word as written, and its value when it is a literal string: no expansion, tilde, or unquoted glob or brace characters. */

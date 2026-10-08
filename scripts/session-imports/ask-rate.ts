@@ -25,7 +25,7 @@ import { basename, join } from "node:path";
 import { segmentsOf } from "../../src/agent-host/command-parser.ts";
 import type { Fact } from "../../src/agent-machine/fact.ts";
 import { CallId, ToolName } from "../../src/agent-machine/names.ts";
-import { WordText } from "../../src/agent-policy/command-segments.ts";
+import { WordText } from "../../src/agent-environment/command-segments.ts";
 import { answerPicking, defaultPermissionSettings, OptionId, permissions, type PermissionQuestion, questionIn } from "../../src/agent-policy/permissions.ts";
 import { receivedJson } from "../../src/agent-session/received.ts";
 import { type CorpusCommand, corpusFile, corpusFolder } from "./commands.ts";

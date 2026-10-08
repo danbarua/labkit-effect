@@ -20,7 +20,7 @@ import type { V1Version } from "effective-acp/protocol";
 import { type SessionId, type TerminalId, ToolCallId } from "effective-acp/schema/v1";
 import { type CallId, ToolName } from "../agent-machine/names.ts";
 import type { ShownWrite } from "../agent-host/command-writes.ts";
-import { ShellCommand } from "../agent-policy/command-segments.ts";
+import { ShellCommand } from "../agent-environment/command-segments.ts";
 import { FilePath } from "../agent-tools/paths.ts";
 import { CurrentCall, Reported, Rejected, type Tool } from "../agent-tools/tool.ts";
 import { commandSeconds, EditFile, maxReadBytes, maxReadText, ReadFile, RunCommand } from "../agent-tools/workspace.ts";

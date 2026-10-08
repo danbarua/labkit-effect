@@ -9,7 +9,7 @@ import { Effect, Layer, Logger } from "effect";
 import { runTest } from "../../tests/support/run.ts";
 import { test, testFolder } from "../../tests/support/test.ts";
 import { CallId, ToolName } from "../agent-machine/names.ts";
-import { WordText } from "../agent-policy/command-segments.ts";
+import { WordText } from "../agent-environment/command-segments.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
 import { asText, receivedJson } from "../agent-session/received.ts";
 import type { ToolSource } from "../agent-session/tool-sources.ts";

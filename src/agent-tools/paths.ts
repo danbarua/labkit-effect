@@ -32,7 +32,7 @@ export const pathOf = (schema: Schema.Top): PathOf | undefined => Schema.resolve
 
 /**
  * The absolute path that `path`, as a tool is given it, names from the working folder `root`: `~` and
- * `~/x` from the home folder, as the permission policy resolves them (`agent-policy/path-resolver.ts`),
+ * `~/x` from the home folder, as the permission policy resolves them (`agent-environment/path-resolver.ts`),
  * anything else from `root`.
  */
 export const fullPathIn = (root: string, path: string): string => (path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(1)) : resolve(root, path));

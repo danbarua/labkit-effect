@@ -6,7 +6,7 @@ import { BunServices } from "@effect/platform-bun";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, testFolder } from "../../tests/support/test.ts";
-import { ShellCommand, WordText } from "../agent-policy/command-segments.ts";
+import { ShellCommand, WordText } from "../agent-environment/command-segments.ts";
 import { type Current, currentOnDisk } from "../agent-tools/file-change.ts";
 import { plannedWrites, shownWrites } from "./command-writes.ts";
 

@@ -11,8 +11,8 @@
  * containing a fence does not end the block early.
  */
 
-import { codeSpan } from "../agent-policy/code-span.ts";
-import type { Detail } from "../agent-policy/command-units.ts";
+import { codeSpan } from "../agent-environment/code-span.ts";
+import type { Detail } from "../agent-environment/command-units.ts";
 
 const fenced = (language: string, code: string): ReadonlyArray<string> => {
   const longest = Math.max(0, ...(code.match(/`+/g) ?? []).map((run) => run.length));

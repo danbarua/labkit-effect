@@ -2,8 +2,8 @@
 
 import { expect } from "bun:test";
 import { test } from "../../tests/support/test.ts";
-import { CodeText, type Detail } from "../agent-policy/command-units.ts";
-import { Explanation } from "../agent-policy/sed-script.ts";
+import { CodeText, type Detail } from "../agent-environment/command-units.ts";
+import { Explanation } from "../agent-environment/sed-script.ts";
 import { markdownOf, terminalOf } from "./command-detail.ts";
 
 const code = (text: string): Detail => ({ _tag: "Code", language: "bash", code: CodeText.make(text) });

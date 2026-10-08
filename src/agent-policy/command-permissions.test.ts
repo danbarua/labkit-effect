@@ -9,8 +9,8 @@ import { CallId, type ToolKind, ToolName } from "../agent-machine/names.ts";
 import type { EffectRequest } from "../agent-machine/request.ts";
 import { receivedJson } from "../agent-session/received.ts";
 import { segmentsOf } from "../agent-host/command-parser.ts";
-import { WordText } from "./command-segments.ts";
-import type { Folders } from "./command-units.ts";
+import { WordText } from "../agent-environment/command-segments.ts";
+import type { Folders } from "../agent-environment/command-units.ts";
 import { PermissionRule } from "./permission-rules.ts";
 import { answerPicking, defaultPermissionSettings, explainedAt, explainedOf, OptionId, type PermissionMode, permissions, type PermissionQuestion, questionIn } from "./permissions.ts";
 

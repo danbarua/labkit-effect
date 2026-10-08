@@ -24,8 +24,8 @@
  * match it: `src` does not match `../other/src`.
  */
 
-import { WordText } from "./command-segments.ts";
-import type { Folders } from "./command-units.ts";
+import { WordText } from "../agent-environment/command-segments.ts";
+import type { Folders } from "../agent-environment/command-units.ts";
 
 /** A pattern's root: the file system's, the home folder, or the working folder. */
 export type PathRoot = "absolute" | "home" | "working";

@@ -59,7 +59,7 @@ import { leavesFolder, resolvePath } from "./path-resolver.ts";
 import { effectsOf, explain as explainSed, ExplanationLine, parse as parseSed, SedFile, SedScript } from "./sed-script.ts";
 
 /** Why a unit's words do not show what it runs. */
-export const NeedText = Schema.String.pipe(Schema.brand("agent-policy/NeedText"));
+export const NeedText = Schema.String.pipe(Schema.brand("agent-environment/NeedText"));
 export type NeedText = typeof NeedText.Type;
 
 /** The language of code that a command gives a program to run, for showing it. */
@@ -67,7 +67,7 @@ export const CodeLanguage = Schema.Literals(["python", "javascript", "typescript
 export type CodeLanguage = typeof CodeLanguage.Type;
 
 /** Code that a command gives a program to run, as written. */
-export const CodeText = Schema.String.pipe(Schema.brand("agent-policy/CodeText"));
+export const CodeText = Schema.String.pipe(Schema.brand("agent-environment/CodeText"));
 export type CodeText = typeof CodeText.Type;
 
 /**

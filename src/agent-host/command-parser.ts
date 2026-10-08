@@ -3,7 +3,7 @@
  * (`bash_segments.wasm`, committed beside the crate; `bun run native:build` builds it again), loaded on
  * first use and then called synchronously. `segmentsOf` writes a
  * command into the module's memory, calls its `segments_json`, reads the JSON it returns, and decodes
- * it as `agent-policy/command-segments.ts`'s `Segments`.
+ * it as `agent-environment/command-segments.ts`'s `Segments`.
  *
  * When the module is missing, does not load, traps, or answers in a form that is not known, the
  * command is `Unparsed` with the reason, so that the permission policy asks about it.
@@ -11,7 +11,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { Schema } from "effect";
-import { Segments, type SegmentsOf, UnparsedReason } from "../agent-policy/command-segments.ts";
+import { Segments, type SegmentsOf, UnparsedReason } from "../agent-environment/command-segments.ts";
 
 /** The committed module, which `bun run native:build` writes. */
 export const modulePath = new URL("../../native/bash-segments/bash_segments.wasm", import.meta.url).pathname;

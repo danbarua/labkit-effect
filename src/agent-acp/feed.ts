@@ -40,7 +40,7 @@ import { type CallId, FailureText, type TurnId, Via } from "../agent-machine/nam
 import type { Observation } from "../agent-machine/observation.ts";
 import type { Origin } from "../agent-machine/origin.ts";
 import { segmentsOf } from "../agent-host/command-parser.ts";
-import type { Folders } from "../agent-policy/command-units.ts";
+import type { Folders } from "../agent-environment/command-units.ts";
 import { explainedOf, OptionId, type PermissionQuestion, questionIn } from "../agent-policy/permissions.ts";
 import type { Services, Session } from "../agent-session/loop.ts";
 import { reportedBy } from "../agent-session/origin.ts";

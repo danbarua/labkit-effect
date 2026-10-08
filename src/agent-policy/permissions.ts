@@ -45,18 +45,18 @@
  * vetoed. The veto's reason names the permission modes that let the call run.
  */
 
-import { codeSpan } from "./code-span.ts";
+import { codeSpan } from "../agent-environment/code-span.ts";
 import { Schema } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 import { FailureText, ToolKind, ToolName } from "../agent-machine/names.ts";
 import { MediaType, type Received, ReceivedText } from "../agent-machine/received.ts";
-import { type SegmentsOf, ShellCommand, type Word, WordText } from "./command-segments.ts";
+import { type SegmentsOf, ShellCommand, type Word, WordText } from "../agent-environment/command-segments.ts";
 import { commandNotes, notesOf } from "./command-explainers.ts";
-import { Detail, type Folders, NeedText, type OutsideChange, placesOf, relativePath, type Unit, type UnitPath, unitsOf } from "./command-units.ts";
-import { Explanation } from "./sed-script.ts";
+import { Detail, type Folders, NeedText, type OutsideChange, placesOf, relativePath, type Unit, type UnitPath, unitsOf } from "../agent-environment/command-units.ts";
+import { Explanation } from "../agent-environment/sed-script.ts";
 import { defaultReadOnly, namesProgram, namesTool, type ParsedRule, parseRule, type PathRule, pathRuleOf, PermissionRule, type ReadOnlyPrefix, readOnlyNames, ruleNamesProgram } from "./permission-rules.ts";
 import { changeReaches, matchesPath } from "./path-patterns.ts";
-import { leavesFolder, resolvePath } from "./path-resolver.ts";
+import { leavesFolder, resolvePath } from "../agent-environment/path-resolver.ts";
 import type { Policy, PolicyStep } from "./policy.ts";
 
 export const PermissionMode = Schema.Literals(["default", "acceptEdits", "dontAsk", "bypassPermissions"]);

@@ -2,7 +2,7 @@
 
 import { expect } from "bun:test";
 import { test } from "../../tests/support/test.ts";
-import { ShellCommand } from "../agent-policy/command-segments.ts";
+import { ShellCommand } from "../agent-environment/command-segments.ts";
 import { segmentsOf as split } from "./command-parser.ts";
 
 const segmentsOf = (command: string) => split(ShellCommand.make(command));

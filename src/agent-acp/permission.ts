@@ -10,7 +10,7 @@ import type { RequestPermissionRequest, RequestPermissionResponse, SessionId, To
 import { PermissionOptionId, ToolCallId } from "effective-acp/schema/v1";
 import type { Received } from "../agent-machine/received.ts";
 import { markdownOf } from "../agent-host/command-detail.ts";
-import { codeSpan } from "../agent-policy/code-span.ts";
+import { codeSpan } from "../agent-environment/code-span.ts";
 import { answerCancelled, answerPicking, type CommandNeed, type Explained, explainedAt, OptionId, type PermissionQuestion } from "../agent-policy/permissions.ts";
 import { type Call, type Presented, rawOf } from "./projection.ts";
 

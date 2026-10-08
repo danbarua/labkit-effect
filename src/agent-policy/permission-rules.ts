@@ -29,8 +29,8 @@
 
 import { Schema } from "effect";
 import { ToolName } from "../agent-machine/names.ts";
-import { WordText } from "./command-segments.ts";
-import type { Unit } from "./command-units.ts";
+import { WordText } from "../agent-environment/command-segments.ts";
+import type { Unit } from "../agent-environment/command-units.ts";
 import { type PathPattern, parsePathPattern } from "./path-patterns.ts";
 
 /** Why `rule` is refused, when it is a rule of a kind people write by mistake: `Write(<path>)`, a path from a single `/`, or a program rule naming a path. */

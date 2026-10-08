@@ -4,8 +4,8 @@ import { expect } from "bun:test";
 import { test } from "../../tests/support/test.ts";
 import { segmentsOf } from "../agent-host/command-parser.ts";
 import { commandNotes, notesOf } from "./command-explainers.ts";
-import { ShellCommand, WordText } from "./command-segments.ts";
-import { type Folders, unitsOf } from "./command-units.ts";
+import { ShellCommand, WordText } from "../agent-environment/command-segments.ts";
+import { type Folders, unitsOf } from "../agent-environment/command-units.ts";
 
 const folders: Folders = { working: WordText.make("/home/someone/play/app"), home: WordText.make("/home/someone") };
 /** Each unit's notes, for the units that have any. */

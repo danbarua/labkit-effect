@@ -23,15 +23,15 @@ import { codeSpan } from "./code-span.ts";
 import { Schema } from "effect";
 
 /** A sed script, as written in a command. */
-export const SedScript = Schema.String.pipe(Schema.brand("agent-policy/SedScript"));
+export const SedScript = Schema.String.pipe(Schema.brand("agent-environment/SedScript"));
 export type SedScript = typeof SedScript.Type;
 
 /** A file name that a script names. */
-export const SedFile = Schema.String.pipe(Schema.brand("agent-policy/SedFile"));
+export const SedFile = Schema.String.pipe(Schema.brand("agent-environment/SedFile"));
 export type SedFile = typeof SedFile.Type;
 
 /** A line of an explanation, in plain English. */
-export const Explanation = Schema.String.pipe(Schema.brand("agent-policy/Explanation"));
+export const Explanation = Schema.String.pipe(Schema.brand("agent-environment/Explanation"));
 export type Explanation = typeof Explanation.Type;
 
 /** A line of an explanation, and how deep it sits: 0 for what is read, 1 for each command, 2 and more for the commands in a block. */

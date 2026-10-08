@@ -4,7 +4,7 @@ import { expect } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, testFolder } from "../../tests/support/test.ts";
-import { WordText } from "./command-segments.ts";
+import { WordText } from "../agent-environment/command-segments.ts";
 import { changeReaches, matchesPath, parsePathPattern } from "./path-patterns.ts";
 
 const folders = { working: WordText.make("/home/someone/project"), home: WordText.make("/home/someone") };

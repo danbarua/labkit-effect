@@ -27,7 +27,7 @@ import { Effect, FileSystem, Option } from "effect";
 import { ByteCount, FullPath, type ToolName } from "../agent-machine/names.ts";
 import type { ToolDetail } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
-import type { Folders } from "../agent-policy/command-units.ts";
+import type { Folders } from "../agent-environment/command-units.ts";
 import { editsFiles } from "../agent-policy/permissions.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
 import { parseJson } from "../agent-session/received.ts";

@@ -21,9 +21,10 @@ const effectSchemaOnly = { name: "effect", allowImportNames: ["Schema"], message
 /** The modules each abstract layer may import, besides `Schema` from effect and its own files. */
 const importsAllowed: Record<AbstractLayer, { readonly group: ReadonlyArray<string>; readonly message: string }> = {
   "agent-machine": { group: ["*", "!effect", "!./*"], message: "agent-machine imports only `Schema` from effect, and its own files." },
+  "agent-environment": { group: ["*", "!effect", "!./*"], message: "agent-environment imports only `Schema` from effect, and its own files." },
   "agent-policy": {
-    group: ["*", "!effect", "!./*", "!../agent-machine/*"],
-    message: "agent-policy imports only `Schema` from effect, agent-machine, and its own files.",
+    group: ["*", "!effect", "!./*", "!../agent-machine/*", "!../agent-environment/*"],
+    message: "agent-policy imports only `Schema` from effect, agent-machine, agent-environment, and its own files.",
   },
 };
 

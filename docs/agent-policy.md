@@ -8,15 +8,16 @@ exist: it receives a veto as an observation, like any other outcome.
 
 ## Files
 
+What a command does and where its paths lead (its segments, units, `sed` scripts, and path resolution)
+is the environment's model, in `agent-environment` (`docs/agent-environment.md`); the policy judges
+what that model says.
+
 | File | Responsibility |
 | --- | --- |
 | `policy.ts` | The `Policy` interface and `every`, which applies several policies in order. |
 | `permissions.ts` | The permission policy, by Claude Code's permission modes, by allow and deny rules, and, for a command tool, by each program its command runs. |
 | `permission-rules.ts` | The rules (`<tool>`, `<tool>(<words>)`, `<tool>(<words>:*)`) and the read-only programs. |
-| `command-segments.ts` | A shell command's segments, as the host's parser (`agent-host/command-parser.ts`, the Rust crate `native/bash-segments`) returns them. |
-| `command-units.ts` | The programs a command runs, past wrappers; what a session grant names; the files they write; which are opaque. |
 | `command-explainers.ts` | Plain-English notes for a question: what cannot be undone, the hosts a command connects to, what an install runs, paths in full, a pipeline's exit status, and what the session grants offered cover. |
-| `sed-script.ts` | What a `sed` script does besides transforming text (runs commands, writes files, reads files), and what it does, in plain English. |
 | `loop-breaker.ts` | `repeatedCalls` and `repeatingTurns`: they stop a model that makes the same tool call again and again. |
 | `max-turn-requests.ts` | `maxTurnRequests`: a limit on the number of model requests in one turn (ACP's `max_turn_requests`). |
 
@@ -95,7 +96,7 @@ The permissions plug-in's settings hold rules (`permission-rules.ts`):
 
 Path rules are Claude Code's (`path-patterns.ts`): `//` from the root, `~/` from the home folder,
 anything else from the working folder, then gitignore's matching; a pattern from a single `/` is
-refused. Each path a unit reads or changes (`Unit.paths`) is resolved by `path-resolver.ts`, the one
+refused. Each path a unit reads or changes (`Unit.paths`) is resolved by `agent-environment/path-resolver.ts`, the one
 place a path as written becomes a full path. A path deny rule vetoes a read that a `Read` pattern
 matches, or a change that reaches a `Read` or an `Edit` pattern (`changeReaches`: the path matches,
 or it is a folder holding the folder an anchored pattern starts from): a path that may not be read
@@ -130,7 +131,7 @@ trust.
 
 A command tool (`commandTools`: `run_command` and `terminal_command` unless the settings name
 others) has a shell command in its input's `command`. The host splits the command into its segments
-(`agent-host/command-parser.ts`), and `command-units.ts` reads each segment past the programs that
+(`agent-host/command-parser.ts`), and `agent-environment/command-units.ts` reads each segment past the programs that
 only run another one (`env`, `timeout`, `xargs`, `uv run`, `bash -c '…'`, `find -exec`), down to the
 programs that run. Each program, its unit, has:
 
@@ -164,7 +165,7 @@ outside it is itself a read outside it).
   `~`, with whether the text is added to the end (`>>`, `tee -a`) and whether the shell expands
   `$…` in it. `textsWritten` lists a command's writes, each with whether a `cd` comes before it.
 
-`sed` is judged by its script (`sed-script.ts`): a script that runs commands (`e`), that is in a
+`sed` is judged by its script (`agent-environment/sed-script.ts`): a script that runs commands (`e`), that is in a
 file (`-f`), or that is not understood is opaque; otherwise its grant is `sed`, and it writes the
 files its script names (`w`) and, with `-i`, the files it edits. `ssh`, `docker` and `kubectl` are
 trusted as a whole: the command that `ssh <host> <command>` or `docker exec` runs is not judged, and
@@ -282,8 +283,8 @@ Each decision is recorded with the deciding policy's name in its origin (`tool c
 
 ## Tests
 
-- `src/agent-policy`: `permissions.test.ts`, `command-permissions.test.ts`, `command-units.test.ts`,
-  `loop-breaker.test.ts`, `max-turn-requests.test.ts`.
+- `src/agent-policy`: `permissions.test.ts`, `command-permissions.test.ts`, `loop-breaker.test.ts`,
+  `max-turn-requests.test.ts`; `src/agent-environment`: `command-units.test.ts`.
 - `native/bash-segments/tests`: how a command splits into segments (`bun run native:test`).
 - `src/agent-session`: how the loop applies policies (`permission.test.ts`,
   `model-request-policy.test.ts`, `loop-breaker.test.ts`, `resume.test.ts`).

@@ -18,10 +18,10 @@
  * An explainer reads literal words only: a word that is not written out says nothing.
  */
 
-import { codeSpan } from "./code-span.ts";
-import { type Segment, type SegmentsOf, type ShellCommand, WordText } from "./command-segments.ts";
-import { type Folders, fullPathOf, judgesPathsOf, type Unit } from "./command-units.ts";
-import { Explanation } from "./sed-script.ts";
+import { codeSpan } from "../agent-environment/code-span.ts";
+import { type Segment, type SegmentsOf, type ShellCommand, WordText } from "../agent-environment/command-segments.ts";
+import { type Folders, fullPathOf, judgesPathsOf, type Unit } from "../agent-environment/command-units.ts";
+import { Explanation } from "../agent-environment/sed-script.ts";
 
 /** Notes about one program, from its unit; none when it has nothing to say. */
 export type Explainer = (unit: Unit, folders: Folders | undefined) => ReadonlyArray<Explanation>;

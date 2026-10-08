@@ -7,7 +7,7 @@
  * for another reason does not. A file larger than `maxCurrentBytes` is not read.
  */
 
-import { codeSpan } from "../agent-policy/code-span.ts";
+import { codeSpan } from "../agent-environment/code-span.ts";
 import { Effect, FileSystem } from "effect";
 import { ByteCount, FullPath } from "../agent-machine/names.ts";
 import type { ToolDetail } from "../agent-machine/observation.ts";

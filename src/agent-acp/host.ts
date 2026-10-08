@@ -67,7 +67,7 @@ import { readRecord, RecordFailed, recordedSessions, recordFileOf, writeRecord }
 import { foldersOf, SessionServices } from "../agent-host/services.ts";
 import { additionalDirectoriesOf, commandToolsOf } from "../agent-config/builtins.ts";
 import { recordingChanges } from "../agent-host/recorded-changes.ts";
-import { WordText } from "../agent-policy/command-segments.ts";
+import { WordText } from "../agent-environment/command-segments.ts";
 import { homedir } from "node:os";
 import type { Fact } from "../agent-machine/fact.ts";
 import { leftRunning } from "../agent-machine/left-running.ts";

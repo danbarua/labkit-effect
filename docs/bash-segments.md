@@ -6,7 +6,7 @@ these segments (`docs/agent-policy.md`, Command tools). It is built to WebAssemb
 the host in the same process (`src/agent-host/command-parser.ts`).
 
 It reports structure only. What a program may do is the policy's to decide
-(`src/agent-policy/command-units.ts`). The crate depends on nothing of labkit's, so it could become
+(`src/agent-environment/command-units.ts`). The crate depends on nothing of labkit's, so it could become
 a package of its own, as `effective-acp` did.
 
 The walk is adapted from exo-project's structural profiler (spike 01_2,

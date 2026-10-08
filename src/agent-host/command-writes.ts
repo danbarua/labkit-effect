@@ -1,6 +1,6 @@
 /**
  * The files a command writes text to, when its words show the text (`cat > f <<'EOF'`,
- * `echo x >> f`, `tee f <<< x`; `textsWritten` in `agent-policy/command-units.ts`), for a host to show
+ * `echo x >> f`, `tee f <<< x`; `textsWritten` in `agent-environment/command-units.ts`), for a host to show
  * as a diff: each file's full path and the text the file will hold.
  *
  * A host reads a file's current text before the command runs (`currentOnDisk` in
@@ -17,10 +17,10 @@
  */
 
 import { Effect } from "effect";
-import { ShellCommand, type Word, type WordText } from "../agent-policy/command-segments.ts";
-import { filesWritten, type Folders, type Place, placesOf, relativePath, textsWritten, unitsOf, type Writes } from "../agent-policy/command-units.ts";
+import { ShellCommand, type Word, type WordText } from "../agent-environment/command-segments.ts";
+import { filesWritten, type Folders, type Place, placesOf, relativePath, textsWritten, unitsOf, type Writes } from "../agent-environment/command-units.ts";
 import type { Current } from "../agent-tools/file-change.ts";
-import { resolvePath } from "../agent-policy/path-resolver.ts";
+import { resolvePath } from "../agent-environment/path-resolver.ts";
 import { segmentsOf } from "./command-parser.ts";
 
 /** A write the command makes: with the file's full path, or why it is not shown as a diff. */

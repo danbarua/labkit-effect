@@ -3,6 +3,9 @@
 `src/agent-machine`: pure machines (agent, conversation turn, turn step, call).
 Facts are Observations (each with an Origin) or Decisions. Effects are requested.
 
+`src/agent-environment`: the harness's model of the environment the agent acts in: what a shell
+command does and where its paths lead. The policy, the tools and the hosts read it.
+
 `src/agent-session`: `loop.ts` is the agentic loop.
 Everything else is composable, extensible logic plugged in at sensible seams.
 

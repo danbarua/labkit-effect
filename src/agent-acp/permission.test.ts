@@ -7,9 +7,9 @@ import { CallId, FailureText, ToolName } from "../agent-machine/names.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { type Explained, type PermissionQuestion, permissions, questionIn } from "../agent-policy/permissions.ts";
 import { asText, receivedJson } from "../agent-session/received.ts";
-import { ShellCommand, WordText } from "../agent-policy/command-segments.ts";
-import { CodeText, NeedText } from "../agent-policy/command-units.ts";
-import { Explanation } from "../agent-policy/sed-script.ts";
+import { ShellCommand, WordText } from "../agent-environment/command-segments.ts";
+import { CodeText, NeedText } from "../agent-environment/command-units.ts";
+import { Explanation } from "../agent-environment/sed-script.ts";
 import { answerOf, requestOf } from "./permission.ts";
 
 const call = { call: CallId.make("c1"), tool: ToolName.make("write_file"), input: receivedJson({ path: "a.ts", text: "hi" }) };
