@@ -54,7 +54,7 @@ then open.
 | `session/set_config_option` | Changes the draft, or, on an open session, submits the change to the configuration gate. |
 | `session/prompt` | Opens a draft (turn zero), then runs the turn. `/export` and `/mcp` are answered without the model. |
 | `session/cancel` | Interrupts the turn under way. |
-| `session/load`, `session/resume` | Starts a stored session from its facts file. |
+| `session/load`, `session/resume` | Starts a stored session from its facts file; a session the connection holds already goes on as it is. |
 | `session/list` | Lists the stored sessions that have the host's record. |
 | `session/close` | Interrupts the turn under way, waits for its prompt, and closes the session's scope. |
 
@@ -167,11 +167,14 @@ is sent none, logged at DEBUG, and gets the same answer. A notice is a live even
 
 1. The request is refused when:
    - `cwd` is not absolute (-32602);
-   - the connection holds the session already (-32602, "already loaded");
    - the session directory holds no facts file for it (-32002, with its `sessionId`);
    - its store cannot be opened, such as a facts file open in another process or one that does
      not read (-32000, carrying the store's message). Nothing is left open, so the session loads
      once the cause is gone.
+
+   A session the connection holds already is not refused: it goes on as it is (A session the
+   connection holds). A request for a session that another request is starting waits for that one
+   to be answered, then is answered as a load or resume of the session it started.
 2. The configuration is read for `cwd` and the client's MCP servers, the world is opened, and the
    servers are started.
 3. The session starts over its facts, with the model, system prompt and tool catalog that they hold.
@@ -201,6 +204,36 @@ calls' names, inputs and outputs that live sent, and each call left running `fai
 was in flight adds only the calls that had arrived in it, because the text and thinking it streamed
 were never recorded. ACP has no update for how a turn ended, so a turn whose only request was in
 flight, with no call arrived, shows its input alone.
+
+### A session the connection holds
+
+`session/load` or `session/resume` of a session the connection made or started already, a draft
+or open, answers it as it stands: nothing is opened or started, and no turn is ended. The session
+keeps the working folder, additional directories and MCP servers it has; those the request names are
+not applied. Where they differ (MCP servers compared by name and command or URL; a list the request
+leaves out names nothing), the host logs a WARN (`acp_host.session.reopened_as_is`) with the values
+asked and those kept. The host logs the reopen at INFO (`acp_host.session.reopened`).
+
+- A draft has no history: `session/load` sends nothing before its answer, and `_meta["effective-acp/replayed"]`
+  is 0. Both answer with the draft's config options, then send `available_commands_update`.
+- An open session: the host waits for the feed to take the facts recorded so far, then holds the feed
+  until its answer is written. While the feed is held, `session/load` sends the replay of the facts
+  the feed had taken. After them it sends the text the feed has sent of responses that are not
+  recorded yet, one chunk for each message under that message's id. These updates are sent the way the
+  feed sends its updates, so `_meta["effective-acp/replayed"]` counts them. `session/resume` sends
+  nothing. The answer has the session's config options. After the answer, the feed goes on from where
+  it was, and the host sends `available_commands_update`, `session_info_update` and, through the feed,
+  `usage_update`, unless the client has those numbers.
+- A turn under way goes on and ends as it would have, and its prompt is answered as usual. The replay
+  shows the turn's input and the requests and calls recorded so far, then the text sent so far of the
+  response that is streaming. That text comes after the recorded calls, each message by its id, even
+  where live sent it before a call. The rest of the response comes live after the answer, in the same
+  messages. The replay and the feed's updates do not interleave, and nothing is sent twice. Whitespace
+  that the feed still holds is not in the replay: the feed sends it later, in its message.
+
+When two `session/load` requests for one session are answered at once, effective-acp (0.4.0) keeps
+one count for both, because it counts the updates of a session, not of a request: the second
+answer's `_meta["effective-acp/replayed"]` leaves out its replay.
 
 ### `session/list`
 
@@ -475,6 +508,11 @@ the load showed is not shown again, and a later request's deltas are sent once.
 - `caughtUp` completes once the feed has taken every fact the session has when it is asked: by then
   each of their updates has been sent, so a prompt answers after its turn's updates, its usage among
   them. A fact that could not be projected counts as taken.
+- `holding` runs an effect while the feed sends nothing, given the last fact the feed has taken and
+  its projection's state, which the effect reads and does not change. What arrives meanwhile is taken
+  once the effect ends. A load of a session the connection holds sends its replay this way, so the
+  replay and the feed's updates do not interleave. The replay includes what the state says the feed
+  has sent of responses not yet recorded (`sentNotRecorded`).
 - A defect while projecting one input is logged, and the feed goes on with the next.
 
 ### Permission

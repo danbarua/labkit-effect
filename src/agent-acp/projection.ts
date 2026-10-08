@@ -32,6 +32,10 @@
  *   fallback's dispatch continues the request, which keeps the first's seq. A streamed item waits in
  *   the state until its request's dispatch, or its response, is taken, so that it is sent with its id.
  *
+ * Live, the state keeps what streamed items sent of each response not yet taken (`TurnText.shown`):
+ * a replay of the facts does not have it, so a load of a session the connection holds sends it after
+ * them (`sentNotRecorded`).
+ *
  * The host sends its own updates, which are not made here: `usage_update`, `session_info_update`,
  * `available_commands_update`, `config_option_update`, `plan` and `notice`, and
  * `session/request_permission`.
@@ -324,9 +328,15 @@ interface TurnText {
   readonly runs: Runs;
   /** Streamed items taken before their request's dispatch or response, in order: they wait for it, to be sent with their message's id. */
   readonly waiting: ReadonlyArray<CapturedObservation>;
+  /**
+   * For each request whose `ModelResponded` is not taken yet, by the seq that names its messages: the
+   * chunks its streamed items sent, each message's text joined in one chunk, in the order the messages
+   * began. Held whitespace is not among them until it is sent.
+   */
+  readonly shown: ReadonlyMap<number, ReadonlyArray<ShownText>>;
 }
 
-const fresh: TurnText = { streaming: none, held: {}, awaiting: [], ahead: 0, requests: new Map(), answered: 0, streamed: 0, runs: noRuns, waiting: [] };
+const fresh: TurnText = { streaming: none, held: {}, awaiting: [], ahead: 0, requests: new Map(), answered: 0, streamed: 0, runs: noRuns, waiting: [], shown: new Map() };
 
 export interface ProjectionState {
   /** The text of each turn under way, by the turn, created by the first input that names the turn. */
@@ -386,6 +396,39 @@ const withoutHeld = (sent: Sent, held: TurnText["held"]): Sent => ({
   Commentary: sent.Commentary - (held.Commentary?.length ?? 0),
   Thinking: sent.Thinking - (held.Thinking?.length ?? 0),
 });
+
+/** A message's text that streamed items sent: the kind of chunk it went in, the message's id, and the text, joined. */
+interface ShownText {
+  readonly chunk: "agent_message_chunk" | "agent_thought_chunk";
+  readonly messageId: MessageId;
+  readonly text: string;
+}
+
+/**
+ * Returns `shown` with the text of `updates`, which the streamed items of the request named `request`
+ * sent, added to that request's: to its message's text, or after the others for a message it begins.
+ */
+const shownWith = (shown: TurnText["shown"], request: number, updates: ReadonlyArray<SessionUpdate>): TurnText["shown"] => {
+  if (updates.length === 0) return shown;
+  const joined = updates.reduce<ReadonlyArray<ShownText>>((all, update) => {
+    if ((update.sessionUpdate !== "agent_message_chunk" && update.sessionUpdate !== "agent_thought_chunk") || update.content.type !== "text" || update.messageId == null) return all;
+    const { sessionUpdate: chunk, messageId } = update;
+    const added = update.content.text;
+    return all.some((each) => each.chunk === chunk && each.messageId === messageId)
+      ? all.map((each) => (each.chunk === chunk && each.messageId === messageId ? { ...each, text: each.text + added } : each))
+      : [...all, { chunk, messageId, text: added }];
+  }, shown.get(request) ?? []);
+  return new Map([...shown, [request, joined]]);
+};
+
+/**
+ * Returns the chunks that the live projection whose state is `state` has sent of responses it has
+ * not taken yet, each message's text in one chunk, in the order the messages began: what a client
+ * has been sent beyond a replay of the facts that `state` has taken. Held whitespace is not among
+ * them: the projection sends it later, in its message.
+ */
+export const sentNotRecorded = (state: ProjectionState): ReadonlyArray<SessionUpdate> =>
+  [...state.texts.values()].flatMap((now) => [...now.shown.values()].flat().map((each): SessionUpdate => ({ sessionUpdate: each.chunk, content: text(each.text), messageId: each.messageId })));
 
 /**
  * Ends the open message of the request streaming now in `now`, named by `request`: returns the chunk
@@ -545,9 +588,10 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
       const { run, begins, runs } = runFor(now.runs, input.kind);
       // A message that begins ends the one before, which is sent what it still holds, under its own id.
       const before = begins ? closing(now, request) : { updates: [], held: now.held };
+      const updates = [...before.updates, chunkOf(input.kind, held, messageIdOf(request, run))];
       return Effect.succeed({
-        state: withText(state, input.turn, { ...now, streaming, runs, held: { ...before.held, [input.kind]: "" } }),
-        updates: [...before.updates, chunkOf(input.kind, held, messageIdOf(request, run))],
+        state: withText(state, input.turn, { ...now, streaming, runs, held: { ...before.held, [input.kind]: "" }, shown: shownWith(now.shown, request, updates) }),
+        updates,
       });
     }
     case "ModelPartArrived": {
@@ -562,7 +606,7 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
         // A call ends the open message, which is sent what it still holds. Whitespace held of another
         // kind is a part's with nothing to show, which replay does not send either: it is dropped.
         const before = closing(now, request);
-        const after = withText(state, input.turn, { ...now, runs: { ...now.runs, open: undefined }, held: {} });
+        const after = withText(state, input.turn, { ...now, runs: { ...now.runs, open: undefined }, held: {}, shown: shownWith(now.shown, request, before.updates) });
         return Effect.map(announce(after, callOf(part), context), (step) => ({ state: step.state, updates: [...before.updates, ...step.updates] }));
       }
       if (!isText(part)) return Effect.succeed(nothing(state));
@@ -572,9 +616,10 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
       const before = begins ? closing(now, request) : { updates: [], held: now.held };
       // The part is whole: what its deltas still hold is the whitespace after its text, sent in its message.
       const end = before.held[part._tag] ?? "";
+      const updates = [...before.updates, ...(end === "" ? [] : [chunkOf(part._tag, end, messageIdOf(request, run))])];
       return Effect.succeed({
-        state: withText(state, input.turn, { ...now, runs, held: { ...before.held, [part._tag]: "" } }),
-        updates: [...before.updates, ...(end === "" ? [] : [chunkOf(part._tag, end, messageIdOf(request, run))])],
+        state: withText(state, input.turn, { ...now, runs, held: { ...before.held, [part._tag]: "" }, shown: shownWith(now.shown, request, updates) }),
+        updates,
       });
     }
     case "ModelResponseEnded": {
@@ -621,7 +666,9 @@ export function next(state: ProjectionState, input: ProjectionInput, context: Pr
           const now = textOf(state, observation.turn);
           const request = now.requests.get(now.answered);
           const [sent, after] = sentFor(now, context.mode);
-          const taken = withText(state, observation.turn, { ...after, answered: now.answered + 1 });
+          // Its response is recorded now: what its streamed items sent is in the facts from here on.
+          const shown = new Map([...after.shown].filter(([named]) => named !== request));
+          const taken = withText(state, observation.turn, { ...after, answered: now.answered + 1, shown });
           return Effect.gen(function* () {
             // The loop records a request's dispatch before its response; facts without one name its messages by the response's own seq.
             if (request === undefined) yield* Effect.logWarning(logKeys.update.noDispatch, { response: input.seq }).pipe(Effect.annotateLogs({ turn: observation.turn }));

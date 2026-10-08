@@ -15,7 +15,7 @@ import { receivedJson } from "../agent-session/received.ts";
 import { jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { described } from "../agent-tools/described.ts";
 import { anyTool, type Tool } from "../agent-tools/tool.ts";
-import { next as nextIn, type Present, presentFrom, type ProjectionContext, type ProjectionInput, type ProjectionState, project as projectIn, start, changedFiles } from "./projection.ts";
+import { next as nextIn, type Present, presentFrom, type ProjectionContext, type ProjectionInput, type ProjectionState, project as projectIn, sentNotRecorded, start, changedFiles } from "./projection.ts";
 import { logKeys } from "./log-keys.ts";
 
 /** `project` and `next`, run: the presentations here read nothing. `next` drops its log: the tests that read a log use `projectLogged`. */
@@ -408,6 +408,43 @@ test("every merge of one response's facts and its streamed items sends the same 
   const all = everyMerge(session.journal.slice(0, from), session.journal.slice(from), items);
   expect(all).toHaveLength(1287);
   for (const updates of all) expect(messages(updates)).toEqual(loaded);
+});
+
+test("a load while a response streams its text after its thought: what live sent of it is the thought and the text so far, each message in one chunk under its id; with what live sends after, each message is replay's, at every moment of every merge; once the response is taken nothing is left", () => {
+  const { session, inputs, fact, stream } = recording();
+  fact(asked("hi"));
+  const from = session.journal.findIndex((input) => input._tag === "Observed" && input.observation._tag === "TurnStarted");
+  fact(dispatched());
+  const items = [delta("Thinking", "I should "), delta("Thinking", "greet."), delta("Text", "Hel"), delta("Text", "lo."), ended()];
+  stream(...items.slice(0, 3));
+  // The moment of the load: the thought streamed, and the text streaming.
+  const atLoad = inputs.length;
+  stream(...items.slice(3));
+  fact(responded([thinking("I should greet."), answer("Hello.")]));
+  const [request] = seqsOf(session.journal, "ModelRequestDispatched");
+  const loaded = messages(project(session.journal, replay).updates);
+  expect(loaded).toEqual([
+    [`agent_thought_chunk ${request}:0`, "I should greet."],
+    [`agent_message_chunk ${request}:1`, "Hello."],
+  ]);
+  const isFact = (input: ProjectionInput): input is Fact => input._tag === "Observed" || input._tag === "Decided";
+  const mid = project(inputs.slice(0, atLoad), live);
+  expect(sentNotRecorded(mid.state)).toEqual([thought("I should greet.", `${request}:0`), said("Hel", `${request}:1`)]);
+  // The facts at the load hold none of the response, so its messages are what live had sent and what it sends after.
+  expect(messages(project(inputs.slice(0, atLoad).filter(isFact), replay).updates)).toEqual([]);
+  expect(messages([...sentNotRecorded(mid.state), ...project(inputs.slice(atLoad), live, mid.state).updates])).toEqual(loaded);
+  // Taken, the response is in the facts: nothing of it is left to send beyond them, before the turn's end drops the turn's text.
+  const respondedAt = inputs.findIndex((input) => input._tag === "Observed" && input.observation._tag === "ModelResponded");
+  expect(sentNotRecorded(project(inputs.slice(0, respondedAt + 1), live).state)).toEqual([]);
+  // At every moment of every merge of the feeds: the replay of the facts taken, what live sent beyond them, then what live sends after.
+  const before = session.journal.slice(0, from);
+  for (const merged of merges<ProjectionInput>(session.journal.slice(from), items)) {
+    for (let at = 0; at <= merged.length; at++) {
+      const taken = project([...before, ...merged.slice(0, at)], live);
+      const replayed = project([...before, ...merged.slice(0, at)].filter(isFact), replay).updates;
+      expect(messages([...replayed, ...sentNotRecorded(taken.state), ...project(merged.slice(at), live, taken.state).updates])).toEqual(loaded);
+    }
+  }
 });
 
 test("every merge of a two-request turn's facts and its streamed items sends the same text once, in the messages that replay names, and announces the call once", () => {

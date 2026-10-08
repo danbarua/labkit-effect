@@ -9,7 +9,7 @@ export const logKeys = {
   session: {
     /** `session/new` made a draft: its working folder, the model it starts with and the tools its world gave. */
     created: "acp_host.session.created",
-    /** `session/new`, `session/load` or `session/resume` was refused: why (a working folder that is not absolute, no model to ask, a session already loaded). */
+    /** `session/new`, `session/load` or `session/resume` was refused: why (a working folder that is not absolute, no model to ask, a configuration that cannot be used). */
     refused: "acp_host.session.refused",
     /** The first prompt opened the draft (turn zero): the session's facts are now kept in its folder. */
     opened: "acp_host.session.opened",
@@ -19,6 +19,20 @@ export const logKeys = {
     loaded: "acp_host.session.loaded",
     /** `session/resume` started a stored session, replaying nothing: the turn it found left running and ended, if any. */
     resumed: "acp_host.session.resumed",
+    /**
+     * `session/load` or `session/resume` named a session this connection holds already, which goes on as it is, with nothing
+     * opened or started: whether it was open or a draft, how many updates the load replayed, the turn under way if one is, and
+     * the session's working folder.
+     */
+    reopened: "acp_host.session.reopened",
+    /**
+     * Warning: `session/load` or `session/resume` of a session this connection holds already named a working folder, MCP servers
+     * (by name and how each is reached) or additional directories other than the session's. They are not applied, because the
+     * session is already open on this connection: the values asked, and those kept.
+     */
+    reopenedAsIs: "acp_host.session.reopened_as_is",
+    /** `session/load` or `session/resume` named a session that another request on this connection is starting or reopening: it waits for that one to be answered, then looks again. */
+    waiting: "acp_host.session.waiting",
     /** `session/load` or `session/resume` named a session the session directory does not hold: where it looked. */
     notStored: "acp_host.session.not_stored",
     /** A stored session could not be started (its facts file is held by another process, or does not read): the cause. Nothing is left open. */
