@@ -215,8 +215,15 @@ const endedAs = (outcome: ToolOutcome): string => {
   }
 };
 
-/** How an ended tool call is printed: the tool and its input, then how it ended. */
-const shownEnded = (tool: string, input: string, outcome: ToolOutcome): string => `● ${tool} ${oneLine(input)}\n  \x1b[2m⎿ ${endedAs(outcome)}\x1b[0m`;
+/** The diff of each file a call changed, from its details: an update's patch, and a created file's text as lines added. */
+const changedLines = (outcome: ToolOutcome): ReadonlyArray<string> =>
+  outcome._tag !== "Succeeded"
+    ? []
+    : (outcome.details ?? []).flatMap((detail) => (detail.change === "created" ? unifiedDiff(detail.path, undefined, asText(detail.patch)) : asText(detail.patch).split("\n")));
+
+/** How an ended tool call is printed: the tool and its input, then how it ended, then the diff of each file it changed, coloured and indented. */
+export const shownEnded = (tool: string, input: string, outcome: ToolOutcome): string =>
+  [`● ${tool} ${oneLine(input)}`, `  \x1b[2m⎿ ${endedAs(outcome)}\x1b[0m`, ...changedLines(outcome).map((line) => `    ${coloured(line)}`)].join("\n");
 
 /** Returns the tool that `call` names, from the facts. */
 const toolOf = (facts: ReadonlyArray<Fact>, call: CallId): string =>

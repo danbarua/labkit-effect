@@ -24,7 +24,7 @@ import { BoringContextAssembler } from "../../../tests/support/boring.ts";
 import { runTest } from "../../../tests/support/run.ts";
 import { typing } from "../../../tests/support/terminal.ts";
 import { CannotAsk } from "./models.ts";
-import { replyOf, repl, terminal, withoutModel } from "./repl.ts";
+import { replyOf, repl, terminal, withoutModel, shownEnded } from "./repl.ts";
 import { type View, viewOf } from "./view.ts";
 import type { SettingsChange } from "../../agent-machine/settings.ts";
 import { ask, type Config } from "./session.ts";
@@ -286,4 +286,30 @@ test("without a model, a model that does not support the command-line settings i
   const refused = "ERROR: openai/gpt-5 does not support effort=xhigh (from the command line).\nHINT: Supported: default, minimal, low, medium, high.\nHINT: Pick another model, or start the CLI again without that setting.";
   expect(logged.slice(2)).toEqual([refused, refused, `Default model: openai/gpt-5.5 (saved to ${join(configFolder(), "models.yml")})`]);
   expect(picked as unknown).toEqual({ provider: "openai", model: "gpt-5.5" });
+});
+
+test("an ended call that changed files is printed with each file's diff, from what it recorded: an update's patch, a created file's lines added", () => {
+  const text = (value: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text: value } }) as never;
+  const printed = shownEnded("edit_file", '{"path":"a.txt"}', {
+    _tag: "Succeeded",
+    output: text("Edited /w/a.txt."),
+    details: [
+      { _tag: "FileChanged", path: "/w/a.txt" as never, change: "updated", patch: text("--- /w/a.txt\n+++ /w/a.txt\n@@ -1 +1 @@\n-alpha\n+beta") },
+      { _tag: "FileChanged", path: "/w/new.txt" as never, change: "created", patch: text("hi\n") },
+    ],
+  });
+  // Without its colours.
+  expect(Bun.stripANSI(printed).split("\n")).toEqual([
+    '● edit_file {"path":"a.txt"}',
+    "  ⎿ Edited /w/a.txt.",
+    "    --- /w/a.txt",
+    "    +++ /w/a.txt",
+    "    @@ -1 +1 @@",
+    "    -alpha",
+    "    +beta",
+    "    --- /dev/null",
+    "    +++ /w/new.txt",
+    "    @@ -0,0 +1,1 @@",
+    "    +hi",
+  ]);
 });

@@ -74,7 +74,7 @@ import { FileBackedSessionStore } from "../agent-session/file-session-store.ts";
 import { endTurnLeftRunning, openSession, type Services, type Session } from "../agent-session/loop.ts";
 import type { SessionStore, SessionStoreFailed } from "../agent-session/session-store.ts";
 import { harnessParts, reportedBy } from "../agent-session/origin.ts";
-import { outcomeAsSent } from "../agent-session/tool-output.ts";
+import { outcomeAsText } from "../agent-session/tool-output.ts";
 import { Notices } from "../agent-context/assemble.ts";
 import { mcpCommand as mcpSaid } from "../agent-mcp/command.ts";
 import { type GivenServer, type McpServers, startMcpServers } from "../agent-mcp/servers.ts";
@@ -537,9 +537,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             const world: WorldSession = {
               system: opened.system,
               sources: [...opened.sources, ...mcp.sources],
-              // A call is shown with its result as the model is sent it: an MCP server's result as text, whether or not the server is still running.
+              // A call is shown with an MCP server's result as text, whether or not the server is still running, and with its details.
               present: (call, outcome, mode) => {
-                const sent = outcome === undefined ? undefined : outcomeAsSent(outcome);
+                const sent = outcome === undefined ? undefined : outcomeAsText(outcome);
                 return catalog.some((tool) => tool.name === call.tool) ? mcpPresent(call, sent, mode) : opened.present(call, sent, mode);
               },
             };

@@ -49,7 +49,7 @@ import { fullPathIn } from "../agent-tools/paths.ts";
 import { type AnyTool, type CurrentCall, anyTool, sourceOf } from "../agent-tools/tool.ts";
 import { maxReadBytes, workingFolderLine, workspaceTools } from "../agent-tools/workspace.ts";
 import { Editor, editFile, readFile, runCommand, updatePlan, writeFile } from "./editor-tools.ts";
-import { oneLine, type Present, type Presented, presentFrom } from "./projection.ts";
+import { changedFiles, oneLine, type Present, type Presented, presentFrom } from "./projection.ts";
 
 /** What a world is given for one session, when the session is made. */
 export interface WorldOpening {
@@ -210,6 +210,8 @@ export const editorWorld: World<FileSystem.FileSystem> = {
           const at = typeof input["path"] === "string" ? { full: fullPathIn(cwd, input["path"]) } : undefined;
           if (at === undefined) return shown;
           const located: Presented = { ...shown, locations: [{ path: at.full }] };
+          // A call that recorded what it changed shows its diffs from that (`presentFrom`); one that has not ended, or was recorded before calls kept it, shows its input's.
+          if (changedFiles(outcome).length > 0) return located;
           const edited = call.tool === "edit_file" && typeof input["old_text"] === "string" && typeof input["new_text"] === "string";
           return edited && (outcome === undefined || outcome._tag === "Succeeded")
             ? ({ ...located, content: [{ type: "diff", path: at.full, oldText: input["old_text"] as string, newText: input["new_text"] as string }] } satisfies Presented)

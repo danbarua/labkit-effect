@@ -161,7 +161,7 @@ test("write_file and edit_file record what they changed: a file created, with it
   const full = `${root}/src/d.txt`;
   expect((await detailsOf("write_file", { path: "src/d.txt", text: "one\ntwo\n" })) as unknown).toEqual([{ _tag: "FileChanged", path: full, change: "created", patch: "one\ntwo\n" }]);
   expect((await detailsOf("edit_file", { path: "src/d.txt", old_text: "two", new_text: "three" })) as unknown).toEqual([
-    { _tag: "FileChanged", path: full, change: "updated", patch: [`--- a/${full}`, `+++ b/${full}`, "@@ -1,2 +1,2 @@", " one", "-two", "+three"].join("\n") },
+    { _tag: "FileChanged", path: full, change: "updated", patch: [`--- ${full}`, `+++ ${full}`, "@@ -1,2 +1,2 @@", " one", "-two", "+three"].join("\n") },
   ]);
   expect(await detailsOf("write_file", { path: "src/d.txt", text: "one\nthree\n" })).toBeUndefined();
 });

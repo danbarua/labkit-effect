@@ -51,9 +51,15 @@ const mcpResultText = (output: Received): Received => {
   return receivedText(texts.length === 0 && structured !== undefined ? JSON.stringify(structured) : texts.join("\n"));
 };
 
-/** Returns a tool call's outcome as the model is sent it. */
-export const outcomeAsSent = (outcome: ToolOutcome): ToolOutcome => {
-  if (outcome._tag === "Succeeded") return { _tag: "Succeeded", output: outcome.output.mediaType === mcpToolResult ? mcpResultText(outcome.output) : outcome.output };
+/** Returns a tool call's outcome with an MCP server's result as plain text, its details kept: as a display shows it. */
+export const outcomeAsText = (outcome: ToolOutcome): ToolOutcome => {
+  if (outcome._tag === "Succeeded") return outcome.output.mediaType === mcpToolResult ? { ...outcome, output: mcpResultText(outcome.output) } : outcome;
   const reason = outcome.reason;
   return reason._tag === "Reported" && reason.error.mediaType === mcpToolResult ? { ...outcome, reason: { ...reason, error: mcpResultText(reason.error) } } : outcome;
+};
+
+/** Returns a tool call's outcome as the model is sent it: as text (`outcomeAsText`), without its details. */
+export const outcomeAsSent = (outcome: ToolOutcome): ToolOutcome => {
+  const asText = outcomeAsText(outcome);
+  return asText._tag === "Succeeded" ? { _tag: "Succeeded", output: asText.output } : asText;
 };

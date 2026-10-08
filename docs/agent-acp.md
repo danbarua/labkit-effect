@@ -547,6 +547,11 @@ the file tools' paths are resolved against the working folder (`agent-tools/in-w
   choice. A path is the call's location. An edit's call shows its change as a `diff`, from when
   permission is asked; a command's call shows its `terminal` from when it has one, and when it has
   ended.
+- A call that ended having recorded the files it changed (`FileChanged`: `write_file`, `edit_file`)
+  shows them from what it recorded, live and on a replay alike (`changedFiles`): a created file as a
+  `diff` from no text (`oldText: null`), an updated file as one `diff` for each hunk of its patch,
+  whose texts are the hunk's lines with three lines of context, not the whole file. A call recorded
+  before calls kept what they changed shows the `edit_file` input's texts, as before it ended.
 - A command that writes text to a file where its words show the text (`cat > f <<'EOF'`,
   `echo x >> f`, `tee f <<< x`; `agent-host/command-writes.ts`) shows each such file's `diff` in its
   call: from when it is announced, in its permission question, and after it succeeds. The file's text
@@ -657,9 +662,10 @@ The host logs each event under `log-keys.ts`, with the ids it is about as log an
 - **A turn left running is ended at load, not continued.** The editor that closed mid-turn is not
   watching, and what the turn had begun should not run unseen.
 - **One projection for live and replay.** The two differ only in the mode, so a loaded session and a
-  live one show the same text, and the live feed continues from the replay's state. A command's write
-  is the exception: live, it shows the file's diff, read from the disk before the command runs; on a
-  replay it says what it wrote, as other harnesses do, rather than keeping files' texts in the facts.
+  live one show the same text, and the live feed continues from the replay's state. A file a call
+  changed is shown from the patch the call recorded, never from the file as it is now. A command's
+  write is the exception: live, it shows the file's diff, read from the disk before the command runs;
+  on a replay it says what it wrote, since a command records no patch yet.
 - **Tool calls go through the editor.** The model then sees unsaved buffers, and the editor shows and
   controls what changes. `workspaceWorld` is a stopgap that bypasses it.
 - **A cancelled permission request refuses the call once.** The turn goes on, and the model asks

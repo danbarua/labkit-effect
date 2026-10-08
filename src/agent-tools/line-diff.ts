@@ -1,7 +1,8 @@
 /**
  * A line diff of two texts, as a unified diff (`--- a/<path>`, `+++ b/<path>`, `@@` hunks with three
- * lines of context): what a terminal shows of a command's write to a file. A text that does not
- * exist yet is `undefined`, and its side is `/dev/null`.
+ * lines of context; an absolute path without `a/` and `b/`): what a terminal shows of a change to a
+ * file, and what a tool records of it (`FileChanged`). A text that does not exist yet is
+ * `undefined`, and its side is `/dev/null`.
  *
  * The diff is the longest common subsequence of the lines, from a table of `before × after` cells.
  * Above `maxCells` cells, every line of `before` is removed and every line of `after` added: a diff
@@ -69,7 +70,9 @@ export const unifiedDiff = (path: string, before: string | undefined, after: str
     if (last !== undefined && start <= last[1]) last[1] = Math.max(last[1], end);
     else ranges.push([start, end]);
   }
-  const header = [before === undefined ? "--- /dev/null" : `--- a/${path}`, `+++ b/${path}`];
+  // A relative path is marked a/ and b/, as git marks it; an absolute path is given as it is, as diff -u gives it.
+  const [a, b] = path.startsWith("/") ? ["", ""] : ["a/", "b/"];
+  const header = [before === undefined ? "--- /dev/null" : `--- ${a}${path}`, `+++ ${b}${path}`];
   const hunks = ranges.flatMap(([start, end]) => {
     const preceding = lines.slice(0, start);
     const hunk = lines.slice(start, end);
@@ -80,4 +83,30 @@ export const unifiedDiff = (path: string, before: string | undefined, after: str
     return [`@@ -${oldCount === 0 ? oldStart : oldStart + 1},${oldCount} +${newCount === 0 ? newStart : newStart + 1},${newCount} @@`, ...hunk.map((line) => `${line.op}${line.line}`)];
   });
   return [...header, ...hunks];
+};
+
+/**
+ * The hunks of a unified diff that `unifiedDiff` made, each as the text of its old lines and the text
+ * of its new lines: its context lines in both, its removed lines in the old, its added lines in the
+ * new, in order, each line ending with a line break. The header is skipped.
+ */
+export const hunksOf = (patch: string): ReadonlyArray<{ readonly before: string; readonly after: string }> => {
+  const hunks: Array<{ readonly before: Array<string>; readonly after: Array<string> }> = [];
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("@@")) {
+      hunks.push({ before: [], after: [] });
+      continue;
+    }
+    const hunk = hunks.at(-1);
+    // Lines before the first hunk are the header.
+    if (hunk === undefined) continue;
+    if (line.startsWith("-")) hunk.before.push(line.slice(1));
+    else if (line.startsWith("+")) hunk.after.push(line.slice(1));
+    else {
+      hunk.before.push(line.slice(1));
+      hunk.after.push(line.slice(1));
+    }
+  }
+  const text = (lines: ReadonlyArray<string>) => lines.map((line) => `${line}\n`).join("");
+  return hunks.map((hunk) => ({ before: text(hunk.before), after: text(hunk.after) }));
 };

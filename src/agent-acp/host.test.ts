@@ -831,6 +831,42 @@ test("a command that writes text to a file shows the file's diff in its call: be
   expect(updates.at(-1) as unknown).toMatchObject({ status: "completed", content: [...diffs, { type: "terminal" }] });
 });
 
+test("a loaded session shows the diffs of the files that write_file and edit_file changed as live showed them once the calls ended: from what the calls recorded", async () => {
+  const first = startHost({
+    script: [
+      answer({ _tag: "ToolCall", call: "write-1", tool: "write_file", input: { path: "notes.txt", content: "one\ntwo\n", intent: "Write the notes." } }),
+      answer({ _tag: "ToolCall", call: "edit-1", tool: "edit_file", input: { path: "a.txt", old_text: "alpha", new_text: "beta", intent: "Rename alpha." } }),
+      answer({ _tag: "Text", text: "Done." }),
+    ],
+  });
+  const a = join(testFolder(), "work", "a.txt");
+  const live = sdkClient(undefined, { [a]: "first\nalpha\nlast\n" });
+  const sessionId = await live.app.connectWith(first.stream, async (ctx) => {
+    await initialize(ctx, { fs: { readTextFile: true, writeTextFile: true } });
+    const created = await ctx.request("session/new", { cwd: first.cwd, mcpServers: [] });
+    await ctx.request("session/prompt", say(created.sessionId, "Write and edit"));
+    return created.sessionId;
+  });
+  await first.stop();
+  /** The content of the last update about `call` that has any. */
+  const lastContent = (updates: ReadonlyArray<Update>, call: string) =>
+    updates.flatMap((update) => ((update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") && update.toolCallId === call && update.content !== undefined && update.content !== null ? [update.content] : [])).at(-1);
+  const written = [{ type: "diff", path: join(first.cwd, "notes.txt"), oldText: null, newText: "one\ntwo\n" }];
+  const edited = [{ type: "diff", path: a, oldText: "first\nalpha\nlast\n", newText: "first\nbeta\nlast\n" }];
+  expect(lastContent(live.log.updates, "write-1") as unknown).toEqual(written);
+  expect(lastContent(live.log.updates, "edit-1") as unknown).toEqual(edited);
+  // The files have changed since: the diffs come from what the calls recorded, not from the files.
+  const second = startHost({});
+  const reloaded = sdkClient(undefined, { [a]: "changed since\n" });
+  await reloaded.app.connectWith(second.stream, async (ctx) => {
+    await initialize(ctx, { fs: { readTextFile: true, writeTextFile: true } });
+    await ctx.request("session/load", { sessionId, cwd: second.cwd, mcpServers: [] });
+  });
+  await second.stop();
+  expect(lastContent(reloaded.log.updates, "write-1") as unknown).toEqual(written);
+  expect(lastContent(reloaded.log.updates, "edit-1") as unknown).toEqual(edited);
+});
+
 test("a loaded session shows no diff for the writes it replays, whose files were read after the commands ran: it says what each wrote", async () => {
   const first = startHost({
     script: [answer({ _tag: "ToolCall", call: "append-1", tool: "terminal_command", input: { command: "echo two >> log.txt", intent: "Append." } }), answer({ _tag: "Text", text: "Appended." })],

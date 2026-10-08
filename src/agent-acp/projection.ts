@@ -47,6 +47,7 @@ import type { Received } from "../agent-machine/received.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
 import { asText, parseJson } from "../agent-session/received.ts";
 import { intentOf, isDescribed } from "../agent-tools/described.ts";
+import { hunksOf } from "../agent-tools/line-diff.ts";
 import { logKeys } from "./log-keys.ts";
 
 /** An input to the projection: a fact, or an item that a model request passed on while it ran. */
@@ -116,6 +117,19 @@ const titleOf = (call: Call, spec: ToolSpec | undefined): string => {
   return intent === undefined ? call.tool : oneLine(intent);
 };
 
+/**
+ * Returns the diffs of the files that a call changed, from its details (`FileChanged`): a created
+ * file as its whole text, an updated one as one diff for each hunk of its patch. None for a call
+ * that has not ended, that failed, or that recorded no details.
+ */
+export const changedFiles = (outcome: ToolOutcome | undefined): ReadonlyArray<ToolCallContent> =>
+  outcome?._tag !== "Succeeded"
+    ? []
+    : (outcome.details ?? []).flatMap((detail): ReadonlyArray<ToolCallContent> => {
+        if (detail.change === "created") return [{ type: "diff", path: detail.path, oldText: null, newText: asText(detail.patch) }];
+        return hunksOf(asText(detail.patch)).map((hunk) => ({ type: "diff", path: detail.path, oldText: hunk.before, newText: hunk.after }));
+      });
+
 /** Returns the text that a call's outcome shows: its output, or why it failed; undefined before it ends. */
 const shownOf = (tool: ToolName, outcome: ToolOutcome | undefined): string | undefined => {
   if (outcome === undefined) return undefined;
@@ -126,7 +140,8 @@ const shownOf = (tool: ToolName, outcome: ToolOutcome | undefined): string | und
  * The default presentation over the session's tool catalog (`immutableToolCatalogOf`): as the title,
  * the call's intent, on one line, when `described` (`agent-tools/described.ts`) added that input to
  * its tool, and the tool's name otherwise; its kind from the catalog (none for a tool the
- * catalog does not have); and, once it ends, its output, or why it failed, as text.
+ * catalog does not have); and, once it ends, the diffs of the files it changed (`changedFiles`), or,
+ * when it changed none, its output, or why it failed, as text.
  */
 export const presentFrom =
   (catalog: ReadonlyArray<ToolSpec>): Present =>
@@ -134,10 +149,12 @@ export const presentFrom =
     const spec = catalog.find((tool) => tool.name === call.tool);
     const kind = spec?.kind;
     const shown = shownOf(call.tool, outcome);
+    const changed = changedFiles(outcome);
+    const content = changed.length > 0 || shown === undefined ? changed : [{ type: "content" as const, content: text(shown) }];
     return Effect.succeed({
       title: titleOf(call, spec),
       ...(kind === undefined ? {} : { kind }),
-      ...(shown === undefined ? {} : { content: [{ type: "content" as const, content: text(shown) }] }),
+      ...(content.length === 0 ? {} : { content }),
     });
   };
 
