@@ -25,6 +25,10 @@ export type ToolName = typeof ToolName.Type;
 export const McpServerName = Schema.String.pipe(Schema.brand("agent-machine/McpServerName"));
 export type McpServerName = typeof McpServerName.Type;
 
+/** The absolute path of a folder on the host's file system. */
+export const FolderPath = Schema.String.pipe(Schema.brand("agent-machine/FolderPath"));
+export type FolderPath = typeof FolderPath.Type;
+
 /**
  * What a tool does, in ACP's names: reads, edits, deletes or moves files, searches, runs a command,
  * thinks, fetches, or something else. Whoever defines a tool declares its kind; a permission policy

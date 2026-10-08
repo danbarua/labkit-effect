@@ -345,3 +345,10 @@ test("a Read deny rule refuses a change as well as a read, in every mode, and th
   expect(fileCall("edit", "secrets/key", { deny: ["Read(secrets/**)"], mode: "bypassPermissions" })).toBe(`write_file is denied by the rule Read(secrets/**)${either}`);
   expect(judged("cat secrets/key", { ...deny, deny: ["Edit(secrets/**)"] }).step).toBe("runs");
 });
+
+test("a blob:// pointer that the model was given needs no path permission: it is not outside the working folder, and path deny rules do not refuse it", () => {
+  const deny = ["Read(secrets/**)", "Read(./.env)", "Edit(~/.ssh/**)"];
+  expect(judged("cat blob://ab12", { deny, folders: project }).step).toBe("runs");
+  expect(fileCall("read", "blob://ab12", { deny })).toBe("runs");
+  expect(fileCall("read", "blob://ab12", { mode: "dontAsk" })).toBe("runs");
+});

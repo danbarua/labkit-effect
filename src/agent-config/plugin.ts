@@ -47,10 +47,10 @@ export interface FromHost {
   readonly workingFolder?: string | undefined;
   /**
    * Folders the host adds to the working folder for this session (`--add-dir`, ACP's
-   * `additionalDirectories`, the REPL's `/add-dir`), as absolute paths; an effect when they can change
-   * while the session runs, read at each call.
+   * `additionalDirectories`), as absolute paths. A folder the user adds while the session runs is a
+   * fact of the session (`FolderAdded`), which the permission policy reads.
    */
-  readonly additionalFolders?: ReadonlyArray<string> | Effect.Effect<ReadonlyArray<string>> | undefined;
+  readonly additionalFolders?: ReadonlyArray<string> | undefined;
   /**
    * The names of a tool's path inputs, from the tools the session runs with now; the permission
    * policy judges those paths. A tool it does not name falls back to the session's recorded catalog

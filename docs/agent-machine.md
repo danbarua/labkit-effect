@@ -65,8 +65,10 @@ The core is four kinds of machine in a tree:
 - The router delivers an observation to the machine its fields address. An observation that a
   machine ignores is recorded as `ObservationNotExpected`; one addressed to a turn or a call that no
   machine exists for is recorded as `ObservationUndelivered`.
-- `McpServerChanged` is recorded for the session's record and its host. No machine acts on it,
-  nothing follows from it, and it is never recorded as `ObservationNotExpected`.
+- `McpServerChanged` is recorded for the session's record and its host. `FolderAdded` is recorded
+  for the permission policy, which counts the folder as inside the working folder, and for the
+  model, which is told of the folder where it was added (`conversation.ts`). No machine acts on
+  either, nothing follows from them, and neither is recorded as `ObservationNotExpected`.
 - Every `switch` in the core ends in `satisfies never`, so a new kind of observation, decision or
   request does not compile until every machine handles it.
 

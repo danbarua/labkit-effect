@@ -3,7 +3,8 @@
  * - each input given to a turn is a user message;
  * - each response is an assistant message with its text and tool calls, followed by a user message
  *   with a result for every call it made (sent as `tool-output.ts` describes);
- * - each notice is an instruction message, at the place where it was inserted.
+ * - each notice is an instruction message, at the place where it was inserted;
+ * - each folder the user added is an instruction message saying so, at the place where it was added.
  *
  * Consecutive messages from one role are merged into one. A response's thinking and the parts that
  * the harness does not recognise stay in their place, marked with the provider that produced them;
@@ -14,7 +15,7 @@ import { Array as Arr, Option } from "effect";
 import { outcomeAsSent } from "./tool-output.ts";
 import type { BlobRef } from "../agent-machine/blob.ts";
 import type { Fact } from "../agent-machine/fact.ts";
-import type { CallId, NoticeText, Seq } from "../agent-machine/names.ts";
+import { type CallId, NoticeText, type Seq } from "../agent-machine/names.ts";
 import type { Observation, ToolOutcome } from "../agent-machine/observation.ts";
 import type { ContextMessage, ContextPart } from "./contracts.ts";
 import { sentIn } from "./sent.ts";
@@ -106,6 +107,8 @@ function messages(fact: Fact, texts: ReturnType<typeof inputTexts>, calls: Calls
       ];
     case "NoticeInserted":
       return [noticeMessage([observation.text])];
+    case "FolderAdded":
+      return [noticeMessage([NoticeText.make(`The user added the folder ${observation.folder}: it counts as inside the working folder, so you may read and change files there.`)])];
     case "SessionOpened":
     case "InputArrived":
     case "InputCancelled":

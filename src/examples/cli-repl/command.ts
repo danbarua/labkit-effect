@@ -14,7 +14,6 @@ import type { LayerSource } from "../../agent-config/file.ts";
 import type { SettingsChange } from "../../agent-machine/settings.ts";
 import type { Asked, ModelCatalog } from "../../agent-host/catalog.ts";
 import type { McpServers } from "../../agent-mcp/servers.ts";
-import type { AddedFolders } from "./added-folders.ts";
 import type { Services, Session } from "../../agent-session/loop.ts";
 import type { SessionStoreFailed } from "../../agent-session/session-store.ts";
 import type { SettingOption } from "../../agent-session/configuration/options.ts";
@@ -37,8 +36,6 @@ export interface CommandContext {
   readonly commandLine: SettingsChange;
   /** The session's MCP servers; absent when the session has none. */
   readonly mcp?: McpServers;
-  /** The folders added to the session (`/add-dir`); absent before a session is open. */
-  readonly addedFolders?: AddedFolders;
 }
 
 /** What completion draws on: the usable models, the current model's settings, and the session's MCP server names. */

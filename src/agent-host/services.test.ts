@@ -6,7 +6,7 @@ import { boringOpening } from "../../tests/support/boring.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { test, testOrigin } from "../../tests/support/test.ts";
 import type { Fact } from "../agent-machine/fact.ts";
-import { CallId, Seq, type ToolKind, ToolName } from "../agent-machine/names.ts";
+import { CallId, FolderPath, Seq, type ToolKind, ToolName } from "../agent-machine/names.ts";
 import type { PermissionMode } from "../agent-policy/permissions.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
 import { receivedJson } from "../agent-session/received.ts";
@@ -54,22 +54,22 @@ test("an additional folder counts as inside the working folder: from ~, relative
   expect(await judged("cat /data2/x.csv", ["/data"])).toBe("asks");
 });
 
-test("additional folders that can change while the session runs are read at each call", async () => {
-  const shared: Array<string> = [];
-  const judged = (command: string) =>
+test("a folder the user added to the session counts as inside the working folder, read from the session's facts, so a continued session keeps it", async () => {
+  const judged = (command: string, added: ReadonlyArray<string>) =>
     runTest(
       Effect.gen(function* () {
         const facts: ReadonlyArray<Fact> = [
           { _tag: "Observed", seq: Seq.make(1), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation: boringOpening([spec("run_command", "execute")]) },
+          ...added.map((folder, at): Fact => ({ _tag: "Observed", seq: Seq.make(2 + at), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation: { _tag: "FolderAdded", folder: FolderPath.make(folder) } })),
         ];
-        const policy = yield* permissionsFor("default", true, undefined, "/work/project", Effect.sync(() => [...shared]))(facts);
+        const policy = yield* permissionsFor("default", true, undefined, "/work/project")(facts);
         const step = policy.start({ _tag: "RunTool", call: CallId.make("c1"), tool: ToolName.make("run_command"), input: receivedJson({ command }) });
         return step._tag === "Waiting" ? "asks" : step.verdict._tag === "Continue" ? "runs" : "vetoed";
       }),
     );
-  expect(await judged("cat /data/x.csv")).toBe("asks");
-  shared.push("/data");
-  expect(await judged("cat /data/x.csv")).toBe("runs");
+  expect(await judged("cat /data/x.csv", [])).toBe("asks");
+  expect(await judged("cat /data/x.csv", ["/data"])).toBe("runs");
+  expect(await judged("cat /data2/x.csv", ["/data"])).toBe("asks");
 });
 
 test("a tool's path inputs come from the tools the session runs with now, so a session whose recorded catalog does not name them still has its paths judged", async () => {

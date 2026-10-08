@@ -11,7 +11,7 @@
 
 import { Effect, Schema } from "effect";
 import type { Fact } from "../../agent-machine/fact.ts";
-import type { SessionId } from "../../agent-machine/names.ts";
+import type { FolderPath, SessionId } from "../../agent-machine/names.ts";
 import type { ModelTarget, Observation } from "../../agent-machine/observation.ts";
 import { changed, type ModelSettings } from "../../agent-machine/settings.ts";
 import { type Target, ToolSpec } from "../contracts.ts";
@@ -112,6 +112,11 @@ export const immutableSystemPromptOf = (facts: ReadonlyArray<Fact>): string | un
   const system = openingOf(facts)?.system;
   return system === undefined ? undefined : asText(system);
 };
+
+/** Returns the folders the user added to the session (`FolderAdded`), in the order they were added, each once. */
+export const foldersAddedOf = (facts: ReadonlyArray<Fact>): ReadonlyArray<FolderPath> => [
+  ...new Set(facts.flatMap((fact) => (fact._tag === "Observed" && fact.observation._tag === "FolderAdded" ? [fact.observation.folder] : []))),
+];
 
 /**
  * ImmutableToolCatalog: returns the tools that the session opened with. Every request uses them;

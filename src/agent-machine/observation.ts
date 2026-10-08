@@ -15,6 +15,7 @@ import {
   CallId,
   AdjustmentReason,
   FailureText,
+  FolderPath,
   InputText,
   McpServerName,
   ModelName,
@@ -220,6 +221,12 @@ export const Observation = Schema.Union([
       Schema.TaggedStruct("Stopped", {}),
     ]),
   }),
+  /**
+   * The user added `folder`, an absolute path, to the session's folders. From then on, a path in it
+   * counts as inside the working folder for the permission policy, and the model is told so at this
+   * place in the conversation. No machine acts on it.
+   */
+  Schema.TaggedStruct("FolderAdded", { folder: FolderPath }),
   /**
    * A request for a model response was sent to `provider` for `model`. `sent` is what the request
    * carried (the system prompt, the tools and the conversation), as the layer that assembled them

@@ -28,7 +28,7 @@ import type { Configuration } from "./file.ts";
 import { PermissionRule, ReadOnlyPrefix } from "../agent-policy/permission-rules.ts";
 import { ToolName } from "../agent-machine/names.ts";
 import type { Received } from "../agent-machine/received.ts";
-import { type AnyPlugin, type FromHost, plugin } from "./plugin.ts";
+import { type AnyPlugin, plugin } from "./plugin.ts";
 
 /** A setting of type `schema`, which takes `value` when the file does not give it. */
 const defaulted = <S extends Schema.Top>(schema: S, value: S["Encoded"]) => schema.pipe(Schema.withDecodingDefaultKey(Effect.succeed(value)));
@@ -69,13 +69,9 @@ export const permissions = plugin(
   }),
   ["toolCalls"],
   ({ mode, additionalDirectories, ...settings }, host) => ({
-    toolCalls: permissionsFor(host.permissionMode ?? mode, host.canAsk, settings, host.workingFolder, foldersWith(additionalDirectories, host.additionalFolders), host.toolPaths),
+    toolCalls: permissionsFor(host.permissionMode ?? mode, host.canAsk, settings, host.workingFolder, [...additionalDirectories, ...(host.additionalFolders ?? [])], host.toolPaths),
   }),
 );
-
-/** The settings' additional folders, then the host's: an effect when the host's can change while the session runs. */
-const foldersWith = (settings: ReadonlyArray<string>, host: FromHost["additionalFolders"]): ReadonlyArray<string> | Effect.Effect<ReadonlyArray<string>> =>
-  Effect.isEffect(host) ? Effect.map(host, (added) => [...settings, ...added]) : [...settings, ...(host ?? [])];
 
 /** The folders that `configuration`'s permissions plug-in counts as inside the working folder (`additionalDirectories`), as written. */
 export const additionalDirectoriesOf = (configuration: Configuration): ReadonlyArray<string> =>

@@ -59,9 +59,9 @@ model.
           rules, `Read(...)` and `Edit(...)`, as in Claude Code (2026-10-08); additional folders
           (settings, `--add-dir`, ACP's `additionalDirectories`) count as inside, for commands and
           the file tools, which are asked about a path outside every folder as a command is; the
-          REPL's `/add-dir` adds one for the session. To do: `/add-dir` remembering a folder (where it
-          is saved is not decided: the project's local settings, as Claude Code, or the user's); the
-          programs the guide lists as not checked (`docs/guide/permissions.md`).
+          REPL's `/add-dir` adds one to the session as a fact of it (`FolderAdded`), so a continued
+          session keeps it. To do: the programs the guide lists as not checked
+          (`docs/guide/permissions.md`).
         - Searches rewritten to leave out denied folders (Dan, 2026-10-08): with the command parsed
           (`bash-segments`), labkit adds exclusions to `find`, `grep -r` and `rg` (`-not -path`,
           `--exclude-dir`, `--glob '!…'`) for the folders that deny rules name inside the folders
@@ -436,11 +436,6 @@ with no model, its attachments as pointers and one line for each tool call (`dig
         observability:datasources` is run by hand after `lgtm-stack.sh`;
       - captures from zork's two sessions are checked by reading the code, not by a live game.
 
-- [ ] Additional directories (Claude Code's `/add-dir`, ACP's additional directories): folders a
-      session may use at the same trust level as its working folder. Built: the settings'
-      `additionalDirectories`, `--add-dir`, ACP's `additionalDirectories` and the REPL's `/add-dir`
-      (for the session). To do: remembering a folder `/add-dir` adds, which Claude Code offers
-      (Dan, 2026-10-07); where it is saved is not decided.
 - [ ] A session is not bound to its working folder for ever (Dan, 2026-10-07): moving it to another
       folder forks it and rewrites its turn zero, which records the working folder. Waits for forks,
       below.

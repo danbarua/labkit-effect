@@ -174,7 +174,8 @@ plugins:
 
 `--add-dir <folder>` adds one for a session, at the terminal or in the ACP launcher, and is
 repeatable. In a conversation, `/add-dir <folder>` adds one from the next tool call on, and tells the
-agent; `/add-dir` alone lists them. An editor can name more for each session it opens (ACP's
+agent; `/add-dir` alone lists them. A folder added with `/add-dir` stays added when you continue the
+session (`--continue`, `--resume`). An editor can name more for each session it opens (ACP's
 `additionalDirectories`).
 
 ## What labkit does not check
