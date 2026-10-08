@@ -175,7 +175,8 @@ MCP server's result (`mcpToolResult`) is sent as plain text, one line per block:
 | image or audio | a line naming its type and media type |
 
 A result with no text is sent as its `structuredContent`, as JSON. A tool's own failure (`isError`)
-is sent the same way. Any other output is sent as recorded.
+is sent the same way. Any other output is sent as recorded. A result's details (`ToolDetail`) are
+never sent: the model is sent the output alone.
 
 ## Providers
 

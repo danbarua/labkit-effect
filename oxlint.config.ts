@@ -65,7 +65,7 @@ const imperativeBoundaries: ReadonlyArray<string> = [
   // The command parser's WebAssembly module: loaded once, its memory written and read in place.
   "src/agent-host/command-parser.ts",
   // A line diff's table of common subsequences, filled in place.
-  "src/agent-host/line-diff.ts",
+  "src/agent-tools/line-diff.ts",
 ];
 
 export default defineConfig({

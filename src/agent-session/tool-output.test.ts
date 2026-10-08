@@ -58,3 +58,9 @@ test("an MCP result with no text is sent as its structured content in JSON; an M
   const plain = sent({ _tag: "Succeeded", output: json({ files: ["a"] }) });
   expect(plain?._tag === "Succeeded" ? [plain.output.mediaType, asText(plain.output)] : plain).toEqual(["application/json", '{"files":["a"]}']);
 });
+
+test("a result's details are never sent to the model: it is sent the output alone", () => {
+  const output = { mediaType: "text/plain", body: { _tag: "Text", text: "Edited /w/a.txt." } };
+  const details = [{ _tag: "FileChanged", path: "/w/a.txt", change: "updated", patch: { mediaType: "text/plain", body: { _tag: "Text", text: "-two\n+three" } } }];
+  expect(sent({ _tag: "Succeeded", output, details }) as unknown).toEqual({ _tag: "Succeeded", output });
+});

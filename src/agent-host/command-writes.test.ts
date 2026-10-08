@@ -7,7 +7,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, testFolder } from "../../tests/support/test.ts";
 import { ShellCommand, WordText } from "../agent-policy/command-segments.ts";
-import { type Current, currentOnDisk, plannedWrites, shownWrites } from "./command-writes.ts";
+import { type Current, currentOnDisk } from "../agent-tools/file-change.ts";
+import { plannedWrites, shownWrites } from "./command-writes.ts";
 
 const folders = { working: WordText.make("/home/someone/project"), home: WordText.make("/home/someone") };
 const planned = (command: string) => plannedWrites(ShellCommand.make(command), folders).map((each) => (each._tag === "Planned" ? `${each.full} ← ${JSON.stringify(each.writes.text)}` : `${each.writes.path}: ${each.reason}`));

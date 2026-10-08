@@ -28,7 +28,7 @@ import type { ToolSpec } from "../agent-session/contracts.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
 import { bound } from "./bound.ts";
 import { described } from "./described.ts";
-import { anyTool, type Fields, Rejected, Reported, sourceOf, type Tool } from "./tool.ts";
+import { anyTool, type Fields, Rejected, Reported, sourceOf, type Tool, withNote } from "./tool.ts";
 
 /** The repository's folder: the folder that holds `.git`. */
 export const RepositoryPath = Schema.NonEmptyString.annotate({ description: "The repository's folder: the folder that holds .git.", pathOf: "folder" });
@@ -197,7 +197,7 @@ const actionTool = <A extends string, F extends Fields & { readonly intent?: nev
       const logged = unused.length === 0 ? Effect.void : Effect.logWarning(logKeys.tools.inputIgnored, { tool: name, action: given.action, ignored: unused });
       return logged.pipe(
         Effect.andThen(tool.run(input)),
-        Effect.map((output) => `${output}${unusedNote(given.action, unused)}`),
+        Effect.map((output) => withNote(output, unusedNote(given.action, unused))),
       );
     },
   };

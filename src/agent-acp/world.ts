@@ -24,15 +24,16 @@
  * files without the editor being told. A working folder inside a repository, below its root, is
  * offered no git tools.
  *
- * A path given to a tool is relative to the working folder, or absolute. A path outside the working
- * folder is refused with a failure the model reads.
+ * A path given to a tool is relative to the working folder, from `~`, or absolute. The tools refuse
+ * no path: the permission policy asks about a path outside the working folders.
  */
 
 import type { Environment } from "../agent-process/environment.ts";
 import { Effect, FileSystem, HashMap, Option, Ref } from "effect";
 import { homedir } from "node:os";
-import { type Current, currentOnDisk, type PlannedWrite, plannedWrites, type ShownWrite, shownWrites } from "../agent-host/command-writes.ts";
-import { logKeys as hostLogKeys } from "../agent-host/log-keys.ts";
+import { type PlannedWrite, plannedWrites, type ShownWrite, shownWrites } from "../agent-host/command-writes.ts";
+import { logKeys } from "../agent-session/log-keys.ts";
+import { type Current, currentOnDisk } from "../agent-tools/file-change.ts";
 import { ShellCommand, WordText } from "../agent-policy/command-segments.ts";
 import type { Folders } from "../agent-policy/command-units.ts";
 import type { AgentConnection } from "effective-acp/agent";
@@ -143,7 +144,7 @@ export const editorWorld: World<FileSystem.FileSystem> = {
               connection.client["fs/read_text_file"]({ sessionId, path: full }).pipe(
                 Effect.map(({ content }): Current => ({ _tag: "Text", text: content })),
                 Effect.catch((error) =>
-                  Effect.logWarning(hostLogKeys.writes.currentUnread, { path, full, cause: error.message }).pipe(
+                  Effect.logWarning(logKeys.tools.currentUnread, { path, full, cause: error.message }).pipe(
                     Effect.as<Current>({ _tag: "Unknown", reason: `the editor could not read its current text: ${error.message}` }),
                   ),
                 ),
@@ -175,7 +176,7 @@ export const editorWorld: World<FileSystem.FileSystem> = {
         anyTool(described(updatePlan)),
         ...(connection.profile.client.capabilities.terminal === true ? [anyTool(described(runCommand))] : []),
       ];
-      const source = yield* sourceOf(tools, { strictInput }).pipe(Effect.provideService(Editor, { connection, sessionId, cwd, terminals, writesBefore }));
+      const source = yield* sourceOf(tools, { strictInput }).pipe(Effect.provideService(Editor, { connection, sessionId, cwd, terminals, writesBefore, currentOf }));
 
       const git = gitToolsAt(cwd, strictInput);
       const plain = presentFrom([...source.tools, ...(git?.catalog ?? [])]);

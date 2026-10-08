@@ -40,6 +40,7 @@ import { ToolName } from "../agent-machine/names.ts";
 import { type Environment, withoutCredentials } from "../agent-process/environment.ts";
 import { described } from "./described.ts";
 import { inWorkspace } from "./in-workspace.ts";
+import { currentOnDisk, fileChanged } from "./file-change.ts";
 import { FilePath, FolderPath } from "./paths.ts";
 import { anyTool, Rejected, Reported, sourceOf, type Tool } from "./tool.ts";
 
@@ -184,8 +185,10 @@ export const writeFile: Tool<typeof WriteFile.fields, FileSystem.FileSystem> = {
     Effect.gen(function* () {
       const bytes = Buffer.byteLength(text);
       if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The text is over ${maxReadText} (${bytes} bytes). Write less.` });
-      yield* (yield* FileSystem.FileSystem).writeFileString(path, text).pipe(Effect.mapError(reported(path)));
-      return `Wrote ${bytes} bytes to ${path}.`;
+      const fs = yield* FileSystem.FileSystem;
+      const before = yield* currentOnDisk(fs, path, path);
+      yield* fs.writeFileString(path, text).pipe(Effect.mapError(reported(path)));
+      return { text: `Wrote ${bytes} bytes to ${path}.`, details: fileChanged(path, before, text) };
     }),
 };
 
@@ -209,7 +212,7 @@ export const editFile: Tool<typeof EditFile.fields, FileSystem.FileSystem> = {
       const bytes = Buffer.byteLength(changed);
       if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The file would be over ${maxReadText} (${bytes} bytes).` });
       yield* fs.writeFileString(path, changed).pipe(Effect.mapError(reported(path)));
-      return `Edited ${path}.`;
+      return { text: `Edited ${path}.`, details: fileChanged(path, { _tag: "Text", text }, changed) };
     }),
 };
 

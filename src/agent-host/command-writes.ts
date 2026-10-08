@@ -3,8 +3,8 @@
  * `echo x >> f`, `tee f <<< x`; `textsWritten` in `agent-policy/command-units.ts`), for a host to show
  * as a diff: each file's full path and the text the file will hold.
  *
- * A host reads a file's current text before the command runs (`currentOnDisk`, or through the
- * editor), and the diff is between that text and the text the command leaves (`newTextOf`). A write
+ * A host reads a file's current text before the command runs (`currentOnDisk` in
+ * `agent-tools/file-change.ts`, or through the editor), and the diff is between that text and the text the command leaves (`newTextOf`). A write
  * is not shown as a diff when:
  * - a `cd`, `pushd` or `popd` comes before it in the command, which may change which file it writes;
  * - its path names another user's home folder (`~name/…`);
@@ -15,23 +15,17 @@
  * that; a read that fails for another reason does not.
  */
 
-import { Effect, FileSystem } from "effect";
+import { Effect } from "effect";
 import { join, resolve } from "node:path";
 import type { ShellCommand } from "../agent-policy/command-segments.ts";
 import { type Folders, textsWritten, unitsOf, type Writes } from "../agent-policy/command-units.ts";
+import type { Current } from "../agent-tools/file-change.ts";
 import { segmentsOf } from "./command-parser.ts";
-import { logKeys } from "./log-keys.ts";
-
-/** The largest current text that is read for a diff: 256 KiB, as the file tools read. */
-export const maxCurrentBytes = 256 * 1024;
 
 /** A write the command makes: with the file's full path, or why it is not shown as a diff. */
 export type PlannedWrite =
   | { readonly _tag: "Planned"; readonly full: string; readonly writes: Writes }
   | { readonly _tag: "NotShown"; readonly writes: Writes; readonly reason: string };
-
-/** A file's text before the command runs: none (`Missing`, a new file), its text, or why it is not known. */
-export type Current = { readonly _tag: "Missing" } | { readonly _tag: "Text"; readonly text: string } | { readonly _tag: "Unknown"; readonly reason: string };
 
 /** The writes of `command` whose text its words show, in order, judged against `folders`. */
 export const plannedWrites = (command: ShellCommand, folders: Folders): ReadonlyArray<PlannedWrite> => {
@@ -48,21 +42,6 @@ export const plannedWrites = (command: ShellCommand, folders: Folders): Readonly
 /** The text the file holds after `writes`, given its `current` text. */
 export const newTextOf = (current: Exclude<Current, { readonly _tag: "Unknown" }>, writes: Writes): string =>
   writes.append && current._tag === "Text" ? `${current.text}${writes.text}` : writes.text;
-
-/** The current text of the file at `full`, read from the local disk with `fs`. A failure other than a missing file is logged and named. */
-export const currentOnDisk = (fs: FileSystem.FileSystem, full: string, path: string): Effect.Effect<Current> =>
-  Effect.gen(function* () {
-    const info = yield* fs.stat(full);
-    if (info.type !== "File") return { _tag: "Unknown", reason: "it is not a file" } satisfies Current;
-    if (info.size > BigInt(maxCurrentBytes)) return { _tag: "Unknown", reason: `it is larger than ${maxCurrentBytes / 1024} KiB` } satisfies Current;
-    return { _tag: "Text", text: yield* fs.readFileString(full) } satisfies Current;
-  }).pipe(
-    Effect.catch((error) =>
-      error.reason._tag === "NotFound"
-        ? Effect.succeed<Current>({ _tag: "Missing" })
-        : Effect.logWarning(logKeys.writes.currentUnread, { path, full, cause: error.message }).pipe(Effect.as<Current>({ _tag: "Unknown", reason: `its current text could not be read: ${error.message}` })),
-    ),
-  );
 
 /** A write as a host shows it: the file's text before and after (`before` is undefined for a new file), or why no diff is shown. */
 export type ShownWrite =

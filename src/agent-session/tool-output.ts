@@ -8,7 +8,7 @@
  * - an image or audio block: a line naming its type and media type.
  *
  * When no block gives text, `structuredContent` is sent as JSON. Any other output is sent as
- * recorded.
+ * recorded. A result's details (`ToolDetail`) are never sent.
  */
 
 import { MediaType, type Received } from "../agent-machine/received.ts";
@@ -53,7 +53,7 @@ const mcpResultText = (output: Received): Received => {
 
 /** Returns a tool call's outcome as the model is sent it. */
 export const outcomeAsSent = (outcome: ToolOutcome): ToolOutcome => {
-  if (outcome._tag === "Succeeded") return outcome.output.mediaType === mcpToolResult ? { ...outcome, output: mcpResultText(outcome.output) } : outcome;
+  if (outcome._tag === "Succeeded") return { _tag: "Succeeded", output: outcome.output.mediaType === mcpToolResult ? mcpResultText(outcome.output) : outcome.output };
   const reason = outcome.reason;
   return reason._tag === "Reported" && reason.error.mediaType === mcpToolResult ? { ...outcome, reason: { ...reason, error: mcpResultText(reason.error) } } : outcome;
 };

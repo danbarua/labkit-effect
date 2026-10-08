@@ -25,6 +25,10 @@ export type ToolName = typeof ToolName.Type;
 export const McpServerName = Schema.String.pipe(Schema.brand("agent-machine/McpServerName"));
 export type McpServerName = typeof McpServerName.Type;
 
+/** The absolute path of a file on the host's file system. */
+export const FullPath = Schema.String.pipe(Schema.brand("agent-machine/FullPath"));
+export type FullPath = typeof FullPath.Type;
+
 /** The absolute path of a folder on the host's file system. */
 export const FolderPath = Schema.String.pipe(Schema.brand("agent-machine/FolderPath"));
 export type FolderPath = typeof FolderPath.Type;

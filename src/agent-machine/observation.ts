@@ -16,6 +16,7 @@ import {
   AdjustmentReason,
   FailureText,
   FolderPath,
+  FullPath,
   InputText,
   McpServerName,
   ModelName,
@@ -76,9 +77,25 @@ export const ToolFailure = Schema.Union([
 ]);
 export type ToolFailure = typeof ToolFailure.Type;
 
-/** How a tool call ended: `Succeeded` with the tool's output, or `Failed` with the reason. */
+/**
+ * What a tool call did, for the harness and its displays. The model is never sent it. Each variant
+ * is one kind of thing a call does, so a display branches on what happened, not on which tool ran.
+ *
+ * - `FileChanged`: the call created the text file at `path` (`patch` is the file's whole text), or
+ *   updated it (`patch` is a unified diff of the change, with three lines of context).
+ */
+export const ToolDetail = Schema.Union([
+  Schema.TaggedStruct("FileChanged", { path: FullPath, change: Schema.Literals(["created", "updated"]), patch: Received }),
+]);
+export type ToolDetail = typeof ToolDetail.Type;
+
+/**
+ * How a tool call ended: `Succeeded` with the tool's output, the text the model is sent, and the
+ * details of what it did when the tool gives them; or `Failed` with the reason. A failed call has no
+ * details: nothing changed, or what changed is not known.
+ */
 export const ToolOutcome = Schema.Union([
-  Schema.TaggedStruct("Succeeded", { output: Received }),
+  Schema.TaggedStruct("Succeeded", { output: Received, details: Schema.optionalKey(Schema.Array(ToolDetail)) }),
   Schema.TaggedStruct("Failed", { reason: ToolFailure }),
 ]);
 export type ToolOutcome = typeof ToolOutcome.Type;

@@ -111,7 +111,12 @@ Constraints:
 
 ### A tool's result has details for the harness (2026-10-08)
 
-Dan: "Tool results with details: … Yes, that's the one." A design, not built.
+Dan: "Tool results with details: … Yes, that's the one." Built so far: the shape (`ToolDetail`,
+`ToolOutput`), the details recorded with a result and never sent to the model, and `FileChanged`
+from `write_file` and `edit_file`, of the workspace and of the editor. The patch is kept with the
+result, in the facts, since a file the tools change is at most 256 KiB, and the CLI keeps no blob
+store across processes. A created file's patch is its text; no tool deletes a file yet, so
+`FileChanged` has no `deleted` change.
 
 **The problem.** A tool's result is one value, the text the model is sent
 (`ToolOutcome.Succeeded { output }`). What the call changed is not recorded, so a display that

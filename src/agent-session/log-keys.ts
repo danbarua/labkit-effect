@@ -6,6 +6,12 @@ export const logKeys = {
     inputIgnored: "tool.input.ignored",
     /** The git tools' repository could not be opened to say whether it is a linked worktree; the system text calls it a repository. */
     repositoryNotOpened: "tool.git.repository_not_opened",
+    /**
+     * Warning: the current text of a file that a tool or a command changes could not be read, so what
+     * changed is not recorded and no diff is shown. Details: the path as given, the full path, and
+     * the cause.
+     */
+    currentUnread: "tool.file.current_unread",
   },
   blobs: {
     /** A blob's file holds bytes whose hash is not its id; the store finds nothing for it. */

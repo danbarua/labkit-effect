@@ -25,8 +25,9 @@ import { Console, Deferred, Effect, FileSystem, HashMap, Option, PubSub, Queue, 
 import { homedir } from "node:os";
 import { Brand } from "../../agent-host/brand.ts";
 import { terminalOf } from "../../agent-host/command-detail.ts";
-import { currentOnDisk, type ShownWrite, shownWrites } from "../../agent-host/command-writes.ts";
-import { unifiedDiff } from "../../agent-host/line-diff.ts";
+import { type ShownWrite, shownWrites } from "../../agent-host/command-writes.ts";
+import { currentOnDisk } from "../../agent-tools/file-change.ts";
+import { unifiedDiff } from "../../agent-tools/line-diff.ts";
 import { WordText } from "../../agent-policy/command-segments.ts";
 import type { Detail, Folders } from "../../agent-policy/command-units.ts";
 import type { SessionUpdate } from "effective-acp/schema/v1";

@@ -148,6 +148,24 @@ test("a call that cannot run says why: a missing file, a result over 256 KiB, in
   expect(await call("delete_file", { path: "a" })).toBe("NotFound");
 });
 
+/** The details a call of `tool` with `input` records of what it did; undefined when it records none or fails. */
+const detailsOf = (tool: string, input: object) =>
+  runTest(
+    Effect.gen(function* () {
+      const outcome = yield* (yield* ToolRunner).run(ToolName.make(tool), receivedJson({ intent: "A test call.", ...input } as never), CallId.make("call-1"));
+      return outcome._tag === "Succeeded" ? outcome.details?.map((detail) => ({ ...detail, patch: asText(detail.patch) })) : undefined;
+    }).pipe(Effect.provide(runner.pipe(Layer.provide(BunServices.layer)))),
+  );
+
+test("write_file and edit_file record what they changed: a file created, with its text; a file updated, with a unified diff; nothing when the text is the same", async () => {
+  const full = `${root}/src/d.txt`;
+  expect((await detailsOf("write_file", { path: "src/d.txt", text: "one\ntwo\n" })) as unknown).toEqual([{ _tag: "FileChanged", path: full, change: "created", patch: "one\ntwo\n" }]);
+  expect((await detailsOf("edit_file", { path: "src/d.txt", old_text: "two", new_text: "three" })) as unknown).toEqual([
+    { _tag: "FileChanged", path: full, change: "updated", patch: [`--- a/${full}`, `+++ b/${full}`, "@@ -1,2 +1,2 @@", " one", "-two", "+three"].join("\n") },
+  ]);
+  expect(await detailsOf("write_file", { path: "src/d.txt", text: "one\nthree\n" })).toBeUndefined();
+});
+
 test("write_file creates or replaces a file inside the workspace, whose folder exists", async () => {
   expect(await call("write_file", { path: "src/b.txt", text: "hello" })).toBe(`Wrote 5 bytes to ${root}/src/b.txt.`);
   expect(await call("read_file", { path: "src/b.txt" })).toBe("hello");

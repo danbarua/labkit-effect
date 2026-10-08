@@ -11,7 +11,7 @@
 
 import { Context, Data, Effect, Schema } from "effect";
 import { type CallId, FailureText, type ToolName } from "../agent-machine/names.ts";
-import type { ToolOutcome } from "../agent-machine/observation.ts";
+import type { ToolDetail, ToolOutcome } from "../agent-machine/observation.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
 import { parseJson, receivedText } from "../agent-session/received.ts";
@@ -31,6 +31,12 @@ export class Reported extends Data.TaggedError("Reported")<{ readonly message: s
  */
 export class CurrentCall extends Context.Service<CurrentCall, CallId>()("agent-tools/CurrentCall") {}
 
+/** What a call returns: the text the model is sent, or that text and the details of what the call did (`ToolDetail`), which the model is never sent. */
+export type ToolOutput = string | { readonly text: string; readonly details: ReadonlyArray<ToolDetail> };
+
+/** Returns `output` with `note` appended to its text. */
+export const withNote = (output: ToolOutput, note: string): ToolOutput => (typeof output === "string" ? `${output}${note}` : { ...output, text: `${output.text}${note}` });
+
 /** The fields of a tool's input: each decodes and encodes without services. */
 export type Fields = { readonly [name: string]: Schema.Top & { readonly DecodingServices: never; readonly EncodingServices: never } };
 
@@ -41,14 +47,14 @@ export interface Tool<F extends Fields, R = never> {
   readonly input: Schema.Struct<F>;
   readonly kind: ToolSpec["kind"];
   readonly replay: ToolSpec["replay"];
-  readonly run: (input: Schema.Struct<F>["Type"]) => Effect.Effect<string, Rejected | Reported, R>;
+  readonly run: (input: Schema.Struct<F>["Type"]) => Effect.Effect<ToolOutput, Rejected | Reported, R>;
 }
 
 /** A tool of any input, as a list of tools holds it. */
 export interface AnyTool<R> {
   readonly spec: ToolSpec;
   readonly decode: (input: unknown, strict: boolean) => Effect.Effect<Decoded<unknown>, Schema.SchemaError>;
-  readonly run: (input: unknown) => Effect.Effect<string, Rejected | Reported, R>;
+  readonly run: (input: unknown) => Effect.Effect<ToolOutput, Rejected | Reported, R>;
 }
 
 /** The names of `input`'s path inputs (`paths.ts`), for the spec, when it has any. */
@@ -92,7 +98,11 @@ export const sourceOf = <R>(tools: ReadonlyArray<AnyTool<R>>, options: { readonl
             const logged = ignored.length === 0 ? Effect.void : Effect.logWarning(logKeys.tools.inputIgnored, { tool: name, ignored });
             return logged.pipe(
               Effect.andThen(found.run(value)),
-              Effect.map((output): ToolOutcome => ({ _tag: "Succeeded", output: receivedText(`${output}${note}`) })),
+              Effect.map((output): ToolOutcome => {
+                const ran = withNote(output, note);
+                if (typeof ran === "string") return { _tag: "Succeeded", output: receivedText(ran) };
+                return { _tag: "Succeeded", output: receivedText(ran.text), ...(ran.details.length === 0 ? {} : { details: ran.details }) };
+              }),
               Effect.catchTag("Reported", (error) => Effect.fail(new Reported({ message: `${error.message}${note}` }))),
             );
           }),
