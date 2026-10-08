@@ -40,6 +40,7 @@ import { logKeys as mcpLogKeys } from "../agent-mcp/log-keys.ts";
 import { test, testFolder } from "../../tests/support/test.ts";
 import { makeHost } from "./host.ts";
 import { logKeys } from "./log-keys.ts";
+import { logKeys as sessionLogKeys } from "../agent-session/log-keys.ts";
 import { presentFrom, project } from "./projection.ts";
 import { maxFileBytes, type World } from "./world.ts";
 import { defaultPermissionSettings } from "../agent-policy/permissions.ts";
@@ -1084,6 +1085,10 @@ test("each lifecycle point logs its event with the connection, request, session,
   expect(of(logKeys.prompt.admitted)).toMatchObject({ annotations: { session: sessionId } });
   expect(of(logKeys.permission.asked)).toMatchObject({ annotations: { session: sessionId, call: "call-1", turn: expect.any(String) }, details: { tool: "write_file" } });
   expect(of(logKeys.permission.answered)).toMatchObject({ annotations: { call: "call-1" }, details: { outcome: "selected", option: "allow-once" } });
+  // The loop logs each observation it records; a permission's question and answer with their text, for an audit of what was asked and answered.
+  const recorded = (observation: string) => host.logged.find((each) => each.key === sessionLogKeys.loop.observationRecorded && (each.details as { observation?: string } | undefined)?.observation === observation);
+  expect(recorded("PermissionAsked")).toMatchObject({ details: { details: { call: "call-1", asks: expect.stringContaining("write_file") } } });
+  expect(recorded("PermissionAnswered")).toMatchObject({ details: { details: { call: "call-1", answer: '{"optionId":"allow-once"}' } } });
   expect(of(logKeys.usage.sent)).toMatchObject({ details: { used: expect.any(Number), size: expect.any(Number) } });
   expect(of(logKeys.prompt.settled)).toMatchObject({
     level: "Info",

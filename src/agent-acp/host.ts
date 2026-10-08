@@ -98,6 +98,8 @@ import { editorWorld, type World, type WorldSession, workspaceWorld } from "./wo
 export interface HostOptions<R = never> {
   /** The session directory's root (`agent-host/directory.ts`). Each session that had a turn is a folder in it. */
   readonly directory: string;
+  /** Where the sessions' blobs are kept (the launcher's `--sessions-dir`, its `blobs` folder); the brand's blobs folder (`blobsFolderOf`) when left out. */
+  readonly blobsFolder?: string | undefined;
   /**
    * Where the sessions' tools come from: `"editor"` (`editorWorld`, the default), `"local"`
    * (`workspaceWorld`, a stopgap that bypasses the editor; the launcher's `--local-tools`), or a
@@ -645,7 +647,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const file = storeFileOf(options.directory, id);
               // The blobs (inputs' images and files, stored outputs) are kept in the brand's blobs folder, which every session and host
               // shares, so a session continued from its facts has them; a session made before then also reads those in its own folder.
-              const blobs = BlobsInFolder(blobsFolderOf(brand, options.home), [join(sessionFolderOf(options.directory, id), "blobs")]);
+              const blobs = BlobsInFolder(options.blobsFolder ?? blobsFolderOf(brand, options.home), [join(sessionFolderOf(options.directory, id), "blobs")]);
               // The configuration's seam lists, with permission following the session's mode (`FromHost.permissionMode`). Its tool
               // sources are not used: the session's tools are the world's and its MCP servers'.
               const additionalFolders = [...(options.additionalFolders ?? []), ...parent.additional];

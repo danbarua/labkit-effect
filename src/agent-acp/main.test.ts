@@ -137,6 +137,12 @@ test("sessions are kept in --sessions-dir (LABKIT_ACP_SESSIONS_DIR), else in ~/.
   expect(await directory({ ACME_ACP_SESSIONS_DIR: "/tmp/acme" }, acme)).toBe("/tmp/acme");
 });
 
+test("with --sessions-dir, the sessions' blobs are kept in its blobs folder; without it, in the brand's (the host's default)", async () => {
+  const blobsFolder = async (args: ReadonlyArray<string>) => hostOptionsOf((await launcherOptions(args, {}))!, defaultBrand).blobsFolder;
+  expect(await blobsFolder(["--sessions-dir", "/tmp/given"])).toBe("/tmp/given/blobs");
+  expect(await blobsFolder([])).toBeUndefined();
+});
+
 test("the launcher's options are the brand's variables, and no other brand's", async () => {
   const acme = { name: "acme", version: "1.0.0" };
   const env = { ACME_ACP_MODEL: "openai/gpt-5.5", ACME_ACP_RETRIES: "3", ACME_ACP_PERMISSION_MODE: "acceptEdits", ACME_ACP_LOCAL_TOOLS: "1", LABKIT_ACP_RETRIES: "9" };

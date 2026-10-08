@@ -21,7 +21,7 @@
  * written to stderr. What the command line prints (help, an option's error) goes to stderr.
  */
 
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { BunRuntime, BunServices, BunStdio } from "@effect/platform-bun";
 import { Console, ConfigProvider, Effect, Layer } from "effect";
 import { Command } from "effect/cli";
@@ -37,7 +37,7 @@ import { logKeys } from "./log-keys.ts";
 /** The launcher's options: those both hosts take, and its own. */
 export const launcherFlags = {
   ...launchFlags,
-  sessionsDir: textFlag("sessions-dir", "Where sessions are kept (~/.local/share/<brand>/sessions/<version> when not given)"),
+  sessionsDir: textFlag("sessions-dir", "Where sessions are kept, and their blobs in its blobs folder (~/.local/share/<brand>/sessions/<version> and ~/.local/share/<brand>/blobs when not given)"),
   localTools: toggleFlag("local-tools", "The tools on the local disk instead of through the editor: a stopgap"),
   retries: intFlag("retries", "How many times a turn with thinking and no answer is asked again for it; 0 never (1 when not given)"),
 };
@@ -50,6 +50,7 @@ export const sessionsDirectoryOf = (given: string | undefined, brand: Brand): st
 /** Returns the host's options from the launcher's options. */
 export const hostOptionsOf = (options: LauncherOptions, brand: Brand, home?: string): HostOptions => ({
   directory: sessionsDirectoryOf(options.sessionsDir, brand),
+  ...(options.sessionsDir ? { blobsFolder: join(resolve(options.sessionsDir), "blobs") } : {}),
   world: options.localTools ? "local" : "editor",
   model: options.model,
   configFlags: options,

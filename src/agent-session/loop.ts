@@ -78,13 +78,17 @@ const worldOf = (facts: ReadonlyArray<Fact>): World => worldAndRequestsOf(facts)
 
 /**
  * Returns an observation in brief, for the log: each field that is text (its first 200 characters),
- * a number or a flag, and the tag of each field that has one (an outcome, an ending). Other fields
- * (a response's parts, what a request sent) are in the facts only.
+ * a number or a flag, and the tag of each field that has one (an outcome, an ending). A permission's
+ * question and answer are logged as their text too (its first 200 characters), so that the log
+ * says what each call was asked and how it was answered. Other fields (a response's parts, what a
+ * request sent) are in the facts only.
  */
 const inBrief = (observation: Observation): Record<string, unknown> =>
   Object.fromEntries(
     Object.entries(observation).flatMap(([field, value]): ReadonlyArray<readonly [string, unknown]> => {
       if (field === "_tag") return [];
+      if (observation._tag === "PermissionAsked" && field === "asks") return [[field, asText(observation.asks).slice(0, 200)]];
+      if (observation._tag === "PermissionAnswered" && field === "answer") return [[field, asText(observation.answer).slice(0, 200)]];
       if (typeof value === "string") return [[field, value.length > 200 ? `${value.slice(0, 200)}…` : value]];
       if (typeof value === "number" || typeof value === "boolean") return [[field, value]];
       if (typeof value === "object" && value !== null && "_tag" in value) return [[field, value._tag]];
