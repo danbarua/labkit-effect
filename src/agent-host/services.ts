@@ -48,7 +48,8 @@ export const SessionServices = <E, R>(runner: Layer.Layer<ToolRunner, E, R>) =>
  * host's command parser (`command-parser.ts`), with `settings`' rules, and the paths a program reads
  * judged against `workingFolder`, the `additional` folders that count as inside it (absolute, from
  * `~`, or relative to the working folder; read at each call when they can change), and this
- * process's home folder. `canAsk` is whether anyone can
+ * process's home folder. A tool's path inputs come from `toolPaths` (the tools the session runs with
+ * now), else from the catalog the session opened with. `canAsk` is whether anyone can
  * answer a question before a call runs. `mode` is read at each call, so a host that lets the user
  * change it applies the change from the next call. A tool call policy (`ToolCallPolicies`).
  */
@@ -59,6 +60,7 @@ export const permissionsFor =
     settings: PermissionSettings = defaultPermissionSettings,
     workingFolder?: string,
     additional: ReadonlyArray<string> | Effect.Effect<ReadonlyArray<string>> = [],
+    toolPaths?: (tool: string) => ReadonlyArray<string> | undefined,
   ): PolicyOfFacts =>
   (facts) =>
     Effect.flatMap(immutableToolCatalogOf(facts), (tools) =>
@@ -68,7 +70,7 @@ export const permissionsFor =
           permissions(now, canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts, {
             settings,
             segmentsOf,
-            pathInputsOf: (name) => tools.find((tool) => tool.name === name)?.paths ?? [],
+            pathInputsOf: (name) => toolPaths?.(name) ?? tools.find((tool) => tool.name === name)?.paths ?? [],
             ...(workingFolder === undefined ? {} : { folders: foldersOf(workingFolder, folders) }),
           }) as Policy<unknown>,
       ),

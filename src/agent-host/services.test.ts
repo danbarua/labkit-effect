@@ -71,3 +71,20 @@ test("additional folders that can change while the session runs are read at each
   shared.push("/data");
   expect(await judged("cat /data/x.csv")).toBe("runs");
 });
+
+test("a tool's path inputs come from the tools the session runs with now, so a session whose recorded catalog does not name them still has its paths judged", async () => {
+  const judged = (toolPaths: ((tool: string) => ReadonlyArray<string> | undefined) | undefined) =>
+    runTest(
+      Effect.gen(function* () {
+        // The catalog recorded at the opening names no path inputs, as a session recorded before they were named.
+        const facts: ReadonlyArray<Fact> = [
+          { _tag: "Observed", seq: Seq.make(1), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation: boringOpening([spec("read_file", "read")]) },
+        ];
+        const policy = yield* permissionsFor("default", true, undefined, "/work/project", [], toolPaths)(facts);
+        const step = policy.start({ _tag: "RunTool", call: CallId.make("c1"), tool: ToolName.make("read_file"), input: receivedJson({ path: "~/.aws/credentials" }) });
+        return step._tag === "Waiting" ? "asks" : step.verdict._tag === "Continue" ? "runs" : "vetoed";
+      }),
+    );
+  expect(await judged((tool) => (tool === "read_file" ? ["path"] : undefined))).toBe("asks");
+  expect(await judged(undefined)).toBe("runs");
+});

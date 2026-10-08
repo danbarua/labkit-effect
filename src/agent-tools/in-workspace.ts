@@ -7,9 +7,8 @@
  * command's paths. A tool without the policy runs as the user, anywhere, as a bare tool does.
  */
 
-import { resolve } from "node:path";
 import { Effect, Schema } from "effect";
-import { type PathOf, pathInputsOf } from "./paths.ts";
+import { fullPathIn, type PathOf, pathInputsOf } from "./paths.ts";
 import type { Fields, Tool } from "./tool.ts";
 
 /** What the model is told of each kind of path input. */
@@ -41,7 +40,7 @@ export const inWorkspace =
           const resolved = yield* Effect.forEach(paths, ([name]) => {
             const path = given[name];
             if (typeof path !== "string") return Effect.succeed([]);
-            return Effect.succeed([[name, resolve(root, path)] as const]);
+            return Effect.succeed([[name, fullPathIn(root, path)] as const]);
           });
           // The input with each path made absolute has the fields of `tool`'s input.
           return yield* tool.run({ ...given, ...Object.fromEntries(resolved.flat()) } as Schema.Struct<F>["Type"]);

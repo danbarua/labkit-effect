@@ -638,11 +638,14 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               // The configuration's seam lists, with permission following the session's mode (`FromHost.permissionMode`). Its tool
               // sources are not used: the session's tools are the world's and its MCP servers'.
               const additionalFolders = [...(options.additionalFolders ?? []), ...parent.additional];
+              // The path inputs of the tools the session runs with now, which a session recorded before they were named lacks.
+              const { catalog: live } = yield* toolsOf(world.sources);
               const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(parent.configuration, {
                 canAsk: true,
                 permissionMode: Ref.get(permissionMode),
                 workingFolder: parent.cwd,
                 additionalFolders,
+                toolPaths: (name) => live.find((tool) => tool.name === name)?.paths,
               });
               const runner = SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, world.sources)));
               // The model is told of the session's MCP servers that are not running (`McpServers.notices`).

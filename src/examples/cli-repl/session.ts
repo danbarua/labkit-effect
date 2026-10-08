@@ -38,6 +38,7 @@ import type { SettingsChange } from "../../agent-machine/settings.ts";
 import { gitTools, isRepositoryRoot } from "../../agent-tools/git.ts";
 import { additionalDirectoriesOf } from "../../agent-config/builtins.ts";
 import { type AddedFolders, makeAddedFolders } from "./added-folders.ts";
+import type { ToolSpec } from "../../agent-session/contracts.ts";
 import { foldersOf } from "../../agent-host/services.ts";
 import { workspaceTools } from "../../agent-tools/workspace.ts";
 import type { Session } from "../../agent-session/loop.ts";
@@ -112,12 +113,14 @@ const gitOf = (config: Config) => (isRepositoryRoot(process.cwd()) ? gitTools(pr
  * give: `SessionServices` with the configuration's `models:` overrides, and the configuration's
  * policies and turn-end hooks.
  */
-const servicesOf = (config: Config, added: AddedFolders) => {
+const servicesOf = (config: Config, added: AddedFolders, live: ReadonlyArray<ToolSpec>) => {
   // The CLI uses its own tool sources (the workspace's and the MCP servers'), not the configuration's.
   const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(config.configuration, {
     canAsk: config.canAsk,
     workingFolder: process.cwd(),
     additionalFolders: Effect.map(added.list, (folders) => [...config.additionalFolders, ...folders]),
+    // The path inputs of the tools the session runs with now, which a session recorded before they were named lacks.
+    toolPaths: (name) => live.find((tool) => tool.name === name)?.paths,
   });
   return Layer.mergeAll(SessionServices(SourcedToolRunner).pipe(Layer.provide(Layer.succeed(ModelOverrides, config.configuration.models))), seamLayer(lists));
 };
@@ -228,7 +231,7 @@ export const withCliSession = <A, E, R, L, H>(
         persist: config.persist,
         root,
         record: cliRecord(process.cwd()),
-        services: servicesOf(config, added),
+        services: servicesOf(config, added, workspace.catalog),
         boltOns: [folder, serversBoltOn(mcp), { notices: [added.notices] }],
         logs,
         host,

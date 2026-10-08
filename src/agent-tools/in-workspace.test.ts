@@ -1,7 +1,8 @@
 /** `inWorkspace`, around a tool that records the input it runs with. */
 
 import { expect } from "bun:test";
-import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { Effect, Schema } from "effect";
 import { test } from "../../tests/support/test.ts";
 import { ToolName } from "../agent-machine/names.ts";
@@ -43,11 +44,15 @@ test("inWorkspace resolves each path input against the root, and passes the othe
   ]);
 });
 
-test("inWorkspace does not refuse a path outside the root: it resolves it against the root and runs the tool, leaving the path to the permission policy", async () => {
+test("inWorkspace does not refuse a path outside the root: it resolves it against the root, ~ from the home folder as the policy does, and runs the tool, leaving the path to the permission policy", async () => {
   const { tool, ran } = recording();
   const wrapped = inWorkspace(root)(tool);
   await Effect.runPromise(wrapped.run({ path: "../other/a.ts", at: "/etc", count: 1 }));
-  expect(ran).toEqual([{ path: resolve(root, "../other/a.ts"), at: "/etc", count: 1 }]);
+  await Effect.runPromise(wrapped.run({ path: "~/notes.md", at: "~", count: 1 }));
+  expect(ran).toEqual([
+    { path: resolve(root, "../other/a.ts"), at: "/etc", count: 1 },
+    { path: join(homedir(), "notes.md"), at: homedir(), count: 1 },
+  ]);
 });
 
 test("inWorkspace describes a file path and a folder path as relative to the working folder, and changes no other input", () => {

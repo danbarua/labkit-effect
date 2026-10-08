@@ -6,6 +6,8 @@
  */
 
 import { Schema } from "effect";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 
 /** What a path input names. */
 export type PathOf = "file" | "folder";
@@ -27,6 +29,13 @@ export const FolderPath = Schema.NonEmptyString.annotate({ description: "The fol
 
 /** Returns what the input `schema` is a path to, or undefined when the input is not a path. */
 export const pathOf = (schema: Schema.Top): PathOf | undefined => Schema.resolveAnnotations(schema)?.pathOf;
+
+/**
+ * The absolute path that `path`, as a tool is given it, names from the working folder `root`: `~` and
+ * `~/x` from the home folder, as the permission policy resolves them (`agent-policy/path-resolver.ts`),
+ * anything else from `root`.
+ */
+export const fullPathIn = (root: string, path: string): string => (path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(1)) : resolve(root, path));
 
 /** Returns the names of the path inputs among `fields`, with what each is a path to. */
 export const pathInputsOf = (fields: Readonly<Record<string, Schema.Top>>): ReadonlyArray<readonly [string, PathOf]> =>

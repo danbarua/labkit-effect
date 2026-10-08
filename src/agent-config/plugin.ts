@@ -51,6 +51,12 @@ export interface FromHost {
    * while the session runs, read at each call.
    */
   readonly additionalFolders?: ReadonlyArray<string> | Effect.Effect<ReadonlyArray<string>> | undefined;
+  /**
+   * The names of a tool's path inputs, from the tools the session runs with now; the permission
+   * policy judges those paths. A tool it does not name falls back to the session's recorded catalog
+   * (`ToolSpec.paths`), which a session recorded before path inputs were named lacks.
+   */
+  readonly toolPaths?: ((tool: string) => ReadonlyArray<string> | undefined) | undefined;
 }
 
 /** A plug-in's settings: a struct, each of its settings with a default (`Schema.withDecodingDefaultKey`). */
