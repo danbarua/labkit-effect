@@ -15,6 +15,7 @@ import { type CallId, ToolName } from "../agent-machine/names.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
 import { ToolRunner, type ToolSpec } from "./contracts.ts";
+import type { SessionContext } from "../agent-environment/session-context.ts";
 
 export interface ToolSource {
   /**
@@ -24,8 +25,8 @@ export interface ToolSource {
    */
   readonly namespace?: string;
   readonly tools: ReadonlyArray<ToolSpec>;
-  /** Runs a call to one of the source's tools, by the tool's name without the namespace. */
-  readonly run: (tool: ToolName, input: Received, call: CallId) => Effect.Effect<ToolOutcome>;
+  /** Runs a call to one of the source's tools, by the tool's name without the namespace, in the session it runs in (`SessionContext`). */
+  readonly run: (tool: ToolName, input: Received, call: CallId) => Effect.Effect<ToolOutcome, never, SessionContext>;
 }
 
 /** A session's tool sources, in order. None by default. */
@@ -34,7 +35,7 @@ export const ToolSources = Context.Reference<ReadonlyArray<ToolSource>>("agent-s
 /** The tools of a list of sources as offered (`catalog`), and the runner that sends a call, by its offered name, to its source (`run`). */
 export interface Tools {
   readonly catalog: ReadonlyArray<ToolSpec>;
-  readonly run: (tool: ToolName, input: Received, call: CallId) => Effect.Effect<ToolOutcome>;
+  readonly run: (tool: ToolName, input: Received, call: CallId) => Effect.Effect<ToolOutcome, never, SessionContext>;
 }
 
 interface Offered {

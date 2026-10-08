@@ -28,6 +28,7 @@ import { ByteCount, FullPath, type ToolName } from "../agent-machine/names.ts";
 import type { ToolDetail } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
 import type { Folders } from "../agent-environment/command-units.ts";
+import { SessionContext } from "../agent-environment/session-context.ts";
 import { editsFiles } from "../agent-policy/permissions.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
 import { parseJson } from "../agent-session/received.ts";
@@ -37,11 +38,12 @@ import { ignoredByGit } from "../agent-tools/git.ts";
 import { fullPathIn } from "../agent-tools/paths.ts";
 import { type PlannedMove, plannedMoves, writtenFiles } from "./command-writes.ts";
 
+/**
+ * How a host's tool sources are recorded. The working folder, from which a relative path input is
+ * resolved, and the folders that a command's paths are resolved against (`writtenFiles`) are the
+ * session's (`SessionContext`), read at each call.
+ */
 export interface Recording {
-  /** The working folder, from which a relative path input is resolved. */
-  readonly root: string;
-  /** The folders a command's paths are resolved against (`writtenFiles`). */
-  readonly folders: Folders;
   /** The command tools' names (the permission settings' `commandTools`). */
   readonly commandTools: ReadonlyArray<string>;
   /** A path input's file text before or after the call, as the world's tools read and write it; from the disk when left out. */
@@ -77,8 +79,6 @@ export const recordingChanges =
   (source: ToolSource): Effect.Effect<ToolSource, never, FileSystem.FileSystem> =>
     Effect.map(FileSystem.FileSystem, (fs) => {
       const disk = (full: string) => currentOnDisk(fs, full, full);
-      const written = writtenFiles(recording.folders);
-      const moving = plannedMoves(recording.folders);
       /** The command in a command tool's `input`; undefined for any other tool, or input with no command. */
       const commandOf = (tool: ToolName, input: Received): string | undefined => {
         if (!recording.commandTools.includes(tool)) return undefined;
@@ -129,20 +129,20 @@ export const recordingChanges =
           const [left, arrived] = [yield* there(tool, move.from), yield* there(tool, move.to)];
           return left === false && arrived === true ? [{ _tag: "FileMoved", from: FullPath.make(move.from), to: FullPath.make(move.to), ...(move.occupied ? { replaced: true as const } : {}) }] : [];
         });
-      /** The files that a call to `tool` with `input` changes, each once. */
-      const changedBy = (tool: ToolName, input: Received): ReadonlyArray<Changed> => {
+      /** The files that a call to `tool` with `input` changes, each once, in the working folder `working` with `folders`. */
+      const changedBy = (tool: ToolName, input: Received, working: string, folders: Folders): ReadonlyArray<Changed> => {
         const parsed = parseJson(input);
         // A tool's input is a JSON object; anything else names no file.
         const given = ("value" in parsed && typeof parsed.value === "object" && parsed.value !== null && !Array.isArray(parsed.value) ? parsed.value : {}) as Readonly<Record<string, unknown>>;
         if (recording.commandTools.includes(tool)) {
           const command = given["command"];
-          return typeof command === "string" ? written(command).map((full) => ({ full, read: disk })) : [];
+          return typeof command === "string" ? writtenFiles(command, folders).map((full) => ({ full, read: disk })) : [];
         }
         const spec = source.tools.find((each) => each.name === tool);
         if (spec === undefined || !editsFiles.includes(spec.kind)) return [];
         const fulls = (spec.paths ?? []).flatMap((name) => {
           const path = given[name];
-          return typeof path === "string" && path !== "" ? [fullPathIn(recording.root, path)] : [];
+          return typeof path === "string" && path !== "" ? [fullPathIn(working, path)] : [];
         });
         return [...new Set(fulls)].map((full) => ({ full, read: recording.fileText ?? disk }));
       };
@@ -153,12 +153,14 @@ export const recordingChanges =
         ...source,
         run: (tool, input, call) =>
           Effect.gen(function* () {
-            const files = changedBy(tool, input);
+            const session = yield* SessionContext;
+            const folders = yield* session.folders;
+            const files = changedBy(tool, input, session.working, folders);
             const command = commandOf(tool, input);
-            const moves = command === undefined ? [] : moving(command);
+            const moves = command === undefined ? [] : plannedMoves(command, folders);
             if (files.length === 0 && moves.length === 0) return yield* source.run(tool, input, call);
             // A file git ignores (a log, build output) is recorded by its size; any other, by its text.
-            const ignored = yield* Effect.forEach(files, (file) => Effect.map(ignoredByGit(file.full, recording.root), (yes) => ({ file, yes })));
+            const ignored = yield* Effect.forEach(files, (file) => Effect.map(ignoredByGit(file.full, session.working), (yes) => ({ file, yes })));
             const sized = yield* Effect.forEach(
               ignored.filter((each) => each.yes),
               ({ file }) => Effect.map(sizeOf(tool, file.full), (size) => ({ full: file.full, size })),

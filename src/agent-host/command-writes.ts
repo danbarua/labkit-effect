@@ -60,22 +60,20 @@ export const plannedWrites = (command: ShellCommand, folders: Folders): Readonly
 };
 
 /**
- * The full paths of the files whose text `command` writes (`filesWritten`), each once: what a command
- * tool records, by reading each file before the command runs and after
+ * The full paths of the files whose text `command` writes (`filesWritten`), each once, judged against
+ * `folders`: what a command tool records, by reading each file before the command runs and after
  * (`agent-host/recorded-changes.ts`). The text need not be in the command's words, so `sed -i` and
  * `printf … > f` are recorded too. After a `cd` that may or may not have moved, a relative path names
  * a file in each folder it may lead from, and each is read: only a file that changed is recorded. A
  * path the shell expands (`"$F"`), or one after a move that cannot be followed (`popd`, `cd -`), is
  * not recorded.
  */
-export const writtenFiles =
-  (folders: Folders) =>
-  (command: string): ReadonlyArray<string> => {
-    const split = unitsOf(ShellCommand.make(command), segmentsOf, folders);
-    if (split._tag === "Unparsed") return [];
-    const places = placesOf(split.units, folders);
-    return [...new Set(filesWritten(split.units).flatMap(({ word, at }) => fullsOf(word, places[at], folders)))];
-  };
+export const writtenFiles = (command: string, folders: Folders): ReadonlyArray<string> => {
+  const split = unitsOf(ShellCommand.make(command), segmentsOf, folders);
+  if (split._tag === "Unparsed") return [];
+  const places = placesOf(split.units, folders);
+  return [...new Set(filesWritten(split.units).flatMap(({ word, at }) => fullsOf(word, places[at], folders)))];
+};
 
 /**
  * A move that `command` may make, as full paths: the source, and the destination, which is the
@@ -89,37 +87,35 @@ export interface PlannedMove {
 }
 
 /**
- * The moves of `command`'s `mv`s (`Unit.moves`), each once: for each folder a relative path may lead
- * from (`placesOf`), the source and the destination resolved from it. A move whose source or
+ * The moves of `command`'s `mv`s (`Unit.moves`), each once, judged against `folders`: for each folder
+ * a relative path may lead from (`placesOf`), the source and the destination resolved from it. A move whose source or
  * destination is not written out, or that a move it cannot follow comes before (`popd`, `cd -`), is
  * left out. Each is a candidate: a host records it only when the disk shows the move.
  */
-export const plannedMoves =
-  (folders: Folders) =>
-  (command: string): ReadonlyArray<PlannedMove> => {
-    const split = unitsOf(ShellCommand.make(command), segmentsOf, folders);
-    if (split._tag === "Unparsed") return [];
-    const places = placesOf(split.units, folders);
-    const full = (word: Word, base: WordText | undefined): string | undefined => {
-      const resolved = resolvePath(word, folders, base);
-      return resolved._tag === "Local" ? resolved.full : undefined;
-    };
-    const moves = split.units.flatMap((unit, at) => {
-      const place = places[at];
-      const moved = unit.moves;
-      if (place === undefined || moved === undefined) return [];
-      return moved.sources.flatMap((source) => {
-        const relative = relativePath(source) || relativePath(moved.destination);
-        if (relative && place.unknown) return [];
-        return (relative ? place.bases : [undefined]).flatMap((base): ReadonlyArray<PlannedMove> => {
-          const from = full(source, base);
-          const destination = full(moved.destination, base);
-          return from === undefined || destination === undefined ? [] : [{ from, destination, into: moved.into }];
-        });
+export const plannedMoves = (command: string, folders: Folders): ReadonlyArray<PlannedMove> => {
+  const split = unitsOf(ShellCommand.make(command), segmentsOf, folders);
+  if (split._tag === "Unparsed") return [];
+  const places = placesOf(split.units, folders);
+  const full = (word: Word, base: WordText | undefined): string | undefined => {
+    const resolved = resolvePath(word, folders, base);
+    return resolved._tag === "Local" ? resolved.full : undefined;
+  };
+  const moves = split.units.flatMap((unit, at) => {
+    const place = places[at];
+    const moved = unit.moves;
+    if (place === undefined || moved === undefined) return [];
+    return moved.sources.flatMap((source) => {
+      const relative = relativePath(source) || relativePath(moved.destination);
+      if (relative && place.unknown) return [];
+      return (relative ? place.bases : [undefined]).flatMap((base): ReadonlyArray<PlannedMove> => {
+        const from = full(source, base);
+        const destination = full(moved.destination, base);
+        return from === undefined || destination === undefined ? [] : [{ from, destination, into: moved.into }];
       });
     });
-    return moves.filter((move, at) => moves.findIndex((other) => other.from === move.from && other.destination === move.destination) === at);
-  };
+  });
+  return moves.filter((move, at) => moves.findIndex((other) => other.from === move.from && other.destination === move.destination) === at);
+};
 
 /** The text the file holds after `writes`, given its `current` text. */
 export const newTextOf = (current: Exclude<Current, { readonly _tag: "Unknown" }>, writes: Writes): string =>

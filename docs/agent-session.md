@@ -28,6 +28,7 @@ the provider adapters, the stores where a session's facts are kept, and the sess
 | `ModelClient` | Makes a model request. |
 | `ToolRunner` | Runs a tool call. |
 | `Turns` | Gives each new turn its identity. |
+| `SessionContext` | The session's id, working folder and folders (`docs/agent-environment.md`). The host provides it for the whole session. Required: there is no default. |
 | `ToolCallPolicies`, `ModelRequestPolicies` | Review requests before they are carried out (`docs/agent-policy.md`). Empty by default. |
 | `TurnEndHooks`, `MaxHolds` | Review a turn before it ends. Empty and 0 by default. |
 
@@ -65,6 +66,11 @@ and an outcome is recorded for it, so its turn still ends:
 While a request runs, `CurrentWork` holds the session, the turn, and for a tool run the call and the
 tool. Every log line written during the request is annotated with them, and each request runs in a
 span named for its kind (`agent.model.request`, `agent.tool.run`, `agent.turn.review`).
+
+A request's fiber starts from the fiber that recorded the observation the request follows from, and
+inherits that fiber's services, `SessionContext` among them. A tool run (`ToolRunner.run`,
+`ToolSource.run`) and a policy (`PolicyOfFacts`) read `SessionContext` when they run, so each reads
+the context of the session it runs in.
 
 ### When a write fails
 

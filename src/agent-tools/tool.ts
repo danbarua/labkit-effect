@@ -18,6 +18,7 @@ import { parseJson, receivedText } from "../agent-session/received.ts";
 import type { ToolSource } from "../agent-session/tool-sources.ts";
 import { type Decoded, decoderOf, ignoredNote, jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { pathInputsOf } from "./paths.ts";
+import { SessionContext } from "../agent-environment/session-context.ts";
 
 /** The call's input does not fit, or names a path that the tool does not accept: the model reads the problem. */
 export class Rejected extends Data.TaggedError("Rejected")<{ readonly problem: string }> {}
@@ -81,14 +82,16 @@ const rejected = (problem: string): ToolOutcome => ({ _tag: "Failed", reason: { 
 
 /**
  * Returns the tool source (the host's own tools, with no namespace) that runs calls to `tools`, with
- * the services `R` that it is built with, and the call (`CurrentCall`).
+ * the services `R` that it is built with, the call (`CurrentCall`), and the context of the session
+ * the call runs in (`SessionContext`), read from the call's fiber when the call runs, not when the
+ * source is built.
  * - With `strictInput`, a call whose input has properties that its tool does not take is refused.
  *   Without it, the call runs without them, a WARN is logged, and the result says which were ignored.
  * - A call to a name that no tool has ends `NotFound`.
  */
-export const sourceOf = <R>(tools: ReadonlyArray<AnyTool<R>>, options: { readonly strictInput?: boolean } = {}): Effect.Effect<ToolSource, never, Exclude<R, CurrentCall>> =>
+export const sourceOf = <R>(tools: ReadonlyArray<AnyTool<R>>, options: { readonly strictInput?: boolean } = {}): Effect.Effect<ToolSource, never, Exclude<Exclude<R, SessionContext>, CurrentCall>> =>
   Effect.gen(function* () {
-    const services = yield* Effect.context<Exclude<R, CurrentCall>>();
+    const services = yield* Effect.context<Exclude<Exclude<R, SessionContext>, CurrentCall>>();
     const strict = options.strictInput ?? false;
     return {
       tools: tools.map((tool) => tool.spec),
@@ -97,27 +100,31 @@ export const sourceOf = <R>(tools: ReadonlyArray<AnyTool<R>>, options: { readonl
         if (found === undefined) return Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "NotFound" } });
         const parsed = parseJson(input);
         if ("reason" in parsed) return Effect.succeed(rejected(`The input could not be read: ${parsed.reason}.`));
-        return found.decode(parsed.value, strict).pipe(
-          Effect.mapError((error) => new Rejected({ problem: `${name} does not take this input: ${error.message}` })),
-          Effect.flatMap(({ value, ignored }) => {
-            const note = ignoredNote(name, ignored);
-            const logged = ignored.length === 0 ? Effect.void : Effect.logWarning(logKeys.tools.inputIgnored, { tool: name, ignored });
-            return logged.pipe(
-              Effect.andThen(found.run(value)),
-              Effect.map((output): ToolOutcome => {
-                const ran = withNote(output, note);
-                if (typeof ran === "string") return { _tag: "Succeeded", output: receivedText(ran) };
-                return { _tag: "Succeeded", output: receivedText(ran.text), ...(ran.details.length === 0 ? {} : { details: ran.details }) };
-              }),
-              Effect.catchTag("Reported", (error) => Effect.fail(new Reported({ message: `${error.message}${note}` }))),
-            );
-          }),
-          Effect.catchTags({
-            Rejected: (error) => Effect.succeed(rejected(error.problem)),
-            Reported: (error) => Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(error.message) } }),
-          }),
-          Effect.provideService(CurrentCall, call),
-          Effect.provideContext(services),
+        // The session's context is the call's, given closest to the tool: the services captured when the source was built may hold another session's.
+        return Effect.flatMap(SessionContext, (session) =>
+          found.decode(parsed.value, strict).pipe(
+            Effect.mapError((error) => new Rejected({ problem: `${name} does not take this input: ${error.message}` })),
+            Effect.flatMap(({ value, ignored }) => {
+              const note = ignoredNote(name, ignored);
+              const logged = ignored.length === 0 ? Effect.void : Effect.logWarning(logKeys.tools.inputIgnored, { tool: name, ignored });
+              return logged.pipe(
+                Effect.andThen(found.run(value)),
+                Effect.map((output): ToolOutcome => {
+                  const ran = withNote(output, note);
+                  if (typeof ran === "string") return { _tag: "Succeeded", output: receivedText(ran) };
+                  return { _tag: "Succeeded", output: receivedText(ran.text), ...(ran.details.length === 0 ? {} : { details: ran.details }) };
+                }),
+                Effect.catchTag("Reported", (error) => Effect.fail(new Reported({ message: `${error.message}${note}` }))),
+              );
+            }),
+            Effect.catchTags({
+              Rejected: (error) => Effect.succeed(rejected(error.problem)),
+              Reported: (error) => Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(error.message) } }),
+            }),
+            Effect.provideService(SessionContext, session),
+            Effect.provideService(CurrentCall, call),
+            Effect.provideContext(services),
+          ),
         );
       },
     };

@@ -3,6 +3,7 @@
 import { expect } from "bun:test";
 import { Cause, Effect, Exit } from "effect";
 import { test } from "../../tests/support/test.ts";
+import { TestSessionContext } from "../../tests/support/session-context.ts";
 import { CallId, ToolName } from "../agent-machine/names.ts";
 import type { ToolSpec } from "./contracts.ts";
 import { asText, receivedJson, receivedText } from "./received.ts";
@@ -22,7 +23,7 @@ const ran = (sources: ReadonlyArray<ToolSource>, tool: string) =>
     Effect.gen(function* () {
       const outcome = yield* (yield* toolsOf(sources)).run(ToolName.make(tool), receivedJson({}), CallId.make("c1"));
       return outcome._tag === "Succeeded" ? asText(outcome.output) : outcome.reason._tag;
-    }),
+    }).pipe(Effect.provide(TestSessionContext())),
   );
 
 test("the sources' tools are offered in order, a namespaced source's as <namespace>__<tool>; a call reaches the source that offered it, by the source's own name", () => {

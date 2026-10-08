@@ -20,12 +20,11 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { segmentsOf } from "../../src/agent-host/command-parser.ts";
 import type { Fact } from "../../src/agent-machine/fact.ts";
 import { CallId, ToolName } from "../../src/agent-machine/names.ts";
-import { WordText } from "../../src/agent-environment/command-segments.ts";
+import { openingFolders } from "../../src/agent-host/session-context.ts";
 import { answerPicking, defaultPermissionSettings, OptionId, permissions, type PermissionQuestion, questionIn } from "../../src/agent-policy/permissions.ts";
 import { receivedJson } from "../../src/agent-session/received.ts";
 import { type CorpusCommand, corpusFile, corpusFolder } from "./commands.ts";
@@ -49,7 +48,7 @@ const judge = (command: string, id: number, facts: ReadonlyArray<Fact>, cwd: str
   permissions("default", true, () => "execute", facts, {
     settings: defaultPermissionSettings,
     segmentsOf,
-    ...(cwd === "" ? {} : { folders: { working: WordText.make(cwd), home: WordText.make(homedir()) } }),
+    ...(cwd === "" ? {} : { folders: openingFolders({ working: cwd, additional: [] }) }),
   }).start({
     _tag: "RunTool",
     call: CallId.make(`c${id}`),

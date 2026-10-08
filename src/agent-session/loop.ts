@@ -68,6 +68,7 @@ import { sentAs } from "./sent.ts";
 import { immutableToolCatalogOf, modelOf } from "./configuration/session-setup.ts";
 import { SessionStore, type SessionStoreFailed } from "./session-store.ts";
 import { CurrentWork, type Work } from "./work.ts";
+import type { SessionContext } from "../agent-environment/session-context.ts";
 
 /**
  * Returns the core's machines as `facts` leave them. Between turns the machines hold nothing, so
@@ -138,8 +139,12 @@ interface Started {
 const firstMatching = <A>(facts: PubSub.Subscription<Fact>, pick: (fact: Fact) => Option.Option<A>): Effect.Effect<A> =>
   Effect.flatMap(PubSub.take(facts), (fact) => Option.match(pick(fact), { onNone: () => firstMatching(facts, pick), onSome: Effect.succeed }));
 
-/** What the loop needs to carry out requests. */
-export type Services = ModelProvider | ContextAssembler | ModelClient | Turns | ToolRunner;
+/**
+ * What the loop needs to carry out requests: the services a host builds for the session, and the
+ * session's context (`SessionContext`), which the host provides for the whole session. Each request
+ * runs in a fiber that inherits them from the fiber that recorded the observation it follows from.
+ */
+export type Services = ModelProvider | ContextAssembler | ModelClient | Turns | ToolRunner | SessionContext;
 
 /** What the user gives a turn: the text, and the files that came with it. */
 export type Prompt = Pick<Extract<Observation, { _tag: "InputArrived" }>, "text" | "attachments">;
@@ -408,7 +413,7 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
   };
 
   /** Returns the policies of `list` as the facts stand now, combined with `every`, and a function from a position to the policy's name. */
-  const policiesNow = (list: ReadonlyArray<NamedPolicy>): Effect.Effect<{ readonly policy: Policy<EveryState>; readonly nameAt: (index: number | undefined) => string }> =>
+  const policiesNow = (list: ReadonlyArray<NamedPolicy>): Effect.Effect<{ readonly policy: Policy<EveryState>; readonly nameAt: (index: number | undefined) => string }, never, SessionContext> =>
     Effect.gen(function* () {
       const facts = yield* store.facts;
       const policy = every(yield* Effect.forEach(list, (entry) => entry.policy(facts)));

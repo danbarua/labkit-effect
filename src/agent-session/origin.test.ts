@@ -12,6 +12,7 @@ import { TurnContextAssembler } from "./turn-context.ts";
 import { CountingTurns } from "./turns.ts";
 import { BoringModelProvider, boringOpening } from "../../tests/support/boring.ts";
 import { runTest } from "../../tests/support/run.ts";
+import { TestSessionContext } from "../../tests/support/session-context.ts";
 import { SmolToolRunner, smolCatalog } from "../../tests/support/smol-tools.ts";
 import { test } from "../../tests/support/test.ts";
 
@@ -74,7 +75,7 @@ test("an observation given to a session with no origin set is a defect", async (
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening());
       yield* session.idle;
-    }).pipe(Effect.provide(services()), Effect.scoped),
+    }).pipe(Effect.provide(Layer.merge(services(), TestSessionContext())), Effect.scoped),
   );
   expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toContain("SessionOpened was given to a session with no origin set");
 });

@@ -37,20 +37,14 @@ export const seams: ReadonlyArray<Seam> = ["toolCalls", "modelRequests", "turnEn
 
 /**
  * What the host provides that a file cannot: whether anyone can answer a question before a call
- * runs, and, where the user changes the permission mode during a session, the current mode.
+ * runs, and, where the user changes the permission mode during a session, the current mode. The
+ * session's id and folders are not here: an entry reads them at each call from the context of the
+ * session it runs in (`agent-environment/session-context.ts`).
  */
 export interface FromHost {
   readonly canAsk: boolean;
   /** The session's current permission mode, read at each call; the configured `mode` is the mode that the session starts in. */
   readonly permissionMode?: Effect.Effect<PermissionMode> | undefined;
-  /** The folder the session works in, as an absolute path: the permission policy reads a path outside it as one that needs permission. */
-  readonly workingFolder?: string | undefined;
-  /**
-   * Folders the host adds to the working folder for this session (`--add-dir`, ACP's
-   * `additionalDirectories`), as absolute paths. A folder the user adds while the session runs is a
-   * fact of the session (`FolderAdded`), which the permission policy reads.
-   */
-  readonly additionalFolders?: ReadonlyArray<string> | undefined;
   /**
    * The names of a tool's path inputs, from the tools the session runs with now; the permission
    * policy judges those paths. A tool it does not name falls back to the session's recorded catalog

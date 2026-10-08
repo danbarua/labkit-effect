@@ -22,14 +22,13 @@
 
 import type { McpServers } from "../../agent-mcp/servers.ts";
 import { Console, Deferred, Effect, FileSystem, HashMap, Option, PubSub, Queue, Ref } from "effect";
-import { homedir } from "node:os";
 import { BrandFolders } from "../../agent-host/brand-folders.ts";
 import { terminalOf } from "../../agent-host/command-detail.ts";
 import { type ShownWrite, shownWrites } from "../../agent-host/command-writes.ts";
 import { currentOnDisk, movedLine, patchCutNote, writtenLine } from "../../agent-tools/file-change.ts";
 import { unifiedDiff } from "../../agent-tools/line-diff.ts";
-import { WordText } from "../../agent-environment/command-segments.ts";
-import type { Detail, Folders } from "../../agent-environment/command-units.ts";
+import type { Detail } from "../../agent-environment/command-units.ts";
+import { SessionContext } from "../../agent-environment/session-context.ts";
 import type { SessionUpdate } from "effective-acp/schema/v1";
 import { next, presentFrom, type ProjectionInput, project } from "../../agent-acp/projection.ts";
 import { immutableToolCatalogOf } from "../../agent-session/configuration/session-setup.ts";
@@ -263,7 +262,6 @@ const following = (session: Session, view: View, stdin?: NodeJS.ReadStream) =>
     const before = yield* session.facts;
     const present = presentFrom(yield* immutableToolCatalogOf(before));
     const disk = yield* FileSystem.FileSystem;
-    const folders: Folders = { working: WordText.make(process.cwd()), home: WordText.make(homedir()) };
     const replayed = (yield* project(before, { mode: "replay", present })).state;
     const state = yield* Ref.make(replayed);
     // The turns whose updates are all printed: those that ended before following began, then each one as it ends.
@@ -311,7 +309,8 @@ const following = (session: Session, view: View, stdin?: NodeJS.ReadStream) =>
         const question = questionIn(asks);
         if (question === undefined) return;
         yield* endLine;
-        // The command waits for the answer, so its files are read before it runs.
+        // The command waits for the answer, so its files are read before it runs. Its paths are judged against the session's folders as they are now.
+        const folders = yield* (yield* SessionContext).folders;
         const writes = question._tag === "Command" ? yield* shownWrites(question.command, folders, (full, path) => currentOnDisk(disk, full, path)) : [];
         const explained = question._tag === "Command" ? explainedOf(question, segmentsOf, folders) : { programs: [], notes: [] };
         const message = shown(question, inputOf(yield* session.facts, call), writes, explained);

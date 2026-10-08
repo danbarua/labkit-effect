@@ -68,14 +68,31 @@ for the permission policy (`docs/agent-policy.md`), for the file tools, which ta
 any of them (`inWorkspace`), and in the system text, which names them. Each must be an absolute path, as `cwd` must,
 or the request is refused (-32602, naming it). A new session's are kept in its record.
 
+### The session's context
+
+`session/new`, `session/load` and `session/resume` make the session's context (`SessionContext`,
+`docs/agent-environment.md`) when they create the session's entry, with
+`agent-host/session-context.ts`: the session's id, `cwd` as its working folder, and its folders (the
+launcher's `--add-dir`, the request's `additionalDirectories`, then the settings'). The entry keeps
+the context until `session/close` or the end of the connection.
+
+- The context is made before the world is opened. The world, the MCP servers, the session's
+  services, its feed and its requests run in it: each of their log lines carries `session`, and
+  each of their spans carries `session` and `cwd`.
+- The permission policy, the recording of what a call changes, the diffs of a command's writes and
+  the explanation of a permission question read the session's folders from the context at each use.
+- A draft has no store, so its folders are those the host gives. Once the store opens, the folders
+  that the facts record (`FolderAdded`) follow them.
+
 ### `session/new`
 
 - A `cwd` that is not absolute is refused (-32602).
 - With no model to ask, the request fails (-32603) and names the variables to set or the local server
   to start. The model comes from `HostOptions.model` (`provider/model`), else the configuration's
   `model`, else the catalog's first.
-- The session's configuration is read (see Configuration), the world is opened for `cwd`, and the
-  MCP servers are started at once.
+- The session's configuration is read (see Configuration). The session's context is made with the
+  new id (The session's context), then the world is opened for `cwd`, and the MCP servers are
+  started at once.
 - The draft holds the model, its settings, the system prompt and the tools. Its output limit is
   defaulted to the model's own (`withDefaults`).
 - The answer carries the session's id and its config options. After the answer is written, the
@@ -175,8 +192,8 @@ is sent none, logged at DEBUG, and gets the same answer. A notice is a live even
    A session the connection holds already is not refused: it goes on as it is (A session the
    connection holds). A request for a session that another request is starting waits for that one
    to be answered, then is answered as a load or resume of the session it started.
-2. The configuration is read for `cwd` and the client's MCP servers, the world is opened, and the
-   servers are started.
+2. The configuration is read for `cwd` and the client's MCP servers, the session's context is made
+   (The session's context), the world is opened, and the servers are started.
 3. The session starts over its facts, with the model, system prompt and tool catalog that they hold.
    The record keeps the working folder it had.
 4. A turn that the facts left running is ended (`endTurnLeftRunning`): it ends `Interrupted`, each
@@ -553,7 +570,9 @@ is optional, and its default. The descriptions and limits shared with the worksp
 The tools go through the editor. Each is offered only when the client advertised the methods it
 uses, so no call meets a capability the client does not have. Each tool is a value
 (`editor-tools.ts`) that asks for the `Editor` service, which the world provides: the editor is the
-environment the tools run in. Every tool takes an `intent` input (`agent-tools/described.ts`), and
+environment the tools run in. The session's id, which each request to the editor names, and the
+working folder, where a command's terminal starts, are read from the session's context when the call
+runs. Every tool takes an `intent` input (`agent-tools/described.ts`), and
 the file tools' paths are resolved against the working folder (`agent-tools/in-workspace.ts`).
 
 | Tool | Kind | Offered when the client advertised | What it does |
@@ -679,6 +698,8 @@ The projection does not make these; the host sends them:
 
 The host logs each event under `log-keys.ts`, with the ids it is about as log annotations:
 `connection` (minted per connection), `request` (set by the peer), `session`, `turn` and `call`.
+`session` is the `sessionId` of a request that names one, and, for everything that runs in a session,
+the session's own id, from its context (The session's context).
 
 - Logged at INFO: a session created, opened, loaded, resumed, listed and closed; a record written; a
   turn left running ended; a prompt received, admitted and settled (its stop reason, and its

@@ -64,11 +64,11 @@ import { chooseModel, defaultModel, type Draft, draftOf, opening, optionsOfDraft
 import { markdownOf } from "../agent-host/export.ts";
 import { KnownWithLocalServer, localServer, SettlingWithLocalServer } from "../agent-host/local-server.ts";
 import { readRecord, RecordFailed, recordedSessions, recordFileOf, writeRecord } from "../agent-host/record.ts";
-import { foldersOf, SessionServices } from "../agent-host/services.ts";
+import { SessionServices } from "../agent-host/services.ts";
 import { additionalDirectoriesOf, commandToolsOf } from "../agent-config/builtins.ts";
 import { recordingChanges } from "../agent-host/recorded-changes.ts";
-import { WordText } from "../agent-environment/command-segments.ts";
-import { homedir } from "node:os";
+import { inSession, type MadeSessionContext, makeSessionContext, openingFolders, type SessionPlace } from "../agent-host/session-context.ts";
+import { SessionContext } from "../agent-environment/session-context.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { leftRunning } from "../agent-machine/left-running.ts";
 import { InputText, SessionId, type TurnId } from "../agent-machine/names.ts";
@@ -143,9 +143,10 @@ export interface HostOptions<R = never> {
   readonly mcpConnectTimeout?: Duration.Input | undefined;
   /**
    * What a session runs with, given its world's tool runner, over the session's store, before its
-   * configuration's seam lists; `SessionServices` when left out.
+   * configuration's seam lists; `SessionServices` when left out. The host provides the session's
+   * context (`SessionContext`) itself.
    */
-  readonly services?: ((runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>) | undefined;
+  readonly services?: ((runner: Layer.Layer<ToolRunner>) => Layer.Layer<Exclude<Services, SessionContext>, never, SessionStore>) | undefined;
   /** The maximum number of sessions on one page of `session/list`; 50 when left out. */
   readonly pageSize?: number | undefined;
   /** The name the agent goes by (`agent-host/brand.ts`): it names the folder `/export` writes to, and is the name the host gives MCP servers. */
@@ -266,7 +267,14 @@ type EntryState = { readonly _tag: "Draft"; readonly draft: Draft } | { readonly
 /** A session this connection holds: one it made (a draft until its first prompt, then open), or one it started from its facts (open). */
 interface Entry {
   readonly id: AcpSessionId;
-  readonly cwd: string;
+  /**
+   * The session's context (`SessionContext`): its id, its working folder (`cwd`) and its folders. It
+   * is made with the entry, before the world is opened. The world, the MCP servers and the open
+   * session (its services, its feed and its requests) run in it.
+   */
+  readonly context: SessionContext["Service"];
+  /** Gives the context the session's facts once the session's store is open (`startSession`). */
+  readonly storeOpened: MadeSessionContext["storeOpened"];
   /** The folders the client named with the working folder (`additionalDirectories`), absolute. */
   readonly additional: ReadonlyArray<string>;
   /** Its world, with the MCP servers' tools after the world's own. */
@@ -381,7 +389,7 @@ const whenApplied = (when: "draft" | "made" | "held"): string => {
 };
 
 /** Returns the world that a host's sessions open: the editor's, unless the options name the local disk's or give a world of their own. */
-const worldOf = <R>(world: HostOptions<R>["world"]): World<R> | World<FileSystem.FileSystem> => {
+const worldOf = <R>(world: HostOptions<R>["world"]): World<R> | World<FileSystem.FileSystem | SessionContext> => {
   if (world === undefined || world === "editor") return editorWorld;
   return world === "local" ? workspaceWorld : world;
 };
@@ -559,12 +567,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             const { catalog } = yield* toolsOf(mcp.sources);
             const mcpPresent = presentFrom(catalog);
             // What the world's own tools change in files is recorded with their results; the MCP servers' tools are not wrapped.
-            const recorded = recordingChanges({
-              root: cwd,
-              folders: { working: WordText.make(cwd), home: WordText.make(homedir()) },
-              commandTools: commandToolsOf(configuration),
-              fileText: opened.fileText,
-            });
+            const recorded = recordingChanges({ commandTools: commandToolsOf(configuration), fileText: opened.fileText });
             const world: WorldSession = {
               system: opened.system,
               sources: [...(yield* Effect.forEach(opened.sources, recorded)), ...mcp.sources],
@@ -657,7 +660,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
           id: AcpSessionId,
           world: WorldSession,
           permissionMode: Ref.Ref<PermissionMode>,
-          parent: { readonly scope: Scope.Scope; readonly mcp: McpServers; readonly configuration: Configured; readonly cwd: string; readonly additional: ReadonlyArray<string> },
+          parent: Pick<Entry, "scope" | "mcp" | "configuration" | "context" | "storeOpened">,
           go: (session: Session, context: Context.Context<Services>, follow: (initial: ProjectionState) => Effect.Effect<Feed>) => Effect.Effect<A, E, X>,
         ) =>
           Effect.gen(function* () {
@@ -668,15 +671,13 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               // shares, so a session continued from its facts has them; a session made before then also reads those in its own folder.
               const blobs = BlobsInFolder(options.folders.blobs, [join(sessionFolderOf(options.folders.sessions, id), "blobs")]);
               // The configuration's seam lists, with permission following the session's mode (`FromHost.permissionMode`). Its tool
-              // sources are not used: the session's tools are the world's and its MCP servers'.
-              const additionalFolders = [...(options.additionalFolders ?? []), ...parent.additional];
+              // sources are not used: the session's tools are the world's and its MCP servers'. Its policies read the session's
+              // folders from its context.
               // The path inputs of the tools the session runs with now, which a session recorded before they were named lacks.
               const { catalog: live } = yield* toolsOf(world.sources);
               const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(parent.configuration, {
                 canAsk: true,
                 permissionMode: Ref.get(permissionMode),
-                workingFolder: parent.cwd,
-                additionalFolders,
                 toolPaths: (name) => live.find((tool) => tool.name === name)?.paths,
               });
               const runner = SourcedToolRunner.pipe(Layer.provide(Layer.succeed(ToolSources, world.sources)));
@@ -686,10 +687,14 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 // What is known of models is the catalog's, with the configuration's overrides (`models:`) over it.
                 Layer.succeed(ModelOverrides, parent.configuration.models),
               );
-              const layer = Layer.mergeAll(services(runner).pipe(Layer.provide(notices)), seamLayer(lists), blobs).pipe(Layer.provideMerge(FileBackedSessionStore(file)));
+              const layer = Layer.mergeAll(services(runner).pipe(Layer.provide(notices)), seamLayer(lists), blobs, Layer.succeed(SessionContext, parent.context)).pipe(
+                Layer.provideMerge(FileBackedSessionStore(file)),
+              );
               const context = yield* Layer.buildWithScope(layer, scope);
-              // Every span of the session carries its working folder and this host, as its record holds them.
-              const session = yield* openSession.pipe(Effect.provideContext(context), Effect.annotateSpans({ host: acpHost, cwd: parent.cwd }), Scope.provide(scope));
+              // Every span of the session carries the session and its working folder (`inSession`), and this host, as its record holds them.
+              const session = yield* openSession.pipe(Effect.provideContext(context), Effect.annotateSpans({ host: acpHost }), Scope.provide(scope));
+              // The session's folders read its facts from its store, now that it is open.
+              yield* parent.storeOpened(session.facts);
 
               const follow = (initial: ProjectionState) =>
                 startFeed({
@@ -697,7 +702,6 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   session,
                   context,
                   present: world.present,
-                  folders: foldersOf(parent.cwd, [...additionalFolders, ...additionalDirectoriesOf(parent.configuration)]),
                   connection,
                   annotations: { connection: connectionId, session: id },
                   initial,
@@ -730,7 +734,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               );
               return { ...made, session, context, scope, gate };
             }).pipe(Effect.onError(() => Scope.close(scope, Exit.void)));
-          });
+          }).pipe(
+            // The session's services, its feed and its requests run in the session's context, whichever request starts the session.
+            inSession(parent.context),
+          );
 
         /**
          * Opens the entry's draft at its first prompt (turn zero): writes its record (`host.json`: the working folder, and the
@@ -744,11 +751,11 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 Effect.andThen(Effect.fail(rpcError(ErrorCode.InternalError, `The session could not be opened: ${error.message}`))),
               );
 
-            const record = recordFor(entry.cwd, text, entry.additional);
+            const record = recordFor(entry.context.working, text, entry.additional);
             yield* writeRecord(options.folders.sessions, entry.id, record).pipe(Effect.catch(failed("writing the session's record at its first prompt")));
             yield* Effect.logInfo(logKeys.record.written, { file: recordFileOf(options.folders.sessions, entry.id), cwd: record.cwd, titled: record.title !== undefined });
             yield* settingsWritten(entry.id, entry.configuration, yield* Ref.get(entry.permissionMode), `${draft.model.provider}/${draft.model.model}`);
-            const opened = yield* startSession(entry.id, entry.world, entry.permissionMode, { scope: entry.scope, mcp: entry.mcp, configuration: entry.configuration, cwd: entry.cwd, additional: entry.additional }, (session, context, follow) =>
+            const opened = yield* startSession(entry.id, entry.world, entry.permissionMode, entry, (session, context, follow) =>
               Effect.gen(function* () {
                 // The feed starts first: the session has no facts yet, so the feed sends everything from the opening on, live.
                 const feed = yield* follow(start);
@@ -771,10 +778,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               yield* say("Nothing to export: this session has had no turn yet.");
               return { stopReason: "end_turn" as const };
             }
-            const path = join(entry.cwd, options.folders.project, "exports", `${entry.id}.md`);
+            const path = join(entry.context.working, options.folders.project, "exports", `${entry.id}.md`);
             const markdown = markdownOf(yield* state.opened.session.facts);
             const fs = yield* FileSystem.FileSystem;
-            yield* fs.makeDirectory(join(entry.cwd, options.folders.project, "exports"), { recursive: true }).pipe(
+            yield* fs.makeDirectory(join(entry.context.working, options.folders.project, "exports"), { recursive: true }).pipe(
               Effect.andThen(fs.writeFileString(path, markdown)),
               Effect.catch((error) =>
                 Effect.logError(logKeys.export.failed, { path, doing: "writing the transcript", cause: error.message }).pipe(
@@ -903,7 +910,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             const keptServers = Arr.sort(entry.clientServers.map(serverIdentityOf), Order.String);
             const askedFolders = asked.additionalDirectories === undefined ? undefined : Arr.sort(asked.additionalDirectories, Order.String);
             const keptFolders = Arr.sort(entry.additional, Order.String);
-            const cwdDiffers = asked.cwd !== entry.cwd;
+            const cwdDiffers = asked.cwd !== entry.context.working;
             const serversDiffer = askedServers !== undefined && askedServers.join("\n") !== keptServers.join("\n");
             const foldersDiffer = askedFolders !== undefined && askedFolders.join("\n") !== keptFolders.join("\n");
             if (cwdDiffers || serversDiffer || foldersDiffer) {
@@ -916,7 +923,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   ...(foldersDiffer ? { additionalDirectories: askedFolders } : {}),
                 },
                 kept: {
-                  ...(cwdDiffers ? { cwd: entry.cwd } : {}),
+                  ...(cwdDiffers ? { cwd: entry.context.working } : {}),
                   ...(serversDiffer ? { mcpServers: keptServers } : {}),
                   ...(foldersDiffer ? { additionalDirectories: keptFolders } : {}),
                 },
@@ -930,10 +937,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             if (state._tag === "Draft") {
               yield* Deferred.succeed(replayed, 0);
               yield* Effect.forkIn(
-                Fiber.await(self).pipe(
-                  Effect.flatMap((exit) => (Exit.isSuccess(exit) ? send(entry.id, commandsUpdate) : Effect.void)),
-                  Effect.annotateLogs({ session: entry.id }),
-                ),
+                Fiber.await(self).pipe(Effect.flatMap((exit) => (Exit.isSuccess(exit) ? send(entry.id, commandsUpdate) : Effect.void))),
                 connectionScope,
               );
             } else {
@@ -964,7 +968,6 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                     // A holder interrupted before it replayed does not leave the request waiting.
                     Effect.ensuring(Deferred.interrupt(replayed)),
                     Effect.flatMap((answered) => (Exit.isSuccess(answered) ? announce(entry, opened) : Effect.void)),
-                    Effect.annotateLogs({ session: entry.id }),
                   ),
                 connectionScope,
               );
@@ -976,10 +979,13 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               was: state._tag === "Open" ? "open" : "a draft",
               replayed: count,
               ...(turn === undefined ? {} : { turnUnderWay: turn }),
-              cwd: entry.cwd,
+              cwd: entry.context.working,
             });
             return { configOptions: (yield* configurationOf(entry)).options };
-          });
+          }).pipe(
+            // The work of a session this connection holds runs in the session's context: the fibers it forks inherit it.
+            inSession(entry.context),
+          );
 
         /**
          * Handles `session/load` or `session/resume`. A session this connection holds already goes on as it is (`reopenHeld`); a request
@@ -1052,10 +1058,14 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 return yield* Effect.fail(rpcError(ErrorCode.ResourceNotFound, `Session ${sessionId} not found in ${options.folders.sessions}`, { sessionId }));
               }
               const configuration = yield* configurationFor(cwd, mcpServers, method);
-              const worldAlone = yield* (world as World<R | FileSystem.FileSystem>).open({
+              // The session's context is made before its world is opened: the world, the MCP servers and the session run in it.
+              const place = placeOf(SessionId.make(sessionId), cwd, additional, configuration);
+              const made = yield* makeSessionContext(place);
+              return yield* Effect.gen(function* () {
+              const worldAlone = yield* (world as World<R | FileSystem.FileSystem | SessionContext>).open({
                 sessionId,
                 cwd,
-                additionalFolders: sessionFolders(cwd, additional, configuration),
+                additionalFolders: openingFolders(place).additional,
                 mcpServers,
                 connection,
                 strictInput: options.strictToolInput ?? false,
@@ -1066,7 +1076,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               // The policy reads the session's mode at each call; the mode starts as the configuration says.
               const initialMode = startingModeOf(configuration);
               const mode = yield* Ref.make(initialMode);
-              const opened = yield* startSession(sessionId, sessionWorld, mode, { scope, mcp, configuration, cwd, additional }, (session, context, follow) =>
+              const opened = yield* startSession(sessionId, sessionWorld, mode, { scope, mcp, configuration, ...made }, (session, context, follow) =>
                 Effect.gen(function* () {
                   const left = leftRunning(yield* session.facts);
                   if (left !== undefined) {
@@ -1084,7 +1094,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               ).pipe(Effect.catch(notStarted("starting the stored session")));
               const entry: Entry = {
                 id: sessionId,
-                cwd,
+                ...made,
                 additional,
                 world: sessionWorld,
                 scope,
@@ -1111,9 +1121,10 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               });
               // The updates follow the response: the response is written before this handler's fiber ends.
               const self = yield* Effect.fiber;
-              yield* Effect.forkIn(Fiber.await(self).pipe(Effect.andThen(announce(entry, opened)), Effect.annotateLogs({ session: sessionId })), connectionScope);
+              yield* Effect.forkIn(Fiber.await(self).pipe(Effect.andThen(announce(entry, opened))), connectionScope);
               return { configOptions: configured };
               }).pipe(Effect.onError(() => Scope.close(scope, Exit.void)));
+              }).pipe(inSession(made.context));
             }).pipe(
               // Let go once this request is answered (its handler's fiber has ended), so a request that waited is answered after it. The
               // entry, if the session started, is set by then: whoever waits for the claim finds it.
@@ -1129,9 +1140,12 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             );
           });
 
-        // The folders a session counts as inside its working folder, absolute: the launcher's, the session's, then the settings'.
-        const sessionFolders = (cwd: string, additional: ReadonlyArray<string>, configuration: Configured): ReadonlyArray<string> =>
-          foldersOf(cwd, [...(options.additionalFolders ?? []), ...additional, ...additionalDirectoriesOf(configuration)]).additional ?? [];
+        /** Where the session `session` works: `cwd`, and the folders that count as inside it, as given: the launcher's, the session's (`additional`), then the settings'. */
+        const placeOf = (session: SessionId, cwd: string, additional: ReadonlyArray<string>, configuration: Configured): SessionPlace => ({
+          session,
+          working: cwd,
+          additional: [...(options.additionalFolders ?? []), ...additional, ...additionalDirectoriesOf(configuration)],
+        });
 
         const handlers: Agent.AgentHandlers<Protocol.V1Version, ModelCatalog | FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner | Scope.Scope | R> = {
           "session/new": ({ cwd, mcpServers, additionalDirectories }) =>
@@ -1152,10 +1166,14 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   Effect.tapError((error) => Effect.logWarning(logKeys.session.refused, { cwd, cause: error.message })),
                 );
                 const id = AcpSessionId.make(crypto.randomUUID());
-                const worldAlone = yield* (world as World<R | FileSystem.FileSystem>).open({
+                // The session's context is made with its id, before its world is opened: the world, the MCP servers and the session run in it.
+                const place = placeOf(SessionId.make(id), cwd, additional, configuration);
+                const made = yield* makeSessionContext(place);
+                return yield* Effect.gen(function* () {
+                const worldAlone = yield* (world as World<R | FileSystem.FileSystem | SessionContext>).open({
                   sessionId: id,
                   cwd,
-                  additionalFolders: sessionFolders(cwd, additional, configuration),
+                  additionalFolders: openingFolders(place).additional,
                   mcpServers,
                   connection,
                   strictInput: options.strictToolInput ?? false,
@@ -1171,7 +1189,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 );
                 const entry: Entry = {
                   id,
-                  cwd,
+                  ...made,
                   additional,
                   world: sessionWorld,
                   scope,
@@ -1190,18 +1208,13 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                   model: `${model.provider}/${model.model}`,
                   tools: catalog.map((tool) => tool.name),
                   mcpServers: mcpServers.length,
-                }).pipe(Effect.annotateLogs({ session: id }));
+                });
                 // The update follows the response: the response is written before this handler's fiber ends.
                 const self = yield* Effect.fiber;
-                yield* Effect.forkIn(
-                  Fiber.await(self).pipe(
-                    Effect.andThen(send(id, commandsUpdate)),
-                    Effect.annotateLogs({ session: id }),
-                  ),
-                  connectionScope,
-                );
+                yield* Effect.forkIn(Fiber.await(self).pipe(Effect.andThen(send(id, commandsUpdate))), connectionScope);
                 return { sessionId: id, configOptions: configured };
                 }).pipe(Effect.onError(() => Scope.close(scope, Exit.void)));
+                }).pipe(inSession(made.context));
               }),
             ),
 

@@ -6,13 +6,24 @@ import { boringOpening } from "../../tests/support/boring.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { test, testOrigin } from "../../tests/support/test.ts";
 import type { Fact } from "../agent-machine/fact.ts";
-import { CallId, FolderPath, Seq, type ToolKind, ToolName } from "../agent-machine/names.ts";
+import { CallId, FolderPath, Seq, SessionId, type ToolKind, ToolName } from "../agent-machine/names.ts";
 import type { PermissionMode } from "../agent-policy/permissions.ts";
 import type { ToolSpec } from "../agent-session/contracts.ts";
 import { receivedJson } from "../agent-session/received.ts";
 import { permissionsFor } from "./services.ts";
+import { inSession, makeSessionContext } from "./session-context.ts";
 
 const spec = (name: string, kind: ToolKind): ToolSpec => ({ name: ToolName.make(name), description: name, input: { type: "object" }, kind, replay: "safe" });
+
+/** Runs `effect` in the context of a session working in `/work/project`, with the folders `additional` and the facts `facts`, as a host makes it (`session-context.ts`). */
+const inProject =
+  (additional: ReadonlyArray<string>, facts: ReadonlyArray<Fact>) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.gen(function* () {
+      const made = yield* makeSessionContext({ session: SessionId.make("s1"), working: "/work/project", additional });
+      yield* made.storeOpened(Effect.succeed(facts));
+      return yield* inSession(made.context)(effect);
+    });
 
 /** What the policy for `mode` does with a call to each of `tools`, in a session that opened with a tool that reads and one that edits. */
 const verdicts = (mode: PermissionMode, canAsk: boolean, tools: ReadonlyArray<string>) =>
@@ -43,7 +54,7 @@ test("an additional folder counts as inside the working folder: from ~, relative
         const facts: ReadonlyArray<Fact> = [
           { _tag: "Observed", seq: Seq.make(1), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation: boringOpening([spec("run_command", "execute")]) },
         ];
-        const policy = yield* permissionsFor("default", true, undefined, "/work/project", additional)(facts);
+        const policy = yield* permissionsFor("default", true)(facts).pipe(inProject(additional, facts));
         const step = policy.start({ _tag: "RunTool", call: CallId.make("c1"), tool: ToolName.make("run_command"), input: receivedJson({ command }) });
         return step._tag === "Waiting" ? "asks" : step.verdict._tag === "Continue" ? "runs" : "vetoed";
       }),
@@ -62,7 +73,7 @@ test("a folder the user added to the session counts as inside the working folder
           { _tag: "Observed", seq: Seq.make(1), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation: boringOpening([spec("run_command", "execute")]) },
           ...added.map((folder, at): Fact => ({ _tag: "Observed", seq: Seq.make(2 + at), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation: { _tag: "FolderAdded", folder: FolderPath.make(folder) } })),
         ];
-        const policy = yield* permissionsFor("default", true, undefined, "/work/project")(facts);
+        const policy = yield* permissionsFor("default", true)(facts).pipe(inProject([], facts));
         const step = policy.start({ _tag: "RunTool", call: CallId.make("c1"), tool: ToolName.make("run_command"), input: receivedJson({ command }) });
         return step._tag === "Waiting" ? "asks" : step.verdict._tag === "Continue" ? "runs" : "vetoed";
       }),
@@ -80,7 +91,7 @@ test("a tool's path inputs come from the tools the session runs with now, so a s
         const facts: ReadonlyArray<Fact> = [
           { _tag: "Observed", seq: Seq.make(1), time: DateTime.makeUnsafe(0), origin: testOrigin(), observation: boringOpening([spec("read_file", "read")]) },
         ];
-        const policy = yield* permissionsFor("default", true, undefined, "/work/project", [], toolPaths)(facts);
+        const policy = yield* permissionsFor("default", true, undefined, toolPaths)(facts).pipe(inProject([], facts));
         const step = policy.start({ _tag: "RunTool", call: CallId.make("c1"), tool: ToolName.make("read_file"), input: receivedJson({ path: "~/.aws/credentials" }) });
         return step._tag === "Waiting" ? "asks" : step.verdict._tag === "Continue" ? "runs" : "vetoed";
       }),

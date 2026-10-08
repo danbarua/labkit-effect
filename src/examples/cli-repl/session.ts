@@ -39,7 +39,7 @@ import type { SettingsChange } from "../../agent-machine/settings.ts";
 import { gitTools, isRepositoryRoot } from "../../agent-tools/git.ts";
 import { additionalDirectoriesOf, commandToolsOf } from "../../agent-config/builtins.ts";
 import type { ToolSpec } from "../../agent-session/contracts.ts";
-import { foldersOf } from "../../agent-host/services.ts";
+import { openingFolders } from "../../agent-host/session-context.ts";
 import { recordingChanges } from "../../agent-host/recorded-changes.ts";
 import { workspaceTools } from "../../agent-tools/workspace.ts";
 import type { Session } from "../../agent-session/loop.ts";
@@ -88,14 +88,17 @@ export const cliRecord = (cwd: string) => ({ host: cliHost, cwd });
 /** Whether a stored session's record says that the CLI made it in the working folder `cwd`. */
 export const madeIn = (record: unknown, cwd: string): boolean => Predicate.isReadonlyObject(record) && record["host"] === cliHost && record["cwd"] === cwd;
 
+/** The folders that count as inside the working folder for a CLI session: `--add-dir`'s, then the configuration's (`additionalDirectories`). */
+const additionalOf = (config: Config): ReadonlyArray<string> => [...config.additionalFolders, ...additionalDirectoriesOf(config.configuration)];
+
 /**
- * The workspace tools for the working folder; their commands run with the environment the
- * configuration builds (`commandEnvironment`).
+ * The workspace tools for the working folder, whose system text names the folders that count as
+ * inside it; their commands run with the environment the configuration builds (`commandEnvironment`).
  */
 const workspaceOf = (config: Config) =>
   workspaceTools(process.cwd(), {
     strictInput: config.strictToolInput,
-    additional: foldersOf(process.cwd(), [...config.additionalFolders, ...additionalDirectoriesOf(config.configuration)]).additional ?? [],
+    additional: openingFolders({ working: process.cwd(), additional: additionalOf(config) }).additional ?? [],
     environment: processEnvironmentWith(seamListsOf(config.configuration, { canAsk: config.canAsk }).commandEnvironment ?? [removeCredentials()]),
   });
 
@@ -105,14 +108,12 @@ const gitOf = (config: Config) => (isRepositoryRoot(process.cwd()) ? gitTools(pr
 /**
  * The loop's services for a CLI session, besides its tool sources and notices, which its bolt-ons
  * give: `SessionServices` with the configuration's `models:` overrides, and the configuration's
- * policies and turn-end hooks.
+ * policies and turn-end hooks. The policies read the session's folders from its context.
  */
 const servicesOf = (config: Config, live: ReadonlyArray<ToolSpec>) => {
   // The CLI uses its own tool sources (the workspace's and the MCP servers'), not the configuration's.
   const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(config.configuration, {
     canAsk: config.canAsk,
-    workingFolder: process.cwd(),
-    additionalFolders: config.additionalFolders,
     // The path inputs of the tools the session runs with now, which a session recorded before they were named lacks.
     toolPaths: (name) => live.find((tool) => tool.name === name)?.paths,
   });
@@ -170,7 +171,7 @@ const requiredRunning = (configuration: Configuration, mcp: McpServers) =>
 const folderBoltOn = (config: Config, workspace: ReturnType<typeof workspaceOf>, git: ReturnType<typeof gitOf>) =>
   Effect.gen(function* (): Effect.fn.Return<BoltOn, never, FileSystem.FileSystem> {
     // What the working folder's tools change in files is recorded with their results; the MCP servers' tools are not wrapped.
-    const recorded = recordingChanges({ root: process.cwd(), folders: foldersOf(process.cwd(), []), commandTools: commandToolsOf(config.configuration) });
+    const recorded = recordingChanges({ commandTools: commandToolsOf(config.configuration) });
     return {
       sources: yield* Effect.forEach([yield* workspace.source, ...(git === undefined ? [] : [yield* git.source])], recorded),
       system: [workspace.system, ...(git === undefined ? [] : [yield* git.system])].join(" "),
@@ -228,6 +229,8 @@ export const withCliSession = <A, E, R, L, H>(
         continues: config.continues,
         persist: config.persist,
         root,
+        working: process.cwd(),
+        additional: additionalOf(config),
         record: cliRecord(process.cwd()),
         // A saved session's blobs are kept in the brand's blobs folder, which the ACP host shares, so a continued session has them.
         services: Layer.merge(servicesOf(config, workspace.catalog), config.persist ? BlobsInFolder(folders.blobs) : BlobsInMemory),

@@ -3,7 +3,9 @@
  * `write_file` with `fs/write_text_file`, `edit_file` with both, `terminal_command` in a terminal of the
  * editor's (`terminal/*`), and `update_plan`, which sends the model's plan to the editor (a `plan`
  * update). Each is a primitive tool (`agent-tools/tool.ts`) that asks for the `Editor` service: the
- * editor is the environment the tools run in, and the world provides it. A file tool takes the path
+ * editor is the environment the tools run in, and the world provides it. The session's id, which
+ * each request to the editor names, and its working folder, where a command's terminal starts, are
+ * the session's context (`SessionContext`), which the call's fiber has. A file tool takes the path
  * as it is given; `inWorkspace` resolves the model's paths against the working folder first.
  *
  * - `read_file` reads the file as the editor has it, unsaved changes included. A result over 256 KiB
@@ -17,10 +19,11 @@
 import { Context, Duration, Effect, HashMap, Option, Ref, Schema } from "effect";
 import type { AgentConnection } from "effective-acp/agent";
 import type { V1Version } from "effective-acp/protocol";
-import { type SessionId, type TerminalId, ToolCallId } from "effective-acp/schema/v1";
+import { SessionId, type TerminalId, ToolCallId } from "effective-acp/schema/v1";
 import { type CallId, ToolName } from "../agent-machine/names.ts";
 import type { ShownWrite } from "../agent-host/command-writes.ts";
 import { ShellCommand } from "../agent-environment/command-segments.ts";
+import { SessionContext } from "../agent-environment/session-context.ts";
 import { FilePath } from "../agent-tools/paths.ts";
 import { CurrentCall, Reported, Rejected, type Tool } from "../agent-tools/tool.ts";
 import { commandSeconds, EditFile, maxReadBytes, maxReadText, ReadFile, RunCommand } from "../agent-tools/workspace.ts";
@@ -30,9 +33,6 @@ export class Editor extends Context.Service<
   Editor,
   {
     readonly connection: AgentConnection<V1Version>;
-    readonly sessionId: SessionId;
-    /** The working folder, where a command's terminal starts. */
-    readonly cwd: string;
     /** The terminal each command ran in, by call: shown in the call as it runs, and when it has ended. */
     readonly terminals: Ref.Ref<HashMap.HashMap<CallId, TerminalId>>;
     /**
@@ -42,6 +42,9 @@ export class Editor extends Context.Service<
     readonly writesBefore: (call: CallId, command: ShellCommand) => Effect.Effect<ReadonlyArray<ShownWrite>>;
   }
 >()("agent-acp/Editor") {}
+
+/** The ACP id of the session that the call runs in: the session's own id (`SessionContext`). */
+const sessionIdOf = Effect.map(SessionContext, (context) => SessionId.make(context.session));
 
 const WriteFile = Schema.Struct({ path: FilePath, content: Schema.String.annotate({ description: `The file's new text, at most ${maxReadText}.` }) });
 
@@ -74,7 +77,7 @@ const cut = (text: string, max: number): { readonly kept: string; readonly omitt
 };
 
 /** `read_file`: reads a file as the editor has it, or the lines that `line` and `limit` select. */
-export const readFile: Tool<typeof ReadFile.fields, Editor> = {
+export const readFile: Tool<typeof ReadFile.fields, Editor | SessionContext> = {
   name: ToolName.make("read_file"),
   kind: "read",
   replay: "safe",
@@ -82,7 +85,8 @@ export const readFile: Tool<typeof ReadFile.fields, Editor> = {
   input: ReadFile,
   run: (input) =>
     Effect.gen(function* () {
-      const { connection, sessionId } = yield* Editor;
+      const { connection } = yield* Editor;
+      const sessionId = yield* sessionIdOf;
       const { content } = yield* connection.client["fs/read_text_file"]({
         sessionId,
         path: input.path,
@@ -95,7 +99,7 @@ export const readFile: Tool<typeof ReadFile.fields, Editor> = {
 };
 
 /** `write_file`: creates or replaces a file through the editor. */
-export const writeFile: Tool<typeof WriteFile.fields, Editor> = {
+export const writeFile: Tool<typeof WriteFile.fields, Editor | SessionContext> = {
   name: ToolName.make("write_file"),
   kind: "edit",
   replay: "idempotent",
@@ -105,14 +109,15 @@ export const writeFile: Tool<typeof WriteFile.fields, Editor> = {
     Effect.gen(function* () {
       const bytes = Buffer.byteLength(input.content);
       if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The content is over ${maxReadText} (${bytes} bytes). Write less.` });
-      const { connection, sessionId } = yield* Editor;
+      const { connection } = yield* Editor;
+      const sessionId = yield* sessionIdOf;
       yield* connection.client["fs/write_text_file"]({ sessionId, path: input.path, content: input.content }).pipe(Effect.mapError(failed("fs/write_text_file", input.path)));
       return `Wrote ${bytes} bytes to ${input.path}.`;
     }),
 };
 
 /** `edit_file`: replaces the one occurrence of a text in a file, as the editor has it. */
-export const editFile: Tool<typeof EditFile.fields, Editor> = {
+export const editFile: Tool<typeof EditFile.fields, Editor | SessionContext> = {
   name: ToolName.make("edit_file"),
   kind: "edit",
   replay: "unsafe",
@@ -120,7 +125,8 @@ export const editFile: Tool<typeof EditFile.fields, Editor> = {
   input: EditFile,
   run: (input) =>
     Effect.gen(function* () {
-      const { connection, sessionId } = yield* Editor;
+      const { connection } = yield* Editor;
+      const sessionId = yield* sessionIdOf;
       const { content } = yield* connection.client["fs/read_text_file"]({ sessionId, path: input.path }).pipe(Effect.mapError(failed("edit_file", input.path)));
       const count = content.split(input.old_text).length - 1;
       if (count !== 1)
@@ -136,7 +142,7 @@ export const editFile: Tool<typeof EditFile.fields, Editor> = {
 };
 
 /** `update_plan`: sends the model's plan to the editor. */
-export const updatePlan: Tool<typeof UpdatePlan.fields, Editor> = {
+export const updatePlan: Tool<typeof UpdatePlan.fields, Editor | SessionContext> = {
   name: ToolName.make("update_plan"),
   kind: "think",
   replay: "safe",
@@ -144,7 +150,8 @@ export const updatePlan: Tool<typeof UpdatePlan.fields, Editor> = {
   input: UpdatePlan,
   run: (input) =>
     Effect.gen(function* () {
-      const { connection, sessionId } = yield* Editor;
+      const { connection } = yield* Editor;
+      const sessionId = yield* sessionIdOf;
       const entries = input.entries.map((entry) => ({ content: entry.content, status: entry.status, priority: entry.priority ?? "medium" }));
       const count = (status: string) => entries.filter((entry) => entry.status === status).length;
       yield* connection.notify("session/update", { sessionId, update: { sessionUpdate: "plan", entries } }).pipe(Effect.mapError(failed("update_plan", "the plan")));
@@ -153,7 +160,7 @@ export const updatePlan: Tool<typeof UpdatePlan.fields, Editor> = {
 };
 
 /** `terminal_command`: runs a shell command in a terminal of the editor's, in the working folder. */
-export const runCommand: Tool<typeof RunCommand.fields, Editor | CurrentCall> = {
+export const runCommand: Tool<typeof RunCommand.fields, Editor | CurrentCall | SessionContext> = {
   name: ToolName.make("terminal_command"),
   kind: "execute",
   replay: "unsafe",
@@ -161,7 +168,9 @@ export const runCommand: Tool<typeof RunCommand.fields, Editor | CurrentCall> = 
   input: RunCommand,
   run: (input) =>
     Effect.gen(function* () {
-      const { connection, sessionId, cwd, terminals, writesBefore } = yield* Editor;
+      const { connection, terminals, writesBefore } = yield* Editor;
+      const sessionId = yield* sessionIdOf;
+      const cwd = (yield* SessionContext).working;
       const call = yield* CurrentCall;
       const seconds = input.timeout_seconds ?? commandSeconds;
       yield* writesBefore(call, ShellCommand.make(input.command));

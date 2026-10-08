@@ -3,17 +3,14 @@
 import { Effect, Layer } from "effect";
 import { AgentContextAssembler, WholeConversation } from "../agent-context/assembler.ts";
 import { defaultPermissionSettings, type PermissionMode, type PermissionSettings, permissions } from "../agent-policy/permissions.ts";
-import { homedir } from "node:os";
-import { WordText } from "../agent-environment/command-segments.ts";
-import type { Folders } from "../agent-environment/command-units.ts";
-import { join, resolve } from "node:path";
+import { SessionContext } from "../agent-environment/session-context.ts";
 import { segmentsOf } from "./command-parser.ts";
 import { type LoopBreakerSettings, loopBreakerDefaults, repeatedCalls, repeatingTurns } from "../agent-policy/loop-breaker.ts";
 import { maxTurnRequests } from "../agent-policy/max-turn-requests.ts";
 import type { Policy } from "../agent-policy/policy.ts";
 import type { PolicyOfFacts, ToolRunner } from "../agent-session/contracts.ts";
 import { ModelFromFacts } from "../agent-session/configuration/model-choice.ts";
-import { foldersAddedOf, immutableToolCatalogOf } from "../agent-session/configuration/session-setup.ts";
+import { immutableToolCatalogOf } from "../agent-session/configuration/session-setup.ts";
 import { CountingTurnsInStore } from "../agent-session/turns.ts";
 import { costIn } from "../agent-session/accounting.ts";
 import { receivedJson } from "../agent-session/received.ts";
@@ -46,10 +43,9 @@ export const SessionServices = <E, R>(runner: Layer.Layer<ToolRunner, E, R>) =>
  * The permission policy for `mode`, over the tools that the session opened with: each call is judged
  * by its tool's kind, and a call to a command tool by the programs its command runs, split by the
  * host's command parser (`command-parser.ts`), with `settings`' rules, and the paths a program reads
- * judged against `workingFolder`, the folders that count as inside it, and this process's home
- * folder. Those folders are the `additional` ones (absolute, from `~`, or relative to the working
- * folder) and the ones the user added to the session (`FolderAdded`), read from the facts at each
- * call. A tool's path inputs come from `toolPaths` (the tools the session runs with
+ * judged against the session's folders (`SessionContext.folders`: the working folder, the home
+ * folder, and the folders that count as inside the working folder, the user's additions among them),
+ * read at each call. A tool's path inputs come from `toolPaths` (the tools the session runs with
  * now), else from the catalog the session opened with. `canAsk` is whether anyone can
  * answer a question before a call runs. `mode` is read at each call, so a host that lets the user
  * change it applies the change from the next call. A tool call policy (`ToolCallPolicies`).
@@ -59,33 +55,20 @@ export const permissionsFor =
     mode: PermissionMode | Effect.Effect<PermissionMode>,
     canAsk: boolean,
     settings: PermissionSettings = defaultPermissionSettings,
-    workingFolder?: string,
-    additional: ReadonlyArray<string> = [],
     toolPaths?: (tool: string) => ReadonlyArray<string> | undefined,
   ): PolicyOfFacts =>
   (facts) =>
-    Effect.flatMap(immutableToolCatalogOf(facts), (tools) =>
-      Effect.map(
-        Effect.isEffect(mode) ? mode : Effect.succeed(mode),
-        (now) =>
-          permissions(now, canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts, {
-            settings,
-            segmentsOf,
-            pathInputsOf: (name) => toolPaths?.(name) ?? tools.find((tool) => tool.name === name)?.paths ?? [],
-            ...(workingFolder === undefined ? {} : { folders: foldersOf(workingFolder, [...additional, ...foldersAddedOf(facts)]) }),
-          }) as Policy<unknown>,
-      ),
-    );
-
-/** The working folder, the home folder, and the additional folders resolved against them (`~/x` from the home folder, a relative path from the working folder). */
-export const foldersOf = (workingFolder: string, additional: ReadonlyArray<string>): Folders => {
-  const home = homedir();
-  return {
-    working: WordText.make(workingFolder),
-    home: WordText.make(home),
-    additional: additional.map((folder) => WordText.make(folder === "~" || folder.startsWith("~/") ? join(home, folder.slice(1)) : resolve(workingFolder, folder))),
-  };
-};
+    Effect.gen(function* () {
+      const tools = yield* immutableToolCatalogOf(facts);
+      const now = Effect.isEffect(mode) ? yield* mode : mode;
+      const folders = yield* (yield* SessionContext).folders;
+      return permissions(now, canAsk, (name) => tools.find((tool) => tool.name === name)?.kind, facts, {
+        settings,
+        segmentsOf,
+        pathInputsOf: (name) => toolPaths?.(name) ?? tools.find((tool) => tool.name === name)?.paths ?? [],
+        folders,
+      }) as Policy<unknown>;
+    });
 
 /** The limit on a turn's model requests (`agent-policy/max-turn-requests.ts`), 1000 when not given. A model request policy. */
 export const turnRequestLimit =

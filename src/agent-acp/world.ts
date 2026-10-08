@@ -30,12 +30,11 @@
 
 import type { Environment } from "../agent-process/environment.ts";
 import { Effect, FileSystem, HashMap, Option, Ref } from "effect";
-import { homedir } from "node:os";
 import { type PlannedWrite, plannedWrites, type ShownWrite, shownWrites } from "../agent-host/command-writes.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
 import { type Current, currentOnDisk } from "../agent-tools/file-change.ts";
-import { ShellCommand, WordText } from "../agent-environment/command-segments.ts";
-import type { Folders } from "../agent-environment/command-units.ts";
+import { ShellCommand } from "../agent-environment/command-segments.ts";
+import { SessionContext } from "../agent-environment/session-context.ts";
 import type { AgentConnection } from "effective-acp/agent";
 import type { V1Version } from "effective-acp/protocol";
 import type { McpServer, SessionId, TerminalId, ToolCallContent } from "effective-acp/schema/v1";
@@ -130,17 +129,18 @@ const wroteContent = (planned: PlannedWrite): ToolCallContent => ({
   content: { type: "text", text: `${planned.writes.append ? "Added to the end of" : "Wrote"} ${planned.writes.path}.` },
 });
 
-export const editorWorld: World<FileSystem.FileSystem> = {
+export const editorWorld: World<FileSystem.FileSystem | SessionContext> = {
   open: ({ sessionId, cwd, connection, strictInput, additionalFolders }) =>
     Effect.gen(function* () {
       const fs = connection.profile.client.capabilities.fs;
       const additional = additionalFolders ?? [];
       const disk = yield* FileSystem.FileSystem;
+      // The session's folders, which a command's writes are judged against, read at each use.
+      const { folders } = yield* SessionContext;
       // The terminal each command ran in, by call: shown in the call as it runs, and when it has ended.
       const terminals = yield* Ref.make(HashMap.empty<CallId, TerminalId>());
       // What each command writes to files, with their text before it ran: read once, before it runs.
       const writes = yield* Ref.make(HashMap.empty<CallId, ReadonlyArray<ShownWrite>>());
-      const folders: Folders = { working: WordText.make(cwd), home: WordText.make(homedir()) };
       // A file's current text: whether it exists from the disk, and its text from the editor, so that an unsaved change counts.
       const currentOf = (full: string, path: string): Effect.Effect<Current> =>
         currentOnDisk(disk, full, path).pipe(
@@ -161,7 +161,7 @@ export const editorWorld: World<FileSystem.FileSystem> = {
         Effect.gen(function* () {
           const known = HashMap.get(yield* Ref.get(writes), call);
           if (Option.isSome(known)) return known.value;
-          const shown = yield* shownWrites(command, folders, currentOf);
+          const shown = yield* shownWrites(command, yield* folders, currentOf);
           // The first reading kept wins: a later one may have read after the command ran.
           return yield* Ref.modify(writes, (all) =>
             Option.match(HashMap.get(all, call), { onSome: (kept) => [kept, all] as const, onNone: () => [shown, HashMap.set(all, call, shown)] as const }),
@@ -175,14 +175,14 @@ export const editorWorld: World<FileSystem.FileSystem> = {
         return Ref.get(writes).pipe(Effect.map((all) => Option.getOrElse(HashMap.get(all, call), () => [])));
       };
       const inFolder = inWorkspace(cwd);
-      const tools: ReadonlyArray<AnyTool<Editor | CurrentCall | FileSystem.FileSystem>> = [
+      const tools: ReadonlyArray<AnyTool<Editor | CurrentCall | SessionContext | FileSystem.FileSystem>> = [
         ...(fs?.readTextFile === true ? [anyTool(described(blobReads(inFolder(readFile))))] : []),
         ...(fs?.writeTextFile === true ? [anyTool(described(inFolder(writeFile)))] : []),
         ...(fs?.readTextFile === true && fs.writeTextFile === true ? [anyTool(described(inFolder(editFile)))] : []),
         anyTool(described(updatePlan)),
         ...(connection.profile.client.capabilities.terminal === true ? [anyTool(described(runCommand))] : []),
       ];
-      const source = yield* sourceOf(tools, { strictInput }).pipe(Effect.provideService(Editor, { connection, sessionId, cwd, terminals, writesBefore }));
+      const source = yield* sourceOf(tools, { strictInput }).pipe(Effect.provideService(Editor, { connection, terminals, writesBefore }));
 
       const git = gitToolsAt(cwd, strictInput);
       const plain = presentFrom([...source.tools, ...(git?.catalog ?? [])]);
@@ -212,7 +212,7 @@ export const editorWorld: World<FileSystem.FileSystem> = {
             // write it recorded nothing of (its text before was not known, or it was recorded before
             // commands kept their writes) says what it wrote.
             const recorded = new Set<string>(outcome._tag === "Succeeded" ? (outcome.details ?? []).flatMap((detail) => (detail._tag === "FileChanged" || detail._tag === "FileWritten" ? [detail.path] : [])) : []);
-            const unrecorded = outcome._tag === "Succeeded" && command !== undefined ? plannedWrites(command, folders).filter((planned) => planned._tag !== "Planned" || !recorded.has(planned.full)) : [];
+            const unrecorded = outcome._tag === "Succeeded" && command !== undefined ? plannedWrites(command, yield* folders).filter((planned) => planned._tag !== "Planned" || !recorded.has(planned.full)) : [];
             const content = [...changedFiles(outcome), ...unrecorded.map(wroteContent), ...terminal];
             return content.length === 0 ? shown : ({ ...shown, content } satisfies Presented);
           }

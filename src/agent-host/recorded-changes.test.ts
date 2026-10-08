@@ -7,6 +7,7 @@ import { BunServices } from "@effect/platform-bun";
 import * as git from "es-git";
 import { Effect, Layer, Logger } from "effect";
 import { runTest } from "../../tests/support/run.ts";
+import { TestSessionContext } from "../../tests/support/session-context.ts";
 import { test, testFolder } from "../../tests/support/test.ts";
 import { CallId, ToolName } from "../agent-machine/names.ts";
 import { WordText } from "../agent-environment/command-segments.ts";
@@ -27,14 +28,23 @@ const ran = (calls: ReadonlyArray<readonly [string, object]>, options: { readonl
       const source =
         options.wrapped === false
           ? bare
-          : yield* recordingChanges({ root, folders: { working: WordText.make(root), home: WordText.make(join(root, "home")) }, commandTools: ["run_command"], fileText: options.fileText })(bare);
+          : yield* recordingChanges({ commandTools: ["run_command"], fileText: options.fileText })(bare);
       const results = yield* Effect.forEach(calls, ([tool, input]) =>
         Effect.map(source.run(ToolName.make(tool), receivedJson({ intent: "A test call.", ...input } as never), CallId.make("call-1")), (outcome) =>
           outcome._tag === "Succeeded" ? (outcome.details ?? []).map((detail) => (detail._tag === "FileChanged" ? { ...detail, patch: asText(detail.patch) } : detail)) : outcome.reason._tag,
         ),
       );
       return { results, logged };
-    }).pipe(Effect.provide(Layer.mergeAll(Logger.layer([Logger.make((log) => logged.push(log.message))], { mergeWithExisting: true }), BunServices.layer))),
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Logger.layer([Logger.make((log) => logged.push(log.message))], { mergeWithExisting: true }),
+          BunServices.layer,
+          // The session works in the test's folder, with a home folder of its own inside it.
+          TestSessionContext({ working: root, folders: { working: WordText.make(root), home: WordText.make(join(root, "home")) } }),
+        ),
+      ),
+    ),
   );
 };
 

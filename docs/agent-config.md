@@ -104,6 +104,11 @@ caller builds itself (`fileLayer(file, false)`).
 - `permissionMode`: where the user changes the permission mode during a session (the ACP host), the
   mode now. Every `permissions` entry follows it in place of its configured `mode`; the first entry's
   `mode` is the mode that the session starts in.
+- `toolPaths`: the names of each tool's path inputs, from the tools the session runs with now.
+
+The session's id, its working folder and its folders are not in `FromHost`. An entry reads them
+when it runs, from the context of the session it runs in (`SessionContext`,
+`docs/agent-environment.md`).
 
 ### Merging
 

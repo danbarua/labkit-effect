@@ -10,6 +10,7 @@ import { type Observation, ToolOutcome } from "../agent-machine/observation.ts";
 import { Received } from "../agent-machine/received.ts";
 import type { ModelSettings } from "../agent-machine/settings.ts";
 import type { RequestFailed } from "./provider-call.ts";
+import type { SessionContext } from "../agent-environment/session-context.ts";
 
 /**
  * The model that a request goes to, and the settings for the request, where they were given. The
@@ -158,14 +159,21 @@ export const TurnEndHooks = Context.Reference<ReadonlyArray<TurnEndHook>>("agent
  */
 export const MaxHolds = Context.Reference<number>("agent-session/MaxHolds", { defaultValue: () => 0 });
 
-/** Runs one tool call and returns how it ended. `call` lets a host show the call while it runs. */
+/**
+ * Runs one tool call and returns how it ended. `call` lets a host show the call while it runs. The
+ * run reads the context of the session it runs in (`SessionContext`), which the loop's request fiber
+ * inherits from the host.
+ */
 export class ToolRunner extends Context.Service<
   ToolRunner,
-  { readonly run: (tool: ToolName, input: Received, call: CallId) => Effect.Effect<ToolOutcome> }
+  { readonly run: (tool: ToolName, input: Received, call: CallId) => Effect.Effect<ToolOutcome, never, SessionContext> }
 >()("agent-session/ToolRunner") {}
 
-/** Returns a policy as the session's facts stand when the request that it reviews is about to be carried out. */
-export type PolicyOfFacts = (facts: ReadonlyArray<Fact>) => Effect.Effect<Policy<unknown>>;
+/**
+ * Returns a policy as the session's facts stand when the request that it reviews is about to be
+ * carried out. It may read the context of the session it reviews a request of (`SessionContext`).
+ */
+export type PolicyOfFacts = (facts: ReadonlyArray<Fact>) => Effect.Effect<Policy<unknown>, never, SessionContext>;
 
 /** A policy in a list, with the name that the list gives it. Its vetoes and questions are recorded as coming from that name. */
 export interface NamedPolicy {

@@ -8,6 +8,8 @@
  * its own logger (to assert on what is logged) replaces this one for its program. When
  * `OTEL_EXPORTER_OTLP_ENDPOINT` is set, the test's spans, log lines and metrics are also sent there
  * as OTLP, as the service `labkit-tests`, with the test's name and file as resource attributes.
+ * The program runs in a session's context (`testSessionContext`, `session-context.ts`), unless it
+ * provides its own.
  */
 
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
@@ -19,6 +21,8 @@ import { HttpCaptures, capturesFolderIn } from "../../src/instrumentation/http-c
 import { OtlpSpansAndMetrics, otlpLogger } from "../../src/instrumentation/telemetry.ts";
 import { reportedBy } from "../../src/agent-session/origin.ts";
 import { testFolder, testOrigin } from "./test.ts";
+import { TestSessionContext } from "./session-context.ts";
+import type { SessionContext } from "../../src/agent-environment/session-context.ts";
 
 const testLogs = (folder: string) => {
   const secrets = secretsOf(process.env);
@@ -31,7 +35,7 @@ const testLogs = (folder: string) => {
   ).pipe(Layer.provide(BunFileSystem.layer));
 };
 
-export const runTest = <A, E>(program: Effect.Effect<A, E, Scope.Scope>): Promise<A> =>
+export const runTest = <A, E>(program: Effect.Effect<A, E, Scope.Scope | SessionContext>): Promise<A> =>
   Effect.runPromise(
     Effect.suspend(() => {
       const origin = testOrigin();
@@ -39,7 +43,7 @@ export const runTest = <A, E>(program: Effect.Effect<A, E, Scope.Scope>): Promis
         reportedBy(origin),
         Effect.annotateLogs({ origin }),
         Effect.scoped,
-        Effect.provide(Layer.mergeAll(withLogLevel(logLevelOf(process.env), testLogs(testFolder())), OtlpSpansAndMetrics("labkit-tests"))),
+        Effect.provide(Layer.mergeAll(withLogLevel(logLevelOf(process.env), testLogs(testFolder())), OtlpSpansAndMetrics("labkit-tests"), TestSessionContext())),
       );
     }),
   );

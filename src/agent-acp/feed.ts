@@ -31,7 +31,7 @@
  *   the feed goes on after it with what arrived meanwhile, so nothing is sent twice.
  */
 
-import { type Context, Effect, Fiber, HashMap, Option, PubSub, Queue, Ref, References, type Scope, Semaphore, Stream, SubscriptionRef } from "effect";
+import { Context, Effect, Fiber, HashMap, Option, PubSub, Queue, Ref, References, type Scope, Semaphore, Stream, SubscriptionRef } from "effect";
 import type { AgentConnection } from "effective-acp/agent";
 import type { V1Version } from "effective-acp/protocol";
 import type { SessionId, SessionUpdate } from "effective-acp/schema/v1";
@@ -40,7 +40,7 @@ import { type CallId, FailureText, type TurnId, Via } from "../agent-machine/nam
 import type { Observation } from "../agent-machine/observation.ts";
 import type { Origin } from "../agent-machine/origin.ts";
 import { segmentsOf } from "../agent-host/command-parser.ts";
-import type { Folders } from "../agent-environment/command-units.ts";
+import { SessionContext } from "../agent-environment/session-context.ts";
 import { explainedOf, OptionId, type PermissionQuestion, questionIn } from "../agent-policy/permissions.ts";
 import type { Services, Session } from "../agent-session/loop.ts";
 import { reportedBy } from "../agent-session/origin.ts";
@@ -55,11 +55,9 @@ export const acpUser: Origin = { _tag: "User", via: Via.make("acp") };
 export interface FeedOptions {
   readonly sessionId: SessionId;
   readonly session: Session;
-  /** What the session's operations run with. */
+  /** What the session's operations run with; its context's folders (`SessionContext`) are what a question's command is judged against when it is explained (`explainedOf`). */
   readonly context: Context.Context<Services>;
   readonly present: Present;
-  /** The working and home folders that a question's command is judged against when it is explained (`explainedOf`). */
-  readonly folders: Folders;
   readonly connection: AgentConnection<V1Version>;
   /** The log annotations of everything the feed logs (the connection and the session). */
   readonly annotations: Readonly<Record<string, unknown>>;
@@ -133,7 +131,7 @@ export const startFeed = (options: FeedOptions): Effect.Effect<Feed, never, Scop
         // The projection announces a call before its question (`ToolCallArrived` is recorded first).
         if (known === undefined) return yield* failed("presenting the call to ask about", "The call was never announced to the client.");
         yield* Effect.logInfo(logKeys.permission.asked, { tool: question.tool, options: question.options.map((option) => option.optionId) });
-        const explained = question._tag === "Command" ? explainedOf(question, segmentsOf, options.folders) : undefined;
+        const explained = question._tag === "Command" ? explainedOf(question, segmentsOf, yield* Context.get(context, SessionContext).folders) : undefined;
         const asked = yield* connection.client["session/request_permission"](requestOf(sessionId, known.call, question, known.shown, explained)).pipe(Effect.result);
         if (asked._tag === "Failure") return yield* failed("asking the client session/request_permission", `${asked.failure._tag}: ${asked.failure.message}`);
         const outcome = asked.success.outcome;

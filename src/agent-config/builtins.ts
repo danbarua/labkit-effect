@@ -54,8 +54,9 @@ export const loopBreaker = plugin(
  * (`<tool>`, `<tool>(<words>)`, `<tool>(<words>:*)`, with `command` for every command tool, and the
  * path rules `Read(<path>)` and `Edit(<path>)`); the read-only programs that command tools run without
  * a question; which tools run shell commands; and the additional folders that count as inside the
- * working folder (`additionalDirectories`: absolute, from `~`, or relative to the working folder),
- * with those the host adds for the session.
+ * working folder (`additionalDirectories`: absolute, from `~`, or relative to the working folder).
+ * The host reads `additionalDirectories` (`additionalDirectoriesOf`) into the session's folders
+ * (`agent-host/session-context.ts`), which the policy judges paths against.
  */
 export const permissions = plugin(
   "permissions",
@@ -68,9 +69,11 @@ export const permissions = plugin(
     additionalDirectories: defaulted(Schema.Array(Schema.String), []),
   }),
   ["toolCalls"],
-  ({ mode, additionalDirectories, ...settings }, host) => ({
-    toolCalls: permissionsFor(host.permissionMode ?? mode, host.canAsk, settings, host.workingFolder, [...additionalDirectories, ...(host.additionalFolders ?? [])], host.toolPaths),
-  }),
+  (given, host) => {
+    // The host reads `additionalDirectories` into the session's folders (`additionalDirectoriesOf`), which the policy reads from the session's context.
+    const { mode, additionalDirectories: _, ...settings } = given;
+    return { toolCalls: permissionsFor(host.permissionMode ?? mode, host.canAsk, settings, host.toolPaths) };
+  },
 );
 
 /** The folders that `configuration`'s permissions plug-in counts as inside the working folder (`additionalDirectories`), as written. */

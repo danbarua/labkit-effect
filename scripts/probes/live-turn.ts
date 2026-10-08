@@ -26,6 +26,7 @@ import { ModelName, ProviderName, SessionId, TestName } from "../../src/agent-ma
 import type { Observation } from "../../src/agent-machine/observation.ts";
 import { ModelSettings } from "../../src/agent-machine/settings.ts";
 import { openSession } from "../../src/agent-session/loop.ts";
+import { inSession, makeSessionContext } from "../../src/agent-host/session-context.ts";
 import { EphemeralSessionStore } from "../../src/agent-session/session-store.ts";
 import { ModelFromFacts } from "../../src/agent-session/configuration/model-choice.ts";
 import { reportedBy } from "../../src/agent-session/origin.ts";
@@ -72,28 +73,33 @@ const name = [stamp, provider, model, ...said].join("-");
 const run = runFolder("live-turn", name);
 
 const facts = await Effect.runPromise(
-  Effect.gen(function* () {
-    const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
-    yield* session.observe(
-      openedWith({
-        session: SessionId.make("live"),
-        model: { provider: ProviderName.make(provider), model: ModelName.make(model), settings },
-        system: "Before each tool call, say in one sentence what you are about to do.",
-        tools: smolCatalog,
+  Effect.flatMap(makeSessionContext({ session: SessionId.make("live"), working: process.cwd(), additional: [] }), (made) =>
+    inSession(made.context)(
+      Effect.gen(function* () {
+        const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
+        yield* made.storeOpened(session.facts);
+        yield* session.observe(
+          openedWith({
+            session: SessionId.make("live"),
+            model: { provider: ProviderName.make(provider), model: ModelName.make(model), settings },
+            system: "Before each tool call, say in one sentence what you are about to do.",
+            tools: smolCatalog,
+          }),
+        );
+        yield* session.idle;
+        yield* session.observe({
+          _tag: "InputArrived",
+          from: { _tag: "User" },
+          // Hard enough that a model which thinks as it sees fit does think.
+          text:
+            "Of 1873, 4127, 2946, 6054, 3381 and 7519, exactly two are the smallest and largest primes in the list. " +
+            "Work out which, add those two with the tool, then tell me the result.",
+        } as unknown as Observation);
+        yield* session.idle;
+        return yield* session.facts;
       }),
-    );
-    yield* session.idle;
-    yield* session.observe({
-      _tag: "InputArrived",
-      from: { _tag: "User" },
-      // Hard enough that a model which thinks as it sees fit does think.
-      text:
-        "Of 1873, 4127, 2946, 6054, 3381 and 7519, exactly two are the smallest and largest primes in the list. " +
-        "Work out which, add those two with the tool, then tell me the result.",
-    } as unknown as Observation);
-    yield* session.idle;
-    return yield* session.facts;
-  }).pipe(
+    ),
+  ).pipe(
     reportedBy({ _tag: "Test", name: TestName.make(`live-turn ${provider} ${model}`) }),
     Effect.scoped,
     Effect.provide(

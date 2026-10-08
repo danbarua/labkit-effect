@@ -33,6 +33,7 @@ import { type ModelContext, ToolRunner, type ToolSpec } from "../../src/agent-se
 import { MediaType } from "../../src/agent-machine/received.ts";
 import { Blobs, BlobsInFolder } from "../../src/agent-session/blobs.ts";
 import { openSession } from "../../src/agent-session/loop.ts";
+import { inSession, makeSessionContext } from "../../src/agent-host/session-context.ts";
 import { EphemeralSessionStore } from "../../src/agent-session/session-store.ts";
 import { anthropicInputTokens } from "../../src/agent-session/providers/anthropic-count.ts";
 import { openAiInputTokens } from "../../src/agent-session/providers/openai-count.ts";
@@ -134,47 +135,52 @@ const run = runFolder("attachments-live", name);
 const blobFolder = join(run, "blobs");
 
 const facts = await Effect.runPromise(
-  Effect.gen(function* () {
-    const blobs = yield* Blobs;
-    const image = yield* blobs.store(halves(), MediaType.make("image/png"), "halves.png");
-    const document = yield* blobs.store(papaya(), MediaType.make("application/pdf"), "papaya.pdf");
-    // Counted before it is sent, by the provider's count endpoint, where it has one.
-    const target = { provider: ProviderName.make(provider), model: ModelName.make(model) };
-    const context: ModelContext = {
-      system: undefined,
-      tools: [],
-      messages: [{ role: "user", parts: [{ _tag: "Text", text: question }, { _tag: "File", blob: image }, { _tag: "File", blob: document }] }],
-    };
-    const counted =
-      viaTool || provider === "xai" || provider === "localhost"
-        ? undefined
-        : provider === "anthropic"
-          ? yield* Effect.flatMap(anthropicInputTokens(), (count) => count(target, context)).pipe(Effect.provide(AnthropicClient.layer({ apiKey }).pipe(Layer.provide(http))))
-          : yield* Effect.flatMap(openAiInputTokens(), (count) => count(target, context)).pipe(Effect.provide(OpenAiClient.layer({ apiKey }).pipe(Layer.provide(http))));
-    if (counted !== undefined) console.log(`counted before sending: ${counted} input tokens`);
-    const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
-    yield* session.observe(
-      openedWith({
-        session: SessionId.make("attachments"),
-        model: { provider: ProviderName.make(provider), model: ModelName.make(model) },
-        system: undefined,
-        tools: viaTool ? [look] : [],
+  Effect.flatMap(makeSessionContext({ session: SessionId.make("attachments"), working: process.cwd(), additional: [] }), (made) =>
+    inSession(made.context)(
+      Effect.gen(function* () {
+        const blobs = yield* Blobs;
+        const image = yield* blobs.store(halves(), MediaType.make("image/png"), "halves.png");
+        const document = yield* blobs.store(papaya(), MediaType.make("application/pdf"), "papaya.pdf");
+        // Counted before it is sent, by the provider's count endpoint, where it has one.
+        const target = { provider: ProviderName.make(provider), model: ModelName.make(model) };
+        const context: ModelContext = {
+          system: undefined,
+          tools: [],
+          messages: [{ role: "user", parts: [{ _tag: "Text", text: question }, { _tag: "File", blob: image }, { _tag: "File", blob: document }] }],
+        };
+        const counted =
+          viaTool || provider === "xai" || provider === "localhost"
+            ? undefined
+            : provider === "anthropic"
+              ? yield* Effect.flatMap(anthropicInputTokens(), (count) => count(target, context)).pipe(Effect.provide(AnthropicClient.layer({ apiKey }).pipe(Layer.provide(http))))
+              : yield* Effect.flatMap(openAiInputTokens(), (count) => count(target, context)).pipe(Effect.provide(OpenAiClient.layer({ apiKey }).pipe(Layer.provide(http))));
+        if (counted !== undefined) console.log(`counted before sending: ${counted} input tokens`);
+        const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
+        yield* made.storeOpened(session.facts);
+        yield* session.observe(
+          openedWith({
+            session: SessionId.make("attachments"),
+            model: { provider: ProviderName.make(provider), model: ModelName.make(model) },
+            system: undefined,
+            tools: viaTool ? [look] : [],
+          }),
+        );
+        yield* session.idle;
+        yield* session.observe(
+          viaTool
+            ? { _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make("Use the look tool, then say what colours the image shows, left and right, in one line.") }
+            : {
+                _tag: "InputArrived",
+                from: { _tag: "User" },
+                text: InputText.make(question),
+                attachments: [image, document],
+              },
+        );
+        yield* session.idle;
+        return yield* session.facts;
       }),
-    );
-    yield* session.idle;
-    yield* session.observe(
-      viaTool
-        ? { _tag: "InputArrived", from: { _tag: "User" }, text: InputText.make("Use the look tool, then say what colours the image shows, left and right, in one line.") }
-        : {
-            _tag: "InputArrived",
-            from: { _tag: "User" },
-            text: InputText.make(question),
-            attachments: [image, document],
-          },
-    );
-    yield* session.idle;
-    return yield* session.facts;
-  }).pipe(
+    ),
+  ).pipe(
     reportedBy({ _tag: "Test", name: TestName.make(`attachments-live ${provider} ${model}`) }),
     Effect.scoped,
     Effect.provide(

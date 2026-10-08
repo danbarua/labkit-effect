@@ -17,14 +17,18 @@
  * - When the run is interrupted during a turn, the interruption is recorded and the turn is waited
  *   for; a second interrupt (Ctrl+C) exits at once.
  *
- * The session that `use` is given carries its own services, so a host can run two sessions at once:
- * zork's engine and adventurer each call the other's session.
+ * - The session's context (`SessionContext`: its id, its working folder and its folders,
+ *   `session-context.ts`) is made before anything else, and everything `withSession` runs runs in it
+ *   (`inSession`): every log line carries the session's id (`session`), and every span the session's
+ *   id, its working folder (`cwd`) and the host's name (`host`). The loop's requests inherit it.
  *
- * Every span made in the session carries the host's name (`host`) and, when the record has one, the
- * session's working folder (`cwd`), as the session's record holds them.
+ * The session that `use` is given carries its own services and its own context, so a host can run
+ * two sessions at once: zork's engine and adventurer each call the other's session, and each call
+ * runs in the context of the session it calls.
  */
 
 import { Effect, Layer, type Scope } from "effect";
+import { SessionContext } from "../agent-environment/session-context.ts";
 import { type NoticeProvider, Notices } from "../agent-context/assemble.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { leftRunning, type LeftRunning } from "../agent-machine/left-running.ts";
@@ -39,6 +43,7 @@ import type { Asked } from "./catalog.ts";
 import { sessionFolderOf, storeFileOf } from "./directory.ts";
 import { logKeys } from "./log-keys.ts";
 import { writeRecord } from "./record.ts";
+import { inSession, makeSessionContext } from "./session-context.ts";
 
 /** What a host's own machinery adds to a session. */
 export interface BoltOn {
@@ -68,6 +73,14 @@ export const Headless: Host = { follow: () => Effect.void, choose: () => Effect.
 
 export interface SessionOptions<SE, SR, L, H> {
   readonly sessionId: string;
+  /** The session's working folder, as an absolute path. */
+  readonly working: string;
+  /**
+   * The folders that count as inside the working folder, in order: the launcher's (`--add-dir`), then
+   * the configuration's (`additionalDirectoriesOf`); absolute, from `~`, or relative to the working
+   * folder. None when left out. The folders the user adds during the session are read from its facts.
+   */
+  readonly additional?: ReadonlyArray<string> | undefined;
   /** The model a new session asks; a continued session asking another is changed to this one. */
   readonly target: Asked;
   /** The settings a new session opens with; a continued session applies them as a change. */
@@ -82,8 +95,8 @@ export interface SessionOptions<SE, SR, L, H> {
   readonly root: string;
   /** What a new saved session's record holds: the host that made it, and what else the host keeps. */
   readonly record: { readonly host: string } & Readonly<Record<string, unknown>>;
-  /** The loop's services, except the store and the tool sources, which `withSession` provides: `SessionServices` and the host's own. */
-  readonly services: Layer.Layer<Services, SE, SR>;
+  /** The loop's services, except the store, the tool sources and the session's context, which `withSession` provides: `SessionServices` and the host's own. */
+  readonly services: Layer.Layer<Exclude<Services, SessionContext>, SE, SR>;
   readonly boltOns: ReadonlyArray<BoltOn>;
   readonly logs: Layer.Layer<never, never, L>;
   readonly host: Host<H>;
@@ -103,50 +116,58 @@ const interrupted = (session: Session) =>
 export const withSession = <A, E, R, SE, SR, L, H>(options: SessionOptions<SE, SR, L, H>, use: (session: Session) => Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
     const { sessionId, root, boltOns } = options;
-    if (options.persist && options.continues === undefined)
-      yield* writeRecord(root, sessionId, options.record).pipe(
-        Effect.catch((error) => Effect.logWarning(logKeys.record.notWritten, { folder: sessionFolderOf(root, sessionId), cause: error.message })),
-      );
-    const store = options.persist ? FileBackedSessionStore(storeFileOf(root, sessionId)) : ephemeralSessionStore(options.continues ?? []);
-    const given = Layer.mergeAll(Layer.succeed(ToolSources, boltOns.flatMap((boltOn) => boltOn.sources ?? [])), Layer.succeed(Notices, boltOns.flatMap((boltOn) => boltOn.notices ?? [])));
-    // The store logs while it opens (a lock taken over, a torn line cut off) to the session's log.
-    const layer = Layer.mergeAll(options.services, options.logs).pipe(Layer.provideMerge(given), Layer.provideMerge(store.pipe(Layer.provide(options.logs))));
-    // A memo map of its own: a session opened inside another's (zork's adventurer, in its engine's)
-    // would otherwise reuse the other's memoized services, its tool runner and its turn numbering among them.
-    const context = yield* Layer.buildWithMemoMap(layer, yield* Layer.makeMemoMap, yield* Effect.scope);
-    const session = yield* openSession.pipe(Effect.provideContext(context));
-    // The session's own services, so that a host's code that holds two sessions asks each with its own.
-    const bound: Session = {
-      ...session,
-      observe: (observation) => session.observe(observation).pipe(Effect.provideContext(context)),
-      prompt: (input) => session.prompt(input).pipe(Effect.provideContext(context)),
-      cancel: session.cancel.pipe(Effect.provideContext(context)),
-    };
-    return yield* Effect.gen(function* () {
-      yield* options.host.follow(bound);
-      const facts = yield* bound.facts;
-      if (facts.length === 0) {
-        const system = [...boltOns.flatMap((boltOn) => (boltOn.system === undefined ? [] : [boltOn.system])), ...(options.system === undefined ? [] : [options.system])];
-        const model = { ...options.target, settings: changed({}, options.settings) };
-        yield* bound.observe(openedWith({ session: SessionId.make(sessionId), model, system: system.length === 0 ? undefined : system.join("\n\n"), tools: yield* offeredTools }));
-      } else {
-        const left = leftRunning(facts);
-        if (left === undefined) yield* bound.goOn;
-        else if ((yield* options.host.choose(left)) === "go on") {
-          yield* bound.goOn;
+    const made = yield* makeSessionContext({ session: SessionId.make(sessionId), working: options.working, additional: options.additional ?? [] });
+    const within = inSession(made.context);
+    return yield* within(
+      Effect.gen(function* () {
+        if (options.persist && options.continues === undefined)
+          yield* writeRecord(root, sessionId, options.record).pipe(
+            Effect.catch((error) => Effect.logWarning(logKeys.record.notWritten, { folder: sessionFolderOf(root, sessionId), cause: error.message })),
+          );
+        const store = options.persist ? FileBackedSessionStore(storeFileOf(root, sessionId)) : ephemeralSessionStore(options.continues ?? []);
+        const given = Layer.mergeAll(
+          Layer.succeed(ToolSources, boltOns.flatMap((boltOn) => boltOn.sources ?? [])),
+          Layer.succeed(Notices, boltOns.flatMap((boltOn) => boltOn.notices ?? [])),
+          Layer.succeed(SessionContext, made.context),
+        );
+        // The store logs while it opens (a lock taken over, a torn line cut off) to the session's log.
+        const layer = Layer.mergeAll(options.services, options.logs).pipe(Layer.provideMerge(given), Layer.provideMerge(store.pipe(Layer.provide(options.logs))));
+        // A memo map of its own: a session opened inside another's (zork's adventurer, in its engine's)
+        // would otherwise reuse the other's memoized services, its tool runner and its turn numbering among them.
+        const context = yield* Layer.buildWithMemoMap(layer, yield* Layer.makeMemoMap, yield* Effect.scope);
+        const session = yield* openSession.pipe(Effect.provideContext(context));
+        // The session's folders read its facts from its store, now that it is open.
+        yield* made.storeOpened(session.facts);
+        // The session's own services and context, so that a host's code that holds two sessions asks each with its own.
+        const bound: Session = {
+          ...session,
+          observe: (observation) => session.observe(observation).pipe(Effect.provideContext(context), within),
+          prompt: (input) => session.prompt(input).pipe(Effect.provideContext(context), within),
+          cancel: session.cancel.pipe(Effect.provideContext(context), within),
+        };
+        return yield* Effect.gen(function* () {
+          yield* options.host.follow(bound);
+          const facts = yield* bound.facts;
+          if (facts.length === 0) {
+            const system = [...boltOns.flatMap((boltOn) => (boltOn.system === undefined ? [] : [boltOn.system])), ...(options.system === undefined ? [] : [options.system])];
+            const model = { ...options.target, settings: changed({}, options.settings) };
+            yield* bound.observe(openedWith({ session: SessionId.make(sessionId), model, system: system.length === 0 ? undefined : system.join("\n\n"), tools: yield* offeredTools }));
+          } else {
+            const left = leftRunning(facts);
+            if (left === undefined) yield* bound.goOn;
+            else if ((yield* options.host.choose(left)) === "go on") {
+              yield* bound.goOn;
+              yield* bound.idle;
+              yield* options.host.wentOn(bound);
+            } else yield* endTurnLeftRunning(bound);
+            const now = yield* modelOf(facts);
+            const different = now.provider !== options.target.provider || now.model !== options.target.model || Object.keys(options.settings).length > 0;
+            if (different) yield* bound.observe({ _tag: "ModelChangeArrived", provider: options.target.provider, model: options.target.model, settings: options.settings });
+          }
+          yield* Effect.forEach(boltOns, (boltOn) => (boltOn.opened === undefined ? Effect.void : boltOn.opened(bound)), { discard: true });
           yield* bound.idle;
-          yield* options.host.wentOn(bound);
-        } else yield* endTurnLeftRunning(bound);
-        const now = yield* modelOf(facts);
-        const different = now.provider !== options.target.provider || now.model !== options.target.model || Object.keys(options.settings).length > 0;
-        if (different) yield* bound.observe({ _tag: "ModelChangeArrived", provider: options.target.provider, model: options.target.model, settings: options.settings });
-      }
-      yield* Effect.forEach(boltOns, (boltOn) => (boltOn.opened === undefined ? Effect.void : boltOn.opened(bound)), { discard: true });
-      yield* bound.idle;
-      return yield* use(bound).pipe(Effect.onInterrupt(() => interrupted(bound)));
-    }).pipe(Effect.provideContext(context));
-  }).pipe(
-    Effect.annotateSpans({ host: options.record.host, ...(typeof options.record["cwd"] === "string" ? { cwd: options.record["cwd"] } : {}) }),
-    Effect.scoped,
-    Effect.provide(options.logs),
-  );
+          return yield* use(bound).pipe(Effect.onInterrupt(() => interrupted(bound)));
+        }).pipe(Effect.provideContext(context));
+      }),
+    );
+  }).pipe(Effect.annotateSpans({ host: options.record.host }), Effect.scoped, Effect.provide(options.logs));

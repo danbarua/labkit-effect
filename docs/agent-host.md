@@ -18,6 +18,7 @@ about them are in [agent-host-direction.md](agent-host-direction.md).
 | `clients.ts` | `Clients`: one model client per provider whose key is set, and the local server. Every provider's requests go through one HTTP client that captures their bodies (`capturingHttp`), and each attempt is observed on its span (`observedAttempts`); both are in `src/instrumentation`. |
 | `services.ts` | `SessionServices`, `permissionsFor`, `loopBreaker`, `turnRequestLimit`, `budgetLimit`. |
 | `with-session.ts` | `withSession`: a session as a host runs it, with the host's bolt-ons. |
+| `session-context.ts` | The builder of a session's context (`makeSessionContext`), the one place a session's folders are assembled, and the combinator that runs a session's work in it (`inSession`). |
 | `directory.ts` | The folder of sessions. |
 | `record.ts` | `host.json`: a host's own record of a session. |
 | `draft.ts` | A draft: a session before its first turn. |
@@ -99,8 +100,41 @@ with it. It is the session's machinery; what a host's own machinery adds is a li
   previous run left unfinished is gone on with or ended. `Headless` follows nothing and goes on.
 - When the run is interrupted during a turn, the interruption is recorded and the turn is waited
   for; a second Ctrl+C exits at once.
-- The session that `use` is given carries its own services, so a host can hold two sessions at
-  once: zork's game asks its engine and its adventurer in turn.
+- The session's context (`SessionContext`) is made first, from the session's id, its working folder
+  (`working`) and the folders the host adds (`additional`), and everything `withSession` runs runs
+  in it (`inSession`). Its folders read the session's facts from the store once the store is open.
+- The session that `use` is given carries its own services and its own context, so a host can hold
+  two sessions at once: zork's game asks its engine and its adventurer in turn, and each call runs
+  in the context of the session it calls.
+
+## A session's context
+
+`session-context.ts` makes a session's context (`SessionContext`, `docs/agent-environment.md`) for
+every host. It is the one place where a session's folders are assembled.
+
+- `makeSessionContext(place)` makes the context of the session at `place`: the session's id, its
+  working folder, and the folders that count as inside it as the host gives them, in order: the
+  launcher's (`--add-dir`), the client's (ACP's `additionalDirectories`), then the configuration's
+  (`additionalDirectories` of the permissions plug-in, `additionalDirectoriesOf`). A folder from `~`
+  is resolved from this process's home folder, and a relative one from the working folder.
+- The context's folders are read at each use. They are the folders `place` gives, then the folders
+  the user added to the session (`FolderAdded`), read from the session's facts.
+- The host gives the context the session's facts once the session's store is open
+  (`storeOpened`). Before then the session has no facts. Giving a second store is a defect.
+- `openingFolders(place)` returns the folders of `place` before the user adds any: the folders
+  that the opening system text names (`workingFolderLine`).
+- `inSession(context)` runs an effect in the session: it provides `SessionContext`, annotates each
+  log line with `session`, and annotates each span with `session` and `cwd` (the working folder).
+  The fibers that the effect starts inherit all three, the loop's requests among them.
+
+| Host | Where it makes the context |
+| --- | --- |
+| CLI, zork | `withSession`, before the session's store opens. |
+| ACP | When `session/new`, `session/load` or `session/resume` creates the session's entry, before the world is opened and the MCP servers are started (`docs/agent-acp.md`). |
+
+A log line written inside a session carries `session`. A line that the CLI writes outside
+`withSession` does not carry it: the line that says where `effective-settings.json` was written, and
+what the MCP servers log, since the CLI starts them before `withSession` opens the session.
 
 ## Session services
 
@@ -112,7 +146,9 @@ those the store holds, and `runner` for its tools.
 - `permissionsFor(mode, canAsk)` is the permission policy (`docs/agent-policy.md`) for `mode`. A
   call is judged by its tool's kind in the catalog that the session opened with; a tool not in it is
   treated as changing things. Questions are asked only when `canAsk` is true. `mode` can be an
-  effect, read at each call, when the host lets the user change the mode during a session.
+  effect, read at each call, when the host lets the user change the mode during a session. The
+  paths a call names are judged against the session's folders (`SessionContext.folders`), read at
+  each call.
 - `loopBreaker(settings)` returns the loop breaker's two policies, one per list. The CLI puts the
   loop breaker before the permission policy among the tool call policies, so no one is asked to
   permit a call that the loop breaker vetoes. The ACP host lists the permission policy alone,

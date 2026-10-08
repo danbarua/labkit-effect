@@ -137,6 +137,7 @@ const optionsOf = (
     system: prompt,
     persist: true,
     root: folders.sessions,
+    working: process.cwd(),
     record: { host: "zork", game, role, cwd: process.cwd() },
     services: servicesOf(player, request, feedback),
     boltOns: source === undefined ? [] : [{ sources: [source] }],
