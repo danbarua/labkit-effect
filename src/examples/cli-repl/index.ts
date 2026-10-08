@@ -241,7 +241,7 @@ export const cliOf = (brand: Brand, invalidLevels: ReadonlyArray<InvalidLevel> =
       const folders = yield* brandFoldersFor(brand, {
         ...(options.configDir === undefined ? {} : { configDir: resolve(options.configDir) }),
         dataDir: options.dataDir,
-      }).pipe(Effect.mapError((error) => invalid(`Invalid configuration: ${error.message}`)));
+      }).pipe(Effect.mapError((error) => invalid(`Invalid configuration: ${error.message}`, "Give --data-dir an absolute path.")));
       const run = Effect.gen(function* () {
         const stdio = yield* Stdio.Stdio;
         const interactive = yield* stdio.stdinIsTerminal;
