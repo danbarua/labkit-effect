@@ -85,9 +85,13 @@ export type ToolFailure = typeof ToolFailure.Type;
  * - `FileChanged`: the call created the text file at `path` (`patch` is the file's whole text), or
  *   updated it (`patch` is a unified diff of the change, with three lines of context). A patch over
  *   32 KiB is cut at the end of a line: `cut` is the number of bytes left out after it.
+ * - `FileMoved`: the call moved the file or folder at `from` to `to`, as the disk showed before and
+ *   after it ran. `replaced` when something was at `to` before, which the move replaced. A move is
+ *   recorded as a line, not as the moved file's text.
  */
 export const ToolDetail = Schema.Union([
   Schema.TaggedStruct("FileChanged", { path: FullPath, change: Schema.Literals(["created", "updated"]), patch: Received, cut: Schema.optionalKey(ByteCount) }),
+  Schema.TaggedStruct("FileMoved", { from: FullPath, to: FullPath, replaced: Schema.optionalKey(Schema.Literal(true)) }),
 ]);
 export type ToolDetail = typeof ToolDetail.Type;
 

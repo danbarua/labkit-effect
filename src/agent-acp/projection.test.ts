@@ -1034,3 +1034,20 @@ test("a call's changed files are diffs from its details: a created file from no 
   ]);
   expect(changedFiles({ _tag: "Failed", reason: { _tag: "NotRun" } })).toEqual([]);
 });
+
+test("a call's moved files are one line each, not diffs: from where to where, and whether it replaced what was there", () => {
+  const text = (value: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text: value } }) as never;
+  expect(
+    changedFiles({
+      _tag: "Succeeded",
+      output: text(""),
+      details: [
+        { _tag: "FileMoved", from: "/w/a.txt" as never, to: "/w/b.txt" as never },
+        { _tag: "FileMoved", from: "/w/c.txt" as never, to: "/w/d.txt" as never, replaced: true },
+      ],
+    }) as unknown,
+  ).toEqual([
+    { type: "content", content: { type: "text", text: "Moved `/w/a.txt` to `/w/b.txt`." } },
+    { type: "content", content: { type: "text", text: "Moved `/w/c.txt` to `/w/d.txt`, replacing what was there." } },
+  ]);
+});

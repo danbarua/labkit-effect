@@ -112,6 +112,19 @@ export interface Unit {
   readonly paths: ReadonlyArray<UnitPath>;
   /** What it does in plain English, or the code it runs; for showing to the person asked. */
   readonly detail: Detail | undefined;
+  /** What `mv` moves, when the unit is an `mv` whose sources and destination its words name. */
+  readonly moves?: Moves;
+}
+
+/**
+ * What an `mv` moves, as written: its sources, and its destination. `into` when `-t` names the
+ * destination, which is then a folder the sources go into; otherwise the destination is the new path
+ * of a single source, or a folder, as the disk says when it runs.
+ */
+export interface Moves {
+  readonly sources: ReadonlyArray<Word>;
+  readonly destination: Word;
+  readonly into: boolean;
 }
 
 /**
@@ -175,6 +188,7 @@ interface Touches {
   /** Whether it reads paths it is given as it runs (`xargs cat`, `find -exec cat {}`). */
   readonly fedReads?: boolean;
   readonly detail?: Detail;
+  readonly moves?: Moves;
 }
 
 const unit = (words: ReadonlyArray<Word>, grant: ReadonlyArray<WordText> | undefined, touches: Touches = {}): Unit => {
@@ -202,6 +216,7 @@ const unit = (words: ReadonlyArray<Word>, grant: ReadonlyArray<WordText> | undef
       ...(touches.fed === undefined ? [] : [{ access: touches.fed, word: undefined, givenBy: touches.fedBy ?? "xargs" }]),
     ],
     detail: touches.detail,
+    ...(touches.moves === undefined ? {} : { moves: touches.moves }),
   };
 };
 const opaque = (words: ReadonlyArray<Word>, why: NeedText, detail?: Detail): Unit => ({ words, grant: undefined, writes: [], changesOutside: [], opaque: why, outside: [], paths: [], detail });
@@ -485,7 +500,7 @@ const changers: ReadonlyMap<WordText, Changer> = new Map([
 ]);
 
 /** What a program in `changers` changes and reads, from its words; `fed` when `xargs` gives it more operands on its input. Undefined for any other program. */
-const changesOf = (base: WordText, words: ReadonlyArray<Word>, fed: boolean): Pick<Touches, "changes" | "fed"> & { readonly reads: ReadonlyArray<Word> } | undefined => {
+const changesOf = (base: WordText, words: ReadonlyArray<Word>, fed: boolean): (Pick<Touches, "changes" | "fed" | "moves"> & { readonly reads: ReadonlyArray<Word> }) | undefined => {
   const known = changers.get(base);
   if (known === undefined) return undefined;
   const scan = (rest: ReadonlyArray<Word>, operands: ReadonlyArray<Word>, outputs: ReadonlyArray<Word>, ended: boolean): { readonly operands: ReadonlyArray<Word>; readonly outputs: ReadonlyArray<Word> } => {
@@ -508,10 +523,22 @@ const changesOf = (base: WordText, words: ReadonlyArray<Word>, fed: boolean): Pi
   const changed = known.operands === "every" ? paths : destination;
   const others = known.operands === "last" ? paths.slice(0, paths.length - destination.length) : [];
   const files = (words: ReadonlyArray<Word>): ReadonlyArray<Word> => words.flatMap((word) => present(fileOf(word)));
+  const [into] = outputs;
+  const named = files(paths);
+  const last = named.at(-1);
+  const moves: Moves | undefined =
+    base !== WordText.make("mv") || fed
+      ? undefined
+      : into !== undefined
+        ? { sources: named, destination: into, into: true }
+        : last !== undefined && named.length >= 2
+          ? { sources: named.slice(0, -1), destination: last, into: false }
+          : undefined;
   return {
     changes: files([...changed, ...outputs]).map((word) => ({ verb: known.verb, word })),
     fed: fed && known.operands === "every" ? known.verb : undefined,
     reads: known.othersRead ? files(others) : [],
+    ...(moves === undefined ? {} : { moves }),
   };
 };
 
@@ -787,6 +814,7 @@ const resolve = (words: ReadonlyArray<Word>, seen: Seen): ReadonlyArray<Unit> =>
       recursiveReads: read.recursiveReads,
       // The paths xargs or find -exec gives a program it judges, when it does not change them, are read.
       fedReads: seen.fedArgs !== false && changed?.fed === undefined && judgesPathsOf(base),
+      ...(changed?.moves === undefined ? {} : { moves: changed.moves }),
     }),
   ];
 };

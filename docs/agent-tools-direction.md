@@ -118,7 +118,8 @@ detail is `FileChanged`: a text file created, with its whole text, or updated, w
 The hosts record it for their own tools where the calls run (`agent-host/recorded-changes.ts`):
 `write_file` and `edit_file` by their path inputs, `terminal_command` and `run_command` for each
 file their command writes at a path it writes out (`writtenFiles`): a redirect's target, `tee`'s and
-`sed -i`'s, whether or not the words show the text. ACP shows a finished call's diffs from it, live
+`sed -i`'s, whether or not the words show the text. The second is `FileMoved`: a command's `mv`, as
+the disk shows it, recorded as a line (moved from X to Y) rather than as the file's text. ACP shows a finished call's diffs from it, live
 and replayed alike, and the REPL prints them under the call (`docs/agent-acp.md`). Other harnesses keep the same two parts per result: Claude Code's
 `toolUseResult`, Codex's `FileChange`, opencode's `metadata`, omp's `details`.
 
@@ -149,7 +150,7 @@ agent reads, as the harness's notices of changed files want.
 - A command's other changes: the files a program puts whole (`cp`, `curl -o`) and a build's, which
   say nothing once the call has ended. Dan: this would be an enhancement on "the agent ran this bash
   command", and git records the meaningful diffs anyway. A whole file shown as a diff would be as long
-  as the file; a line that says what happened (moved from X to Y) costs far fewer tokens.
+  as the file; a line that says what happened costs far fewer tokens, as `FileMoved` does for `mv`.
 - Details tell the harness's notices of changed files which changes the agent made itself
   (`TODO.md`); Dan: "If we have the information to do so, then we should do so!"
 - A rewritten search tells the agent that its command was rewritten and why in its result

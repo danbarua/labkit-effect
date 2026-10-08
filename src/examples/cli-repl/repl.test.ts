@@ -341,6 +341,12 @@ test("an ended call whose patch was cut is printed with the diff kept and how mu
   ]);
 });
 
+test("an ended call that moved a file is printed with one line for the move, not a diff", () => {
+  const text = (value: string) => ({ mediaType: "text/plain", body: { _tag: "Text", text: value } }) as never;
+  const printed = shownEnded("run_command", '{"command":"mv a.txt b.txt"}', { _tag: "Succeeded", output: text(""), details: [{ _tag: "FileMoved", from: "/w/a.txt" as never, to: "/w/b.txt" as never }] });
+  expect(Bun.stripANSI(printed).split("\n").slice(2)).toEqual(["    Moved `/w/a.txt` to `/w/b.txt`."]);
+});
+
 /** A model that calls `echo` in its first response, and answers in any later one. */
 const callsEcho = () => {
   let requests = 0;

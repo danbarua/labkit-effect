@@ -601,7 +601,10 @@ the file tools' paths are resolved against the working folder (`agent-tools/in-w
   shows them from what it recorded, live and on a replay alike (`changedFiles`), followed by its
   output: a created file as a `diff` from no text (`oldText: null`), an updated file as one `diff`
   for each hunk of its patch, whose texts are the hunk's lines with three lines of context, not the
-  whole file. A patch that was cut at 32 KiB is followed by a note of how many bytes are not shown. A call recorded
+  whole file. A patch that was cut at 32 KiB is followed by a note of how many bytes are not shown.
+  A file the call moved (`FileMoved`, a command's `mv`) is one line of text, not a diff:
+  ``Moved `/w/a.txt` to `/w/b.txt`.``, with `, replacing what was there` when the move replaced a
+  file. A call recorded
   before calls kept what they changed shows the `edit_file` input's texts, as before it ended.
 - A command that writes text to a file where its words show the text (`cat > f <<'EOF'`,
   `echo x >> f`, `tee f <<< x`; `agent-host/command-writes.ts`) shows each such file's `diff` in its

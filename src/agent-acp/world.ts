@@ -211,7 +211,7 @@ export const editorWorld: World<FileSystem.FileSystem> = {
             // Once it has ended, the files it changed are shown from what it recorded (`changedFiles`); a
             // write it recorded nothing of (its text before was not known, or it was recorded before
             // commands kept their writes) says what it wrote.
-            const recorded = new Set<string>(outcome._tag === "Succeeded" ? (outcome.details ?? []).map((detail) => detail.path) : []);
+            const recorded = new Set<string>(outcome._tag === "Succeeded" ? (outcome.details ?? []).flatMap((detail) => (detail._tag === "FileChanged" ? [detail.path] : [])) : []);
             const unrecorded = outcome._tag === "Succeeded" && command !== undefined ? plannedWrites(command, folders).filter((planned) => planned._tag !== "Planned" || !recorded.has(planned.full)) : [];
             const content = [...changedFiles(outcome), ...unrecorded.map(wroteContent), ...terminal];
             return content.length === 0 ? shown : ({ ...shown, content } satisfies Presented);

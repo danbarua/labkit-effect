@@ -17,7 +17,7 @@
  */
 
 import { Effect } from "effect";
-import { ShellCommand, type Word } from "../agent-policy/command-segments.ts";
+import { ShellCommand, type Word, type WordText } from "../agent-policy/command-segments.ts";
 import { filesWritten, type Folders, type Place, placesOf, relativePath, textsWritten, unitsOf, type Writes } from "../agent-policy/command-units.ts";
 import type { Current } from "../agent-tools/file-change.ts";
 import { resolvePath } from "../agent-policy/path-resolver.ts";
@@ -75,6 +75,50 @@ export const writtenFiles =
     if (split._tag === "Unparsed") return [];
     const places = placesOf(split.units, folders);
     return [...new Set(filesWritten(split.units).flatMap(({ word, at }) => fullsOf(word, places[at], folders)))];
+  };
+
+/**
+ * A move that `command` may make, as full paths: the source, and the destination, which is the
+ * source's new path or a folder it goes into. `into` when `-t` names the destination, which is then
+ * a folder; otherwise the disk says, when the command runs, whether the destination is a folder.
+ */
+export interface PlannedMove {
+  readonly from: string;
+  readonly destination: string;
+  readonly into: boolean;
+}
+
+/**
+ * The moves of `command`'s `mv`s (`Unit.moves`), each once: for each folder a relative path may lead
+ * from (`placesOf`), the source and the destination resolved from it. A move whose source or
+ * destination is not written out, or that a move it cannot follow comes before (`popd`, `cd -`), is
+ * left out. Each is a candidate: a host records it only when the disk shows the move.
+ */
+export const plannedMoves =
+  (folders: Folders) =>
+  (command: string): ReadonlyArray<PlannedMove> => {
+    const split = unitsOf(ShellCommand.make(command), segmentsOf, folders);
+    if (split._tag === "Unparsed") return [];
+    const places = placesOf(split.units, folders);
+    const full = (word: Word, base: WordText | undefined): string | undefined => {
+      const resolved = resolvePath(word, folders, base);
+      return resolved._tag === "Local" ? resolved.full : undefined;
+    };
+    const moves = split.units.flatMap((unit, at) => {
+      const place = places[at];
+      const moved = unit.moves;
+      if (place === undefined || moved === undefined) return [];
+      return moved.sources.flatMap((source) => {
+        const relative = relativePath(source) || relativePath(moved.destination);
+        if (relative && place.unknown) return [];
+        return (relative ? place.bases : [undefined]).flatMap((base): ReadonlyArray<PlannedMove> => {
+          const from = full(source, base);
+          const destination = full(moved.destination, base);
+          return from === undefined || destination === undefined ? [] : [{ from, destination, into: moved.into }];
+        });
+      });
+    });
+    return moves.filter((move, at) => moves.findIndex((other) => other.from === move.from && other.destination === move.destination) === at);
   };
 
 /** The text the file holds after `writes`, given its `current` text. */

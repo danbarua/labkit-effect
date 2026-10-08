@@ -29,7 +29,7 @@ const ran = (calls: ReadonlyArray<readonly [string, object]>, options: { readonl
           : yield* recordingChanges({ root, folders: { working: WordText.make(root), home: WordText.make(join(root, "home")) }, commandTools: ["run_command"], fileText: options.fileText })(bare);
       const results = yield* Effect.forEach(calls, ([tool, input]) =>
         Effect.map(source.run(ToolName.make(tool), receivedJson({ intent: "A test call.", ...input } as never), CallId.make("call-1")), (outcome) =>
-          outcome._tag === "Succeeded" ? (outcome.details ?? []).map((detail) => ({ ...detail, patch: asText(detail.patch) })) : outcome.reason._tag,
+          outcome._tag === "Succeeded" ? (outcome.details ?? []).map((detail) => (detail._tag === "FileChanged" ? { ...detail, patch: asText(detail.patch) } : detail)) : outcome.reason._tag,
         ),
       );
       return { results, logged };
@@ -94,11 +94,31 @@ test("after a cd, a relative path is read in each folder it may lead from, and o
   expect(results as unknown).toEqual([[{ _tag: "FileChanged", path: inSub, change: "updated", patch: [`--- ${inSub}`, `+++ ${inSub}`, "@@ -1,1 +1,1 @@", "-one", "+two"].join("\n") }], []]);
 });
 
+test("an mv is recorded as a move, not as text, once the disk shows it: renamed, into a folder, replacing a file; a move that failed records nothing", async () => {
+  const at = (name: string) => join(testFolder(), name);
+  mkdirSync(at("sub"), { recursive: true });
+  writeFileSync(at("a.txt"), "a\n");
+  writeFileSync(at("c.txt"), "c\n");
+  writeFileSync(at("d.txt"), "d\n");
+  const { results } = await ran([
+    ["run_command", { command: "mv a.txt b.txt" }],
+    ["run_command", { command: "mv b.txt sub" }],
+    ["run_command", { command: "mv c.txt d.txt" }],
+    ["run_command", { command: "mv missing.txt e.txt" }],
+  ]);
+  expect(results as unknown).toEqual([
+    [{ _tag: "FileMoved", from: at("a.txt"), to: at("b.txt") }],
+    [{ _tag: "FileMoved", from: at("b.txt"), to: join(at("sub"), "b.txt") }],
+    [{ _tag: "FileMoved", from: at("c.txt"), to: at("d.txt"), replaced: true }],
+    "Reported",
+  ]);
+});
+
 test("a patch over 32 KiB is kept to its first lines that fit, and the bytes left out are recorded", async () => {
   const line = `${"x".repeat(99)}\n`;
   const { results } = await ran([["write_file", { path: "big.txt", text: line.repeat(400) }]]);
   const [details] = results;
-  expect(Array.isArray(details) ? details.map((detail) => ({ change: detail.change, kept: Buffer.byteLength(detail.patch), cut: detail.cut })) : details).toEqual([{ change: "created", kept: 327 * 100, cut: 73 * 100 }] as never);
+  expect(Array.isArray(details) ? details.map((detail) => (detail._tag === "FileChanged" ? { change: detail.change, kept: Buffer.byteLength(detail.patch), cut: detail.cut } : detail)) : details).toEqual([{ change: "created", kept: 327 * 100, cut: 73 * 100 }] as never);
 });
 
 test("a path input's text is read through the world's reader; a text over 256 KiB is not known, so nothing is recorded of its file, and a warning says so", async () => {

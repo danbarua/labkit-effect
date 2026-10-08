@@ -7,6 +7,7 @@
  * for another reason does not. A file larger than `maxCurrentBytes` is not read.
  */
 
+import { codeSpan } from "../agent-policy/code-span.ts";
 import { Effect, FileSystem } from "effect";
 import { ByteCount, FullPath } from "../agent-machine/names.ts";
 import type { ToolDetail } from "../agent-machine/observation.ts";
@@ -38,6 +39,10 @@ const keptOf = (text: string): { readonly kept: string; readonly cut: number } =
     .join("");
   return { kept, cut: total - Buffer.byteLength(kept) };
 };
+
+/** What a display says of a `FileMoved`: one line, with the paths as Markdown code spans. */
+export const movedLine = (detail: Extract<ToolDetail, { readonly _tag: "FileMoved" }>): string =>
+  `Moved ${codeSpan(detail.from)} to ${codeSpan(detail.to)}${detail.replaced === true ? ", replacing what was there" : ""}.`;
 
 /** What a display says of a `FileChanged` whose patch was cut; undefined when it was kept whole. */
 export const patchCutNote = (detail: Extract<ToolDetail, { readonly _tag: "FileChanged" }>): string | undefined =>

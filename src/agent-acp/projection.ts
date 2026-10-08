@@ -52,7 +52,7 @@ import type { ToolSpec } from "../agent-session/contracts.ts";
 import { asText, parseJson } from "../agent-session/received.ts";
 import { intentOf, isDescribed } from "../agent-tools/described.ts";
 import { answerIn, optionPicked, type PermissionQuestion, questionIn } from "../agent-policy/permissions.ts";
-import { patchCutNote } from "../agent-tools/file-change.ts";
+import { movedLine, patchCutNote } from "../agent-tools/file-change.ts";
 import { hunksOf } from "../agent-tools/line-diff.ts";
 import { blobNameOf, blobUriOf } from "../agent-session/blobs.ts";
 import { logKeys } from "./log-keys.ts";
@@ -142,13 +142,15 @@ const titleOf = (call: Call, spec: ToolSpec | undefined): string => {
 /**
  * Returns the diffs of the files that a call changed, from its details (`FileChanged`): a created
  * file as its whole text, an updated one as one diff for each hunk of its patch, each followed by a
- * note when its patch was cut (`patchCutNote`). None for a call that has not ended, that failed, or that
+ * note when its patch was cut (`patchCutNote`); and a line for each file it moved (`FileMoved`,
+ * `movedLine`). None for a call that has not ended, that failed, or that
  * recorded no details.
  */
 export const changedFiles = (outcome: ToolOutcome | undefined): ReadonlyArray<ToolCallContent> =>
   outcome?._tag !== "Succeeded"
     ? []
     : (outcome.details ?? []).flatMap((detail): ReadonlyArray<ToolCallContent> => {
+        if (detail._tag === "FileMoved") return [{ type: "content", content: text(movedLine(detail)) }];
         const note = patchCutNote(detail);
         const noted: ReadonlyArray<ToolCallContent> = note === undefined ? [] : [{ type: "content", content: text(note) }];
         if (detail.change === "created") return [{ type: "diff", path: detail.path, oldText: null, newText: asText(detail.patch) }, ...noted];
