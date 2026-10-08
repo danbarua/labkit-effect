@@ -10,12 +10,13 @@ import { test, testFolder } from "../../tests/support/test.ts";
 import { plugin } from "../agent-config/plugin.ts";
 import { seamLayer, seamListsOf } from "../agent-config/seams.ts";
 import { SessionContext } from "../agent-environment/session-context.ts";
-import { CallId, InputText, ModelName, ModelText, ProviderName, StopReason, ToolName } from "../agent-machine/names.ts";
+import { CallId, InputText, ModelName, ModelText, ProviderName, SessionId, StopReason, ToolName } from "../agent-machine/names.ts";
 import type { Policy } from "../agent-policy/policy.ts";
 import { ModelClient } from "../agent-session/contracts.ts";
 import { asText, receivedJson, receivedText } from "../agent-session/received.ts";
 import { SourcedToolRunner, type ToolSource } from "../agent-session/tool-sources.ts";
 import { CountingTurnsInStore } from "../agent-session/turns.ts";
+import { makeSessionContext } from "./session-context.ts";
 import { Headless, withSession } from "./with-session.ts";
 
 /** A model that calls `attribute` once, then answers. */
@@ -66,28 +67,29 @@ test("inside a session, a tool and a plug-in's tool call policy read the session
   const configuration = { lists: { toolCalls: [{ name: "attribution", plugin: attribution, settings: {} }] }, mcpServers: [], models: new Map(), cli: { view: { thinking: "on" as const } } };
   const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(configuration, { canAsk: false });
   const ran = await runTest(
-    withSession(
-      {
-        sessionId: "attributed",
-        working: testFolder(),
-        target: { provider: ProviderName.make("boring"), model: ModelName.make("boring-1") },
-        settings: {},
-        persist: false,
-        root: testFolder(),
-        record: { host: "test" },
-        services: Layer.mergeAll(BoringModelProvider, BoringContextAssembler, scripted(), CountingTurnsInStore, SourcedToolRunner, seamLayer(lists)),
-        boltOns: [{ sources: [attributing] }],
-        logs: Layer.empty,
-        host: Headless,
-      },
-      (session) =>
-        Effect.gen(function* () {
-          const ending = yield* session.prompt({ text: InputText.make("Which session is this?") });
-          const outputs = (yield* session.facts).flatMap((fact) =>
-            fact._tag === "Observed" && fact.observation._tag === "ToolEnded" && fact.observation.outcome._tag === "Succeeded" ? [asText(fact.observation.outcome.output)] : [],
-          );
-          return { ending: ending._tag, outputs, fiber: yield* Effect.fiberId };
-        }),
+    Effect.flatMap(makeSessionContext({ session: SessionId.make("attributed"), working: testFolder(), additional: [] }), (context) =>
+      withSession(
+        {
+          context,
+          target: { provider: ProviderName.make("boring"), model: ModelName.make("boring-1") },
+          settings: {},
+          persist: false,
+          root: testFolder(),
+          record: { host: "test" },
+          services: Layer.mergeAll(BoringModelProvider, BoringContextAssembler, scripted(), CountingTurnsInStore, SourcedToolRunner, seamLayer(lists)),
+          boltOns: [{ sources: [attributing] }],
+          logs: Layer.empty,
+          host: Headless,
+        },
+        (session) =>
+          Effect.gen(function* () {
+            const ending = yield* session.prompt({ text: InputText.make("Which session is this?") });
+            const outputs = (yield* session.facts).flatMap((fact) =>
+              fact._tag === "Observed" && fact.observation._tag === "ToolEnded" && fact.observation.outcome._tag === "Succeeded" ? [asText(fact.observation.outcome.output)] : [],
+            );
+            return { ending: ending._tag, outputs, fiber: yield* Effect.fiberId };
+          }),
+      ),
     ).pipe(Effect.provide(BunServices.layer)),
   );
   expect(ran.ending).toBe("Completed");

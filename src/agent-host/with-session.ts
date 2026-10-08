@@ -17,8 +17,9 @@
  * - When the run is interrupted during a turn, the interruption is recorded and the turn is waited
  *   for; a second interrupt (Ctrl+C) exits at once.
  *
- * - The session's context (`SessionContext`: its id, its working folder and its folders,
- *   `session-context.ts`) is made before anything else, and everything `withSession` runs runs in it
+ * - The host makes the session's context (`SessionContext`: its id, its working folder, its folders
+ *   and its environment, `session-context.ts`) before it calls `withSession`, so that the host's own
+ *   machinery (the CLI's MCP servers) runs in it too. Everything `withSession` runs runs in it
  *   (`inSession`): every log line carries the session's id (`session`), and every span the session's
  *   id, its working folder (`cwd`) and the host's name (`host`). The loop's requests inherit it.
  *
@@ -32,7 +33,6 @@ import { SessionContext } from "../agent-environment/session-context.ts";
 import { type NoticeProvider, Notices } from "../agent-context/assemble.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { leftRunning, type LeftRunning } from "../agent-machine/left-running.ts";
-import { SessionId } from "../agent-machine/names.ts";
 import { changed, type SettingsChange } from "../agent-machine/settings.ts";
 import { modelOf, openedWith } from "../agent-session/configuration/session-setup.ts";
 import { FileBackedSessionStore } from "../agent-session/file-session-store.ts";
@@ -43,7 +43,7 @@ import type { Asked } from "./catalog.ts";
 import { sessionFolderOf, storeFileOf } from "./directory.ts";
 import { logKeys } from "./log-keys.ts";
 import { writeRecord } from "./record.ts";
-import { inSession, makeSessionContext } from "./session-context.ts";
+import { inSession, type MadeSessionContext } from "./session-context.ts";
 
 /** What a host's own machinery adds to a session. */
 export interface BoltOn {
@@ -72,15 +72,12 @@ export interface Host<R = never> {
 export const Headless: Host = { follow: () => Effect.void, choose: () => Effect.succeed("go on"), wentOn: () => Effect.void };
 
 export interface SessionOptions<SE, SR, L, H> {
-  readonly sessionId: string;
-  /** The session's working folder, as an absolute path. */
-  readonly working: string;
   /**
-   * The folders that count as inside the working folder, in order: the launcher's (`--add-dir`), then
-   * the configuration's (`additionalDirectoriesOf`); absolute, from `~`, or relative to the working
-   * folder. None when left out. The folders the user adds during the session are read from its facts.
+   * The session's context, which the host made (`makeSessionContext`): the session's id, its working
+   * folder, its folders and its environment. `withSession` gives it the session's facts once the store
+   * is open.
    */
-  readonly additional?: ReadonlyArray<string> | undefined;
+  readonly context: MadeSessionContext;
   /** The model a new session asks; a continued session asking another is changed to this one. */
   readonly target: Asked;
   /** The settings a new session opens with; a continued session applies them as a change. */
@@ -115,8 +112,8 @@ const interrupted = (session: Session) =>
 /** Opens a new session with `options`, or continues the one whose facts it gives, and runs `use` with it (see the module's description). */
 export const withSession = <A, E, R, SE, SR, L, H>(options: SessionOptions<SE, SR, L, H>, use: (session: Session) => Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
-    const { sessionId, root, boltOns } = options;
-    const made = yield* makeSessionContext({ session: SessionId.make(sessionId), working: options.working, additional: options.additional ?? [] });
+    const { root, boltOns, context: made } = options;
+    const sessionId = made.context.session;
     const within = inSession(made.context);
     return yield* within(
       Effect.gen(function* () {
@@ -151,7 +148,7 @@ export const withSession = <A, E, R, SE, SR, L, H>(options: SessionOptions<SE, S
           if (facts.length === 0) {
             const system = [...boltOns.flatMap((boltOn) => (boltOn.system === undefined ? [] : [boltOn.system])), ...(options.system === undefined ? [] : [options.system])];
             const model = { ...options.target, settings: changed({}, options.settings) };
-            yield* bound.observe(openedWith({ session: SessionId.make(sessionId), model, system: system.length === 0 ? undefined : system.join("\n\n"), tools: yield* offeredTools }));
+            yield* bound.observe(openedWith({ session: sessionId, model, system: system.length === 0 ? undefined : system.join("\n\n"), tools: yield* offeredTools }));
           } else {
             const left = leftRunning(facts);
             if (left === undefined) yield* bound.goOn;

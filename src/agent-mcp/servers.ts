@@ -12,6 +12,7 @@
 import { Effect, Ref, Stream } from "effect";
 import type { Duration, Scope } from "effect";
 import type { ChildProcessSpawner } from "effect/process";
+import type { SessionContext } from "../agent-environment/session-context.ts";
 import type { NoticeProvider } from "../agent-context/assemble.ts";
 import { FailureText, McpServerName, ToolName } from "../agent-machine/names.ts";
 import type { Observation } from "../agent-machine/observation.ts";
@@ -88,7 +89,7 @@ export const startMcpServers = (
   given: ReadonlyArray<GivenServer>,
   roots: ReadonlyArray<Root>,
   options: { readonly connectTimeout?: Duration.Input | undefined; readonly clientInfo?: ClientInfo | undefined } = {},
-): Effect.Effect<McpServers, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner> =>
+): Effect.Effect<McpServers, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner | SessionContext> =>
   Effect.gen(function* () {
     const started = yield* Effect.forEach(
       given,

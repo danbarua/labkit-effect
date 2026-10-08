@@ -17,10 +17,11 @@ import { brandFoldersOf } from "../../agent-host/brand-folders.ts";
 import { type InvalidLevel, warnInvalidLevels } from "../../agent-host/log-level.ts";
 import { LogsToFile } from "../../agent-host/logs.ts";
 import { SessionServices } from "../../agent-host/services.ts";
+import { type MadeSessionContext, makeSessionContext } from "../../agent-host/session-context.ts";
 import { Headless, withSession } from "../../agent-host/with-session.ts";
 import type { Ending } from "../../agent-machine/decision.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
-import { InputText, type TurnId } from "../../agent-machine/names.ts";
+import { InputText, SessionId, type TurnId } from "../../agent-machine/names.ts";
 import { requestsIn } from "../../agent-machine/turn-requests.ts";
 import type { ModelTarget } from "../../agent-machine/observation.ts";
 import { ContextAssembler, MaxHolds, ModelRequestPolicies, TurnEndHooks, type ModelClient, type ModelContext } from "../../agent-session/contracts.ts";
@@ -123,21 +124,24 @@ const servicesOf = (player: Player, request?: Request, feedback: Effect.Effect<R
   );
 };
 
-/** One of a game's two sessions, `zork-<role>-<game>`, as `withSession` runs it. `source` is the adventurer's bolt-on, the world's tools. */
+/** Makes the context of the session of `role` in the game `game`, `zork-<role>-<game>`, which works in this process's working folder. */
+const contextOf = (game: string, role: "engine" | "adventurer") =>
+  makeSessionContext({ session: SessionId.make(`zork-${role}-${game}`), working: process.cwd(), additional: [] });
+
+/** One of a game's two sessions, in its `context`, as `withSession` runs it. `source` is the adventurer's bolt-on, the world's tools. */
 const optionsOf = (
-  setup: Setup, game: string, role: "engine" | "adventurer", player: Player, prompt: string, brand: Brand,
+  setup: Setup, game: string, role: "engine" | "adventurer", player: Player, prompt: string, brand: Brand, context: MadeSessionContext,
   source?: ToolSource, request?: Request, feedback?: Effect.Effect<ReadonlyArray<string>>,
 ) => {
-  const sessionId = `zork-${role}-${game}`;
+  const sessionId = context.context.session;
   const folders = brandFoldersOf(brand, { home: setup.home ?? homedir() });
   return {
-    sessionId,
+    context,
     target: { provider: player.target.provider, model: player.target.model },
     settings: player.target.settings ?? {},
     system: prompt,
     persist: true,
     root: folders.sessions,
-    working: process.cwd(),
     record: { host: "zork", game, role, cwd: process.cwd() },
     services: servicesOf(player, request, feedback),
     boltOns: source === undefined ? [] : [{ sources: [source] }],
@@ -218,8 +222,10 @@ export const play = (setup: Setup) => {
       return customise === undefined ? offered : customise({ state: current, context: offered, lastChance });
     }));
     const invalidLevels = setup.invalidLevels ?? [];
-    return yield* withSession(optionsOf(setup, id, "engine", setup.engine, enginePrompt(commands), brand), (engineSession) =>
-      Effect.andThen(warnInvalidLevels(invalidLevels), withSession(optionsOf(setup, id, "adventurer", setup.adventurer, adventurerPrompt(commands), brand, worldTools(state), request, feedback), (adventurerSession) =>
+    const engineContext = yield* contextOf(id, "engine");
+    const adventurerContext = yield* contextOf(id, "adventurer");
+    return yield* withSession(optionsOf(setup, id, "engine", setup.engine, enginePrompt(commands), brand, engineContext), (engineSession) =>
+      Effect.andThen(warnInvalidLevels(invalidLevels), withSession(optionsOf(setup, id, "adventurer", setup.adventurer, adventurerPrompt(commands), brand, adventurerContext, worldTools(state), request, feedback), (adventurerSession) =>
         Effect.andThen(warnInvalidLevels(invalidLevels), Effect.gen(function* () {
           const engine = asked(engineSession);
           const adventurer = asked(adventurerSession);

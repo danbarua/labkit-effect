@@ -5,6 +5,7 @@ import { BunServices } from "@effect/platform-bun";
 import { Deferred, Duration, Effect, Exit, Layer, Logger, PlatformError, Scope, Sink, Stream } from "effect";
 import fc from "fast-check";
 import { ChildProcessSpawner } from "effect/process";
+import type { SessionContext } from "../agent-environment/session-context.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
 import { logKeys } from "./log-keys.ts";
@@ -152,7 +153,7 @@ test("when the spawner reports neither an exit code nor a signal, the run is Exi
 });
 
 /** Starts a group whose run starts a child process in the background and prints the child's pid. Returns the group, the run's pid and the child's pid. */
-const withChild = (group: (onRun: Parameters<typeof makeProcessGroup>[1]) => Effect.Effect<ProcessGroup, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner>) =>
+const withChild = (group: (onRun: Parameters<typeof makeProcessGroup>[1]) => Effect.Effect<ProcessGroup, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner | SessionContext>) =>
   Effect.gen(function* () {
     const childPid = yield* Deferred.make<number>();
     const made = yield* group((_run, handle) =>

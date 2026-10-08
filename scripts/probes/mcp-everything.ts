@@ -5,7 +5,9 @@
  * lists the tools, calls `echo`, asks for the roots the client gave (`get-roots-list`, which makes
  * the server ask the client `roots/list`), and calls a tool that does not exist. What each step gave
  * is written to the run's folder (`logs/probes/mcp-everything/<run>/result.json`), and the client's
- * log to `log.jsonl` beside it.
+ * log to `log.jsonl` beside it. The probe runs in a session's context of its own (`mcp-everything`),
+ * so the stdio server receives the default session environment: this process's environment without
+ * its credential variables.
  *
  * Run: `bun scripts/probes/mcp-everything.ts [stdio|http|sse]` (stdio when not said).
  */
@@ -15,7 +17,10 @@ import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Logger, type Scope } from "effect";
 import type { ChildProcessSpawner } from "effect/process";
+import type { SessionContext } from "../../src/agent-environment/session-context.ts";
 import { logLevelOf, withLogLevel } from "../../src/agent-host/log-level.ts";
+import { inSession, makeSessionContext } from "../../src/agent-host/session-context.ts";
+import { SessionId } from "../../src/agent-machine/names.ts";
 import { connectStdio, type McpConnection, type McpFailed } from "../../src/agent-mcp/client.ts";
 import { connectRemote, type RemoteRefused } from "../../src/agent-mcp/http.ts";
 import { OtlpSpansAndMetrics, otlpLogger } from "../../src/instrumentation/telemetry.ts";
@@ -58,7 +63,7 @@ const served = (mode: "streamableHttp" | "sse", path: string) =>
     (child) => Effect.sync(() => child.kill()),
   );
 
-const connected: Effect.Effect<McpConnection, McpFailed | RemoteRefused, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner> =
+const connected: Effect.Effect<McpConnection, McpFailed | RemoteRefused, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner | SessionContext> =
   transport === "stdio"
     ? connectStdio({ name: "everything", command: "bunx", args: [everything, "stdio"], env: {} }, roots)
     : Effect.andThen(served(transport === "http" ? "streamableHttp" : "sse", transport === "http" ? "/mcp" : "/sse"), () =>
@@ -81,7 +86,7 @@ const program = Effect.gen(function* () {
 });
 
 const result = await Effect.runPromise(
-  program.pipe(
+  Effect.flatMap(makeSessionContext({ session: SessionId.make("mcp-everything"), working: process.cwd(), additional: [] }), (made) => inSession(made.context)(program)).pipe(
     Effect.scoped,
     Effect.provide(Layer.mergeAll(BunServices.layer, withLogLevel(logLevelOf(process.env), Logger.layer([log, otlpLogger("labkit-probe")])), OtlpSpansAndMetrics("labkit-probe"))),
   ),

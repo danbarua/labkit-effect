@@ -6,7 +6,7 @@ server is reached in one of three ways:
 
 | Transport | How |
 | --- | --- |
-| stdio | A child process (`agent-process`), with newline-delimited JSON-RPC on its stdin and stdout. |
+| stdio | A child process (`agent-process`), with newline-delimited JSON-RPC on its stdin and stdout. The process receives the session's environment (`SessionContext.environment`), with the server's own `env` set over it. |
 | Streamable HTTP (`http`) | A POST to the server's URL for each message, plus an optional GET stream. |
 | HTTP+SSE (`sse`, protocol 2024-11-05) | A GET stream, and POSTs to the endpoint that the stream names. |
 
@@ -18,7 +18,7 @@ drops the messages that a server sends without being asked.
 
 | File | Responsibility |
 | --- | --- |
-| `client.ts` | `connectOver(name, wire, roots)`: one connection over any wire (`initialize`, `tools`, `call`). `connectStdio` starts a process and connects over its pipes; only tests use it. |
+| `client.ts` | `connectOver(name, wire, roots)`: one connection over any wire (`initialize`, `tools`, `call`). `connectStdio` starts a process, with the session's environment and the server's `env` over it, and connects over its pipes; only tests and probes use it. |
 | `http.ts` | The wire to a server at a URL (`remoteWire`), and `connectRemote`. |
 | `peer.ts` | One JSON-RPC connection that both serves requests and makes them. Listed in `imperativeBoundaries` in `oxlint.config.ts`. |
 | `server-machine.ts` | A pure state machine for one server over its runs. |

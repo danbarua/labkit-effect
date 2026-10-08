@@ -10,8 +10,8 @@
  * - `described` (`described.ts`) wraps every tool: it adds a required `intent` input.
  *
  * `workspaceTools(root)` returns the catalog, the tool source that runs a call given the file
- * system, the environment that `run_command` runs with, and the system text that names the root as
- * the working folder (`workingFolderLine`). The descriptions call the root "the working folder" and
+ * system and the session's context, and the system text that names the root as the working folder
+ * (`workingFolderLine`). The descriptions call the root "the working folder" and
  * do not name it. A tool's description states what the tool does and its limits; each input's
  * description states what the input means, whether it is optional, and its default.
  *
@@ -24,7 +24,8 @@
  * since (`"idempotent"`). `edit_file` replaces the one occurrence of a text in a file; text that
  * occurs never or more than once is refused. `run_command` runs `sh -c <command>` in the root, and
  * gives its output (stdout, then stderr; the last 256 KiB, kept as it is read) and how it ended:
- * exit code 0 succeeds, any other end fails with the output. It runs as a process group of its own,
+ * exit code 0 succeeds, any other end fails with the output. It runs with the session's environment
+ * (`SessionContext.environment`), read when the call runs. It runs as a process group of its own,
  * stopped whole, what it started included, after its time (`commandSeconds` unless the call says,
  * at most `maxCommandSeconds`) or when the call is interrupted; a command that ends by itself leaves
  * what it started in the background to run on. Neither runs again when a session goes on
@@ -36,14 +37,14 @@
 
 import { resolve } from "node:path";
 import { Array as Arr, Chunk, Duration, Effect, FileSystem, Option, Order, Schema, Stream } from "effect";
+import { SessionContext } from "../agent-environment/session-context.ts";
 import { ToolName } from "../agent-machine/names.ts";
-import { type Environment, withoutCredentials } from "../agent-process/environment.ts";
 import { described } from "./described.ts";
 import { inWorkspace } from "./in-workspace.ts";
 import { blobReads } from "./blob-reads.ts";
 import { maxReadBytes, maxReadText, selectedLines } from "./read-limits.ts";
 import { FilePath, FolderPath } from "./paths.ts";
-import { anyTool, Rejected, Reported, sourceOf, type Tool } from "./tool.ts";
+import { type AnyTool, anyTool, Rejected, Reported, sourceOf, type Tool } from "./tool.ts";
 
 
 export { maxReadBytes, maxReadText } from "./read-limits.ts";
@@ -207,8 +208,8 @@ export const editFile: Tool<typeof EditFile.fields, FileSystem.FileSystem> = {
     }),
 };
 
-/** `run_command`: runs a shell command in the folder `root`, with `environment`. */
-export const runCommand = (root: string, environment: Environment): Tool<typeof RunCommand.fields> => ({
+/** `run_command`: runs a shell command in the folder `root`, with the session's environment. */
+export const runCommand = (root: string): Tool<typeof RunCommand.fields, SessionContext> => ({
   name: ToolName.make("run_command"),
   kind: "execute",
   replay: "unsafe",
@@ -218,12 +219,14 @@ export const runCommand = (root: string, environment: Environment): Tool<typeof 
     const seconds = timeout_seconds ?? commandSeconds;
     // The command is a process group of its own (`detached`). Stopped (at its time, or when the
     // call is interrupted), the whole group is killed, what it started included; a command that
-    // ends by itself leaves what it started to run on (`nohup server &`). It is given the
-    // environment the host composed, by default without this process's credentials
-    // (agent-process `environment.ts`): what it prints the model reads.
+    // ends by itself leaves what it started to run on (`nohup server &`). It is given the session's
+    // environment (`SessionContext.environment`), which the host made from the configuration's
+    // `commandEnvironment`, by default without this process's credentials: what it prints the model reads.
     return Effect.acquireUseRelease(
-      Effect.sync(() =>
-        Bun.spawn(["/bin/sh", "-c", command], { cwd: root, env: { ...environment }, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true }),
+      Effect.flatMap(SessionContext, ({ environment }) =>
+        Effect.sync(() =>
+          Bun.spawn(["/bin/sh", "-c", command], { cwd: root, env: { ...environment.variables }, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true }),
+        ),
       ),
       (child) =>
         Effect.all([tailOf(child.stdout, maxReadBytes), tailOf(child.stderr, maxReadBytes), Effect.promise(() => child.exited)], { concurrency: "unbounded" }).pipe(
@@ -262,25 +265,21 @@ export function workspaceTools(
   root: string,
   options: {
     readonly strictInput?: boolean;
-    readonly environment?: Environment;
     readonly additional?: ReadonlyArray<string>;
   } = {},
 ) {
-  // What `run_command` is given: what the host composed (`commandEnvironment`), else this process's without its credentials.
-  const environment = options.environment ?? withoutCredentials(process.env).env;
   const additional = options.additional ?? [];
   const bound = inWorkspace(root);
-  const tools = [
+  const tools: ReadonlyArray<AnyTool<FileSystem.FileSystem | SessionContext>> = [
     anyTool(described(blobReads(bound(readFile)))),
     anyTool(described(bound(listDir))),
     anyTool(described(bound(writeFile))),
     anyTool(described(bound(editFile))),
-    anyTool(described(runCommand(root, environment))),
+    anyTool(described(runCommand(root))),
   ];
   return {
     catalog: tools.map((tool) => tool.spec),
     source: sourceOf(tools, { strictInput: options.strictInput ?? false }),
-    environment,
     system: workingFolderLine(root, additional),
   };
 }

@@ -7,8 +7,10 @@ import { join, resolve } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
 import { runTest } from "../../tests/support/run.ts";
+import { TestSessionContext } from "../../tests/support/session-context.ts";
 import { test } from "../../tests/support/test.ts";
 import { undescribedInputs } from "../../tests/support/tool-input.ts";
+import type { KnownEnvironment } from "../agent-environment/command-environment.ts";
 import { CallId, ToolName } from "../agent-machine/names.ts";
 import { ToolRunner } from "../agent-session/contracts.ts";
 import { asText, receivedJson } from "../agent-session/received.ts";
@@ -183,20 +185,23 @@ test("write_file creates or replaces a file inside the workspace, whose folder e
   expect(await call("write_file", { path: "nowhere/c.txt", text: "x" })).toStartWith(`reported: ${root}/nowhere/c.txt:`);
 });
 
-test("run_command is given the environment its host composed; by default this process's when the tools were made, without the variables that hold credentials", async () => {
+test("run_command is given the environment its host composed, the session's; by default this process's when the session's context was made, without the variables that hold credentials", async () => {
   process.env["WORKSPACE_TEST_TOKEN"] = "secret";
   process.env["WORKSPACE_TEST_PLAIN"] = "plain";
-  const envOf = (tools: ReturnType<typeof workspaceTools>) =>
+  const envOf = (environment?: KnownEnvironment) =>
     runTest(
       Effect.gen(function* () {
         const outcome = yield* (yield* ToolRunner).run(ToolName.make("run_command"), receivedJson({ command: "env", intent: "A test call." }), CallId.make("call-1"));
         return outcome._tag === "Succeeded" ? asText(outcome.output) : outcome._tag;
-      }).pipe(Effect.provide(Layer.effect(ToolRunner, tools.source).pipe(Layer.provide(BunServices.layer)))),
+      }).pipe(
+        Effect.provide(runner.pipe(Layer.provide(BunServices.layer))),
+        (run) => (environment === undefined ? run : Effect.provide(run, TestSessionContext({ environment }))),
+      ),
     );
-  const printed = await envOf(workspaceTools(root));
+  const printed = await envOf();
   expect(printed).toContain("WORKSPACE_TEST_PLAIN=plain");
   expect(printed).not.toContain("WORKSPACE_TEST_TOKEN");
-  const given = await envOf(workspaceTools(root, { environment: { PATH: process.env["PATH"] ?? "", ONLY: "this" } }));
+  const given = await envOf({ _tag: "Known", variables: { PATH: process.env["PATH"] ?? "", ONLY: "this" }, leftOut: [] });
   expect(given).toContain("ONLY=this");
   expect(given).not.toContain("WORKSPACE_TEST_PLAIN");
 });

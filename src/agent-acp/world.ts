@@ -1,9 +1,10 @@
 /**
- * What the ACP host does not know of a session: the world it works in. From `session/new`'s working
- * folder, the MCP servers the client named and the connection (the client's capabilities, its
- * `fs/*` methods), a world returns the session's system prompt, its tool sources (`ToolSource`: the
- * tools and what runs a call to one) and how their calls are shown (`Present`). The core records
- * what happened, and never sees the world.
+ * What the ACP host does not know of a session: the world it works in. From the session's context
+ * (`SessionContext`: its id, its working folder, its folders and its environment), the MCP servers
+ * the client named and the connection (the client's capabilities, its `fs/*` methods), a world
+ * returns the session's system prompt, its tool sources (`ToolSource`: the tools and what runs a call
+ * to one), how their calls are shown (`Present`), and the environment its commands run with. The
+ * core records what happened, and never sees the world.
  *
  * - `editorWorld`, the default: the tools go through the editor. `read_file` reads with the client's
  *   `fs/read_text_file`, so the model sees the editor's unsaved buffers; `write_file` writes with
@@ -12,10 +13,13 @@
  *   listed or searched, since the editor has no method for either. Each is offered only when the
  *   client advertised the methods it uses (`clientCapabilities.fs.readTextFile`, `.writeTextFile`,
  *   `.terminal`), so no call meets a capability the client does not have. `update_plan` sends the
- *   model's plan to the editor (a `plan` update), which shows it; every client gets it.
+ *   model's plan to the editor (a `plan` update), which shows it; every client gets it. The editor
+ *   runs a command in its terminal with the editor's environment, which the harness does not see, so
+ *   the world's command environment is unknown; the harness sets no variable of the command's.
  * - `workspaceWorld`: a stopgap. The tools of `agent-tools/workspace.ts` (`read_file`, `list_dir`,
  *   `write_file`) on the local disk under the working folder, bypassing the editor and its unsaved
- *   buffers. A launcher chooses it explicitly.
+ *   buffers. Its commands run with the session's environment (`SessionContext.environment`). A
+ *   launcher chooses it explicitly.
  *
  * In both worlds, when the working folder is the root of a git repository (it holds `.git`), the
  * session is also offered the git tools of `agent-tools/git.ts`, bound to that repository, and the
@@ -28,16 +32,16 @@
  * no path: the permission policy asks about a path outside the working folders.
  */
 
-import type { Environment } from "../agent-process/environment.ts";
 import { Effect, FileSystem, HashMap, Option, Ref } from "effect";
 import { type PlannedWrite, plannedWrites, type ShownWrite, shownWrites } from "../agent-host/command-writes.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
 import { type Current, currentOnDisk } from "../agent-tools/file-change.ts";
+import type { CommandEnvironment } from "../agent-environment/command-environment.ts";
 import { ShellCommand } from "../agent-environment/command-segments.ts";
 import { SessionContext } from "../agent-environment/session-context.ts";
 import type { AgentConnection } from "effective-acp/agent";
 import type { V1Version } from "effective-acp/protocol";
-import type { McpServer, SessionId, TerminalId, ToolCallContent } from "effective-acp/schema/v1";
+import { type McpServer, SessionId, type TerminalId, type ToolCallContent } from "effective-acp/schema/v1";
 import type { CallId } from "../agent-machine/names.ts";
 import type { ToolSource } from "../agent-session/tool-sources.ts";
 import { parseJson } from "../agent-session/received.ts";
@@ -51,13 +55,12 @@ import { maxReadBytes, workingFolderLine, workspaceTools } from "../agent-tools/
 import { Editor, editFile, readFile, runCommand, updatePlan, writeFile } from "./editor-tools.ts";
 import { changedFiles, oneLine, type Present, type Presented, presentFrom } from "./projection.ts";
 
-/** What a world is given for one session, when the session is made. */
+/**
+ * What a world is given for one session, when the session is made. The world reads the session's id,
+ * its working folder, its folders and its environment from the session's context (`SessionContext`),
+ * which the host provides when it opens the world.
+ */
 export interface WorldOpening {
-  readonly sessionId: SessionId;
-  /** The working folder, absolute. */
-  readonly cwd: string;
-  /** The folders that count as inside the working folder (`additionalDirectories`, `--add-dir`), absolute. */
-  readonly additionalFolders?: ReadonlyArray<string> | undefined;
   readonly mcpServers: ReadonlyArray<McpServer>;
   readonly connection: AgentConnection<V1Version>;
   /**
@@ -65,12 +68,6 @@ export interface WorldOpening {
    * call runs without them, and its result names the properties that were ignored.
    */
   readonly strictInput: boolean;
-  /**
-   * The environment that a command the model runs on the local disk receives (the configuration's
-   * `commandEnvironment`); when left out, this process's environment without its credentials. A
-   * command run in the editor's terminal receives the editor's environment.
-   */
-  readonly environment?: Environment | undefined;
 }
 
 /** One session's world: fixed when the session is made, and the same for every turn of it. */
@@ -84,7 +81,19 @@ export interface WorldSession {
    * what they change (`agent-host/recorded-changes.ts`); from the disk when left out.
    */
   readonly fileText?: ((full: string, when: "before" | "after") => Effect.Effect<Current>) | undefined;
+  /**
+   * The environment variables that the world's commands run with: the session's
+   * (`SessionContext.environment`) when the harness starts the command's process; unknown when another
+   * program starts it, as the editor does for a command in its terminal.
+   */
+  readonly environment: CommandEnvironment;
 }
+
+/** The environment of a command that the editor runs in its terminal (`terminal_command`). */
+const editorTerminalEnvironment: CommandEnvironment = {
+  _tag: "Unknown",
+  reason: "the editor runs the command in its terminal, with the editor's environment, which the harness does not see",
+};
 
 export interface World<R = never> {
   readonly open: (opening: WorldOpening) => Effect.Effect<WorldSession, never, R>;
@@ -130,13 +139,15 @@ const wroteContent = (planned: PlannedWrite): ToolCallContent => ({
 });
 
 export const editorWorld: World<FileSystem.FileSystem | SessionContext> = {
-  open: ({ sessionId, cwd, connection, strictInput, additionalFolders }) =>
+  open: ({ connection, strictInput }) =>
     Effect.gen(function* () {
       const fs = connection.profile.client.capabilities.fs;
-      const additional = additionalFolders ?? [];
       const disk = yield* FileSystem.FileSystem;
       // The session's folders, which a command's writes are judged against, read at each use.
-      const { folders } = yield* SessionContext;
+      const { session, working: cwd, folders } = yield* SessionContext;
+      const sessionId = SessionId.make(session);
+      // The world is opened before the session's store, so these are the folders the host gives: those the system text names.
+      const additional = (yield* folders).additional ?? [];
       // The terminal each command ran in, by call: shown in the call as it runs, and when it has ended.
       const terminals = yield* Ref.make(HashMap.empty<CallId, TerminalId>());
       // What each command writes to files, with their text before it ran: read once, before it runs.
@@ -236,7 +247,13 @@ export const editorWorld: World<FileSystem.FileSystem | SessionContext> = {
               Effect.map(({ content }): Current => ({ _tag: "Text", text: content })),
               Effect.catch((error) => Effect.succeed<Current>({ _tag: "Unknown", reason: `the editor could not read its text: ${error.message}` })),
             );
-      return { system: yield* systemFor(cwd, git, additional), sources: [source, ...(git === undefined ? [] : [yield* git.source])], present, fileText };
+      return {
+        system: yield* systemFor(cwd, git, additional),
+        sources: [source, ...(git === undefined ? [] : [yield* git.source])],
+        present,
+        fileText,
+        environment: editorTerminalEnvironment,
+      };
     }),
 };
 
@@ -245,17 +262,20 @@ export const editorWorld: World<FileSystem.FileSystem | SessionContext> = {
  * working folder. It bypasses the editor, so the model does not see unsaved buffers, and the editor
  * is not notified of writes.
  */
-export const workspaceWorld: World<FileSystem.FileSystem> = {
-  open: ({ cwd, strictInput, environment, additionalFolders }) =>
+export const workspaceWorld: World<FileSystem.FileSystem | SessionContext> = {
+  open: ({ strictInput }) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const additional = additionalFolders ?? [];
-      const workspace = workspaceTools(cwd, { strictInput, additional, ...(environment === undefined ? {} : { environment }) });
+      const { working: cwd, folders, environment } = yield* SessionContext;
+      // The world is opened before the session's store, so these are the folders the host gives: those the system text names.
+      const additional = (yield* folders).additional ?? [];
+      const workspace = workspaceTools(cwd, { strictInput, additional });
       const git = gitToolsAt(cwd, strictInput);
       return {
         system: yield* systemFor(cwd, git, additional),
         sources: [yield* workspace.source.pipe(Effect.provideService(FileSystem.FileSystem, fs)), ...(git === undefined ? [] : [yield* git.source])],
         present: presentFrom([...workspace.catalog, ...(git?.catalog ?? [])]),
+        environment,
       };
     }),
 };

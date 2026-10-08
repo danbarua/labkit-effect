@@ -44,7 +44,6 @@ import { type ConfigFlags, launchLayers } from "../agent-host/launch.ts";
 import { writeEffectiveSettings } from "../agent-config/effective.ts";
 import { type Configuration, type LayerSource, loadConfiguration } from "../agent-config/file.ts";
 import { seamLayer, seamListsOf } from "../agent-config/seams.ts";
-import { removeCredentials, processEnvironmentWith } from "../agent-process/environment.ts";
 import { describe } from "../agent-mcp/server-machine.ts";
 import { basename, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -67,7 +66,7 @@ import { readRecord, RecordFailed, recordedSessions, recordFileOf, writeRecord }
 import { SessionServices } from "../agent-host/services.ts";
 import { additionalDirectoriesOf, commandToolsOf } from "../agent-config/builtins.ts";
 import { recordingChanges } from "../agent-host/recorded-changes.ts";
-import { inSession, type MadeSessionContext, makeSessionContext, openingFolders, type SessionPlace } from "../agent-host/session-context.ts";
+import { inSession, type MadeSessionContext, makeSessionContext, type SessionPlace } from "../agent-host/session-context.ts";
 import { SessionContext } from "../agent-environment/session-context.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { leftRunning } from "../agent-machine/left-running.ts";
@@ -107,9 +106,11 @@ export interface HostOptions<R = never> {
   /**
    * Where the sessions' tools come from: `"editor"` (`editorWorld`, the default), `"local"`
    * (`workspaceWorld`, a stopgap that bypasses the editor; the launcher's `--local-tools`), or a
-   * world of the host's own.
+   * world of the host's own. A world reads the session's id, its working folder, its folders and its
+   * environment from the session's context (`SessionContext`), which the host provides when it opens
+   * the world.
    */
-  readonly world?: "editor" | "local" | World<R> | undefined;
+  readonly world?: "editor" | "local" | World<R | SessionContext> | undefined;
   /** The model that sessions start with, as `provider/model` (the launcher's `--model`); the catalog's first model when left out. */
   readonly model?: string | undefined;
   /**
@@ -160,8 +161,8 @@ export interface HostOptions<R = never> {
  * - the limit on a turn's model requests (`maxTurnRequests`, 1000 when not given);
  * - `retryIncomplete` on the turn's end, asking a turn with thinking and no answer again `retries`
  *   times (1 when not given; with 0, no turn-end hook);
- * - `credentials` on the command environment: the model's commands receive the environment without
- *   its credentials.
+ * - `credentials` on the command environment: the model's commands on the local disk and the MCP
+ *   servers receive the environment without its credentials.
  */
 export const acpDefaults = (options: { readonly retries?: number | undefined; readonly maxTurnRequests?: number | undefined }): LayerSource => {
   const retries = options.retries ?? 1;
@@ -389,7 +390,7 @@ const whenApplied = (when: "draft" | "made" | "held"): string => {
 };
 
 /** Returns the world that a host's sessions open: the editor's, unless the options name the local disk's or give a world of their own. */
-const worldOf = <R>(world: HostOptions<R>["world"]): World<R> | World<FileSystem.FileSystem | SessionContext> => {
+const worldOf = <R>(world: HostOptions<R>["world"]): World<R | SessionContext> | World<FileSystem.FileSystem | SessionContext> => {
   if (world === undefined || world === "editor") return editorWorld;
   return world === "local" ? workspaceWorld : world;
 };
@@ -506,9 +507,6 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             ),
           );
 
-        /** Returns the environment that a command the model runs on the local disk receives, as the configuration composes it. */
-        const environmentFor = (configuration: Configured) => processEnvironmentWith(seamListsOf(configuration, { canAsk: true }).commandEnvironment ?? [removeCredentials()]);
-
         /** Writes what a session's configuration resolved to, with what the host says beside it, to the session's folder. */
         const settingsWritten = (id: AcpSessionId, configuration: Configured, permissionMode: PermissionMode, model: string) =>
           writeEffectiveSettings(sessionFolderOf(options.folders.sessions, id), configuration.layers, configuration, {
@@ -570,6 +568,7 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             const recorded = recordingChanges({ commandTools: commandToolsOf(configuration), fileText: opened.fileText });
             const world: WorldSession = {
               system: opened.system,
+              environment: opened.environment,
               sources: [...(yield* Effect.forEach(opened.sources, recorded)), ...mcp.sources],
               // A call is shown with an MCP server's result as text, whether or not the server is still running, and with its details.
               present: (call, outcome, mode) => {
@@ -1063,13 +1062,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
               const made = yield* makeSessionContext(place);
               return yield* Effect.gen(function* () {
               const worldAlone = yield* (world as World<R | FileSystem.FileSystem | SessionContext>).open({
-                sessionId,
-                cwd,
-                additionalFolders: openingFolders(place).additional,
                 mcpServers,
                 connection,
                 strictInput: options.strictToolInput ?? false,
-                environment: environmentFor(configuration),
               });
               const { world: sessionWorld, scope, mcp } = yield* withServers(cwd, worldAlone, configuration, method);
               return yield* Effect.gen(function* () {
@@ -1140,11 +1135,16 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             );
           });
 
-        /** Where the session `session` works: `cwd`, and the folders that count as inside it, as given: the launcher's, the session's (`additional`), then the settings'. */
+        /**
+         * Where the session `session` works: `cwd`, and the folders that count as inside it, as given: the launcher's, the session's
+         * (`additional`), then the settings'; and the transforms of the environment of the processes it starts, a command on the local
+         * disk and an MCP server, which the configuration lists (`commandEnvironment`).
+         */
         const placeOf = (session: SessionId, cwd: string, additional: ReadonlyArray<string>, configuration: Configured): SessionPlace => ({
           session,
           working: cwd,
           additional: [...(options.additionalFolders ?? []), ...additional, ...additionalDirectoriesOf(configuration)],
+          commandEnvironment: seamListsOf(configuration, { canAsk: true }).commandEnvironment,
         });
 
         const handlers: Agent.AgentHandlers<Protocol.V1Version, ModelCatalog | FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner | Scope.Scope | R> = {
@@ -1171,13 +1171,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 const made = yield* makeSessionContext(place);
                 return yield* Effect.gen(function* () {
                 const worldAlone = yield* (world as World<R | FileSystem.FileSystem | SessionContext>).open({
-                  sessionId: id,
-                  cwd,
-                  additionalFolders: openingFolders(place).additional,
                   mcpServers,
                   connection,
                   strictInput: options.strictToolInput ?? false,
-                  environment: environmentFor(configuration),
                 });
                 const { world: sessionWorld, scope, mcp } = yield* withServers(cwd, worldAlone, configuration, "session/new");
                 return yield* Effect.gen(function* () {

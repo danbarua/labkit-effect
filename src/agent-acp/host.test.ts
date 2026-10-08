@@ -21,6 +21,8 @@ import { brandFoldersOf } from "../agent-host/brand-folders.ts";
 import { blobNameOf } from "../agent-session/blobs.ts";
 import type { ConfigFlags } from "../agent-host/launch.ts";
 import type { Environment } from "../agent-process/environment.ts";
+import type { CommandEnvironment } from "../agent-environment/command-environment.ts";
+import { SessionContext } from "../agent-environment/session-context.ts";
 import { type CatalogSource, ModelCatalog } from "../agent-host/catalog.ts";
 import { sessionFolderOf, storeFileOf } from "../agent-host/directory.ts";
 import { startFakeHttpServer } from "../../tests/support/mcp-http-server.ts";
@@ -139,12 +141,16 @@ interface Logged {
 
 /** A test world: one tool, `echo` (kind read), which answers with its input. */
 const echoTool: ToolSpec = { name: ToolName.make("echo"), description: "Answers with its input.", input: { type: "object" }, kind: "read", replay: "safe" };
+/** The environment of a test world's commands: its tools run no command. */
+const noCommands: CommandEnvironment = { _tag: "Unknown", reason: "the test's world runs no command" };
+
 const echoWorld: World = {
   open: () =>
     Effect.succeed({
       system: "Test.",
       sources: [{ tools: [echoTool], run: (_name, input) => Effect.succeed({ _tag: "Succeeded", output: input }) }],
       present: presentFrom([echoTool]),
+      environment: noCommands,
     }),
 };
 
@@ -176,7 +182,7 @@ interface HostRun {
 function startHost(
   options: {
     readonly script?: ReadonlyArray<Reply>;
-    readonly world?: "editor" | "local" | World;
+    readonly world?: "editor" | "local" | World<SessionContext>;
     readonly sources?: ReadonlyArray<CatalogSource>;
     readonly services?: (runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>;
     readonly pageSize?: number;
@@ -226,7 +232,8 @@ function startHost(
         return reply === undefined ? Effect.die(new Error("the script has no more replies")) : reply(turn, target);
       }),
   });
-  const host = makeHost({
+  // The host provides the session's context to the world it opens, so the world's own services are none.
+  const host = makeHost<never>({
     // The brand's folders are the test's own: its sessions in `directory`, the rest under its home.
     folders: brandFoldersOf(options.brand ?? defaultBrand, { home: join(testFolder(), "home"), sessionsDir: directory }),
     ...(options.world === undefined ? {} : { world: options.world }),
@@ -1529,6 +1536,7 @@ const runsWorld = (runs: Array<string>, hold?: Deferred.Deferred<void>): World =
         },
       ],
       present: presentFrom([echoTool]),
+      environment: noCommands,
     }),
 });
 
@@ -1724,7 +1732,10 @@ test("with only the host's defaults, a session's world is given this process's e
   process.env["LABKIT_ACP_TEST_TOKEN"] = "inherited";
   process.env["LABKIT_ACP_TEST_PLAIN"] = "plain";
   const given: Array<Environment | undefined> = [];
-  const recording: World = { open: (opening) => Effect.sync(() => given.push(opening.environment)).pipe(Effect.andThen(echoWorld.open(opening))) };
+  // The world reads the environment from the session's context, where the host gives it.
+  const recording: World<SessionContext> = {
+    open: (opening) => Effect.flatMap(SessionContext, ({ environment }) => Effect.sync(() => given.push(environment.variables))).pipe(Effect.andThen(echoWorld.open(opening))),
+  };
   const host = startHost({ world: recording, script: [answer({ _tag: "Text", text: "Hi." })] });
   await sdkClient().app.connectWith(host.stream, async (ctx) => {
     await initialize(ctx, {});
@@ -2635,6 +2646,7 @@ test("a prompt is answered only after the client has every update of its turn, h
         system: "Test.",
         sources: [{ tools: [echoTool], run: (_name, input) => Effect.succeed({ _tag: "Succeeded", output: input }) }],
         present: (call, outcome) => (outcome === undefined ? presentFrom([echoTool])(call) : Effect.sleep("300 millis").pipe(Effect.andThen(presentFrom([echoTool])(call, outcome)))),
+        environment: noCommands,
       }),
   };
   const host = startHost({ world: slowWorld, script: [answer({ _tag: "ToolCall", call: "echo-1", tool: "echo", input: { say: "4" } }), answer({ _tag: "Text", text: "Done." })] });

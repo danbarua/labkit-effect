@@ -26,7 +26,7 @@ export interface Entries {
   readonly settling: SettlingSource;
   /** A source started in the session's scope (an MCP server's, for example). */
   readonly toolSources: Effect.Effect<ToolSource, never, Scope.Scope>;
-  /** A transform of the environment that the model's commands receive (`agent-process` `EnvironmentTransform`). */
+  /** A transform of the session's environment, which the model's commands and the MCP servers receive (`agent-process` `EnvironmentTransform`). */
   readonly commandEnvironment: EnvironmentTransform;
 }
 

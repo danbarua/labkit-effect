@@ -6,8 +6,10 @@
  *
  * The tools work in the folder the CLI runs in (`agent-tools/workspace.ts`): `read_file` and
  * `list_dir` read it, `write_file` and `edit_file` change it, and `run_command` runs a shell command
- * in it. When the folder is the root of a git repository, the git tools (`agent-tools/git.ts`) come
- * next, bound to it. Then come the tools of the MCP servers the configuration names
+ * in it. `run_command` and the MCP servers receive the session's environment, which the
+ * configuration's `commandEnvironment` makes (by default, this process's environment without its
+ * credential variables). When the folder is the root of a git repository, the git tools
+ * (`agent-tools/git.ts`) come next, bound to it. Then come the tools of the MCP servers the configuration names
  * (`configuration.ts`). The system prompt starts with the line that names that folder as the working
  * folder, which the tool descriptions refer to, and the line that says it is a repository's root
  * when it is one; the `--system-prompt` and `--append-system-prompt` text follows. The
@@ -22,9 +24,9 @@ import { Array as Arr, Effect, type FileSystem, Layer, Order, Predicate, Stream 
 import { ModelOverrides } from "../../agent-session/configuration/well-known-models.ts";
 import { writeEffectiveSettings } from "../../agent-config/effective.ts";
 import type { Configuration, LayerSource } from "../../agent-config/file.ts";
-import { seamLayer, seamListsOf } from "../../agent-config/seams.ts";
+import { type SeamLists, seamLayer, seamListsOf } from "../../agent-config/seams.ts";
 import { describe } from "../../agent-mcp/server-machine.ts";
-import { removeCredentials, processEnvironmentWith } from "../../agent-process/environment.ts";
+import type { KnownEnvironment } from "../../agent-environment/command-environment.ts";
 import { type GivenServer, type McpServers, startMcpServers } from "../../agent-mcp/servers.ts";
 import type { Asked } from "../../agent-host/catalog.ts";
 import { BrandFolders } from "../../agent-host/brand-folders.ts";
@@ -34,12 +36,12 @@ import { SessionServices } from "../../agent-host/services.ts";
 import { type BoltOn, type Host, withSession } from "../../agent-host/with-session.ts";
 import type { Ending } from "../../agent-machine/decision.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
-import { InputText, type TurnId, Via } from "../../agent-machine/names.ts";
+import { InputText, SessionId, type TurnId, Via } from "../../agent-machine/names.ts";
 import type { SettingsChange } from "../../agent-machine/settings.ts";
 import { gitTools, isRepositoryRoot } from "../../agent-tools/git.ts";
 import { additionalDirectoriesOf, commandToolsOf } from "../../agent-config/builtins.ts";
 import type { ToolSpec } from "../../agent-session/contracts.ts";
-import { openingFolders } from "../../agent-host/session-context.ts";
+import { inSession, makeSessionContext, openingFolders } from "../../agent-host/session-context.ts";
 import { recordingChanges } from "../../agent-host/recorded-changes.ts";
 import { workspaceTools } from "../../agent-tools/workspace.ts";
 import type { Session } from "../../agent-session/loop.ts";
@@ -93,31 +95,35 @@ const additionalOf = (config: Config): ReadonlyArray<string> => [...config.addit
 
 /**
  * The workspace tools for the working folder, whose system text names the folders that count as
- * inside it; their commands run with the environment the configuration builds (`commandEnvironment`).
+ * inside it; their commands run with the session's environment, which the configuration's
+ * `commandEnvironment` makes.
  */
 const workspaceOf = (config: Config) =>
   workspaceTools(process.cwd(), {
     strictInput: config.strictToolInput,
     additional: openingFolders({ working: process.cwd(), additional: additionalOf(config) }).additional ?? [],
-    environment: processEnvironmentWith(seamListsOf(config.configuration, { canAsk: config.canAsk }).commandEnvironment ?? [removeCredentials()]),
   });
 
 /** The git tools bound to the working folder, when it is the root of a git repository; undefined otherwise. */
 const gitOf = (config: Config) => (isRepositoryRoot(process.cwd()) ? gitTools(process.cwd(), { strictInput: config.strictToolInput }) : undefined);
 
 /**
+ * The configuration's seam lists for a CLI session, made once, with what the CLI provides
+ * (`FromHost`): whether someone can answer a permission question, and the path inputs of the tools
+ * the session runs with now (`live`), which a session recorded before they were named lacks.
+ */
+const listsOf = (config: Config, live: ReadonlyArray<ToolSpec>): SeamLists =>
+  seamListsOf(config.configuration, { canAsk: config.canAsk, toolPaths: (name) => live.find((tool) => tool.name === name)?.paths });
+
+/**
  * The loop's services for a CLI session, besides its tool sources and notices, which its bolt-ons
  * give: `SessionServices` with the configuration's `models:` overrides, and the configuration's
- * policies and turn-end hooks. The policies read the session's folders from its context.
+ * policies and turn-end hooks (`lists`). The policies read the session's folders from its context.
  */
-const servicesOf = (config: Config, live: ReadonlyArray<ToolSpec>) => {
-  // The CLI uses its own tool sources (the workspace's and the MCP servers'), not the configuration's.
-  const { toolSources: _, commandEnvironment: __, ...lists } = seamListsOf(config.configuration, {
-    canAsk: config.canAsk,
-    // The path inputs of the tools the session runs with now, which a session recorded before they were named lacks.
-    toolPaths: (name) => live.find((tool) => tool.name === name)?.paths,
-  });
-  return Layer.mergeAll(SessionServices(SourcedToolRunner).pipe(Layer.provide(Layer.succeed(ModelOverrides, config.configuration.models))), seamLayer(lists));
+const servicesOf = (config: Config, lists: SeamLists) => {
+  // The CLI uses its own tool sources (the workspace's and the MCP servers'), not the configuration's. The command environment is in the session's context.
+  const { toolSources: _, commandEnvironment: __, ...rest } = lists;
+  return Layer.mergeAll(SessionServices(SourcedToolRunner).pipe(Layer.provide(Layer.succeed(ModelOverrides, config.configuration.models))), seamLayer(rest));
 };
 
 /** The configuration's MCP servers, in the form `startMcpServers` takes. */
@@ -127,10 +133,10 @@ const givenOf = (configuration: Configuration): ReadonlyArray<GivenServer> =>
 /**
  * Writes the session's resolved configuration (`effective-settings.json`, `agent-config`
  * `effective.ts`) to its folder, with the CLI's own values: the model and its settings, whether
- * permission questions can be answered, and the names of the environment variables commands get and
- * those removed.
+ * permission questions can be answered, and the names of the variables in the session's environment
+ * (`given`) and of this process's variables that it does not have (`leftOut`).
  */
-const written = (config: Config, environment: Readonly<Record<string, string>>, root: string) =>
+const written = (config: Config, environment: KnownEnvironment, root: string) =>
   Effect.gen(function* () {
     const folder = sessionFolderOf(root, config.sessionId);
     const host = {
@@ -139,13 +145,7 @@ const written = (config: Config, environment: Readonly<Record<string, string>>, 
       canAsk: config.canAsk,
       strictToolInput: config.strictToolInput,
       persist: config.persist,
-      commandEnvironment: {
-        given: Arr.sort(Object.keys(environment), Order.String),
-        leftOut: Arr.sort(
-          Object.keys(process.env).filter((name) => !(name in environment)),
-          Order.String,
-        ),
-      },
+      commandEnvironment: { given: Arr.sort(Object.keys(environment.variables), Order.String), leftOut: environment.leftOut },
     };
     yield* writeEffectiveSettings(folder, config.configuration.layers, config.configuration, host).pipe(
       Effect.tap((path) => Effect.logInfo(logKeys.settings.written, { path })),
@@ -198,7 +198,10 @@ const serversBoltOn = (mcp: McpServers): BoltOn => ({
 /**
  * Opens a new CLI session with `config`, or continues the one it names, and runs `use` with it and
  * its MCP servers, through `withSession` (`agent-host/with-session.ts`), with the CLI's bolt-ons:
- * the working folder's tools and the MCP servers. The session is saved in the brand's sessions
+ * the working folder's tools and the MCP servers. The session's context (`makeSessionContext`) is
+ * made first, with the configuration's command environment; writing the session's settings, the MCP
+ * servers and the session run in it, so each of their log lines carries `session`, and the MCP
+ * servers receive the session's environment. The session is saved in the brand's sessions
  * folder, recorded as the CLI's, made in this working folder (`cliRecord`), and its blobs in the
  * brand's blobs folder; a session kept in memory only keeps its blobs in memory. A store that cannot be
  * opened or written stops the session with an error. What `use` records comes from the user,
@@ -215,30 +218,39 @@ export const withCliSession = <A, E, R, L, H>(
     const folders = yield* BrandFolders;
     const root = folders.sessions;
     const workspace = workspaceOf(config);
-    yield* written(config, workspace.environment, root);
-    // The MCP servers start in the session's scope, before its services, because their tools are among them.
-    const mcp = yield* startMcpServers(givenOf(config.configuration), [{ uri: pathToFileURL(process.cwd()).href, name: basename(process.cwd()) }]);
-    yield* requiredRunning(config.configuration, mcp);
-    const folder = yield* folderBoltOn(config, workspace, gitOf(config));
-    return yield* withSession(
-      {
-        sessionId: config.sessionId,
-        target: config.target,
-        settings: config.settings,
-        system: config.system,
-        continues: config.continues,
-        persist: config.persist,
-        root,
-        working: process.cwd(),
-        additional: additionalOf(config),
-        record: cliRecord(process.cwd()),
-        // A saved session's blobs are kept in the brand's blobs folder, which the ACP host shares, so a continued session has them.
-        services: Layer.merge(servicesOf(config, workspace.catalog), config.persist ? BlobsInFolder(folders.blobs) : BlobsInMemory),
-        boltOns: [folder, serversBoltOn(mcp)],
-        logs,
-        host,
-      },
-      (session) => use(session, mcp),
+    const lists = listsOf(config, workspace.catalog);
+    const context = yield* makeSessionContext({
+      session: SessionId.make(config.sessionId),
+      working: process.cwd(),
+      additional: additionalOf(config),
+      commandEnvironment: lists.commandEnvironment,
+    });
+    return yield* inSession(context.context)(
+      Effect.gen(function* () {
+        yield* written(config, context.context.environment, root);
+        // The MCP servers start in the session's scope, before its services, because their tools are among them.
+        const mcp = yield* startMcpServers(givenOf(config.configuration), [{ uri: pathToFileURL(process.cwd()).href, name: basename(process.cwd()) }]);
+        yield* requiredRunning(config.configuration, mcp);
+        const folder = yield* folderBoltOn(config, workspace, gitOf(config));
+        return yield* withSession(
+          {
+            context,
+            target: config.target,
+            settings: config.settings,
+            system: config.system,
+            continues: config.continues,
+            persist: config.persist,
+            root,
+            record: cliRecord(process.cwd()),
+            // A saved session's blobs are kept in the brand's blobs folder, which the ACP host shares, so a continued session has them.
+            services: Layer.merge(servicesOf(config, lists), config.persist ? BlobsInFolder(folders.blobs) : BlobsInMemory),
+            boltOns: [folder, serversBoltOn(mcp)],
+            logs,
+            host,
+          },
+          (session) => use(session, mcp),
+        );
+      }),
     );
   }).pipe(
     reportedBy({ _tag: "User", via: Via.make("cli") }),

@@ -28,7 +28,7 @@ the provider adapters, the stores where a session's facts are kept, and the sess
 | `ModelClient` | Makes a model request. |
 | `ToolRunner` | Runs a tool call. |
 | `Turns` | Gives each new turn its identity. |
-| `SessionContext` | The session's id, working folder and folders (`docs/agent-environment.md`). The host provides it for the whole session. Required: there is no default. |
+| `SessionContext` | The session's id, working folder, folders and environment (`docs/agent-environment.md`). The host provides it for the whole session. Required: there is no default. |
 | `ToolCallPolicies`, `ModelRequestPolicies` | Review requests before they are carried out (`docs/agent-policy.md`). Empty by default. |
 | `TurnEndHooks`, `MaxHolds` | Review a turn before it ends. Empty and 0 by default. |
 

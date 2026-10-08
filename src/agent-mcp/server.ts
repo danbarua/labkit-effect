@@ -4,7 +4,9 @@
  * current run and starts another; `stop` ends it.
  *
  * - A stdio server's run is its process (`agent-process`), connected over the process's pipes
- *   (`client.ts` `connect`). The run ends when the process does.
+ *   (`client.ts` `connect`). The process receives the session's environment
+ *   (`SessionContext.environment`) with the server's own `env` set over it. The run ends when the
+ *   process does.
  * - A remote server's run is a connection to its URL (`http.ts`). When the server no longer has the
  *   session (a 404 to a request that carried it), a new session is made and the refused request is
  *   made again, once. A connection whose stream ends between requests (HTTP+SSE) is made anew. The
@@ -19,6 +21,7 @@
 
 import { Duration, Effect, Exit, HashMap, Option, Ref, Scope, Semaphore, Stream, SubscriptionRef } from "effect";
 import type { ChildProcessSpawner } from "effect/process";
+import type { SessionContext } from "../agent-environment/session-context.ts";
 import type { ProcessState } from "../agent-process/machine.ts";
 import { isCredentialName } from "../agent-process/environment.ts";
 import { makeProcessGroup } from "../agent-process/process-group.ts";
@@ -120,7 +123,7 @@ export const startMcpServer = (
   server: McpServerConfig,
   roots: ReadonlyArray<Root>,
   options: { readonly connectTimeout?: Duration.Input | undefined; readonly clientInfo?: ClientInfo | undefined } = {},
-): Effect.Effect<McpServer, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner> =>
+): Effect.Effect<McpServer, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner | SessionContext> =>
   Effect.gen(function* () {
     const timeout = options.connectTimeout ?? defaultConnectTimeout;
     const state = yield* SubscriptionRef.make<McpServerState>(initialMcpServerState);
@@ -200,7 +203,7 @@ const stdioRuns = (
   server: McpServerStdio,
   dispatch: (event: McpServerEvent) => Effect.Effect<void>,
   onRun: (run: number, handle: Parameters<typeof connect>[1]) => Effect.Effect<void, never, Scope.Scope>,
-): Effect.Effect<Runs, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner> =>
+): Effect.Effect<Runs, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner | SessionContext> =>
   Effect.gen(function* () {
     const group = yield* makeProcessGroup({ name: `mcp ${server.name}`, command: server.command, args: server.args, env: server.env, cwd: server.cwd }, onRun);
     yield* group.changes.pipe(

@@ -4,6 +4,7 @@ import { expect } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
 import { Effect, Fiber, Layer, Logger, type Scope, Stream } from "effect";
 import type { ChildProcessSpawner } from "effect/process";
+import type { SessionContext } from "../agent-environment/session-context.ts";
 import { type FakeHttpOptions, type FakeHttpServer, startFakeHttpServer } from "../../tests/support/mcp-http-server.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
@@ -26,7 +27,7 @@ const remoteOf = (fake: FakeHttpServer, transport: "http" | "sse", headers: Read
 /** Runs `use` with a fake server of `options`, and what was logged meanwhile: each record's message. */
 const withFake = async <A, E>(
   options: FakeHttpOptions,
-  use: (fake: FakeHttpServer, logged: ReadonlyArray<unknown>) => Effect.Effect<A, E, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner>,
+  use: (fake: FakeHttpServer, logged: ReadonlyArray<unknown>) => Effect.Effect<A, E, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner | SessionContext>,
 ) => {
   const fake = startFakeHttpServer(options);
   const logged: Array<unknown> = [];

@@ -13,8 +13,8 @@
  * - `maxBudget` (`agent-host/services.ts`), on `modelRequests`: `usd`, with no default. A model
  *   request is vetoed once the session has cost that much.
  * - `credentials` (`agent-process/environment.ts`), on `commandEnvironment`: `pass` (none), the
- *   credential variables that the model's commands still receive (`SSH_AUTH_SOCK`, for `git push`
- *   over SSH). The other credential variables are removed.
+ *   credential variables that the model's commands and the MCP servers still receive
+ *   (`SSH_AUTH_SOCK`, for `git push` over SSH). The other credential variables are removed.
  */
 
 import { removeCredentials } from "../agent-process/environment.ts";

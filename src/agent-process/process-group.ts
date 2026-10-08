@@ -7,8 +7,10 @@
  *   group. `stop`, `restart` and closing the group's scope all close the run's scope.
  * - `onRun` runs in the run's scope. After a run exits by itself, the run's scope stays open until
  *   `onRun` finishes, for `consumerGrace` at most.
- * - A run inherits this process's environment without its credential variables, with the command's
- *   own `env` applied over it.
+ * - A run receives the environment of the session that the group is made in
+ *   (`SessionContext.environment`, which the host makes from the configuration's
+ *   `commandEnvironment`; by default this process's environment without its credential variables),
+ *   with the command's own `env` applied over it.
  * - Every state change is logged with the group's name, the command line with credential values
  *   redacted, the event, and the states before and after. Each run's environment is logged by
  *   variable names only.
@@ -16,7 +18,8 @@
 
 import { Effect, Exit, Fiber, HashMap, Option, type PlatformError, Ref, Scope, Semaphore, Stream, SubscriptionRef } from "effect";
 import { ChildProcess, type ChildProcessSpawner } from "effect/process";
-import { redactedArgs, withoutCredentials } from "./environment.ts";
+import { SessionContext } from "../agent-environment/session-context.ts";
+import { redactedArgs } from "./environment.ts";
 import { logKeys } from "./log-keys.ts";
 import { initialProcessState, type ProcessEffect, type ProcessEvent, type ProcessState, stepProcess } from "./machine.ts";
 
@@ -28,7 +31,7 @@ export interface ProcessCommand {
   readonly name: string;
   readonly command: string;
   readonly args: ReadonlyArray<string>;
-  /** Variables set over the inherited environment, credentials included. */
+  /** Variables set over the session's environment, credentials included. */
   readonly env: Readonly<Record<string, string>>;
   /** The working directory. When undefined, the process uses this process's working directory. */
   readonly cwd?: string | undefined;
@@ -58,16 +61,19 @@ const signalOf = (error: PlatformError.PlatformError): string | undefined => {
 };
 
 /**
- * Returns the process group for `command`, in the current scope. No process starts until `start` or
- * `restart` is called. `onRun` receives each run's process handle once the process has started.
+ * Returns the process group for `command`, in the current scope and the current session. No process
+ * starts until `start` or `restart` is called. `onRun` receives each run's process handle once the
+ * process has started. Every run receives the session's environment as it is when the group is made,
+ * whichever fiber starts the run.
  */
 export const makeProcessGroup = (
   command: ProcessCommand,
   onRun: (run: number, handle: ChildProcessSpawner.ChildProcessHandle) => Effect.Effect<void, never, Scope.Scope> = () => Effect.void,
-): Effect.Effect<ProcessGroup, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner> =>
+): Effect.Effect<ProcessGroup, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner | SessionContext> =>
   Effect.gen(function* () {
     const scope = yield* Scope.Scope;
     const context = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
+    const { environment } = yield* SessionContext;
     const state = yield* SubscriptionRef.make<ProcessState>(initialProcessState);
     const lock = yield* Semaphore.make(1);
     // The scope of each live run, by run number.
@@ -83,11 +89,10 @@ export const makeProcessGroup = (
       Effect.gen(function* () {
         const runScope = yield* Scope.fork(scope);
         yield* Ref.update(runs, HashMap.set(run, runScope));
-        // The command's own `env` is applied after the credentials are removed, so a server receives the credential that its configuration names.
-        const inherited = withoutCredentials(process.env);
-        yield* Effect.logInfo(logKeys.process.environment, { name: command.name, run, removed: inherited.removed, set: Object.keys(command.env) });
+        // The command's own `env` is applied over the session's environment, so a server receives the credential that its configuration names.
+        yield* Effect.logInfo(logKeys.process.environment, { name: command.name, run, removed: environment.leftOut, set: Object.keys(command.env) });
         const started = yield* ChildProcess.make(command.command, [...command.args], {
-          env: { ...inherited.env, ...command.env },
+          env: { ...environment.variables, ...command.env },
           extendEnv: false,
           ...(command.cwd === undefined ? {} : { cwd: command.cwd }),
         }).pipe(Scope.provide(runScope), Effect.provideContext(context), Effect.result);

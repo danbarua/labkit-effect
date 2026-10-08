@@ -4,7 +4,7 @@
  *
  * - `connectOver` connects over any wire; `connect` over a running process's pipes (newline-delimited
  *   JSON-RPC, MCP's stdio transport); `connectStdio` starts a process and connects to it, and only
- *   tests use it. Each sends `initialize` (this client's latest version, its roots capability), then
+ *   tests and probes use it. Each sends `initialize` (this client's latest version, its roots capability), then
  *   `notifications/initialized`, and returns the connection.
  * - The client answers the server's `ping` and `roots/list` (with the roots it was given). It does
  *   not offer sampling or elicitation.
@@ -21,7 +21,7 @@ import { McpSchema } from "effect/ai";
 import { type Wire, WireError, WireInput } from "effective-acp/json-rpc";
 import * as Methods from "effective-acp/methods";
 import { ChildProcess, type ChildProcessSpawner } from "effect/process";
-import { withoutCredentials } from "../agent-process/environment.ts";
+import { SessionContext } from "../agent-environment/session-context.ts";
 import { logKeys } from "./log-keys.ts";
 import * as Peer from "./peer.ts";
 
@@ -126,17 +126,19 @@ export interface ServerPipes {
 
 /**
  * Starts `server` as a process and connects to it, in the current scope; the process ends with the
- * scope. `roots` are returned to the server when it asks (`roots/list`). Only tests use it: a session
- * starts its servers through `server.ts`.
+ * scope. The process receives the session's environment (`SessionContext.environment`) with the
+ * server's own `env` set over it. `roots` are returned to the server when it asks (`roots/list`).
+ * Only tests and probes use it: a session starts its servers through `server.ts`.
  */
 export const connectStdio = (
   server: McpServerStdio,
   roots: ReadonlyArray<Root>,
   clientInfo: ClientInfo = defaultClientInfo,
-): Effect.Effect<McpConnection, McpFailed, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner> =>
+): Effect.Effect<McpConnection, McpFailed, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner | SessionContext> =>
   Effect.gen(function* () {
+    const { environment } = yield* SessionContext;
     const handle = yield* ChildProcess.make(server.command, [...server.args], {
-      env: { ...withoutCredentials(process.env).env, ...server.env },
+      env: { ...environment.variables, ...server.env },
       extendEnv: false,
       ...(server.cwd === undefined ? {} : { cwd: server.cwd }),
     }).pipe(Effect.mapError((cause) => new McpFailed({ server: server.name, reason: `${server.command} could not be started`, cause })));

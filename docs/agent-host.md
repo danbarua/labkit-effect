@@ -100,9 +100,10 @@ with it. It is the session's machinery; what a host's own machinery adds is a li
   previous run left unfinished is gone on with or ended. `Headless` follows nothing and goes on.
 - When the run is interrupted during a turn, the interruption is recorded and the turn is waited
   for; a second Ctrl+C exits at once.
-- The session's context (`SessionContext`) is made first, from the session's id, its working folder
-  (`working`) and the folders the host adds (`additional`), and everything `withSession` runs runs
-  in it (`inSession`). Its folders read the session's facts from the store once the store is open.
+- The host makes the session's context (`SessionContext`) with `makeSessionContext` before it
+  calls `withSession`, and passes it (`context`). The session's id is the context's. Everything
+  `withSession` runs runs in the context (`inSession`). The context's folders read the session's
+  facts from the store once the store is open.
 - The session that `use` is given carries its own services and its own context, so a host can hold
   two sessions at once: zork's game asks its engine and its adventurer in turn, and each call runs
   in the context of the session it calls.
@@ -110,7 +111,7 @@ with it. It is the session's machinery; what a host's own machinery adds is a li
 ## A session's context
 
 `session-context.ts` makes a session's context (`SessionContext`, `docs/agent-environment.md`) for
-every host. It is the one place where a session's folders are assembled.
+every host. It is the one place where a session's folders and its environment are assembled.
 
 - `makeSessionContext(place)` makes the context of the session at `place`: the session's id, its
   working folder, and the folders that count as inside it as the host gives them, in order: the
@@ -121,6 +122,11 @@ every host. It is the one place where a session's folders are assembled.
   the user added to the session (`FolderAdded`), read from the session's facts.
 - The host gives the context the session's facts once the session's store is open
   (`storeOpened`). Before then the session has no facts. Giving a second store is a defect.
+- The context's environment is made once, by `makeSessionContext`: the transforms that `place`
+  gives (`commandEnvironment`, the configuration's list) are applied in order to this process's
+  environment (`environmentWith`). When `place` gives none, the transforms are
+  `defaultCommandEnvironment`: this process's environment without its credential variables. The
+  environment also names this process's variables that it does not have (`leftOut`).
 - `openingFolders(place)` returns the folders of `place` before the user adds any: the folders
   that the opening system text names (`workingFolderLine`).
 - `inSession(context)` runs an effect in the session: it provides `SessionContext`, annotates each
@@ -129,12 +135,13 @@ every host. It is the one place where a session's folders are assembled.
 
 | Host | Where it makes the context |
 | --- | --- |
-| CLI, zork | `withSession`, before the session's store opens. |
+| CLI | `withCliSession`, before it writes the session's settings and starts the MCP servers, with the configuration's command environment. |
+| zork | Before each of its two sessions' `withSession`, with the default command environment. |
 | ACP | When `session/new`, `session/load` or `session/resume` creates the session's entry, before the world is opened and the MCP servers are started (`docs/agent-acp.md`). |
 
-A log line written inside a session carries `session`. A line that the CLI writes outside
-`withSession` does not carry it: the line that says where `effective-settings.json` was written, and
-what the MCP servers log, since the CLI starts them before `withSession` opens the session.
+A log line written inside a session carries `session`. The CLI writes the session's settings and
+starts its MCP servers in the session's context, so the line that says where
+`effective-settings.json` was written, and what the MCP servers log, carry `session` too.
 
 ## Session services
 

@@ -72,15 +72,19 @@ or the request is refused (-32602, naming it). A new session's are kept in its r
 
 `session/new`, `session/load` and `session/resume` make the session's context (`SessionContext`,
 `docs/agent-environment.md`) when they create the session's entry, with
-`agent-host/session-context.ts`: the session's id, `cwd` as its working folder, and its folders (the
-launcher's `--add-dir`, the request's `additionalDirectories`, then the settings'). The entry keeps
-the context until `session/close` or the end of the connection.
+`agent-host/session-context.ts`: the session's id, `cwd` as its working folder, its folders (the
+launcher's `--add-dir`, the request's `additionalDirectories`, then the settings'), and its
+environment, made once from the configuration's `commandEnvironment`. The entry keeps the context
+until `session/close` or the end of the connection.
 
 - The context is made before the world is opened. The world, the MCP servers, the session's
   services, its feed and its requests run in it: each of their log lines carries `session`, and
   each of their spans carries `session` and `cwd`.
 - The permission policy, the recording of what a call changes, the diffs of a command's writes and
   the explanation of a permission question read the session's folders from the context at each use.
+- The world reads the session's id, its working folder, its folders and its environment from the
+  context when it is opened (`WorldOpening` carries none of them).
+- The MCP servers' processes receive the context's environment, each with its own `env` set over it.
 - A draft has no store, so its folders are those the host gives. Once the store opens, the folders
   that the facts record (`FolderAdded`) follow them.
 
@@ -290,8 +294,8 @@ in layers (`docs/agent-host.md`, Launch options):
 
 A configuration that cannot be used refuses the request (-32603), naming the layer at fault. The
 configuration's seam lists are the session's, except its tool sources: the session's tools are the
-world's and its MCP servers'. Its `commandEnvironment` is what a command run on the local disk is
-given.
+world's and its MCP servers'. Its `commandEnvironment` makes the session's environment, which a
+command run on the local disk and each MCP server's process receive.
 
 The host's defaults:
 
@@ -300,7 +304,7 @@ The host's defaults:
 | `toolCalls` | `permissions` |
 | `modelRequests` | `maxTurnRequests`, 1000 unless the launcher says otherwise (`--max-turns`) |
 | `turnEnd` | `retryIncomplete`, asked `retries` times (1 unless `--retries` says otherwise); none when `retries` is 0 |
-| `commandEnvironment` | `credentials`: the environment without its credentials |
+| `commandEnvironment` | `credentials`: the environment without its credentials, for the commands on the local disk and the MCP servers |
 
 A turn whose response had thinking and no answer (`Incomplete`) is asked again for its answer, by
 default once. An answer then reaches the client as `agent_message_chunk`, and the prompt ends
@@ -554,10 +558,13 @@ the load showed is not shown again, and a later request's deltas are sent once.
 
 ## Worlds
 
-A world (`world.ts`) is what the host does not know of a session. Given the session's id, its working
-folder, the client's MCP servers, the connection, whether tool input is strict, and the command
-environment, a world gives the session's system prompt, its tool sources (`ToolSource`) and their
-presentation (`Present`). A host can give a world of its own (`HostOptions.world`).
+A world (`world.ts`) is what the host does not know of a session. Given the client's MCP servers,
+the connection and whether tool input is strict (`WorldOpening`), and the session's context, from
+which it reads the session's id, its working folder, its folders and its environment, a world gives
+the session's system prompt, its tool sources (`ToolSource`), their presentation (`Present`), and
+the environment its commands run with (`WorldSession.environment`, `docs/agent-environment.md`). A
+host can give a world of its own (`HostOptions.world`); the host provides the session's context
+when it opens the world.
 
 Both worlds below send one line of system prompt, which names the working folder
 (`workingFolderLine` in `agent-tools/workspace.ts`). Their tool descriptions refer to "the working
@@ -590,6 +597,9 @@ the file tools' paths are resolved against the working folder (`agent-tools/in-w
   gives `timeout_seconds`, at most 600), reads its output (the last 256 KiB), and releases the
   terminal however the call ends, which stops a command still running. Exit code 0 succeeds; any
   other end fails, with the output and how it ended for the model to read.
+- The editor runs `terminal_command` in its terminal with the editor's environment. The harness
+  sets no variable of the command's process and does not see the editor's, so the world's
+  environment is unknown (`Unknown`).
 - The editor has no method to list or search a folder, so `terminal_command` does both.
 - When the working folder is the root of a git repository (it holds `.git`), the session is also
   offered the git tools of `agent-tools/git.ts` (`git_status`, `git_diff`, `git_add`, `git_commit`
@@ -653,7 +663,7 @@ the file tools' paths are resolved against the working folder (`agent-tools/in-w
 
 A stopgap: the workspace tools of `agent-tools/workspace.ts` on the local disk under the working
 folder (`--local-tools`). It bypasses the editor, so the model does not see unsaved buffers and the
-editor is not told of writes.
+editor is not told of writes. `run_command` runs with the session's environment.
 Each of its tools takes an `intent` input (`agent-tools/described.ts`). A call's title is that
 intent on one line. A call to a tool that `described` did not wrap, such as an MCP tool, is titled
 with the tool's name, even when the tool has an input of its own named `intent`.

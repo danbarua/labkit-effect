@@ -204,10 +204,16 @@ still decides it for a session that reads that layer.
 
 ## Command environment
 
-`commandEnvironment` lists transforms of the environment that the model's commands receive; the
-first transform receives this process's environment. The `credentials` plug-in removes the
-variables whose names are credential names (`isCredentialName` in `agent-process`), except those in
-`pass` (for example `SSH_AUTH_SOCK`, for `git push` over SSH).
+`commandEnvironment` lists transforms of the environment that the model's commands on the local
+disk and the MCP servers' processes receive (the session's environment, `docs/agent-environment.md`);
+the first transform receives this process's environment. A host applies them once, when it makes the
+session's context. When the configuration lists no `commandEnvironment`, the session's environment
+is this process's environment without its credential variables. An MCP server's own `env` is set
+over the session's environment, so a server receives the credential its configuration names.
+
+The `credentials` plug-in removes the variables whose names are credential names
+(`isCredentialName` in `agent-process`), except those in `pass` (for example `SSH_AUTH_SOCK`, for
+`git push` over SSH). A variable in `pass` reaches the MCP servers as well as the model's commands.
 
 ## Budget
 
