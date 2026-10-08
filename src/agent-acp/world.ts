@@ -31,9 +31,9 @@
 import type { Environment } from "../agent-process/environment.ts";
 import { Effect, FileSystem, HashMap, Option, Ref } from "effect";
 import { homedir } from "node:os";
-import { type PlannedWrite, plannedWrites, type ShownWrite, shownWrites, writtenFiles } from "../agent-host/command-writes.ts";
+import { type PlannedWrite, plannedWrites, type ShownWrite, shownWrites } from "../agent-host/command-writes.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
-import { type Current, currentOnDisk, recordingWrites } from "../agent-tools/file-change.ts";
+import { type Current, currentOnDisk } from "../agent-tools/file-change.ts";
 import { ShellCommand, WordText } from "../agent-policy/command-segments.ts";
 import type { Folders } from "../agent-policy/command-units.ts";
 import type { AgentConnection } from "effective-acp/agent";
@@ -80,6 +80,12 @@ export interface WorldSession {
   /** In order. The session's tools are the tools of all of them, joined (`toolsOf`). */
   readonly sources: ReadonlyArray<ToolSource>;
   readonly present: Present;
+  /**
+   * A file's text as the world's file tools read and write it, for recording what they change
+   * (`agent-host/recorded-changes.ts`): the editor's text, unsaved changes included, in the editor
+   * world; from the disk when left out.
+   */
+  readonly fileText?: ((full: string) => Effect.Effect<Current>) | undefined;
 }
 
 export interface World<R = never> {
@@ -175,10 +181,9 @@ export const editorWorld: World<FileSystem.FileSystem> = {
         ...(fs?.writeTextFile === true ? [anyTool(described(inFolder(writeFile)))] : []),
         ...(fs?.readTextFile === true && fs.writeTextFile === true ? [anyTool(described(inFolder(editFile)))] : []),
         anyTool(described(updatePlan)),
-        // A command records the files it writes from the disk, which it writes, read just before and after it runs; what is shown before it runs is read through the editor (`writesBefore`).
-        ...(connection.profile.client.capabilities.terminal === true ? [anyTool(described(recordingWrites(writtenFiles(folders))(runCommand)))] : []),
+        ...(connection.profile.client.capabilities.terminal === true ? [anyTool(described(runCommand))] : []),
       ];
-      const source = yield* sourceOf(tools, { strictInput }).pipe(Effect.provideService(Editor, { connection, sessionId, cwd, terminals, writesBefore, currentOf }));
+      const source = yield* sourceOf(tools, { strictInput }).pipe(Effect.provideService(Editor, { connection, sessionId, cwd, terminals, writesBefore }));
 
       const git = gitToolsAt(cwd, strictInput);
       const plain = presentFrom([...source.tools, ...(git?.catalog ?? [])]);
@@ -223,7 +228,7 @@ export const editorWorld: World<FileSystem.FileSystem> = {
             : located;
         });
 
-      return { system: yield* systemFor(cwd, git, additional), sources: [source, ...(git === undefined ? [] : [yield* git.source])], present };
+      return { system: yield* systemFor(cwd, git, additional), sources: [source, ...(git === undefined ? [] : [yield* git.source])], present, fileText: (full) => currentOf(full, full) };
     }),
 };
 
@@ -237,8 +242,7 @@ export const workspaceWorld: World<FileSystem.FileSystem> = {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const additional = additionalFolders ?? [];
-      const writtenBy = writtenFiles({ working: WordText.make(cwd), home: WordText.make(homedir()) });
-      const workspace = workspaceTools(cwd, { strictInput, additional, writtenBy, ...(environment === undefined ? {} : { environment }) });
+      const workspace = workspaceTools(cwd, { strictInput, additional, ...(environment === undefined ? {} : { environment }) });
       const git = gitToolsAt(cwd, strictInput);
       return {
         system: yield* systemFor(cwd, git, additional),

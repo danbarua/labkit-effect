@@ -150,51 +150,6 @@ test("a call that cannot run says why: a missing file, a result over 256 KiB, in
   expect(await call("delete_file", { path: "a" })).toBe("NotFound");
 });
 
-/** The details a call of `tool` with `input` records of what it did; undefined when it records none or fails. */
-const detailsOf = (tool: string, input: object) =>
-  runTest(
-    Effect.gen(function* () {
-      const outcome = yield* (yield* ToolRunner).run(ToolName.make(tool), receivedJson({ intent: "A test call.", ...input } as never), CallId.make("call-1"));
-      return outcome._tag === "Succeeded" ? outcome.details?.map((detail) => ({ ...detail, patch: asText(detail.patch) })) : undefined;
-    }).pipe(Effect.provide(runner.pipe(Layer.provide(BunServices.layer)))),
-  );
-
-test("write_file and edit_file record what they changed: a file created, with its text; a file updated, with a unified diff; nothing when the text is the same", async () => {
-  const full = `${root}/src/d.txt`;
-  expect((await detailsOf("write_file", { path: "src/d.txt", text: "one\ntwo\n" })) as unknown).toEqual([{ _tag: "FileChanged", path: full, change: "created", patch: "one\ntwo\n" }]);
-  expect((await detailsOf("edit_file", { path: "src/d.txt", old_text: "two", new_text: "three" })) as unknown).toEqual([
-    { _tag: "FileChanged", path: full, change: "updated", patch: [`--- ${full}`, `+++ ${full}`, "@@ -1,2 +1,2 @@", " one", "-two", "+three"].join("\n") },
-  ]);
-  expect(await detailsOf("write_file", { path: "src/d.txt", text: "one\nthree\n" })).toBeUndefined();
-});
-
-test("a patch over 32 KiB is kept to its first lines that fit, and the bytes left out are recorded", async () => {
-  const line = `${"x".repeat(99)}\n`;
-  const text = line.repeat(400);
-  const details = (await detailsOf("write_file", { path: "src/big.txt", text })) ?? [];
-  expect(details.map((detail) => ({ change: detail.change, kept: Buffer.byteLength(detail.patch), cut: detail.cut })) as unknown).toEqual([{ change: "created", kept: 327 * 100, cut: 73 * 100 }]);
-  expect(details[0]?.patch.endsWith(line)).toBe(true);
-});
-
-test("with writtenBy, run_command records each file its command writes, from its text before the command ran and after; a failed command records nothing", async () => {
-  const full = join(root, "src", "w.txt");
-  writeFileSync(full, "old\n");
-  const recording = workspaceTools(root, { writtenBy: (command) => (command.includes("w.txt") ? [full, full] : []) });
-  const ran = (command: string) =>
-    runTest(
-      Effect.gen(function* () {
-        const outcome = yield* (yield* ToolRunner).run(ToolName.make("run_command"), receivedJson({ intent: "A test call.", command } as never), CallId.make("call-1"));
-        return outcome._tag === "Succeeded" ? (outcome.details ?? []).map((detail) => ({ ...detail, patch: asText(detail.patch) })) : outcome.reason._tag;
-      }).pipe(Effect.provide(Layer.effect(ToolRunner, recording.source).pipe(Layer.provide(BunServices.layer)))),
-    );
-  // The file is named twice, and recorded once.
-  expect((await ran("echo new > src/w.txt")) as unknown).toEqual([
-    { _tag: "FileChanged", path: full, change: "updated", patch: [`--- ${full}`, `+++ ${full}`, "@@ -1,1 +1,1 @@", "-old", "+new"].join("\n") },
-  ]);
-  expect(await ran("echo again > src/w.txt; exit 1")).toBe("Reported");
-  expect(await ran("echo hi")).toEqual([]);
-});
-
 test("read_file reads a blob:// pointer from the blob store as text, with line and limit; a pointer to bytes that are not text, to no blob, or that is no pointer is refused", async () => {
   const read = (paths: ReadonlyArray<{ readonly path: string; readonly line?: number; readonly limit?: number }>) =>
     runTest(

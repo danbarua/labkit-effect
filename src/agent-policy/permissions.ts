@@ -215,7 +215,8 @@ const changeByKind: ReadonlyMap<ToolKind, UnitPath["access"]> = new Map<ToolKind
   ["delete", "deletes"],
   ["move", "moves"],
 ]);
-const editsFiles: ReadonlyArray<ToolKind> = ["edit", "delete", "move"];
+/** The kinds of tool that change files: they run unasked in `acceptEdits`, and what they change is recorded (`agent-host/recorded-changes.ts`). */
+export const editsFiles: ReadonlyArray<ToolKind> = ["edit", "delete", "move"];
 
 const option = (id: Parameters<typeof OptionId.make>[0], name: Parameters<typeof OptionName.make>[0], kind: PermissionOption["kind"]): PermissionOption => ({
   optionId: OptionId.make(id),

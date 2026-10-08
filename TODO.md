@@ -122,8 +122,8 @@ model.
           brand's folder, a blob of another session's included, given its id.
         - Tool results with details (Dan, 2026-10-08). Built: `FileChanged` from the file tools and
           from commands' writes whose text their words show, shown by ACP live and replayed alike
-          and by the REPL; a patch over 32 KiB cut, with the bytes left out recorded. To do: the
-          tool runner reading the files for every tool (`docs/agent-tools-direction.md`), and a
+          and by the REPL; a patch over 32 KiB cut, with the bytes left out recorded; the files read
+          where the calls run, for every host tool (`agent-host/recorded-changes.ts`). To do: a
           `deleted` change.
         - The opinionated harness runs a composite command itself (Dan, 2026-10-07): it splits the
           command into its programs and their order, runs each, and returns to the model the result

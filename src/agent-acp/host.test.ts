@@ -8,7 +8,7 @@
 
 import { expect } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import * as git from "es-git";
 import { BunServices } from "@effect/platform-bun";
@@ -266,7 +266,8 @@ interface ClientLog {
 type Ran = { readonly output: string; readonly exitCode: number } | "runs on";
 
 /**
- * The SDK's client: serves `fs/*` from `contents`, answers permission with `permission`, records each update. `until(check)`
+ * The SDK's client: serves `fs/*` from its buffers, which start as `contents`, answers permission with `permission`, records each
+ * update. A write sets the file's buffer and, as an editor saves it, writes the file under the test's folder. `until(check)`
  * resolves once `check` holds of the updates recorded: the host's updates after an answer come once it is written.
  */
 function sdkClient(
@@ -277,6 +278,7 @@ function sdkClient(
   run: (command: string) => Ran = () => ({ output: "", exitCode: 0 }),
 ) {
   const log: ClientLog = { updates: [], files: [], asked: [], terminals: [] };
+  const buffers = new Map(Object.entries(contents));
   const ran = new Map<string, Ran>();
   const waiting: Array<{ readonly check: (updates: ReadonlyArray<Update>) => boolean; readonly resolve: () => void }> = [];
   const app = acp
@@ -287,10 +289,15 @@ function sdkClient(
     })
     .onRequest("fs/read_text_file", (ctx) => {
       log.files.push({ method: "fs/read_text_file", path: ctx.params.path, sessionId: ctx.params.sessionId });
-      return { content: contents[ctx.params.path] ?? "" };
+      return { content: buffers.get(ctx.params.path) ?? "" };
     })
     .onRequest("fs/write_text_file", (ctx) => {
       log.files.push({ method: "fs/write_text_file", path: ctx.params.path, sessionId: ctx.params.sessionId, content: ctx.params.content });
+      buffers.set(ctx.params.path, ctx.params.content);
+      if (ctx.params.path.startsWith(`${testFolder()}/`)) {
+        mkdirSync(dirname(ctx.params.path), { recursive: true });
+        writeFileSync(ctx.params.path, ctx.params.content);
+      }
       return {};
     })
     .onRequest("terminal/create", (ctx) => {
@@ -426,7 +433,11 @@ test("the first prompt opens the draft; thinking and text stream, write_file goe
   expect(texts.join("")).toBe("Writing.Done.");
   expect(log.asked).toHaveLength(1);
   expect(log.asked[0]?.toolCall).toMatchObject({ toolCallId: "call-1", title: "Write the notes.", kind: "edit", locations: [{ path: join(host.cwd, "notes.txt") }] });
-  expect(log.files).toEqual([{ method: "fs/write_text_file", path: join(host.cwd, "notes.txt"), sessionId, content: "hello" }]);
+  // After the write, the host reads the file back through the editor, to record what the call changed.
+  expect(log.files).toEqual([
+    { method: "fs/write_text_file", path: join(host.cwd, "notes.txt"), sessionId, content: "hello" },
+    { method: "fs/read_text_file", path: join(host.cwd, "notes.txt"), sessionId },
+  ]);
   const facts = await factsOn(storeFileOf(host.directory, sessionId));
   expect(facts[0]).toMatchObject({
     origin: { _tag: "User", via: "acp" },
@@ -866,6 +877,9 @@ test("a loaded session shows the diffs of the files that write_file and edit_fil
     ],
   });
   const a = join(testFolder(), "work", "a.txt");
+  // The file the editor has open is on the disk as well.
+  mkdirSync(first.cwd, { recursive: true });
+  writeFileSync(a, "first\nalpha\nlast\n");
   const live = sdkClient(undefined, { [a]: "first\nalpha\nlast\n" });
   const sessionId = await live.app.connectWith(first.stream, async (ctx) => {
     await initialize(ctx, { fs: { readTextFile: true, writeTextFile: true } });
@@ -2471,11 +2485,12 @@ test("a call with properties its tool does not take runs without them and says w
   const lenient = await run(false);
   expect(lenient.ended).toMatchObject({ status: "completed" });
   expect(JSON.stringify(lenient.ended)).toContain("[Not inputs of write_file, so ignored: mode.]");
-  expect(lenient.files.map((each) => each.method)).toEqual(["fs/write_text_file"]);
+  expect(lenient.files.map((each) => each.method)).toEqual(["fs/write_text_file", "fs/read_text_file"]);
   const strict = await run(true);
   expect(strict.ended).toMatchObject({ status: "failed" });
   expect(JSON.stringify(strict.ended)).toContain("write_file does not take this input");
-  expect(strict.files).toEqual([]);
+  // Nothing is written; the file's text was read before the call, to record what it would change.
+  expect(strict.files.filter((each) => each.method === "fs/write_text_file")).toEqual([]);
 });
 
 test("session/new starts with the model the configuration names; its overrides decide the efforts offered, and what the session knows of the model", async () => {

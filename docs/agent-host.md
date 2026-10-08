@@ -31,6 +31,7 @@ about them are in [agent-host-direction.md](agent-host-direction.md).
 | `launch.ts` | The launch options both hosts share, and the configuration layers they make. |
 | `command-parser.ts` | The command parser: the WebAssembly module of `native/bash-segments`, which splits a shell command into its segments (`docs/bash-segments.md`). |
 | `command-writes.ts` | The files a command writes text to (`cat > f <<'EOF'`, `echo x >> f`), their full paths, and their text before the command runs, read from the disk (`currentOnDisk`, `agent-tools/file-change.ts`) or by a host's own means: what a host shows as each file's diff, and the files a command tool records (`writtenFiles`). |
+| `recorded-changes.ts` | `recordingChanges`: the wrapper around a host's own tool sources that records what each call changes in files (`FileChanged`), the files found as the permission policy finds them, each read just before and after the call, under the size limits. |
 | `command-detail.ts` | A permission question's detail, shown as Markdown for ACP (code in a fence that names its language, an explanation as a nested list) and as plain lines for the REPL. |
 | `trust.ts` | Trusted folders: the folders whose own `.env` files and project settings the agent reads (`trusted-folders.json`). |
 | `log-keys.ts` | The names of the log events that this module writes. |

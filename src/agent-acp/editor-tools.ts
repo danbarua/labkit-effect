@@ -21,7 +21,6 @@ import { type SessionId, type TerminalId, ToolCallId } from "effective-acp/schem
 import { type CallId, ToolName } from "../agent-machine/names.ts";
 import type { ShownWrite } from "../agent-host/command-writes.ts";
 import { ShellCommand } from "../agent-policy/command-segments.ts";
-import { type Current, fileChanged } from "../agent-tools/file-change.ts";
 import { FilePath } from "../agent-tools/paths.ts";
 import { CurrentCall, Reported, Rejected, type Tool } from "../agent-tools/tool.ts";
 import { commandSeconds, EditFile, maxReadBytes, maxReadText, ReadFile, RunCommand } from "../agent-tools/workspace.ts";
@@ -41,8 +40,6 @@ export class Editor extends Context.Service<
      * that the call shows each write as a diff; the command runs after it.
      */
     readonly writesBefore: (call: CallId, command: ShellCommand) => Effect.Effect<ReadonlyArray<ShownWrite>>;
-    /** The current text of the file at `full` (`path` as given): whether it exists from the disk, and its text from the editor, unsaved changes included. */
-    readonly currentOf: (full: string, path: string) => Effect.Effect<Current>;
   }
 >()("agent-acp/Editor") {}
 
@@ -108,10 +105,9 @@ export const writeFile: Tool<typeof WriteFile.fields, Editor> = {
     Effect.gen(function* () {
       const bytes = Buffer.byteLength(input.content);
       if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The content is over ${maxReadText} (${bytes} bytes). Write less.` });
-      const { connection, sessionId, currentOf } = yield* Editor;
-      const before = yield* currentOf(input.path, input.path);
+      const { connection, sessionId } = yield* Editor;
       yield* connection.client["fs/write_text_file"]({ sessionId, path: input.path, content: input.content }).pipe(Effect.mapError(failed("fs/write_text_file", input.path)));
-      return { text: `Wrote ${bytes} bytes to ${input.path}.`, details: fileChanged(input.path, before, input.content) };
+      return `Wrote ${bytes} bytes to ${input.path}.`;
     }),
 };
 
@@ -135,7 +131,7 @@ export const editFile: Tool<typeof EditFile.fields, Editor> = {
       const bytes = Buffer.byteLength(changed);
       if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The file would be over ${maxReadText} (${bytes} bytes).` });
       yield* connection.client["fs/write_text_file"]({ sessionId, path: input.path, content: changed }).pipe(Effect.mapError(failed("edit_file", input.path)));
-      return { text: `Edited ${input.path}.`, details: fileChanged(input.path, { _tag: "Text", text: content }, changed) };
+      return `Edited ${input.path}.`;
     }),
 };
 

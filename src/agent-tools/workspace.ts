@@ -42,7 +42,6 @@ import { described } from "./described.ts";
 import { inWorkspace } from "./in-workspace.ts";
 import { blobReads } from "./blob-reads.ts";
 import { maxReadBytes, maxReadText, selectedLines } from "./read-limits.ts";
-import { currentOnDisk, fileChanged, recordingWrites } from "./file-change.ts";
 import { FilePath, FolderPath } from "./paths.ts";
 import { anyTool, Rejected, Reported, sourceOf, type Tool } from "./tool.ts";
 
@@ -179,10 +178,8 @@ export const writeFile: Tool<typeof WriteFile.fields, FileSystem.FileSystem> = {
     Effect.gen(function* () {
       const bytes = Buffer.byteLength(text);
       if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The text is over ${maxReadText} (${bytes} bytes). Write less.` });
-      const fs = yield* FileSystem.FileSystem;
-      const before = yield* currentOnDisk(fs, path, path);
-      yield* fs.writeFileString(path, text).pipe(Effect.mapError(reported(path)));
-      return { text: `Wrote ${bytes} bytes to ${path}.`, details: fileChanged(path, before, text) };
+      yield* (yield* FileSystem.FileSystem).writeFileString(path, text).pipe(Effect.mapError(reported(path)));
+      return `Wrote ${bytes} bytes to ${path}.`;
     }),
 };
 
@@ -206,7 +203,7 @@ export const editFile: Tool<typeof EditFile.fields, FileSystem.FileSystem> = {
       const bytes = Buffer.byteLength(changed);
       if (bytes > maxReadBytes) return yield* new Rejected({ problem: `The file would be over ${maxReadText} (${bytes} bytes).` });
       yield* fs.writeFileString(path, changed).pipe(Effect.mapError(reported(path)));
-      return { text: `Edited ${path}.`, details: fileChanged(path, { _tag: "Text", text }, changed) };
+      return `Edited ${path}.`;
     }),
 };
 
@@ -259,7 +256,7 @@ export const runCommand = (root: string, environment: Environment): Tool<typeof 
 /**
  * The workspace tools for the folder `root`. With `strictInput`, a call whose input has properties
  * its tool does not take is refused; without (the default), it runs without them, and its result
- * says which were ignored. With `writtenBy`, `run_command` records the files its command writes.
+ * says which were ignored. A host records what the tools change in files (`agent-host/recorded-changes.ts`).
  */
 export function workspaceTools(
   root: string,
@@ -267,8 +264,6 @@ export function workspaceTools(
     readonly strictInput?: boolean;
     readonly environment?: Environment;
     readonly additional?: ReadonlyArray<string>;
-    /** The full paths of the files a command writes text to, from its words; with it, `run_command` records them (`recordingWrites`). */
-    readonly writtenBy?: (command: string) => ReadonlyArray<string>;
   } = {},
 ) {
   // What `run_command` is given: what the host composed (`commandEnvironment`), else this process's without its credentials.
@@ -280,7 +275,7 @@ export function workspaceTools(
     anyTool(described(bound(listDir))),
     anyTool(described(bound(writeFile))),
     anyTool(described(bound(editFile))),
-    anyTool(described(options.writtenBy === undefined ? runCommand(root, environment) : recordingWrites(options.writtenBy)(runCommand(root, environment)))),
+    anyTool(described(runCommand(root, environment))),
   ];
   return {
     catalog: tools.map((tool) => tool.spec),

@@ -81,6 +81,16 @@ export const additionalDirectoriesOf = (configuration: Configuration): ReadonlyA
     return settings.additionalDirectories.filter((folder): folder is string => typeof folder === "string");
   });
 
+/** The command tools of `configuration`'s permissions plug-in (`commandTools`), whose calls are judged and recorded by their commands; the default ones when it names none. */
+export const commandToolsOf = (configuration: Configuration): ReadonlyArray<string> => {
+  const named = (configuration.lists.toolCalls ?? []).flatMap((entry) => {
+    const settings: unknown = entry.settings;
+    if (entry.plugin.use !== permissions.use || typeof settings !== "object" || settings === null || !("commandTools" in settings) || !Array.isArray(settings.commandTools)) return [];
+    return [settings.commandTools.filter((tool): tool is string => typeof tool === "string")];
+  });
+  return named[0] ?? defaultPermissionSettings.commandTools;
+};
+
 export const maxTurnRequests = plugin("maxTurnRequests", Schema.Struct({ limit: defaulted(atLeast(1), defaultMaxTurnRequests) }), ["modelRequests"], ({ limit }) => ({
   modelRequests: turnRequestLimit(limit),
 }));

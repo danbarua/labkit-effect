@@ -115,11 +115,10 @@ Dan: "Tool results with details: … Yes, that's the one." Built: a tool returns
 has them, the details of what it did (`ToolOutput`, `ToolDetail`), which a successful outcome
 records and the model is never sent (`docs/agent-machine.md`, `docs/agent-session.md`). The first
 detail is `FileChanged`: a text file created, with its whole text, or updated, with a unified diff.
-`write_file`, `edit_file`, `terminal_command` and `run_command` record it, a command for each file
-whose text its words show (`writtenFiles`), its text read from the disk just before and after the
-command runs (`recordingWrites`). ACP
-shows a finished call's diffs from it, live and replayed alike, and the REPL prints them under the
-call (`docs/agent-acp.md`). Other harnesses keep the same two parts per result: Claude Code's
+The hosts record it for their own tools where the calls run (`agent-host/recorded-changes.ts`):
+`write_file` and `edit_file` by their path inputs, `terminal_command` and `run_command` for each
+file whose text their words show (`writtenFiles`). ACP shows a finished call's diffs from it, live
+and replayed alike, and the REPL prints them under the call (`docs/agent-acp.md`). Other harnesses keep the same two parts per result: Claude Code's
 `toolUseResult`, Codex's `FileChange`, opencode's `metadata`, omp's `details`.
 
 The patch is kept with the result, in the facts, cut at 32 KiB at the end of a line, with the
@@ -127,20 +126,18 @@ bytes left out recorded (`cut`), as omp cuts its stored diffs. Dan: "There are d
 that handle big diffs." The REPL prints what was kept and how much was left out; there is nothing
 past 32 KiB for it to expand.
 
-**The tool runner reads the files (Dan, 2026-10-08).** "Yes, that way everything goes through the
-trust layer (and we can enforce size limits in one place)." Not built. The design proposed:
+**Where the calls run reads the files (Dan, 2026-10-08).** "Yes, that way everything goes through
+the trust layer (and we can enforce size limits in one place)." Built as a wrapper around each
+host's own tool sources (`recordingChanges`): it finds the files a call will change from the
+judgments the permission policy makes (a tool's path inputs for a tool whose kind changes files,
+`editsFiles`; a command tool's written files, `writtenFiles`), reads each just before the call runs
+and once it has succeeded, through the world's reader (the editor's text in the editor world, the
+disk for commands and elsewhere), and holds the limits: a text over 256 KiB is not read, and a
+patch is cut at 32 KiB. The tools return their text alone. An MCP server's tools are not wrapped.
+The editor world reads a written file back through the editor once the call has run.
 
-- A wrapper around the session's tool runner finds the files a call will change from the same
-  judgments the permission policy makes: a tool's path inputs (`ToolSpec.paths`) for a tool whose
-  kind changes files, and the files a command writes text to (`writtenFiles`) for a command tool.
-- It reads each file's text just before the call runs and once it has run, through a reader each
-  world supplies: the editor's text for the editor's file tools, the disk for commands and the
-  workspace's tools. It records `FileChanged` from the two, and holds the size limits (256 KiB read,
-  32 KiB kept).
-- The tools then return their text alone, and `recordingWrites` and the file tools' own reads go.
-
-The other way, every tool's reads and writes through one files service, also sees what the agent
-reads, which the harness's notices of changed files want, but it means rewriting every tool.
+Not done: every tool's reads and writes through one files service, which would also see what the
+agent reads, as the harness's notices of changed files want.
 
 **Not built.**
 

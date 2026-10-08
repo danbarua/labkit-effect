@@ -37,10 +37,10 @@ import type { Fact } from "../../agent-machine/fact.ts";
 import { InputText, type TurnId, Via } from "../../agent-machine/names.ts";
 import type { SettingsChange } from "../../agent-machine/settings.ts";
 import { gitTools, isRepositoryRoot } from "../../agent-tools/git.ts";
-import { additionalDirectoriesOf } from "../../agent-config/builtins.ts";
+import { additionalDirectoriesOf, commandToolsOf } from "../../agent-config/builtins.ts";
 import type { ToolSpec } from "../../agent-session/contracts.ts";
 import { foldersOf } from "../../agent-host/services.ts";
-import { writtenFiles } from "../../agent-host/command-writes.ts";
+import { recordingChanges } from "../../agent-host/recorded-changes.ts";
 import { workspaceTools } from "../../agent-tools/workspace.ts";
 import type { Session } from "../../agent-session/loop.ts";
 import { SourcedToolRunner } from "../../agent-session/tool-sources.ts";
@@ -97,13 +97,11 @@ export const madeIn = (record: unknown, cwd: string): boolean => Predicate.isRea
 
 /**
  * The workspace tools for the working folder; their commands run with the environment the
- * configuration builds (`commandEnvironment`), and record the files they write text to
- * (`writtenFiles`).
+ * configuration builds (`commandEnvironment`).
  */
 const workspaceOf = (config: Config) =>
   workspaceTools(process.cwd(), {
     strictInput: config.strictToolInput,
-    writtenBy: writtenFiles(foldersOf(process.cwd(), [])),
     additional: foldersOf(process.cwd(), [...config.additionalFolders, ...additionalDirectoriesOf(config.configuration)]).additional ?? [],
     environment: processEnvironmentWith(seamListsOf(config.configuration, { canAsk: config.canAsk }).commandEnvironment ?? [removeCredentials()]),
   });
@@ -176,10 +174,12 @@ const requiredRunning = (configuration: Configuration, mcp: McpServers) =>
  * The working folder's bolt-on: the workspace tools, the git tools when the folder is a repository's
  * root, and the system text that names the folder (and says it is a repository's root).
  */
-const folderBoltOn = (workspace: ReturnType<typeof workspaceOf>, git: ReturnType<typeof gitOf>) =>
+const folderBoltOn = (config: Config, workspace: ReturnType<typeof workspaceOf>, git: ReturnType<typeof gitOf>) =>
   Effect.gen(function* (): Effect.fn.Return<BoltOn, never, FileSystem.FileSystem> {
+    // What the working folder's tools change in files is recorded with their results; the MCP servers' tools are not wrapped.
+    const recorded = recordingChanges({ root: process.cwd(), folders: foldersOf(process.cwd(), []), commandTools: commandToolsOf(config.configuration) });
     return {
-      sources: [yield* workspace.source, ...(git === undefined ? [] : [yield* git.source])],
+      sources: yield* Effect.forEach([yield* workspace.source, ...(git === undefined ? [] : [yield* git.source])], recorded),
       system: [workspace.system, ...(git === undefined ? [] : [yield* git.system])].join(" "),
     };
   });
@@ -224,7 +224,7 @@ export const withCliSession = <A, E, R, L, H>(
     // The MCP servers start in the session's scope, before its services, because their tools are among them.
     const mcp = yield* startMcpServers(givenOf(config.configuration), [{ uri: pathToFileURL(process.cwd()).href, name: basename(process.cwd()) }]);
     yield* requiredRunning(config.configuration, mcp);
-    const folder = yield* folderBoltOn(workspace, gitOf(config));
+    const folder = yield* folderBoltOn(config, workspace, gitOf(config));
     return yield* withSession(
       {
         sessionId: config.sessionId,

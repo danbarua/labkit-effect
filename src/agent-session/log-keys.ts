@@ -12,6 +12,12 @@ export const logKeys = {
      * the cause.
      */
     currentUnread: "tool.file.current_unread",
+    /**
+     * Warning: what a call changed in a file is not recorded, since the file's text before or after
+     * the call is not known (larger than 256 KiB, or not read). Details: the tool, the file's full
+     * path, and the reason; annotated with the call.
+     */
+    changeNotRecorded: "tool.file.change_not_recorded",
   },
   blobs: {
     /** A blob's file holds bytes whose hash is not its id; the store finds nothing for it. */

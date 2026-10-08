@@ -63,7 +63,10 @@ import { markdownOf } from "../agent-host/export.ts";
 import { KnownWithLocalServer, localServer, SettlingWithLocalServer } from "../agent-host/local-server.ts";
 import { readRecord, RecordFailed, recordedSessions, recordFileOf, writeRecord } from "../agent-host/record.ts";
 import { foldersOf, SessionServices } from "../agent-host/services.ts";
-import { additionalDirectoriesOf } from "../agent-config/builtins.ts";
+import { additionalDirectoriesOf, commandToolsOf } from "../agent-config/builtins.ts";
+import { recordingChanges } from "../agent-host/recorded-changes.ts";
+import { WordText } from "../agent-policy/command-segments.ts";
+import { homedir } from "node:os";
 import type { Fact } from "../agent-machine/fact.ts";
 import { leftRunning } from "../agent-machine/left-running.ts";
 import { InputText, SessionId, type TurnId } from "../agent-machine/names.ts";
@@ -534,9 +537,16 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             }
             const { catalog } = yield* toolsOf(mcp.sources);
             const mcpPresent = presentFrom(catalog);
+            // What the world's own tools change in files is recorded with their results; the MCP servers' tools are not wrapped.
+            const recorded = recordingChanges({
+              root: cwd,
+              folders: { working: WordText.make(cwd), home: WordText.make(homedir()) },
+              commandTools: commandToolsOf(configuration),
+              fileText: opened.fileText,
+            });
             const world: WorldSession = {
               system: opened.system,
-              sources: [...opened.sources, ...mcp.sources],
+              sources: [...(yield* Effect.forEach(opened.sources, recorded)), ...mcp.sources],
               // A call is shown with an MCP server's result as text, whether or not the server is still running, and with its details.
               present: (call, outcome, mode) => {
                 const sent = outcome === undefined ? undefined : outcomeAsText(outcome);
