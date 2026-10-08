@@ -144,7 +144,7 @@ test("the server sends the page, refuses a Begin it cannot start, and sends a pa
     request === 3 ? Effect.promise(async () => { held.resolve(); await release.promise; }) : Effect.void,
   );
   const match = await runTest(makeMatch(playersOf(engine.player, adventurerOfShortGame().player), run));
-  const server = serve(match, { hostname: "localhost", port: 0 });
+  const server = serve(match, 0);
   try {
     const page = await fetch(new URL("/", server.url));
     expect(page.headers.get("content-type")).toContain("text/html");

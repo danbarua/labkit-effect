@@ -1,7 +1,8 @@
 /**
- * The Zork spectator: `bun run zork:spectator`, then open http://localhost:3001 on a phone-sized
+ * The Zork spectator: `bun run zork:spectator`, then open http://127.0.0.1:3001 on a phone-sized
  * screen. The page begins a game with the Engine and Adventurer chosen, or shows the game that is
- * running (`match.ts`). The server listens on `localhost` only, so only this machine can begin a game.
+ * running (`match.ts`). The server listens on `127.0.0.1` only, so only this machine can begin a game;
+ * a second spectator started while one listens exits with an error (`listening`).
  *
  * Each model is asked as `zork/players.ts` describes, with its provider's key from the environment;
  * a model whose key is not set is refused when the game begins. Each game is played as `bun run zork`
@@ -16,7 +17,7 @@ import { OtlpSpansAndMetrics, otlpLogger } from "../../instrumentation/telemetry
 import { adventurerFor, playerFor } from "../zork/players.ts";
 import { play } from "../zork/scenario.ts";
 import { makeMatch, modelOf, type Players } from "./match.ts";
-import { serve } from "./server.ts";
+import { listening } from "./server.ts";
 
 const port = 3001;
 
@@ -37,5 +38,5 @@ const match = await Effect.runPromise(
     ),
   ),
 );
-const server = serve(match, { hostname: "localhost", port });
+const server = listening(match, port);
 console.log(`Zork spectator: ${server.url.href}`);

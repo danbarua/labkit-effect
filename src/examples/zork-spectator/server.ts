@@ -33,11 +33,19 @@ const begin = async (match: Match, request: Request): Promise<Response> => {
   return Response.json(begun, { status: statuses[begun._tag] });
 };
 
+/**
+ * The one address the spectator listens on, so that only this machine can open it. `localhost` would
+ * name two addresses, `::1` and `127.0.0.1`, and Bun listens on whichever of them is free: a second
+ * spectator would then start beside the first, on the other address, and a browser would reach the
+ * first.
+ */
+export const hostname = "127.0.0.1";
+
 /** Serves the spectator for `match` on `hostname` and `port` (0 for any free port). */
-export const serve = (match: Match, options: { readonly hostname: string; readonly port: number }) =>
+export const serve = (match: Match, port: number) =>
   Bun.serve({
-    hostname: options.hostname,
-    port: options.port,
+    hostname,
+    port,
     idleTimeout: idleSeconds,
     fetch: (request) => {
       const { pathname } = new URL(request.url);
@@ -47,3 +55,14 @@ export const serve = (match: Match, options: { readonly hostname: string; readon
       return new Response("Not found.", { status: 404 });
     },
   });
+
+/** Serves the spectator for `match` on `port`. When the port is in use, prints why and exits with status 1. */
+export const listening = (match: Match, port: number): ReturnType<typeof serve> => {
+  try {
+    return serve(match, port);
+  } catch (error) {
+    if ((error as { readonly code?: unknown }).code !== "EADDRINUSE") throw error;
+    console.error(`ERROR: ${hostname}:${port} is in use.\nHINT: Stop the spectator that is listening there, then start this one again.`);
+    return process.exit(1);
+  }
+};

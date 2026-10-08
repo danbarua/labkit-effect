@@ -1,6 +1,6 @@
 /**
  * The Zork spectator with scripted players, which ask no model: `bun run zork:spectator:scripted`,
- * then open http://localhost:3002. Whichever labels are chosen, the engine narrates the world's own
+ * then open http://127.0.0.1:3002. Whichever labels are chosen, the engine narrates the world's own
  * event and offers every available tool, and the adventurer plays the same short game: it opens the
  * mailbox, takes the leaflet and the lantern, opens the trapdoor and goes down without light, and is
  * eaten in game turn 7. Each answer takes 1.5 seconds, so the page shows the game arrive turn by turn.
@@ -8,7 +8,7 @@
  * Its sessions and transcripts are kept in `logs/zork-spectator/scripted/`, apart from real games,
  * and log at the level `LABKIT_LOG_LEVEL` names, info by default (`agent-host/log-level.ts`); a value
  * that names no level is reported in each session's log.
- * Like the spectator, the server listens on `localhost` only.
+ * Like the spectator, the server listens on `127.0.0.1` only.
  */
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
@@ -20,7 +20,7 @@ import { play } from "../zork/scenario.ts";
 import { adventurerScript, engineScript, scriptedPlayer } from "../zork/scripted.ts";
 import type { Action } from "../zork/world.ts";
 import { makeMatch } from "./match.ts";
-import { serve } from "./server.ts";
+import { listening } from "./server.ts";
 
 const port = 3002;
 const folder = join("logs", "zork-spectator", "scripted");
@@ -50,5 +50,5 @@ const match = await Effect.runPromise(
     ),
   ),
 );
-const server = serve(match, { hostname: "localhost", port });
+const server = listening(match, port);
 console.log(`Zork spectator, scripted: ${server.url.href}`);

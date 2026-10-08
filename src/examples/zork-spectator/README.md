@@ -5,16 +5,17 @@ A phone page that begins a Zork game (`../zork`) and shows it as it is played:
 ```sh
 # Set the key of each provider whose models you want to choose, then:
 bun run zork:spectator
-# Open http://localhost:3001 on a phone-sized screen.
+# Open http://127.0.0.1:3001 on a phone-sized screen.
 ```
 
-The server listens on `localhost` only, so only this machine can open the page and begin a game.
+The server listens on `127.0.0.1` only, so only this machine can open the page and begin a game. A
+second spectator started while one is listening exits with an error naming the address in use.
 
 To see the page without a provider's key, run the scripted spectator instead:
 
 ```sh
 bun run zork:spectator:scripted
-# Open http://localhost:3002.
+# Open http://127.0.0.1:3002.
 ```
 
 Whichever models are chosen, it plays the same short game with scripted players
