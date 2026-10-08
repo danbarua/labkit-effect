@@ -137,10 +137,10 @@ test("sessions are kept in --sessions-dir (LABKIT_ACP_SESSIONS_DIR), else in ~/.
   expect(await directory({ ACME_ACP_SESSIONS_DIR: "/tmp/acme" }, acme)).toBe("/tmp/acme");
 });
 
-test("with --sessions-dir, the sessions' blobs are kept in its blobs folder; without it, in the brand's (the host's default)", async () => {
-  const blobsFolder = async (args: ReadonlyArray<string>) => hostOptionsOf((await launcherOptions(args, {}))!, defaultBrand).blobsFolder;
-  expect(await blobsFolder(["--sessions-dir", "/tmp/given"])).toBe("/tmp/given/blobs");
-  expect(await blobsFolder([])).toBeUndefined();
+test("--sessions-dir moves the sessions alone: the host is given no other folder for their blobs", async () => {
+  const options = hostOptionsOf((await launcherOptions(["--sessions-dir", "/tmp/given"], {}))!, defaultBrand);
+  expect(options.directory).toBe("/tmp/given");
+  expect(Object.keys(options)).not.toContain("blobsFolder");
 });
 
 test("the launcher's options are the brand's variables, and no other brand's", async () => {
