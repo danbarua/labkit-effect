@@ -2,12 +2,14 @@
  * Plain-English notes for a permission question, for what a command does that its words do not say
  * plainly. Each explainer handles one kind of thing, from a program's words (`Unit`):
  *
- * | Explainer | Notes |
- * | --- | --- |
- * | `destructive` | what cannot be undone: `rm` (and `-r`, `-f`), `git reset --hard`, `git push --force`, `git clean`, `git checkout -- <files>`, `git restore`, `git branch -D`, `git stash drop`, `-R` on `chmod`, `chown` and `chgrp`, `dd` to a device |
- * | `network` | the hosts it connects to, and whether it sends them data: `curl`, `wget`, `git push`, `pull`, `fetch` and `clone`, `ssh`, `scp`, `rsync` |
- * | `installs` | what installing packages runs or changes: `npm`, `yarn`, `pnpm`, `bun`, `pip`, `uv pip`, `cargo install`, `gem install`, `go install`, `brew install` |
- * | `paths` | each path outside the working folder that is written relatively, as its full path |
+ * - `destructive`: what cannot be undone: `rm` (and `-r`, `-f`), `git reset --hard`,
+ *   `git push --force`, `git clean`, `git checkout -- <files>`, `git restore`, `git branch -D`,
+ *   `git stash drop`, `-R` on `chmod`, `chown` and `chgrp`, `dd` to a device.
+ * - `network`: the hosts it connects to, and whether it sends them data: `curl`, `wget`,
+ *   `git push`, `pull`, `fetch` and `clone`, `ssh`, `scp`, `rsync`.
+ * - `installs`: what installing packages runs or changes: `npm`, `yarn`, `pnpm`, `bun`, `pip`,
+ *   `uv pip`, `cargo install`, `gem install`, `go install`, `brew install`.
+ * - `paths`: each path outside the working folder that is written relatively, as its full path.
  *
  * `explainers` lists them, and `notesOf` gives a unit's notes, in that order. `commandNotes` gives
  * the notes about the command as a whole: what the session grants offered cover, and a pipeline
