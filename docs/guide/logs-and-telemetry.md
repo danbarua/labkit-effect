@@ -45,18 +45,21 @@ warnings and errors.
    bun run observability:dashboards
    ```
 
-3. Run labkit with `OTEL_EXPORTER_OTLP_ENDPOINT` set to the collector:
+3. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to the collector's address, `http://localhost:4318`, in the
+   environment of the program you run. A program sends telemetry only while the variable is set.
 
    ```sh
-   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 labkit
+   export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # every program run from this shell
+   labkit
    ```
 
-   - Set the variable in the shell's environment, or export it in your shell profile, so that every
-     run sends its telemetry.
-   - The commands run in this checkout (`bun cli`, `bun test`, the scripts) also read it from the
-     checkout's `.env`.
-   - For the ACP agent, add the variable to the environment the editor launches the agent with,
-     in the editor's settings for the agent.
+   - To set it for one run only, put it before the command: `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 labkit`.
+     There, `labkit` is the command that runs, not part of the variable's value.
+   - The commands run in this checkout (`bun cli`, `bun test`, the scripts) also read the variable
+     from the checkout's `.env`.
+   - For the ACP agent, add the variable to the environment that the editor starts the agent with,
+     in the editor's settings for the agent. labkit-web's dev stack passes its own environment to
+     the agent it starts.
 
 4. Open Grafana at <http://localhost:3000>. The dashboards have the tag `labkit`. They include an
    overview, models, providers, costs, requests, errors, tools and one session. Each request links to
@@ -70,8 +73,28 @@ warnings and errors.
 
    The bodies are captured only at the `debug` level.
 
-Each program sends its telemetry under its own service name: `labkit-cli` for the `labkit` command
-and `labkit-acp` for the ACP agent. `OTEL_SERVICE_NAME` replaces the name.
+## Service names
+
+Each program sends its telemetry under a service name, which Grafana shows and filters by:
+
+| Program | Service name |
+| --- | --- |
+| The `labkit` command (`bun cli` in this checkout) | `labkit-cli` |
+| The ACP agent | `labkit-acp` |
+| Zork and the Zork spectator | `labkit-zork` |
+| The tests (`bun test`) | `labkit-tests` |
+| The live probes in `scripts/probes/` | `labkit-probe` |
+| The capture server | `labkit-captures` |
+
+- The `labkit` in `labkit-cli` and `labkit-acp` is the brand that the program runs as. It is
+  `labkit` unless a program that ships the agent gives another brand, or `LABKIT_BRAND` names one.
+  The other names are fixed.
+- `OTEL_SERVICE_NAME` replaces the name for every program run with it.
+- Each dashboard's **Service** list offers the services whose names start with `labkit-`, and shows
+  all of them by default. A program sent under another name, from another brand or another
+  `OTEL_SERVICE_NAME`, is still recorded in the collector, but no dashboard shows it.
+- The names cover this repository's programs only. labkit-web sends no telemetry of its own; the ACP
+  agent it starts sends as `labkit-acp`.
 
 The telemetry carries no API keys: secret values from the environment are redacted from log lines,
 and request bodies are captured without their headers.
