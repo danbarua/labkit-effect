@@ -10,9 +10,7 @@
  * them, the price of an hour-long cache write, and the thinking modes it takes besides the provider's
  * default and `disabled` (`thinking: ["between_tools"]`), the highest effort at which its thinking can
  * be turned off (`thinkingOffUpTo`), and the `observe` settings it takes where it refuses some
- * (`observe`). It also holds a price that the catalog
- * gives and the provider's own pricing contradicts: Claude Sonnet 5.5's cache reads are $0.20 per
- * million tokens, where models.dev gave $0.10 on 2026-10-08. What was measured wins. A measured
+ * (`observe`). What was measured wins. A measured
  * difference in efforts is not kept here: a user's configuration overrides it (`models:`, as
  * `src/agent-config/fixtures/user/40_models.yml` shows).
  *
@@ -95,6 +93,12 @@ function price(cost: Json): Json {
 }
 
 const missing: Array<string> = [];
+/** Each value that the measured file gives in place of a different one that the catalog gives, as `provider/model field: catalog → measured`. */
+const replaced: Array<string> = [];
+const replacing = (named: string, field: string, catalog: unknown, ours: unknown): void => {
+  if (catalog !== undefined && ours !== undefined && JSON.stringify(catalog) !== JSON.stringify(ours))
+    replaced.push(`${named} ${field}: ${JSON.stringify(catalog)} → ${JSON.stringify(ours)}`);
+};
 const models = Object.fromEntries(
   Object.entries(measured).map(([provider, listed]) => [
     provider,
@@ -106,6 +110,8 @@ const models = Object.fromEntries(
           return [];
         }
         const { above, ...base } = price(theirs.cost) as Json & { above?: Json };
+        replacing(`${provider}/${model}`, "input", theirs.modalities.input, ours.input);
+        for (const [field, value] of Object.entries(ours.price ?? {})) replacing(`${provider}/${model}`, `price.${field}`, base[field], value);
         return [
           [
             model,
@@ -180,6 +186,7 @@ writeFileSync(
 const catalogued = Object.entries(others).map(([provider, listed]) => `${provider} ${Object.keys(listed).length}`);
 console.log(`wrote ${catalogPath}: ${catalogued.join(", ")}`);
 for (const reason of leftOut) console.log(`left out of ${catalogPath}: ${reason}`);
+for (const each of replaced) console.log(`${measuredPath} replaces the catalog's ${each}`);
 writeFileSync(
   generatedPath,
   [

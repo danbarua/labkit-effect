@@ -12,7 +12,6 @@
     },
     "claude-sonnet-5-5": {
       "price": {
-        "cacheRead": 0.2,
         "cacheWrite1h": 4
       },
       "thinking": ["between_tools"]

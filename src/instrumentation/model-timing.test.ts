@@ -146,8 +146,8 @@ test("a priced model's response: its request's span has priced=true, the cost an
   const { request, attempt, counted } = await askOnce(target, Effect.succeed(answering(usage)));
   // 100 tokens in the one second after the first token, which came 200ms after the attempt started.
   expect(attempt).toMatchObject({ outcome: "responded", ending: "Complete", stop: "end_turn", output_tokens: 100, ttft_ms: 200, tokens_per_second: 100 });
-  // 1,000 uncached at $2, 100 out at $10, 3,000 read at $0.20, 1,000 written for five minutes at $2.50 and 1,000 for an hour at $4, per million.
-  const components = { input: 0.002, output: 0.001, cache_read: 0.0006, cache_write: 0.0065 };
+  // 1,000 uncached at $2, 100 out at $10, 3,000 read at $0.10, 1,000 written for five minutes at $2.50 and 1,000 for an hour at $4, per million.
+  const components = { input: 0.002, output: 0.001, cache_read: 0.0003, cache_write: 0.0065 };
   expect(request).toMatchObject({
     outcome: "responded",
     ending: "Complete",
@@ -156,7 +156,7 @@ test("a priced model's response: its request's span has priced=true, the cost an
     ttft_ms: 200,
     tokens_per_second: 100,
     priced: true,
-    cost_usd: expect.closeTo(0.0101, 12),
+    cost_usd: expect.closeTo(0.0098, 12),
     cost_input_usd: expect.closeTo(components.input, 12),
     cost_output_usd: expect.closeTo(components.output, 12),
     cost_cache_read_usd: expect.closeTo(components.cache_read, 12),
