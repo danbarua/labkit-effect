@@ -101,8 +101,9 @@ The prompt is then the turn's input, from the same origin. A prompt's input is:
 
 - the text of its text blocks;
 - each resource link as a Markdown link in the text;
-- each image and embedded resource stored in the session's blob store (`blobs/` in its folder) and
-  attached by reference, with its media type and the name its URI ends in.
+- each image and embedded resource stored in the blob store (the brand's `blobs/` folder, which
+  every session and host shares) and attached by reference, with its media type and the name its URI
+  ends in. A session made before blobs were kept there also reads the `blobs/` in its own folder.
 
 ### A prompt
 

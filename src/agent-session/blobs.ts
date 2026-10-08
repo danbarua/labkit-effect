@@ -7,14 +7,14 @@
  * | --- | --- |
  * | `Blobs` default | in memory, while the process runs, so a session given no store still finds what it stored |
  * | `BlobsInMemory` | in memory, while its layer lasts |
- * | `BlobsInFolder(folder)` | as files named for their ids, in `folder` only |
+ * | `BlobsInFolder(folder, readAlso)` | as files named for their ids, in `folder`; read from `folder`, then from each of `readAlso` |
  *
  * `keptOutcome` puts a tool's output that arrived as bytes in the store, so the facts hold its
  * reference (`Received` body `Stored`).
  */
 
 import { createHash } from "node:crypto";
-import { Context, Effect, FileSystem, HashMap, Layer, Option, Path, Ref } from "effect";
+import { Context, Effect, FileSystem, HashMap, Layer, Option, Path, type PlatformError, Ref } from "effect";
 import { BlobId, type BlobRef, FileName } from "../agent-machine/blob.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import type { MediaType } from "../agent-machine/received.ts";
@@ -63,8 +63,10 @@ export const BlobsInMemory = Layer.effect(Blobs, Effect.map(Ref.make(HashMap.emp
 const isBlobId = (id: string): boolean => /^[0-9a-f]{64}$/.test(id);
 
 /**
- * Blobs as files in `folder`, each named for its id; the store reads and writes nothing outside the
- * folder. The folder is created when the first blob is stored. Provide the layer to use it in place
+ * Blobs as files in `folder`, each named for its id. A read that finds no file in `folder` looks in
+ * each of `readAlso` in turn, such as the folder where a session kept its blobs before blobs were
+ * kept in one folder for every session. The store writes nothing outside `folder`, and reads
+ * nothing outside it and `readAlso`. The folder is created when the first blob is stored. Provide the layer to use it in place
  * of the default; it needs a `FileSystem` and a `Path` (`@effect/platform-bun` provides both).
  *
  * - A blob is written to a temporary file in the folder and renamed to its id, so a file named for
@@ -77,7 +79,7 @@ const isBlobId = (id: string): boolean => /^[0-9a-f]{64}$/.test(id);
  * - A file that cannot be written or read is a defect, because the bytes that the facts refer to
  *   cannot be kept.
  */
-export const BlobsInFolder = (folder: string) =>
+export const BlobsInFolder = (folder: string, readAlso: ReadonlyArray<string> = []) =>
   Layer.effect(
     Blobs,
     Effect.gen(function* () {
@@ -95,16 +97,22 @@ export const BlobsInFolder = (folder: string) =>
             yield* fs.rename(writing, file);
             return reference;
           }).pipe(Effect.orDie),
-        read: (id) =>
-          Effect.gen(function* () {
-            if (!isBlobId(id)) return undefined;
-            const file = path.join(folder, id);
-            if (!(yield* fs.exists(file))) return undefined;
-            const bytes = yield* fs.readFile(file);
-            if (blobIdOf(bytes) === id) return bytes;
-            yield* Effect.logWarning(logKeys.blobs.notAsStored, { blob: id, file, size: bytes.byteLength });
-            return undefined;
-          }).pipe(Effect.orDie),
+        read: (id) => {
+          // The bytes with `id` in the first of `folders` that holds them.
+          const readIn = (folders: ReadonlyArray<string>): Effect.Effect<Uint8Array | undefined, PlatformError.PlatformError> => {
+            const [first, ...rest] = folders;
+            if (first === undefined) return Effect.undefined;
+            return Effect.gen(function* () {
+              const file = path.join(first, id);
+              if (!(yield* fs.exists(file))) return yield* readIn(rest);
+              const bytes = yield* fs.readFile(file);
+              if (blobIdOf(bytes) === id) return bytes;
+              yield* Effect.logWarning(logKeys.blobs.notAsStored, { blob: id, file, size: bytes.byteLength });
+              return yield* readIn(rest);
+            });
+          };
+          return isBlobId(id) ? readIn([folder, ...readAlso]).pipe(Effect.orDie) : Effect.undefined;
+        },
       };
     }),
   );

@@ -27,7 +27,8 @@ import { describe } from "../../agent-mcp/server-machine.ts";
 import { removeCredentials, processEnvironmentWith } from "../../agent-process/environment.ts";
 import { type GivenServer, type McpServers, startMcpServers } from "../../agent-mcp/servers.ts";
 import type { Asked } from "../../agent-host/catalog.ts";
-import { Brand, logsFolderOf, sessionsFolderOf } from "../../agent-host/brand.ts";
+import { blobsFolderOf, Brand, logsFolderOf, sessionsFolderOf } from "../../agent-host/brand.ts";
+import { BlobsInFolder, BlobsInMemory } from "../../agent-session/blobs.ts";
 import { sessionFolderOf } from "../../agent-host/directory.ts";
 import { SessionServices } from "../../agent-host/services.ts";
 import { type BoltOn, type Host, withSession } from "../../agent-host/with-session.ts";
@@ -204,7 +205,8 @@ const serversBoltOn = (mcp: McpServers): BoltOn => ({
  * Opens a new CLI session with `config`, or continues the one it names, and runs `use` with it and
  * its MCP servers, through `withSession` (`agent-host/with-session.ts`), with the CLI's bolt-ons:
  * the working folder's tools and the MCP servers. The session is saved in the brand's sessions
- * folder, recorded as the CLI's, made in this working folder (`cliRecord`). A store that cannot be
+ * folder, recorded as the CLI's, made in this working folder (`cliRecord`), and its blobs in the
+ * brand's blobs folder; a session kept in memory only keeps its blobs in memory. A store that cannot be
  * opened or written stops the session with an error. What `use` records comes from the user,
  * through the CLI.
  */
@@ -215,7 +217,8 @@ export const withCliSession = <A, E, R, L, H>(
   use: (session: Session, mcp: McpServers) => Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
-    const root = storeFolderOf(yield* Brand);
+    const brand = yield* Brand;
+    const root = storeFolderOf(brand);
     const workspace = workspaceOf(config);
     yield* written(config, workspace.environment, root);
     // The MCP servers start in the session's scope, before its services, because their tools are among them.
@@ -232,7 +235,8 @@ export const withCliSession = <A, E, R, L, H>(
         persist: config.persist,
         root,
         record: cliRecord(process.cwd()),
-        services: servicesOf(config, workspace.catalog),
+        // A saved session's blobs are kept in the brand's blobs folder, which the ACP host shares, so a continued session has them.
+        services: Layer.merge(servicesOf(config, workspace.catalog), config.persist ? BlobsInFolder(blobsFolderOf(brand)) : BlobsInMemory),
         boltOns: [folder, serversBoltOn(mcp)],
         logs,
         host,

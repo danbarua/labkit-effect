@@ -37,7 +37,7 @@
  * The end of the connection closes every session's scope.
  */
 
-import { type Brand, defaultBrand, envPrefixOf, folderOf } from "../agent-host/brand.ts";
+import { blobsFolderOf, type Brand, defaultBrand, envPrefixOf, folderOf } from "../agent-host/brand.ts";
 import { type ConfigFlags, launchLayers } from "../agent-host/launch.ts";
 import { writeEffectiveSettings } from "../agent-config/effective.ts";
 import { type Configuration, type LayerSource, loadConfiguration } from "../agent-config/file.ts";
@@ -633,8 +633,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
             const scope = yield* Scope.fork(parent.scope);
             return yield* Effect.gen(function* () {
               const file = storeFileOf(options.directory, id);
-              // The session's blobs (its inputs' images and files) are kept in its folder, so a session continued from its facts has them.
-              const blobs = BlobsInFolder(join(sessionFolderOf(options.directory, id), "blobs"));
+              // The blobs (inputs' images and files, stored outputs) are kept in the brand's blobs folder, which every session and host
+              // shares, so a session continued from its facts has them; a session made before then also reads those in its own folder.
+              const blobs = BlobsInFolder(blobsFolderOf(brand, options.home), [join(sessionFolderOf(options.directory, id), "blobs")]);
               // The configuration's seam lists, with permission following the session's mode (`FromHost.permissionMode`). Its tool
               // sources are not used: the session's tools are the world's and its MCP servers'.
               const additionalFolders = [...(options.additionalFolders ?? []), ...parent.additional];

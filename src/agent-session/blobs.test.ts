@@ -51,6 +51,22 @@ test("in a folder, each blob is a file named for its id", async () => {
   expect(readdirSync(folder)).toEqual([helloId]);
 });
 
+test("in a folder, a blob missing from it is read from the folders read also, in order; a store writes only to its own folder", async () => {
+  const [own, older] = [mkdtempSync(join(tmpdir(), "blobs-")), mkdtempSync(join(tmpdir(), "blobs-older-"))];
+  writeFileSync(join(older, helloId), bytes);
+  const found = await runTest(
+    Effect.gen(function* () {
+      const blobs = yield* Blobs;
+      const read = yield* blobs.read(BlobId.make(helloId));
+      yield* blobs.store(new TextEncoder().encode("new"), MediaType.make("text/plain"));
+      return read;
+    }).pipe(Effect.provide(BlobsInFolder(own, [older]).pipe(Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))))),
+  );
+  expect(found).toEqual(bytes);
+  expect(readdirSync(older)).toEqual([helloId]);
+  expect(readdirSync(own)).toHaveLength(1);
+});
+
 test("with no store provided, the default holds the bytes in memory", async () => {
   const { read } = await runTest(
     Effect.gen(function* () {

@@ -75,6 +75,8 @@ The hosts keep what they write outside the repository, in `~/.local/share/<brand
 - `sessions/<version>/<session>/`: a session's facts (`facts.jsonl`, its session store), its record
   (`host.json`: the host that made it and its working folder) and, for the CLI, what its
   configuration resolved to (`effective-settings.json`). The CLI and the ACP host share the folder.
+- `blobs/`: the bytes that sessions' facts refer to (inputs' images and files, stored outputs), each
+  a file named for its SHA-256, for every session of both hosts.
 - `logs/`: the CLI's log of each session (`cli-<session>.log`) and the ACP launcher's logs.
 
 Run commands whose output goes to a file with `FORCE_COLOR=0 NO_COLOR=1`. Claude Code's shell sets

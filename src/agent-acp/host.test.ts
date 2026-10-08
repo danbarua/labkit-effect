@@ -15,7 +15,7 @@ import { BunServices } from "@effect/platform-bun";
 import { Deferred, Effect, Fiber, Layer, Logger, References } from "effect";
 import * as Agent from "effective-acp/agent";
 import { fromWebStreams } from "effective-acp/stdio";
-import type { Brand } from "../agent-host/brand.ts";
+import { blobsFolderOf, type Brand, defaultBrand } from "../agent-host/brand.ts";
 import type { ConfigFlags } from "../agent-host/launch.ts";
 import type { Environment } from "../agent-process/environment.ts";
 import { type CatalogSource, ModelCatalog } from "../agent-host/catalog.ts";
@@ -511,7 +511,8 @@ test("a prompt's image and embedded file are attached to the input, their bytes 
     ],
   });
   const attached = input !== undefined && input._tag === "InputArrived" ? (input.attachments ?? []) : [];
-  for (const blob of attached) expect(await Bun.file(join(host.directory, sessionId, "blobs", blob.id)).exists()).toBe(true);
+  // The brand's blobs folder, which every session and host shares, holds them.
+  for (const blob of attached) expect(await Bun.file(join(blobsFolderOf(defaultBrand, join(testFolder(), "home")), blob.id)).exists()).toBe(true);
 });
 
 test("update_plan sends the whole plan to the editor as a plan update, without asking", async () => {

@@ -4,7 +4,8 @@
  *
  * - the configuration folders: `~/.config/<name>/` and `<project>/.<name>/`;
  * - where the agent keeps what it writes (`dataFolderOf`): `~/.local/share/<name>/`, with the
- *   sessions of every host in `sessions/<version>/` and the log files in `logs/`;
+ *   sessions of every host in `sessions/<version>/`, the bytes their facts refer to (images, files,
+ *   stored outputs) in `blobs/`, and the log files in `logs/`;
  * - where `/export` writes: `<folder>/.<name>/exports`;
  * - the environment variable prefix: `<NAME>_` (`<NAME>_ACP_` for the ACP launcher's);
  * - the name it gives an ACP client (`agentInfo`) and an MCP server (`clientInfo`).
@@ -57,6 +58,13 @@ export const dataFolderOf = (brand: Brand, home: string = homedir()): string => 
 
 /** The folder of every host's sessions, for the current `sessionsVersion`. */
 export const sessionsFolderOf = (brand: Brand, home: string = homedir()): string => join(dataFolderOf(brand, home), "sessions", sessionsVersion);
+
+/**
+ * The folder of every host's blobs (`agent-session/blobs.ts`), each a file named for its id. An id is
+ * the SHA-256 of the bytes, so one folder serves every session, and a session that another host
+ * continues finds its blobs.
+ */
+export const blobsFolderOf = (brand: Brand, home: string = homedir()): string => join(dataFolderOf(brand, home), "blobs");
 
 /** The folder of the agent's log files. */
 export const logsFolderOf = (brand: Brand, home: string = homedir()): string => join(dataFolderOf(brand, home), "logs");

@@ -144,6 +144,9 @@ The file store:
   changed may not read back; the store refuses it, with an instruction to delete it.
 
 `blobs.ts` keeps bytes outside the facts, by the SHA-256 of the bytes; the facts hold references.
+The hosts keep them in the brand's `blobs/` folder (`agent-host/brand.ts`, `blobsFolderOf`), one
+folder for every session, so a session that the other host continues has them. The CLI keeps the
+blobs of a session that it does not save (`--no-session-persistence`) in memory.
 
 ## A user's change of configuration
 
