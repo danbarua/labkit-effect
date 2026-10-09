@@ -35,6 +35,7 @@ so code that reads it compiles only where a host provides it.
 | `folders`     | An effect that returns the session's folders (`Folders`): the working folder, the home folder, and the additional folders from every source, all absolute. |
 | `foldersFrom` | Returns an effect that returns the working folder, the home folder, and the additional folders whose source the given function accepts.                    |
 | `environment` | The environment variables of each process that the harness starts for the session (`KnownEnvironment`, below).                                             |
+| `processes`   | The process groups that the session's commands (`run_command`) started. The session stops them when it closes (`docs/agent-process.md`).                    |
 
 Each host makes the context once, where the session's resources start, with the builder in
 `agent-host/session-context.ts` (`docs/agent-host.md`), and runs the session's work in it:
@@ -54,6 +55,8 @@ What runs inside the session reads the context:
 - the previews of a write, in the ACP world and the REPL (`agent-host/command-writes.ts`);
 - the explanation of a permission question, in the ACP feed and the REPL;
 - `run_command` and the MCP servers' processes, for their environment variables;
+- `run_command`, to register the process group of each command it runs (`processes`);
+- the loop (`openSession`), to stop those groups when the session closes;
 - the ACP worlds, for the session's id, its working folder, its folders and its environment.
 
 The loop runs each request in a fiber that inherits the context from the fiber that recorded the

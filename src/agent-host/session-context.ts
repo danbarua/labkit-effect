@@ -28,6 +28,7 @@ import type { Fact } from "../agent-machine/fact.ts";
 import { FolderPath, type SessionId } from "../agent-machine/names.ts";
 import type { FolderSource } from "../agent-machine/observation.ts";
 import { type EnvironmentTransform, processEnvironmentWith, removeCredentials } from "../agent-process/environment.ts";
+import { makeSessionProcesses } from "../agent-process/session-processes.ts";
 import { changesAtOpen, folded, type GivenFolders, type HomeChange, homeOf } from "../agent-session/configuration/session-home.ts";
 
 /** The folders that one source other than the user gives a session, as the host has them: absolute, from `~`, or relative to the working folder. */
@@ -91,14 +92,15 @@ export interface MadeSessionContext {
 
 /**
  * Makes the context of the session at `place`: its environment, made now from
- * `place.commandEnvironment`, and its folders, projected at each use from the session's facts (the
- * module's table). Until the open's changes are recorded, the folders include them, so a draft that
+ * `place.commandEnvironment`; its folders, projected at each use from the session's facts (the
+ * module's table); and an empty registry of the process groups that its commands start. Until the open's changes are recorded, the folders include them, so a draft that
  * has no store yet has the folders that its open will record.
  */
 export const makeSessionContext = (place: SessionPlace): Effect.Effect<MadeSessionContext> =>
   Effect.gen(function* () {
     const store = yield* Deferred.make<Effect.Effect<ReadonlyArray<Fact>>>();
     const environment = yield* Effect.sync(() => environmentWith(place.commandEnvironment ?? defaultCommandEnvironment));
+    const processes = yield* makeSessionProcesses(place.session);
     const home = homedir();
     const working = FolderPath.make(place.working);
     const given: ReadonlyArray<GivenFolders> = place.given.map((each) => ({ from: each.from, folders: each.folders.map((folder) => absolute(folder, place.working, home)) }));
@@ -120,6 +122,7 @@ export const makeSessionContext = (place: SessionPlace): Effect.Effect<MadeSessi
         folders: foldersFrom(() => true),
         foldersFrom,
         environment,
+        processes,
       },
       storeOpened: (read) =>
         Effect.flatMap(Deferred.succeed(store, read), (given) => (given ? Effect.void : Effect.die(new Error(`Session ${place.session} was given a second store`)))),

@@ -68,7 +68,7 @@ import { sentAs } from "./sent.ts";
 import { immutableToolCatalogOf, modelOf } from "./configuration/session-setup.ts";
 import { SessionStore, type SessionStoreFailed } from "./session-store.ts";
 import { CurrentWork, type Work } from "./work.ts";
-import type { SessionContext } from "../agent-environment/session-context.ts";
+import { SessionContext } from "../agent-environment/session-context.ts";
 
 /**
  * Returns the core's machines as `facts` leave them. Between turns the machines hold nothing, so
@@ -213,10 +213,14 @@ export interface Session {
  * Facts that stop while a turn runs leave the turn under way with no one carrying out its requests.
  * The host continues it (`goOn`) or ends it (`endTurnLeftRunning`).
  *
+ * When the scope closes, the session interrupts its requests, then stops the process groups that
+ * its commands started and left running (`SessionContext.processes`).
+ *
  * `Turns` must give identities that the facts have not used.
  */
-export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionStore> = Effect.gen(function* () {
+export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionStore | SessionContext> = Effect.gen(function* () {
   const store = yield* SessionStore;
+  const { processes } = yield* SessionContext;
   const facts = yield* store.facts;
   // The host's span annotations, kept for the spans that other fibers start for the session.
   const annotations = yield* References.TracerSpanAnnotations;
@@ -277,6 +281,9 @@ export const openSession: Effect.Effect<Session, never, Scope.Scope | SessionSto
         { discard: true },
       );
     });
+  // Added before the requests' fibers are made, so it runs after they are interrupted: no command
+  // starts a process group after the session has stopped them.
+  yield* Effect.addFinalizer(() => processes.stopAll);
   const machines = yield* Ref.make<World>(worldOf(facts));
   const recorded = yield* PubSub.unbounded<Fact>();
   const captured = yield* PubSub.unbounded<CapturedObservation>();

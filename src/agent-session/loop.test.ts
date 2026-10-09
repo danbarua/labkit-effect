@@ -4,12 +4,12 @@ import { userInput } from "../../tests/support/observations.ts";
 import { expect } from "bun:test";
 import { test } from "../../tests/support/test.ts";
 import { Effect, Layer, Logger, PubSub, References } from "effect";
-import { ModelName, ModelText, ProviderName, SessionId, StopReason, TokenCount, TurnId } from "../agent-machine/names.ts";
+import { CallId, ModelName, ModelText, ProviderName, SessionId, StopReason, TokenCount, ToolName, TurnId } from "../agent-machine/names.ts";
 import type { Fact } from "../agent-machine/fact.ts";
 import { CurrentWork, type Work } from "./work.ts";
 import { BoringContextAssembler, BoringModelProvider } from "../../tests/support/boring.ts";
 import { CountingTurns, CountingTurnsInStore } from "./turns.ts";
-import { MaxHolds, ModelClient, ModelProvider, TurnEndHooks } from "./contracts.ts";
+import { MaxHolds, ModelClient, ModelProvider, ToolRunner, TurnEndHooks } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
 import { openSession } from "./loop.ts";
 import { EphemeralSessionStore, ephemeralSessionStore } from "./session-store.ts";
@@ -18,6 +18,11 @@ import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { type SpanLine, SpansTo } from "../instrumentation/telemetry.ts";
 import { boringOpening } from "../../tests/support/boring.ts";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { BunServices } from "@effect/platform-bun";
+import { workspaceTools } from "../agent-tools/workspace.ts";
 
 test("while a request is carried out, CurrentWork and every log line name its session and turn; every line names the test", async () => {
   const logged: Array<{ message: unknown; annotations: Record<string, unknown> }> = [];
@@ -349,3 +354,58 @@ test("a session reopened over the facts of an earlier run ends its span with the
   expect(second?.attributes).toMatchObject({ session: "s1", requests: 1, turns: 1, input_tokens: 1000, output_tokens: 100, cost_usd: expect.closeTo(0.003, 12), models: "anthropic/claude-sonnet-5-5" });
   expect(second?.traceId).not.toBe(first?.traceId);
 });
+
+test("closing a session stops what its commands left running in the background; while the session is open, it runs on", async () => {
+  const root = mkdtempSync(join(tmpdir(), "session-close-"));
+  const { catalog, source } = workspaceTools(root);
+  const answers = { count: 0 };
+  // The model starts a server in the background, then answers.
+  const client = Layer.succeed(ModelClient, {
+    respond: (target, _context, turn) =>
+      Effect.sync(() => {
+        answers.count += 1;
+        const command = "sleep 30 >/dev/null 2>&1 & echo $! > server.pid";
+        const parts =
+          answers.count === 1
+            ? [{ _tag: "ToolCall" as const, call: CallId.make("c1"), tool: ToolName.make("run_command"), input: receivedJson({ command, intent: "Starts a server." }) }]
+            : [{ _tag: "Text" as const, text: ModelText.make("started") }];
+        return {
+          _tag: "ModelResponded" as const,
+          turn,
+          provider: target.provider,
+          model: target.model,
+          parts,
+          stop: StopReason.make(answers.count === 1 ? "tool_use" : "end_turn"),
+          ending: { _tag: "Complete" as const },
+          metadata: receivedJson({}),
+        };
+      }),
+  });
+  const server = await runTest(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
+        yield* session.observe(boringOpening(catalog.filter((tool) => tool.name === "run_command")));
+        yield* session.idle;
+        yield* session.observe(userInput("start the server"));
+        yield* session.idle;
+        const pid = Number(readFileSync(join(root, "server.pid"), "utf8"));
+        return { pid, runningWhileOpen: alive(pid) };
+      }),
+    ).pipe(Effect.provide(Layer.mergeAll(BoringModelProvider, client, BoringContextAssembler, CountingTurns, Layer.effect(ToolRunner, source).pipe(Layer.provide(BunServices.layer))))),
+  );
+  expect(server.runningWhileOpen).toBe(true);
+  const deadline = Date.now() + 5000;
+  const ended = async (): Promise<boolean> => (!alive(server.pid) ? true : Date.now() > deadline ? false : Bun.sleep(25).then(ended));
+  expect(await ended()).toBe(true);
+});
+
+/** Whether the process with id `pid` exists. */
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};

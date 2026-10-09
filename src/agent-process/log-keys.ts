@@ -12,4 +12,20 @@ export const logKeys = {
     /** Warning: a run ended, and the spawner reported neither an exit code nor a signal. Details: the group's name, the run, and the error. The run's state is Exited with neither. */
     exitUnread: "process.run.exit_unread",
   },
+  session: {
+    /** A closing session sent SIGTERM to a process group that one of its commands started. Details: the session, the group, and the call that started it. */
+    groupTerminated: "process.session.group_terminated",
+    /**
+     * Warning: a process group still existed `stopGrace` after the closing session sent it SIGTERM, and the session sent it SIGKILL.
+     * Details: the session, the group, the call that started it, and the grace.
+     */
+    groupKilled: "process.session.group_killed",
+    /** Debug: a process group that one of the session's commands started had ended before the session stopped it. Details: the session, the group, and the call. */
+    groupEnded: "process.session.group_ended",
+    /**
+     * Warning: a signal to a process group failed for a reason other than the group having ended, such as a lack of permission.
+     * Details: the session, the group, the call, the signal, and the error.
+     */
+    signalFailed: "process.session.signal_failed",
+  },
 } as const;

@@ -5,6 +5,10 @@ MCP servers that run over stdio. Each run of a child process has its own process
 the run also stops every process that the child started. The module does not decide which commands
 run or when: `agent-mcp` and the hosts make those decisions.
 
+It also keeps the registry of the process groups that a session's commands (`run_command`) start
+(`session-processes.ts`). A command that ends by itself leaves what it started in the background to
+run on; the session stops those groups when it closes.
+
 A run receives the session's environment (`SessionContext.environment`,
 `docs/agent-environment.md`), which the host makes from the configuration's `commandEnvironment`;
 by default it is this process's environment without its credential variables. The module also
@@ -18,6 +22,7 @@ arguments before they are logged.
 | `machine.ts`       | A pure state machine for one process group. `stepProcess(state, event)` returns the next state and the effects to perform (`Spawn`, `Kill`).                                                                                                                                                                                         |
 | `process-group.ts` | `makeProcessGroup(command, onRun)` performs the machine's effects with Effect's `ChildProcessSpawner`, gives each run the session's environment, and logs every state change.                                                                                                                                                        |
 | `environment.ts`   | Classifies environment variable names as credential names (`isCredentialName`), removes credential variables from an environment (`removeCredentials`, `withoutCredentials`), applies transforms to this process's environment (`processEnvironmentWith`), and redacts credential flag values in command arguments (`redactedArgs`). |
+| `session-processes.ts` | `makeSessionProcesses(session)` makes the registry of the process groups that a session's commands start (`SessionContext.processes`): `started` registers a group, and `stopAll` stops every registered group and empties the registry. |
 | `log-keys.ts`      | The names of the log events that this module writes.                                                                                                                                                                                                                                                                                 |
 
 ## States
@@ -74,6 +79,26 @@ Other modules use these functions:
   variables the session's environment does not have (`removed`) and those the command sets (`set`).
 - **Arguments are redacted in logs only.** The log shows `--token=<redacted>`. The process receives
   the original value.
+- **A session stops what its commands left running.** `run_command` runs each command as a process
+  group of its own and registers the group with the session (`SessionContext.processes`) as it
+  starts. A command that ends by itself leaves its background processes running
+  (`nohup server &`). When the session's scope closes, the loop (`openSession`) interrupts the
+  session's requests, then calls `stopAll`:
+
+  | Step | What happens | Logged |
+  |---|---|---|
+  | 1 | A group that no longer exists is skipped. | Debug, `process.session.group_ended` |
+  | 2 | Every other group is sent SIGTERM. | Info, `process.session.group_terminated` |
+  | 3 | A group that still exists `stopGrace` (2 seconds) after SIGTERM is sent SIGKILL. | Warning, `process.session.group_killed` |
+
+  A signal that fails for another reason (such as a lack of permission) is logged as a warning,
+  `process.session.signal_failed`. Each line carries the session, the group and the call that
+  started the group. Each registration first removes the groups that have ended, logged at Debug.
+- **Limits of the stop.** A process group id is not reused while the group exists, but it can be
+  reused after the group ends. If a registered group ends and another process group takes its id
+  before the session closes, the session stops that other group; removing ended groups at each
+  registration makes that window shorter. Nothing is stopped when the harness exits without closing
+  the session's scope: when it is killed (SIGKILL), or when the CLI exits at a second Ctrl+C.
 - **Signal names.** Effect's spawner reports a signalled exit as an error whose cause message names
   the signal. `process-group.ts` parses the signal name from that message. When the error names no
   signal, the run is `Exited` with neither a code nor a signal, and `process.run.exit_unread` is
@@ -86,3 +111,7 @@ Other modules use these functions:
   scope kills the processes that the run started in the background.
 - `environment.test.ts`: credential name classification, argument redaction, the environment that a
   run receives, and what is logged about a run's arguments and environment.
+- `session-processes.test.ts`: `stopAll` ends a running group with SIGTERM, sends SIGKILL to a group
+  that ignores SIGTERM, skips a group that has ended, and empties the registry.
+- `agent-session/loop.test.ts`: a session whose command left a process running in the background
+  stops it when the session's scope closes; while the session is open, the process runs on.

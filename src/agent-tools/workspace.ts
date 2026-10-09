@@ -29,9 +29,10 @@
  * exit code 0 succeeds, any other end fails with the output. It runs with the session's environment
  * (`SessionContext.environment`), read when the call runs. It runs as a process group of its own,
  * stopped whole, what it started included, after its time (`commandSeconds` unless the call says,
- * at most `maxCommandSeconds`) or when the call is interrupted; a command that ends by itself leaves
- * what it started in the background to run on. Neither runs again when a session goes on
- * (`"unsafe"`).
+ * at most `maxCommandSeconds`) or when the call is interrupted. A command that ends by itself leaves
+ * what it started in the background to run on until the session closes, which stops it
+ * (`SessionContext.processes`, `agent-process/session-processes.ts`). Neither runs again when a
+ * session goes on (`"unsafe"`).
  *
  * A call that cannot run fails with the reason: no tool has the name (`NotFound`), the input does
  * not fit (`InputRejected`), or the file system reported an error (`Reported`, with its message).
@@ -47,7 +48,7 @@ import { inWorkspace } from "./in-workspace.ts";
 import { blobReads } from "./blob-reads.ts";
 import { maxReadBytes, maxReadText, selectedLines } from "./read-limits.ts";
 import { FilePath, FolderPath } from "./paths.ts";
-import { type AnyTool, anyTool, Rejected, Reported, sourceOf, type Tool } from "./tool.ts";
+import { type AnyTool, anyTool, CurrentCall, Rejected, Reported, sourceOf, type Tool } from "./tool.ts";
 
 
 export { maxReadBytes, maxReadText } from "./read-limits.ts";
@@ -205,7 +206,7 @@ export const editFile: Tool<typeof EditFile.fields, FileSystem.FileSystem> = {
 };
 
 /** `run_command`: runs a shell command in the folder `root`, with the session's environment. */
-export const runCommand = (root: string): Tool<typeof RunCommand.fields, SessionContext> => ({
+export const runCommand = (root: string): Tool<typeof RunCommand.fields, SessionContext | CurrentCall> => ({
   name: ToolName.make("run_command"),
   kind: "execute",
   replay: "unsafe",
@@ -215,15 +216,21 @@ export const runCommand = (root: string): Tool<typeof RunCommand.fields, Session
     const seconds = timeout_seconds ?? commandSeconds;
     // The command is a process group of its own (`detached`). Stopped (at its time, or when the
     // call is interrupted), the whole group is killed, what it started included; a command that
-    // ends by itself leaves what it started to run on (`nohup server &`). It is given the session's
-    // environment (`SessionContext.environment`), which the host made from the configuration's
-    // `commandEnvironment`, by default without this process's credentials: what it prints the model reads.
+    // ends by itself leaves what it started to run on (`nohup server &`) until the session closes:
+    // the group is registered with the session (`SessionContext.processes`) as it starts, and the
+    // session stops it then. It is given the session's environment (`SessionContext.environment`),
+    // which the host made from the configuration's `commandEnvironment`, by default without this
+    // process's credentials: what it prints the model reads.
     return Effect.acquireUseRelease(
-      Effect.flatMap(SessionContext, ({ environment }) =>
-        Effect.sync(() =>
+      Effect.gen(function* () {
+        const { environment, processes } = yield* SessionContext;
+        const call = yield* CurrentCall;
+        const child = yield* Effect.sync(() =>
           Bun.spawn(["/bin/sh", "-c", command], { cwd: root, env: { ...environment.variables }, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true }),
-        ),
-      ),
+        );
+        yield* processes.started({ group: child.pid, call });
+        return child;
+      }),
       (child) =>
         Effect.all([tailOf(child.stdout, maxReadBytes), tailOf(child.stderr, maxReadBytes), Effect.promise(() => child.exited)], { concurrency: "unbounded" }).pipe(
           Effect.timeoutOption(Duration.seconds(seconds)),
@@ -264,7 +271,7 @@ export function workspaceTools(
   } = {},
 ) {
   const bound = inWorkspace(root);
-  const tools: ReadonlyArray<AnyTool<FileSystem.FileSystem | SessionContext>> = [
+  const tools: ReadonlyArray<AnyTool<FileSystem.FileSystem | SessionContext | CurrentCall>> = [
     anyTool(described(blobReads(bound(readFile)))),
     anyTool(described(bound(listDir))),
     anyTool(described(bound(writeFile))),
