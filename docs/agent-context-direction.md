@@ -12,8 +12,8 @@ in `TODO.md`.
   followed by the recent facts. Each summary or substitution records pointers to the journal
   entries it replaces, and the model can call a tool to look up the full journal.
 - **Usage.** Two views over the same recorded usage:
-  - spend: what the model was sent, for decisions during the session;
-  - exposure: what any model has seen over the whole session, for reports.
+    - spend: what the model was sent, for decisions during the session;
+    - exposure: what any model has seen over the whole session, for reports.
 
 ## Compaction that knows the provider's cache
 
@@ -61,8 +61,7 @@ A session has an id, and so does a turn. A turn's parent is a pointer to a sessi
 
 - Turn zero of a root session points at itself (`session/session`). A pointer to itself marks the
   root.
-- Turn zero of a fork points at the session and turn it was forked from
-  (`parent-session/parent-turn`).
+- Turn zero of a fork points at the session and turn it was forked from (`parent-session/parent-turn`).
 
 On disk the pointer is one field; a database may split it into two columns for joins. A fork reads
 its parent's history through the pointer, so forking copies nothing, unless the fork is made with
@@ -92,14 +91,14 @@ everything is like one process that holds everything; cheap forks are like Unix 
 - A request to compact is refused before it is made when it would not fit the summarizer's context
   window.
 - Cheap forks allow:
-  - trying compaction strategies side by side over the same parent (A/B tests);
-  - forks that keep different facts: a fork made for a purpose keeps what that purpose needs,
-    which is the reason a user forks at all;
-  - strategies per provider or per model (cache-aware, attention-aware), or after a switch of
-    model;
-  - compaction by meaning: fork, drop what the fork's goal does not need, and keep revising the
-    compacted history as the goal changes. A compacted fork of a fork can diverge from its
-    parent's compacted fork.
+    - trying compaction strategies side by side over the same parent (A/B tests);
+    - forks that keep different facts: a fork made for a purpose keeps what that purpose needs,
+      which is the reason a user forks at all;
+    - strategies per provider or per model (cache-aware, attention-aware), or after a switch of
+      model;
+    - compaction by meaning: fork, drop what the fork's goal does not need, and keep revising the
+      compacted history as the goal changes. A compacted fork of a fork can diverge from its
+      parent's compacted fork.
 - Compacting between steps is one strategy, like stop-the-world garbage collection. A request to
   compact goes to the inbox like any other message, and waits for a point between steps. That does
   not rule out summarising asynchronously, or ahead of time, beside it.

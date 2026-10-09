@@ -9,31 +9,31 @@ Direction that is not built is in [agent-machine-direction.md](agent-machine-dir
 
 ## Terms
 
-| Term | Definition |
-| --- | --- |
+| Term        | Definition                                                                                                                                                                                                                         |
+|-------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Observation | Dan: "a Fact that's out of our sphere of influence." Something that reached the harness from outside, which the harness did not choose: an input, model output, a tool's outcome, a policy's veto. It is recorded with its origin. |
-| Decision | A choice that the core makes, computed by its machines from the facts. |
-| Effect | An action on the outside world. The core sends a request for it as a message; an adapter carries it out. Its result reaches the core as an observation. |
-| Fact | A recorded observation or a recorded decision, at its position in the session (`seq`), with the time it was recorded. |
-| Event | Not a term of the code. Dan uses it for an observation arriving and for a message the harness sends; in the code, the first is an observation and the second an effect request. |
+| Decision    | A choice that the core makes, computed by its machines from the facts.                                                                                                                                                             |
+| Effect      | An action on the outside world. The core sends a request for it as a message; an adapter carries it out. Its result reaches the core as an observation.                                                                            |
+| Fact        | A recorded observation or a recorded decision, at its position in the session (`seq`), with the time it was recorded.                                                                                                              |
+| Event       | Not a term of the code. Dan uses it for an observation arriving and for a message the harness sends; in the code, the first is an observation and the second an effect request.                                                    |
 
 ## Files
 
-| File | Responsibility |
-| --- | --- |
-| `observation.ts`, `decision.ts`, `request.ts`, `fact.ts` | The schemas of observations, decisions, effect requests and facts. |
-| `origin.ts` | Who or what reported an observation. |
-| `received.ts` | `Received`: content from outside, unparsed. |
-| `names.ts` | Branded strings for every kind of name and id. |
-| `blob.ts` | `BlobRef`: a reference to bytes kept outside the facts. |
-| `settings.ts` | A model's settings in the core's terms. |
-| `table.ts` | A machine as a transition table. |
-| `agent.ts`, `conversation-turn.ts`, `turn-step.ts`, `call.ts` | The four machines. |
-| `messages.ts` | The messages that machines send each other. These are not facts. |
-| `router.ts` | `deliver`: routes an observation to its machine, and the messages that follow, until none are left. |
-| `throttle.ts` | A machine that releases captured observations in batches. |
-| `left-running.ts`, `not-observed.ts` | What facts that stop while a turn runs leave under way, and the outcomes to record for it. |
-| `turn-requests.ts` | `requestsIn`: how many model requests a turn has made. |
+| File                                                          | Responsibility                                                                                      |
+|---------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| `observation.ts`, `decision.ts`, `request.ts`, `fact.ts`      | The schemas of observations, decisions, effect requests and facts.                                  |
+| `origin.ts`                                                   | Who or what reported an observation.                                                                |
+| `received.ts`                                                 | `Received`: content from outside, unparsed.                                                         |
+| `names.ts`                                                    | Branded strings for every kind of name and id.                                                      |
+| `blob.ts`                                                     | `BlobRef`: a reference to bytes kept outside the facts.                                             |
+| `settings.ts`                                                 | A model's settings in the core's terms.                                                             |
+| `table.ts`                                                    | A machine as a transition table.                                                                    |
+| `agent.ts`, `conversation-turn.ts`, `turn-step.ts`, `call.ts` | The four machines.                                                                                  |
+| `messages.ts`                                                 | The messages that machines send each other. These are not facts.                                    |
+| `router.ts`                                                   | `deliver`: routes an observation to its machine, and the messages that follow, until none are left. |
+| `throttle.ts`                                                 | A machine that releases captured observations in batches.                                           |
+| `left-running.ts`, `not-observed.ts`                          | What facts that stop while a turn runs leave under way, and the outcomes to record for it.          |
+| `turn-requests.ts`                                            | `requestsIn`: how many model requests a turn has made.                                              |
 
 ## Content from outside
 
@@ -51,12 +51,12 @@ is a defect.
 
 The core is four kinds of machine in a tree:
 
-| Machine | One per | Handles |
-| --- | --- | --- |
-| agent | session | input while no turn runs, turn starts, compaction windows and model changes between turns |
-| conversation turn | turn | the steps of a turn, input during the turn, the end of the turn |
-| turn step | model request | the request, its response, and the tool calls it makes |
-| call | tool call | permission, dispatch and the end of one call |
+| Machine           | One per       | Handles                                                                                   |
+|-------------------|---------------|-------------------------------------------------------------------------------------------|
+| agent             | session       | input while no turn runs, turn starts, compaction windows and model changes between turns |
+| conversation turn | turn          | the steps of a turn, input during the turn, the end of the turn                           |
+| turn step         | model request | the request, its response, and the tool calls it makes                                    |
+| call              | tool call     | permission, dispatch and the end of one call                                              |
 
 - Each machine is a table from (state kind, message kind) to a transition, "ignored" or "deferred".
   Whether a message is acted on depends on the two kinds alone.
@@ -68,9 +68,9 @@ The core is four kinds of machine in a tree:
 - `McpServerChanged` is recorded for the session's record and its host. `SessionHomed`,
   `FolderAdded` and `FolderRemoved` record the session's working folder and its additional folders,
   each folder with its source (`FolderSource`: `User`, `Launcher`, `Client`, or a `Permissions`
-  entry by name). The session's folders are projected from them
-  (`agent-session/configuration/session-home.ts`), and the model is told of them
-  (`docs/agent-session.md`). No machine acts on any of these, nothing follows from them, and none is
+  entry by name). The session's folders are projected from them (`agent-session/configuration/session-home.ts`), and the
+  model is told of them (`docs/agent-session.md`). No machine acts on any of these, nothing follows from them, and none
+  is
   recorded as `ObservationNotExpected`.
 - Every `switch` in the core ends in `satisfies never`, so a new kind of observation, decision or
   request does not compile until every machine handles it.
@@ -81,12 +81,12 @@ Every effect that the core requests follows one pattern: a decision is recorded,
 sent, and the outcome is observed. When a turn starts is not one of them: the layers around the core
 decide it and report `TurnStarted`.
 
-| Decision | Request | Observed outcome |
-| --- | --- | --- |
-| `AskModel` (a turn's first step), `TellModel` (each later step) | `RequestModelResponse` | `ModelRequestDispatched` when the request is made, then `ModelResponded`, `ModelFailed` or `ModelVetoed` |
-| none: every proposed call is requested | `RunTool` | `PermissionAsked`, then `PermissionAnswered` or `PermissionFailed`, when a policy asks first, `ToolCallDispatched` when the tool begins to run, then `ToolEnded` (`Succeeded` or `Failed`) |
-| none: the model gave a response with no tool calls | `BeforeTurnEnded` | input, if any, then `TurnEndReviewed` |
-| none: the turn was interrupted | `StopTurnWork` | each request under way reports how far it got |
+| Decision                                                        | Request                | Observed outcome                                                                                                                                                                           |
+|-----------------------------------------------------------------|------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `AskModel` (a turn's first step), `TellModel` (each later step) | `RequestModelResponse` | `ModelRequestDispatched` when the request is made, then `ModelResponded`, `ModelFailed` or `ModelVetoed`                                                                                   |
+| none: every proposed call is requested                          | `RunTool`              | `PermissionAsked`, then `PermissionAnswered` or `PermissionFailed`, when a policy asks first, `ToolCallDispatched` when the tool begins to run, then `ToolEnded` (`Succeeded` or `Failed`) |
+| none: the model gave a response with no tool calls              | `BeforeTurnEnded`      | input, if any, then `TurnEndReviewed`                                                                                                                                                      |
+| none: the turn was interrupted                                  | `StopTurnWork`         | each request under way reports how far it got                                                                                                                                              |
 
 Whether a requested effect happens is decided outside the core. The core sees a veto as an outcome:
 a vetoed tool call settles like any other, and the model is asked again; a vetoed model request ends
@@ -113,8 +113,8 @@ Dan: "The world isn't sealed while the agent thinks, skeddadles, makes 20 tool c
 
 ## The end of a turn
 
-After a response with no tool calls, the turn asks the layers around the core for anything more
-(`BeforeTurnEnded`; a Stop hook's feedback, for example, arrives as input), and they answer with
+After a response with no tool calls, the turn asks the layers around the core for anything more (`BeforeTurnEnded`; a
+Stop hook's feedback, for example, arrives as input), and they answer with
 `TurnEndReviewed`.
 
 - Before that request, a whole response with answer text is recorded as `TurnCompleted`, and one
@@ -125,8 +125,8 @@ After a response with no tool calls, the turn asks the layers around the core fo
   new to answer.
 - Whether an incomplete turn is held open is a turn-end hook's decision, and how often hooks may hold
   a turn open is the layers' business.
-- A whole response with no tool calls that its provider marks as not the end of the model's turn
-  (`Unfinished`: Anthropic's `pause_turn`) is followed by another request at once. Whether a
+- A whole response with no tool calls that its provider marks as not the end of the model's turn (`Unfinished`:
+  Anthropic's `pause_turn`) is followed by another request at once. Whether a
   response that reads as unfinished, with no such mark, is followed up is for the layers around the
   core to judge.
 - A turn that ends other than with an answer (`Failed`, `Vetoed`, `Interrupted`) drops the input
@@ -167,8 +167,8 @@ After a response with no tool calls, the turn asks the layers around the core fo
   arrived, with the complete parts (`ModelResponded`, ending `Interrupted`); a tool that was running
   reports that its end was not observed; a call not yet run reports that it was not. The turn then
   ends `Interrupted`, on a step's boundary, so the conversation continues from it.
-- Interrupted during the turn-end review (`BeforeTurnEnded`), the turn asks for the review to stop
-  (`StopTurnWork`) and waits for it to report (`TurnEndReviewed`). The layers around the core stop
+- Interrupted during the turn-end review (`BeforeTurnEnded`), the turn asks for the review to stop (`StopTurnWork`) and
+  waits for it to report (`TurnEndReviewed`). The layers around the core stop
   the turn-end hooks and report at once, without the hooks' feedback. The turn then ends
   `Interrupted`, and the model is not asked again, even when input was taken during the review.
 - An interruption records the user's intent. The turn ends once what was under way for it has
@@ -185,26 +185,26 @@ A session can continue from its facts, which are kept as given.
 - A session continued from its facts builds its machines from the facts after the last turn's end
   only (`worldAndRequestsOf`). It has no machine for a turn, or a call, of a turn that ended
   before. An observation addressed to one is recorded differently:
-  - in a session continued from its facts: `ObservationUndelivered`;
-  - in a session that was not: `ObservationNotExpected` for a turn's observation, and no decision
-    for a call's `ToolEnded`, which the call's machine still takes.
+    - in a session continued from its facts: `ObservationUndelivered`;
+    - in a session that was not: `ObservationNotExpected` for a turn's observation, and no decision
+      for a call's `ToolEnded`, which the call's machine still takes.
 - Every request a turn makes has its outcome recorded before the turn ends, so such an observation
   comes only from a fault, such as a response reported twice.
 - Facts can also stop while a turn runs: the process ended with requests made and no outcome
   recorded (`leftRunning` lists them). Whoever continues from the facts decides what becomes of the
   turn:
-  - **End it.** The turn is interrupted, and each request under way receives what is known of it: a
-    model request gets `ModelResponded` with ending `Indeterminate`, holding the tool calls that had
-    arrived; a call that began gets an end that was not observed; a call that had not begun was not
-    run; a turn-end review gets `TurnEndReviewed`, with no input from the hooks. No request is made
-    again. The turn ends `Interrupted`, and the conversation continues from
-    it.
-  - **Continue it.** Each request with no outcome is carried out. A model request is made again. A
-    tool call runs again only when its tool's `replay` is `safe` (it changes nothing), and is asked
-    about again if it was waiting for an answer. Any other call, `idempotent` included, is not run:
-    it ends `Indeterminate` if it had begun and `NotRun` if it had not, because what it would change
-    may have changed since; the model looks before it asks again. A turn that was being interrupted
-    receives what is known of each request, as when ending it, and ends.
+    - **End it.** The turn is interrupted, and each request under way receives what is known of it: a
+      model request gets `ModelResponded` with ending `Indeterminate`, holding the tool calls that had
+      arrived; a call that began gets an end that was not observed; a call that had not begun was not
+      run; a turn-end review gets `TurnEndReviewed`, with no input from the hooks. No request is made
+      again. The turn ends `Interrupted`, and the conversation continues from
+      it.
+    - **Continue it.** Each request with no outcome is carried out. A model request is made again. A
+      tool call runs again only when its tool's `replay` is `safe` (it changes nothing), and is asked
+      about again if it was waiting for an answer. Any other call, `idempotent` included, is not run:
+      it ends `Indeterminate` if it had begun and `NotRun` if it had not, because what it would change
+      may have changed since; the model looks before it asks again. A turn that was being interrupted
+      receives what is known of each request, as when ending it, and ends.
 
 ## What the model has seen
 
@@ -252,7 +252,7 @@ continues").
 - A model's settings are given in the core's own terms (`settings.ts`):
 
   | Setting | Values |
-  | --- | --- |
+    | --- | --- |
   | `thinking` | `disabled`, `between_tools` |
   | `observe` | `all`, `progress_only`, `off` |
   | `effort` | `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
@@ -281,11 +281,11 @@ continues").
   are its text, and are passed on before its `ModelPartArrived`. A response that arrives whole, a
   part with no readable text, and a tool call have no deltas. A delta that adds no text is not
   passed on.
-- The end of a model request is passed on last, after everything it streamed
-  (`ModelResponseEnded`), however it ended: answered, failed or stopped.
+- The end of a model request is passed on last, after everything it streamed (`ModelResponseEnded`), however it ended:
+  answered, failed or stopped.
 - `throttle.ts` is a machine that holds what is passed on and releases it in batches, at most once
-  per interval. Time is an input, so the machine reads no clock. The loop sets the interval
-  (`ModelStreamInterval`), and releases everything held when a part completes and when the request
+  per interval. Time is an input, so the machine reads no clock. The loop sets the interval (`ModelStreamInterval`), and
+  releases everything held when a part completes and when the request
   ends, whether or not the interval has passed.
 
 ## Tests

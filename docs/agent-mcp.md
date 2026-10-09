@@ -4,11 +4,11 @@
 tools to the session as tool sources, and tells the model when a server stops or runs again. A
 server is reached in one of three ways:
 
-| Transport | How |
-| --- | --- |
-| stdio | A child process (`agent-process`), with newline-delimited JSON-RPC on its stdin and stdout. The process receives the session's environment (`SessionContext.environment`), with the server's own `env` set over it. |
-| Streamable HTTP (`http`) | A POST to the server's URL for each message, plus an optional GET stream. |
-| HTTP+SSE (`sse`, protocol 2024-11-05) | A GET stream, and POSTs to the endpoint that the stream names. |
+| Transport                             | How                                                                                                                                                                                                                 |
+|---------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| stdio                                 | A child process (`agent-process`), with newline-delimited JSON-RPC on its stdin and stdout. The process receives the session's environment (`SessionContext.environment`), with the server's own `env` set over it. |
+| Streamable HTTP (`http`)              | A POST to the server's URL for each message, plus an optional GET stream.                                                                                                                                           |
+| HTTP+SSE (`sse`, protocol 2024-11-05) | A GET stream, and POSTs to the endpoint that the stream names.                                                                                                                                                      |
 
 MCP's messages are Effect's (`effect/ai` `McpSchema`). The JSON-RPC peer (`peer.ts`) is a copy of
 `effective-acp`'s peer, with MCP's cancellation added. Effect's `RpcClient` was not used because it
@@ -16,22 +16,22 @@ drops the messages that a server sends without being asked.
 
 ## Files
 
-| File | Responsibility |
-| --- | --- |
-| `client.ts` | `connectOver(name, wire, roots)`: one connection over any wire (`initialize`, `tools`, `call`). `connectStdio` starts a process, with the session's environment and the server's `env` over it, and connects over its pipes; only tests and probes use it. |
-| `http.ts` | The wire to a server at a URL (`remoteWire`), and `connectRemote`. |
-| `peer.ts` | One JSON-RPC connection that both serves requests and makes them. Listed in `imperativeBoundaries` in `oxlint.config.ts`. |
-| `server-machine.ts` | A pure state machine for one server over its runs. |
-| `server.ts` | `startMcpServer`: one server that a session keeps, with `reconnect`, `stop` and `call`. |
-| `source.ts` | A server's tools as a tool source, under the namespace `mcp__<server>`. |
-| `servers.ts` | `startMcpServers`: the servers of one session, their tool sources, their notices, and their state changes. |
-| `command.ts` | The `/mcp` command: each server's state, and `/mcp reconnect <server>`. |
-| `log-keys.ts` | The names of the log events that this module writes. |
+| File                | Responsibility                                                                                                                                                                                                                                             |
+|---------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `client.ts`         | `connectOver(name, wire, roots)`: one connection over any wire (`initialize`, `tools`, `call`). `connectStdio` starts a process, with the session's environment and the server's `env` over it, and connects over its pipes; only tests and probes use it. |
+| `http.ts`           | The wire to a server at a URL (`remoteWire`), and `connectRemote`.                                                                                                                                                                                         |
+| `peer.ts`           | One JSON-RPC connection that both serves requests and makes them. Listed in `imperativeBoundaries` in `oxlint.config.ts`.                                                                                                                                  |
+| `server-machine.ts` | A pure state machine for one server over its runs.                                                                                                                                                                                                         |
+| `server.ts`         | `startMcpServer`: one server that a session keeps, with `reconnect`, `stop` and `call`.                                                                                                                                                                    |
+| `source.ts`         | A server's tools as a tool source, under the namespace `mcp__<server>`.                                                                                                                                                                                    |
+| `servers.ts`        | `startMcpServers`: the servers of one session, their tool sources, their notices, and their state changes.                                                                                                                                                 |
+| `command.ts`        | The `/mcp` command: each server's state, and `/mcp reconnect <server>`.                                                                                                                                                                                    |
+| `log-keys.ts`       | The names of the log events that this module writes.                                                                                                                                                                                                       |
 
 ## The client
 
-- **Initialization.** The client offers `initialize` its latest protocol version
-  (`protocolVersion`) and the host's brand as `clientInfo` (the default brand when the host gives
+- **Initialization.** The client offers `initialize` its latest protocol version (`protocolVersion`) and the host's
+  brand as `clientInfo` (the default brand when the host gives
   none). It keeps the server's answer, then sends `notifications/initialized`.
 - **Tools.** `tools` lists every page, following `nextCursor`.
 - **Calls.** A call returns the tool's result as the server sent it, decoded with `McpSchema`. A
@@ -47,14 +47,14 @@ drops the messages that a server sends without being asked.
 
 ## A server's states
 
-| State | Meaning |
-| --- | --- |
-| `Stopped` | No run, or the run was stopped. |
-| `Connecting` | A run is starting, and the server has not yet answered `initialize` and listed its tools. |
-| `Ready` | The server answered and listed its tools. |
-| `Failed` | The run could not start, the server did not connect within `connectTimeout`, or it refused the credentials given. The run is stopped. |
-| `NeedsAuth` | The server asks for authorization that this client cannot give. The run is stopped. |
-| `Exited` | The run ended. |
+| State        | Meaning                                                                                                                               |
+|--------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| `Stopped`    | No run, or the run was stopped.                                                                                                       |
+| `Connecting` | A run is starting, and the server has not yet answered `initialize` and listed its tools.                                             |
+| `Ready`      | The server answered and listed its tools.                                                                                             |
+| `Failed`     | The run could not start, the server did not connect within `connectTimeout`, or it refused the credentials given. The run is stopped. |
+| `NeedsAuth`  | The server asks for authorization that this client cannot give. The run is stopped.                                                   |
+| `Exited`     | The run ended.                                                                                                                        |
 
 Each state names the run it is about. An event about an earlier run changes nothing. A stdio
 server's run is its process; a remote server's run is its connection.
@@ -77,11 +77,11 @@ server's run is its process; a remote server's run is its connection.
   again, because whether it ran is not known.
 - When a new connection cannot be made, the run has ended.
 - **Credentials.** A server that answers 401 or 403, while connecting or to a request once ready:
-  - needs authorization (`NeedsAuth`) when its headers give no credentials (no `Authorization`
-    header, and no header whose name is a credential name, such as `X-API-Key`). The reason says
-    whether the server asks for OAuth (a `WWW-Authenticate` that names OAuth's metadata), which this
-    client does not support;
-  - has failed when credentials were given: they were refused.
+    - needs authorization (`NeedsAuth`) when its headers give no credentials (no `Authorization`
+      header, and no header whose name is a credential name, such as `X-API-Key`). The reason says
+      whether the server asks for OAuth (a `WWW-Authenticate` that names OAuth's metadata), which this
+      client does not support;
+    - has failed when credentials were given: they were refused.
 
 ### Transports
 
@@ -112,7 +112,7 @@ server's run is its process; a remote server's run is its connection.
 - **Kinds.**
 
   | The server says | Kind | Replay |
-  | --- | --- | --- |
+    | --- | --- | --- |
   | `readOnlyHint` | `read` | `safe` |
   | `idempotentHint` | `other` | `idempotent` |
   | neither | `other` | `unsafe` |

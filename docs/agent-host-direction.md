@@ -41,8 +41,8 @@ Dan, 2026-10-02. Text in quotation marks is verbatim.
 
 `docs/agent-acp.md` lists the layers that are built here. One more layer is planned:
 
-| Layer | Where | Is |
-| --- | --- | --- |
+| Layer  | Where                              | Is                                                                                                                                                       |
+|--------|------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
 | labkit | `packages/app-acp` in labkit-agent | The world side of the ACP host: workspace files, the editor's files and terminal as tools, MCP, elicitation, plans, commands. It plugs into `agent-acp`. |
 
 ## Order of work
@@ -69,6 +69,6 @@ with the SDK's client.
 
 ## What the ACP host still needs of the core
 
-| Need | Where |
-| --- | --- |
+| Need                                                                                                                                                                | Where                |
+|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------|
 | An end item for each attempt of a model request on `streamed`: a fallback's failed attempt leaves its text on screen, and the next attempt's text is sent after it. | `TODO.md`, Providers |

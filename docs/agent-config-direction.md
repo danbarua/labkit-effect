@@ -78,12 +78,12 @@ the output limit defaults to the model's own.
 
 ## Settings the user sees
 
-| Setting | Values | Meaning |
-| --- | --- | --- |
-| model | `provider/model` | The model to ask. |
-| effort | `default`; the model's efforts, from models.dev, except `none` | How much the model reasons. `default` sends nothing: the provider's default applies. `none` is `thinking=disabled`. |
-| thinking | `default`, `disabled`, `between_tools` | `default` sends nothing. `disabled` turns the model's thinking off, offered for a model that can turn it off: its efforts list `none`, or it takes a budget. `between_tools` thinks only between tool calls, offered for a model measured to take it (Claude Sonnet 5.5). |
-| `cli.view.thinking` | `on`, `off` | Whether the CLI shows the model's thinking. It changes nothing in the request. In the CLI's `/settings`, it is `view.thinking`. |
+| Setting             | Values                                                         | Meaning                                                                                                                                                                                                                                                                   |
+|---------------------|----------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| model               | `provider/model`                                               | The model to ask.                                                                                                                                                                                                                                                         |
+| effort              | `default`; the model's efforts, from models.dev, except `none` | How much the model reasons. `default` sends nothing: the provider's default applies. `none` is `thinking=disabled`.                                                                                                                                                       |
+| thinking            | `default`, `disabled`, `between_tools`                         | `default` sends nothing. `disabled` turns the model's thinking off, offered for a model that can turn it off: its efforts list `none`, or it takes a budget. `between_tools` thinks only between tool calls, offered for a model measured to take it (Claude Sonnet 5.5). |
+| `cli.view.thinking` | `on`, `off`                                                    | Whether the CLI shows the model's thinking. It changes nothing in the request. In the CLI's `/settings`, it is `view.thinking`.                                                                                                                                           |
 
 - The maximum number of output tokens is not a setting that a user must choose. It defaults to the
   model's output limit from models.dev, and a configuration file can override it. Later, the
@@ -103,12 +103,12 @@ the output limit defaults to the model's own.
 
 ### Commands
 
-| Command | What it does |
-| --- | --- |
-| `/model` | Sets the user's default model for every session, and writes it to `models.yml`. |
-| `/switch` | Changes the model for this session only. |
+| Command     | What it does                                                                       |
+|-------------|------------------------------------------------------------------------------------|
+| `/model`    | Sets the user's default model for every session, and writes it to `models.yml`.    |
+| `/switch`   | Changes the model for this session only.                                           |
 | `/settings` | Shows and changes the user's settings, not only the next request's model settings. |
-| `/effort` | Sets the effort; repeated, it cycles through the model's efforts. |
+| `/effort`   | Sets the effort; repeated, it cycles through the model's efforts.                  |
 
 Thinking is toggled with a key, as Claude Code does with Option+T and pi with Shift+Tab.
 
@@ -130,9 +130,9 @@ Thinking is toggled with a key, as Claude Code does with Option+T and pi with Sh
 Direction of 2026-10-06, not built. The first use is when to compact (`TODO.md`, Compaction).
 
 - A setting has a state:
-  - **draft**: the user is changing it, and it is not applied yet;
-  - **persisted**: it is written to disk;
-  - **running**: it applies to the current turn.
+    - **draft**: the user is changing it, and it is not applied yet;
+    - **persisted**: it is written to disk;
+    - **running**: it applies to the current turn.
 - A layer of configuration has a scope: the user, a project, a model, or a provider. A layer scoped
   to a model or a provider applies only to sessions that ask that model or provider, over the
   layers before it. Example: a global `autocompact: "60%"`, and `"75%"` or `"192k"` for Claude

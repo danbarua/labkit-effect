@@ -8,17 +8,17 @@ Direction that is not built is in [agent-context-direction.md](agent-context-dir
 
 ## Files
 
-| File | Responsibility |
-| --- | --- |
-| `assemble.ts` | The services that assembly reads (`SystemPrompts`, `Notices`, `Conversation`, `ModelSelectors`), `opening`, and `assembleContents`. |
-| `assembler.ts` | `AgentContextAssembler`, the loop's `ContextAssembler`; `WholeConversation`. |
-| `compaction.ts` | `compact`, `compactIfDue`, `CompactionPolicy`, `Summarizer`, `Summaries` and `SummariesInMemory`; `CompactedConversation`. |
-| `forks.ts` | `WindowSummary`: a summary of one compaction window, for one provider. |
-| `summaries-in-folder.ts` | `SummariesInFolder`: summaries kept as files. |
-| `provider-compaction.ts` | `providerCompaction`: a summarizer that asks the provider for its own compaction. |
-| `digest.ts` | `DigestSummarizer`: a summarizer that lists a span's attachments and tool calls, with no model. |
-| `example-providers.ts` | Examples: a notice of the current time, a fixed model selector, and a selector that moves to a larger model. |
-| `log-keys.ts` | The names of the log events that this module writes. |
+| File                     | Responsibility                                                                                                                      |
+|--------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| `assemble.ts`            | The services that assembly reads (`SystemPrompts`, `Notices`, `Conversation`, `ModelSelectors`), `opening`, and `assembleContents`. |
+| `assembler.ts`           | `AgentContextAssembler`, the loop's `ContextAssembler`; `WholeConversation`.                                                        |
+| `compaction.ts`          | `compact`, `compactIfDue`, `CompactionPolicy`, `Summarizer`, `Summaries` and `SummariesInMemory`; `CompactedConversation`.          |
+| `forks.ts`               | `WindowSummary`: a summary of one compaction window, for one provider.                                                              |
+| `summaries-in-folder.ts` | `SummariesInFolder`: summaries kept as files.                                                                                       |
+| `provider-compaction.ts` | `providerCompaction`: a summarizer that asks the provider for its own compaction.                                                   |
+| `digest.ts`              | `DigestSummarizer`: a summarizer that lists a span's attachments and tool calls, with no model.                                     |
+| `example-providers.ts`   | Examples: a notice of the current time, a fixed model selector, and a selector that moves to a larger model.                        |
+| `log-keys.ts`            | The names of the log events that this module writes.                                                                                |
 
 ## The system prompt and tools
 
@@ -48,9 +48,9 @@ inserted.
 
 Two `Conversation` services are built:
 
-| Service | Messages |
-| --- | --- |
-| `WholeConversation` | The whole session (`nextMessages`). The hosts use this one. |
+| Service                 | Messages                                                                                                                                             |
+|-------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `WholeConversation`     | The whole session (`nextMessages`). The hosts use this one.                                                                                          |
 | `CompactedConversation` | For a session with compaction windows: each provider's summaries, then the facts that follow them. The FizzBuzz example and the probes use this one. |
 
 `nextMessages` returns the messages that the last request carried, as recorded with that request
@@ -67,14 +67,14 @@ nothing were compacted.
 
 A `WindowSummary` records:
 
-| Field | Meaning |
-| --- | --- |
-| `session` | The session it summarises. |
-| `window` | The window it covers. |
-| `kind` | The provider whose requests carry it. |
-| `writtenBy` | The summarizer that wrote it. |
-| `writtenAt` | When it was written. |
-| `summary` | Text, or JSON: a provider's own compaction items. |
+| Field       | Meaning                                           |
+|-------------|---------------------------------------------------|
+| `session`   | The session it summarises.                        |
+| `window`    | The window it covers.                             |
+| `kind`      | The provider whose requests carry it.             |
+| `writtenBy` | The summarizer that wrote it.                     |
+| `writtenAt` | When it was written.                              |
+| `summary`   | Text, or JSON: a provider's own compaction items. |
 
 A summary is never changed once it is recorded. A change of summarizer changes later summaries only.
 
@@ -116,11 +116,11 @@ provider's compaction was made from the summaries before it, so it replaces them
 
 ## Summarizers
 
-| Summarizer | Summary |
-| --- | --- |
+| Summarizer                        | Summary                                                                                                                                                                                                                                                                                                                                                                                               |
+|-----------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `providerCompaction(compactions)` | Asks the provider for its own compaction. The request carries the session's system prompt and tools, the provider's earlier summaries, then the span. The Responses adapter's `openAiCompactions` does this for OpenAI and xAI. The request is not recorded in the session's facts. A compaction that still fails after its retries is a defect, because the session has no summary to continue with. |
-| `DigestSummarizer(digests)` | A digest made from the messages alone: the span's attachments by pointer, and one line per tool call. |
-| FizzBuzz summarizers | `src/examples/fizzbuzz/summarizers.ts`. |
+| `DigestSummarizer(digests)`       | A digest made from the messages alone: the span's attachments by pointer, and one line per tool call.                                                                                                                                                                                                                                                                                                 |
+| FizzBuzz summarizers              | `src/examples/fizzbuzz/summarizers.ts`.                                                                                                                                                                                                                                                                                                                                                               |
 
 The trajectory importers write the summaries that Claude Code and Codex made to `summaries.jsonl`,
 with `claude-code` or `codex` as the summarizer, and `claude-code auto`, `claude-code manual` or
@@ -128,9 +128,9 @@ with `claude-code` or `codex` as the summarizer, and `claude-code auto`, `claude
 
 ## Where summaries are kept
 
-| Layer | Storage |
-| --- | --- |
-| `SummariesInMemory` | In memory, for as long as the layer lasts. |
+| Layer                       | Storage                                                                                                                                                                                                                                             |
+|-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `SummariesInMemory`         | In memory, for as long as the layer lasts.                                                                                                                                                                                                          |
 | `SummariesInFolder(folder)` | One file per summary: `<folder>/<session>/<kind>/<number>_<writtenAt>_<writtenBy>_<window>.txt` or `.json`. Summaries are read back in the order written: by time, then by number within a kind. A file that cannot be written or read is a defect. |
 
 ## Model selection

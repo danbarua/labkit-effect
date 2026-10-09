@@ -12,14 +12,14 @@ What a command does and where its paths lead (its segments, units, `sed` scripts
 is the environment's model, in `agent-environment` (`docs/agent-environment.md`); the policy judges
 what that model says.
 
-| File | Responsibility |
-| --- | --- |
-| `policy.ts` | The `Policy` interface and `every`, which applies several policies in order. |
-| `permissions.ts` | The permission policy, by Claude Code's permission modes, by allow and deny rules, and, for a command tool, by each program its command runs. |
-| `permission-rules.ts` | The rules (`<tool>`, `<tool>(<words>)`, `<tool>(<words>:*)`) and the read-only programs. |
+| File                    | Responsibility                                                                                                                                                                                        |
+|-------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `policy.ts`             | The `Policy` interface and `every`, which applies several policies in order.                                                                                                                          |
+| `permissions.ts`        | The permission policy, by Claude Code's permission modes, by allow and deny rules, and, for a command tool, by each program its command runs.                                                         |
+| `permission-rules.ts`   | The rules (`<tool>`, `<tool>(<words>)`, `<tool>(<words>:*)`) and the read-only programs.                                                                                                              |
 | `command-explainers.ts` | Plain-English notes for a question: what cannot be undone, the hosts a command connects to, what an install runs, paths in full, a pipeline's exit status, and what the session grants offered cover. |
-| `loop-breaker.ts` | `repeatedCalls` and `repeatingTurns`: they stop a model that makes the same tool call again and again. |
-| `max-turn-requests.ts` | `maxTurnRequests`: a limit on the number of model requests in one turn (ACP's `max_turn_requests`). |
+| `loop-breaker.ts`       | `repeatedCalls` and `repeatingTurns`: they stop a model that makes the same tool call again and again.                                                                                                |
+| `max-turn-requests.ts`  | `maxTurnRequests`: a limit on the number of model requests in one turn (ACP's `max_turn_requests`).                                                                                                   |
 
 ## Policies
 
@@ -30,7 +30,8 @@ A policy is a state machine for one request.
 - `Waiting` can carry `asks`: what the policy wants answered. The layer that shows the question to
   a person interprets it.
 - `receive(state, message)` handles a message while the policy waits: an answer (`Answered`), a
-  question that could not be asked (`AskingFailed`, with what failed), or a clock tick (`Tick`). It returns a verdict, or waits again. Waiting is how a policy delays an
+  question that could not be asked (`AskingFailed`, with what failed), or a clock tick (`Tick`). It returns a verdict,
+  or waits again. Waiting is how a policy delays an
   effect.
 
 A policy can decide by any means: fixed rules, parsing a command, a model's judgement, or asking a
@@ -48,23 +49,26 @@ person.
 permission mode; a call to a command tool, by the programs its command runs (below). A tool whose
 kind is not known is treated as `other`.
 
-| Mode | Tool that only reads (`read`, `search`, `think`, `fetch`) | Tool that changes files (`edit`, `delete`, `move`) | Any other tool |
-| --- | --- | --- | --- |
-| `default` | runs | asks | asks |
-| `acceptEdits` | runs | runs | asks |
-| `dontAsk` | runs | vetoed | vetoed |
-| `bypassPermissions` | runs | runs | runs |
+| Mode                | Tool that only reads (`read`, `search`, `think`, `fetch`) | Tool that changes files (`edit`, `delete`, `move`) | Any other tool |
+|---------------------|-----------------------------------------------------------|----------------------------------------------------|----------------|
+| `default`           | runs                                                      | asks                                               | asks           |
+| `acceptEdits`       | runs                                                      | runs                                               | asks           |
+| `dontAsk`           | runs                                                      | vetoed                                             | vetoed         |
+| `bypassPermissions` | runs                                                      | runs                                               | runs           |
 
 When the policy asks, it offers four options:
 
-| Option id | ACP kind | Effect |
-| --- | --- | --- |
-| `allow-once` | `allow_once` | This call runs. |
-| `allow-session` | `allow_always` | This call runs. Later calls to the tool run without a question, in every mode. |
-| `reject-once` | `reject_once` | This call is vetoed. |
+| Option id        | ACP kind        | Effect                                                                                                                   |
+|------------------|-----------------|--------------------------------------------------------------------------------------------------------------------------|
+| `allow-once`     | `allow_once`    | This call runs.                                                                                                          |
+| `allow-session`  | `allow_always`  | This call runs. Later calls to the tool run without a question, in every mode.                                           |
+| `reject-once`    | `reject_once`   | This call is vetoed.                                                                                                     |
 | `reject-session` | `reject_always` | This call is vetoed. Later calls to the tool are vetoed without a question, in every mode, `bypassPermissions` included. |
 
-An answer that names no offered option vetoes the call. So does the answer `cancelled` (`{ outcome: "cancelled" }`, as ACP gives it), which an answerer gives when the turn that asked was cancelled; the model is told that the question was cancelled before it was answered. A question that could not be asked (`AskingFailed`) vetoes the call too, and the model is told what failed.
+An answer that names no offered option vetoes the call. So does the answer `cancelled` (`{ outcome: "cancelled" }`, as
+ACP gives it), which an answerer gives when the turn that asked was cancelled; the model is told that the question was
+cancelled before it was answered. A question that could not be asked (`AskingFailed`) vetoes the call too, and the model
+is told what failed.
 
 The policy reads session answers from the session's facts (`PermissionAsked`, `PermissionAnswered`).
 A process that resumes the session from its facts therefore applies the same answers.
@@ -74,8 +78,8 @@ A tool whose inputs include paths (`ToolSpec.paths`, from the `pathOf` marker on
 (`CommandJudging.pathInputsOf`): a deny path rule refuses a read (`Read`) or a change (`Read` or
 `Edit`, as the tool's kind says) in every mode; a path outside the working folders is asked about, offering only
 this call, unless a path allow rule matches it, an allow rule names the tool, or the mode is
-`bypassPermissions`; it is vetoed in `dontAsk` and when no one can answer. The question says why
-(`Tool.why`). The tools themselves resolve paths and refuse none (`inWorkspace`).
+`bypassPermissions`; it is vetoed in `dontAsk` and when no one can answer. The question says why (`Tool.why`). The tools
+themselves resolve paths and refuse none (`inWorkspace`).
 
 When no one can answer (`canAsk` is false, as in the CLI's print mode), a call that would be asked
 about is vetoed. The veto's reason names the permission modes that let the call run:
@@ -86,13 +90,13 @@ other tool.
 
 The permissions plug-in's settings hold rules (`permission-rules.ts`):
 
-| Rule | Names |
-| --- | --- |
-| `<tool>` | every call to the tool |
-| `<tool>(<words>)` | a command tool's program that is exactly these words |
-| `<tool>(<words>:*)` | a command tool's program whose words start with these |
-| `Read(<path>)` | the paths a command reads that match the pattern; as a deny rule, also the paths it writes, deletes, moves or changes |
-| `Edit(<path>)` | the paths a command writes, deletes, moves or changes that match the pattern |
+| Rule                | Names                                                                                                                 |
+|---------------------|-----------------------------------------------------------------------------------------------------------------------|
+| `<tool>`            | every call to the tool                                                                                                |
+| `<tool>(<words>)`   | a command tool's program that is exactly these words                                                                  |
+| `<tool>(<words>:*)` | a command tool's program whose words start with these                                                                 |
+| `Read(<path>)`      | the paths a command reads that match the pattern; as a deny rule, also the paths it writes, deletes, moves or changes |
+| `Edit(<path>)`      | the paths a command writes, deletes, moves or changes that match the pattern                                          |
 
 Path rules are Claude Code's (`path-patterns.ts`): `//` from the root, `~/` from the home folder,
 anything else from the working folder, then gitignore's matching; a pattern from a single `/` is
@@ -100,10 +104,11 @@ refused. Each path a unit reads or changes (`Unit.paths`) is resolved by `agent-
 place a path as written becomes a full path. A path deny rule vetoes a read that a `Read` pattern
 matches, or a change that reaches a `Read` or an `Edit` pattern (`changeReaches`: the path matches,
 or it is a folder holding the folder an anchored pattern starts from): a path that may not be read
-may not be changed either, and the veto says so. An `Edit` deny rule does not veto a read. A path allow rule lifts a read outside
+may not be changed either, and the veto says so. An `Edit` deny rule does not veto a read. A path allow rule lifts a
+read outside
 the working folder that a `Read` or `Edit` pattern matches, a change outside it, or a write inside
-it, that an `Edit` pattern matches; the paths it does not match are still named. A recursive read
-(`rg`, `grep -r`, `ls -R`; `UnitPath.recursive`) reaches an anchored pattern inside the folder it
+it, that an `Edit` pattern matches; the paths it does not match are still named. A recursive read (`rg`, `grep -r`,
+`ls -R`; `UnitPath.recursive`) reaches an anchored pattern inside the folder it
 reads, as a change does. A relative path after a `cd` or `pushd` to a folder written out is judged
 from both folders (it is denied when either is, allowed only when both are, and outside when either
 is); after `popd`, `cd -` or a `cd` to a folder not written out it is outside, and unseen. When path
@@ -123,8 +128,8 @@ the words of `sudo` and other opaque programs (`sudo rm`). When deny rules name 
 they cannot see (one that does not parse, or a program whose name is not written out, such as
 `$(printf rm)`) is asked about in every mode, `bypassPermissions` included, and vetoed when no one
 can answer. Deny rules cannot see code that a program is given to run (`python3 -c '…'`,
-`sh -c "$X"`, a here-document fed to a shell): in `bypassPermissions` that code runs. Every layer a host builds is trusted
-(`docs/agent-config.md`), so rules come only from the user's own configuration and the folders they
+`sh -c "$X"`, a here-document fed to a shell): in `bypassPermissions` that code runs. Every layer a host builds is
+trusted (`docs/agent-config.md`), so rules come only from the user's own configuration and the folders they
 trust.
 
 ### Command tools
@@ -141,8 +146,8 @@ programs that run. Each program, its unit, has:
 - the files it writes inside the working folder (a redirect to a file, `tee`, `dd of=`, `sort -o`,
   `git --output`, `sed -i`, `find -delete`);
 - the paths outside the working folder that it writes, deletes, moves or changes: the files above
-  when they are outside, and the operands of the programs that change the paths they are given
-  (`rm`, `rmdir`, `unlink`, `shred`, `mv`, `cp`, `install`, `rsync` and `ln` to their destination,
+  when they are outside, and the operands of the programs that change the paths they are given (`rm`, `rmdir`, `unlink`,
+  `shred`, `mv`, `cp`, `install`, `rsync` and `ln` to their destination,
   `touch`, `mkdir`, `truncate`, `chmod`, `chown`, `chgrp`, `curl -o`, `wget -O`, and what
   `find <outside> -delete` finds); inside the working folder, those operands are not writes. The
   paths that `xargs` gives such a program on its input count as outside, since they are not
@@ -155,13 +160,15 @@ A path is outside the working folder when it is absolute (or from `~`) and not i
 `..` climb above it, or when it is not written out (`"$DIR"`). Symbolic links are not followed, and
 a `cd` earlier in the command does not move the folder that later paths are judged against (a `cd`
 outside it is itself a read outside it).
+
 - whether it is opaque: its words do not show what it runs (`python3 -c`, `curl … | sh`, `sudo`,
   `awk`, a variable such as `PATH` set for it), with why;
 - a detail that helps a person judge it: what a `sed` script does, in plain English; the code
   written in the command, with its language (`python3 -c`, `node -e`, `perl -ne`, `bun -e`,
   `deno eval`, an `awk` program, a here-document or here-string that a runtime or a shell reads); or
   the text it writes to one file (`Writes`): `cat` given a here-document or here-string, `echo` with
-  literal words and no option or backslash (their meanings differ between shells), or `tee`, writing to one file named by a literal word or a path from
+  literal words and no option or backslash (their meanings differ between shells), or `tee`, writing to one file named
+  by a literal word or a path from
   `~`, with whether the text is added to the end (`>>`, `tee -a`) and whether the shell expands
   `$…` in it. `textsWritten` lists a command's writes, each with whether a `cd` comes before it.
 
@@ -186,14 +193,14 @@ Only the programs named above have their paths judged. A program that writes fil
 arguments or configuration say (`make`, `bun run build`, `go build -o ~/bin/x`, a script) is
 judged by its grant alone.
 
-| Command | `default` | `acceptEdits` | `dontAsk` | `bypassPermissions` |
-| --- | --- | --- | --- | --- |
-| every program runs without a question | runs | runs | runs | runs |
-| a program writes files inside the working folder, the others run without a question | asks | runs | vetoed | runs |
-| a program reads outside the working folder | asks | asks | vetoed | runs |
-| a program writes, deletes, moves or changes paths outside the working folder (no `Edit` rule matches them) | asks | asks | vetoed | runs |
-| a program needs permission | asks | asks | vetoed | runs |
-| a deny rule or a rejected grant names a program | vetoed | vetoed | vetoed | vetoed |
+| Command                                                                                                    | `default` | `acceptEdits` | `dontAsk` | `bypassPermissions` |
+|------------------------------------------------------------------------------------------------------------|-----------|---------------|-----------|---------------------|
+| every program runs without a question                                                                      | runs      | runs          | runs      | runs                |
+| a program writes files inside the working folder, the others run without a question                        | asks      | runs          | vetoed    | runs                |
+| a program reads outside the working folder                                                                 | asks      | asks          | vetoed    | runs                |
+| a program writes, deletes, moves or changes paths outside the working folder (no `Edit` rule matches them) | asks      | asks          | vetoed    | runs                |
+| a program needs permission                                                                                 | asks      | asks          | vetoed    | runs                |
+| a deny rule or a rejected grant names a program                                                            | vetoed    | vetoed        | vetoed    | vetoed              |
 
 The question (`Command`) names the command and each program that needs permission, with why and its
 kind (`NeedKind`: what lets it run). That is what the session's facts record of it. What a host shows
@@ -208,11 +215,11 @@ apply in every mode: `dontAsk` and print mode are autonomy.
 
 ## Loop breaker
 
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| `nudgeAt` | 3 | The identical call in a row that `repeatedCalls` vetoes, and each one after it. |
-| `stopAt` | 5 | The number of identical calls in a row after which `repeatingTurns` vetoes the turn's next model request. |
-| `key` | `sameToolAndInput` | Two calls are identical when their keys are equal. The default key is the tool and the input as received. |
+| Setting   | Default            | Meaning                                                                                                   |
+|-----------|--------------------|-----------------------------------------------------------------------------------------------------------|
+| `nudgeAt` | 3                  | The identical call in a row that `repeatedCalls` vetoes, and each one after it.                           |
+| `stopAt`  | 5                  | The number of identical calls in a row after which `repeatingTurns` vetoes the turn's next model request. |
+| `key`     | `sameToolAndInput` | Two calls are identical when their keys are equal. The default key is the tool and the input as received. |
 
 - `repeatedCalls` is a tool call policy. Its veto reason, which the model receives as the call's
   result, states how many identical calls were made in a row, and that the turn ends after `stopAt`.

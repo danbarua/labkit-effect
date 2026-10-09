@@ -7,21 +7,21 @@ labkit's dashboards. How the instrumentation works is described in
 
 ## Log files
 
-| What | Where |
-| --- | --- |
-| A `labkit` conversation's log | `~/.local/share/labkit/logs/cli-<session>.log` |
-| A `labkit -p` run's log lines | stderr, so that stdout carries only the answer |
-| The ACP agent's log, one file per launch | `~/.local/share/labkit/logs/`, or the folder `LABKIT_ACP_LOG_DIR` names |
+| What                                          | Where                                                                          |
+|-----------------------------------------------|--------------------------------------------------------------------------------|
+| A `labkit` conversation's log                 | `~/.local/share/labkit/logs/cli-<session>.log`                                 |
+| A `labkit -p` run's log lines                 | stderr, so that stdout carries only the answer                                 |
+| The ACP agent's log, one file per launch      | `~/.local/share/labkit/logs/`, or the folder `LABKIT_ACP_LOG_DIR` names        |
 | The bodies of each model request and response | `~/.local/share/labkit/logs/http-captures/`, written only at the `debug` level |
 
 `--data-dir` moves the whole `~/.local/share/labkit/` folder, logs included.
 
 The level is set as follows:
 
-| Program | Setting | Default |
-| --- | --- | --- |
-| The `labkit` command | `--log-level`, else `LABKIT_LOG_LEVEL` | `info` |
-| The ACP agent | `LABKIT_ACP_LOG_LEVEL`, else `LABKIT_LOG_LEVEL` | `debug` |
+| Program              | Setting                                         | Default |
+|----------------------|-------------------------------------------------|---------|
+| The `labkit` command | `--log-level`, else `LABKIT_LOG_LEVEL`          | `info`  |
+| The ACP agent        | `LABKIT_ACP_LOG_LEVEL`, else `LABKIT_LOG_LEVEL` | `debug` |
 
 The levels are `all`, `trace`, `debug`, `info`, `warn`, `error`, `fatal` and `none`.
 
@@ -53,13 +53,13 @@ warnings and errors.
    labkit
    ```
 
-   - To set it for one run only, put it before the command: `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 labkit`.
-     There, `labkit` is the command that runs, not part of the variable's value.
-   - The commands run in this checkout (`bun cli`, `bun test`, the scripts) also read the variable
-     from the checkout's `.env`.
-   - For the ACP agent, add the variable to the environment that the editor starts the agent with,
-     in the editor's settings for the agent. labkit-web's dev stack passes its own environment to
-     the agent it starts.
+    - To set it for one run only, put it before the command: `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 labkit`.
+      There, `labkit` is the command that runs, not part of the variable's value.
+    - The commands run in this checkout (`bun cli`, `bun test`, the scripts) also read the variable
+      from the checkout's `.env`.
+    - For the ACP agent, add the variable to the environment that the editor starts the agent with,
+      in the editor's settings for the agent. labkit-web's dev stack passes its own environment to
+      the agent it starts.
 
 4. Open Grafana at <http://localhost:3000>. The dashboards have the tag `labkit`. They include an
    overview, models, providers, costs, requests, errors, tools and one session. Each request links to
@@ -77,14 +77,14 @@ warnings and errors.
 
 Each program sends its telemetry under a service name, which Grafana shows and filters by:
 
-| Program | Service name |
-| --- | --- |
-| The `labkit` command (`bun cli` in this checkout) | `labkit-cli` |
-| The ACP agent | `labkit-acp` |
-| Zork and the Zork spectator | `labkit-zork` |
-| The tests (`bun test`) | `labkit-tests` |
-| The live probes in `scripts/probes/` | `labkit-probe` |
-| The capture server | `labkit-captures` |
+| Program                                           | Service name      |
+|---------------------------------------------------|-------------------|
+| The `labkit` command (`bun cli` in this checkout) | `labkit-cli`      |
+| The ACP agent                                     | `labkit-acp`      |
+| Zork and the Zork spectator                       | `labkit-zork`     |
+| The tests (`bun test`)                            | `labkit-tests`    |
+| The live probes in `scripts/probes/`              | `labkit-probe`    |
+| The capture server                                | `labkit-captures` |
 
 - The `labkit` in `labkit-cli` and `labkit-acp` is the brand that the program runs as. It is
   `labkit` unless a program that ships the agent gives another brand, or `LABKIT_BRAND` names one.

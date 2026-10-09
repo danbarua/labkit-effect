@@ -6,10 +6,10 @@ work is listed in order at the end. Text in quotation marks is Dan's, verbatim.
 ## The problem
 
 - Each tool states and checks the same things itself:
-  - Each workspace tool checks that its path is inside the working folder.
-  - Each description repeated the working folder's path until the system text named it once.
-  - ACP's editor world (`src/agent-acp/world.ts`) defines its own path check, with a different
-    message.
+    - Each workspace tool checks that its path is inside the working folder.
+    - Each description repeated the working folder's path until the system text named it once.
+    - ACP's editor world (`src/agent-acp/world.ts`) defines its own path check, with a different
+      message.
 - The git tools (`src/agent-tools/git.ts`) end every description with `Repository: <path>.`, and
   take paths relative to that repository. No host offers them.
 - ACP shows a tool call's title as the tool's name and its command or path (`aboutOf`,
@@ -31,7 +31,7 @@ work is listed in order at the end. Text in quotation marks is Dan's, verbatim.
   Each behaviour is defined once, as one wrapper:
 
   | Wrapper | What it does |
-  | --- | --- |
+    | --- | --- |
   | `inWorkspace` | Resolves relative paths against the working folder. The permission policy judges a path outside it, as it judges a command's (Dan, 2026-10-08: option B). |
   | `described` | Adds an `intent` input: one sentence that says what the call is for. A UI shows it as the call's title. The input is named `intent`, not `description`, because many tools (MCP tools among them) have a `description` input of their own. |
   | `bound` | Removes an input from what the model is offered, and supplies its value itself. The git tool bound to a workspace supplies `repository`: the model never sees that input. |
@@ -120,8 +120,10 @@ The hosts record it for their own tools where the calls run (`agent-host/recorde
 file their command writes at a path it writes out (`writtenFiles`): a redirect's target, `tee`'s and
 `sed -i`'s, whether or not the words show the text. The second is `FileMoved`: a command's `mv`, as
 the disk shows it, recorded as a line (moved from X to Y) rather than as the file's text. The third is
-`FileWritten`: a file git ignores (a log, build output), recorded by its size. ACP shows a finished call's diffs from it, live
-and replayed alike, and the REPL prints them under the call (`docs/agent-acp.md`). Other harnesses keep the same two parts per result: Claude Code's
+`FileWritten`: a file git ignores (a log, build output), recorded by its size. ACP shows a finished call's diffs from
+it, live
+and replayed alike, and the REPL prints them under the call (`docs/agent-acp.md`). Other harnesses keep the same two
+parts per result: Claude Code's
 `toolUseResult`, Codex's `FileChange`, opencode's `metadata`, omp's `details`.
 
 The patch is kept with the result, in the facts, cut at 32 KiB at the end of a line, with the
@@ -152,17 +154,15 @@ agent reads, as the harness's notices of changed files want.
   say nothing once the call has ended. Dan: this would be an enhancement on "the agent ran this bash
   command", and git records the meaningful diffs anyway. A whole file shown as a diff would be as long
   as the file; a line that says what happened costs far fewer tokens, as `FileMoved` does for `mv`.
-- Details tell the harness's notices of changed files which changes the agent made itself
-  (`TODO.md`); Dan: "If we have the information to do so, then we should do so!"
-- A rewritten search tells the agent that its command was rewritten and why in its result
-  (`TODO.md`).
+- Details tell the harness's notices of changed files which changes the agent made itself (`TODO.md`); Dan: "If we have
+  the information to do so, then we should do so!"
+- A rewritten search tells the agent that its command was rewritten and why in its result (`TODO.md`).
 
 ## Ideas, not decided
 
 - `ToolCallPolicies` takes the shape of a wrapper.
 - `--tools my_tools.ts`: tools given as code on the command line.
-- `/preview`: the CLI shows what the next request would send, the system prompt included
-  (`TODO.md`).
+- `/preview`: the CLI shows what the next request would send, the system prompt included (`TODO.md`).
 - A workspace wrapper under which the model is offered and sends only paths relative to the working
   folder, and the working folder's path is removed from results. The host (ACP) still sees absolute
   paths. Dan: "not necessarily something I'd use, but I can see enterprise deployments wanting it."

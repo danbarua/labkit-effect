@@ -6,12 +6,12 @@ session.
 
 ## Permission modes
 
-| Mode | What it does |
-| --- | --- |
-| `default` | Asks before a file is changed and before a command that is not read-only. |
-| `acceptEdits` | Changes files in your folder without asking: the file tools, and a command's writes to files there (`>`, `tee`). Still asks about a program not allowed yet, and about changes outside your folder. |
-| `dontAsk` | Asks nothing: what would be asked about is refused, unless you allowed it earlier in the session. |
-| `bypassPermissions` | Runs everything, except what a deny rule refuses. |
+| Mode                | What it does                                                                                                                                                                                        |
+|---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `default`           | Asks before a file is changed and before a command that is not read-only.                                                                                                                           |
+| `acceptEdits`       | Changes files in your folder without asking: the file tools, and a command's writes to files there (`>`, `tee`). Still asks about a program not allowed yet, and about changes outside your folder. |
+| `dontAsk`           | Asks nothing: what would be asked about is refused, unless you allowed it earlier in the session.                                                                                                   |
+| `bypassPermissions` | Runs everything, except what a deny rule refuses.                                                                                                                                                   |
 
 Choose one with `--permission-mode`, or in an editor with the session's permission setting.
 
@@ -30,14 +30,14 @@ These run without a question when they read only inside your folder: `ls`, `cat`
 
 labkit asks, and says why, when a command:
 
-| Why | Example | What you can allow |
-| --- | --- | --- |
-| runs a program not allowed yet | `rm -rf build`, `bun test` | the call, or the program (and its subcommand) for the rest of the session |
-| writes a file | `echo done > notes.txt` | the call; `acceptEdits` allows it |
-| reads outside your folder | `cat ~/.aws/credentials` | the call (see below) |
-| writes, deletes or moves outside your folder | `rm -rf ~/Code/other`, `echo x >> ~/.zshrc` | the call (see below) |
-| runs code labkit cannot read | `python3 -c '…'`, `curl … \| sh` | the call |
-| does not parse | | the call |
+| Why                                          | Example                                     | What you can allow                                                        |
+|----------------------------------------------|---------------------------------------------|---------------------------------------------------------------------------|
+| runs a program not allowed yet               | `rm -rf build`, `bun test`                  | the call, or the program (and its subcommand) for the rest of the session |
+| writes a file                                | `echo done > notes.txt`                     | the call; `acceptEdits` allows it                                         |
+| reads outside your folder                    | `cat ~/.aws/credentials`                    | the call (see below)                                                      |
+| writes, deletes or moves outside your folder | `rm -rf ~/Code/other`, `echo x >> ~/.zshrc` | the call (see below)                                                      |
+| runs code labkit cannot read                 | `python3 -c '…'`, `curl … \| sh`            | the call                                                                  |
+| does not parse                               |                                             | the call                                                                  |
 
 "Allow for the rest of the session" names what it allows: `rm`, `git push`, `bun run build`,
 `npx eslint`. A later command that runs only allowed programs runs without a question.
@@ -53,8 +53,8 @@ that allows a program says which programs run; a path rule says where they read 
 An allow rule for the whole tool (`command`) runs every command. This covers redirects, `tee`, `sed -i`,
 `rm`, `mv`, `cp`, `rsync`, `ln`, `touch`, `mkdir`, `chmod`, `chown`, `curl -o`, `wget -O` and
 `find -delete`. A path labkit cannot read (`rm -rf "$DIR"`, or `xargs rm`, whose paths come from its
-input) counts as outside your folder. Other programs write where their own arguments say
-(`go build -o ~/bin/tool`, a script), and labkit does not see where.
+input) counts as outside your folder. Other programs write where their own arguments say (`go build -o ~/bin/tool`, a
+script), and labkit does not see where.
 
 `ssh`, `docker` and `kubectl` are allowed by host or container (`ssh build-box`,
 `docker exec web`): the command they run there is not judged.
@@ -87,16 +87,16 @@ they will do:
   does; at the terminal, it is in the question.
 
 - **Notes in plain English** say what the words do not say plainly:
-  - what cannot be undone: `rm` (folders with `-r`, without asking with `-f`), `git reset --hard`,
-    `git push --force`, `git clean -f`, `git checkout -- <files>`, `git restore`, `git branch -D`,
-    `git stash drop`, `-R` on `chmod` and `chown`, `dd` to a device;
-  - the hosts a command connects to, and whether it sends them data (`curl`, `wget`, `git push`,
-    `git pull`, `git clone`, `ssh`, `scp`, `rsync`);
-  - what installing packages downloads and runs (`npm`, `yarn`, `pnpm`, `bun`, `pip`, `cargo install`,
-    `gem install`, `go install`, `brew install`);
-  - a relative path outside your folder (`../lib/secret.txt`) as its full path;
-  - that in a pipeline (`bun test | tail -20`) only the last program's exit status counts;
-  - what "Allow … for the rest of the session" covers.
+    - what cannot be undone: `rm` (folders with `-r`, without asking with `-f`), `git reset --hard`,
+      `git push --force`, `git clean -f`, `git checkout -- <files>`, `git restore`, `git branch -D`,
+      `git stash drop`, `-R` on `chmod` and `chown`, `dd` to a device;
+    - the hosts a command connects to, and whether it sends them data (`curl`, `wget`, `git push`,
+      `git pull`, `git clone`, `ssh`, `scp`, `rsync`);
+    - what installing packages downloads and runs (`npm`, `yarn`, `pnpm`, `bun`, `pip`, `cargo install`,
+      `gem install`, `go install`, `brew install`);
+    - a relative path outside your folder (`../lib/secret.txt`) as its full path;
+    - that in a pipeline (`bun test | tail -20`) only the last program's exit status counts;
+    - what "Allow … for the rest of the session" covers.
 
 - **Code written in the command** is shown in its language: `python3 -c`, `node -e`, `perl -ne`,
   `ruby -e`, `bun -e`, `deno eval`, an `awk` program, and code given to a program or a shell as a
@@ -124,13 +124,13 @@ plugins:
       - "Edit(~/.ssh/**)"          # never change ~/.ssh, nor delete a folder that holds it
 ```
 
-| Rule | What it names |
-| --- | --- |
-| `tool` | every call to the tool |
-| `tool(words)` | a command's program that is exactly these words |
-| `tool(words:*)` | a command's program that starts with these words |
-| `Read(path)` | the files a command reads that match the path; a denied read is a denied change |
-| `Edit(path)` | the files a command writes, changes or deletes that match the path; an allowed edit is an allowed read |
+| Rule            | What it names                                                                                          |
+|-----------------|--------------------------------------------------------------------------------------------------------|
+| `tool`          | every call to the tool                                                                                 |
+| `tool(words)`   | a command's program that is exactly these words                                                        |
+| `tool(words:*)` | a command's program that starts with these words                                                       |
+| `Read(path)`    | the files a command reads that match the path; a denied read is a denied change                        |
+| `Edit(path)`    | the files a command writes, changes or deletes that match the path; an allowed edit is an allowed read |
 
 Paths are Claude Code's: `//tmp/**` is from the root of the file system, `~/notes/**` from your home
 folder, and anything else from your folder (`./.env`, `src/**`). After that, a path is matched as a

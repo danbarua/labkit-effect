@@ -10,35 +10,35 @@ loads, are in `src/agent-config/fixtures/`.
 
 ```yaml
 # yaml-language-server: $schema=../schemas/config.schema.json
-extensions:            # the user's own file only
+extensions: # the user's own file only
   - ./my-plugin.ts
 plugins:
   loopBreaker: { nudgeAt: 3, stopAt: 5 }
   strict: { use: loopBreaker, stopAt: 3 }   # a second loop breaker, with its own settings
   permissions:
     mode: default
-    allow: ["command(bun test:*)", "command(make build)"]   # docs/agent-policy.md, Rules
-    deny: ["command(git push:*)", git_push]
-toolCalls: [loopBreaker, permissions]
-modelRequests: [loopBreaker, maxTurnRequests]   # maxTurnRequests: its defaults
-turnEnd: [retryIncomplete]
+    allow: [ "command(bun test:*)", "command(make build)" ]   # docs/agent-policy.md, Rules
+    deny: [ "command(git push:*)", git_push ]
+toolCalls: [ loopBreaker, permissions ]
+modelRequests: [ loopBreaker, maxTurnRequests ]   # maxTurnRequests: its defaults
+turnEnd: [ retryIncomplete ]
 maxHolds: 1
 mcpServers:
-  github: { command: gh-mcp, args: [--read-only], required: true, connectTimeout: 10 seconds }
+  github: { command: gh-mcp, args: [ --read-only ], required: true, connectTimeout: 10 seconds }
 ```
 
 ## Files
 
-| File | Responsibility |
-| --- | --- |
-| `plugin.ts` | What a plug-in is, the seams, and `FromHost` (what the host provides that a file cannot). |
-| `builtins.ts` | The built-in plug-ins: `loopBreaker`, `permissions`, `maxTurnRequests`, `retryIncomplete`, `maxBudget`, `credentials`. |
-| `folders.ts` | The configuration folders (`configFolders`) and the error that refuses a configuration (`ConfigInvalid`). It imports nothing else from the agent but the brand, so a program that imports the brand's folders (`agent-host/brand-folders.ts`) does not load the configuration. |
-| `file.ts` | The configuration files' layers (`fileLayers`, `fileLayer`), decoding (`loadConfiguration`), and the MCP servers. |
-| `merge.ts` | Merging layers of parsed values. |
-| `seams.ts` | `seamListsOf`: the lists that a configuration gives a session, and the layer that provides them. |
-| `effective.ts` | `effective-settings.json`: what a configuration resolved to, and which layer wrote each value. |
-| `schema.ts` | The JSON Schema of a configuration file, kept at `schemas/config.schema.json`. |
+| File           | Responsibility                                                                                                                                                                                                                                                                 |
+|----------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `plugin.ts`    | What a plug-in is, the seams, and `FromHost` (what the host provides that a file cannot).                                                                                                                                                                                      |
+| `builtins.ts`  | The built-in plug-ins: `loopBreaker`, `permissions`, `maxTurnRequests`, `retryIncomplete`, `maxBudget`, `credentials`.                                                                                                                                                         |
+| `folders.ts`   | The configuration folders (`configFolders`) and the error that refuses a configuration (`ConfigInvalid`). It imports nothing else from the agent but the brand, so a program that imports the brand's folders (`agent-host/brand-folders.ts`) does not load the configuration. |
+| `file.ts`      | The configuration files' layers (`fileLayers`, `fileLayer`), decoding (`loadConfiguration`), and the MCP servers.                                                                                                                                                              |
+| `merge.ts`     | Merging layers of parsed values.                                                                                                                                                                                                                                               |
+| `seams.ts`     | `seamListsOf`: the lists that a configuration gives a session, and the layer that provides them.                                                                                                                                                                               |
+| `effective.ts` | `effective-settings.json`: what a configuration resolved to, and which layer wrote each value.                                                                                                                                                                                 |
+| `schema.ts`    | The JSON Schema of a configuration file, kept at `schemas/config.schema.json`.                                                                                                                                                                                                 |
 
 ## Layers
 
@@ -46,11 +46,11 @@ A host builds the layers (`agent-host/launch.ts`): its own defaults, then the fi
 command line gives (`--settings`, `--mcp-config`, flags). Both hosts, the CLI and the ACP host,
 read layers.
 
-| Files | Trusted | Read |
-| --- | --- | --- |
-| the user's configuration folder: `~/.config/<name>/`, or `--config-dir` (an absolute path) | yes | always |
-| the project's folder, `<project>/.<name>/`: its files other than `*.local.yml` | yes | with `--setting-sources project`, in a trusted folder |
-| the project's folder: the user's own files for the project, `*.local.yml` | yes | with `--setting-sources local`, in a trusted folder |
+| Files                                                                                      | Trusted | Read                                                  |
+|--------------------------------------------------------------------------------------------|---------|-------------------------------------------------------|
+| the user's configuration folder: `~/.config/<name>/`, or `--config-dir` (an absolute path) | yes     | always                                                |
+| the project's folder, `<project>/.<name>/`: its files other than `*.local.yml`             | yes     | with `--setting-sources project`, in a trusted folder |
+| the project's folder: the user's own files for the project, `*.local.yml`                  | yes     | with `--setting-sources local`, in a trusted folder   |
 
 - Each file is a layer. A folder's files are its `.yml` and `.yaml` files, read in the order of their
   names (code-unit order), so a name can start with a sorting prefix: `10_policies.yml`,
@@ -63,15 +63,15 @@ read layers.
 - `<name>` is `configName` (`labkit`) unless the caller gives another.
 - The project's files are read only when named, and only in a trusted folder, because a file that
   comes with a cloned project could turn off permission or give the model's commands credentials.
-  - A folder is trusted when it, or a folder that contains it, is listed in `trusted-folders.json`
-    in the user's configuration folder (`agent-host/trust.ts`). The list is JSON, so it is not one of
-    the folder's layers.
-  - The CLI's command, `labkit` (`bin/labkit.ts`), asks at a terminal whether to trust a folder that
-    has its own files, and lists the folder when the user says yes.
-  - For the ACP host, the session's working folder counts as trusted, because the editor trusts its
-    workspace.
-  - Naming the project's files, or the local ones, in a folder that is not trusted refuses the
-    configuration.
+    - A folder is trusted when it, or a folder that contains it, is listed in `trusted-folders.json`
+      in the user's configuration folder (`agent-host/trust.ts`). The list is JSON, so it is not one of
+      the folder's layers.
+    - The CLI's command, `labkit` (`bin/labkit.ts`), asks at a terminal whether to trust a folder that
+      has its own files, and lists the folder when the user says yes.
+    - For the ACP host, the session's working folder counts as trusted, because the editor trusts its
+      workspace.
+    - Naming the project's files, or the local ones, in a folder that is not trusted refuses the
+      configuration.
 
 Only a trusted layer may name `extensions` or `mcpServers`, because both run code. An untrusted layer
 that names either is refused. Every layer a host builds is trusted; the check guards layers that a
@@ -79,16 +79,16 @@ caller builds itself (`fileLayer(file, false)`).
 
 ## What a layer holds
 
-| Key | Value |
-| --- | --- |
-| `plugins` | Plug-ins by name, each with its settings. The plug-in is the one the name names, unless `use` names another. A setting that is not given takes its default. |
-| `toolCalls`, `modelRequests`, `turnEnd`, `knownModels`, `settling`, `toolSources`, `commandEnvironment` | Each seam's list of names, in order. Each name is in `plugins`, or is a plug-in's own name (that plug-in with its defaults). |
-| `maxHolds` | How many times the turn-end hooks may hold one turn open. Required when `turnEnd` lists hooks. |
-| `mcpServers` | MCP servers by name. |
-| `extensions` | Module paths, absolute or relative to the file's folder. |
-| `model` | The model that a new session asks unless the command line names another, as `provider/model`. |
-| `models` | What is known of models, by `provider/model`, over models.dev's catalog (see Models). |
-| `cli` | The CLI's own settings: `view.thinking` (`on`, `off`), whether it shows the model's thinking; `on` when no layer sets it. It changes nothing in a request. |
+| Key                                                                                                     | Value                                                                                                                                                       |
+|---------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `plugins`                                                                                               | Plug-ins by name, each with its settings. The plug-in is the one the name names, unless `use` names another. A setting that is not given takes its default. |
+| `toolCalls`, `modelRequests`, `turnEnd`, `knownModels`, `settling`, `toolSources`, `commandEnvironment` | Each seam's list of names, in order. Each name is in `plugins`, or is a plug-in's own name (that plug-in with its defaults).                                |
+| `maxHolds`                                                                                              | How many times the turn-end hooks may hold one turn open. Required when `turnEnd` lists hooks.                                                              |
+| `mcpServers`                                                                                            | MCP servers by name.                                                                                                                                        |
+| `extensions`                                                                                            | Module paths, absolute or relative to the file's folder.                                                                                                    |
+| `model`                                                                                                 | The model that a new session asks unless the command line names another, as `provider/model`.                                                               |
+| `models`                                                                                                | What is known of models, by `provider/model`, over models.dev's catalog (see Models).                                                                       |
+| `cli`                                                                                                   | The CLI's own settings: `view.thinking` (`on`, `off`), whether it shows the model's thinking; `on` when no layer sets it. It changes nothing in a request.  |
 
 - A seam's entries become the session's list for that seam, in the same order. Each entry is made by
   its plug-in from its settings, which are the same on every list the entry is on, and the name it
@@ -144,12 +144,12 @@ built-ins are, for every layer to use.
 
 ## MCP servers
 
-| Field | Meaning |
-| --- | --- |
-| `command`, `args`, `env`, `cwd` | A server that the session runs as a process. `type: stdio` may be given, as Claude Code's `.mcp.json` does. |
-| `type: http` or `sse`, `url`, `headers` | A server at a URL. |
-| `required` | Whether a session needs the server. False unless given. |
-| `connectTimeout` | How long the server has to connect, as a duration such as `10 seconds`. |
+| Field                                   | Meaning                                                                                                     |
+|-----------------------------------------|-------------------------------------------------------------------------------------------------------------|
+| `command`, `args`, `env`, `cwd`         | A server that the session runs as a process. `type: stdio` may be given, as Claude Code's `.mcp.json` does. |
+| `type: http` or `sse`, `url`, `headers` | A server at a URL.                                                                                          |
+| `required`                              | Whether a session needs the server. False unless given.                                                     |
+| `connectTimeout`                        | How long the server has to connect, as a duration such as `10 seconds`.                                     |
 
 - Servers merge key by key, so a later layer can add a server or change one. A layer that writes
   `mcpServers: null` removes the servers of the layers before it.
@@ -168,7 +168,7 @@ server lists. `models` overrides either, for one model at a time:
 model: anthropic/claude-sonnet-5-5
 models:
   xai/grok-4.7:
-    efforts: [minimal, low, medium, high, xhigh]
+    efforts: [ minimal, low, medium, high, xhigh ]
   localhost/qwen3.5-9b-8bit:
     context: 32768
     output: 8192
@@ -214,8 +214,8 @@ session's context. When the configuration lists no `commandEnvironment`, the ses
 is this process's environment without its credential variables. An MCP server's own `env` is set
 over the session's environment, so a server receives the credential its configuration names.
 
-The `credentials` plug-in removes the variables whose names are credential names
-(`isCredentialName` in `agent-process`), except those in `pass` (for example `SSH_AUTH_SOCK`, for
+The `credentials` plug-in removes the variables whose names are credential names (`isCredentialName` in
+`agent-process`), except those in `pass` (for example `SSH_AUTH_SOCK`, for
 `git push` over SSH). A variable in `pass` reaches the MCP servers as well as the model's commands.
 
 ## Budget
@@ -231,8 +231,8 @@ with no known price costs nothing). It has no default, so a list that names it n
 - the layers, in order, and whether each is trusted;
 - each seam's entries by name, with their plug-in and every setting as resolved, defaults included;
 - `maxHolds`;
-- the MCP servers. A server's command, arguments and URL are shown as the layers wrote them
-  (`${VAR}`, not the variable's value), with credential flag values redacted (`redactedArgs`). Its
+- the MCP servers. A server's command, arguments and URL are shown as the layers wrote them (`${VAR}`, not the
+  variable's value), with credential flag values redacted (`redactedArgs`). Its
   environment and headers are shown by name only;
 - for every value the layers wrote, the layer that wrote it last (`from`);
 - what the host provides beside the layers (`host`).

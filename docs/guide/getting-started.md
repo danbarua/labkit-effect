@@ -15,11 +15,11 @@ bun link                 # puts the labkit command on your PATH
 
 labkit asks a model from one of these:
 
-| Provider | What it needs |
-| --- | --- |
-| Anthropic | `ANTHROPIC_API_KEY` |
-| OpenAI | `OPENAI_API_KEY` |
-| xAI | `XAI_API_KEY` |
+| Provider                         | What it needs                          |
+|----------------------------------|----------------------------------------|
+| Anthropic                        | `ANTHROPIC_API_KEY`                    |
+| OpenAI                           | `OPENAI_API_KEY`                       |
+| xAI                              | `XAI_API_KEY`                          |
 | A local OpenAI-compatible server | a server at `http://localhost:8000/v1` |
 
 `labkit models` lists the models you can use, one per line. A model is named `provider/model`, such
@@ -47,14 +47,14 @@ asks whether to trust the folder ([Trusted folders](trusted-folders.md)).
 
 ## What labkit keeps, and where
 
-| What | Where |
-| --- | --- |
-| Your settings | `~/.config/labkit/*.yml` |
-| The folders you trust | `~/.config/labkit/trusted-folders.json` |
-| Each session, so that you can carry on with it | `~/.local/share/labkit/sessions/` |
-| The images and files that sessions refer to | `~/.local/share/labkit/blobs/` |
-| Each session's log | `~/.local/share/labkit/logs/` ([Logs and telemetry](logs-and-telemetry.md)) |
-| A session you export with `/export` | `.labkit/exports/` in the folder you work in |
+| What                                           | Where                                                                       |
+|------------------------------------------------|-----------------------------------------------------------------------------|
+| Your settings                                  | `~/.config/labkit/*.yml`                                                    |
+| The folders you trust                          | `~/.config/labkit/trusted-folders.json`                                     |
+| Each session, so that you can carry on with it | `~/.local/share/labkit/sessions/`                                           |
+| The images and files that sessions refer to    | `~/.local/share/labkit/blobs/`                                              |
+| Each session's log                             | `~/.local/share/labkit/logs/` ([Logs and telemetry](logs-and-telemetry.md)) |
+| A session you export with `/export`            | `.labkit/exports/` in the folder you work in                                |
 
 Two things decide these paths:
 
@@ -65,15 +65,14 @@ Two things decide these paths:
   specification: a program's settings go in the first, and what it writes in the second. labkit
   does not read `XDG_CONFIG_HOME` or `XDG_DATA_HOME`. To move the folders, use the options below.
 
-| Option | Variable: `labkit` / the ACP agent | What it moves |
-| --- | --- | --- |
-| `--config-dir <folder>` | `LABKIT_CONFIG_DIR` / `LABKIT_ACP_CONFIG_DIR` | Your settings, and the folders you trust |
-| `--data-dir <folder>` | `LABKIT_DATA_DIR` / `LABKIT_ACP_DATA_DIR` | Sessions, blobs and logs, together |
+| Option                    | Variable: `labkit` / the ACP agent            | What it moves                                          |
+|---------------------------|-----------------------------------------------|--------------------------------------------------------|
+| `--config-dir <folder>`   | `LABKIT_CONFIG_DIR` / `LABKIT_ACP_CONFIG_DIR` | Your settings, and the folders you trust               |
+| `--data-dir <folder>`     | `LABKIT_DATA_DIR` / `LABKIT_ACP_DATA_DIR`     | Sessions, blobs and logs, together                     |
 | `--sessions-dir <folder>` | the ACP agent only: `LABKIT_ACP_SESSIONS_DIR` | Sessions alone; blobs and logs stay in the data folder |
 
 `--config-dir` and `--data-dir` take an absolute path. `--setting-sources` moves nothing: it chooses
-whether labkit also reads a folder's own settings, in `.labkit/` in that folder
-([Trusted folders](trusted-folders.md)).
+whether labkit also reads a folder's own settings, in `.labkit/` in that folder ([Trusted folders](trusted-folders.md)).
 
 ## Asking before it acts
 

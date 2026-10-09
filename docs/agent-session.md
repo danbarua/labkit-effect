@@ -7,30 +7,30 @@ the provider adapters, the stores where a session's facts are kept, and the sess
 
 ## Files
 
-| Area | Files |
-| --- | --- |
-| The loop | `loop.ts` (`openSession`, `Session`), `contracts.ts` (the services that the loop needs), `report.ts`, `work.ts`, `origin.ts`, `turns.ts`, `model-stream.ts` |
-| Where facts are kept | `session-store.ts`, `file-session-store.ts`, `blobs.ts` |
-| What a request carries | `conversation.ts`, `tool-output.ts`, `turn-context.ts`, `sent.ts`, `received.ts` |
-| Tools | `tool-sources.ts`, `tool-input.ts` |
-| Providers | `provider-call.ts`, `shaping.ts`, `model-fallback.ts`, `providers/` (Anthropic Messages, OpenAI Responses, xAI, Chat Completions) |
-| Configuration | `configuration/`: the model and settings read from the facts, the session's working folder and additional folders read from the facts (`session-home.ts`), the well-known models, the options a host offers, and the gate for a user's changes |
-| Usage | `accounting.ts`: the context gauge, a response's cost by component, and a session's totals, read from the facts |
-| Shared | `first-answer.ts` (an ordered list of sources where the first that knows answers), `log-keys.ts` |
+| Area                   | Files                                                                                                                                                                                                                                          |
+|------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| The loop               | `loop.ts` (`openSession`, `Session`), `contracts.ts` (the services that the loop needs), `report.ts`, `work.ts`, `origin.ts`, `turns.ts`, `model-stream.ts`                                                                                    |
+| Where facts are kept   | `session-store.ts`, `file-session-store.ts`, `blobs.ts`                                                                                                                                                                                        |
+| What a request carries | `conversation.ts`, `tool-output.ts`, `turn-context.ts`, `sent.ts`, `received.ts`                                                                                                                                                               |
+| Tools                  | `tool-sources.ts`, `tool-input.ts`                                                                                                                                                                                                             |
+| Providers              | `provider-call.ts`, `shaping.ts`, `model-fallback.ts`, `providers/` (Anthropic Messages, OpenAI Responses, xAI, Chat Completions)                                                                                                              |
+| Configuration          | `configuration/`: the model and settings read from the facts, the session's working folder and additional folders read from the facts (`session-home.ts`), the well-known models, the options a host offers, and the gate for a user's changes |
+| Usage                  | `accounting.ts`: the context gauge, a response's cost by component, and a session's totals, read from the facts                                                                                                                                |
+| Shared                 | `first-answer.ts` (an ordered list of sources where the first that knows answers), `log-keys.ts`                                                                                                                                               |
 
 ## Services the loop needs
 
-| Service | Job |
-| --- | --- |
-| `SessionStore` | Keeps the session's facts. Required: there is no default. |
-| `ModelProvider` | Returns the model that a request goes to. |
-| `ContextAssembler` | Builds what a model request carries. |
-| `ModelClient` | Makes a model request. |
-| `ToolRunner` | Runs a tool call. |
-| `Turns` | Gives each new turn its identity. |
-| `SessionContext` | The session's id, working folder, folders and environment (`docs/agent-environment.md`). The host provides it for the whole session. Required: there is no default. |
-| `ToolCallPolicies`, `ModelRequestPolicies` | Review requests before they are carried out (`docs/agent-policy.md`). Empty by default. |
-| `TurnEndHooks`, `MaxHolds` | Review a turn before it ends. Empty and 0 by default. |
+| Service                                    | Job                                                                                                                                                                 |
+|--------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `SessionStore`                             | Keeps the session's facts. Required: there is no default.                                                                                                           |
+| `ModelProvider`                            | Returns the model that a request goes to.                                                                                                                           |
+| `ContextAssembler`                         | Builds what a model request carries.                                                                                                                                |
+| `ModelClient`                              | Makes a model request.                                                                                                                                              |
+| `ToolRunner`                               | Runs a tool call.                                                                                                                                                   |
+| `Turns`                                    | Gives each new turn its identity.                                                                                                                                   |
+| `SessionContext`                           | The session's id, working folder, folders and environment (`docs/agent-environment.md`). The host provides it for the whole session. Required: there is no default. |
+| `ToolCallPolicies`, `ModelRequestPolicies` | Review requests before they are carried out (`docs/agent-policy.md`). Empty by default.                                                                             |
+| `TurnEndHooks`, `MaxHolds`                 | Review a turn before it ends. Empty and 0 by default.                                                                                                               |
 
 ## The loop
 
@@ -57,11 +57,11 @@ reports that its end was not observed.
 A request that dies of a defect is logged with the defect's message and stack (`loop.request.died`),
 and an outcome is recorded for it, so its turn still ends:
 
-| Request | Outcome recorded |
-| --- | --- |
-| Model request | `ModelFailed`, with the defect's message and stack |
-| Tool run | `ToolEnded` with `Failed { Indeterminate }` |
-| Turn-end review | `TurnEndReviewed` |
+| Request         | Outcome recorded                                   |
+|-----------------|----------------------------------------------------|
+| Model request   | `ModelFailed`, with the defect's message and stack |
+| Tool run        | `ToolEnded` with `Failed { Indeterminate }`        |
+| Turn-end review | `TurnEndReviewed`                                  |
 
 While a request runs, `CurrentWork` holds the session, the turn, and for a tool run the call and the
 tool. Every log line written during the request is annotated with them, and each request runs in a
@@ -85,17 +85,17 @@ A write that fails stops the session:
 
 ## What a host calls
 
-| Operation | Behaviour |
-| --- | --- |
+| Operation              | Behaviour                                                                                                                                                           |
+|------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `observe(observation)` | Records the observation with the origin that `CurrentOrigin` gives, and returns once it is recorded. A session given an observation with no origin set is a defect. |
-| `prompt(input)` | Records the input as the user's (`InputArrived` from `User`, with its text and attachments) and returns how the turn that took it ended. |
-| `cancel` | Records `TurnInterrupted` for the turn under way and returns once it is recorded. |
-| `turn` | Returns the turn under way, or undefined. |
-| `idle` | Waits until no request is running. |
-| `facts` | Returns the session's facts. |
-| `goOn` | Continues a turn that the facts left running. |
-| `subscribe` | Every fact recorded from now on. |
-| `streamed` | What model requests pass on while their responses stream. None of it is recorded. |
+| `prompt(input)`        | Records the input as the user's (`InputArrived` from `User`, with its text and attachments) and returns how the turn that took it ended.                            |
+| `cancel`               | Records `TurnInterrupted` for the turn under way and returns once it is recorded.                                                                                   |
+| `turn`                 | Returns the turn under way, or undefined.                                                                                                                           |
+| `idle`                 | Waits until no request is running.                                                                                                                                  |
+| `facts`                | Returns the session's facts.                                                                                                                                        |
+| `goOn`                 | Continues a turn that the facts left running.                                                                                                                       |
+| `subscribe`            | Every fact recorded from now on.                                                                                                                                    |
+| `streamed`             | What model requests pass on while their responses stream. None of it is recorded.                                                                                   |
 
 - **The turn under way** is the latest `TurnStarted` with no `TurnEnded` for it. Between turns there
   is none.
@@ -126,9 +126,9 @@ ended. The host chooses what to do:
 
 ## Where facts are kept
 
-| Store | Behaviour |
-| --- | --- |
-| `EphemeralSessionStore` | Keeps the facts in memory, until the process ends. |
+| Store                          | Behaviour                                          |
+|--------------------------------|----------------------------------------------------|
+| `EphemeralSessionStore`        | Keeps the facts in memory, until the process ends. |
 | `FileBackedSessionStore(file)` | Keeps the facts in a file, one JSON line per fact. |
 
 A store opened on facts it already keeps is the session continuing from them.
@@ -180,11 +180,11 @@ core takes it between steps.
 `configuration/session-home.ts` projects the session's working folder and its additional folders
 from its facts, in order (`homeOf`):
 
-| Fact | Effect on the projection |
-| --- | --- |
-| `SessionHomed { working }` | The working folder becomes `working`: the last one recorded is the working folder. |
-| `FolderAdded { folder, from }` | `folder` is added from the source `from`, unless that source gives it already. |
-| `FolderRemoved { folder, from }` | `folder` is taken away from the source `from`. Another source may still give it. |
+| Fact                             | Effect on the projection                                                           |
+|----------------------------------|------------------------------------------------------------------------------------|
+| `SessionHomed { working }`       | The working folder becomes `working`: the last one recorded is the working folder. |
+| `FolderAdded { folder, from }`   | `folder` is added from the source `from`, unless that source gives it already.     |
+| `FolderRemoved { folder, from }` | `folder` is taken away from the source `from`. Another source may still give it.   |
 
 A host records these facts each time it opens a session, before any turn runs (`changesAtOpen`,
 `docs/agent-host.md`). The user adds folders during the session (`FolderAdded` from `User`).
@@ -201,7 +201,7 @@ What the model is told depends on TurnZero, the first `TurnStarted`:
   recorded (`changeTextOf`, `conversation.ts`):
 
   | Fact | Message |
-  | --- | --- |
+    | --- | --- |
   | `FolderAdded` from `User` | The user added the folder: it counts as inside the working folder. |
   | `FolderAdded` from another source | The folder was added to the session's folders. |
   | `FolderRemoved` | The folder was removed, and whether it still counts as inside the working folder. |
@@ -215,12 +215,12 @@ test's) has no working folder, and its system prompt has no line for it.
 A tool's output is recorded as received. `tool-output.ts` decides how the conversation sends it. An
 MCP server's result (`mcpToolResult`) is sent as plain text, one line per block:
 
-| Block | Text sent |
-| --- | --- |
-| text | the text |
-| embedded text resource | the resource's text |
-| resource link | a Markdown link |
-| image or audio | a line naming its type and media type |
+| Block                  | Text sent                             |
+|------------------------|---------------------------------------|
+| text                   | the text                              |
+| embedded text resource | the resource's text                   |
+| resource link          | a Markdown link                       |
+| image or audio         | a line naming its type and media type |
 
 A result with no text is sent as its `structuredContent`, as JSON. A tool's own failure (`isError`)
 is sent the same way. Any other output is sent as recorded. A result's details (`ToolDetail`) are
@@ -231,11 +231,11 @@ never sent: the model is sent the output alone.
 Each provider adapter shapes the core's context into the provider's wire format and the response
 back into the core's observations:
 
-| Adapter | API |
-| --- | --- |
-| `providers/anthropic-client.ts` | Anthropic Messages |
-| `providers/openai-client.ts` | OpenAI Responses |
-| `providers/xai-client.ts` | xAI, through the Responses adapter |
+| Adapter                             | API                                |
+|-------------------------------------|------------------------------------|
+| `providers/anthropic-client.ts`     | Anthropic Messages                 |
+| `providers/openai-client.ts`        | OpenAI Responses                   |
+| `providers/xai-client.ts`           | xAI, through the Responses adapter |
 | `providers/openai-compat-client.ts` | OpenAI-compatible Chat Completions |
 
 - `provider-call.ts` does what every adapter does around one request: posts it, retries the

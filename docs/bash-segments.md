@@ -5,8 +5,8 @@ program the command would run, wherever it is written. The permission policy jud
 these segments (`docs/agent-policy.md`, Command tools). It is built to WebAssembly and loaded by
 the host in the same process (`src/agent-host/command-parser.ts`).
 
-It reports structure only. What a program may do is the policy's to decide
-(`src/agent-environment/command-units.ts`). The crate depends on nothing of labkit's, so it could become
+It reports structure only. What a program may do is the policy's to decide (`src/agent-environment/command-units.ts`).
+The crate depends on nothing of labkit's, so it could become
 a package of its own, as `effective-acp` did.
 
 The walk is adapted from exo-project's structural profiler (spike 01_2,
@@ -15,25 +15,25 @@ It parses with brush-parser, at the revision the spikes used.
 
 ## Files
 
-| File | What it holds |
-| --- | --- |
+| File                       | What it holds                                                                                                             |
+|----------------------------|---------------------------------------------------------------------------------------------------------------------------|
 | `Cargo.toml`, `Cargo.lock` | The crate: brush-parser at a fixed git revision, serde. A library built as `cdylib` (WebAssembly) and `rlib` (its tests). |
-| `src/lib.rs` | `segments_of(command)`, the walk, and the C ABI the host calls. |
-| `tests/segments.rs` | How commands split, and which are `Unparsed`. |
+| `src/lib.rs`               | `segments_of(command)`, the walk, and the C ABI the host calls.                                                           |
+| `tests/segments.rs`        | How commands split, and which are `Unparsed`.                                                                             |
 
 ## What a command splits into
 
 `segments_of` returns `Parsed { segments }` or `Unparsed { reason }`. A segment is a simple
 command, a function's definition, a `[[ ]]` test or a `(( ))` expression:
 
-| Field | What it holds |
-| --- | --- |
-| `kind` | `simple`, `function_definition`, `test` or `arithmetic`. |
-| `words` | The program and its arguments, each as written (`text`) and, when it is a literal string, its value with quotes and escapes removed (`literal`); otherwise its `parts`, below. |
+| Field         | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `kind`        | `simple`, `function_definition`, `test` or `arithmetic`.                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `words`       | The program and its arguments, each as written (`text`) and, when it is a literal string, its value with quotes and escapes removed (`literal`); otherwise its `parts`, below.                                                                                                                                                                                                                                                                                    |
 | `assignments` | The variables the command sets, each with its `name`, its `value` as a word (none for an array), and whether it is appended (`NAME+=value`): those set before the command's name (`X=1 make`), or in the shell when the command has no words. An assignment after the name is an argument (`env X=1 …`, `make A=b`). A `for` loop reports a segment with one assignment of its variable for each value it takes (none for a loop over the positional parameters). |
-| `redirects` | Its redirects (`op`, `fd`, `target`), then those of each compound command it is inside, innermost first. |
-| `fed_text` | Whether its input is a here-document or a here-string. |
-| `context` | Where it runs: `command`, `subshell`, `function_body`, `command_substitution` or `process_substitution`. |
+| `redirects`   | Its redirects (`op`, `fd`, `target`), then those of each compound command it is inside, innermost first.                                                                                                                                                                                                                                                                                                                                                          |
+| `fed_text`    | Whether its input is a here-document or a here-string.                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `context`     | Where it runs: `command`, `subshell`, `function_body`, `command_substitution` or `process_substitution`.                                                                                                                                                                                                                                                                                                                                                          |
 
 A segment is reported wherever it is written:
 
@@ -48,19 +48,19 @@ A word is literal when it has no parameter, command or arithmetic expansion, no 
 no unquoted `*`, `?` or `[`, and no brace expansion (`{a,b}`, `{1..3}`). A lone `{`, `}` or `{}` is
 literal.
 
-A word that is not literal has its parts, in order, each marked `quoted` when it is inside quotes
-(the shell neither splits nor globs it):
+A word that is not literal has its parts, in order, each marked `quoted` when it is inside quotes (the shell neither
+splits nor globs it):
 
-| Part | What it holds |
-| --- | --- |
-| `text` | Text, with quotes and escapes removed: `value`. |
-| `tilde` | The folder a tilde names (`of`): `home` (`~`), `user` (`~bob`, with `user`), `working` (`~+`), `previous` (`~-`), `stack` (`~1`). |
-| `parameter` | A parameter expansion: the parameter's `name` (`HOME`, `1`, `?`, `@`) and what is done to its value (`op`): `value`; a default, an assignment of one, an alternative or an error, each with the word in parts (`word`), and `_if_unset` when it tests unset only; `length`; a pattern removed from the end or the start (`remove_suffix`, `remove_longest_suffix`, `remove_prefix`, `remove_longest_prefix`, with the `pattern` as written); `other` (an indirection, an index, a substring, a replacement, a case change). |
-| `command` | A command substitution: the `command` as written. Its segments are reported with the command's own. |
-| `arithmetic` | An arithmetic expansion: the `expression` as written. |
+| Part         | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+|--------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `text`       | Text, with quotes and escapes removed: `value`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `tilde`      | The folder a tilde names (`of`): `home` (`~`), `user` (`~bob`, with `user`), `working` (`~+`), `previous` (`~-`), `stack` (`~1`).                                                                                                                                                                                                                                                                                                                                                                                           |
+| `parameter`  | A parameter expansion: the parameter's `name` (`HOME`, `1`, `?`, `@`) and what is done to its value (`op`): `value`; a default, an assignment of one, an alternative or an error, each with the word in parts (`word`), and `_if_unset` when it tests unset only; `length`; a pattern removed from the end or the start (`remove_suffix`, `remove_longest_suffix`, `remove_prefix`, `remove_longest_prefix`, with the `pattern` as written); `other` (an indirection, an index, a substring, a replacement, a case change). |
+| `command`    | A command substitution: the `command` as written. Its segments are reported with the command's own.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `arithmetic` | An arithmetic expansion: the `expression` as written.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
-The parser reports what each part is; what a word expands to is worked out by the harness
-(`src/agent-environment`), from the variables the command's environment and its own assignments
+The parser reports what each part is; what a word expands to is worked out by the harness (`src/agent-environment`),
+from the variables the command's environment and its own assignments
 give.
 
 ## Failing closed
@@ -101,11 +101,11 @@ Built from two folders, the module was the same bytes (2026-10-08).
 The module exports three functions with a C ABI, and the host (`command-parser.ts`) calls them
 synchronously:
 
-| Export | What it does |
-| --- | --- |
-| `segments_alloc(len)` | Allocates `len` bytes in the module's memory, for the host to write a command into. |
+| Export                    | What it does                                                                                                                                                       |
+|---------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `segments_alloc(len)`     | Allocates `len` bytes in the module's memory, for the host to write a command into.                                                                                |
 | `segments_json(ptr, len)` | Splits the UTF-8 command at `ptr` and returns its segments as JSON, in a buffer of the module's memory: its address in the high 32 bits, its length in the low 32. |
-| `segments_free(ptr, len)` | Frees a buffer that the module allocated or returned. |
+| `segments_free(ptr, len)` | Frees a buffer that the module allocated or returned.                                                                                                              |
 
 Some of brush-parser's dependencies (getrandom, web-time) link wasm-bindgen's hooks on `wasm32`.
 The host gives each import the module declares a function that throws when called; splitting a
@@ -131,9 +131,9 @@ order, and writes each judgement to `judgements.jsonl` beside the corpus.
 
 Over 85,042 commands from 542 sessions (2026-10-07), in `default` mode:
 
-| | Runs without a question | Asks, with a grant to offer | Asks about the call only | Does not parse |
-| --- | ---: | ---: | ---: | ---: |
-| First in its session | 15.4% | 36.1% | 48.2% | 0.3% |
+|                      | Runs without a question | Asks, with a grant to offer | Asks about the call only | Does not parse |
+|----------------------|------------------------:|----------------------------:|-------------------------:|---------------:|
+| First in its session |                   15.4% |                       36.1% |                    48.2% |           0.3% |
 
 With every grant offered allowed for the rest of its session, 46.8% run without a question. The
 questions that offer only the call are mostly reads outside the working folder (paths not written

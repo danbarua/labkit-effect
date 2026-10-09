@@ -11,32 +11,32 @@ about them are in [agent-host-direction.md](agent-host-direction.md).
 
 ## Files
 
-| File | Responsibility |
-| --- | --- |
-| `catalog.ts` | The model catalog (`ModelCatalog`), `askable`, and `targetOf`. |
-| `local-server.ts` | The local server's models and what is known of them; `KnownWithLocalServer`, `SettlingWithLocalServer`. |
-| `clients.ts` | `Clients`: one model client per provider whose key is set, and the local server. Every provider's requests go through one HTTP client that captures their bodies (`capturingHttp`), and each attempt is observed on its span (`observedAttempts`); both are in `src/instrumentation`. |
-| `services.ts` | `SessionServices`, `permissionsFor`, `loopBreaker`, `turnRequestLimit`, `budgetLimit`. |
-| `with-session.ts` | `withSession`: a session as a host runs it, with the host's bolt-ons. |
-| `session-context.ts` | The builder of a session's context (`makeSessionContext`), the one place a session's folders are assembled, and the combinator that runs a session's work in it (`inSession`). |
-| `directory.ts` | The folder of sessions. |
-| `record.ts` | `host.json`: a host's own record of a session. |
-| `draft.ts` | A draft: a session before its first turn. |
-| `export.ts` | `markdownOf`: a session's transcript as Markdown. |
-| `incomplete.ts` | `retryIncomplete`: the turn-end hook for a response with thinking and no answer. |
-| `logs.ts` | `LogsToFile`, `LogsToStderr`. |
-| `log-level.ts` | The level a program logs at, from `<PREFIX>LOG_LEVEL`, and the warning for a value that names no level. |
-| `launcher-logs.ts`, `log-file.ts` | The ACP launcher's log files. `log-file.ts` is listed in `imperativeBoundaries` in `oxlint.config.ts`. |
-| `redaction.ts` | Removing the environment's secrets from log records. |
-| `brand.ts` | The name the agent goes by, and what is named after it. |
-| `brand-folders.ts` | `BrandFolders`: every folder named after the brand (configuration, data, sessions, blobs, logs, the project's folder), resolved once at an entry point from the brand, the home folder and `--config-dir`, `--data-dir` and `--sessions-dir`. |
-| `launch.ts` | The launch options both hosts share, and the configuration layers they make. |
-| `command-parser.ts` | The command parser: the WebAssembly module of `native/bash-segments`, which splits a shell command into its segments (`docs/bash-segments.md`). |
-| `command-writes.ts` | The files a command writes text to (`cat > f <<'EOF'`, `echo x >> f`), their full paths, and their text before the command runs, read from the disk (`currentOnDisk`, `agent-tools/file-change.ts`) or by a host's own means: what a host shows as each file's diff before the command runs. Also the files a command tool records (`writtenFiles`): every file the command writes at a path it writes out, `sed -i`'s and `printf … > f`'s included, whose text is read before and after it runs. |
-| `recorded-changes.ts` | `recordingChanges`: the wrapper around a host's own tool sources that records what each call changes in files (`FileChanged`), the files found as the permission policy finds them, each read just before and after the call, under the size limits; and each move a command's `mv` makes (`FileMoved`, `plannedMoves`), as the disk shows it before and after. A file git ignores is recorded by its size (`FileWritten`, `ignoredByGit`), unless the repository ignores the working folder itself. |
-| `command-detail.ts` | A permission question's detail, shown as Markdown for ACP (code in a fence that names its language, an explanation as a nested list) and as plain lines for the REPL. |
-| `trust.ts` | Trusted folders: the folders whose own `.env` files and project settings the agent reads (`trusted-folders.json`). |
-| `log-keys.ts` | The names of the log events that this module writes. |
+| File                              | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+|-----------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `catalog.ts`                      | The model catalog (`ModelCatalog`), `askable`, and `targetOf`.                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `local-server.ts`                 | The local server's models and what is known of them; `KnownWithLocalServer`, `SettlingWithLocalServer`.                                                                                                                                                                                                                                                                                                                                                                                              |
+| `clients.ts`                      | `Clients`: one model client per provider whose key is set, and the local server. Every provider's requests go through one HTTP client that captures their bodies (`capturingHttp`), and each attempt is observed on its span (`observedAttempts`); both are in `src/instrumentation`.                                                                                                                                                                                                                |
+| `services.ts`                     | `SessionServices`, `permissionsFor`, `loopBreaker`, `turnRequestLimit`, `budgetLimit`.                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `with-session.ts`                 | `withSession`: a session as a host runs it, with the host's bolt-ons.                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `session-context.ts`              | The builder of a session's context (`makeSessionContext`), the one place a session's folders are assembled, and the combinator that runs a session's work in it (`inSession`).                                                                                                                                                                                                                                                                                                                       |
+| `directory.ts`                    | The folder of sessions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `record.ts`                       | `host.json`: a host's own record of a session.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `draft.ts`                        | A draft: a session before its first turn.                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `export.ts`                       | `markdownOf`: a session's transcript as Markdown.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `incomplete.ts`                   | `retryIncomplete`: the turn-end hook for a response with thinking and no answer.                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `logs.ts`                         | `LogsToFile`, `LogsToStderr`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `log-level.ts`                    | The level a program logs at, from `<PREFIX>LOG_LEVEL`, and the warning for a value that names no level.                                                                                                                                                                                                                                                                                                                                                                                              |
+| `launcher-logs.ts`, `log-file.ts` | The ACP launcher's log files. `log-file.ts` is listed in `imperativeBoundaries` in `oxlint.config.ts`.                                                                                                                                                                                                                                                                                                                                                                                               |
+| `redaction.ts`                    | Removing the environment's secrets from log records.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `brand.ts`                        | The name the agent goes by, and what is named after it.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `brand-folders.ts`                | `BrandFolders`: every folder named after the brand (configuration, data, sessions, blobs, logs, the project's folder), resolved once at an entry point from the brand, the home folder and `--config-dir`, `--data-dir` and `--sessions-dir`.                                                                                                                                                                                                                                                        |
+| `launch.ts`                       | The launch options both hosts share, and the configuration layers they make.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `command-parser.ts`               | The command parser: the WebAssembly module of `native/bash-segments`, which splits a shell command into its segments (`docs/bash-segments.md`).                                                                                                                                                                                                                                                                                                                                                      |
+| `command-writes.ts`               | The files a command writes text to (`cat > f <<'EOF'`, `echo x >> f`), their full paths, and their text before the command runs, read from the disk (`currentOnDisk`, `agent-tools/file-change.ts`) or by a host's own means: what a host shows as each file's diff before the command runs. Also the files a command tool records (`writtenFiles`): every file the command writes at a path it writes out, `sed -i`'s and `printf … > f`'s included, whose text is read before and after it runs.   |
+| `recorded-changes.ts`             | `recordingChanges`: the wrapper around a host's own tool sources that records what each call changes in files (`FileChanged`), the files found as the permission policy finds them, each read just before and after the call, under the size limits; and each move a command's `mv` makes (`FileMoved`, `plannedMoves`), as the disk shows it before and after. A file git ignores is recorded by its size (`FileWritten`, `ignoredByGit`), unless the repository ignores the working folder itself. |
+| `command-detail.ts`               | A permission question's detail, shown as Markdown for ACP (code in a fence that names its language, an explanation as a nested list) and as plain lines for the REPL.                                                                                                                                                                                                                                                                                                                                |
+| `trust.ts`                        | Trusted folders: the folders whose own `.env` files and project settings the agent reads (`trusted-folders.json`).                                                                                                                                                                                                                                                                                                                                                                                   |
+| `log-keys.ts`                     | The names of the log events that this module writes.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 ## The model catalog
 
@@ -53,17 +53,17 @@ the models it lists. `KeyedAndLocalCatalog` has two kinds of source:
 
 `targetOf(name)` returns the provider and model that a name refers to:
 
-| Name | Result |
-| --- | --- |
-| `<well-known provider>/<model>` | that provider's model, whether `known` lists it or not |
-| `<other source>/<model>` | a model that the source lists |
-| `<model>` | the well-known model of that name, or else another source's model of that name |
+| Name                            | Result                                                                         |
+|---------------------------------|--------------------------------------------------------------------------------|
+| `<well-known provider>/<model>` | that provider's model, whether `known` lists it or not                         |
+| `<other source>/<model>`        | a model that the source lists                                                  |
+| `<model>`                       | the well-known model of that name, or else another source's model of that name |
 
-| Failure | When |
-| --- | --- |
-| `ModelNotFound`, with the close names (equal apart from case, or one containing the other) | no source has the name |
-| `SourceNotAnswering` | the model's source did not answer |
-| `KeyNotSet`, with the variable to set | the model is a well-known provider's and the provider is not in the catalog |
+| Failure                                                                                    | When                                                                        |
+|--------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------|
+| `ModelNotFound`, with the close names (equal apart from case, or one containing the other) | no source has the name                                                      |
+| `SourceNotAnswering`                                                                       | the model's source did not answer                                           |
+| `KeyNotSet`, with the variable to set                                                      | the model is a well-known provider's and the provider is not in the catalog |
 
 A host reports these in its own words.
 
@@ -96,8 +96,7 @@ with it. It is the session's machinery; what a host's own machinery adds is a li
   work that starts once the session is open. The CLI's bolt-ons are its working folder's tools (the
   workspace's and the git tools, whose part of the system text is the git tools' line) and its MCP
   servers. Zork's adventurer's bolt-on is the game's world tools. No bolt-on names the working
-  folder: every request's system prompt starts with the line made from the session's facts
-  (`docs/agent-session.md`).
+  folder: every request's system prompt starts with the line made from the session's facts (`docs/agent-session.md`).
 - Each open records what it changes of the session's working folder and its additional folders
   (`MadeSessionContext.changesAtOpen`, below): a new session after `SessionOpened`, a continued one
   first, before a turn that a previous run left unfinished is gone on with or ended. The facts are
@@ -124,7 +123,7 @@ every host. It is the one place where a session's folders and its environment ar
   A source that `given` does not list gives no folders.
 
   | Host | Sources it gives, in order |
-  | --- | --- |
+    | --- | --- |
   | CLI | `Launcher` (`--add-dir`), then each permissions entry (`permissionFoldersOf`) |
   | ACP | `Launcher` (the launcher's `--add-dir`), `Client` (`additionalDirectories`), then each permissions entry |
   | Zork, fizzbuzz | none |
@@ -133,12 +132,12 @@ every host. It is the one place where a session's folders and its environment ar
   working folder.
 - `changesAtOpen(facts)` returns what the host records when it opens the session over `facts`
   (`agent-session/configuration/session-home.ts`):
-  1. `SessionHomed` with the working folder, when the facts record no working folder or another
-     one;
-  2. for each source other than the user, those that `given` lists and then those that only the
-     facts name: a `FolderRemoved` for each folder that the facts have from the source and that it
-     no longer gives, then a `FolderAdded` for each folder that it gives and that the facts do not
-     have from it.
+    1. `SessionHomed` with the working folder, when the facts record no working folder or another
+       one;
+    2. for each source other than the user, those that `given` lists and then those that only the
+       facts name: a `FolderRemoved` for each folder that the facts have from the source and that it
+       no longer gives, then a `FolderAdded` for each folder that it gives and that the facts do not
+       have from it.
 
   Nothing is returned when nothing differs. The folders that the user added stay as they are. A
   session continued in the CLI loses the ACP client's folders, and a session continued in ACP loses
@@ -156,11 +155,11 @@ every host. It is the one place where a session's folders and its environment ar
   log line with `session`, and annotates each span with `session` and `cwd` (the working folder).
   The fibers that the effect starts inherit all three, the loop's requests among them.
 
-| Host | Where it makes the context |
-| --- | --- |
-| CLI | `withCliSession`, before it writes the session's settings and starts the MCP servers, with the configuration's command environment. |
-| zork | Before each of its two sessions' `withSession`, with the default command environment. |
-| ACP | When `session/new`, `session/load` or `session/resume` creates the session's entry, before the world is opened and the MCP servers are started (`docs/agent-acp.md`). |
+| Host | Where it makes the context                                                                                                                                            |
+|------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| CLI  | `withCliSession`, before it writes the session's settings and starts the MCP servers, with the configuration's command environment.                                   |
+| zork | Before each of its two sessions' `withSession`, with the default command environment.                                                                                 |
+| ACP  | When `session/new`, `session/load` or `session/resume` creates the session's entry, before the world is opened and the MCP servers are started (`docs/agent-acp.md`). |
 
 A log line written inside a session carries `session`. The CLI writes the session's settings and
 starts its MCP servers in the session's context, so the line that says where
@@ -190,12 +189,12 @@ those the store holds, and `runner` for its tools.
 A folder of sessions (`directory.ts`) keeps each session in `<root>/<session>/`, with its facts in
 `facts.jsonl` and the host's record in `host.json`.
 
-| Function | Returns |
-| --- | --- |
-| `storedSessions` | the sessions that have a facts file, the one written to last first |
-| `readSession` | one session's facts; `SessionNotFound` when the root does not hold it |
-| `latestSession` | the session written to last; `NoSessionStored` when there is none |
-| `summaryOf` | how many turns a session started, and the model it asks now |
+| Function         | Returns                                                               |
+|------------------|-----------------------------------------------------------------------|
+| `storedSessions` | the sessions that have a facts file, the one written to last first    |
+| `readSession`    | one session's facts; `SessionNotFound` when the root does not hold it |
+| `latestSession`  | the session written to last; `NoSessionStored` when there is none     |
+| `summaryOf`      | how many turns a session started, and the model it asks now           |
 
 A root that cannot be read fails with `DirectoryUnreadable`.
 
@@ -209,8 +208,8 @@ its contents.
 - `readRecord` returns the JSON written, `undefined` for a session with no record, and fails with
   `RecordFailed`, naming the file, when the record is not JSON or cannot be read.
 - `recordedSessions` returns `storedSessions`, each with its record, or `undefined` when it has none
-  or its record does not read. An unreadable record is logged as a warning
-  (`host_record.unreadable`, with the session, the file and the cause). A folder with a record and
+  or its record does not read. An unreadable record is logged as a warning (`host_record.unreadable`, with the session,
+  the file and the cause). A folder with a record and
   no facts file is not a session.
 
 ## The draft
@@ -226,8 +225,8 @@ It holds the model to ask, the settings as given, the system prompt and the tool
 - `opening(draft, session)` returns the `SessionOpened` observation that opens `session` with the
   draft's model, settings, system prompt and tools. A host opens the session at the first input and
   then drops the draft.
-- `withDefaults(draft, capabilities)` gives a draft with no output limit the model's own limit
-  (from models.dev, or the user's `models:` override), or 32768 tokens when that is not known. A
+- `withDefaults(draft, capabilities)` gives a draft with no output limit the model's own limit (from models.dev, or the
+  user's `models:` override), or 32768 tokens when that is not known. A
   limit that was given stays.
 - `defaultModel` is the first model that the catalog lists (`askable`), or none when it lists none.
 
@@ -255,15 +254,15 @@ alone: no model and no blob store is asked. A host's `/export` writes it; where 
 - The transcript opens with the session's id and the models it asked: the opening model, then each
   change taken, which is also shown where it was taken.
 - Each turn follows in order:
-  - each input, with its sender and its text as recorded, and each attachment by media type, size
-    and blob id;
-  - each response's answer text, and its thinking in a collapsed `<details>` block;
-  - each tool call: the tool's name, its input fenced, the permission question and answer on one
-    line, and how it ended (its output, or why it failed: vetoed with the reason, not run, not
-    observed, input rejected, reported by the tool);
-  - input dropped when the turn ended;
-  - when the turn did not end with an answer, how it ended (cut short, failed with the failure,
-    vetoed, interrupted, no answer).
+    - each input, with its sender and its text as recorded, and each attachment by media type, size
+      and blob id;
+    - each response's answer text, and its thinking in a collapsed `<details>` block;
+    - each tool call: the tool's name, its input fenced, the permission question and answer on one
+      line, and how it ended (its output, or why it failed: vetoed with the reason, not run, not
+      observed, input rejected, reported by the tool);
+    - input dropped when the turn ended;
+    - when the turn did not end with an answer, how it ended (cut short, failed with the failure,
+      vetoed, interrupted, no answer).
 - A call whose response was not recorded is shown where it arrived. A turn with no `TurnEnded` is
   marked as left running, and a call with no `ToolEnded` as having no recorded outcome.
 - A tool's text output is fenced with more backticks than any run of backticks it contains, and is
@@ -293,8 +292,8 @@ level `<PREFIX>LOG_LEVEL` names (`log-level.ts`; `LABKIT_LOG_LEVEL` for labkit),
 The names are those the CLI's `--log-level` takes: all, trace, debug, info, warn or warning, error,
 fatal, none, in any case. The CLI's `--log-level` wins over the variable. The ACP launcher reads
 `<PREFIX>ACP_LOG_LEVEL` first, then `<PREFIX>LOG_LEVEL`, then debug. A value that names no level is
-passed over, to the next variable or the default, and reported once as a warning
-(`host_logs.level_invalid`) with the variable, the value and the level used, in the run's log.
+passed over, to the next variable or the default, and reported once as a warning (`host_logs.level_invalid`) with the
+variable, the value and the level used, in the run's log.
 
 ### Launcher log files
 
@@ -304,12 +303,12 @@ warning, error, fatal), its log annotations (connection, request, session, turn 
 message and, when there is one, its cause as text with its stack and nested causes. The layer also
 sets the minimum log level. The file's path is written to stderr once, at start.
 
-| Variable (after the brand's prefix, `LABKIT_` for labkit) | Default |
-| --- | --- |
-| `ACP_LOG_DIR` | `~/.local/share/<brand>/logs` |
-| `ACP_LOG_LEVEL` | `LOG_LEVEL`, else debug |
-| `ACP_LOG_MAX_BYTES` | 10 MiB |
-| `ACP_LOG_BACKUPS` | 4 |
+| Variable (after the brand's prefix, `LABKIT_` for labkit) | Default                       |
+|-----------------------------------------------------------|-------------------------------|
+| `ACP_LOG_DIR`                                             | `~/.local/share/<brand>/logs` |
+| `ACP_LOG_LEVEL`                                           | `LOG_LEVEL`, else debug       |
+| `ACP_LOG_MAX_BYTES`                                       | 10 MiB                        |
+| `ACP_LOG_BACKUPS`                                         | 4                             |
 
 A size or backup count that does not parse takes the default; a level that does not parse is
 reported (above). Each launch has its own id.
@@ -326,8 +325,7 @@ reported (above). Each launch has its own id.
 
 ### Redaction
 
-Every log that a host writes (the launcher's, the CLI's to a file or stderr, a test's) is redacted
-(`redaction.ts`):
+Every log that a host writes (the launcher's, the CLI's to a file or stderr, a test's) is redacted (`redaction.ts`):
 
 - The values of the environment variables whose names are credential names (`isCredentialName` in
   `agent-process`: `OPENAI_API_KEY`, `GITHUB_PAT`) are replaced by `<redacted>` wherever they occur
@@ -336,8 +334,8 @@ Every log that a host writes (the launcher's, the CLI's to a file or stderr, a t
 - The value of a credential field (`authorization`, `apiKey`, `password`, an access token, a cookie)
   is replaced by `<redacted>`, whatever it is. The rest of an error's text stays.
 - A value shorter than 8 characters is not searched for, because replacing it would cut ordinary
-  text. Each such variable is reported once, when the log is created, as a warning
-  (`host_logs.secrets_not_looked_for`) with the variable's name and the value's length, never the
+  text. Each such variable is reported once, when the log is created, as a warning (`host_logs.secrets_not_looked_for`)
+  with the variable's name and the value's length, never the
   value.
 - A provider's key is held as `Redacted` from the environment to its client (`keyOf`): a log line or
   a string of it shows `<redacted>`.
@@ -354,9 +352,9 @@ brand at its entry point; the CLI's `main(brand)` and the ACP launcher's `launch
   none); otherwise labkit.
 - Named after the brand: the configuration folders (`~/.config/<name>/`, `<project>/.<name>/`), the
   folder where the hosts keep what they write (`~/.local/share/<name>/`: every host's sessions in
-  `sessions/<version>/`, their blobs in `blobs/`, the log files in `logs/`), the launcher's variables
-  (`<PREFIX>ACP_*`), where `/export` writes (`.<name>/exports`), the name the ACP host gives a client
-  (`agentInfo`) and the MCP client a server (`clientInfo`), and the CLI's command.
+  `sessions/<version>/`, their blobs in `blobs/`, the log files in `logs/`), the launcher's variables (`<PREFIX>ACP_*`),
+  where `/export` writes (`.<name>/exports`), the name the ACP host gives a client (`agentInfo`) and the MCP client a
+  server (`clientInfo`), and the CLI's command.
 
 ## The brand's folders
 
@@ -365,14 +363,14 @@ entry point (the CLI, the ACP launcher, zork) and provided to what runs there; w
 writes one of them reads it from the service, which has no default. Tests provide one pointed at
 their own folder.
 
-| Folder | Default | Moved by |
-| --- | --- | --- |
-| `config` | `~/.config/<brand>` | `--config-dir` |
-| `data` | `~/.local/share/<brand>` | `--data-dir` (an absolute path; a relative one is refused) |
-| `sessions` | `<data>/sessions/<version>` | `--data-dir`; the ACP launcher's `--sessions-dir` moves it alone |
-| `blobs` | `<data>/blobs` | `--data-dir` |
-| `logs` | `<data>/logs` | `--data-dir`; the ACP launcher's own log files: `<BRAND>_ACP_LOG_DIR` |
-| `project` | `.<brand>`, in a project's folder | |
+| Folder     | Default                           | Moved by                                                              |
+|------------|-----------------------------------|-----------------------------------------------------------------------|
+| `config`   | `~/.config/<brand>`               | `--config-dir`                                                        |
+| `data`     | `~/.local/share/<brand>`          | `--data-dir` (an absolute path; a relative one is refused)            |
+| `sessions` | `<data>/sessions/<version>`       | `--data-dir`; the ACP launcher's `--sessions-dir` moves it alone      |
+| `blobs`    | `<data>/blobs`                    | `--data-dir`                                                          |
+| `logs`     | `<data>/logs`                     | `--data-dir`; the ACP launcher's own log files: `<BRAND>_ACP_LOG_DIR` |
+| `project`  | `.<brand>`, in a project's folder |                                                                       |
 
 The ACP launcher opens its log file once its flags are read, so that `--data-dir` moves it.
 
@@ -387,24 +385,24 @@ options make (`launchConfiguration`, over the host's own defaults).
   `--add-dir` (repeatable: a folder that counts as inside the working folder), `--settings`,
   `--setting-sources`, `--config-dir` (the user's configuration folder) and `--data-dir` (where the
   hosts keep what they write, in place of `~/.local/share/<brand>/`: an absolute path).
-- An option that is not given is read from a variable named: the brand's prefix, the host's part
-  (`ACP_` for the ACP launcher, none for the CLI), then the option's name in capitals with `_` for
+- An option that is not given is read from a variable named: the brand's prefix, the host's part (`ACP_` for the ACP
+  launcher, none for the CLI), then the option's name in capitals with `_` for
   `-` (`LABKIT_MAX_TURNS`, `LABKIT_ACP_MAX_TURNS`). `--mcp-config` takes one value from its
   variable. An option given on the command line wins; an empty variable counts as not set; a
   variable value that the option would not accept is that option's error.
 - A variable that is not an option's twin (`OTEL_EXPORTER_OTLP_ENDPOINT`) is read under its own
   name, after the name with the brand's prefix and the host's part.
 - The layers, merged in order, the last write winning (`docs/agent-config.md`):
-  1. the host's defaults;
-  2. the files of the user's configuration folder (`--config-dir`, else `~/.config/<brand>/`), then
-     the project's files and the local ones when `--setting-sources` names them (they still may not
-     name extensions or MCP servers);
-  3. `--settings` (JSON, or a file of JSON or YAML);
-  4. with `--strict-mcp-config`, a layer that removes the MCP servers of the layers before it;
-  5. each `--mcp-config` (JSON, or a file of it, as Claude Code's `.mcp.json`);
-  6. the options: `--permission-mode` sets the permission plug-in's mode, `--max-turns` the turn
-     request limit, and `--max-budget-usd` the session's budget. A plug-in that an option sets is
-     added to the end of the model requests' list when the list does not have it.
+    1. the host's defaults;
+    2. the files of the user's configuration folder (`--config-dir`, else `~/.config/<brand>/`), then
+       the project's files and the local ones when `--setting-sources` names them (they still may not
+       name extensions or MCP servers);
+    3. `--settings` (JSON, or a file of JSON or YAML);
+    4. with `--strict-mcp-config`, a layer that removes the MCP servers of the layers before it;
+    5. each `--mcp-config` (JSON, or a file of it, as Claude Code's `.mcp.json`);
+    6. the options: `--permission-mode` sets the permission plug-in's mode, `--max-turns` the turn
+       request limit, and `--max-budget-usd` the session's budget. A plug-in that an option sets is
+       added to the end of the model requests' list when the list does not have it.
 
 ## Tests
 

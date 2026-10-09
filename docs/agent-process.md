@@ -13,22 +13,22 @@ arguments before they are logged.
 
 ## Files
 
-| File | Responsibility |
-| --- | --- |
-| `machine.ts` | A pure state machine for one process group. `stepProcess(state, event)` returns the next state and the effects to perform (`Spawn`, `Kill`). |
-| `process-group.ts` | `makeProcessGroup(command, onRun)` performs the machine's effects with Effect's `ChildProcessSpawner`, gives each run the session's environment, and logs every state change. |
-| `environment.ts` | Classifies environment variable names as credential names (`isCredentialName`), removes credential variables from an environment (`removeCredentials`, `withoutCredentials`), applies transforms to this process's environment (`processEnvironmentWith`), and redacts credential flag values in command arguments (`redactedArgs`). |
-| `log-keys.ts` | The names of the log events that this module writes. |
+| File               | Responsibility                                                                                                                                                                                                                                                                                                                       |
+|--------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `machine.ts`       | A pure state machine for one process group. `stepProcess(state, event)` returns the next state and the effects to perform (`Spawn`, `Kill`).                                                                                                                                                                                         |
+| `process-group.ts` | `makeProcessGroup(command, onRun)` performs the machine's effects with Effect's `ChildProcessSpawner`, gives each run the session's environment, and logs every state change.                                                                                                                                                        |
+| `environment.ts`   | Classifies environment variable names as credential names (`isCredentialName`), removes credential variables from an environment (`removeCredentials`, `withoutCredentials`), applies transforms to this process's environment (`processEnvironmentWith`), and redacts credential flag values in command arguments (`redactedArgs`). |
+| `log-keys.ts`      | The names of the log events that this module writes.                                                                                                                                                                                                                                                                                 |
 
 ## States
 
-| State | Meaning |
-| --- | --- |
-| `Idle` | No run was started, or the last run was stopped. |
-| `Starting` | A run was requested, and its process has not started yet. |
-| `Running` | The run's process is running. The state carries the process id. |
-| `Exited` | The run's process ended without a stop request. The state carries the exit code, or the name of the signal that ended the process. |
-| `Failed` | The command could not be started. The state carries the reason. |
+| State      | Meaning                                                                                                                            |
+|------------|------------------------------------------------------------------------------------------------------------------------------------|
+| `Idle`     | No run was started, or the last run was stopped.                                                                                   |
+| `Starting` | A run was requested, and its process has not started yet.                                                                          |
+| `Running`  | The run's process is running. The state carries the process id.                                                                    |
+| `Exited`   | The run's process ended without a stop request. The state carries the exit code, or the name of the signal that ended the process. |
+| `Failed`   | The command could not be started. The state carries the reason.                                                                    |
 
 ## Interfaces
 
@@ -45,11 +45,11 @@ arguments before they are logged.
 
 Other modules use these functions:
 
-| Module | Uses |
-| --- | --- |
-| `agent-mcp` | `makeProcessGroup` for stdio servers; `isCredentialName` for HTTP header names. |
-| `agent-config` | `removeCredentials` for the `credentials` plug-in; `redactedArgs` for `effective-settings.json`. |
-| `agent-host` | `processEnvironmentWith` and `removeCredentials` to make a session's environment (`session-context.ts`); `isCredentialName` to collect the credential values that logs redact; `redactionPlaceholder`. |
+| Module         | Uses                                                                                                                                                                                                   |
+|----------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `agent-mcp`    | `makeProcessGroup` for stdio servers; `isCredentialName` for HTTP header names.                                                                                                                        |
+| `agent-config` | `removeCredentials` for the `credentials` plug-in; `redactedArgs` for `effective-settings.json`.                                                                                                       |
+| `agent-host`   | `processEnvironmentWith` and `removeCredentials` to make a session's environment (`session-context.ts`); `isCredentialName` to collect the credential values that logs redact; `redactionPlaceholder`. |
 
 ## Design decisions
 
@@ -71,8 +71,7 @@ Other modules use these functions:
   removed when `isCredentialName` classifies its name as a credential name. A variable that the
   command's own configuration sets (an MCP server's `env`) is passed unchanged, because that is how
   a server receives the credential it needs. The log line `process.group.environment` names the
-  variables the session's environment does not have (`removed`) and those the command sets
-  (`set`).
+  variables the session's environment does not have (`removed`) and those the command sets (`set`).
 - **Arguments are redacted in logs only.** The log shows `--token=<redacted>`. The process receives
   the original value.
 - **Signal names.** Effect's spawner reports a signalled exit as an error whose cause message names

@@ -9,29 +9,29 @@ Dan's rulings about the hosts, their layers, and what is planned are in
 
 ## Files
 
-| File | Responsibility |
-| --- | --- |
-| `host.ts` | `makeHost(options)`: the protocol's handlers, and each session the connection holds. `acpDefaults`: the host's configuration layer. |
-| `feed.ts` | An open session's live view: the facts and the streamed items, projected and sent; permission questions asked of the client. |
-| `projection.ts` | The pure projection of a session's facts and streamed items to `session/update`. |
-| `world.ts` | A session's world: its system prompt, its tools, and how their calls are shown. `editorWorld`, `workspaceWorld`. |
-| `config-options.ts` | A configuration as ACP's config options, and `session/set_config_option` as the change it asks. |
-| `permission.ts` | `session/request_permission` for a `PermissionAsked`, and the answer that the client's response gives. |
-| `stop-reason.ts` | `stopOf`: a turn's ending as the answer to the prompt that began it. |
-| `usage.ts` | `usageUpdate`: the session's `usage_update`. |
-| `session-record.ts` | What the host keeps in a session's record (`host.json`), and the pages of `session/list`. |
-| `log-keys.ts` | The names of the events the host logs. |
-| `main.ts` | The launcher: the host on this process's stdin and stdout. |
+| File                | Responsibility                                                                                                                      |
+|---------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| `host.ts`           | `makeHost(options)`: the protocol's handlers, and each session the connection holds. `acpDefaults`: the host's configuration layer. |
+| `feed.ts`           | An open session's live view: the facts and the streamed items, projected and sent; permission questions asked of the client.        |
+| `projection.ts`     | The pure projection of a session's facts and streamed items to `session/update`.                                                    |
+| `world.ts`          | A session's world: its system prompt, its tools, and how their calls are shown. `editorWorld`, `workspaceWorld`.                    |
+| `config-options.ts` | A configuration as ACP's config options, and `session/set_config_option` as the change it asks.                                     |
+| `permission.ts`     | `session/request_permission` for a `PermissionAsked`, and the answer that the client's response gives.                              |
+| `stop-reason.ts`    | `stopOf`: a turn's ending as the answer to the prompt that began it.                                                                |
+| `usage.ts`          | `usageUpdate`: the session's `usage_update`.                                                                                        |
+| `session-record.ts` | What the host keeps in a session's record (`host.json`), and the pages of `session/list`.                                           |
+| `log-keys.ts`       | The names of the events the host logs.                                                                                              |
+| `main.ts`           | The launcher: the host on this process's stdin and stdout.                                                                          |
 
 ## Layers
 
-| Layer | Where | Imports |
-| --- | --- | --- |
-| Core | `agent-machine`, `agent-policy`, `agent-session`, `agent-context` | no host and no protocol |
-| Host services | `agent-host` | the core; no protocol |
-| ACP | `effective-acp` (a package of its own) | nothing of the core |
-| ACP host | `agent-acp` | `effective-acp`, `agent-host` and the core |
-| CLI | `examples/cli-repl` | `agent-host`; never `agent-acp` |
+| Layer         | Where                                                             | Imports                                    |
+|---------------|-------------------------------------------------------------------|--------------------------------------------|
+| Core          | `agent-machine`, `agent-policy`, `agent-session`, `agent-context` | no host and no protocol                    |
+| Host services | `agent-host`                                                      | the core; no protocol                      |
+| ACP           | `effective-acp` (a package of its own)                            | nothing of the core                        |
+| ACP host      | `agent-acp`                                                       | `effective-acp`, `agent-host` and the core |
+| CLI           | `examples/cli-repl`                                               | `agent-host`; never `agent-acp`            |
 
 ## What the host advertises
 
@@ -48,15 +48,15 @@ Dan's rulings about the hosts, their layers, and what is planned are in
 The connection holds each session it made or started. A session is a draft until its first prompt,
 then open.
 
-| Request | What the host does |
-| --- | --- |
-| `session/new` | Mints the id, reads the configuration, opens the world, starts the MCP servers, and makes a draft. Writes nothing. |
-| `session/set_config_option` | Changes the draft, or, on an open session, submits the change to the configuration gate. |
-| `session/prompt` | Opens a draft (turn zero), then runs the turn. `/export` and `/mcp` are answered without the model. |
-| `session/cancel` | Interrupts the turn under way. |
-| `session/load`, `session/resume` | Starts a stored session from its facts file; a session the connection holds already goes on as it is. |
-| `session/list` | Lists the stored sessions that have the host's record. |
-| `session/close` | Interrupts the turn under way, waits for its prompt, and closes the session's scope. |
+| Request                          | What the host does                                                                                                 |
+|----------------------------------|--------------------------------------------------------------------------------------------------------------------|
+| `session/new`                    | Mints the id, reads the configuration, opens the world, starts the MCP servers, and makes a draft. Writes nothing. |
+| `session/set_config_option`      | Changes the draft, or, on an open session, submits the change to the configuration gate.                           |
+| `session/prompt`                 | Opens a draft (turn zero), then runs the turn. `/export` and `/mcp` are answered without the model.                |
+| `session/cancel`                 | Interrupts the turn under way.                                                                                     |
+| `session/load`, `session/resume` | Starts a stored session from its facts file; a session the connection holds already goes on as it is.              |
+| `session/list`                   | Lists the stored sessions that have the host's record.                                                             |
+| `session/close`                  | Interrupts the turn under way, waits for its prompt, and closes the session's scope.                               |
 
 The same id is ACP's `sessionId` and the core's `SessionId`: one id with two lifetimes. A draft that
 never gets a prompt leaves nothing on disk, so `session/list` lists only sessions that had a turn.
@@ -75,7 +75,8 @@ session's are kept in its record.
 `docs/agent-environment.md`) when they create the session's entry, with
 `agent-host/session-context.ts`: the session's id, `cwd` as its working folder, the folders that
 each source gives (the launcher's `--add-dir`, the request's `additionalDirectories`, then each
-permissions entry's), and its environment, made once from the configuration's `commandEnvironment`. The entry keeps the context
+permissions entry's), and its environment, made once from the configuration's `commandEnvironment`. The entry keeps the
+context
 until `session/close` or the end of the connection.
 
 - The context is made before the world is opened. The world, the MCP servers, the session's
@@ -88,8 +89,8 @@ until `session/close` or the end of the connection.
 - The MCP servers' processes receive the context's environment, each with its own `env` set over it.
 - A draft has no store, so its folders are those its open will record. Once the store opens, the
   folders are projected from the facts.
-- Each open records what it changes of the session's working folder and its additional folders
-  (`changesAtOpen`, `docs/agent-host.md`), before any turn runs: a new session at its first prompt,
+- Each open records what it changes of the session's working folder and its additional folders (`changesAtOpen`,
+  `docs/agent-host.md`), before any turn runs: a new session at its first prompt,
   after `SessionOpened`; a session that `session/load` or `session/resume` starts once its store is
   open, before a turn that its facts left running is ended. A session loaded or resumed in another
   `cwd` records `SessionHomed` with it, and the model's next request tells it of the move. A session
@@ -151,15 +152,15 @@ The prompt is then the turn's input, from the same origin. A prompt's input is:
 
 ### A turn's stop
 
-| Ending | Answer to the prompt |
-| --- | --- |
-| `Completed`, `Incomplete` | `end_turn` |
-| `CutShort` | `max_tokens` |
-| `Interrupted` | `cancelled` |
-| `Vetoed`, with a reason whose JSON has `stop: "max_turn_requests"` | `max_turn_requests` |
-| `Vetoed`, otherwise | a JSON-RPC error (-32603) carrying the reason as text |
-| `Failed` | a JSON-RPC error (-32603) carrying the failure |
-| any ending, when the turn's last response was `Refused` | `refusal` |
+| Ending                                                             | Answer to the prompt                                  |
+|--------------------------------------------------------------------|-------------------------------------------------------|
+| `Completed`, `Incomplete`                                          | `end_turn`                                            |
+| `CutShort`                                                         | `max_tokens`                                          |
+| `Interrupted`                                                      | `cancelled`                                           |
+| `Vetoed`, with a reason whose JSON has `stop: "max_turn_requests"` | `max_turn_requests`                                   |
+| `Vetoed`, otherwise                                                | a JSON-RPC error (-32603) carrying the reason as text |
+| `Failed`                                                           | a JSON-RPC error (-32603) carrying the failure        |
+| any ending, when the turn's last response was `Refused`            | `refusal`                                             |
 
 A turn that has not ended has no stop. After a failed turn the session takes the next prompt.
 
@@ -167,10 +168,10 @@ A stop of `max_tokens` or `refusal` is explained by a `notice` (`noticeOf`, `sto
 after every other update of the turn, its `usage_update` included, and before the answer. It is
 built from the turn's last response and the session's settings, and says only what they record:
 
-| Stop | `title` | `description` |
-| --- | --- | --- |
-| `max_tokens` | The reply was cut short | The model; `stopped at a length limit` when the response's ending was `CutShort`, otherwise (not classified, not observed) `stopped before finishing its reply`; the output tokens the response used, when reported; the output limit the request was sent with, when the session's settings for that model give one (an adapter's own default is not recorded, and is not stated); the provider's stop reason. |
-| `refusal` | The model declined to continue | The model; the provider's stop reason; each refusal text the response carries (a field named `refusal`, as OpenAI's APIs send it), quoted. |
+| Stop         | `title`                        | `description`                                                                                                                                                                                                                                                                                                                                                                                                   |
+|--------------|--------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `max_tokens` | The reply was cut short        | The model; `stopped at a length limit` when the response's ending was `CutShort`, otherwise (not classified, not observed) `stopped before finishing its reply`; the output tokens the response used, when reported; the output limit the request was sent with, when the session's settings for that model give one (an adapter's own default is not recorded, and is not stated); the provider's stop reason. |
+| `refusal`    | The model declined to continue | The model; the provider's stop reason; each refusal text the response carries (a field named `refusal`, as OpenAI's APIs send it), quoted.                                                                                                                                                                                                                                                                      |
 
 For example: `openai/gpt-6-sol stopped at a length limit after 4,096 output tokens. The request set
 the output limit to 4,096 tokens. The provider's stop reason: max_tokens.`
@@ -183,8 +184,8 @@ is sent none, logged at DEBUG, and gets the same answer. A notice is a live even
 ### Cancel and close
 
 - `session/cancel` records `TurnInterrupted` for the turn under way (`Session.cancel`). The turn ends
-  `Interrupted` and its prompt `cancelled`. A prompt request that the client cancels
-  (`$/cancel_request`) cancels its turn the same way. The session then takes the next prompt.
+  `Interrupted` and its prompt `cancelled`. A prompt request that the client cancels (`$/cancel_request`) cancels its
+  turn the same way. The session then takes the next prompt.
 - `session/close` cancels the turn under way, waits for its prompt (which ends `cancelled`), and
   closes the session's scope, which ends its MCP servers. A later request that names it is -32002.
 - When the connection ends, every session's scope closes. A turn under way is left running in the
@@ -196,17 +197,17 @@ is sent none, logged at DEBUG, and gets the same answer. A notice is a live even
 ### `session/load` and `session/resume`
 
 1. The request is refused when:
-   - `cwd` is not absolute (-32602);
-   - the session directory holds no facts file for it (-32002, with its `sessionId`);
-   - its store cannot be opened, such as a facts file open in another process or one that does
-     not read (-32000, carrying the store's message). Nothing is left open, so the session loads
-     once the cause is gone.
+    - `cwd` is not absolute (-32602);
+    - the session directory holds no facts file for it (-32002, with its `sessionId`);
+    - its store cannot be opened, such as a facts file open in another process or one that does
+      not read (-32000, carrying the store's message). Nothing is left open, so the session loads
+      once the cause is gone.
 
    A session the connection holds already is not refused: it goes on as it is (A session the
    connection holds). A request for a session that another request is starting waits for that one
    to be answered, then is answered as a load or resume of the session it started.
-2. The configuration is read for `cwd` and the client's MCP servers, the session's context is made
-   (The session's context), the world is opened, and the servers are started.
+2. The configuration is read for `cwd` and the client's MCP servers, the session's context is made (The session's
+   context), the world is opened, and the servers are started.
 3. The session starts over its facts, with the model, system prompt and tool catalog that they hold.
    The record keeps the working folder it had.
 4. A turn that the facts left running is ended (`endTurnLeftRunning`): it ends `Interrupted`, each
@@ -308,11 +309,11 @@ command run on the local disk and each MCP server's process receive.
 
 The host's defaults:
 
-| Seam | Entry |
-| --- | --- |
-| `toolCalls` | `permissions` |
-| `modelRequests` | `maxTurnRequests`, 1000 unless the launcher says otherwise (`--max-turns`) |
-| `turnEnd` | `retryIncomplete`, asked `retries` times (1 unless `--retries` says otherwise); none when `retries` is 0 |
+| Seam                 | Entry                                                                                                          |
+|----------------------|----------------------------------------------------------------------------------------------------------------|
+| `toolCalls`          | `permissions`                                                                                                  |
+| `modelRequests`      | `maxTurnRequests`, 1000 unless the launcher says otherwise (`--max-turns`)                                     |
+| `turnEnd`            | `retryIncomplete`, asked `retries` times (1 unless `--retries` says otherwise); none when `retries` is 0       |
 | `commandEnvironment` | `credentials`: the environment without its credentials, for the commands on the local disk and the MCP servers |
 
 A turn whose response had thinking and no answer (`Incomplete`) is asked again for its answer, by
@@ -324,13 +325,13 @@ default once. An answer then reaches the client as `agent_message_chunk`, and th
 `configOptions(options, models, limit)` gives the selects of a configuration; `models` are the
 catalog's (`askable`), and `limit` is the model's output limit (none known: every preset).
 
-| id | category | values |
-| --- | --- | --- |
-| `model` | `model` | `provider/model` of each model offered, and of the one asked now |
-| `effort` | `thought_level` | `default`, and the efforts the model takes |
-| `thinking` | `model_config` | `default`, and the thinking modes the model takes |
-| `max_output_tokens` | `model_config` | `default`; 4096, 8192, 16384, 32768, 65536, 128000 up to the model's limit; the limit; the value in force |
-| `permission_mode` | `mode` | `default`, `acceptEdits`, `bypassPermissions`, `dontAsk` |
+| id                  | category        | values                                                                                                    |
+|---------------------|-----------------|-----------------------------------------------------------------------------------------------------------|
+| `model`             | `model`         | `provider/model` of each model offered, and of the one asked now                                          |
+| `effort`            | `thought_level` | `default`, and the efforts the model takes                                                                |
+| `thinking`          | `model_config`  | `default`, and the thinking modes the model takes                                                         |
+| `max_output_tokens` | `model_config`  | `default`; 4096, 8192, 16384, 32768, 65536, 128000 up to the model's limit; the limit; the value in force |
+| `permission_mode`   | `mode`          | `default`, `acceptEdits`, `bypassPermissions`, `dontAsk`                                                  |
 
 - `model` comes first, then one select for each setting the options offer, then `permission_mode`.
   A setting that is not offered has no option.
@@ -359,8 +360,8 @@ catalog's (`askable`), and `limit` is the model's output limit (none known: ever
 ### When a change applies
 
 - On a draft, a change applies at once (`chooseModel`, `withSettings`).
-- On an open session, a change goes through the session's configuration gate
-  (`agent-session/configuration/gate.ts`). Between turns it is made at once: the model change is
+- On an open session, a change goes through the session's configuration gate (`agent-session/configuration/gate.ts`).
+  Between turns it is made at once: the model change is
   recorded as `ModelChangeArrived` from the user through ACP. While a turn runs it is held until the
   turn ends, so the model that started the turn completes it.
 - The gate is settled when a prompt's turn ends and before a prompt starts one.
@@ -394,21 +395,21 @@ presentation of tool calls.
 The inputs are facts (`session.subscribe`) and the items that a model request passes on while it
 runs (`session.streamed`): `ModelDelta`, `ModelPartArrived` and `ModelResponseEnded`.
 
-| Input | Update |
-| --- | --- |
-| `InputArrived` from the user | `user_message_chunk`, on replay only: live, the client has what it sent. Its text, then a `resource_link` for each file it carried (`blob://<id>.<extension>`, with the file's name, media type and size), in the same message |
-| `InputArrived` from the system (a turn-end hook's feedback) or another agent | nothing |
-| `ModelDelta` of `Text` or `Commentary`, live | `agent_message_chunk` with the delta's text |
-| `ModelDelta` of `Thinking`, live | `agent_thought_chunk` with the delta's text |
-| `ModelResponded`: a `Text` or `Commentary` part | `agent_message_chunk` with the part's text that no delta of its request sent |
-| `ModelResponded`: a `Thinking` part | `agent_thought_chunk` with the part's text that no delta of its request sent |
-| `ToolCallArrived`; a `ToolCall` part of `ModelPartArrived` or `ModelResponded` | `tool_call`, `pending`, with the presentation's title, kind, locations and content, the tool's name (`name`) and the call's input (`rawInput`); once for each call |
-| `PermissionAsked` | `tool_call_update`, `pending` |
-| `PermissionAnswered` | `tool_call_update` with `_meta["labkit.dev/permission"]`: the outcome as ACP's `RequestPermissionOutcome` gives it, live and on replay alike. A selected option is `{ outcome: "selected", optionId, name, kind }`, without `name` and `kind` when the question did not offer it; a cancelled request is `{ outcome: "cancelled" }`. ACP has no field for it, and a replay asks no question, so a client shows a replayed call's answer from it. The key follows labkit's own (`labkit.dev/baseline`, `labkit.dev/failure`). A call that was asked and ends with no answer recorded (its turn was cancelled or interrupted first) is sent `{ outcome: "cancelled" }` before its `ToolEnded` update. |
-| `PermissionFailed` | nothing: ACP has no outcome for a request that failed. The call's `ToolEnded` update says why it did not run. |
-| `ToolCallDispatched` | `tool_call_update`, `in_progress` |
-| `ToolEnded` | `tool_call_update`, `completed` when it succeeded and `failed` otherwise, with the presentation's content and locations, its title and kind where they changed, and what it returned or why it failed (`rawOutput`) |
-| anything else | nothing |
+| Input                                                                          | Update                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+|--------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `InputArrived` from the user                                                   | `user_message_chunk`, on replay only: live, the client has what it sent. Its text, then a `resource_link` for each file it carried (`blob://<id>.<extension>`, with the file's name, media type and size), in the same message                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `InputArrived` from the system (a turn-end hook's feedback) or another agent   | nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `ModelDelta` of `Text` or `Commentary`, live                                   | `agent_message_chunk` with the delta's text                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `ModelDelta` of `Thinking`, live                                               | `agent_thought_chunk` with the delta's text                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `ModelResponded`: a `Text` or `Commentary` part                                | `agent_message_chunk` with the part's text that no delta of its request sent                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `ModelResponded`: a `Thinking` part                                            | `agent_thought_chunk` with the part's text that no delta of its request sent                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `ToolCallArrived`; a `ToolCall` part of `ModelPartArrived` or `ModelResponded` | `tool_call`, `pending`, with the presentation's title, kind, locations and content, the tool's name (`name`) and the call's input (`rawInput`); once for each call                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `PermissionAsked`                                                              | `tool_call_update`, `pending`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `PermissionAnswered`                                                           | `tool_call_update` with `_meta["labkit.dev/permission"]`: the outcome as ACP's `RequestPermissionOutcome` gives it, live and on replay alike. A selected option is `{ outcome: "selected", optionId, name, kind }`, without `name` and `kind` when the question did not offer it; a cancelled request is `{ outcome: "cancelled" }`. ACP has no field for it, and a replay asks no question, so a client shows a replayed call's answer from it. The key follows labkit's own (`labkit.dev/baseline`, `labkit.dev/failure`). A call that was asked and ends with no answer recorded (its turn was cancelled or interrupted first) is sent `{ outcome: "cancelled" }` before its `ToolEnded` update. |
+| `PermissionFailed`                                                             | nothing: ACP has no outcome for a request that failed. The call's `ToolEnded` update says why it did not run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `ToolCallDispatched`                                                           | `tool_call_update`, `in_progress`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `ToolEnded`                                                                    | `tool_call_update`, `completed` when it succeeded and `failed` otherwise, with the presentation's content and locations, its title and kind where they changed, and what it returned or why it failed (`rawOutput`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| anything else                                                                  | nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 Each text chunk carries the id of its message (`messageId`, Message ids).
 
@@ -456,9 +457,9 @@ would differ on each replay, and keeping one would need a fact of its own. The p
 used: Effect's Anthropic adapter numbers a response's blocks from "0" in every response, and OpenAI's
 item ids are global.
 
-| Message | Id |
-| --- | --- |
-| A user's input (`InputArrived`), on replay | its seq: `"7"` |
+| Message                                                                                                              | Id                                                                                                            |
+|----------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| A user's input (`InputArrived`), on replay                                                                           | its seq: `"7"`                                                                                                |
 | A run of text of one kind (`Text`, `Commentary` or `Thinking`) in one response, until a call or text of another kind | `"<seq of the request's first ModelRequestDispatched>:<the run's place among the response's runs>"`: `"12:0"` |
 
 - A response's thinking and its text are two messages; so are its text before a call and its text
@@ -503,8 +504,8 @@ the load showed is not shown again, and a later request's deltas are sent once.
   and kind where they changed.
 - The default presentation (`presentFrom(catalog)`) is the tool's name as the title, its kind from
   the session's catalog, and, once it ends, its output as text, or why it failed in words.
-- A call's `tool_call` carries the tool's name as the model called it (`name`) and the call's input
-  (`rawInput`). A later source that holds another input sends it as `rawInput` on a
+- A call's `tool_call` carries the tool's name as the model called it (`name`) and the call's input (`rawInput`). A
+  later source that holds another input sends it as `rawInput` on a
   `tool_call_update`, and the call keeps it.
 - A call's end carries `rawOutput`: what the tool returned; for a failure, its recorded reason (the
   tool's error, the policy's veto, why its input was rejected). A call that named no tool, was not
@@ -578,27 +579,28 @@ when it opens the world.
 Every request's system prompt starts with the line that names the working folder and the additional
 folders, made from the session's facts (`workingFolderLine`, `agent-session/configuration/session-home.ts`).
 Both worlds below add the git tools' line to it when the working folder is a repository's root, and
-nothing otherwise. Their tool descriptions refer to "the working folder" without naming it. Each tool input has a description that states what it means, whether it
+nothing otherwise. Their tool descriptions refer to "the working folder" without naming it. Each tool input has a
+description that states what it means, whether it
 is optional, and its default. The descriptions and limits shared with the workspace tools come from
 `agent-tools/workspace.ts`.
 
 ### `editorWorld`, the default
 
 The tools go through the editor. Each is offered only when the client advertised the methods it
-uses, so no call meets a capability the client does not have. Each tool is a value
-(`editor-tools.ts`) that asks for the `Editor` service, which the world provides: the editor is the
+uses, so no call meets a capability the client does not have. Each tool is a value (`editor-tools.ts`) that asks for the
+`Editor` service, which the world provides: the editor is the
 environment the tools run in. The session's id, which each request to the editor names, and the
 working folder, where a command's terminal starts, are read from the session's context when the call
 runs. Every tool takes an `intent` input (`agent-tools/described.ts`), and
 the file tools' paths are resolved against the working folder (`agent-tools/in-workspace.ts`).
 
-| Tool | Kind | Offered when the client advertised | What it does |
-| --- | --- | --- | --- |
-| `read_file { path, line?, limit? }` | `read` | `fs.readTextFile` | Reads with `fs/read_text_file`, so the model sees the editor's unsaved buffers. A result over 256 KiB is cut there, with a note. |
-| `write_file { path, content }` | `edit` | `fs.writeTextFile` | Writes with `fs/write_text_file`; at most 256 KiB. |
-| `edit_file { path, old_text, new_text }` | `edit` | both `fs` methods | Reads the file, replaces the one occurrence of `old_text`, and writes it back. |
-| `terminal_command { command, timeout_seconds? }` | `execute` | `terminal` | Runs `sh -c <command>` in an editor terminal in the working folder. |
-| `update_plan { entries }` | `think` | always | Sends the whole plan as a `plan` update. |
+| Tool                                             | Kind      | Offered when the client advertised | What it does                                                                                                                     |
+|--------------------------------------------------|-----------|------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| `read_file { path, line?, limit? }`              | `read`    | `fs.readTextFile`                  | Reads with `fs/read_text_file`, so the model sees the editor's unsaved buffers. A result over 256 KiB is cut there, with a note. |
+| `write_file { path, content }`                   | `edit`    | `fs.writeTextFile`                 | Writes with `fs/write_text_file`; at most 256 KiB.                                                                               |
+| `edit_file { path, old_text, new_text }`         | `edit`    | both `fs` methods                  | Reads the file, replaces the one occurrence of `old_text`, and writes it back.                                                   |
+| `terminal_command { command, timeout_seconds? }` | `execute` | `terminal`                         | Runs `sh -c <command>` in an editor terminal in the working folder.                                                              |
+| `update_plan { entries }`                        | `think`   | always                             | Sends the whole plan as a `plan` update.                                                                                         |
 
 - A path is relative to the working folder, or absolute. A path outside the working folder is
   refused with a failure the model reads, and the editor is not asked.
@@ -655,8 +657,8 @@ the file tools' paths are resolved against the working folder (`agent-tools/in-w
   has no text before (`oldText: null`). When the text before cannot be read (the read fails, the
   file is over 256 KiB, a `cd` comes first in the command), the call says why no diff is shown, and
   the permission question shows the text the command writes. A note follows a diff whose text the
-  shell expands (`$…`) before writing it. A command that succeeds records each such file it changed
-  (`FileChanged`), from its text on the disk just before the command ran and once it has run, so the
+  shell expands (`$…`) before writing it. A command that succeeds records each such file it changed (`FileChanged`),
+  from its text on the disk just before the command ran and once it has run, so the
   diff is of what the command wrote, `$…` expanded. A command whose words do not show the text it
   writes (`sed -i`, `printf … > f`) shows no diff before it runs; once it succeeds, each file it wrote
   at a path it writes out is recorded and shown the same way. After a `cd` that may or may not have
@@ -681,8 +683,8 @@ with the tool's name, even when the tool has an input of its own named `intent`.
 ## MCP servers
 
 - A session's MCP servers are its configuration's, the client's among them. They are started when
-  `session/new`, `session/load` or `session/resume` makes the session, at once
-  (`docs/agent-mcp.md`), in the session's scope, which `session/close` closes.
+  `session/new`, `session/load` or `session/resume` makes the session, at once (`docs/agent-mcp.md`), in the session's
+  scope, which `session/close` closes.
 - A server has `mcpConnectTimeout` (30 seconds unless the host is given another) to connect.
 - The tools of the servers that are ready are offered after the world's, under `mcp__<server>`. A
   call is shown with its result as the model is sent it (`agent-session/tool-output.ts`).
@@ -705,14 +707,14 @@ with the tool's name, even when the tool has an input of its own named `intent`.
 
 The projection does not make these; the host sends them:
 
-| Update | When |
-| --- | --- |
-| `available_commands_update` | After `session/new`, `session/load` and `session/resume` answer: `/export` and `/mcp`. |
-| `session_info_update` | At turn zero, and after a load or a resume. |
-| `usage_update` | Sent by the feed when its numbers can change: after each response, a change of model taken and a turn's end (before the prompt's answer), and after a load or a resume; never twice in a row with the same numbers. The gauge of the model the session asks now (`contextGauge`), with the model's window as `KnownModels` knows it, and the cost so far: the priced responses' total. While no response of the session was priced (a local model's are not), it has no `cost`, because a cost not known is not nothing spent. None for a model whose window is not known. |
-| `config_option_update` | After each `session/set_config_option`. |
-| `plan` | From `update_plan`. |
-| `notice` | Before the answer to a prompt that stops with `max_tokens` or `refusal`, to a client that advertised notices (A turn's stop). |
+| Update                      | When                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+|-----------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `available_commands_update` | After `session/new`, `session/load` and `session/resume` answer: `/export` and `/mcp`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `session_info_update`       | At turn zero, and after a load or a resume.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `usage_update`              | Sent by the feed when its numbers can change: after each response, a change of model taken and a turn's end (before the prompt's answer), and after a load or a resume; never twice in a row with the same numbers. The gauge of the model the session asks now (`contextGauge`), with the model's window as `KnownModels` knows it, and the cost so far: the priced responses' total. While no response of the session was priced (a local model's are not), it has no `cost`, because a cost not known is not nothing spent. None for a model whose window is not known. |
+| `config_option_update`      | After each `session/set_config_option`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `plan`                      | From `update_plan`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `notice`                    | Before the answer to a prompt that stops with `max_tokens` or `refusal`, to a client that advertised notices (A turn's stop).                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 ## Logs
 
@@ -746,7 +748,7 @@ the session's own id, from its context (The session's context).
 - Its options are those both hosts take (`docs/agent-host.md`, Launch options) and its own:
 
   | Flag | Default | Meaning |
-  | --- | --- | --- |
+    | --- | --- | --- |
   | `--sessions-dir` | `~/.local/share/<brand>/sessions/<version>` | Where sessions are kept: a folder shared with the CLI, of which `session/list` lists the sessions that the ACP host made. It moves the sessions alone: blobs and logs stay in the brand's folders, which `--data-dir` moves (`agent-host.md`, The brand's folders). |
   | `--local-tools` | off | The tools on the local disk instead of through the editor. |
   | `--retries` | 1 | How many times an incomplete turn is asked again for its answer; 0 never. |
@@ -756,8 +758,8 @@ the session's own id, from its context (The session's context).
   variables. The log's variables are `<PREFIX>ACP_LOG_*`.
 - Before it serves, it loads what of a session's configuration no session's folder changes: the
   host's defaults, the user's file, `--settings`, `--mcp-config` and the flags. An option the launcher
-  does not take (`LABKIT_ACP_PERMISSION_MODE=yolo`), or a configuration that cannot be used
-  (`LABKIT_ACP_MAX_TURNS=0`), ends it with exit code 1, said on stderr, with nothing on stdout.
+  does not take (`LABKIT_ACP_PERMISSION_MODE=yolo`), or a configuration that cannot be used (`LABKIT_ACP_MAX_TURNS=0`),
+  ends it with exit code 1, said on stderr, with nothing on stdout.
 
 ## Design decisions
 
@@ -780,13 +782,13 @@ the session's own id, from its context (The session's context).
 
 ## Tests
 
-| File | Covers |
-| --- | --- |
-| `host.test.ts` | The handlers, against the SDK's client: sessions, prompts, cancel, close, load, resume, list, config options, permission, MCP servers, the editor's tools, logs. |
-| `projection.test.ts` | The projection, live and replay, every merge of the two feeds, message ids, and each call's name, input and raw output. |
-| `config-options.test.ts` | Config options and changes. |
-| `permission.test.ts` | Permission requests and answers. |
-| `stop-reason.test.ts` | Stop reasons, and the notices that explain `max_tokens` and `refusal`. |
-| `usage.test.ts` | `usage_update`. |
-| `session-record.test.ts` | Titles, records, and the pages of `session/list`. |
-| `main.test.ts` | The launcher: stdout, the log file, flags and variables, refused configurations. |
+| File                     | Covers                                                                                                                                                           |
+|--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `host.test.ts`           | The handlers, against the SDK's client: sessions, prompts, cancel, close, load, resume, list, config options, permission, MCP servers, the editor's tools, logs. |
+| `projection.test.ts`     | The projection, live and replay, every merge of the two feeds, message ids, and each call's name, input and raw output.                                          |
+| `config-options.test.ts` | Config options and changes.                                                                                                                                      |
+| `permission.test.ts`     | Permission requests and answers.                                                                                                                                 |
+| `stop-reason.test.ts`    | Stop reasons, and the notices that explain `max_tokens` and `refusal`.                                                                                           |
+| `usage.test.ts`          | `usage_update`.                                                                                                                                                  |
+| `session-record.test.ts` | Titles, records, and the pages of `session/list`.                                                                                                                |
+| `main.test.ts`           | The launcher: stdout, the log file, flags and variables, refused configurations.                                                                                 |
