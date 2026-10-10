@@ -50,7 +50,7 @@ When two sources disagree, the one earlier in this list wins:
 
 ## Do not
 
-- **Do not cast.** Type assertions (`x as T`, `<T>x`) and non-null assertions (`x!`) are lint errors. Narrow, annotate, or decode instead; `as const` is allowed. The files that had casts when the rules started are exempt (`scripts/lint-exceptions.ts`): a file leaves its list when its last cast is gone, and no file joins a list.
+- **Do not cast.** Type assertions (`x as T`, `<T>x`) and non-null assertions (`x!`) are lint errors. Narrow, annotate, or decode instead; `as const` is allowed. The files that had casts when the rules started are exempt from the rules, but `bun run check:casts` holds each one to the count recorded in `scripts/lint-exceptions.ts`. A new cast in such a file fails the check, and a removed cast fails it until the count is lowered. No file joins the list.
 - **Do not give a `Context.Reference` a default** that stands in for persistence, credentials or a transport. A program that forgot to provide the real one then runs on the default with no error. `Blobs` (`agent-session/blobs.ts`), whose default is an in-memory store, is an existing case.
 - **Do not use `Layer.mergeAll` or `Layer.provideMerge` only to make a type error go away.** The error usually names a dependency that some layer has to provide.
 - **Do not sleep in a test** (`Effect.sleep`, `Bun.sleep`, `setTimeout`); `abstract/no-sleep-in-tests` reports it. Synchronize instead (`references/TESTING.md`). A bounded wait for a real process or server carries its reason: `// oxlint-disable-next-line abstract/no-sleep-in-tests -- <reason>`.

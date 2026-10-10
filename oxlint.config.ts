@@ -1,7 +1,7 @@
 import { strict } from "@effect/tsgo/oxlint-presets";
 import { defineConfig, type OxlintOverride } from "oxlint";
 import { type AbstractLayer, abstractLayers } from "./scripts/abstract-layers.ts";
-import { nonNullAssertionFiles, typeAssertionFiles } from "./scripts/lint-exceptions.ts";
+import { nonNullAssertions, typeAssertions } from "./scripts/lint-exceptions.ts";
 
 /** What the abstract layers are held to, beyond the Effect preset. */
 const abstractLayer = {
@@ -83,9 +83,9 @@ export default defineConfig({
     "abstract/workflow-deterministic": "error",
   },
   overrides: [
-    // The files that broke the two cast rules when they started (`scripts/lint-exceptions.ts`).
-    { files: [...typeAssertionFiles], rules: { "typescript/consistent-type-assertions": "off" } },
-    { files: [...nonNullAssertionFiles], rules: { "typescript/no-non-null-assertion": "off" } },
+    // The files that had casts when the two cast rules started, each held to its count by `bun run check:casts` (`scripts/lint-exceptions.ts`).
+    { files: Object.keys(typeAssertions), rules: { "typescript/consistent-type-assertions": "off" } },
+    { files: Object.keys(nonNullAssertions), rules: { "typescript/no-non-null-assertion": "off" } },
     // Tests synchronize on events, or move the test clock; they do not sleep.
     { files: ["**/*.test.ts", "tests/**"], rules: { "abstract/no-sleep-in-tests": "error" } },
     // Application code takes its configuration from `Config` or from the environment an entry point passes in.
