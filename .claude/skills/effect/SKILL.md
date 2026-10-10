@@ -16,7 +16,7 @@ When two sources disagree, the one earlier in this list wins:
 
 1. `CLAUDE.md`, and the module's `docs/<module>.md`.
 2. `oxlint.config.ts` and the other checks in `bun run check`:
-   - Effect's lint preset (`@effect/tsgo`, `recommended`);
+   - Effect's lint preset (`@effect/tsgo`, `strict`: every rule an error);
    - the rules for functional modules and abstract layers (`scripts/oxlint/abstract-layers.js`);
    - the dependency check and the brand check.
 3. This skill.

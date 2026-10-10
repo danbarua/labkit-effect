@@ -1,4 +1,4 @@
-import { recommended } from "@effect/tsgo/oxlint-presets";
+import { strict } from "@effect/tsgo/oxlint-presets";
 import { defineConfig, type OxlintOverride } from "oxlint";
 import { type AbstractLayer, abstractLayers } from "./scripts/abstract-layers.ts";
 
@@ -70,7 +70,7 @@ const imperativeBoundaries: ReadonlyArray<string> = [
 
 export default defineConfig({
   ignorePatterns: ["repos/**"],
-  extends: [recommended],
+  extends: [strict],
   jsPlugins: ["./scripts/oxlint/abstract-layers.js"],
   // All code: a cast through `unknown` or `any` turns off the check that the types exist to make.
   rules: { "abstract/no-double-cast": "error" },
