@@ -12,9 +12,9 @@ import type { Observation } from "../agent-machine/observation.ts";
 import { MaxHolds, ModelClient, type ModelContext, TurnEndHooks } from "../agent-session/contracts.ts";
 import { openSession } from "../agent-session/loop.ts";
 import { receivedJson } from "../agent-session/received.ts";
-import { EphemeralSessionStore } from "../agent-session/session-store.ts";
 import { CountingTurns } from "../agent-session/turns.ts";
 import { answerNow, retryIncomplete } from "./incomplete.ts";
+import { EphemeralSessionStore } from "./ephemeral-session.ts";
 
 /** What the model gives each request, in order: its thinking alone, its answer, or its thinking cut short. */
 type Reply = "thinks" | "answers" | "cut";

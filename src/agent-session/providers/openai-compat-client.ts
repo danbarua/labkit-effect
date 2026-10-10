@@ -34,6 +34,7 @@
  * - A request that still fails after retries is observed as `ModelFailed`.
  */
 
+import { Blobs } from "../blobs.ts";
 import type { BlobId } from "../../agent-machine/blob.ts";
 import { knownOf, takesFile } from "../configuration/well-known-models.ts";
 import { OpenAiClient } from "@effect/ai-openai-compat";
@@ -612,15 +613,16 @@ const respondOnce = (
 /** Makes requests through the configured compatible client, retried while the failure is retryable; a failure is the `AiError`. */
 export const openAiCompatRequests = (
   retries: Retries = defaultRetries,
-): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient> =>
+): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient | Blobs> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
+    const blobs = yield* Blobs;
     // As Effect's `LanguageModel` does: the provided `IdGenerator`, else the adapter's own.
     const ids = yield* Effect.serviceOption(IdGenerator.IdGenerator).pipe(Effect.flatMap(Option.match({ onNone: () => labkitCallIds, onSome: Effect.succeed })));
     const omittedLogged = yield* Ref.make<OmittedLogged>(new Set());
     return (target, context, turn) => {
       const settled = openAiCompatSettle(target);
-      return filesIn(context).pipe(
+      return filesIn(context, blobs).pipe(
         Effect.flatMap((files) => {
         const sent = body(target, context, files);
         const post: Post = {

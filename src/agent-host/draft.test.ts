@@ -13,10 +13,10 @@ import { immutableSystemPromptOf, immutableToolCatalogOf, modelOf } from "../age
 import { capabilitiesOf } from "../agent-session/configuration/well-known-models.ts";
 import { ModelClient, ToolRunner, type ToolSpec } from "../agent-session/contracts.ts";
 import { openSession } from "../agent-session/loop.ts";
-import { EphemeralSessionStore } from "../agent-session/session-store.ts";
 import { CountingTurns } from "../agent-session/turns.ts";
 import { type Asked, type CatalogSource, ModelCatalog } from "./catalog.ts";
 import { chooseModel, defaultModel, draftOf, opening, optionsOfDraft, withSettings, withDefaults } from "./draft.ts";
+import { EphemeralSessionStore } from "./ephemeral-session.ts";
 
 const asked = (provider: string, model: string): Asked => ({ provider: ProviderName.make(provider), model: ModelName.make(model) });
 const option = (options: Options, name: keyof ModelSettings) => options.offered.find((each) => each.name === name);

@@ -6,6 +6,7 @@
  * kept in the test's folder.
  */
 
+import type { Blobs } from "../agent-session/blobs.ts";
 import { expect } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -194,7 +195,7 @@ function startHost(
     readonly script?: ReadonlyArray<Reply>;
     readonly world?: "editor" | "local" | World<SessionContext>;
     readonly sources?: ReadonlyArray<CatalogSource>;
-    readonly services?: (runner: Layer.Layer<ToolRunner>) => Layer.Layer<Services, never, SessionStore>;
+    readonly services?: (runner: Layer.Layer<ToolRunner>) => Layer.Layer<Exclude<Services, Blobs>, never, SessionStore | Blobs>;
     readonly pageSize?: number;
     readonly maxTurnRequests?: number;
     readonly brand?: Brand;
@@ -2136,6 +2137,7 @@ test("a session made in the CLI, with a folder added by /add-dir, keeps the fold
           settings: {},
           persist: true,
           root: join(testFolder(), "sessions"),
+          blobs: join(testFolder(), "blobs"),
           record: cliRecord(cwd),
           services: Layer.mergeAll(BoringModelProvider, BoringContextAssembler, CountingTurnsInStore, SourcedToolRunner, Layer.succeed(ModelClient, { respond: () => Effect.die("no model is asked") })),
           boltOns: [],

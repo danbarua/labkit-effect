@@ -6,6 +6,7 @@
  * tools the engine offers each turn, and the feedback that asks for an action. A game is one span,
  * `zork.game`, with both sessions under it, and each log line carries the game's id.
  */
+import type { Blobs } from "../../agent-session/blobs.ts";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -38,7 +39,7 @@ import { actionNames, availableTools, grueEnding, initialWorld, maxTurns, view, 
 export interface Player {
   readonly target: ModelTarget;
   /** The client the player asks; the provider's own, from its key in the environment, when not given (a test gives a scripted one). */
-  readonly client?: Layer.Layer<ModelClient>;
+  readonly client?: Layer.Layer<ModelClient, never, Blobs>;
 }
 export interface Adventurer extends Player {
   /** How each request the adventurer is sent is changed for its model (`customisations.ts`); unchanged when not given. */
@@ -142,6 +143,7 @@ const optionsOf = (
     system: prompt,
     persist: true,
     root: folders.sessions,
+    blobs: folders.blobs,
     record: { host: "zork", game, role, cwd: process.cwd() },
     services: servicesOf(player, request, feedback),
     boltOns: source === undefined ? [] : [{ sources: [source] }],

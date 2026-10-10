@@ -5,6 +5,7 @@
  * provider's tokenizer counts, so the figure is the provider's.
  */
 
+import { Blobs } from "../blobs.ts";
 import { AnthropicClient } from "@effect/ai-anthropic";
 import { Effect } from "effect";
 import type * as AiError from "effect/ai/AiError";
@@ -17,11 +18,12 @@ const caller = { module: "AnthropicModelClient", method: "countTokens" };
 
 export const anthropicInputTokens = (
   retries: Retries = defaultRetries,
-): Effect.Effect<(target: Target, context: ModelContext) => Effect.Effect<number, AiError.AiError>, never, AnthropicClient.AnthropicClient> =>
+): Effect.Effect<(target: Target, context: ModelContext) => Effect.Effect<number, AiError.AiError>, never, AnthropicClient.AnthropicClient | Blobs> =>
   Effect.gen(function* () {
     const http = (yield* AnthropicClient.AnthropicClient).client.httpClient;
+    const blobs = yield* Blobs;
     return (target, context) =>
-      filesIn(context).pipe(
+      filesIn(context, blobs).pipe(
         Effect.flatMap((files) => {
           const { max_tokens: _limit, ...shaped } = body(target, context, files).json as Record<string, Json>;
           const post: Post = { path: "/v1/messages/count_tokens", headers: {}, body: shaped };

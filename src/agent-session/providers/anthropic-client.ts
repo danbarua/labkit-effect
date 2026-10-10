@@ -31,6 +31,7 @@
  *   annotates these logs with the turn.
  */
 
+import { Blobs } from "../blobs.ts";
 import type { BlobId } from "../../agent-machine/blob.ts";
 import { knownOf, takesFile } from "../configuration/well-known-models.ts";
 import { AnthropicClient } from "@effect/ai-anthropic";
@@ -386,13 +387,14 @@ export function toolCallFields(context: ModelContext, fields: Settled["fields"])
  */
 export const anthropicRequests = (
   retries: Retries = defaultRetries,
-): Effect.Effect<ProviderRequest, never, AnthropicClient.AnthropicClient> =>
+): Effect.Effect<ProviderRequest, never, AnthropicClient.AnthropicClient | Blobs> =>
   Effect.gen(function* () {
     const http = (yield* AnthropicClient.AnthropicClient).client.httpClient;
+    const blobs = yield* Blobs;
     const omittedLogged = yield* Ref.make<OmittedLogged>(new Set());
     return (target, context, turn) => {
       const settled = anthropicSettle(target);
-      return filesIn(context).pipe(
+      return filesIn(context, blobs).pipe(
         Effect.flatMap((files) => {
         const sent = body(target, context, files);
         const fields = toolCallFields(context, settled.fields);

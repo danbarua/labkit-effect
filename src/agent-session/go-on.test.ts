@@ -19,8 +19,8 @@ import type { Policy } from "../agent-policy/policy.ts";
 import { ModelClient, ToolCallPolicies, ToolRunner, type ToolSpec } from "./contracts.ts";
 import { openSession } from "./loop.ts";
 import { receivedJson, receivedText } from "./received.ts";
-import { ephemeralSessionStore } from "./session-store.ts";
 import { CountingTurnsInStore } from "./turns.ts";
+import { ephemeralSessionStore } from "../agent-host/ephemeral-session.ts";
 
 /**
  * `look` and `check` change nothing (`check` is asked about before it runs); `write` leaves things as

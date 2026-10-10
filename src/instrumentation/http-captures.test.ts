@@ -29,6 +29,7 @@ import { anthropicStream, chatStream, openAiStream } from "../../tests/support/s
 import { test, testFolder } from "../../tests/support/test.ts";
 import { type CaptureSettings, HttpCaptures, capturesFolderIn, capturingClient, capturingHttp, eventBlocksOf } from "./http-captures.ts";
 import { type SpanLine, SpansTo } from "./telemetry.ts";
+import { EphemeralBlobs } from "../agent-host/ephemeral-session.ts";
 
 const stops: Array<() => unknown> = [];
 afterAll(() => {
@@ -63,10 +64,10 @@ const key = Redacted.make("test-key");
 
 /** Each adapter, made with its provider's client over `http`, pointed at `url`. */
 const adapters: Record<"anthropic" | "openai" | "xai" | "localhost", Adapter> = {
-  anthropic: (http, url, retries) => anthropicRequests(retries).pipe(Effect.provide(AnthropicClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http)))),
-  openai: (http, url, retries) => openAiRequests(retries).pipe(Effect.provide(OpenAiClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http)))),
-  xai: (http, url, retries) => xAiRequests(retries).pipe(Effect.provide(OpenAiClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http)))),
-  localhost: (http, url, retries) => openAiCompatRequests(retries).pipe(Effect.provide(OpenAiCompatClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http)))),
+  anthropic: (http, url, retries) => anthropicRequests(retries).pipe(Effect.provide(Layer.merge(EphemeralBlobs, AnthropicClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http))))),
+  openai: (http, url, retries) => openAiRequests(retries).pipe(Effect.provide(Layer.merge(EphemeralBlobs, OpenAiClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http))))),
+  xai: (http, url, retries) => xAiRequests(retries).pipe(Effect.provide(Layer.merge(EphemeralBlobs, OpenAiClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http))))),
+  localhost: (http, url, retries) => openAiCompatRequests(retries).pipe(Effect.provide(Layer.merge(EphemeralBlobs, OpenAiCompatClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http))))),
 };
 
 interface Logged {

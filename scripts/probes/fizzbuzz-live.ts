@@ -50,6 +50,7 @@ import { EmojiHappyFizzBuzzSummarizer, PlainTextFizzBuzzSummarizer } from "../..
 import { capturingHttp } from "../../src/instrumentation/http-captures.ts";
 import { TelemetryToFiles } from "../../src/instrumentation/telemetry.ts";
 import { transcript } from "./transcript.ts";
+import { EphemeralBlobs } from "../../src/agent-host/ephemeral-session.ts";
 
 const [provider = "openai", model = "gpt-5.5", counted = "45", ...rest] = process.argv.slice(2);
 const compacting = rest.find((each) => !each.includes("="));
@@ -79,7 +80,7 @@ const http = capturingHttp(FetchHttpClient.layer);
 const openAiClientLayer = (provider === "xai" ? xAiClient(apiKey) : OpenAiClient.layer({ apiKey })).pipe(Layer.provide(http));
 // The provider's own compaction, asked through the same client as the requests.
 const byProvider =
-  compacting === "provider" ? providerCompaction(await Effect.runPromise(openAiCompactions().pipe(Effect.provide(openAiClientLayer)))) : undefined;
+  compacting === "provider" ? providerCompaction(await Effect.runPromise(openAiCompactions().pipe(Effect.provide(Layer.merge(openAiClientLayer, EphemeralBlobs))))) : undefined;
 
 const client =
   provider === "anthropic"

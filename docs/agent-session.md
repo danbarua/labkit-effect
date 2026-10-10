@@ -126,10 +126,10 @@ ended. The host chooses what to do:
 
 ## Where facts are kept
 
-| Store                          | Behaviour                                          |
-|--------------------------------|----------------------------------------------------|
-| `EphemeralSessionStore`        | Keeps the facts in memory, until the process ends. |
-| `FileBackedSessionStore(file)` | Keeps the facts in a file, one JSON line per fact. |
+| Store                                                   | Behaviour                                                                            |
+|---------------------------------------------------------|--------------------------------------------------------------------------------------|
+| `FileBackedSessionStore(file)`                          | Keeps the facts in a file, one JSON line per fact.                                   |
+| `ephemeralSessionStore` (`agent-host/ephemeral-session.ts`) | Keeps the facts in memory, until the process ends: for a session that is not saved. |
 
 A store opened on facts it already keeps is the session continuing from them.
 

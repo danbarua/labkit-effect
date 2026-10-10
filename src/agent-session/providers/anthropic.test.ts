@@ -14,13 +14,13 @@ import { BoringModelProvider } from "../../../tests/support/boring.ts";
 import { CountingTurns } from "../turns.ts";
 import { AnthropicModelClient } from "./anthropic-client.ts";
 import { openSession } from "../loop.ts";
-import { EphemeralSessionStore } from "../session-store.ts";
 import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
 import { anthropicStream } from "../../../tests/support/streams.ts";
 import { runTest } from "../../../tests/support/run.ts";
 import { capabilitiesOf } from "../configuration/well-known-models.ts";
 import { boringOpening } from "../../../tests/support/boring.ts";
+import { EphemeralSessionStore } from "../../agent-host/ephemeral-session.ts";
 
 /** A provider that makes one scripted tool call, then answers; it keeps every request it is sent. */
 function scripted(call: { name: string; input: unknown }) {

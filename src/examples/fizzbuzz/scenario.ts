@@ -5,6 +5,7 @@
  * every context the model was sent.
  */
 
+import type { Blobs } from "../../agent-session/blobs.ts";
 import { Effect, Layer } from "effect";
 import {
   type Conversation,
@@ -13,7 +14,7 @@ import {
   SystemPrompts,
 } from "../../agent-context/assemble.ts";
 import { AgentContextAssembler, WholeConversation } from "../../agent-context/assembler.ts";
-import { type CompactionPolicy, compactIfDue, Summaries, SummariesInMemory } from "../../agent-context/compaction.ts";
+import { type CompactionPolicy, compactIfDue, Summaries } from "../../agent-context/compaction.ts";
 import type { WindowSummary } from "../../agent-context/forks.ts";
 import type { Fact } from "../../agent-machine/fact.ts";
 import type { ModelTarget } from "../../agent-machine/observation.ts";
@@ -23,13 +24,13 @@ import { sentIn } from "../../agent-session/sent.ts";
 import { openSession } from "../../agent-session/loop.ts";
 import { makeSessionContext } from "../../agent-host/session-context.ts";
 import { SessionContext } from "../../agent-environment/session-context.ts";
-import { EphemeralSessionStore } from "../../agent-session/session-store.ts";
 import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
 import { CountingTurns } from "../../agent-session/turns.ts";
 import { scriptedFizzBuzzModel } from "./model.ts";
 import { FizzBuzzSystemPromptProvider } from "./prompt.ts";
 import { AdvancedFizzBuzzTools, FizzBuzzTools } from "./tools.ts";
 import { SourcedToolRunner, type ToolSource, ToolSources } from "../../agent-session/tool-sources.ts";
+import { EphemeralBlobs, EphemeralSessionStore, EphemeralSummaries } from "../../agent-host/ephemeral-session.ts";
 
 /** A user who counts: `count` messages, each the number after the one the model should have returned. */
 export const countingUser = (count: number): ReadonlyArray<string> =>
@@ -44,7 +45,7 @@ export interface Setup {
   /** The session's id; "fizzbuzz" when not given. */
   readonly session?: string;
   /** The model the session asks, and the client that reaches it; the scripted model when not given. */
-  readonly model?: { readonly target: ModelTarget; readonly client: Layer.Layer<ModelClient> };
+  readonly model?: { readonly target: ModelTarget; readonly client: Layer.Layer<ModelClient, never, Blobs> };
   /** Asked after every turn whether to compact, and with which summarizer; never, when not given. */
   readonly compaction?: CompactionPolicy;
   /**
@@ -72,7 +73,7 @@ const scripted: ModelTarget = { provider: ProviderName.make("scripted"), model: 
 
 export const play = (inputs: ReadonlyArray<string>, setup: Setup = basic): Effect.Effect<Played> =>
   Effect.gen(function* () {
-    const summaries = yield* Summaries.pipe(Effect.provide(setup.summaries ?? SummariesInMemory));
+    const summaries = yield* Summaries.pipe(Effect.provide(setup.summaries ?? EphemeralSummaries));
     return yield* played(inputs, setup, summaries);
   });
 
@@ -89,7 +90,8 @@ const played = (inputs: ReadonlyArray<string>, setup: Setup, summaries: Summarie
     CountingTurns,
     setup.tools ?? SourcedToolRunner,
     Layer.succeed(SystemPrompts, [FizzBuzzSystemPromptProvider]),
-  ).pipe(Layer.provideMerge(Layer.succeed(ToolSources, [setup.source])));
+    // FizzBuzz keeps no session: its facts and blobs are in memory.
+  ).pipe(Layer.provideMerge(Layer.succeed(ToolSources, [setup.source])), Layer.provideMerge(EphemeralBlobs));
   const id = SessionId.make(setup.session ?? "fizzbuzz");
   return Effect.gen(function* () {
     // The game has no working folder of its own: the session works in this process's, which its spans and log lines do not name.

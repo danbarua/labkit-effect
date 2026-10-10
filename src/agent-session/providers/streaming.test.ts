@@ -9,7 +9,6 @@ import { Effect, Layer, Logger, PubSub } from "effect";
 import { Millis, TurnId } from "../../agent-machine/names.ts";
 import type { CapturedObservation, Observation } from "../../agent-machine/observation.ts";
 import { openSession } from "../loop.ts";
-import { EphemeralSessionStore } from "../session-store.ts";
 import { ModelStreamInterval } from "../model-stream.ts";
 import { AnthropicModelClient } from "./anthropic-client.ts";
 import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
@@ -27,6 +26,7 @@ import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.t
 import { anthropicStream, openAiStream } from "../../../tests/support/streams.ts";
 import { test } from "../../../tests/support/test.ts";
 import type { Json } from "../shaping.ts";
+import { EphemeralSessionStore } from "../../agent-host/ephemeral-session.ts";
 
 const fold = (events: ReadonlyArray<Json>) =>
   events.reduce<{ state: typeof nothingYet; completed: Array<unknown>; failed: Array<unknown>; notApplied: Array<string>; unparsed: Array<unknown> }>(

@@ -32,6 +32,7 @@
  * no path: the permission policy asks about a path outside the working folders.
  */
 
+import type { Blobs } from "../agent-session/blobs.ts";
 import { Effect, FileSystem, HashMap, Option, Ref } from "effect";
 import { type PlannedWrite, plannedWrites, type ShownWrite, shownWrites } from "../agent-host/command-writes.ts";
 import { logKeys } from "../agent-session/log-keys.ts";
@@ -188,7 +189,7 @@ export const editorWorld: World<FileSystem.FileSystem | SessionContext> = {
         return Ref.get(writes).pipe(Effect.map((all) => Option.getOrElse(HashMap.get(all, call), () => [])));
       };
       const inFolder = inWorkspace(cwd);
-      const tools: ReadonlyArray<AnyTool<Editor | CurrentCall | SessionContext | FileSystem.FileSystem>> = [
+      const tools: ReadonlyArray<AnyTool<Editor | CurrentCall | SessionContext | FileSystem.FileSystem | Blobs>> = [
         ...(fs?.readTextFile === true ? [anyTool(described(blobReads(inFolder(readFile))))] : []),
         ...(fs?.writeTextFile === true ? [anyTool(described(inFolder(writeFile)))] : []),
         ...(fs?.readTextFile === true && fs.writeTextFile === true ? [anyTool(described(inFolder(editFile)))] : []),

@@ -3,11 +3,12 @@
  * SHA-256 of the bytes (`BlobRef`, agent-machine). Storing the same bytes twice returns the same
  * reference. The facts hold references; an adapter reads the bytes when it makes a request.
  *
+ * `Blobs` has no default: a program that stores or reads blobs is given a store, or does not compile.
+ *
  * | Store | Keeps bytes |
  * | --- | --- |
- * | `Blobs` default | in memory, while the process runs, so a session given no store still finds what it stored |
- * | `BlobsInMemory` | in memory, while its layer lasts |
  * | `BlobsInFolder(folder, readAlso)` | as files named for their ids, in `folder`; read from `folder`, then from each of `readAlso` |
+ * | `EphemeralBlobs` (`agent-host/ephemeral-session.ts`) | in memory, while its layer lasts: for a session that is not saved, and for tests |
  *
  * `keptOutcome` puts a tool's output that arrived as bytes in the store, so the facts hold its
  * reference (`Received` body `Stored`).
@@ -19,7 +20,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { Context, Effect, FileSystem, HashMap, Layer, Option, Path, type PlatformError, Ref } from "effect";
+import { Context, Effect, FileSystem, Layer, Path, type PlatformError } from "effect";
 import { BlobId, type BlobRef, FileName } from "../agent-machine/blob.ts";
 import type { ToolOutcome } from "../agent-machine/observation.ts";
 import type { MediaType } from "../agent-machine/received.ts";
@@ -92,35 +93,25 @@ export const parseBlobUri = (uri: string): { readonly id: BlobId; readonly exten
 /** Returns the id of `bytes`: their lowercase hex SHA-256. */
 export const blobIdOf = (bytes: Uint8Array): BlobId => BlobId.make(createHash("sha256").update(bytes).digest("hex"));
 
-const referenceTo = (bytes: Uint8Array, mediaType: MediaType, name: string | undefined): BlobRef => ({
+/** The reference to `bytes` of `mediaType`, with the file name `name` when one is given. */
+export const blobRefOf = (bytes: Uint8Array, mediaType: MediaType, name: string | undefined): BlobRef => ({
   id: blobIdOf(bytes),
   mediaType,
   size: bytes.byteLength,
   ...(name === undefined ? {} : { name: FileName.make(name) }),
 });
 
-/** Returns a store over the map in `held`, as `BlobsInMemory` and the default use. */
-const inMap = (held: Ref.Ref<HashMap.HashMap<BlobId, Uint8Array>>): BlobStore => ({
-  store: (bytes, mediaType, name) =>
-    Effect.suspend(() => {
-      const reference = referenceTo(bytes, mediaType, name);
-      return Ref.update(held, HashMap.set(reference.id, bytes)).pipe(Effect.as(reference));
-    }),
-  // In memory, a blob is found by its id; its extension names a file only in a folder.
-  read: (id) => Effect.map(Ref.get(held), (all) => Option.getOrUndefined(HashMap.get(all, id))),
-});
-
-export const Blobs = Context.Reference<BlobStore>("agent-session/Blobs", { defaultValue: () => inMap(Ref.makeUnsafe(HashMap.empty())) });
+/** The blob store a program uses. It has no default (see the module comment). */
+export class Blobs extends Context.Service<Blobs, BlobStore>()("agent-session/Blobs") {}
 
 /** Returns `outcome` with an output that arrived as bytes put in the store and replaced by its reference. */
-export const keptOutcome = (outcome: ToolOutcome): Effect.Effect<ToolOutcome> =>
+export const keptOutcome = (outcome: ToolOutcome): Effect.Effect<ToolOutcome, never, Blobs> =>
   Effect.gen(function* () {
     if (outcome._tag !== "Succeeded" || outcome.output.body._tag !== "Bytes") return outcome;
     const stored = yield* (yield* Blobs).store(outcome.output.body.bytes, outcome.output.mediaType);
     return { ...outcome, output: { mediaType: outcome.output.mediaType, body: { _tag: "Stored", id: stored.id, size: stored.size } } };
   });
 
-export const BlobsInMemory = Layer.effect(Blobs, Effect.map(Ref.make(HashMap.empty<BlobId, Uint8Array>()), inMap));
 
 /** A blob id as this store writes them: 64 lowercase hex digits, so it names a file in the folder and nothing else. */
 const isBlobId = (id: string): boolean => /^[0-9a-f]{64}$/.test(id);
@@ -156,7 +147,7 @@ export const BlobsInFolder = (folder: string, readAlso: ReadonlyArray<string> = 
       return {
         store: (bytes, mediaType, name) =>
           Effect.gen(function* () {
-            const reference = referenceTo(bytes, mediaType, name);
+            const reference = blobRefOf(bytes, mediaType, name);
             const file = path.join(folder, blobNameOf(reference.id, mediaType));
             yield* fs.makeDirectory(folder, { recursive: true });
             if (yield* fs.exists(file)) return reference;

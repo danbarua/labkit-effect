@@ -9,7 +9,6 @@ import { Effect, Layer, Schema } from "effect";
 import { ModelName, ProviderName, WindowId } from "../../agent-machine/names.ts";
 import { ContextAssembler, type ModelContext, ModelProvider } from "../contracts.ts";
 import { openSession } from "../loop.ts";
-import { EphemeralSessionStore } from "../session-store.ts";
 import { receivedJson } from "../received.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
 import { CountingTurns } from "../turns.ts";
@@ -23,6 +22,7 @@ import { runTest } from "../../../tests/support/run.ts";
 import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
 import { openAiStream } from "../../../tests/support/streams.ts";
 import { test } from "../../../tests/support/test.ts";
+import { EphemeralBlobs, EphemeralSessionStore } from "../../agent-host/ephemeral-session.ts";
 
 const stops: Array<() => unknown> = [];
 afterAll(() => {
@@ -159,7 +159,7 @@ test("the provider's own compaction: the context goes to /responses/compact, and
           { role: "assistant", parts: [{ _tag: "Text", text: "5." }] },
         ],
       });
-    }).pipe(Effect.provide(openAiAt(provider.url))),
+    }).pipe(Effect.provide(Layer.merge(openAiAt(provider.url), EphemeralBlobs))),
   );
   expect(provider.paths).toEqual(["/responses/compact"]);
   expect(provider.bodies).toEqual([

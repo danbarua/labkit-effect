@@ -19,7 +19,6 @@ import { CountingTurns } from "./turns.ts";
 import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { logKeys } from "./log-keys.ts";
 import { openSession } from "./loop.ts";
-import { EphemeralSessionStore } from "./session-store.ts";
 import { FallbackModelClient } from "./model-fallback.ts";
 import type { Retries } from "./provider-call.ts";
 import { anthropicRequests } from "./providers/anthropic-client.ts";
@@ -29,6 +28,7 @@ import { type SpanLine, SpansTo } from "../instrumentation/telemetry.ts";
 import { observedAttempts } from "../instrumentation/model-attempts.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { anthropicAtMock, openAiAtMock, startVidaiMock, type VidaiMock } from "../../tests/support/vidaimock.ts";
+import { EphemeralBlobs, EphemeralSessionStore } from "../agent-host/ephemeral-session.ts";
 
 const state: { mock?: VidaiMock } = {};
 beforeAll(async () => {
@@ -175,7 +175,7 @@ test("a fallback to a provider with no request configured is a defect when the l
         anthropicRequests(noRetries).pipe(
           Effect.map((request) => FallbackModelClient({ requests: new Map([[anthropic.provider, request]]), fallbacks: [openAi] })),
         ),
-      ).pipe(Layer.provide(anthropicAtMock(mock()))),
+      ).pipe(Layer.provide(Layer.merge(anthropicAtMock(mock()), EphemeralBlobs))),
     ).pipe(Effect.scoped),
   );
   expect(Exit.isFailure(exit) && Exit.hasDies(exit)).toBe(true);

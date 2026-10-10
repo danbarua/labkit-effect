@@ -12,7 +12,6 @@ import { CountingTurns, CountingTurnsInStore } from "./turns.ts";
 import { MaxHolds, ModelClient, ModelProvider, ToolRunner, TurnEndHooks } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
 import { openSession } from "./loop.ts";
-import { EphemeralSessionStore, ephemeralSessionStore } from "./session-store.ts";
 import { receivedJson } from "./received.ts";
 import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { runTest } from "../../tests/support/run.ts";
@@ -23,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { workspaceTools } from "../agent-tools/workspace.ts";
+import { EphemeralSessionStore, ephemeralSessionStore } from "../agent-host/ephemeral-session.ts";
 
 test("while a request is carried out, CurrentWork and every log line name its session and turn; every line names the test", async () => {
   const logged: Array<{ message: unknown; annotations: Record<string, unknown> }> = [];

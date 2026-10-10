@@ -212,7 +212,7 @@ model.
       draft; not built.
 - [ ] Attachments. Built: input carries files by reference (`InputArrived.attachments`); a tool's
       output that arrives as bytes is kept in the blob store and recorded by reference (`Received`
-      body `Stored`); bytes in the blob store (`Blobs`: in memory by default, or a folder); each
+      body `Stored`); bytes in the blob store (`Blobs`, which has no default: a folder, or memory for a session that is not saved); each
       adapter sends images and PDFs as its provider takes them, in a user message or a tool result,
       a text file as its text, and anything a model is not known to take as a pointer, logged;
       counting a request's input before it is sent (`anthropic-count.ts`, `openai-count.ts`; xAI has

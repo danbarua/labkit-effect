@@ -4,6 +4,7 @@
  * against it in `vidaimock.test.ts`.
  */
 
+import type { Blobs } from "../blobs.ts";
 import { userInput } from "../../../tests/support/observations.ts";
 import { afterAll, expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
@@ -16,7 +17,6 @@ import { ModelName, ProviderName, TurnId } from "../../agent-machine/names.ts";
 import { ModelClient } from "../contracts.ts";
 import { conversationOf } from "../conversation.ts";
 import { openSession } from "../loop.ts";
-import { EphemeralSessionStore } from "../session-store.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
 import { CountingTurns } from "../turns.ts";
 import { BoringModelProvider, boringOpening } from "../../../tests/support/boring.ts";
@@ -28,6 +28,7 @@ import { openAiCompatModelClient } from "./openai-compat-client.ts";
 import { ModelStreamIdle } from "../provider-call.ts";
 import { anthropicAt, openAiAt, openAiCompatAt } from "../../../tests/support/providers.ts";
 import { runTest } from "../../../tests/support/run.ts";
+import { EphemeralSessionStore } from "../../agent-host/ephemeral-session.ts";
 
 test("a provider that cannot be reached fails as a network error, retried first", async () => {
   // Port 1 on this machine has no server: the connection is refused. (A port freed by a server the
@@ -85,7 +86,7 @@ function rawServer(answers: ReadonlyArray<string>) {
   return { url: new URL(`http://127.0.0.1:${server.port}`), requests: () => requests, stop: () => server.stop(true) };
 }
 
-const asked = (client: Layer.Layer<ModelClient>, provider = "boring") => {
+const asked = (client: Layer.Layer<ModelClient, never, Blobs>, provider = "boring") => {
   const logged: Array<unknown> = [];
   return runTest(
     Effect.gen(function* () {
@@ -163,7 +164,7 @@ const writtenBody = () => {
 };
 
 /** Asks a model through `client` on a test clock while `script` runs: the script writes what is served and moves the clock. */
-const askedWhile = <E>(client: Layer.Layer<ModelClient>, script: (events: (key: string) => ReadonlyArray<unknown>) => Effect.Effect<void, E>) => {
+const askedWhile = <E>(client: Layer.Layer<ModelClient, never, Blobs>, script: (events: (key: string) => ReadonlyArray<unknown>) => Effect.Effect<void, E>) => {
   const logged: Array<unknown> = [];
   const events = (key: string) => logged.filter((message) => Array.isArray(message) && message[0] === key);
   return runTest(

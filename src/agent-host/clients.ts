@@ -6,6 +6,7 @@ import { OpenAiClient as OpenAiCompatClient } from "@effect/ai-openai-compat";
 import { Effect, Layer, Redacted } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { ProviderName } from "../agent-machine/names.ts";
+import type { Blobs } from "../agent-session/blobs.ts";
 import type { ProviderRequest } from "../agent-session/contracts.ts";
 import { FallbackModelClient } from "../agent-session/model-fallback.ts";
 import { anthropicRequests } from "../agent-session/providers/anthropic-client.ts";
@@ -21,7 +22,7 @@ import { localServer } from "./local-server.ts";
 const http = capturingHttp(FetchHttpClient.layer);
 
 /** The providers reached with a key: each provider's request function, made with its key. */
-const keyed: ReadonlyArray<{ readonly provider: string; readonly requestsWith: (key: Redacted.Redacted) => Effect.Effect<ProviderRequest> }> = [
+const keyed: ReadonlyArray<{ readonly provider: string; readonly requestsWith: (key: Redacted.Redacted) => Effect.Effect<ProviderRequest, never, Blobs> }> = [
   { provider: "anthropic", requestsWith: (key) => anthropicRequests().pipe(Effect.provide(AnthropicClient.layer({ apiKey: key }).pipe(Layer.provide(http)))) },
   { provider: "openai", requestsWith: (key) => openAiRequests().pipe(Effect.provide(OpenAiClient.layer({ apiKey: key }).pipe(Layer.provide(http)))) },
   { provider: "xai", requestsWith: (key) => xAiRequests().pipe(Effect.provide(xAiClient(key).pipe(Layer.provide(http)))) },
@@ -30,10 +31,10 @@ const keyed: ReadonlyArray<{ readonly provider: string; readonly requestsWith: (
 /** The local server's request function, which needs no key. */
 const local = openAiCompatRequests().pipe(Effect.provide(OpenAiCompatClient.layer({ apiUrl: localServer, apiKey: Redacted.make("none") }).pipe(Layer.provide(http))));
 
-/** One model client that reaches every provider with a key set, and the local server. Each attempt's outcome is put on its span (`instrumentation/model-attempts.ts`). The keys are read when the layer is built. */
+/** One model client that reaches every provider with a key set, and the local server. Each attempt's outcome is put on its span (`instrumentation/model-attempts.ts`). The keys are read, and the session's blob store taken, when the layer is built. */
 export const Clients = Layer.unwrap(
   Effect.suspend(() => {
-    const requests: ReadonlyArray<Effect.Effect<readonly [ProviderName, ProviderRequest]>> = [
+    const requests: ReadonlyArray<Effect.Effect<readonly [ProviderName, ProviderRequest], never, Blobs>> = [
       ...keyed.flatMap(({ provider, requestsWith }) => {
         const key = keyOf(provider);
         return key === undefined ? [] : [Effect.map(requestsWith(key), (request) => [ProviderName.make(provider), observedAttempts(request)] as const)];

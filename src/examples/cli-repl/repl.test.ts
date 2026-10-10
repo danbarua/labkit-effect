@@ -24,7 +24,6 @@ import { openedWith } from "../../agent-session/configuration/session-setup.ts";
 import { openSession } from "../../agent-session/loop.ts";
 import { ModelStream, ModelStreamInterval } from "../../agent-session/model-stream.ts";
 import { receivedJson, receivedText } from "../../agent-session/received.ts";
-import { EphemeralSessionStore } from "../../agent-session/session-store.ts";
 import { CountingTurns } from "../../agent-session/turns.ts";
 import { BoringContextAssembler } from "../../../tests/support/boring.ts";
 import { userInput } from "../../../tests/support/observations.ts";
@@ -35,6 +34,7 @@ import { replyOf, repl, terminal, withoutModel, shownEnded } from "./repl.ts";
 import { type View, viewOf } from "./view.ts";
 import type { SettingsChange } from "../../agent-machine/settings.ts";
 import { ask, type Config } from "./session.ts";
+import { EphemeralSessionStore } from "../../agent-host/ephemeral-session.ts";
 
 /** Returns what is printed after a turn whose response was `text` and ended `ending`; `printed` says whether it already streamed. */
 const replied = (text: string, ending: string, printed = false) => {

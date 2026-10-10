@@ -15,7 +15,6 @@ import { test, testFolder } from "../../../tests/support/test.ts";
 import { FolderPath, ModelName, ModelText, ProviderName, SessionId } from "../../agent-machine/names.ts";
 import { ModelClient, type Target, ToolRunner, type ToolSpec } from "../../agent-session/contracts.ts";
 import { openSession } from "../../agent-session/loop.ts";
-import { EphemeralSessionStore } from "../../agent-session/session-store.ts";
 import { ModelFromFacts } from "../../agent-session/configuration/model-choice.ts";
 import { receivedJson } from "../../agent-session/received.ts";
 import { openedWith } from "../../agent-session/configuration/session-setup.ts";
@@ -28,6 +27,7 @@ import { said } from "./command.ts";
 import { viewOf } from "./view.ts";
 import { shown } from "./commands/tools.ts";
 import { ask } from "./session.ts";
+import { EphemeralSessionStore } from "../../agent-host/ephemeral-session.ts";
 
 /** The test's user configuration folder, where commands save settings. */
 const configFolder = () => join(testFolder(), "config");

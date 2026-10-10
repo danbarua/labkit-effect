@@ -15,9 +15,10 @@ import type { KnownEnvironment } from "../agent-environment/command-environment.
 import { CallId, ToolName } from "../agent-machine/names.ts";
 import { ToolRunner } from "../agent-session/contracts.ts";
 import { asText, receivedJson } from "../agent-session/received.ts";
-import { Blobs, BlobsInMemory, blobUriOf } from "../agent-session/blobs.ts";
+import { Blobs, blobUriOf } from "../agent-session/blobs.ts";
 import { MediaType } from "../agent-machine/received.ts";
 import { workspaceTools } from "./workspace.ts";
+import { EphemeralBlobs } from "../agent-host/ephemeral-session.ts";
 
 const root = mkdtempSync(join(tmpdir(), "workspace-"));
 mkdirSync(join(root, "src"));
@@ -169,7 +170,7 @@ test("read_file reads a blob:// pointer from the blob store as text, with line a
             return outcome.reason._tag === "InputRejected" ? `rejected: ${outcome.reason.problem}` : outcome.reason._tag;
           }),
         );
-      }).pipe(Effect.provide(Layer.mergeAll(runner.pipe(Layer.provide(BunServices.layer)), BlobsInMemory))),
+      }).pipe(Effect.provide(Layer.mergeAll(runner.pipe(Layer.provide(BunServices.layer)), EphemeralBlobs))),
     );
   const missing = `blob://${"0".repeat(64)}.txt`;
   expect(await read([{ path: "csv" }, { path: "csv", line: 2, limit: 1 }, { path: "png" }, { path: missing }, { path: "blob://runs.csv" }])).toEqual([

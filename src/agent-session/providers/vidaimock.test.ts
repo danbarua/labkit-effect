@@ -4,6 +4,7 @@
  * a failed request records.
  */
 
+import type { Blobs } from "../blobs.ts";
 import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
 import { Effect, Exit, Layer, Logger, Schema } from "effect";
@@ -16,7 +17,6 @@ import { CountingTurns } from "../turns.ts";
 import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
 import { logKeys } from "../log-keys.ts";
 import { openSession } from "../loop.ts";
-import { EphemeralSessionStore } from "../session-store.ts";
 import type { Retries } from "../provider-call.ts";
 import { anthropicModelClient, anthropicRequests } from "./anthropic-client.ts";
 import { openAiModelClient, openAiRequests } from "./openai-client.ts";
@@ -25,6 +25,7 @@ import { TurnContextAssembler } from "../turn-context.ts";
 import { runTest } from "../../../tests/support/run.ts";
 import { boringOpening } from "../../../tests/support/boring.ts";
 import { anthropicAtMock, openAiAtMock, openAiCompatAtMock, startVidaiMock, type VidaiMock } from "../../../tests/support/vidaimock.ts";
+import { EphemeralBlobs, EphemeralSessionStore } from "../../agent-host/ephemeral-session.ts";
 
 const state: { mock?: VidaiMock } = {};
 beforeAll(async () => {
@@ -44,26 +45,26 @@ interface AtMock {
   /** Whether the adapter reads its response as a stream, and so starts a tool call when it arrives. */
   readonly streams: boolean;
   readonly requests: (status?: number) => Effect.Effect<ProviderRequest>;
-  readonly client: (retries: Retries, status?: number) => Layer.Layer<ModelClient>;
+  readonly client: (retries: Retries, status?: number) => Layer.Layer<ModelClient, never, Blobs>;
 }
 
 const adapters: ReadonlyArray<AtMock> = [
   {
     name: "Anthropic Messages",
     streams: true,
-    requests: (status) => anthropicRequests(noRetries).pipe(Effect.provide(anthropicAtMock(mock(), status))),
+    requests: (status) => anthropicRequests(noRetries).pipe(Effect.provide(Layer.merge(EphemeralBlobs, anthropicAtMock(mock(), status)))),
     client: (retries, status) => anthropicModelClient(retries).pipe(Layer.provide(anthropicAtMock(mock(), status))),
   },
   {
     name: "OpenAI Responses",
     streams: true,
-    requests: (status) => openAiRequests(noRetries).pipe(Effect.provide(openAiAtMock(mock(), status))),
+    requests: (status) => openAiRequests(noRetries).pipe(Effect.provide(Layer.merge(EphemeralBlobs, openAiAtMock(mock(), status)))),
     client: (retries, status) => openAiModelClient(retries).pipe(Layer.provide(openAiAtMock(mock(), status))),
   },
   {
     name: "OpenAI-compatible Chat Completions",
     streams: true,
-    requests: (status) => openAiCompatRequests(noRetries).pipe(Effect.provide(openAiCompatAtMock(mock(), status))),
+    requests: (status) => openAiCompatRequests(noRetries).pipe(Effect.provide(Layer.merge(EphemeralBlobs, openAiCompatAtMock(mock(), status)))),
     client: (retries, status) => openAiCompatModelClient(retries).pipe(Layer.provide(openAiCompatAtMock(mock(), status))),
   },
 ];
@@ -79,7 +80,7 @@ const failureOf = async (adapter: AtMock, status: number): Promise<AiError.AiErr
 };
 
 /** A session with one input, through the loop, with `adapter`'s model client; its facts and log. */
-const oneTurn = (client: Layer.Layer<ModelClient>) => {
+const oneTurn = (client: Layer.Layer<ModelClient, never, Blobs>) => {
   const logged: Array<unknown> = [];
   const services = Layer.mergeAll(
     BoringModelProvider,

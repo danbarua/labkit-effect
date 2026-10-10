@@ -12,7 +12,7 @@
  * conversations; both are sent the facts since the later of their summaries.
  */
 
-import { Array as Arr, Context, DateTime, Effect, Layer, Option, Ref } from "effect";
+import { Array as Arr, Context, DateTime, Effect, Layer, Option } from "effect";
 import type { Fact } from "../agent-machine/fact.ts";
 import type { PolicyName, ProviderName, SessionId, Seq } from "../agent-machine/names.ts";
 import { WindowId } from "../agent-machine/names.ts";
@@ -55,18 +55,6 @@ export class Summaries extends Context.Service<
     readonly recorded: Effect.Effect<ReadonlyArray<WindowSummary>>;
   }
 >()("agent-context/Summaries") {}
-
-/** Summaries held in memory, for as long as the layer lasts. */
-export const SummariesInMemory = Layer.effect(
-  Summaries,
-  Effect.gen(function* () {
-    const all = yield* Ref.make<ReadonlyArray<WindowSummary>>([]);
-    return {
-      record: (summary) => Ref.update(all, (before) => [...before, summary]),
-      recorded: Ref.get(all),
-    };
-  }),
-);
 
 type WindowFact = Extract<Fact, { _tag: "Observed" }> & {
   readonly observation: { readonly _tag: "CompactionWindow"; readonly window: WindowId; readonly through: Seq; readonly kept: ReadonlyArray<Seq> };

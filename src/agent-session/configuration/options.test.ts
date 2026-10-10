@@ -9,11 +9,11 @@ import { AdjustmentReason, ModelName, ProviderName, SessionId, TokenCount, TurnI
 import type { ModelSettings } from "../../agent-machine/settings.ts";
 import { ModelClient, ToolRunner } from "../contracts.ts";
 import { openSession } from "../loop.ts";
-import { EphemeralSessionStore } from "../session-store.ts";
 import { CountingTurns } from "../turns.ts";
 import { ModelFromFacts } from "./model-choice.ts";
 import { optionsFor, optionsOf, type Options } from "./options.ts";
 import { openedWith } from "./session-setup.ts";
+import { EphemeralSessionStore } from "../../agent-host/ephemeral-session.ts";
 
 test("the options are the model, the settings in force, and each setting to offer with its value now; they follow a change taken", async () => {
   const [opened, changed] = await runTest(

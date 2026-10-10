@@ -12,7 +12,7 @@ Direction that is not built is in [agent-context-direction.md](agent-context-dir
 |--------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
 | `assemble.ts`            | The services that assembly reads (`SystemPrompts`, `Notices`, `Conversation`, `ModelSelectors`), `opening`, and `assembleContents`. |
 | `assembler.ts`           | `AgentContextAssembler`, the loop's `ContextAssembler`; `WholeConversation`.                                                        |
-| `compaction.ts`          | `compact`, `compactIfDue`, `CompactionPolicy`, `Summarizer`, `Summaries` and `SummariesInMemory`; `CompactedConversation`.          |
+| `compaction.ts`          | `compact`, `compactIfDue`, `CompactionPolicy`, `Summarizer` and `Summaries`; `CompactedConversation`.          |
 | `forks.ts`               | `WindowSummary`: a summary of one compaction window, for one provider.                                                              |
 | `summaries-in-folder.ts` | `SummariesInFolder`: summaries kept as files.                                                                                       |
 | `provider-compaction.ts` | `providerCompaction`: a summarizer that asks the provider for its own compaction.                                                   |
@@ -130,7 +130,7 @@ with `claude-code` or `codex` as the summarizer, and `claude-code auto`, `claude
 
 | Layer                       | Storage                                                                                                                                                                                                                                             |
 |-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `SummariesInMemory`         | In memory, for as long as the layer lasts.                                                                                                                                                                                                          |
+| `EphemeralSummaries`        | In memory, for as long as the layer lasts: for a session that is not saved (`agent-host/ephemeral-session.ts`), and for tests.
 | `SummariesInFolder(folder)` | One file per summary: `<folder>/<session>/<kind>/<number>_<writtenAt>_<writtenBy>_<window>.txt` or `.json`. Summaries are read back in the order written: by time, then by number within a kind. A file that cannot be written or read is a defect. |
 
 ## Model selection

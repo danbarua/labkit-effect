@@ -19,6 +19,7 @@ import type { ToolSource } from "../agent-session/tool-sources.ts";
 import { type Decoded, decoderOf, ignoredNote, jsonSchemaOf } from "../agent-session/tool-input.ts";
 import { pathInputsOf } from "./paths.ts";
 import { SessionContext } from "../agent-environment/session-context.ts";
+import { Blobs } from "../agent-session/blobs.ts";
 
 /** The call's input does not fit, or names a path that the tool does not accept: the model reads the problem. */
 export class Rejected extends Data.TaggedError("Rejected")<{ readonly problem: string }> {}
@@ -89,9 +90,9 @@ const rejected = (problem: string): ToolOutcome => ({ _tag: "Failed", reason: { 
  *   Without it, the call runs without them, a WARN is logged, and the result says which were ignored.
  * - A call to a name that no tool has ends `NotFound`.
  */
-export const sourceOf = <R>(tools: ReadonlyArray<AnyTool<R>>, options: { readonly strictInput?: boolean } = {}): Effect.Effect<ToolSource, never, Exclude<Exclude<R, SessionContext>, CurrentCall>> =>
+export const sourceOf = <R>(tools: ReadonlyArray<AnyTool<R>>, options: { readonly strictInput?: boolean } = {}): Effect.Effect<ToolSource, never, Exclude<Exclude<Exclude<R, SessionContext>, Blobs>, CurrentCall>> =>
   Effect.gen(function* () {
-    const services = yield* Effect.context<Exclude<Exclude<R, SessionContext>, CurrentCall>>();
+    const services = yield* Effect.context<Exclude<Exclude<Exclude<R, SessionContext>, Blobs>, CurrentCall>>();
     const strict = options.strictInput ?? false;
     return {
       tools: tools.map((tool) => tool.spec),
@@ -100,8 +101,8 @@ export const sourceOf = <R>(tools: ReadonlyArray<AnyTool<R>>, options: { readonl
         if (found === undefined) return Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "NotFound" } });
         const parsed = parseJson(input);
         if ("reason" in parsed) return Effect.succeed(rejected(`The input could not be read: ${parsed.reason}.`));
-        // The session's context is the call's, given closest to the tool: the services captured when the source was built may hold another session's.
-        return Effect.flatMap(SessionContext, (session) =>
+        // The session's context and blob store are the call's, given closest to the tool: the services captured when the source was built may hold another session's.
+        return Effect.flatMap(Effect.all([SessionContext, Blobs]), ([session, blobs]) =>
           found.decode(parsed.value, strict).pipe(
             Effect.mapError((error) => new Rejected({ problem: `${name} does not take this input: ${error.message}` })),
             Effect.flatMap(({ value, ignored }) => {
@@ -122,6 +123,7 @@ export const sourceOf = <R>(tools: ReadonlyArray<AnyTool<R>>, options: { readonl
               Reported: (error) => Effect.succeed<ToolOutcome>({ _tag: "Failed", reason: { _tag: "Reported", error: receivedText(error.message) } }),
             }),
             Effect.provideService(SessionContext, session),
+            Effect.provideService(Blobs, blobs),
             Effect.provideService(CurrentCall, call),
             Effect.provideContext(services),
           ),

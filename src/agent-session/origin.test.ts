@@ -6,7 +6,6 @@ import { Cause, Effect, Exit, Layer } from "effect";
 import { CallId, ModelText, StopReason, ToolName } from "../agent-machine/names.ts";
 import { ModelClient } from "./contracts.ts";
 import { openSession } from "./loop.ts";
-import { EphemeralSessionStore } from "./session-store.ts";
 import { receivedJson } from "./received.ts";
 import { TurnContextAssembler } from "./turn-context.ts";
 import { CountingTurns } from "./turns.ts";
@@ -15,6 +14,7 @@ import { runTest } from "../../tests/support/run.ts";
 import { TestSessionContext } from "../../tests/support/session-context.ts";
 import { SmolToolRunner, smolCatalog } from "../../tests/support/smol-tools.ts";
 import { test } from "../../tests/support/test.ts";
+import { EphemeralBlobs, EphemeralSessionStore } from "../agent-host/ephemeral-session.ts";
 
 /** A model that calls `add` once, then answers. */
 const scripted = () => {
@@ -75,7 +75,7 @@ test("an observation given to a session with no origin set is a defect", async (
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));
       yield* session.observe(boringOpening());
       yield* session.idle;
-    }).pipe(Effect.provide(Layer.merge(services(), TestSessionContext())), Effect.scoped),
+    }).pipe(Effect.provide(Layer.merge(services(), TestSessionContext()).pipe(Layer.provideMerge(EphemeralBlobs))), Effect.scoped),
   );
   expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toContain("SessionOpened was given to a session with no origin set");
 });

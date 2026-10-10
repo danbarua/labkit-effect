@@ -21,6 +21,7 @@ import { Report } from "../agent-session/report.ts";
 import { observedAttempts } from "./model-attempts.ts";
 import { TimedModelClient } from "./model-timing.ts";
 import { type SpanLine, SpansTo } from "./telemetry.ts";
+import { EphemeralBlobs } from "../agent-host/ephemeral-session.ts";
 
 const provider = ProviderName.make("scripted");
 const model = ModelName.make("streamer");
@@ -181,7 +182,7 @@ test("an attempt that fails (the key refused, HTTP 401) has its failure, error k
   const mock = state.mock;
   if (mock === undefined) throw new Error("VidaiMock did not start");
   const target = { provider: ProviderName.make("anthropic"), model: ModelName.make("claude-sonnet-5-5") };
-  const { request, attempt, counted } = await askOnce(target, anthropicRequests({ times: 0, firstWait: "1 millis" }).pipe(Effect.provide(anthropicAtMock(mock, 401))), "live");
+  const { request, attempt, counted } = await askOnce(target, anthropicRequests({ times: 0, firstWait: "1 millis" }).pipe(Effect.provide(Layer.merge(EphemeralBlobs, anthropicAtMock(mock, 401)))), "live");
   expect(attempt).toMatchObject({ outcome: "failed", error_kind: "AuthenticationError", http_status: 401, failure: expect.stringContaining("AnthropicModelClient.respond") });
   expect(attempt["error_signature"]).toBeString();
   expect(request).toMatchObject({
@@ -209,7 +210,7 @@ test("an attempt whose first try is answered 529 and whose retry is answered 200
   try {
     const target = { provider: ProviderName.make("localhost"), model: ModelName.make("qwen3.5-9b-8bit") };
     const client = OpenAiCompatClient.layer({ apiUrl: server.url.origin, apiKey: Redacted.make("test-key") }).pipe(Layer.provide(FetchHttpClient.layer));
-    const { attempt } = await askOnce(target, openAiCompatRequests({ times: 1, firstWait: "1 millis" }).pipe(Effect.provide(client)), "live");
+    const { attempt } = await askOnce(target, openAiCompatRequests({ times: 1, firstWait: "1 millis" }).pipe(Effect.provide(Layer.merge(EphemeralBlobs, client))), "live");
     expect(asked).toBe(2);
     expect(attempt["outcome"]).toBe("responded");
     expect("http_status" in attempt).toBe(false);

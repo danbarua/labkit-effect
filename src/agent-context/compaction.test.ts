@@ -11,9 +11,10 @@ import { type ContextMessage, ModelContext } from "../agent-session/contracts.ts
 import type { Session } from "../agent-session/loop.ts";
 import type { SessionStoreFailed } from "../agent-session/session-store.ts";
 import { receivedText } from "../agent-session/received.ts";
-import { CompactedConversation, compact, type Summarizer, Summaries, SummariesInMemory } from "./compaction.ts";
+import { CompactedConversation, compact, type Summarizer, Summaries } from "./compaction.ts";
 import { Conversation } from "./assemble.ts";
 import { SummarizerName, type WindowSummary } from "./forks.ts";
+import { EphemeralSummaries } from "../agent-host/ephemeral-session.ts";
 
 const sent = (messages: ReadonlyArray<ContextMessage>) =>
   json(Schema.encodeSync(Schema.toCodecJson(ModelContext))({ system: undefined, tools: [], messages }));
@@ -59,7 +60,7 @@ test("each compaction window after the first records the window before it as pre
     Effect.gen(function* () {
       yield* compacting(session);
       yield* compacting(session);
-    }).pipe(Effect.provide(SummariesInMemory)),
+    }).pipe(Effect.provide(EphemeralSummaries)),
   );
   expect(windowsIn(driven.journal).map((window) => ({ window: window.window, previous: window.previous })) as unknown).toEqual([
     { window: "window-1", previous: undefined },
@@ -74,7 +75,7 @@ const compactedMessages = (facts: ReadonlyArray<Fact>, recorded: ReadonlyArray<W
       const summaries = yield* Summaries;
       yield* Effect.forEach(recorded, (summary) => summaries.record(summary), { discard: true });
       return yield* (yield* Conversation).messages(facts);
-    }).pipe(Effect.provide(CompactedConversation.pipe(Layer.provideMerge(SummariesInMemory)))),
+    }).pipe(Effect.provide(CompactedConversation.pipe(Layer.provideMerge(EphemeralSummaries)))),
   );
 
 const summaryOf = (session: string): WindowSummary => ({

@@ -11,8 +11,9 @@ import { runTest } from "../../tests/support/run.ts";
 import { test } from "../../tests/support/test.ts";
 import { BlobId } from "../agent-machine/blob.ts";
 import { MediaType } from "../agent-machine/received.ts";
-import { Blobs, BlobsInFolder, BlobsInMemory, blobUriOf, extensionOf, keptOutcome, parseBlobUri } from "./blobs.ts";
+import { Blobs, BlobsInFolder, blobUriOf, extensionOf, keptOutcome, parseBlobUri } from "./blobs.ts";
 import { logKeys } from "./log-keys.ts";
+import { EphemeralBlobs } from "../agent-host/ephemeral-session.ts";
 
 const bytes = new TextEncoder().encode("hello");
 // sha256("hello")
@@ -34,7 +35,7 @@ const contract = (store: Layer.Layer<never>) =>
   );
 
 for (const [name, store] of [
-  ["in memory", () => BlobsInMemory],
+  ["in memory", () => EphemeralBlobs],
   ["in a folder", () => BlobsInFolder(mkdtempSync(join(tmpdir(), "blobs-"))).pipe(Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)))],
 ] as const)
   test(`${name}: the id is the bytes' SHA-256, the same bytes give the same id, and a read gives them back`, async () => {
@@ -96,7 +97,7 @@ test("a tool's output that arrives as bytes is put in the store, and the outcome
       const kept = yield* keptOutcome({ _tag: "Succeeded", output: { mediaType: MediaType.make("image/png"), body: { _tag: "Bytes", bytes } } });
       const body = kept._tag === "Succeeded" ? kept.output.body : undefined;
       return { kept, read: body?._tag === "Stored" ? yield* (yield* Blobs).read(body.id, "png") : undefined };
-    }).pipe(Effect.provide(BlobsInMemory)),
+    }).pipe(Effect.provide(EphemeralBlobs)),
   );
   expect(kept as unknown).toEqual({ _tag: "Succeeded", output: { mediaType: "image/png", body: { _tag: "Stored", id: helloId, size: 5 } } });
   expect(read).toEqual(bytes);

@@ -42,7 +42,7 @@
  * while `prompt` waits.
  */
 
-import { keptOutcome } from "./blobs.ts";
+import { type Blobs, keptOutcome } from "./blobs.ts";
 import { Clock, DateTime, Deferred, Effect, Exit, FiberSet, Option, PubSub, Ref, References, type Scope, Semaphore, type Tracer } from "effect";
 import { sessionTotals } from "./accounting.ts";
 import type { Decision, Ending } from "../agent-machine/decision.ts";
@@ -140,11 +140,12 @@ const firstMatching = <A>(facts: PubSub.Subscription<Fact>, pick: (fact: Fact) =
   Effect.flatMap(PubSub.take(facts), (fact) => Option.match(pick(fact), { onNone: () => firstMatching(facts, pick), onSome: Effect.succeed }));
 
 /**
- * What the loop needs to carry out requests: the services a host builds for the session, and the
- * session's context (`SessionContext`), which the host provides for the whole session. Each request
+ * What the loop needs to carry out requests: the services a host builds for the session, the
+ * session's context (`SessionContext`), which the host provides for the whole session, and the blob
+ * store (`Blobs`), which has no default. Each request
  * runs in a fiber that inherits them from the fiber that recorded the observation it follows from.
  */
-export type Services = ModelProvider | ContextAssembler | ModelClient | Turns | ToolRunner | SessionContext;
+export type Services = ModelProvider | ContextAssembler | ModelClient | Turns | ToolRunner | SessionContext | Blobs;
 
 /** What the user gives a turn: the text, and the files that came with it. */
 export type Prompt = Pick<Extract<Observation, { _tag: "InputArrived" }>, "text" | "attachments">;

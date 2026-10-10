@@ -15,7 +15,6 @@ import { TurnId } from "../agent-machine/names.ts";
 import type { Observation } from "../agent-machine/observation.ts";
 import { ContextAssembler } from "../agent-session/contracts.ts";
 import { openSession } from "../agent-session/loop.ts";
-import { EphemeralSessionStore } from "../agent-session/session-store.ts";
 import { AnthropicModelClient } from "../agent-session/providers/anthropic-client.ts";
 import { Report } from "../agent-session/report.ts";
 import { CountingTurns } from "../agent-session/turns.ts";
@@ -26,6 +25,7 @@ import { anthropicAt } from "../../tests/support/providers.ts";
 import { anthropicStream } from "../../tests/support/streams.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { SmolToolRunner, smolCatalog } from "../../tests/support/smol-tools.ts";
+import { EphemeralSessionStore } from "../agent-host/ephemeral-session.ts";
 
 test("the notices are sent last, as an instruction after the latest input, and each is reported", async () => {
   const session = open();

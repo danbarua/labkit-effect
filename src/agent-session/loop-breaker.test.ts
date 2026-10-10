@@ -13,8 +13,8 @@ import { ModelClient, ModelRequestPolicies, ToolCallPolicies } from "./contracts
 import { openSession } from "./loop.ts";
 import { policyPart } from "./origin.ts";
 import { asText, receivedJson } from "./received.ts";
-import { EphemeralSessionStore } from "./session-store.ts";
 import { CountingTurns } from "./turns.ts";
+import { EphemeralSessionStore } from "../agent-host/ephemeral-session.ts";
 
 /** A model that calls `echo` with the same input at every request. */
 const repeatsEcho = () => {

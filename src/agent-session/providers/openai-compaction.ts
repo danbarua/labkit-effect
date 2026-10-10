@@ -1,5 +1,6 @@
 /** The provider's own compaction, through the OpenAI Responses adapter's shaping. xAI accepts the same request (`xai-compaction.ts`). */
 
+import { Blobs } from "../blobs.ts";
 import { OpenAiClient } from "@effect/ai-openai";
 import { Effect, Ref } from "effect";
 import type * as AiError from "effect/ai/AiError";
@@ -32,12 +33,13 @@ const compactCaller = { module: "OpenAiResponsesModelClient", method: "compact" 
  */
 export const openAiCompactions = (
   retries: Retries = defaultRetries,
-): Effect.Effect<(target: Target, context: ModelContext) => Effect.Effect<Compacted, AiError.AiError>, never, OpenAiClient.OpenAiClient> =>
+): Effect.Effect<(target: Target, context: ModelContext) => Effect.Effect<Compacted, AiError.AiError>, never, OpenAiClient.OpenAiClient | Blobs> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
+    const blobs = yield* Blobs;
     const omittedLogged = yield* Ref.make<OmittedLogged>(new Set());
     return (target, context) => {
-      return filesIn(context).pipe(Effect.flatMap((files) => {
+      return filesIn(context, blobs).pipe(Effect.flatMap((files) => {
       const sent = body(target, context, files);
       const post: Post = { path: "/responses/compact", headers: {}, body: sent.json as Record<string, Json> };
       return logSupplied(sent.supplied, target, undefined, omittedLogged).pipe(

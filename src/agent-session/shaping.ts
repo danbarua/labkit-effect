@@ -11,7 +11,7 @@ import { type CallId, TokenCount, type ToolName, type TurnId } from "../agent-ma
 import type { ResponseEnding, ToolOutcome, Usage } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
 import type { ContextPart, ModelContext, Target, ToolSpec } from "./contracts.ts";
-import { Blobs, blobUriOf, extensionOf } from "./blobs.ts";
+import { type BlobStore, blobUriOf, extensionOf } from "./blobs.ts";
 import { logKeys } from "./log-keys.ts";
 import { asText, parseJson } from "./received.ts";
 
@@ -351,10 +351,9 @@ const blobsOf = (part: ContextPart): ReadonlyArray<readonly [BlobId, string]> =>
   return [];
 };
 
-/** Returns the bytes of every file that `context` carries, read from the blob store; a file that the store does not hold is absent. */
-export const filesIn = (context: ModelContext): Effect.Effect<ReadonlyMap<BlobId, Uint8Array>> =>
+/** Returns the bytes of every file that `context` carries, read from `blobs`; a file that the store does not hold is absent. */
+export const filesIn = (context: ModelContext, blobs: BlobStore): Effect.Effect<ReadonlyMap<BlobId, Uint8Array>> =>
   Effect.gen(function* () {
-    const blobs = yield* Blobs;
     const named = context.messages.flatMap((message) => message.parts.flatMap(blobsOf));
     // One read for each blob, by id; the same bytes under two media types are one blob in memory.
     const ids = named.filter(([id], at) => named.findIndex(([other]) => other === id) === at);

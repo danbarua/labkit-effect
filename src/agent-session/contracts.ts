@@ -1,5 +1,6 @@
 /** The services that the loop needs from outside, one per job. Each adapter implements one. */
 
+import type { Blobs } from "./blobs.ts";
 import type { Capabilities } from "./configuration/well-known-models.ts";
 import { BlobRef } from "../agent-machine/blob.ts";
 import { Context, Effect, Schema } from "effect";
@@ -161,12 +162,12 @@ export const MaxHolds = Context.Reference<number>("agent-session/MaxHolds", { de
 
 /**
  * Runs one tool call and returns how it ended. `call` lets a host show the call while it runs. The
- * run reads the context of the session it runs in (`SessionContext`), which the loop's request fiber
- * inherits from the host.
+ * run reads the context of the session it runs in (`SessionContext`) and the session's blob store
+ * (`Blobs`), which the loop's request fiber inherits from the host.
  */
 export class ToolRunner extends Context.Service<
   ToolRunner,
-  { readonly run: (tool: ToolName, input: Received, call: CallId) => Effect.Effect<ToolOutcome, never, SessionContext> }
+  { readonly run: (tool: ToolName, input: Received, call: CallId) => Effect.Effect<ToolOutcome, never, SessionContext | Blobs> }
 >()("agent-session/ToolRunner") {}
 
 /**

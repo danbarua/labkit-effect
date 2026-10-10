@@ -13,12 +13,13 @@ import { test } from "../../../tests/support/test.ts";
 import type { BlobRef } from "../../agent-machine/blob.ts";
 import { CallId, ModelName, ProviderName, ToolName, TurnId } from "../../agent-machine/names.ts";
 import { MediaType, ReceivedText } from "../../agent-machine/received.ts";
-import { Blobs, BlobsInMemory } from "../blobs.ts";
+import { Blobs } from "../blobs.ts";
 import { type ContextPart, ModelClient, ModelContext } from "../contracts.ts";
 import { blobPointer, notShown } from "../shaping.ts";
 import { AnthropicModelClient } from "./anthropic-client.ts";
 import { OpenAiModelClient } from "./openai-client.ts";
 import { OpenAiCompatModelClient } from "./openai-compat-client.ts";
+import { EphemeralBlobs } from "../../agent-host/ephemeral-session.ts";
 
 const stops: Array<() => unknown> = [];
 afterAll(() => {
@@ -31,7 +32,7 @@ const notes = new TextEncoder().encode("Remember the milk.");
 const base64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
 
 /** Stores the three files, then asks `client` for a response to a message carrying them (and one the store lacks). */
-const sent = (client: Layer.Layer<ModelClient>, provider: string, model: string) =>
+const sent = (client: Layer.Layer<ModelClient, never, Blobs>, provider: string, model: string) =>
   runTest(
     Effect.gen(function* () {
       const blobs = yield* Blobs;
@@ -53,7 +54,7 @@ const sent = (client: Layer.Layer<ModelClient>, provider: string, model: string)
       };
       yield* (yield* ModelClient).respond({ provider: ProviderName.make(provider), model: ModelName.make(model) }, context, TurnId.make("turn-1"));
       return { files: files as ReadonlyArray<BlobRef>, missing, context };
-    }).pipe(Effect.provide(Layer.mergeAll(client, BlobsInMemory))),
+    }).pipe(Effect.provide(client.pipe(Layer.provideMerge(EphemeralBlobs)))),
   );
 
 test("Anthropic: an image as an image block, a PDF as a document block, a text file as its text; a file the store lacks as its pointer", async () => {
@@ -132,7 +133,7 @@ test("what a request carried is recorded with its files by reference: no bytes",
 });
 
 /** A context whose last message is a tool's image result, the image kept in the store. */
-const toolImage = (client: Layer.Layer<ModelClient>, provider: string, model: string) =>
+const toolImage = (client: Layer.Layer<ModelClient, never, Blobs>, provider: string, model: string) =>
   runTest(
     Effect.gen(function* () {
       const stored = yield* (yield* Blobs).store(png, MediaType.make("image/png"));
@@ -147,7 +148,7 @@ const toolImage = (client: Layer.Layer<ModelClient>, provider: string, model: st
         ],
       };
       yield* (yield* ModelClient).respond({ provider: ProviderName.make(provider), model: ModelName.make(model) }, context, TurnId.make("turn-1"));
-    }).pipe(Effect.provide(Layer.mergeAll(client, BlobsInMemory))),
+    }).pipe(Effect.provide(client.pipe(Layer.provideMerge(EphemeralBlobs)))),
   );
 
 test("a tool's image goes back in its result: an image block in Anthropic's tool_result, an input_image in OpenAI's function_call_output", async () => {

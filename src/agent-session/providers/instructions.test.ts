@@ -4,6 +4,7 @@
  * What is sent is checked on a recording server; that the provider takes it, against VidaiMock.
  */
 
+import type { Blobs } from "../blobs.ts";
 import { afterAll, beforeAll, expect } from "bun:test";
 import { test } from "../../../tests/support/test.ts";
 import { Effect, Exit, Layer } from "effect";
@@ -15,6 +16,7 @@ import { openAiCompatModelClient } from "./openai-compat-client.ts";
 import { anthropicAt, openAiAt, openAiCompatAt, recordingServer } from "../../../tests/support/providers.ts";
 import { runTest } from "../../../tests/support/run.ts";
 import { anthropicAtMock, openAiAtMock, openAiCompatAtMock, startVidaiMock, type VidaiMock } from "../../../tests/support/vidaimock.ts";
+import { EphemeralBlobs } from "../../agent-host/ephemeral-session.ts";
 
 const state: { mock?: VidaiMock } = {};
 beforeAll(async () => {
@@ -37,7 +39,7 @@ const context: ModelContext = {
   ],
 };
 
-const respond = (client: Layer.Layer<ModelClient>) =>
+const respond = (client: Layer.Layer<ModelClient, never, Blobs>) =>
   Effect.gen(function* () {
     return yield* (yield* ModelClient).respond(
       { provider: ProviderName.make("any"), model: ModelName.make("any-1") },
@@ -87,6 +89,6 @@ test.each([
   ["OpenAI Responses", () => openAiModelClient(noRetries).pipe(Layer.provide(openAiAtMock(mock())))],
   ["Chat Completions", () => openAiCompatModelClient(noRetries).pipe(Layer.provide(openAiCompatAtMock(mock())))],
 ])("%s at VidaiMock takes a request with an instruction", async (_name, client) => {
-  const exit = await Effect.runPromiseExit(respond(client()));
+  const exit = await Effect.runPromiseExit(respond(client()).pipe(Effect.provide(EphemeralBlobs)));
   expect(Exit.isSuccess(exit) && exit.value._tag).toBe("ModelResponded");
 });

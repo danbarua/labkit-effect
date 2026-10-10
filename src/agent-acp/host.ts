@@ -145,9 +145,9 @@ export interface HostOptions<R = never> {
   /**
    * What a session runs with, given its world's tool runner, over the session's store, before its
    * configuration's seam lists; `SessionServices` when left out. The host provides the session's
-   * context (`SessionContext`) itself.
+   * context (`SessionContext`) and its blob store (`Blobs`, the brand's blobs folder) itself.
    */
-  readonly services?: ((runner: Layer.Layer<ToolRunner>) => Layer.Layer<Exclude<Services, SessionContext>, never, SessionStore>) | undefined;
+  readonly services?: ((runner: Layer.Layer<ToolRunner>) => Layer.Layer<Exclude<Services, SessionContext | Blobs>, never, SessionStore | Blobs>) | undefined;
   /** The maximum number of sessions on one page of `session/list`; 50 when left out. */
   readonly pageSize?: number | undefined;
   /** The name the agent goes by (`agent-host/brand.ts`): it names the folder `/export` writes to, and is the name the host gives MCP servers. */
@@ -696,7 +696,9 @@ export const makeHost = <R = never>(options: HostOptions<R>) => {
                 // What is known of models is the catalog's, with the configuration's overrides (`models:`) over it.
                 Layer.succeed(ModelOverrides, parent.configuration.models),
               );
-              const layer = Layer.mergeAll(services(runner).pipe(Layer.provide(notices)), seamLayer(lists), blobs, Layer.succeed(SessionContext, parent.context)).pipe(
+              // The blob store is provided beneath the services: the model client reads files from it when it is built.
+              const layer = Layer.mergeAll(services(runner).pipe(Layer.provide(notices)), seamLayer(lists), Layer.succeed(SessionContext, parent.context)).pipe(
+                Layer.provideMerge(blobs),
                 Layer.provideMerge(FileBackedSessionStore(file)),
               );
               const context = yield* Layer.buildWithScope(layer, scope);

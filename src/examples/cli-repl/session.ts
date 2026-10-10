@@ -33,7 +33,6 @@ import type { KnownEnvironment } from "../../agent-environment/command-environme
 import { type GivenServer, type McpServers, startMcpServers } from "../../agent-mcp/servers.ts";
 import type { Asked } from "../../agent-host/catalog.ts";
 import { BrandFolders } from "../../agent-host/brand-folders.ts";
-import { BlobsInFolder, BlobsInMemory } from "../../agent-session/blobs.ts";
 import { sessionFolderOf } from "../../agent-host/directory.ts";
 import { SessionServices } from "../../agent-host/services.ts";
 import { type BoltOn, type Host, withSession } from "../../agent-host/with-session.ts";
@@ -53,6 +52,7 @@ import { SessionStoreFailed } from "../../agent-session/session-store.ts";
 import { harnessParts, reportedBy } from "../../agent-session/origin.ts";
 import { invalid } from "./invalid.ts";
 import { logKeys } from "./log-keys.ts";
+
 
 export interface Config {
   readonly sessionId: string;
@@ -242,7 +242,8 @@ export const withCliSession = <A, E, R, L, H>(
             root,
             record: cliRecord(process.cwd()),
             // A saved session's blobs are kept in the brand's blobs folder, which the ACP host shares, so a continued session has them.
-            services: Layer.merge(servicesOf(config, lists), config.persist ? BlobsInFolder(folders.blobs) : BlobsInMemory),
+            blobs: folders.blobs,
+            services: servicesOf(config, lists),
             boltOns: [folder, serversBoltOn(mcp)],
             logs,
             host,

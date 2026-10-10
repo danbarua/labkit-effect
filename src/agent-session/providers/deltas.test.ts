@@ -4,6 +4,7 @@
  * ends with `ModelResponseEnded`, however it ended. The same for each provider's adapter.
  */
 
+import type { Blobs } from "../blobs.ts";
 import { userInput } from "../../../tests/support/observations.ts";
 import { afterAll, expect } from "bun:test";
 import { Effect, Layer, PubSub } from "effect";
@@ -18,12 +19,12 @@ import { test } from "../../../tests/support/test.ts";
 import type { ModelClient } from "../contracts.ts";
 import { openSession } from "../loop.ts";
 import { ModelStreamInterval } from "../model-stream.ts";
-import { EphemeralSessionStore } from "../session-store.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
 import { CountingTurns } from "../turns.ts";
 import { AnthropicModelClient } from "./anthropic-client.ts";
 import { openAiCompatModelClient } from "./openai-compat-client.ts";
 import { OpenAiModelClient } from "./openai-client.ts";
+import { EphemeralSessionStore } from "../../agent-host/ephemeral-session.ts";
 
 const stops: Array<() => unknown> = [];
 afterAll(() => {
@@ -45,7 +46,7 @@ const serving = (respond: (request: number) => Response) => {
 };
 
 /** One turn through `client`: what `streamed` passed on, in order. */
-const streamedIn = (client: Layer.Layer<ModelClient>) =>
+const streamedIn = (client: Layer.Layer<ModelClient, never, Blobs>) =>
   runTest(
     Effect.gen(function* () {
       const session = yield* openSession.pipe(Effect.provide(EphemeralSessionStore));

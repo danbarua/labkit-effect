@@ -13,8 +13,8 @@ import { openSession } from "./loop.ts";
 import { policyPart } from "./origin.ts";
 import { receivedJson } from "./received.ts";
 import { logKeys } from "./log-keys.ts";
-import { EphemeralSessionStore } from "./session-store.ts";
 import { CountingTurns } from "./turns.ts";
+import { EphemeralSessionStore } from "../agent-host/ephemeral-session.ts";
 
 /** Holds every model request, asking for the hour it may go on at. */
 const holding: Policy<unknown> = {

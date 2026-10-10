@@ -10,7 +10,6 @@ import { ModelName, ProviderName, SessionId, TokenCount } from "../../agent-mach
 import { modelChange, userInput } from "../../../tests/support/observations.ts";
 import { changed, type ModelSettings } from "../../agent-machine/settings.ts";
 import { openSession, type Session } from "../loop.ts";
-import { EphemeralSessionStore } from "../session-store.ts";
 import { ModelFromFacts } from "./model-choice.ts";
 import { AnthropicModelClient } from "../providers/anthropic-client.ts";
 import { anthropicSettings, anthropicSettle } from "../providers/anthropic-settings.ts";
@@ -28,6 +27,7 @@ import { anthropicStream } from "../../../tests/support/streams.ts";
 import { runTest } from "../../../tests/support/run.ts";
 import { SmolToolRunner } from "../../../tests/support/smol-tools.ts";
 import { test } from "../../../tests/support/test.ts";
+import { EphemeralSessionStore } from "../../agent-host/ephemeral-session.ts";
 
 /** What is known of a well-known model. */
 const known = (provider: string, model: string) => capabilitiesOf(provider, model);

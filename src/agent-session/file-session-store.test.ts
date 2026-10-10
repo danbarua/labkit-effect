@@ -20,8 +20,9 @@ import { FileBackedSessionStore, readFacts } from "./file-session-store.ts";
 import { logKeys } from "./log-keys.ts";
 import { openSession, type Session } from "./loop.ts";
 import { receivedJson, receivedText } from "./received.ts";
-import { ephemeralSessionStore, SessionStore, SessionStoreFailed } from "./session-store.ts";
+import { SessionStore, SessionStoreFailed } from "./session-store.ts";
 import { CountingTurnsInStore } from "./turns.ts";
+import { ephemeralSessionStore } from "../agent-host/ephemeral-session.ts";
 
 /** The session's file, in the test's folder. */
 const fileIn = () => join(testFolder(), "s1.jsonl");

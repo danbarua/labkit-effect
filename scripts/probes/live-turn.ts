@@ -26,7 +26,6 @@ import { ModelName, ProviderName, SessionId, TestName } from "../../src/agent-ma
 import { ModelSettings } from "../../src/agent-machine/settings.ts";
 import { openSession } from "../../src/agent-session/loop.ts";
 import { inSession, makeSessionContext } from "../../src/agent-host/session-context.ts";
-import { EphemeralSessionStore } from "../../src/agent-session/session-store.ts";
 import { ModelFromFacts } from "../../src/agent-session/configuration/model-choice.ts";
 import { reportedBy } from "../../src/agent-session/origin.ts";
 import { AnthropicModelClient } from "../../src/agent-session/providers/anthropic-client.ts";
@@ -40,6 +39,7 @@ import { SmolToolRunner, smolCatalog } from "../../tests/support/smol-tools.ts";
 import { capturingHttp } from "../../src/instrumentation/http-captures.ts";
 import { TelemetryToFiles } from "../../src/instrumentation/telemetry.ts";
 import { transcript } from "./transcript.ts";
+import { EphemeralBlobs, EphemeralSessionStore } from "../../src/agent-host/ephemeral-session.ts";
 
 const [provider = "openai", model = "gpt-5.5", ...said] = process.argv.slice(2);
 // A setting the core does not know fails here, as it would in a recorded opening.
@@ -109,7 +109,7 @@ const facts = await Effect.runPromise(
         CountingTurns,
         SmolToolRunner,
         withLogLevel(logLevelOf(process.env), TelemetryToFiles(join(run, "telemetry"))),
-      ),
+      ).pipe(Layer.provideMerge(EphemeralBlobs)),
     ),
   ),
 );

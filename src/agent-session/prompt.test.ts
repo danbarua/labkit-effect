@@ -17,8 +17,9 @@ import type { Policy } from "../agent-policy/policy.ts";
 import { ModelClient, ToolCallPolicies } from "./contracts.ts";
 import { endTurnLeftRunning, openSession, type Prompt, type Session } from "./loop.ts";
 import { receivedJson, receivedText } from "./received.ts";
-import { EphemeralSessionStore, ephemeralSessionStore, SessionStore, SessionStoreFailed } from "./session-store.ts";
+import { SessionStore, SessionStoreFailed } from "./session-store.ts";
 import { CountingTurns } from "./turns.ts";
+import { EphemeralSessionStore, ephemeralSessionStore } from "../agent-host/ephemeral-session.ts";
 
 /**
  * What the model does for each request, in order; past the end of the list it answers. `gate`

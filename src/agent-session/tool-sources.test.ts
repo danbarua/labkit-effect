@@ -1,13 +1,14 @@
 /** Tool sources: their tools joined in order, a namespaced source's under its namespace, and each call run by the source that offered its tool. */
 
 import { expect } from "bun:test";
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Exit, Layer } from "effect";
 import { test } from "../../tests/support/test.ts";
 import { TestSessionContext } from "../../tests/support/session-context.ts";
 import { CallId, ToolName } from "../agent-machine/names.ts";
 import type { ToolSpec } from "./contracts.ts";
 import { asText, receivedJson, receivedText } from "./received.ts";
 import { type ToolSource, toolsOf } from "./tool-sources.ts";
+import { EphemeralBlobs } from "../agent-host/ephemeral-session.ts";
 
 const echo: ToolSpec = { name: ToolName.make("echo"), description: "Echoes.", input: { type: "object" }, kind: "read", replay: "safe" };
 
@@ -23,7 +24,7 @@ const ran = (sources: ReadonlyArray<ToolSource>, tool: string) =>
     Effect.gen(function* () {
       const outcome = yield* (yield* toolsOf(sources)).run(ToolName.make(tool), receivedJson({}), CallId.make("c1"));
       return outcome._tag === "Succeeded" ? asText(outcome.output) : outcome.reason._tag;
-    }).pipe(Effect.provide(TestSessionContext())),
+    }).pipe(Effect.provide(Layer.merge(TestSessionContext(), EphemeralBlobs))),
   );
 
 test("the sources' tools are offered in order, a namespaced source's as <namespace>__<tool>; a call reaches the source that offered it, by the source's own name", () => {

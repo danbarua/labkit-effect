@@ -41,7 +41,8 @@ import { changed, type SettingsChange } from "../agent-machine/settings.ts";
 import { modelOf, openedWith } from "../agent-session/configuration/session-setup.ts";
 import { FileBackedSessionStore } from "../agent-session/file-session-store.ts";
 import { endTurnLeftRunning, openSession, type Services, type Session } from "../agent-session/loop.ts";
-import { ephemeralSessionStore } from "../agent-session/session-store.ts";
+import { BlobsInFolder, type Blobs } from "../agent-session/blobs.ts";
+import { EphemeralBlobs, ephemeralSessionStore } from "./ephemeral-session.ts";
 import { offeredTools, type ToolSource, ToolSources } from "../agent-session/tool-sources.ts";
 import type { Asked } from "./catalog.ts";
 import { sessionFolderOf, storeFileOf } from "./directory.ts";
@@ -100,8 +101,10 @@ export interface SessionOptions<SE, SR, L, H> {
   readonly root: string;
   /** What a new saved session's record holds: the host that made it, and what else the host keeps. */
   readonly record: { readonly host: string } & Readonly<Record<string, unknown>>;
-  /** The loop's services, except the store, the tool sources and the session's context, which `withSession` provides: `SessionServices` and the host's own. */
-  readonly services: Layer.Layer<Exclude<Services, SessionContext>, SE, SR>;
+  /** The folder of saved sessions' blobs: the brand's blobs folder (`brand-folders.ts`). A session that is not saved keeps its blobs in memory (`ephemeral-session.ts`). */
+  readonly blobs: string;
+  /** The loop's services, except the stores, the tool sources and the session's context, which `withSession` provides: `SessionServices` and the host's own. */
+  readonly services: Layer.Layer<Exclude<Services, SessionContext | Blobs>, SE, SR>;
   readonly boltOns: ReadonlyArray<BoltOn>;
   readonly logs: Layer.Layer<never, never, L>;
   readonly host: Host<H>;
@@ -129,14 +132,16 @@ export const withSession = <A, E, R, SE, SR, L, H>(options: SessionOptions<SE, S
           yield* writeRecord(root, sessionId, options.record).pipe(
             Effect.catch((error) => Effect.logWarning(logKeys.record.notWritten, { folder: sessionFolderOf(root, sessionId), cause: error.message })),
           );
+        // A saved session's facts and blobs go to files; a session that is not saved keeps both in memory.
         const store = options.persist ? FileBackedSessionStore(storeFileOf(root, sessionId)) : ephemeralSessionStore(options.continues ?? []);
+        const blobs = options.persist ? BlobsInFolder(options.blobs) : EphemeralBlobs;
         const given = Layer.mergeAll(
           Layer.succeed(ToolSources, boltOns.flatMap((boltOn) => boltOn.sources ?? [])),
           Layer.succeed(Notices, boltOns.flatMap((boltOn) => boltOn.notices ?? [])),
           Layer.succeed(SessionContext, made.context),
         );
         // The store logs while it opens (a lock taken over, a torn line cut off) to the session's log.
-        const layer = Layer.mergeAll(options.services, options.logs).pipe(Layer.provideMerge(given), Layer.provideMerge(store.pipe(Layer.provide(options.logs))));
+        const layer = Layer.mergeAll(options.services, options.logs).pipe(Layer.provideMerge(given), Layer.provideMerge(Layer.merge(store.pipe(Layer.provide(options.logs)), blobs)));
         // A memo map of its own: a session opened inside another's (zork's adventurer, in its engine's)
         // would otherwise reuse the other's memoized services, its tool runner and its turn numbering among them.
         const context = yield* Layer.buildWithMemoMap(layer, yield* Layer.makeMemoMap, yield* Effect.scope);

@@ -14,9 +14,9 @@ import type { Policy } from "../agent-policy/policy.ts";
 import { ModelClient, ToolCallPolicies } from "./contracts.ts";
 import { openSession } from "./loop.ts";
 import { policyPart } from "./origin.ts";
-import { EphemeralSessionStore } from "./session-store.ts";
 import { asText, receivedJson } from "./received.ts";
 import { CountingTurns } from "./turns.ts";
+import { EphemeralSessionStore } from "../agent-host/ephemeral-session.ts";
 
 /** A model that calls `echo` once, then answers. */
 const callsEchoOnce = () => {

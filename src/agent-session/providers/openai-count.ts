@@ -5,6 +5,7 @@
  * provider's. xAI has no such endpoint (it answers 405).
  */
 
+import { Blobs } from "../blobs.ts";
 import { OpenAiClient } from "@effect/ai-openai";
 import { Effect } from "effect";
 import type * as AiError from "effect/ai/AiError";
@@ -17,11 +18,12 @@ const caller = { module: "OpenAiResponsesModelClient", method: "countTokens" };
 
 export const openAiInputTokens = (
   retries: Retries = defaultRetries,
-): Effect.Effect<(target: Target, context: ModelContext) => Effect.Effect<number, AiError.AiError>, never, OpenAiClient.OpenAiClient> =>
+): Effect.Effect<(target: Target, context: ModelContext) => Effect.Effect<number, AiError.AiError>, never, OpenAiClient.OpenAiClient | Blobs> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
+    const blobs = yield* Blobs;
     return (target, context) =>
-      filesIn(context).pipe(
+      filesIn(context, blobs).pipe(
         Effect.flatMap((files) => {
           const post: Post = { path: "/responses/input_tokens", headers: {}, body: body(target, context, files).json as Record<string, Json> };
           return postJson(http, caller, post).pipe(

@@ -21,7 +21,7 @@ const textOf = (bytes: Uint8Array): string | undefined => {
   return decoded._tag === "Some" && !decoded.value.includes("\0") ? decoded.value : undefined;
 };
 
-export const blobReads = <R>(tool: Tool<typeof ReadFile.fields, R>): Tool<typeof ReadFile.fields, R> => ({
+export const blobReads = <R>(tool: Tool<typeof ReadFile.fields, R>): Tool<typeof ReadFile.fields, R | Blobs> => ({
   ...tool,
   input: tool.input.mapFields((fields) => ({ ...fields, path: fields.path.annotate({ description: `${pathDescriptions.file.replace(/\.$/, "")}, or a blob://<id>.<extension> pointer from the conversation.` }) })),
   run: (input) => {

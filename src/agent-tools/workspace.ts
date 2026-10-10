@@ -38,6 +38,7 @@
  * not fit (`InputRejected`), or the file system reported an error (`Reported`, with its message).
  */
 
+import type { Blobs } from "../agent-session/blobs.ts";
 import { resolve } from "node:path";
 import { Array as Arr, Chunk, Duration, Effect, FileSystem, Option, Order, Schema, Stream } from "effect";
 import { SessionContext } from "../agent-environment/session-context.ts";
@@ -271,7 +272,7 @@ export function workspaceTools(
   } = {},
 ) {
   const bound = inWorkspace(root);
-  const tools: ReadonlyArray<AnyTool<FileSystem.FileSystem | SessionContext | CurrentCall>> = [
+  const tools: ReadonlyArray<AnyTool<FileSystem.FileSystem | SessionContext | CurrentCall | Blobs>> = [
     anyTool(described(blobReads(bound(readFile)))),
     anyTool(described(bound(listDir))),
     anyTool(described(bound(writeFile))),

@@ -1,12 +1,12 @@
 /** The loop takes observations while a request is being carried out. */
 
+import type { Blobs } from "./blobs.ts";
 import { userInput } from "../../tests/support/observations.ts";
 import { expect } from "bun:test";
 import { Deferred, Effect, Layer } from "effect";
 import { ModelText, StopReason, TurnId } from "../agent-machine/names.ts";
 import { ModelClient, type ModelContext } from "./contracts.ts";
 import { openSession } from "./loop.ts";
-import { EphemeralSessionStore } from "./session-store.ts";
 import { receivedJson } from "./received.ts";
 import { TurnContextAssembler } from "./turn-context.ts";
 import { CountingTurns } from "./turns.ts";
@@ -14,6 +14,7 @@ import { BoringModelProvider, boringOpening } from "../../tests/support/boring.t
 import { runTest } from "../../tests/support/run.ts";
 import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { test } from "../../tests/support/test.ts";
+import { EphemeralSessionStore } from "../agent-host/ephemeral-session.ts";
 
 /**
  * A model that answers each request once `gates` lets it (one gate per request, in order), and
@@ -44,7 +45,7 @@ function gated(gates: ReadonlyArray<Deferred.Deferred<void>>) {
   return { layer, seen, watch };
 }
 
-const services = (model: Layer.Layer<ModelClient>) =>
+const services = (model: Layer.Layer<ModelClient, never, Blobs>) =>
   Layer.mergeAll(BoringModelProvider, TurnContextAssembler, model, CountingTurns, SmolToolRunner);
 
 const input = (text: string) => userInput(text);

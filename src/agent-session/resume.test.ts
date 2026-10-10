@@ -16,10 +16,10 @@ import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { test } from "../../tests/support/test.ts";
 import { ModelClient, type ModelContext } from "./contracts.ts";
 import { endTurnLeftRunning, openSession } from "./loop.ts";
-import { ephemeralSessionStore } from "./session-store.ts";
 import { ModelFromFacts } from "./configuration/model-choice.ts";
 import { receivedJson } from "./received.ts";
 import { countingTurnsAfter } from "./turns.ts";
+import { ephemeralSessionStore } from "../agent-host/ephemeral-session.ts";
 
 /** Facts up to a first request: the session opened, input given, a turn started, the model asked. */
 function asked(): DrivenMachines {

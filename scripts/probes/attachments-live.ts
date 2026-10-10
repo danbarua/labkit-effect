@@ -34,7 +34,6 @@ import { MediaType } from "../../src/agent-machine/received.ts";
 import { Blobs, BlobsInFolder } from "../../src/agent-session/blobs.ts";
 import { openSession } from "../../src/agent-session/loop.ts";
 import { inSession, makeSessionContext } from "../../src/agent-host/session-context.ts";
-import { EphemeralSessionStore } from "../../src/agent-session/session-store.ts";
 import { anthropicInputTokens } from "../../src/agent-session/providers/anthropic-count.ts";
 import { openAiInputTokens } from "../../src/agent-session/providers/openai-count.ts";
 import { ModelFromFacts } from "../../src/agent-session/configuration/model-choice.ts";
@@ -48,6 +47,7 @@ import { TurnContextAssembler } from "../../src/agent-session/turn-context.ts";
 import { CountingTurns } from "../../src/agent-session/turns.ts";
 import { SmolToolRunner } from "../../tests/support/smol-tools.ts";
 import { transcript } from "./transcript.ts";
+import { EphemeralSessionStore } from "../../src/agent-host/ephemeral-session.ts";
 
 const [provider = "anthropic", model = "claude-sonnet-5-5", mode] = process.argv.slice(2);
 const viaTool = mode === "tool";
@@ -190,9 +190,8 @@ const facts = await Effect.runPromise(
         client,
         CountingTurns,
         viaTool ? Looking : SmolToolRunner,
-        BlobsInFolder(blobFolder).pipe(Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))),
         withLogLevel(logLevelOf(process.env), Layer.empty),
-      ),
+      ).pipe(Layer.provideMerge(BlobsInFolder(blobFolder).pipe(Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))))),
     ),
   ),
 );

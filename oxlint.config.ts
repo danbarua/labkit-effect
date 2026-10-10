@@ -88,6 +88,24 @@ export default defineConfig({
     { files: Object.keys(nonNullAssertions), rules: { "typescript/no-non-null-assertion": "off" } },
     // Tests synchronize on events, or move the test clock; they do not sleep.
     { files: ["**/*.test.ts", "tests/**"], rules: { "abstract/no-sleep-in-tests": "error" } },
+    // The in-memory stores are for a session that is not saved: `withSession` chooses them, and examples that keep no session, tests and probes use them.
+    {
+      files: ["src/**"],
+      excludeFiles: ["**/*.test.ts", "src/agent-host/with-session.ts", "src/agent-host/ephemeral-session.ts", "src/examples/fizzbuzz/**"],
+      rules: {
+        "no-restricted-imports": [
+          "error",
+          {
+            patterns: [
+              {
+                group: ["**/ephemeral-session.ts", "**/ephemeral-session"],
+                message: "The in-memory stores are for a session that is not saved, which `withSession` (agent-host/with-session.ts) chooses by `persist`: a saved session must not fall back to memory.",
+              },
+            ],
+          },
+        ],
+      },
+    },
     // Application code takes its configuration from `Config` or from the environment an entry point passes in.
     {
       files: ["src/**"],

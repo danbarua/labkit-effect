@@ -2,7 +2,7 @@
 
 import { expect } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import type { McpSchema } from "effect/ai";
 import { runTest } from "../../tests/support/run.ts";
 import { TestSessionContext } from "../../tests/support/session-context.ts";
@@ -13,6 +13,7 @@ import { toolsOf } from "../agent-session/tool-sources.ts";
 import { mcpToolResult } from "../agent-session/tool-output.ts";
 import { mcpToolSource, namespaceOf } from "./source.ts";
 import { type McpServer, startMcpServer } from "./server.ts";
+import { EphemeralBlobs } from "../agent-host/ephemeral-session.ts";
 
 const fake = { name: "fake", command: process.execPath, args: [new URL("../../tests/support/mcp-server.ts", import.meta.url).pathname], env: {} };
 
@@ -70,7 +71,7 @@ const stubTool: McpSchema.Tool = { name: "act", inputSchema: { type: "object" } 
 test("a call whose input is JSON but not an object is refused as InputRejected, and the server is not called", async () => {
   const { server, calls } = stubServer({ content: [] });
   const { source } = mcpToolSource(server, [stubTool]);
-  const outcome = await Effect.runPromise(source.run(ToolName.make("act"), receivedJson([1, 2]), CallId.make("c1")).pipe(Effect.provide(TestSessionContext())));
+  const outcome = await Effect.runPromise(source.run(ToolName.make("act"), receivedJson([1, 2]), CallId.make("c1")).pipe(Effect.provide(Layer.merge(TestSessionContext(), EphemeralBlobs))));
   expect(outcome as unknown).toEqual({ _tag: "Failed", reason: { _tag: "InputRejected", problem: "mcp__stub__act takes a JSON object as its input." } });
   expect(calls.count).toBe(0);
 });
@@ -78,6 +79,6 @@ test("a call whose input is JSON but not an object is refused as InputRejected, 
 test("a result with isError true is the tool's own failure: Reported, with the result as the server sent it", async () => {
   const result = { content: [{ type: "text", text: "the file is locked" }], isError: true };
   const { source } = mcpToolSource(stubServer(result).server, [stubTool]);
-  const outcome = await Effect.runPromise(source.run(ToolName.make("act"), receivedJson({}), CallId.make("c1")).pipe(Effect.provide(TestSessionContext())));
+  const outcome = await Effect.runPromise(source.run(ToolName.make("act"), receivedJson({}), CallId.make("c1")).pipe(Effect.provide(Layer.merge(TestSessionContext(), EphemeralBlobs))));
   expect(outcome as unknown).toEqual({ _tag: "Failed", reason: { _tag: "Reported", error: { mediaType: mcpToolResult, body: { _tag: "Text", text: JSON.stringify(result) } } } });
 });

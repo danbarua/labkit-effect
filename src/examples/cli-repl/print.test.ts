@@ -9,13 +9,13 @@ import { ModelFromFacts } from "../../agent-session/configuration/model-choice.t
 import { openedWith } from "../../agent-session/configuration/session-setup.ts";
 import { openSession } from "../../agent-session/loop.ts";
 import { receivedJson } from "../../agent-session/received.ts";
-import { EphemeralSessionStore } from "../../agent-session/session-store.ts";
 import { CountingTurns } from "../../agent-session/turns.ts";
 import { BoringContextAssembler } from "../../../tests/support/boring.ts";
 import { runTest } from "../../../tests/support/run.ts";
 import { test } from "../../../tests/support/test.ts";
 import { printOnce } from "./print.ts";
 import type { Config } from "./session.ts";
+import { EphemeralSessionStore } from "../../agent-host/ephemeral-session.ts";
 
 const target = { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.5") };
 const answer = { _tag: "Text" as const, text: ModelText.make("Done.") };

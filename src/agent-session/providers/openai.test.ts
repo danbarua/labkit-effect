@@ -11,7 +11,6 @@ import { asText } from "../received.ts";
 import { BoringModelProvider } from "../../../tests/support/boring.ts";
 import { CountingTurns } from "../turns.ts";
 import { openSession } from "../loop.ts";
-import { EphemeralSessionStore } from "../session-store.ts";
 import { body, OpenAiModelClient } from "./openai-client.ts";
 import { SmolToolRunner, smolCatalog } from "../../../tests/support/smol-tools.ts";
 import { TurnContextAssembler } from "../turn-context.ts";
@@ -19,6 +18,7 @@ import { openAiAt, recordingServer } from "../../../tests/support/providers.ts";
 import { json } from "../../../tests/support/received.ts";
 import { runTest } from "../../../tests/support/run.ts";
 import { boringOpening } from "../../../tests/support/boring.ts";
+import { EphemeralSessionStore } from "../../agent-host/ephemeral-session.ts";
 
 const stops: Array<() => unknown> = [];
 afterAll(() => {

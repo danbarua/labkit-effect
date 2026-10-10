@@ -32,6 +32,7 @@
  * - A request that still fails after retries is observed as `ModelFailed`.
  */
 
+import { Blobs } from "../blobs.ts";
 import type { BlobId } from "../../agent-machine/blob.ts";
 import { knownOf, takesFile } from "../configuration/well-known-models.ts";
 import { OpenAiClient } from "@effect/ai-openai";
@@ -366,13 +367,14 @@ const respondOnce = (
 export const openAiRequests = (
   retries: Retries = defaultRetries,
   settle: (target: Target) => Settled = openAiSettle,
-): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient> =>
+): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient | Blobs> =>
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
+    const blobs = yield* Blobs;
     const omittedLogged = yield* Ref.make<OmittedLogged>(new Set());
     return (target, context, turn) => {
       const settled = settle(target);
-      return filesIn(context).pipe(
+      return filesIn(context, blobs).pipe(
         Effect.flatMap((files) => {
         const sent = body(target, context, files);
         const post: Post = {

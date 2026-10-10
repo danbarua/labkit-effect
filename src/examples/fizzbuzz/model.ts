@@ -16,6 +16,7 @@
  * Every context it is sent is kept, in order, in `seen`.
  */
 
+import type { Blobs } from "../../agent-session/blobs.ts";
 import { Array as Arr, Effect, Layer, Option, Ref } from "effect";
 import * as AiError from "effect/ai/AiError";
 import { CallId, ModelText, StopReason, ToolName, type TurnId } from "../../agent-machine/names.ts";
@@ -81,7 +82,7 @@ function judged(text: string, returned: number | undefined): Judged {
 }
 
 export function scriptedFizzBuzzModel(): {
-  readonly layer: Layer.Layer<ModelClient>;
+  readonly layer: Layer.Layer<ModelClient, never, Blobs>;
   readonly seen: Effect.Effect<ReadonlyArray<ModelContext>>;
 } {
   const seen = Ref.makeUnsafe<ReadonlyArray<ModelContext>>([]);
