@@ -4,8 +4,9 @@
  * table, not by a string; for the abstract layers
  * (`scripts/abstract-layers.ts`), every string branded; for tests, no sleeping (`Effect.sleep`,
  * `Bun.sleep`, `setTimeout`); and, for all code, no cast through `unknown` or `any`
- * (`x as unknown as T`), no cast to `never`, and no clock or random read in a workflow's body
- * outside an activity. The rules read syntax only: a method named `push` or `set` on a type of our
+ * (`x as unknown as T`), no cast to `never`, and no clock, random or generated-id read in a
+ * workflow's body outside an activity (JavaScript's own, Effect's `Clock`, `DateTime` and `Random`,
+ * and any `generateId()`). The rules read syntax only: a method named `push` or `set` on a type of our
  * own is reported too, but a function of a module imported from effect (`Ref.set`) is not; a
  * workflow is recognised by `Workflow.make` in the same file.
  */
@@ -138,8 +139,27 @@ export default {
         // clock or a random source differs between replays. An activity's result is stored and
         // replayed, so the same call inside an activity's `execute` is deterministic.
         const message =
-          "A clock or random read in a workflow's body differs on each replay, so an activity named from it runs again. Read it in an activity's `execute`, whose result is stored, or take the value from the journalled message that started the work.";
+          "A clock, random or generated-id read in a workflow's body differs on each replay, so an activity named from it runs again. Read it in an activity's `execute`, whose result is stored, or take the value from the journalled message that started the work.";
+        // JavaScript's own clock and random sources, called.
         const nondeterministic = new Set(["crypto.randomUUID", "crypto.getRandomValues", "Math.random", "Date.now", "performance.now"]);
+        // Effect's clock, random and date-time reads: effects (`DateTime.now`) or functions (`Random.nextBetween(…)`), reported where they are named.
+        const effectReads = new Set([
+          "Clock.currentTimeMillis",
+          "Clock.currentTimeNanos",
+          "Clock.clockWith",
+          "DateTime.now",
+          "DateTime.nowAsDate",
+          "DateTime.nowUnsafe",
+          "DateTime.nowInCurrentZone",
+          "Random.next",
+          "Random.nextBoolean",
+          "Random.nextInt",
+          "Random.nextBetween",
+          "Random.nextIntBetween",
+          "Random.shuffle",
+          "Random.choice",
+          "Random.randomWith",
+        ]);
         const workflows = new Set();
         const memberName = (node) =>
           node?.type === "MemberExpression" && !node.computed && node.object.type === "Identifier" ? `${node.object.name}.${node.property.name}` : undefined;
@@ -169,6 +189,11 @@ export default {
           },
           CallExpression(node) {
             if (nondeterministic.has(memberName(node.callee))) check(node);
+            // An id generator's `generateId()`, such as `effect/ai`'s `IdGenerator`.
+            if (node.callee.type === "MemberExpression" && !node.callee.computed && node.callee.property.name === "generateId") check(node);
+          },
+          MemberExpression(node) {
+            if (effectReads.has(memberName(node))) check(node);
           },
           NewExpression(node) {
             if (node.callee.type === "Identifier" && node.callee.name === "Date" && node.arguments.length === 0) check(node);

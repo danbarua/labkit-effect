@@ -54,7 +54,7 @@ When two sources disagree, the one earlier in this list wins:
 - **Do not give a `Context.Reference` a default** that stands in for persistence, credentials or a transport. A program that forgot to provide the real one then runs on the default with no error. `Blobs` (`agent-session/blobs.ts`), whose default is an in-memory store, is an existing case.
 - **Do not use `Layer.mergeAll` or `Layer.provideMerge` only to make a type error go away.** The error usually names a dependency that some layer has to provide.
 - **Do not sleep in a test** (`Effect.sleep`, `Bun.sleep`, `setTimeout`); `abstract/no-sleep-in-tests` reports it. Synchronize instead (`references/TESTING.md`). A bounded wait for a real process or server carries its reason: `// oxlint-disable-next-line abstract/no-sleep-in-tests -- <reason>`.
-- **Do not read a clock or a random source in a workflow's body** (`Date.now()`, `new Date()`, `Math.random()`, `crypto.randomUUID()`, `performance.now()`); `abstract/workflow-deterministic` reports it (`references/CLUSTER.md`).
+- **Do not read a clock, a random source or an id generator in a workflow's body.** `abstract/workflow-deterministic` reports JavaScript's own (`Date.now()`, `new Date()`, `Math.random()`, `crypto.randomUUID()`, `performance.now()`), Effect's (`Clock.currentTimeMillis`, `DateTime.now`, `Random.next…`) and any `generateId()` (`references/CLUSTER.md`). It recognises a workflow made with `Workflow.make` in the same file, and reads names, not types: an aliased import is not recognised.
 - **Do not keep a copy of the facts in a `Ref`.** Compute the view from the facts when it is read.
 
 ## References
