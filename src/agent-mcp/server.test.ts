@@ -97,6 +97,7 @@ test("a server that does not answer initialize, or does not list its tools, in t
       const started = yield* startMcpServer(server, [], { connectTimeout: "300 millis" });
       const settled = yield* started.settled;
       // Its process group was stopped (stopping a process group kills all of its processes).
+      // oxlint-disable-next-line abstract/no-sleep-in-tests -- lets a real process group end before the test checks it
       yield* Effect.sleep("50 millis");
       return { settled, running: yield* started.running };
     });

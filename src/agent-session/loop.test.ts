@@ -396,6 +396,7 @@ test("closing a session stops what its commands left running in the background; 
   );
   expect(server.runningWhileOpen).toBe(true);
   const deadline = Date.now() + 5000;
+  // oxlint-disable-next-line abstract/no-sleep-in-tests -- polls a real process's end, until its deadline
   const ended = async (): Promise<boolean> => (!alive(server.pid) ? true : Date.now() > deadline ? false : Bun.sleep(25).then(ended));
   expect(await ended()).toBe(true);
 });

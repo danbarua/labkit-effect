@@ -40,6 +40,7 @@ export const brandFrom = (env: Readonly<Record<string, string | undefined>>): Br
 };
 
 /** The brand a program runs as. */
+// oxlint-disable-next-line node/no-process-env -- the default brand, read from the process's environment when no entry point provides one
 export const Brand = Context.Reference<Brand>("agent-host/Brand", { defaultValue: () => brandFrom(process.env) });
 
 /** Returns the folder that a brand uses in a home or a project: `.<name>`. */

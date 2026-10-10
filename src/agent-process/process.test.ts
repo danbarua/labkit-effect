@@ -42,6 +42,7 @@ const alive = (pid: number): boolean => {
 /** Waits up to one second for process `pid` to exit, and returns whether it has exited. */
 const gone = (pid: number) =>
   Effect.gen(function* () {
+    // oxlint-disable-next-line abstract/no-sleep-in-tests -- polls a real process's end, at most 50 times
     for (let tries = 0; tries < 50 && alive(pid); tries++) yield* Effect.sleep("20 millis");
     return !alive(pid);
   });
@@ -87,6 +88,7 @@ test("after a run exits by itself, onRun reads the run's output to its end befor
     Effect.gen(function* () {
       const output = yield* Deferred.make<string>();
       const group = yield* makeProcessGroup(sh("echo last words"), (_run, handle) =>
+        // oxlint-disable-next-line abstract/no-sleep-in-tests -- reads a real process's output after it has ended
         Effect.sleep("200 millis").pipe(
           Effect.andThen(handle.stdout.pipe(Stream.decodeText, Stream.mkString)),
           Effect.flatMap((text) => Deferred.succeed(output, text)),

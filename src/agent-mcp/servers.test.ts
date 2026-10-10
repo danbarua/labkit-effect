@@ -48,6 +48,7 @@ test("a server that stops produces one notice, and one more when it is reconnect
       yield* servers.notices.notices;
       const source = servers.sources[0]!;
       yield* source.run(ToolName.make("exit"), receivedJson({}), CallId.make("c1")).pipe(Effect.ignore);
+      // oxlint-disable-next-line abstract/no-sleep-in-tests -- waits for a real MCP server process to exit
       yield* Effect.sleep("300 millis");
       const stopped = yield* servers.notices.notices;
       const again = yield* servers.reconnect("fake");
@@ -88,8 +89,10 @@ test("while a reconnected server is connecting, no change is recorded: its chang
         Stream.runForEach((change) => Ref.update(seen, (before) => [...before, change.state._tag])),
         Effect.forkChild,
       );
+      // oxlint-disable-next-line abstract/no-sleep-in-tests -- waits for a real MCP server process to exit
       yield* Effect.sleep("100 millis");
       yield* servers.reconnect("fake");
+      // oxlint-disable-next-line abstract/no-sleep-in-tests -- waits for a real MCP server process to start again
       yield* Effect.sleep("300 millis");
       yield* Fiber.interrupt(watching);
       return yield* Ref.get(seen);

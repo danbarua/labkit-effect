@@ -116,4 +116,5 @@ export const launch = (args: ReadonlyArray<string>, env: Readonly<Record<string,
 };
 
 // `launch` or the command line writes what ended a launch to stderr; the runtime's own report would go to stdout.
+// oxlint-disable-next-line node/no-process-env -- the ACP host's entry point passes the process's environment in
 if (import.meta.main) BunRuntime.runMain(launch(process.argv.slice(2), process.env), { disableErrorReporting: true });

@@ -310,6 +310,7 @@ test("a completed part is passed on when it completes, with the events held befo
             controller.enqueue(event({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }));
             controller.enqueue(event({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "5." } }));
             controller.enqueue(event({ type: "content_block_stop", index: 0 }));
+            // oxlint-disable-next-line abstract/no-sleep-in-tests -- a bound of 2 seconds on waiting for a part
             passedBeforeEnd = await Promise.race([partPassed.promise.then(() => true), Bun.sleep(2000).then(() => false)]);
             controller.enqueue(event({ type: "message_delta", delta: { stop_reason: "end_turn" } }));
             controller.enqueue(event({ type: "message_stop" }));

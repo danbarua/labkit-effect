@@ -47,6 +47,7 @@ const serverLogData = (logged: ReadonlyArray<unknown>) =>
   logged.flat().filter((each): each is { data: string } => typeof each === "object" && each !== null && "data" in each).map((each) => each.data);
 
 /** Waits, within five seconds, until `done`: for what happens in the background (a stream's messages, a connection made anew). */
+// oxlint-disable-next-line abstract/no-sleep-in-tests -- polls a real HTTP server, at most 250 times
 const until = (done: () => boolean) => Effect.sleep("20 millis").pipe(Effect.repeat({ until: done, times: 250 }));
 
 interface Transport {

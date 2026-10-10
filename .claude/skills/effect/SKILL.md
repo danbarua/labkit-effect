@@ -46,14 +46,15 @@ When two sources disagree, the one earlier in this list wins:
 - **Retries and repeats** use a `Schedule`, and every retry has a bound. Retry only an operation that is safe to repeat. Effect's cluster and workflow modules deliver at least once, so code built on them is retried whether or not it is safe (`references/CLUSTER.md`).
 - **A source of many values over time**, which needs backpressure or interruption, is a `Stream`.
 - **Background work and resources have an owner.** A background fiber belongs to a scope (`Effect.forkScoped`, a `FiberSet`), and a resource is released by a finalizer.
-- **Configuration** is read through `Config`, or from the session's environment (`agent-process/environment.ts`). New code does not read `process.env` directly.
+- **Configuration** is read through `Config`, or from the environment that an entry point passes in (`agent-process/environment.ts`). `node/no-process-env` reports a read of `process.env` in `src/` outside tests.
 
 ## Do not
 
-- **Do not cast to silence a type error.** That covers `x as T` to skip a decode, and the non-null assertion `x!`. A cast through `unknown` or `any` (`x as unknown as T`) is already a lint error.
+- **Do not cast.** Type assertions (`x as T`, `<T>x`) and non-null assertions (`x!`) are lint errors. Narrow, annotate, or decode instead; `as const` is allowed. The files that had casts when the rules started are exempt (`scripts/lint-exceptions.ts`): a file leaves its list when its last cast is gone, and no file joins a list.
 - **Do not give a `Context.Reference` a default** that stands in for persistence, credentials or a transport. A program that forgot to provide the real one then runs on the default with no error. `Blobs` (`agent-session/blobs.ts`), whose default is an in-memory store, is an existing case.
 - **Do not use `Layer.mergeAll` or `Layer.provideMerge` only to make a type error go away.** The error usually names a dependency that some layer has to provide.
-- **Do not wait with `Effect.sleep` in a test** for something to happen. Synchronize instead (`references/TESTING.md`).
+- **Do not sleep in a test** (`Effect.sleep`, `Bun.sleep`, `setTimeout`); `abstract/no-sleep-in-tests` reports it. Synchronize instead (`references/TESTING.md`). A bounded wait for a real process or server carries its reason: `// oxlint-disable-next-line abstract/no-sleep-in-tests -- <reason>`.
+- **Do not read a clock or a random source in a workflow's body** (`Date.now()`, `new Date()`, `Math.random()`, `crypto.randomUUID()`, `performance.now()`); `abstract/workflow-deterministic` reports it (`references/CLUSTER.md`).
 - **Do not keep a copy of the facts in a `Ref`.** Compute the view from the facts when it is read.
 
 ## References

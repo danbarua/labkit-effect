@@ -40,6 +40,7 @@ const pause = () => Effect.sleep("1500 millis");
 const engine = scriptedPlayer("engine", engineScript(), pause);
 const adventurer = scriptedPlayer("adventurer", adventurerScript((world) => plan[world.turn] ?? { tool: "look", input: {} }), pause);
 
+// oxlint-disable-next-line node/no-process-env -- an example's entry point reads its log level
 const { level, invalid } = logLevelOf(process.env);
 
 const match = await Effect.runPromise(

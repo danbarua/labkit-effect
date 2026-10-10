@@ -109,6 +109,7 @@ test("run_command is a process group: stopped at its time, what it started is st
   const stopped = await call("run_command", { command: "sleep 30 & echo $! > stopped.pid; wait", timeout_seconds: 1 });
   expect(stopped).toBe("reported: [Still running after 1 seconds: stopped.]");
   const orphan = Number(readFileSync(join(root, "stopped.pid"), "utf8"));
+  // oxlint-disable-next-line abstract/no-sleep-in-tests -- lets a stopped real process end before the test checks it
   await Bun.sleep(100);
   expect(alive(orphan)).toBe(false);
   const ran = await call("run_command", { command: "nohup sleep 30 > /dev/null 2>&1 & echo $!" });

@@ -67,6 +67,7 @@ test("a call interrupted is cancelled at the server (notifications/cancelled, wi
     Effect.gen(function* () {
       yield* connection.call("slow", {}).pipe(Effect.timeout("200 millis"), Effect.ignore);
       // The server's log message saying it was told to cancel.
+      // oxlint-disable-next-line abstract/no-sleep-in-tests -- waits for a real server's log message about the cancel, which is its only signal
       yield* Effect.sleep("200 millis");
     }),
   );

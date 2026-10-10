@@ -26,6 +26,7 @@ const players: Players = {
   adventurer: (label) => adventurerFor(modelOf[label]),
 };
 
+// oxlint-disable-next-line node/no-process-env -- an example's entry point reads its log level
 const { level, invalid } = logLevelOf(process.env);
 
 const match = await Effect.runPromise(

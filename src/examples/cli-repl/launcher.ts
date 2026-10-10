@@ -99,6 +99,7 @@ const trustOfHere = (args: ReadonlyArray<string>, brand: Brand) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const folder = process.cwd();
+    // oxlint-disable-next-line node/no-process-env -- the CLI's entry point
     const userFolder = configDirOf(args, process.env, brand) ?? join(homedir(), ".config", brand.name);
     if (yield* isTrusted(folder, userFolder)) return true;
     const names = yield* fs.readDirectory(folder);
@@ -127,6 +128,7 @@ const runCli = (commandLine: ReadonlyArray<string>) =>
   });
 
 /** Runs the command with this process's arguments, as `brand`. */
+// oxlint-disable-next-line node/no-process-env -- the CLI's entry point
 export const launch = (brand: Brand = brandFrom(process.env)): Promise<never> =>
   Effect.runPromise(
     Effect.gen(function* () {

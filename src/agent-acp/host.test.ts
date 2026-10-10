@@ -397,6 +397,7 @@ const eventually = async (file: string, check: (facts: ReadonlyArray<Fact>) => b
     const facts = await factsOn(file);
     if (check(facts) || tries === 200) return facts;
     // Polls the file the store writes; nothing else signals the end of a turn whose prompt is gone.
+    // oxlint-disable-next-line abstract/no-sleep-in-tests -- polls the facts file, at most 200 times; nothing else signals the end of a turn whose prompt is gone
     await Bun.sleep(10);
   }
 };
@@ -1287,6 +1288,7 @@ test("a server at a URL the client names is connected over Streamable HTTP or HT
       const prompted = await ctx.request("session/prompt", say(sessionId, "Echo over http."));
       await ctx.request("session/close", { sessionId });
       // Closing the session, not the end of the connection, ends its session at the server.
+      // oxlint-disable-next-line abstract/no-sleep-in-tests -- polls a real web server's deletes, at most 100 times
       for (let tries = 0; web.deleted.length === 0 && tries < 100; tries++) await Bun.sleep(10);
       return { prompted, deletedAtClose: web.deleted.length };
     });
@@ -2383,6 +2385,7 @@ test("a call that ends while its permission request is out, its turn cancelled, 
     await asked.promise;
     await ctx.notify("session/cancel", { sessionId });
     await prompt;
+    // oxlint-disable-next-line abstract/no-sleep-in-tests -- a bound of 2 seconds on waiting for the abort
     return { sessionId, cancelled: await Promise.race([aborted.promise.then(() => true), Bun.sleep(2000).then(() => false)]) };
   });
   await host.stop();
@@ -2727,6 +2730,7 @@ test("a prompt is answered only after the client has every update of its turn, h
       Effect.succeed({
         system: "Test.",
         sources: [{ tools: [echoTool], run: (_name, input) => Effect.succeed({ _tag: "Succeeded", output: input }) }],
+        // oxlint-disable-next-line abstract/no-sleep-in-tests -- the slow presentation is the condition under test
         present: (call, outcome) => (outcome === undefined ? presentFrom([echoTool])(call) : Effect.sleep("300 millis").pipe(Effect.andThen(presentFrom([echoTool])(call, outcome)))),
         environment: noCommands,
       }),
@@ -2840,6 +2844,7 @@ test("a session refused for a required server that is not running ends the serve
     const result = await sdkClient().app.connectWith(host.stream, async (ctx) => {
       await initialize(ctx, {});
       const refused = await failure(ctx.request("session/new", { cwd: host.cwd, mcpServers: [{ type: "http", name: "web", url: web.url, headers: [] }] }));
+      // oxlint-disable-next-line abstract/no-sleep-in-tests -- polls a real web server's deletes, at most 100 times
       for (let tries = 0; web.deleted.length === 0 && tries < 100; tries++) await Bun.sleep(10);
       return { refused, deleted: web.deleted.length };
     });

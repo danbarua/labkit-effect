@@ -29,6 +29,7 @@ const orExit = <P extends Player>(found: P | Unavailable): P => {
 };
 
 const [engineModel = "claude-sonnet-5-5", adventurerModel = "claude-haiku-5-5"] = process.argv.slice(2);
+// oxlint-disable-next-line node/no-process-env -- an example's entry point reads its log level
 const { level, invalid } = logLevelOf(process.env);
 const game = await Effect.runPromise(
   play({ engine: orExit(playerFor(engineModel)), adventurer: orExit(adventurerFor(adventurerModel)), invalidLevels: invalid }).pipe(

@@ -323,7 +323,9 @@ export const runCommand = (args: ReadonlyArray<string>, brand: Brand, env: Reado
  * Runs the CLI with `args` as `brand` (by default, the brand the environment names, else labkit). The
  * usable models are the well-known models whose provider has an API key, and the local server's.
  */
+// oxlint-disable-next-line node/no-process-env -- the CLI's entry point
 export const run = (args: ReadonlyArray<string>, brand: Brand = brandFrom(process.env)) =>
+  // oxlint-disable-next-line node/no-process-env -- the CLI's entry point
   runCommand(args, brand, process.env).pipe(
     Effect.provide(Layer.mergeAll(CliOutput.layer(saidFormatter), KeyedAndLocalCatalog)),
     Effect.provideService(Brand, brand),
@@ -331,6 +333,7 @@ export const run = (args: ReadonlyArray<string>, brand: Brand = brandFrom(proces
   );
 
 /** Runs the CLI with this process's arguments, as `brand`; a package's bin passes its own brand. */
+// oxlint-disable-next-line node/no-process-env -- the CLI's entry point
 export const main = (brand: Brand = brandFrom(process.env)) =>
   run(process.argv.slice(2), brand).pipe(Effect.provide(Layer.mergeAll(OtlpSpansAndMetrics(`${brand.name}-cli`), BunServices.layer)), BunRuntime.runMain);
 

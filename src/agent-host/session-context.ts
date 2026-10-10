@@ -64,6 +64,7 @@ export const defaultCommandEnvironment: ReadonlyArray<EnvironmentTransform> = [r
  */
 export const environmentWith = (transforms: ReadonlyArray<EnvironmentTransform>): KnownEnvironment => {
   const variables = processEnvironmentWith(transforms);
+  // oxlint-disable-next-line node/no-process-env -- the names of the process's variables that the session's environment leaves out, for the log
   const leftOut = Object.entries(process.env).flatMap(([name, value]) => (value === undefined || Object.hasOwn(variables, name) ? [] : [name]));
   return { _tag: "Known", variables, leftOut: Arr.sort(leftOut, Order.String) };
 };

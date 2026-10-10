@@ -102,6 +102,7 @@ export const otlpLogger = (service: string): Effect.Effect<Logger.Logger<unknown
     const target = yield* otlpTarget(service);
     if (target === undefined) return Logger.make(() => undefined);
     const inner = yield* OtlpLogger.make({ url: target.url("/v1/logs"), resource: target.resource }).pipe(Effect.provide(otlpServices));
+    // oxlint-disable-next-line node/no-process-env -- the secret values that spans are redacted of
     const redact = redactorOf(secretsOf(process.env).values);
     return Logger.make((options) =>
       inner.log({
@@ -253,5 +254,6 @@ export const TelemetryToFiles = (base: string, service = "labkit-probe"): Layer.
   Layer.mergeAll(
     SpansTo((line) => append(`${base}.spans.jsonl`, line)),
     logsTo(`${base}.logs.jsonl`),
+    // oxlint-disable-next-line node/no-process-env -- the secret values that request captures are redacted of
     Layer.sync(HttpCaptures, () => ({ folder: capturesFolderIn(dirname(base)), secrets: secretsOf(process.env) })),
   ).pipe(Layer.provideMerge(OtlpFromEnv(service)));

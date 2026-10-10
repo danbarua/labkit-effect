@@ -302,6 +302,7 @@ const checkedLayer = (layer: LayerSource): Effect.Effect<void, ConfigInvalid> =>
 export const decodeLayers = (
   layers: ReadonlyArray<LayerSource>,
   registry: ReadonlyArray<AnyPlugin>,
+  // oxlint-disable-next-line node/no-process-env -- the default for a parameter; callers and tests pass their own environment
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): Effect.Effect<Configuration, ConfigInvalid> =>
   Effect.gen(function* () {
@@ -434,6 +435,7 @@ const loadExtension = (module: string, file: string): Effect.Effect<ReadonlyArra
 export const loadConfiguration = (
   layers: ReadonlyArray<LayerSource>,
   registry: ReadonlyArray<AnyPlugin> = builtins,
+  // oxlint-disable-next-line node/no-process-env -- the default for a parameter; callers and tests pass their own environment
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): Effect.Effect<Configuration, ConfigInvalid> =>
   Effect.gen(function* () {

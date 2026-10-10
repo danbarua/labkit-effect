@@ -115,6 +115,7 @@ export type LaunchOptions = Command.Command.Config.Infer<typeof launchFlags>;
 export const launchVariables = (
   brand: Brand,
   host: ReadonlyArray<string> = [],
+  // oxlint-disable-next-line node/no-process-env -- the default for a parameter; callers and tests pass their own environment
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): ConfigProvider.ConfigProvider => {
   const named = ConfigProvider.fromEnvRecord({ ...env });

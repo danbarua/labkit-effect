@@ -1,6 +1,7 @@
 import { strict } from "@effect/tsgo/oxlint-presets";
 import { defineConfig, type OxlintOverride } from "oxlint";
 import { type AbstractLayer, abstractLayers } from "./scripts/abstract-layers.ts";
+import { nonNullAssertionFiles, typeAssertionFiles } from "./scripts/lint-exceptions.ts";
 
 /** What the abstract layers are held to, beyond the Effect preset. */
 const abstractLayer = {
@@ -72,9 +73,28 @@ export default defineConfig({
   ignorePatterns: ["repos/**"],
   extends: [strict],
   jsPlugins: ["./scripts/oxlint/abstract-layers.js"],
-  // All code: a cast through `unknown` or `any` turns off the check that the types exist to make.
-  rules: { "abstract/no-double-cast": "error" },
+  rules: {
+    // A cast through `unknown` or `any` turns off the check that the types exist to make.
+    "abstract/no-double-cast": "error",
+    // A cast is a claim the compiler cannot check: narrow, annotate, or decode instead. `as const` is allowed.
+    "typescript/consistent-type-assertions": ["error", { assertionStyle: "never" }],
+    "typescript/no-non-null-assertion": "error",
+    // A workflow's body runs again on every replay: a clock or random read there differs each time.
+    "abstract/workflow-deterministic": "error",
+  },
   overrides: [
+    // The files that broke the two cast rules when they started (`scripts/lint-exceptions.ts`).
+    { files: [...typeAssertionFiles], rules: { "typescript/consistent-type-assertions": "off" } },
+    { files: [...nonNullAssertionFiles], rules: { "typescript/no-non-null-assertion": "off" } },
+    // Tests synchronize on events, or move the test clock; they do not sleep.
+    { files: ["**/*.test.ts", "tests/**"], rules: { "abstract/no-sleep-in-tests": "error" } },
+    // Application code takes its configuration from `Config` or from the environment an entry point passes in.
+    {
+      files: ["src/**"],
+      excludeFiles: ["**/*.test.ts"],
+      plugins: ["unicorn", "typescript", "oxc", "effecttsgo", "node"],
+      rules: { "node/no-process-env": "error" },
+    },
     {
       files: functionalModules.map((module) => `src/${module}/**`),
       excludeFiles: ["**/*.test.ts", ...imperativeBoundaries],

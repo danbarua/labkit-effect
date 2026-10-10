@@ -78,6 +78,7 @@ export const removeCredentials =
  * value. With no transforms, returns that environment unchanged.
  */
 export const processEnvironmentWith = (transforms: ReadonlyArray<EnvironmentTransform>): Environment =>
+  // oxlint-disable-next-line node/no-process-env -- a session's environment starts from the process's environment
   transforms.reduce<Environment>((environment, transform) => transform(environment), definedVariables(process.env));
 
 /** Returns the variables in `environment` that have a value. */

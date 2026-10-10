@@ -294,6 +294,7 @@ test("a stream closed after a tool call of it was passed on is not made again: t
       data(socket) {
         requests++;
         socket.write(`${opened}${Buffer.byteLength(event).toString(16)}\r\n${event}\r\n`);
+        // oxlint-disable-next-line abstract/no-sleep-in-tests -- a real socket server cuts its response short after 300 ms
         setTimeout(() => socket.end(), 300);
       },
     },

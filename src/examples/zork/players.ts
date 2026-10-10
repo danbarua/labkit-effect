@@ -44,6 +44,7 @@ export type Unavailable =
   | { readonly _tag: "KeyNotSet"; readonly model: string; readonly variable: string };
 
 /** Returns the player for `named`, or why there is none; `env` holds the providers' keys. */
+// oxlint-disable-next-line node/no-process-env -- the default for a parameter; callers and tests pass their own environment
 export const playerFor = (named: string, env: Readonly<Record<string, string | undefined>> = process.env): Player | Unavailable => {
   const { provider, model } = providerOf(named);
   const settings = provider === undefined ? undefined : settingsOf[provider];
@@ -54,6 +55,7 @@ export const playerFor = (named: string, env: Readonly<Record<string, string | u
 };
 
 /** Returns the adventurer for `named`: its player, with the customisation for its model when there is one; or why there is none. */
+// oxlint-disable-next-line node/no-process-env -- the default for a parameter; callers and tests pass their own environment
 export const adventurerFor = (named: string, env: Readonly<Record<string, string | undefined>> = process.env): Adventurer | Unavailable => {
   const player = playerFor(named, env);
   if ("_tag" in player) return player;

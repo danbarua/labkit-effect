@@ -21,6 +21,7 @@ const alive = (pid: number): boolean => {
 /** Waits until the process `pid` no longer exists, for 5 seconds at most; returns whether it ended. */
 const ends = async (pid: number): Promise<boolean> => {
   const deadline = Date.now() + 5000;
+  // oxlint-disable-next-line abstract/no-sleep-in-tests -- polls a real process's end, for 5 seconds at most
   const check = async (): Promise<boolean> => (!alive(pid) ? true : Date.now() > deadline ? false : Bun.sleep(25).then(check));
   return check();
 };

@@ -20,6 +20,7 @@ import { redacting, withTooShortWarning, secretsOf } from "./redaction.ts";
 export const LogsToStderr = (service: string, logsFolder: string) =>
   Layer.unwrap(
     Effect.sync(() => {
+      // oxlint-disable-next-line node/no-process-env -- the secret values that log lines are redacted of
       const secrets = secretsOf(process.env);
       return withTooShortWarning(
         secrets,
@@ -35,6 +36,7 @@ export const LogsToStderr = (service: string, logsFolder: string) =>
  * Writes log lines to the file at `path`, creating its folder when missing, for a host whose terminal
  * shows only the conversation. The secrets are read from `env`.
  */
+// oxlint-disable-next-line node/no-process-env -- the default for a parameter; callers and tests pass their own environment
 export const LogsToFile = (path: string, service: string, env: Readonly<Record<string, string | undefined>> = process.env) =>
   Layer.unwrap(
     Effect.gen(function* () {

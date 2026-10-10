@@ -18,6 +18,7 @@ export const keyVariables: Readonly<Record<string, string>> = { anthropic: "ANTH
 /** Returns the key that the environment holds for `provider`, as `Redacted`, so a log line or a string of it shows `<redacted>`. An empty key counts as none. */
 export const keyOf = (provider: string): Redacted.Redacted | undefined => {
   const variable = keyVariables[provider];
+  // oxlint-disable-next-line node/no-process-env -- a provider's key, read from the variable that keyVariables names for it
   const key = variable === undefined ? undefined : process.env[variable];
   return key === undefined || key === "" ? undefined : Redacted.make(key);
 };
