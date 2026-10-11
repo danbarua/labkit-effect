@@ -45,26 +45,28 @@ const openAi: Target = { provider: ProviderName.make("openai"), model: ModelName
 const anthropicHaiku: Target = { provider: ProviderName.make("anthropic"), model: ModelName.make("claude-haiku-4-5") };
 const noRetries: Retries = { times: 0, firstWait: "1 millis" };
 
-/** Anthropic, then `fallbacks` (OpenAI by default), each at the mock, each attempt observed as the hosts observe it; a provider given a status fails every request with it. */
-const chain = (status: { readonly anthropic?: number; readonly openAi?: number }, fallbacks: ReadonlyArray<Target> = [openAi]) =>
+/** Anthropic, then `fallbacks` (OpenAI by default), each at the mock, each attempt observed as the hosts observe it, each send retried as `retries` says (not at all by default); a provider given a status fails every request with it. */
+const chain = (status: { readonly anthropic?: number; readonly openAi?: number }, fallbacks: ReadonlyArray<Target> = [openAi], retries: Retries = noRetries) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const requests = new Map([
-        [anthropic.provider, observedAttempts(yield* anthropicRequests(noRetries))],
-        [openAi.provider, observedAttempts(yield* openAiRequests(noRetries))],
+        [anthropic.provider, observedAttempts(yield* anthropicRequests)],
+        [openAi.provider, observedAttempts(yield* openAiRequests())],
       ]);
-      return FallbackModelClient({ requests, fallbacks });
+      return FallbackModelClient({ requests, fallbacks, retries });
     }),
   ).pipe(Layer.provide(Layer.mergeAll(anthropicAtMock(mock(), status.anthropic), openAiAtMock(mock(), status.openAi))));
 
 /**
  * A session that starts on Anthropic and asks the model its facts name, with one turn per input:
- * the model observations recorded, how each turn ended, and how often the chain fell back.
+ * the model observations recorded, how each turn ended, how often the chain fell back, and how often
+ * a send was retried.
  */
 const oneTurn = async (
   status: { readonly anthropic?: number; readonly openAi?: number },
   inputs: ReadonlyArray<string> = ["hello"],
   fallbacks?: ReadonlyArray<Target>,
+  retries?: Retries,
 ) => {
   const logged: Array<unknown> = [];
   const facts: ReadonlyArray<Fact> = await runTest(
@@ -85,7 +87,7 @@ const oneTurn = async (
       Effect.provide(
         Layer.mergeAll(
           ModelFromFacts,
-          chain(status, fallbacks),
+          chain(status, fallbacks, retries),
           BoringContextAssembler,
           CountingTurns,
           SmolToolRunner,
@@ -96,8 +98,8 @@ const oneTurn = async (
   );
   const observed = facts.flatMap((fact): ReadonlyArray<Observation> => (fact._tag === "Observed" ? [fact.observation] : []));
   const ended = facts.flatMap((fact) => (fact._tag === "Decided" && fact.decision._tag === "TurnEnded" ? [fact.decision.ending._tag] : []));
-  const fellBack = logged.filter((message) => Array.isArray(message) && message[0] === logKeys.provider.fellBack).length;
-  return { model: observed.filter((observation) => observation._tag.startsWith("Model")), ended, fellBack };
+  const count = (key: string) => logged.filter((message) => Array.isArray(message) && message[0] === key).length;
+  return { model: observed.filter((observation) => observation._tag.startsWith("Model")), ended, fellBack: count(logKeys.provider.fellBack), retried: count(logKeys.provider.requestRetried) };
 };
 
 const decodeAiError = Schema.decodeUnknownSync(Schema.toCodecJson(AiError.AiError));
@@ -151,6 +153,28 @@ test("with two fallbacks, each failed attempt is recorded with its own model: Cl
   expect(fellBack).toBe(2);
 });
 
+test("Anthropic is overloaded (HTTP 529) on every try: its send is retried twice, then OpenAI answers; Anthropic's failed attempt is recorded once", async () => {
+  const { model, ended, fellBack, retried } = await oneTurn({ anthropic: 529 }, ["hello"], [openAi], { times: 2, firstWait: "1 millis" });
+  expect(model).toMatchObject([
+    { _tag: "ModelRequestDispatched", provider: "anthropic" },
+    { _tag: "ModelAttemptFailed", provider: "anthropic" },
+    { _tag: "ModelRequestDispatched", provider: "openai" },
+    { _tag: "ModelChangeArrived", provider: "openai" },
+    { _tag: "ModelResponded", provider: "openai" },
+  ]);
+  expect(ended).toEqual(["Completed"]);
+  expect(retried).toBe(2);
+  expect(fellBack).toBe(1);
+});
+
+test("both providers are down with one retry each: each send is tried twice, so moving to OpenAI does not use up OpenAI's retry", async () => {
+  const { model, ended, fellBack, retried } = await oneTurn({ anthropic: 529, openAi: 503 }, ["hello"], [openAi], { times: 1, firstWait: "1 millis" });
+  expect(model.map((observation) => observation._tag)).toEqual(["ModelRequestDispatched", "ModelAttemptFailed", "ModelRequestDispatched", "ModelFailed"]);
+  expect(ended).toEqual(["Failed"]);
+  expect(retried).toBe(2);
+  expect(fellBack).toBe(1);
+});
+
 test("after falling back, the session stays on OpenAI: the next turn asks it first, and Anthropic is not tried again", async () => {
   const { model, ended, fellBack } = await oneTurn({ anthropic: 529 }, ["hello", "and again"]);
   expect(model.map((observation) => observation._tag)).toEqual([
@@ -189,8 +213,8 @@ test("a fallback to a provider with no request configured is a defect when the l
   const exit = await Effect.runPromiseExit(
     Layer.build(
       Layer.unwrap(
-        anthropicRequests(noRetries).pipe(
-          Effect.map((request) => FallbackModelClient({ requests: new Map([[anthropic.provider, request]]), fallbacks: [openAi] })),
+        anthropicRequests.pipe(
+          Effect.map((request) => FallbackModelClient({ requests: new Map([[anthropic.provider, request]]), fallbacks: [openAi], retries: noRetries })),
         ),
       ).pipe(Layer.provide(Layer.merge(anthropicAtMock(mock()), EphemeralBlobs))),
     ).pipe(Effect.scoped),

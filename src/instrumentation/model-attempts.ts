@@ -1,8 +1,10 @@
 /**
  * How each attempt at a model request ended, on the attempt's span (`agent.model.attempt`,
- * `agent-session/model-fallback.ts`).
+ * `agent-session/model-fallback.ts`). An attempt is one try of a request's send: a send that the
+ * model client retries makes an attempt, with its own span, for each try.
  *
- * `observedAttempts` wraps one provider's request function, and runs inside the attempt's span:
+ * `observedAttempts` wraps one provider's request function. It wraps the send that the request
+ * returns, which runs inside the attempt's span:
  *
  * - An attempt that responded has `outcome` `responded`, `ending` (the response's ending, classified),
  *   `stop` (the provider's reason, when it gave one), `output_tokens` (when the response reported its
@@ -11,8 +13,7 @@
  *   it is recorded as.
  * - An attempt that failed has `outcome` `failed`, `failure` (the error's text), `error_kind` (the
  *   `AiError`'s reason) and `error_signature` (`error-signature.ts`), and `http_status` when its last
- *   HTTP response was not 2xx (`FailedStatus`, kept by `agent-session/provider-call.ts`). A status
- *   that a retry within the attempt got past is not put on the span.
+ *   HTTP response was not 2xx (`FailedStatus`, kept by `agent-session/provider-call.ts`).
  *
  * The time to the first token (`ttft_ms`) is put on the attempt's span by `TimedModelClient`
  * (`model-timing.ts`), as the response streams. The attempt that answered passes its time to the
@@ -21,7 +22,7 @@
 
 import { Clock, Context, Effect, Option, Ref, Schema } from "effect";
 import { Observation } from "../agent-machine/observation.ts";
-import type { ProviderRequest } from "../agent-session/contracts.ts";
+import type { ProviderRequest, ProviderSend } from "../agent-session/contracts.ts";
 import { FailedStatus } from "../agent-session/provider-call.ts";
 import { errorSignature } from "./error-signature.ts";
 import { captureBody } from "./http-captures.ts";
@@ -54,38 +55,42 @@ export const failureAttributes = (failure: string, kind: string | undefined): Re
 
 const encodeObservation = Schema.encodeSync(Schema.fromJsonString(Observation));
 
+/** `send`, with how its attempt ended put on its span. */
+const observedSend = (send: ProviderSend): ProviderSend =>
+  send.pipe(
+    Effect.tap((response) =>
+      Effect.gen(function* () {
+        const span = Option.getOrUndefined(yield* Effect.option(Effect.currentSpan));
+        const now = yield* Clock.currentTimeNanos;
+        const ttft = span?.attributes.get("ttft_ms");
+        const ttftMs = typeof ttft === "number" ? ttft : undefined;
+        const output = response.usage?.output;
+        const rate = output === undefined || span === undefined ? undefined : tokensPerSecond(output, Number(now - span.status.startTime) / 1e6, ttftMs);
+        yield* Effect.annotateCurrentSpan({
+          outcome: "responded",
+          ending: response.ending._tag,
+          ...(response.stop === undefined ? {} : { stop: response.stop }),
+          ...(output === undefined ? {} : { output_tokens: output }),
+          ...(rate === undefined ? {} : { tokens_per_second: rate }),
+        });
+        const answering = yield* AnsweringAttempt;
+        if (answering !== undefined) yield* Ref.set(answering, { ...(ttftMs === undefined ? {} : { ttftMs }), ...(rate === undefined ? {} : { tokensPerSecond: rate }) });
+        yield* captureBody("response_message", () => encodeObservation(response));
+      }),
+    ),
+    Effect.tapError(({ error }) =>
+      Effect.gen(function* () {
+        const kept = yield* FailedStatus;
+        const status = kept === undefined ? undefined : yield* Ref.get(kept);
+        yield* Effect.annotateCurrentSpan({ outcome: "failed", ...failureAttributes(error.message, error.reason._tag), ...(status === undefined ? {} : { http_status: status }) });
+      }),
+    ),
+    // Each attempt keeps its own last status.
+    Effect.provideServiceEffect(FailedStatus, Ref.make<number | undefined>(undefined)),
+  );
+
 /** `request`, with how each attempt ended put on its span (see the module's description). */
 export const observedAttempts =
   (request: ProviderRequest): ProviderRequest =>
   (target, context, turn) =>
-    request(target, context, turn).pipe(
-      Effect.tap((response) =>
-        Effect.gen(function* () {
-          const span = Option.getOrUndefined(yield* Effect.option(Effect.currentSpan));
-          const now = yield* Clock.currentTimeNanos;
-          const ttft = span?.attributes.get("ttft_ms");
-          const ttftMs = typeof ttft === "number" ? ttft : undefined;
-          const output = response.usage?.output;
-          const rate = output === undefined || span === undefined ? undefined : tokensPerSecond(output, Number(now - span.status.startTime) / 1e6, ttftMs);
-          yield* Effect.annotateCurrentSpan({
-            outcome: "responded",
-            ending: response.ending._tag,
-            ...(response.stop === undefined ? {} : { stop: response.stop }),
-            ...(output === undefined ? {} : { output_tokens: output }),
-            ...(rate === undefined ? {} : { tokens_per_second: rate }),
-          });
-          const answering = yield* AnsweringAttempt;
-          if (answering !== undefined) yield* Ref.set(answering, { ...(ttftMs === undefined ? {} : { ttftMs }), ...(rate === undefined ? {} : { tokensPerSecond: rate }) });
-          yield* captureBody("response_message", () => encodeObservation(response));
-        }),
-      ),
-      Effect.tapError(({ error }) =>
-        Effect.gen(function* () {
-          const kept = yield* FailedStatus;
-          const status = kept === undefined ? undefined : yield* Ref.get(kept);
-          yield* Effect.annotateCurrentSpan({ outcome: "failed", ...failureAttributes(error.message, error.reason._tag), ...(status === undefined ? {} : { http_status: status }) });
-        }),
-      ),
-      // Each attempt keeps its own last status.
-      Effect.provideServiceEffect(FailedStatus, Ref.make<number | undefined>(undefined)),
-    );
+    Effect.map(request(target, context, turn), (send) => observedSend(send));

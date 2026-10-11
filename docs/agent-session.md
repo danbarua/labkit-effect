@@ -238,10 +238,15 @@ back into the core's observations:
 | `providers/xai-client.ts`           | xAI, through the Responses adapter |
 | `providers/openai-compat-client.ts` | OpenAI-compatible Chat Completions |
 
-- `provider-call.ts` does what every adapter does around one request: posts it, retries the
-  failures that `AiError` marks retryable before a response begins, and otherwise ends as
-  `ModelFailed` with the error and the request as posted. The whole error is logged where it is
-  caught.
+- An adapter makes a model request in two phases (`ProviderRequest`, `contracts.ts`). Preparing the
+  request reads its files, records the settings adjusted for the model, and returns the send. The
+  send posts the request once, and does not retry.
+- `provider-call.ts` does what every adapter does around one request: posts it, decides which
+  failures are retried (those that `AiError` marks retryable and that come before a response
+  begins, with the wait before each retry), and otherwise ends as `ModelFailed` with the error and
+  the request as posted. The whole error is logged where it is caught. A count of tokens and a
+  compaction are retried in the adapter (`withRetries`); a model request's send is retried by the
+  model client.
 - `shaping.ts` holds what every adapter needs to shape a context. Where an adapter supplies or
   replaces something that the context does not say, it records it as `Supplied` and logs it.
 - A tool call needs an id: its result is sent back under it. When a Chat Completions server sends a
@@ -253,9 +258,11 @@ back into the core's observations:
 - `model-fallback.ts` tries the session's target, then each fallback, moving on only after a
   failure that means the provider cannot serve the request now. When a fallback answers, the chain
   records a change of model to it. The chain is Effect's `ExecutionPlan`, built for each request
-  with one step for each target. Each step makes one attempt, and the adapter retries within it.
-  The `while` predicate of each step after the first decides whether to move on from the previous
-  step's failure, and records the failed attempt when it does.
+  with one step for each target. A step prepares its target's request once, then makes the send.
+  Its schedule decides two things: whether to retry the step's own failed send, and, for a step
+  after the first, whether to move on from the previous step's failure. Each failed send carries its
+  step's index, so the schedule tells the two apart. Each try of a send is an attempt with its own
+  span. `modelClientOf` is the same client over one provider and no fallbacks.
 - Each adapter's `*-settings.ts` maps the session's settings, the user's intent, to the provider's
   fields, from what is known of the model (`well-known-models.ts`: models.dev, the measured entries,
   the user's overrides). A setting that a model does not take is sent as the nearest one it does, or

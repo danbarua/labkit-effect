@@ -13,6 +13,7 @@ import { CallId, ModelName, ModelText, ProviderName, StopReason, TokenCount, Too
 import type { Usage } from "../agent-machine/observation.ts";
 import { ModelClient, type ProviderRequest, type Target } from "../agent-session/contracts.ts";
 import { FallbackModelClient } from "../agent-session/model-fallback.ts";
+import type { Retries } from "../agent-session/provider-call.ts";
 import { ModelStream } from "../agent-session/model-stream.ts";
 import { anthropicRequests } from "../agent-session/providers/anthropic-client.ts";
 import { openAiCompatRequests } from "../agent-session/providers/openai-compat-client.ts";
@@ -93,11 +94,11 @@ beforeAll(async () => {
 });
 afterAll(() => state.mock?.stop());
 
-/** A provider's request that answers as `target` with `usage`: its first token 200ms after it starts, and its answer one second after that. */
+/** A provider's request that answers as `target` with `usage`: its first token 200ms after its send starts, and its answer one second after that. */
 const answering =
   (usage: Usage): ProviderRequest =>
   (target, _context, turn) =>
-    Effect.gen(function* () {
+    Effect.succeed(Effect.gen(function* () {
       const passOn = yield* ModelStream;
       yield* TestClock.adjust("200 millis");
       yield* passOn({ _tag: "Delta", kind: "Text", text: "Hello" });
@@ -113,16 +114,22 @@ const answering =
         usage,
         metadata: receivedJson({}),
       };
-    });
+    }));
 
 /**
  * Asks `target` once, through `TimedModelClient` over a chain whose only provider is `request`, with
- * each attempt observed, inside a request's span; on the test clock unless `clock` is `live`.
- * Returns the request's and the attempt's span attributes, and each metric's attributes and count.
+ * each attempt observed, inside a request's span; on the test clock unless `clock` is `live`; with
+ * no retries unless `retries` gives them. Returns the request's span attributes, the first attempt's
+ * and every attempt's, and each metric's attributes and count.
  */
-const askOnce = async (target: Target, request: Effect.Effect<ProviderRequest>, clock: "test" | "live" = "test") => {
+const askOnce = async (
+  target: Target,
+  request: Effect.Effect<ProviderRequest>,
+  clock: "test" | "live" = "test",
+  retries: Retries = { times: 0, firstWait: "1 millis" },
+) => {
   const spans: Array<SpanLine> = [];
-  const chain = Layer.unwrap(Effect.map(request, (each) => FallbackModelClient({ requests: new Map([[target.provider, observedAttempts(each)]]), fallbacks: [] })));
+  const chain = Layer.unwrap(Effect.map(request, (each) => FallbackModelClient({ requests: new Map([[target.provider, observedAttempts(each)]]), fallbacks: [], retries })));
   const snapshot = await runTest(
     Effect.gen(function* () {
       const client = yield* ModelClient;
@@ -138,7 +145,8 @@ const askOnce = async (target: Target, request: Effect.Effect<ProviderRequest>, 
   const attributesOf = (name: string) => spans.find((span) => span.name === name)?.attributes ?? {};
   const counted = (id: string) =>
     snapshot.filter((metric) => metric.id === id).map((metric) => ({ attributes: metric.attributes, count: "count" in metric.state ? Number(metric.state.count) : undefined }));
-  return { request: attributesOf("agent.model.request"), attempt: attributesOf("agent.model.attempt"), counted };
+  const attempts = spans.filter((span) => span.name === "agent.model.attempt").map((span) => span.attributes);
+  return { request: attributesOf("agent.model.request"), attempt: attributesOf("agent.model.attempt"), attempts, counted };
 };
 
 test("a priced model's response: its request's span has priced=true, the cost and each component; the cost is counted by component; the attempt and the request have the attempt's tokens per second after its first token", async () => {
@@ -182,7 +190,7 @@ test("an attempt that fails (the key refused, HTTP 401) has its failure, error k
   const mock = state.mock;
   if (mock === undefined) throw new Error("VidaiMock did not start");
   const target = { provider: ProviderName.make("anthropic"), model: ModelName.make("claude-sonnet-5-5") };
-  const { request, attempt, counted } = await askOnce(target, anthropicRequests({ times: 0, firstWait: "1 millis" }).pipe(Effect.provide(Layer.merge(EphemeralBlobs, anthropicAtMock(mock, 401)))), "live");
+  const { request, attempt, counted } = await askOnce(target, anthropicRequests.pipe(Effect.provide(Layer.merge(EphemeralBlobs, anthropicAtMock(mock, 401)))), "live");
   expect(attempt).toMatchObject({ outcome: "failed", error_kind: "AuthenticationError", http_status: 401, failure: expect.stringContaining("AnthropicModelClient.respond") });
   expect(attempt["error_signature"]).toBeString();
   expect(request).toMatchObject({
@@ -197,7 +205,7 @@ test("an attempt that fails (the key refused, HTTP 401) has its failure, error k
   expect(counted("agent.model.responses")).toEqual([{ attributes: { provider: "anthropic", model: "claude-sonnet-5-5", outcome: "failed" }, count: 1 }]);
 });
 
-test("an attempt whose first try is answered 529 and whose retry is answered 200 responded, and has no HTTP status on its span", async () => {
+test("a send whose first try is answered 529 and whose retry is answered 200 makes two attempts: the first failed, with HTTP status 529 on its span; the second responded, with none", async () => {
   let asked = 0;
   // The first request is answered 529; every later one streams a short answer.
   const server = Bun.serve({
@@ -210,10 +218,12 @@ test("an attempt whose first try is answered 529 and whose retry is answered 200
   try {
     const target = { provider: ProviderName.make("localhost"), model: ModelName.make("qwen3.5-9b-8bit") };
     const client = OpenAiCompatClient.layer({ apiUrl: server.url.origin, apiKey: Redacted.make("test-key") }).pipe(Layer.provide(FetchHttpClient.layer));
-    const { attempt } = await askOnce(target, openAiCompatRequests({ times: 1, firstWait: "1 millis" }).pipe(Effect.provide(Layer.merge(EphemeralBlobs, client))), "live");
+    const { attempts } = await askOnce(target, openAiCompatRequests.pipe(Effect.provide(Layer.merge(EphemeralBlobs, client))), "live", { times: 1, firstWait: "1 millis" });
     expect(asked).toBe(2);
-    expect(attempt["outcome"]).toBe("responded");
-    expect("http_status" in attempt).toBe(false);
+    expect(attempts.map((attempt) => [attempt["outcome"], attempt["http_status"]])).toEqual([
+      ["failed", 529],
+      ["responded", undefined],
+    ]);
   } finally {
     await server.stop(true);
   }

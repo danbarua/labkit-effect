@@ -45,7 +45,8 @@ import type * as HttpClient from "effect/http/HttpClient";
 import { CallId, ModelText, StopReason, ThinkingText, ToolName, type TurnId } from "../../agent-machine/names.ts";
 import type { ModelPart, Observation } from "../../agent-machine/observation.ts";
 import { type ContextMessage, type ContextPart, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
-import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEventsOrWhole, type Retries, withRetries } from "../provider-call.ts";
+import { defaultRetries, failedPosting, invalidOutput, type Post, postEventsOrWhole, type Retries } from "../provider-call.ts";
+import { modelClientOf } from "../model-fallback.ts";
 import { ModelStream, type Streamed } from "../model-stream.ts";
 import { logKeys } from "../log-keys.ts";
 import { reportAdjusted } from "../configuration/settings.ts";
@@ -610,10 +611,8 @@ const respondOnce = (
     };
   });
 
-/** Makes requests through the configured compatible client, retried while the failure is retryable; a failure is the `AiError`. */
-export const openAiCompatRequests = (
-  retries: Retries = defaultRetries,
-): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient | Blobs> =>
+/** Makes requests through the configured compatible client; a failure is the `AiError`. The send posts once; the model client retries it. */
+export const openAiCompatRequests: Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient | Blobs> =
   Effect.gen(function* () {
     const http = (yield* OpenAiClient.OpenAiClient).client;
     const blobs = yield* Blobs;
@@ -632,7 +631,7 @@ export const openAiCompatRequests = (
         };
         return reportAdjusted(turn, target, settled).pipe(
           Effect.andThen(logSupplied(sent.supplied, target, turn, omittedLogged)),
-          Effect.andThen(respondOnce(http, post, target, turn, ids).pipe(withRetries(retries), failedPosting(post))),
+          Effect.as(respondOnce(http, post, target, turn, ids).pipe(failedPosting(post))),
         );
         }),
       );
@@ -640,6 +639,6 @@ export const openAiCompatRequests = (
   });
 
 export const openAiCompatModelClient = (retries: Retries = defaultRetries) =>
-  Layer.effect(ModelClient, openAiCompatRequests(retries).pipe(Effect.map(modelClientOf)));
+  Layer.effect(ModelClient, openAiCompatRequests.pipe(Effect.map((request) => modelClientOf(request, retries))));
 
 export const OpenAiCompatModelClient = openAiCompatModelClient();

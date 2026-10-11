@@ -7,10 +7,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "bun:test";
 import { test, testFolder } from "./support/test.ts";
-import { Cause, ConfigProvider, Effect, Layer, Metric } from "effect";
+import { Cause, ConfigProvider, Effect, Metric } from "effect";
 import { ModelName, ProviderName } from "../src/agent-machine/names.ts";
-import { ModelClient, type ProviderRequest } from "../src/agent-session/contracts.ts";
-import { FallbackModelClient } from "../src/agent-session/model-fallback.ts";
 import { scriptedFizzBuzzModel } from "../src/examples/fizzbuzz/model.ts";
 import { advanced, play } from "../src/examples/fizzbuzz/scenario.ts";
 import { SourcedToolRunner } from "../src/agent-session/tool-sources.ts";
@@ -73,20 +71,8 @@ const readLines = <A>(path: string): ReadonlyArray<A> =>
 test("the file holds the session's span, each turn's under it, each request's under its turn, and each attempt under its request; the session's span ends with the session's totals", async () => {
   const base = join(testFolder(), "telemetry");
   const target = { provider: ProviderName.make("scripted"), model: ModelName.make("fizzbuzz-1") };
-  // The scripted model as a provider's request, behind the fallback chain, so each request makes an attempt.
-  const client = Layer.unwrap(
-    Effect.gen(function* () {
-      const scripted = yield* ModelClient;
-      const request: ProviderRequest = (to, context, turn) =>
-        scripted.respond(to, context, turn).pipe(
-          Effect.filterOrElse(
-            (outcome): outcome is Extract<typeof outcome, { _tag: "ModelResponded" }> => outcome._tag === "ModelResponded",
-            (outcome) => Effect.die(outcome),
-          ),
-        );
-      return FallbackModelClient({ requests: new Map([[target.provider, request]]), fallbacks: [] });
-    }),
-  ).pipe(Layer.provide(scriptedFizzBuzzModel().layer));
+  // The scripted model's client (`modelClientOf`) makes an attempt for each request.
+  const client = scriptedFizzBuzzModel().layer;
   await runTest(
     play(["1", "3", "7"], { ...advanced, session: "dave", model: { target, client } }).pipe(Effect.provide(TelemetryToFiles(base))),
   );

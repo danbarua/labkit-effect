@@ -162,7 +162,7 @@ export const nonNullAssertions: Readonly<Record<string, number>> = {
   "src/agent-mcp/server.ts": 1,
   "src/agent-mcp/servers.test.ts": 1,
   "src/examples/cli-repl/failure.test.ts": 2,
-  "src/instrumentation/http-captures.test.ts": 27,
+  "src/instrumentation/http-captures.test.ts": 26,
   "tests/examples/policies.test.ts": 2,
   "tests/examples/zork-spectator.test.ts": 1,
   "tests/examples/zork.test.ts": 4,

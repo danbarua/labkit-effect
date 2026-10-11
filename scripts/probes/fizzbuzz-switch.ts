@@ -25,6 +25,7 @@ import { Fact } from "../../src/agent-machine/fact.ts";
 import { ModelName, ProviderName, TestName } from "../../src/agent-machine/names.ts";
 import { FallbackModelClient } from "../../src/agent-session/model-fallback.ts";
 import { reportedBy } from "../../src/agent-session/origin.ts";
+import { defaultRetries } from "../../src/agent-session/provider-call.ts";
 import { anthropicRequests } from "../../src/agent-session/providers/anthropic-client.ts";
 import { openAiRequests } from "../../src/agent-session/providers/openai-client.ts";
 import { whenCountReaches } from "../../src/examples/fizzbuzz/compaction-policies.ts";
@@ -50,9 +51,9 @@ const gpt = { provider: ProviderName.make("openai"), model: ModelName.make("gpt-
 // the provider the session is asking.
 const client = Layer.unwrap(
   Effect.gen(function* () {
-    const anthropic = yield* anthropicRequests();
+    const anthropic = yield* anthropicRequests;
     const openai = yield* openAiRequests();
-    return FallbackModelClient({ requests: new Map([[claude.provider, anthropic], [gpt.provider, openai]]), fallbacks: [] });
+    return FallbackModelClient({ requests: new Map([[claude.provider, anthropic], [gpt.provider, openai]]), fallbacks: [], retries: defaultRetries });
   }),
 ).pipe(
   Layer.provide(

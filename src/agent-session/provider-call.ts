@@ -2,7 +2,9 @@
  * What every provider adapter does around one model request:
  * - post JSON through the provider's configured HTTP client;
  * - fail with Effect's `AiError` when the request does not produce a usable response;
- * - retry the failures that `AiError` marks retryable and that come before a response begins;
+ * - decide which failures are retried: those that `AiError` marks retryable and that come before a
+ *   response begins (`retryMade`, `retryWait`). A model client retries a model request's send
+ *   (`model-fallback.ts`); `withRetries` retries a count of tokens or a compaction;
  * - otherwise end as `ModelFailed`, carrying the error and the request as it was posted.
  *
  * The whole error is logged where it is caught.
@@ -18,7 +20,6 @@ import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { FailureText, type TurnId } from "../agent-machine/names.ts";
 import type { Observation } from "../agent-machine/observation.ts";
 import type { Received } from "../agent-machine/received.ts";
-import { ModelClient, type ProviderRequest } from "./contracts.ts";
 import { receivedJson } from "./received.ts";
 import { logKeys } from "./log-keys.ts";
 
@@ -74,7 +75,7 @@ export const failedPosting =
 
 /**
  * Marks that the provider has begun to respond to the request being made: a 2xx status arrived.
- * `withRetries` gives each attempt its own mark; outside `withRetries`, marking does nothing.
+ * `markingBegan` gives each attempt its own mark; outside it, marking does nothing.
  */
 export const ResponseBegan = Context.Reference<{ readonly mark: Effect.Effect<void> }>("agent-session/ResponseBegan", {
   defaultValue: () => ({ mark: Effect.void }),
@@ -83,8 +84,8 @@ export const ResponseBegan = Context.Reference<{ readonly mark: Effect.Effect<vo
 /**
  * Keeps the status of the last HTTP response of the attempt being made, when it was not 2xx, for the
  * attempt's span: a failure's reason, such as a rate limit, does not keep it. A 2xx response clears
- * it, so a status that a retry got past is not kept. The model attempt's observer
- * (`instrumentation/model-attempts.ts`) gives each attempt its own; outside one, nothing is kept.
+ * it. The model attempt's observer (`instrumentation/model-attempts.ts`) gives each attempt, each try
+ * of a send, its own; outside one, nothing is kept.
  */
 export const FailedStatus = Context.Reference<Ref.Ref<number | undefined> | undefined>("agent-session/FailedStatus", { defaultValue: () => undefined });
 
@@ -282,10 +283,23 @@ export const invalidOutput = (caller: Caller, description: string): AiError.AiEr
   failure(caller, new AiError.InvalidOutputError({ description }));
 
 /** A request's failure, and whether the provider had begun to respond when it came. */
-interface Attempted {
-  readonly error: AiError.AiError;
+export interface Began<E> {
+  readonly failed: E;
   readonly began: boolean;
 }
+
+/**
+ * Runs `request` with its own mark of the response beginning (`ResponseBegan`). When `request`
+ * fails, the failure carries whether the provider had begun to respond.
+ */
+export const markingBegan = <A, E, R>(request: Effect.Effect<A, E, R>): Effect.Effect<A, Began<E>, R> =>
+  Effect.gen(function* () {
+    const began = yield* Ref.make(false);
+    return yield* request.pipe(
+      Effect.provideService(ResponseBegan, { mark: Ref.set(began, true) }),
+      Effect.catch((failed: E) => Effect.flatMap(Ref.get(began), (wasBegun) => Effect.fail<Began<E>>({ failed, began: wasBegun }))),
+    );
+  });
 
 /** Returns why a retryable failure is not retried, or undefined when it is: the provider had begun to respond, or a rate limit asks for a wait longer than `longest`. */
 const notRetriedBecause = (began: boolean, reason: AiError.AiErrorReason, longest: Duration.Duration): string | undefined => {
@@ -296,70 +310,69 @@ const notRetriedBecause = (began: boolean, reason: AiError.AiErrorReason, longes
 };
 
 /**
- * The retry schedule. A failed request is made again while all of these hold:
- * - its failure is retryable;
- * - it came before the provider began to respond;
+ * Returns whether retry `retry` (1 for the first) is made after a request failed with `error`. It is
+ * made while all of these hold:
+ * - the failure is retryable;
+ * - it came before the provider began to respond (`began`);
  * - `retries.times` are not used up.
  *
- * The wait is `firstWait`, doubled each time, or the wait that a rate limit asks for. Each retry is
- * logged as a warning before its wait. A retryable failure that is not retried is logged as a
- * warning with the reason.
+ * A retryable failure that is not retried for another reason is logged as a warning with the reason.
  */
+export const retryMade = (retries: Retries, { failed: error, began }: Began<AiError.AiError>, retry: number): Effect.Effect<boolean> =>
+  Effect.gen(function* () {
+    const reason = error.reason;
+    if (!reason.isRetryable || retry > retries.times) return false;
+    const longest = Duration.fromInputUnsafe(retries.longestWait ?? "1 minute");
+    const why = notRetriedBecause(began, reason, longest);
+    if (why === undefined) return true;
+    yield* Effect.logWarning(logKeys.provider.notRetried, { reason: reason._tag, message: error.message, why, error: encodeAiError(error) });
+    return false;
+  });
+
+/**
+ * Returns the wait before retry `retry` (1 for the first) after a request failed with `error`: the
+ * wait that a rate limit asks for, or `firstWait` doubled for each retry before this one. The retry is
+ * logged as a warning before its wait.
+ */
+export const retryWait = (retries: Retries, error: AiError.AiError, retry: number): Effect.Effect<Duration.Duration> =>
+  Effect.gen(function* () {
+    const reason = error.reason;
+    const wait =
+      reason._tag === "RateLimitError" && reason.retryAfter !== undefined
+        ? Duration.fromInputUnsafe(reason.retryAfter)
+        : Duration.times(Duration.fromInputUnsafe(retries.firstWait), 2 ** (retry - 1));
+    yield* Effect.logWarning(logKeys.provider.requestRetried, {
+      reason: reason._tag,
+      message: error.message,
+      retry,
+      of: retries.times,
+      wait: Duration.format(wait),
+      error: encodeAiError(error),
+    });
+    return wait;
+  });
+
+/** The retry schedule of `withRetries`: a retry is made when `retryMade` says so, after `retryWait`. */
 const retrying = (retries: Retries) =>
-  Schedule.exponential(retries.firstWait).pipe(
-    Schedule.while(({ input, attempt }: Schedule.Metadata<Duration.Duration, Attempted>) =>
-      Effect.gen(function* () {
-        const reason = input.error.reason;
-        if (!reason.isRetryable || attempt > retries.times) return false;
-        const longest = Duration.fromInputUnsafe(retries.longestWait ?? "1 minute");
-        const why = notRetriedBecause(input.began, reason, longest);
-        if (why === undefined) return true;
-        yield* Effect.logWarning(logKeys.provider.notRetried, { reason: reason._tag, message: input.error.message, why, error: encodeAiError(input.error) });
-        return false;
-      }),
-    ),
-    Schedule.modifyDelay(({ input, attempt, duration }: Schedule.Metadata<Duration.Duration, Attempted>) =>
-      Effect.gen(function* () {
-        const reason = input.error.reason;
-        const wait = reason._tag === "RateLimitError" && reason.retryAfter !== undefined ? Duration.fromInputUnsafe(reason.retryAfter) : duration;
-        yield* Effect.logWarning(logKeys.provider.requestRetried, {
-          reason: reason._tag,
-          message: input.error.message,
-          retry: attempt,
-          of: retries.times,
-          wait: Duration.format(wait),
-          error: encodeAiError(input.error),
-        });
-        return wait;
-      }),
-    ),
+  Schedule.forever.pipe(
+    Schedule.while(({ input, attempt }: Schedule.Metadata<number, Began<AiError.AiError>>) => retryMade(retries, input, attempt)),
+    Schedule.modifyDelay(({ input, attempt }: Schedule.Metadata<number, Began<AiError.AiError>>) => retryWait(retries, input.failed, attempt)),
   );
 
 /**
- * Retries `request` on the `retrying` schedule. A request whose response had begun is not made again:
- * what it passed on, and any tool call it started, belong to that response, and the provider would
- * answer a second request as a new one. Each attempt has its own mark of the response beginning
- * (`ResponseBegan`).
+ * Retries `request` on the `retrying` schedule, for a request that is not a model request: a count of
+ * tokens, or a compaction. (A model client retries a model request's send itself,
+ * `model-fallback.ts`.) A request whose response had begun is not made again: what it passed on, and
+ * any tool call it started, belong to that response, and the provider would answer a second request
+ * as a new one. Each attempt has its own mark of the response beginning (`ResponseBegan`).
  */
 export const withRetries =
   (retries: Retries) =>
   <A>(request: Effect.Effect<A, AiError.AiError>): Effect.Effect<A, AiError.AiError> =>
-    Effect.gen(function* () {
-      const began = yield* Ref.make(false);
-      return yield* request.pipe(
-        Effect.provideService(ResponseBegan, { mark: Ref.set(began, true) }),
-        Effect.catch((error: AiError.AiError) => Effect.flatMap(Ref.get(began), (wasBegun) => Effect.fail<Attempted>({ error, began: wasBegun }))),
-      );
-    }).pipe(
+    markingBegan(request).pipe(
       Effect.retry(retrying(retries)),
-      Effect.mapError(({ error }) => error),
+      Effect.mapError(({ failed }) => failed),
     );
-
-/** Returns a model client that makes `request` and reports a failure as `ModelFailed`. */
-export const modelClientOf = (request: ProviderRequest) =>
-  ModelClient.of({
-    respond: (target, context, turn) => request(target, context, turn).pipe(Effect.catch(failedAs(turn))),
-  });
 
 const encodeAiError = Schema.encodeSync(Schema.toCodecJson(AiError.AiError));
 

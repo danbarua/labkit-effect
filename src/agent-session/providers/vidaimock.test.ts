@@ -52,29 +52,29 @@ const adapters: ReadonlyArray<AtMock> = [
   {
     name: "Anthropic Messages",
     streams: true,
-    requests: (status) => anthropicRequests(noRetries).pipe(Effect.provide(Layer.merge(EphemeralBlobs, anthropicAtMock(mock(), status)))),
+    requests: (status) => anthropicRequests.pipe(Effect.provide(Layer.merge(EphemeralBlobs, anthropicAtMock(mock(), status)))),
     client: (retries, status) => anthropicModelClient(retries).pipe(Layer.provide(anthropicAtMock(mock(), status))),
   },
   {
     name: "OpenAI Responses",
     streams: true,
-    requests: (status) => openAiRequests(noRetries).pipe(Effect.provide(Layer.merge(EphemeralBlobs, openAiAtMock(mock(), status)))),
+    requests: (status) => openAiRequests().pipe(Effect.provide(Layer.merge(EphemeralBlobs, openAiAtMock(mock(), status)))),
     client: (retries, status) => openAiModelClient(retries).pipe(Layer.provide(openAiAtMock(mock(), status))),
   },
   {
     name: "OpenAI-compatible Chat Completions",
     streams: true,
-    requests: (status) => openAiCompatRequests(noRetries).pipe(Effect.provide(Layer.merge(EphemeralBlobs, openAiCompatAtMock(mock(), status)))),
+    requests: (status) => openAiCompatRequests.pipe(Effect.provide(Layer.merge(EphemeralBlobs, openAiCompatAtMock(mock(), status)))),
     client: (retries, status) => openAiCompatModelClient(retries).pipe(Layer.provide(openAiCompatAtMock(mock(), status))),
   },
 ];
 
-/** One request through `adapter` at the mock, answered with `status`: the error it failed with, if it did. */
+/** One request through `adapter` at the mock, prepared and sent once, answered with `status`: the error it failed with, if it did. */
 const failureOf = async (adapter: AtMock, status: number): Promise<AiError.AiError | undefined> => {
   const context: ModelContext = { system: undefined, tools: [], messages: [{ role: "user", parts: [{ _tag: "Text", text: "hi" }] }] };
   const target = { provider: ProviderName.make("mock"), model: ModelName.make("mock-1") };
   const exit = await Effect.runPromiseExit(
-    adapter.requests(status).pipe(Effect.flatMap((respond) => respond(target, context, TurnId.make("turn-1")))),
+    adapter.requests(status).pipe(Effect.flatMap((respond) => Effect.flatten(respond(target, context, TurnId.make("turn-1"))))),
   );
   return Exit.isFailure(exit) ? exit.cause.reasons.flatMap((cause) => (cause._tag === "Fail" ? [cause.error.error] : []))[0] : undefined;
 };

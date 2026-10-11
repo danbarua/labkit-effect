@@ -12,8 +12,8 @@
  * - Without `report_error`, input that is not a whole number fails the request with an `AiError`
  *   (`InvalidUserInputError`), as a provider would.
  *
- * It is a `ProviderRequest`, like an adapter's, and its model client is built with `modelClientOf`.
- * Every context it is sent is kept, in order, in `seen`.
+ * It is a `ProviderRequest`, like an adapter's, and its model client is built with `modelClientOf`,
+ * with no retries. Every context it is sent is kept, in order, in `seen`.
  */
 
 import type { Blobs } from "../../agent-session/blobs.ts";
@@ -28,7 +28,8 @@ import {
   type ProviderRequest,
   type Target,
 } from "../../agent-session/contracts.ts";
-import { modelClientOf, RequestFailed } from "../../agent-session/provider-call.ts";
+import { modelClientOf } from "../../agent-session/model-fallback.ts";
+import { RequestFailed, type Retries } from "../../agent-session/provider-call.ts";
 import { parseJson, receivedJson } from "../../agent-session/received.ts";
 import { sentAs } from "../../agent-session/sent.ts";
 import { isObject } from "../../agent-session/shaping.ts";
@@ -45,6 +46,9 @@ export function labelOf(n: number): Label | undefined {
 
 const texts = (message: ContextMessage): ReadonlyArray<string> =>
   message.parts.flatMap((part) => (part._tag === "Text" ? [part.text] : []));
+
+/** The scripted model is not retried: none of its failures is retryable, and it is asked as it is. */
+const noRetries: Retries = { times: 0, firstWait: "0 millis" };
 
 const summaryLine = /The last number you returned to the user was: (-?\d+)/;
 
@@ -151,11 +155,12 @@ export function scriptedFizzBuzzModel(): {
   // What this model is given is the context itself, so a failure records that as the request.
   const request: ProviderRequest = (target, context, turn) =>
     Ref.update(seen, Arr.append(context)).pipe(
-      Effect.andThen(Effect.suspend(() => respond(target, context, turn))),
-      Effect.mapError((error) => new RequestFailed({ error, request: sentAs(context) })),
+      Effect.as(
+        Effect.suspend(() => respond(target, context, turn)).pipe(Effect.mapError((error) => new RequestFailed({ error, request: sentAs(context) }))),
+      ),
     );
   return {
-    layer: Layer.succeed(ModelClient, modelClientOf(request)),
+    layer: Layer.succeed(ModelClient, modelClientOf(request, noRetries)),
     seen: Ref.get(seen),
   };
 }

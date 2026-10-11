@@ -46,12 +46,11 @@ import {
   defaultRetries,
   failedPosting,
   invalidOutput,
-  modelClientOf,
   type Post,
   postEvents,
   type Retries,
-  withRetries,
 } from "../provider-call.ts";
+import { modelClientOf } from "../model-fallback.ts";
 import { logKeys } from "../log-keys.ts";
 import { ModelStream } from "../model-stream.ts";
 import { reportAdjusted, type Settled } from "../configuration/settings.ts";
@@ -359,13 +358,12 @@ const respondOnce = (
   });
 
 /**
- * Makes requests through the configured `OpenAiClient`, retried while the failure is retryable; a
- * failure is the `AiError`. `settle` puts the session's settings for the target's model into the
- * request, because another provider that accepts Responses requests maps the settings differently
- * (`xai-settings.ts`).
+ * Makes requests through the configured `OpenAiClient`; a failure is the `AiError`. The send posts
+ * once; the model client retries it. `settle` puts the session's settings for the target's model
+ * into the request, because another provider that accepts Responses requests maps the settings
+ * differently (`xai-settings.ts`).
  */
 export const openAiRequests = (
-  retries: Retries = defaultRetries,
   settle: (target: Target) => Settled = openAiSettle,
 ): Effect.Effect<ProviderRequest, never, OpenAiClient.OpenAiClient | Blobs> =>
   Effect.gen(function* () {
@@ -384,7 +382,7 @@ export const openAiRequests = (
         };
         return reportAdjusted(turn, target, settled).pipe(
           Effect.andThen(logSupplied(sent.supplied, target, turn, omittedLogged)),
-          Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
+          Effect.as(respondOnce(http, post, target, turn).pipe(failedPosting(post))),
         );
         }),
       );
@@ -392,6 +390,6 @@ export const openAiRequests = (
   });
 
 export const openAiModelClient = (retries: Retries = defaultRetries) =>
-  Layer.effect(ModelClient, openAiRequests(retries).pipe(Effect.map(modelClientOf)));
+  Layer.effect(ModelClient, openAiRequests().pipe(Effect.map((request) => modelClientOf(request, retries))));
 
 export const OpenAiModelClient = openAiModelClient();

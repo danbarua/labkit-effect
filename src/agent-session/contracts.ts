@@ -130,15 +130,19 @@ export class ModelClient extends Context.Service<
 >()("agent-session/ModelClient") {}
 
 /**
- * One request to one provider, as its adapter makes it, retries included. It returns the response,
- * or fails with the `AiError` and the request as it was made (`RequestFailed`). A model client is
- * built from one or more of these and decides what a failure becomes.
+ * One request to one provider, as its adapter makes it, in two phases.
+ * - Preparing the request (`ProviderRequest`) reads the files that the context refers to, records
+ *   the settings that the adapter adjusted for the model, and returns the send. It posts nothing.
+ * - The send (`ProviderSend`) posts the request once. It returns the response, or fails with the
+ *   `AiError` and the request as it was posted (`RequestFailed`). It does not retry.
+ *
+ * A model client is built from one or more of these. It prepares each request once, and decides
+ * whether to make the send again, and what a failure becomes (`model-fallback.ts`).
  */
-export type ProviderRequest = (
-  target: Target,
-  context: ModelContext,
-  turn: TurnId,
-) => Effect.Effect<Extract<Observation, { _tag: "ModelResponded" }>, RequestFailed>;
+export type ProviderRequest = (target: Target, context: ModelContext, turn: TurnId) => Effect.Effect<ProviderSend>;
+
+/** The post of a prepared request (`ProviderRequest`): a model client may make it more than once. */
+export type ProviderSend = Effect.Effect<Extract<Observation, { _tag: "ModelResponded" }>, RequestFailed>;
 
 /** Returns the identity of a turn that is starting. */
 export class Turns extends Context.Service<Turns, { readonly start: Effect.Effect<TurnId> }>()(

@@ -57,7 +57,8 @@ import {
 } from "../contracts.ts";
 import { logKeys } from "../log-keys.ts";
 import { ModelStream, type Streamed } from "../model-stream.ts";
-import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEvents, type Retries, withRetries } from "../provider-call.ts";
+import { defaultRetries, failedPosting, invalidOutput, type Post, postEvents, type Retries } from "../provider-call.ts";
+import { modelClientOf } from "../model-fallback.ts";
 import { reportAdjusted, type Settled } from "../configuration/settings.ts";
 import { anthropicSettle } from "./anthropic-settings.ts";
 import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
@@ -382,12 +383,10 @@ export function toolCallFields(context: ModelContext, fields: Settled["fields"])
 /**
  * Requests go through the configured `AnthropicClient` (its address, key and API version). The
  * client's typed response decoding is not used, so a block type that it does not know is kept as
- * `Unrecognised` instead of failing the response. A failure is an `AiError`; retryable failures are
- * retried.
+ * `Unrecognised` instead of failing the response. A failure is an `AiError`. The send posts once; the
+ * model client retries it.
  */
-export const anthropicRequests = (
-  retries: Retries = defaultRetries,
-): Effect.Effect<ProviderRequest, never, AnthropicClient.AnthropicClient | Blobs> =>
+export const anthropicRequests: Effect.Effect<ProviderRequest, never, AnthropicClient.AnthropicClient | Blobs> =
   Effect.gen(function* () {
     const http = (yield* AnthropicClient.AnthropicClient).client.httpClient;
     const blobs = yield* Blobs;
@@ -405,7 +404,7 @@ export const anthropicRequests = (
         };
         return reportAdjusted(turn, target, settled).pipe(
           Effect.andThen(logSupplied([...fields.supplied, ...sent.supplied], target, turn, omittedLogged)),
-          Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
+          Effect.as(respondOnce(http, post, target, turn).pipe(failedPosting(post))),
         );
         }),
       );
@@ -413,6 +412,6 @@ export const anthropicRequests = (
   });
 
 export const anthropicModelClient = (retries: Retries = defaultRetries) =>
-  Layer.effect(ModelClient, anthropicRequests(retries).pipe(Effect.map(modelClientOf)));
+  Layer.effect(ModelClient, anthropicRequests.pipe(Effect.map((request) => modelClientOf(request, retries))));
 
 export const AnthropicModelClient = anthropicModelClient();

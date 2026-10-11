@@ -58,16 +58,16 @@ const answered = async (response: Response, headers: Record<string, string> = {}
   return { text, answer: () => new Response(text, { status: response.status, headers: { ...Object.fromEntries(response.headers), ...headers } }) };
 };
 
-type Adapter = (http: Layer.Layer<HttpClient.HttpClient>, url: URL, retries: Retries) => Effect.Effect<ProviderRequest>;
+type Adapter = (http: Layer.Layer<HttpClient.HttpClient>, url: URL) => Effect.Effect<ProviderRequest>;
 
 const key = Redacted.make("test-key");
 
 /** Each adapter, made with its provider's client over `http`, pointed at `url`. */
 const adapters: Record<"anthropic" | "openai" | "xai" | "localhost", Adapter> = {
-  anthropic: (http, url, retries) => anthropicRequests(retries).pipe(Effect.provide(Layer.merge(EphemeralBlobs, AnthropicClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http))))),
-  openai: (http, url, retries) => openAiRequests(retries).pipe(Effect.provide(Layer.merge(EphemeralBlobs, OpenAiClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http))))),
-  xai: (http, url, retries) => xAiRequests(retries).pipe(Effect.provide(Layer.merge(EphemeralBlobs, OpenAiClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http))))),
-  localhost: (http, url, retries) => openAiCompatRequests(retries).pipe(Effect.provide(Layer.merge(EphemeralBlobs, OpenAiCompatClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http))))),
+  anthropic: (http, url) => anthropicRequests.pipe(Effect.provide(Layer.merge(EphemeralBlobs, AnthropicClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http))))),
+  openai: (http, url) => openAiRequests().pipe(Effect.provide(Layer.merge(EphemeralBlobs, OpenAiClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http))))),
+  xai: (http, url) => xAiRequests.pipe(Effect.provide(Layer.merge(EphemeralBlobs, OpenAiClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http))))),
+  localhost: (http, url) => openAiCompatRequests.pipe(Effect.provide(Layer.merge(EphemeralBlobs, OpenAiCompatClient.layer({ apiUrl: url.origin, apiKey: key }).pipe(Layer.provide(http))))),
 };
 
 interface Logged {
@@ -106,8 +106,8 @@ const ask = async (asked: Asked) => {
       Effect.provide(
         Layer.mergeAll(
           Layer.unwrap(
-            Effect.map(adapters[asked.provider](capturingHttp(FetchHttpClient.layer), asked.url, asked.retries ?? { times: 0, firstWait: "1 millis" }), (request) =>
-              FallbackModelClient({ requests: new Map([[provider, request]]), fallbacks: [] }),
+            Effect.map(adapters[asked.provider](capturingHttp(FetchHttpClient.layer), asked.url), (request) =>
+              FallbackModelClient({ requests: new Map([[provider, request]]), fallbacks: [], retries: asked.retries ?? { times: 0, firstWait: "1 millis" } }),
             ),
           ),
           SpansTo((line) => void spans.push(line)),
@@ -218,7 +218,7 @@ test("a failed status's body is captured as the response; a body that is not JSO
   expect(failedText!.fields).toMatchObject({ status: 400, content_type: "text/html", as: "text" });
 });
 
-test("a retried request captures each attempt's request and response", async () => {
+test("a retried send captures each try's request and response, each in the span of its own attempt", async () => {
   const stream = await answered(answers.openai());
   const server = served([() => new Response("busy", { status: 503 }), stream.answer]);
   const { captures, attempts } = await ask({ provider: "openai", url: server.url, retries: { times: 1, firstWait: "1 millis" } });
@@ -226,7 +226,9 @@ test("a retried request captures each attempt's request and response", async () 
   expect(await fileOf(captures[0]!.fields)).toEqual(server.bodies[0]!);
   expect(await fileOf(captures[2]!.fields)).toEqual(server.bodies[1]!);
   expect(new Set(captures.map(({ fields }) => fields["capture_id"])).size).toBe(4);
-  expect(new Set(captures.map(({ spanId }) => spanId))).toEqual(new Set([attempts[0]!.spanId]));
+  expect(attempts).toHaveLength(2);
+  // Each attempt's span holds its request and its response.
+  expect(captures.map(({ spanId }) => spanId)).toEqual(attempts.flatMap(({ spanId }) => [spanId, spanId]));
 });
 
 test("a request that fails before any response is still captured, in the attempt's span", async () => {
