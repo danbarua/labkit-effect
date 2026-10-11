@@ -14,14 +14,35 @@
  * - A fallback that is the same as the chosen target is not tried again.
  *
  * Each attempt runs in a span, `agent.model.attempt`, with its provider and model.
+ *
+ * The chain is an `ExecutionPlan` (`effect`, `@stability unstable` in 4.0.2), built for each request,
+ * with one step for each target. A step provides its target and its provider's request function
+ * (`FallbackStep`), and the attempt run under the plan reads them.
+ * - Each step makes one attempt: it has no `attempts` and no `schedule`. The adapter retries within
+ *   the attempt (`withRetries`, `provider-call.ts`).
+ * - The first step has no `while` predicate. Effect does not consult the first step's `while` when
+ *   the step has no `attempts`.
+ * - Step `i`'s `while` receives the error of step `i - 1`'s attempt, and decides whether step `i`
+ *   runs. It moves on after a failure in `fallsBackOn`, and before it does, it records the failed
+ *   attempt and logs the fallback. Effect consults it once, so each failure is recorded once.
+ * - When step `i`'s `while` refuses an error, Effect gives the same error to each later step's
+ *   `while`, which refuses it too, so the request fails with the error that was refused. Every step
+ *   uses the same rule for this reason: a step with a different rule could be skipped, and the step
+ *   after it would attribute the earlier step's error to the skipped target.
+ * - The attempt reads its step from the plan's metadata (`ExecutionPlan.CurrentMetadata`), which
+ *   Effect provides to the attempt but not to `while`. An attempt on a step after the first records
+ *   its request (`ModelRequestDispatched`) and, when it answers, the change of model.
+ *
+ * The plan's `onEvent` observer is not used to record attempts: an `AttemptFailure` event does not
+ * say whether the plan moves on, and Effect ignores the observer's own failures and defects.
  */
 
-import { Effect, Layer } from "effect";
+import { Array as Arr, Context, Effect, ExecutionPlan, Layer } from "effect";
 import type * as AiError from "effect/ai/AiError";
 import { FailureText, type ProviderName, type TurnId } from "../agent-machine/names.ts";
 import { ModelClient, type ModelContext, type ProviderRequest, type Target } from "./contracts.ts";
 import { logKeys } from "./log-keys.ts";
-import { failedAs, receivedAiError } from "./provider-call.ts";
+import { failedAs, receivedAiError, type RequestFailed } from "./provider-call.ts";
 import { harnessParts } from "./origin.ts";
 import { Report } from "./report.ts";
 import { sentAs } from "./sent.ts";
@@ -41,6 +62,11 @@ export interface FallbackChain {
   readonly fallbacks: ReadonlyArray<Target>;
 }
 
+/** The target of a step of the chain's plan, and the request function of the target's provider. */
+class FallbackStep extends Context.Service<FallbackStep, { readonly target: Target; readonly request: ProviderRequest }>()(
+  "agent-session/FallbackStep",
+) {}
+
 /** Returns the request function for `target`'s provider. A provider with no configured request is a configuration fault: a defect, not a failed request. */
 const requestFor = (chain: FallbackChain, target: Target): Effect.Effect<ProviderRequest> => {
   const request = chain.requests.get(target.provider);
@@ -51,68 +77,65 @@ const requestFor = (chain: FallbackChain, target: Target): Effect.Effect<Provide
 
 const sameTarget = (a: Target, b: Target): boolean => a.provider === b.provider && a.model === b.model;
 
-/** Tries `targets` in order. `fellBack` is true when an earlier target has failed and the first of `targets` is a fallback. */
-const attempt = (
-  chain: FallbackChain,
-  targets: readonly [Target, ...ReadonlyArray<Target>],
-  context: ModelContext,
-  turn: TurnId,
-  fellBack: boolean,
-): ReturnType<ProviderRequest> => {
-  const [target, next, ...rest] = targets;
-  // The loop records the request to the target it chose; a request to a fallback is recorded here.
-  const dispatched = fellBack
-    ? Effect.gen(function* () {
+/** One attempt, at the target of the plan's current step. */
+const attempt = (context: ModelContext, turn: TurnId) =>
+  Effect.gen(function* () {
+    const { target, request } = yield* FallbackStep;
+    const fellBack = (yield* ExecutionPlan.CurrentMetadata).stepIndex > 0;
+    const response = yield* Effect.gen(function* () {
+      // The loop records the request to the target it chose; a request to a fallback is recorded here.
+      if (fellBack)
         yield* (yield* Report)(
           { _tag: "ModelRequestDispatched", turn, provider: target.provider, model: target.model, sent: sentAs(context) },
           harnessParts.fallbackChain,
         );
-      })
-    : Effect.void;
-  const tried = requestFor(chain, target).pipe(
-    Effect.tap(() => dispatched),
-    Effect.flatMap((request) => request(target, context, turn)),
-    Effect.withSpan("agent.model.attempt", { attributes: { provider: target.provider, model: target.model } }),
-    Effect.tap(() =>
-      fellBack
-        ? Effect.gen(function* () {
-            yield* (yield* Report)(
-              { _tag: "ModelChangeArrived", provider: target.provider, model: target.model },
-              harnessParts.fallbackChain,
-            );
-          })
-        : Effect.void,
-    ),
-  );
-  if (next === undefined) return tried;
-  return tried.pipe(
-    Effect.catchIf(
-      (failed) => fallsBackOn.has(failed.error.reason._tag),
-      ({ error, request }) =>
-        Effect.gen(function* () {
+      return yield* request(target, context, turn);
+    }).pipe(Effect.withSpan("agent.model.attempt", { attributes: { provider: target.provider, model: target.model } }));
+    if (fellBack) yield* (yield* Report)({ _tag: "ModelChangeArrived", provider: target.provider, model: target.model }, harnessParts.fallbackChain);
+    return response;
+  });
+
+/** The `while` predicate of the step that sends the request to `to`, after the attempt at `from` failed. */
+const movesOn =
+  (from: Target, to: Target, turn: TurnId) =>
+  ({ error, request }: RequestFailed): Effect.Effect<boolean> =>
+    fallsBackOn.has(error.reason._tag)
+      ? Effect.gen(function* () {
           yield* (yield* Report)(
             {
               _tag: "ModelAttemptFailed",
               turn,
-              provider: target.provider,
-              model: target.model,
+              provider: from.provider,
+              model: from.model,
               failure: FailureText.make(error.message),
               error: receivedAiError(error),
               request,
             },
-            { _tag: "Provider", provider: target.provider },
+            { _tag: "Provider", provider: from.provider },
           );
           yield* Effect.logWarning(logKeys.provider.fellBack, {
-            from: { provider: target.provider, model: target.model },
-            to: { provider: next.provider, model: next.model },
+            from: { provider: from.provider, model: from.model },
+            to: { provider: to.provider, model: to.model },
             reason: error.reason._tag,
             message: error.message,
           });
-          return yield* attempt(chain, [next, ...rest], context, turn, true);
-        }),
-    ),
-  );
-};
+          return true;
+        })
+      : Effect.succeed(false);
+
+/** The plan for one request: a step for each of `targets`, in order. */
+const planFor = (chain: FallbackChain, targets: readonly [Target, ...ReadonlyArray<Target>], turn: TurnId) =>
+  Effect.gen(function* () {
+    const [chosen, ...fallbacks] = targets;
+    const first = { provide: Context.make(FallbackStep, { target: chosen, request: yield* requestFor(chain, chosen) }) };
+    // Each fallback, paired with the target before it.
+    const rest = yield* Effect.forEach(Arr.zip(targets, fallbacks), ([from, target]) =>
+      requestFor(chain, target).pipe(
+        Effect.map((request) => ({ provide: Context.make(FallbackStep, { target, request }), while: movesOn(from, target, turn) })),
+      ),
+    );
+    return ExecutionPlan.make(first, ...rest);
+  });
 
 /** The model client over `chain`. The fallbacks' providers are checked when the layer is built; the chosen target's provider is checked per request. */
 export const FallbackModelClient = (chain: FallbackChain) =>
@@ -122,13 +145,10 @@ export const FallbackModelClient = (chain: FallbackChain) =>
       Effect.as(
         ModelClient.of({
           respond: (target, context, turn) =>
-            attempt(
-              chain,
-              [target, ...chain.fallbacks.filter((fallback) => !sameTarget(fallback, target))],
-              context,
-              turn,
-              false,
-            ).pipe(Effect.catch(failedAs(turn))),
+            planFor(chain, [target, ...chain.fallbacks.filter((fallback) => !sameTarget(fallback, target))], turn).pipe(
+              Effect.flatMap((plan) => Effect.withExecutionPlan(attempt(context, turn), plan)),
+              Effect.catch(failedAs(turn)),
+            ),
         }),
       ),
     ),
