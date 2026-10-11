@@ -6,7 +6,7 @@ import { Effect, Ref } from "effect";
 import type * as AiError from "effect/ai/AiError";
 import type { Received } from "../../agent-machine/received.ts";
 import type { ModelContext, Target } from "../contracts.ts";
-import { defaultRetries, invalidOutput, type Post, postJson, type Retries, withRetries } from "../provider-call.ts";
+import { defaultRetries, invalidOutput, type Post, postJson, type Retries } from "../provider-call.ts";
 import { receivedJson } from "../received.ts";
 import { filesIn, isObject, type Json, type OmittedLogged, logSupplied } from "../shaping.ts";
 import { body } from "./openai-client.ts";
@@ -44,14 +44,13 @@ export const openAiCompactions = (
       const post: Post = { path: "/responses/compact", headers: {}, body: sent.json as Record<string, Json> };
       return logSupplied(sent.supplied, target, undefined, omittedLogged).pipe(
         Effect.andThen(
-          postJson(http, compactCaller, post).pipe(
+          postJson(http, compactCaller, post, retries).pipe(
             Effect.flatMap((response) => {
               if (!isObject(response) || !Array.isArray(response["output"]))
                 return Effect.fail(invalidOutput(compactCaller, `The compaction has no output: ${JSON.stringify(response)}`));
               const { output, ...metadata } = response;
               return Effect.succeed({ output: receivedJson(output), metadata: receivedJson(metadata) });
             }),
-            withRetries(retries),
           ),
         ),
       );

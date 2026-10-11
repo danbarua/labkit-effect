@@ -57,7 +57,7 @@ import {
 } from "../contracts.ts";
 import { logKeys } from "../log-keys.ts";
 import { ModelStream, type Streamed } from "../model-stream.ts";
-import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEvents, type Retries, withRetries } from "../provider-call.ts";
+import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEvents, type Retries } from "../provider-call.ts";
 import { reportAdjusted, type Settled } from "../configuration/settings.ts";
 import { anthropicSettle } from "./anthropic-settings.ts";
 import { assemble, assembled, cut, nothingYet } from "./anthropic-stream.ts";
@@ -319,10 +319,15 @@ const respondOnce = (
   post: Post,
   target: Target,
   turn: TurnId,
+  retries: Retries,
 ): Effect.Effect<Extract<Outcome, { _tag: "ModelResponded" }>, AiError.AiError> =>
   Effect.gen(function* () {
     const passOn = yield* ModelStream;
-    const arrived = yield* postEvents(http, caller, post).pipe(
+    const arrived = yield* postEvents(
+      http,
+      caller,
+      post,
+      retries,
       Stream.runFoldEffect(
         () => nothingYet,
         (state, event) =>
@@ -405,7 +410,7 @@ export const anthropicRequests = (
         };
         return reportAdjusted(turn, target, settled).pipe(
           Effect.andThen(logSupplied([...fields.supplied, ...sent.supplied], target, turn, omittedLogged)),
-          Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
+          Effect.andThen(respondOnce(http, post, target, turn, retries).pipe(failedPosting(post))),
         );
         }),
       );

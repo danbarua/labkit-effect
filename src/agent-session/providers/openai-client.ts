@@ -50,7 +50,6 @@ import {
   type Post,
   postEvents,
   type Retries,
-  withRetries,
 } from "../provider-call.ts";
 import { logKeys } from "../log-keys.ts";
 import { ModelStream } from "../model-stream.ts";
@@ -284,10 +283,15 @@ const respondOnce = (
   post: Post,
   target: Target,
   turn: TurnId,
+  retries: Retries,
 ): Effect.Effect<Responded, AiError.AiError> =>
   Effect.gen(function* () {
     const passOn = yield* ModelStream;
-    const ended = yield* postEvents(http, caller, post).pipe(
+    const ended = yield* postEvents(
+      http,
+      caller,
+      post,
+      retries,
       Stream.runFoldEffect(
         (): Reading => ({ response: undefined, kinds: HashMap.empty(), summaries: HashMap.empty() }),
         (reading, event) =>
@@ -332,8 +336,7 @@ const respondOnce = (
             }
           }),
       ),
-      Effect.map((reading) => reading.response),
-    );
+    ).pipe(Effect.map((reading) => reading.response));
     if (ended === undefined || !isObject(ended) || !Array.isArray(ended["output"]))
       return yield* invalidOutput(caller, `The stream ended without a response: ${JSON.stringify(ended ?? null)}`);
     const { output, status, incomplete_details, ...metadata } = ended;
@@ -384,7 +387,7 @@ export const openAiRequests = (
         };
         return reportAdjusted(turn, target, settled).pipe(
           Effect.andThen(logSupplied(sent.supplied, target, turn, omittedLogged)),
-          Effect.andThen(respondOnce(http, post, target, turn).pipe(withRetries(retries), failedPosting(post))),
+          Effect.andThen(respondOnce(http, post, target, turn, retries).pipe(failedPosting(post))),
         );
         }),
       );

@@ -18,8 +18,8 @@
  * The chain is an `ExecutionPlan` (`effect`, `@stability unstable` in 4.0.2), built for each request,
  * with one step for each target. A step provides its target and its provider's request function
  * (`FallbackStep`), and the attempt run under the plan reads them.
- * - Each step makes one attempt: it has no `attempts` and no `schedule`. The adapter retries within
- *   the attempt (`withRetries`, `provider-call.ts`).
+ * - Each step makes one attempt: it has no `attempts` and no `schedule`. The request is retried
+ *   within the attempt, before the provider begins to respond (`provider-call.ts`).
  * - The first step has no `while` predicate. Effect does not consult the first step's `while` when
  *   the step has no `attempts`.
  * - Step `i`'s `while` receives the error of step `i - 1`'s attempt, and decides whether step `i`
