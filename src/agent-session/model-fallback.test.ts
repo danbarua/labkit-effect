@@ -42,17 +42,18 @@ const mock = (): VidaiMock => {
 
 const anthropic: Target = { provider: ProviderName.make("anthropic"), model: ModelName.make("claude-sonnet-5") };
 const openAi: Target = { provider: ProviderName.make("openai"), model: ModelName.make("gpt-5.6") };
+const anthropicHaiku: Target = { provider: ProviderName.make("anthropic"), model: ModelName.make("claude-haiku-4-5") };
 const noRetries: Retries = { times: 0, firstWait: "1 millis" };
 
-/** Anthropic, then OpenAI, each at the mock, each attempt observed as the hosts observe it; a provider given a status fails every request with it. */
-const chain = (status: { readonly anthropic?: number; readonly openAi?: number }) =>
+/** Anthropic, then `fallbacks` (OpenAI by default), each at the mock, each attempt observed as the hosts observe it; a provider given a status fails every request with it. */
+const chain = (status: { readonly anthropic?: number; readonly openAi?: number }, fallbacks: ReadonlyArray<Target> = [openAi]) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const requests = new Map([
         [anthropic.provider, observedAttempts(yield* anthropicRequests(noRetries))],
         [openAi.provider, observedAttempts(yield* openAiRequests(noRetries))],
       ]);
-      return FallbackModelClient({ requests, fallbacks: [openAi] });
+      return FallbackModelClient({ requests, fallbacks });
     }),
   ).pipe(Layer.provide(Layer.mergeAll(anthropicAtMock(mock(), status.anthropic), openAiAtMock(mock(), status.openAi))));
 
@@ -63,6 +64,7 @@ const chain = (status: { readonly anthropic?: number; readonly openAi?: number }
 const oneTurn = async (
   status: { readonly anthropic?: number; readonly openAi?: number },
   inputs: ReadonlyArray<string> = ["hello"],
+  fallbacks?: ReadonlyArray<Target>,
 ) => {
   const logged: Array<unknown> = [];
   const facts: ReadonlyArray<Fact> = await runTest(
@@ -83,7 +85,7 @@ const oneTurn = async (
       Effect.provide(
         Layer.mergeAll(
           ModelFromFacts,
-          chain(status),
+          chain(status, fallbacks),
           BoringContextAssembler,
           CountingTurns,
           SmolToolRunner,
@@ -132,6 +134,21 @@ test("Anthropic's rate limit (HTTP 429) falls back too", async () => {
     "ModelResponded",
   ]);
   expect(ended).toEqual(["Completed"]);
+});
+
+test("with two fallbacks, each failed attempt is recorded with its own model: Claude Sonnet, then Claude Haiku, then OpenAI answers", async () => {
+  const { model, ended, fellBack } = await oneTurn({ anthropic: 529 }, ["hello"], [anthropicHaiku, openAi]);
+  expect(model).toMatchObject([
+    { _tag: "ModelRequestDispatched", provider: "anthropic", model: "claude-sonnet-5" },
+    { _tag: "ModelAttemptFailed", provider: "anthropic", model: "claude-sonnet-5" },
+    { _tag: "ModelRequestDispatched", provider: "anthropic", model: "claude-haiku-4-5" },
+    { _tag: "ModelAttemptFailed", provider: "anthropic", model: "claude-haiku-4-5" },
+    { _tag: "ModelRequestDispatched", provider: "openai", model: "gpt-5.6" },
+    { _tag: "ModelChangeArrived", provider: "openai", model: "gpt-5.6" },
+    { _tag: "ModelResponded", provider: "openai", model: "gpt-5.6" },
+  ]);
+  expect(ended).toEqual(["Completed"]);
+  expect(fellBack).toBe(2);
 });
 
 test("after falling back, the session stays on OpenAI: the next turn asks it first, and Anthropic is not tried again", async () => {

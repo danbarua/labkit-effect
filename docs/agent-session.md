@@ -252,7 +252,10 @@ back into the core's observations:
   arrived. A call with no name stays `Unrecognised`.
 - `model-fallback.ts` tries the session's target, then each fallback, moving on only after a
   failure that means the provider cannot serve the request now. When a fallback answers, the chain
-  records a change of model to it.
+  records a change of model to it. The chain is Effect's `ExecutionPlan`, built for each request
+  with one step for each target. Each step makes one attempt, and the adapter retries within it.
+  The `while` predicate of each step after the first decides whether to move on from the previous
+  step's failure, and records the failed attempt when it does.
 - Each adapter's `*-settings.ts` maps the session's settings, the user's intent, to the provider's
   fields, from what is known of the model (`well-known-models.ts`: models.dev, the measured entries,
   the user's overrides). A setting that a model does not take is sent as the nearest one it does, or
