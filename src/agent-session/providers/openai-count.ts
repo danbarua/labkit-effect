@@ -10,7 +10,7 @@ import { OpenAiClient } from "@effect/ai-openai";
 import { Effect } from "effect";
 import type * as AiError from "effect/ai/AiError";
 import type { ModelContext, Target } from "../contracts.ts";
-import { defaultRetries, invalidOutput, type Post, postJson, type Retries, withRetries } from "../provider-call.ts";
+import { defaultRetries, invalidOutput, type Post, postJson, type Retries } from "../provider-call.ts";
 import { filesIn, type Json, numberAt } from "../shaping.ts";
 import { body } from "./openai-client.ts";
 
@@ -26,14 +26,13 @@ export const openAiInputTokens = (
       filesIn(context, blobs).pipe(
         Effect.flatMap((files) => {
           const post: Post = { path: "/responses/input_tokens", headers: {}, body: body(target, context, files).json as Record<string, Json> };
-          return postJson(http, caller, post).pipe(
+          return postJson(http, caller, post, retries).pipe(
             Effect.flatMap((response) => {
               const counted = numberAt(response, "input_tokens");
               return counted === undefined
                 ? Effect.fail(invalidOutput(caller, `The count has no input_tokens: ${JSON.stringify(response)}`))
                 : Effect.succeed(counted);
             }),
-            withRetries(retries),
           );
         }),
       );

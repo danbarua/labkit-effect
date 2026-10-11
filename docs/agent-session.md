@@ -238,10 +238,12 @@ back into the core's observations:
 | `providers/xai-client.ts`           | xAI, through the Responses adapter |
 | `providers/openai-compat-client.ts` | OpenAI-compatible Chat Completions |
 
-- `provider-call.ts` does what every adapter does around one request: posts it, retries the
-  failures that `AiError` marks retryable before a response begins, and otherwise ends as
-  `ModelFailed` with the error and the request as posted. The whole error is logged where it is
-  caught.
+- `provider-call.ts` does what every adapter does around one request: it posts the request, and
+  posts it again after a failure that `AiError` marks retryable and that came before the provider
+  began to respond (a 2xx status). This is the only place where a request is made again: a model
+  request, a count of tokens and a compaction are all retried there. A failure while a response
+  that has begun is read is not retried. Otherwise the request ends as `ModelFailed` with the error
+  and the request as posted. The whole error is logged where it is caught.
 - `shaping.ts` holds what every adapter needs to shape a context. Where an adapter supplies or
   replaces something that the context does not say, it records it as `Supplied` and logs it.
 - A tool call needs an id: its result is sent back under it. When a Chat Completions server sends a
@@ -253,9 +255,9 @@ back into the core's observations:
 - `model-fallback.ts` tries the session's target, then each fallback, moving on only after a
   failure that means the provider cannot serve the request now. When a fallback answers, the chain
   records a change of model to it. The chain is Effect's `ExecutionPlan`, built for each request
-  with one step for each target. Each step makes one attempt, and the adapter retries within it.
-  The `while` predicate of each step after the first decides whether to move on from the previous
-  step's failure, and records the failed attempt when it does.
+  with one step for each target. Each step makes one attempt, and the request is retried within it
+  (`provider-call.ts`). The `while` predicate of each step after the first decides whether to move
+  on from the previous step's failure, and records the failed attempt when it does.
 - Each adapter's `*-settings.ts` maps the session's settings, the user's intent, to the provider's
   fields, from what is known of the model (`well-known-models.ts`: models.dev, the measured entries,
   the user's overrides). A setting that a model does not take is sent as the nearest one it does, or

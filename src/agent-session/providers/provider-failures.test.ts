@@ -264,6 +264,19 @@ test("a stream closed before its last chunk fails the request, which is not made
   expect(events(logKeys.provider.notRetried)).toMatchObject([[logKeys.provider.notRetried, { reason: "NetworkError" }]]);
 });
 
+test("a retryable error that the stream reports after it began (Anthropic's overloaded_error) fails the request, which is not made again", async () => {
+  const overloaded = `event: error\ndata: ${JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Overloaded" } })}\n\n`;
+  const server = rawServer([`HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: ${Buffer.byteLength(overloaded)}\r\n\r\n${overloaded}`]);
+  const { observed, events } = await asked(anthropicModelClient({ times: 2, firstWait: "1 millis" }).pipe(Layer.provide(anthropicAt(server.url))), "anthropic");
+  server.stop();
+  expect(observed).toMatchObject({ _tag: "ModelFailed", failure: expect.stringContaining("overloaded_error") });
+  expect(server.requests()).toBe(1);
+  expect(events(logKeys.provider.requestRetried)).toEqual([]);
+  expect(events(logKeys.provider.notRetried)).toMatchObject([
+    [logKeys.provider.notRetried, { reason: "InternalProviderError", why: "the provider had begun to respond" }],
+  ]);
+});
+
 test("a body handed over whole whose size is not its Content-Length fails as a transport error; an encoded body is not compared", async () => {
   // Bun's fetch fails a body cut short itself; a client that hands one over is checked here.
   const handingOver = (headers: Record<string, string>) =>

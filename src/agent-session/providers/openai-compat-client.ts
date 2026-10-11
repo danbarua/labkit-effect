@@ -45,7 +45,7 @@ import type * as HttpClient from "effect/http/HttpClient";
 import { CallId, ModelText, StopReason, ThinkingText, ToolName, type TurnId } from "../../agent-machine/names.ts";
 import type { ModelPart, Observation } from "../../agent-machine/observation.ts";
 import { type ContextMessage, type ContextPart, type ModelContext, ModelClient, type ProviderRequest, type Target } from "../contracts.ts";
-import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEventsOrWhole, type Retries, withRetries } from "../provider-call.ts";
+import { defaultRetries, failedPosting, invalidOutput, modelClientOf, type Post, postEventsOrWhole, type Retries } from "../provider-call.ts";
 import { ModelStream, type Streamed } from "../model-stream.ts";
 import { logKeys } from "../log-keys.ts";
 import { reportAdjusted } from "../configuration/settings.ts";
@@ -545,10 +545,15 @@ const respondOnce = (
   target: Target,
   turn: TurnId,
   ids: IdGenerator.Service,
+  retries: Retries,
 ): Effect.Effect<Responded, AiError.AiError> =>
   Effect.gen(function* () {
     const passOn = yield* ModelStream;
-    const end = yield* postEventsOrWhole(http, caller, post).pipe(
+    const end = yield* postEventsOrWhole(
+      http,
+      caller,
+      post,
+      retries,
       Stream.runFoldEffect(
         (): Streaming => ({ finish: undefined, usage: undefined, metadata: {}, building: nothingBuilt, passed: HashSet.empty() }),
         (so, chunk) =>
@@ -632,7 +637,7 @@ export const openAiCompatRequests = (
         };
         return reportAdjusted(turn, target, settled).pipe(
           Effect.andThen(logSupplied(sent.supplied, target, turn, omittedLogged)),
-          Effect.andThen(respondOnce(http, post, target, turn, ids).pipe(withRetries(retries), failedPosting(post))),
+          Effect.andThen(respondOnce(http, post, target, turn, ids, retries).pipe(failedPosting(post))),
         );
         }),
       );
