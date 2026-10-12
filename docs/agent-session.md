@@ -253,8 +253,12 @@ back into the core's observations:
   id, and a warning (`provider.response.call_id_supplied`) gives the tool, the id and the call as it
   arrived. A call with no name stays `Unrecognised`.
 - `model-fallback.ts` tries the session's target, then each fallback, moving on only after a
-  failure that means the provider cannot serve the request now. When a fallback answers, the chain
-  records a change of model to it. The chain is Effect's `ExecutionPlan`, built for each request
+  failure that means the provider cannot serve the request now (it is unreachable, or refuses to
+  serve the request), from an attempt that had passed nothing on (no text, commentary or thinking,
+  and no part of the response). A failure after the attempt passed something on fails the request:
+  what the response passed on, and any tool call it started, belong to that response. The session's
+  next request goes through the chain again. When a fallback answers, the chain records a change of
+  model to it. The chain is Effect's `ExecutionPlan`, built for each request
   with one step for each target. Each step makes one attempt, and the request is retried within it
   (`provider-call.ts`). The `while` predicate of each step after the first decides whether to move
   on from the previous step's failure, and records the failed attempt when it does.

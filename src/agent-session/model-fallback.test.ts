@@ -28,6 +28,9 @@ import { type SpanLine, SpansTo } from "../instrumentation/telemetry.ts";
 import { observedAttempts } from "../instrumentation/model-attempts.ts";
 import { runTest } from "../../tests/support/run.ts";
 import { anthropicAtMock, openAiAtMock, startVidaiMock, type VidaiMock } from "../../tests/support/vidaimock.ts";
+import { anthropicAt, openAiAt, recordingServer } from "../../tests/support/providers.ts";
+import type { AnthropicClient } from "@effect/ai-anthropic";
+import type { OpenAiClient } from "@effect/ai-openai";
 import { EphemeralBlobs, EphemeralSessionStore } from "../agent-host/ephemeral-session.ts";
 
 const state: { mock?: VidaiMock } = {};
@@ -45,8 +48,8 @@ const openAi: Target = { provider: ProviderName.make("openai"), model: ModelName
 const anthropicHaiku: Target = { provider: ProviderName.make("anthropic"), model: ModelName.make("claude-haiku-4-5") };
 const noRetries: Retries = { times: 0, firstWait: "1 millis" };
 
-/** Anthropic, then `fallbacks` (OpenAI by default), each at the mock, each attempt observed as the hosts observe it; a provider given a status fails every request with it. */
-const chain = (status: { readonly anthropic?: number; readonly openAi?: number }, fallbacks: ReadonlyArray<Target> = [openAi]) =>
+/** Anthropic, then `fallbacks` (OpenAI by default), through the providers' clients `at`, each attempt observed as the hosts observe it. */
+const chainAt = (at: Layer.Layer<AnthropicClient.AnthropicClient | OpenAiClient.OpenAiClient>, fallbacks: ReadonlyArray<Target> = [openAi]) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const requests = new Map([
@@ -55,17 +58,24 @@ const chain = (status: { readonly anthropic?: number; readonly openAi?: number }
       ]);
       return FallbackModelClient({ requests, fallbacks });
     }),
-  ).pipe(Layer.provide(Layer.mergeAll(anthropicAtMock(mock(), status.anthropic), openAiAtMock(mock(), status.openAi))));
+  ).pipe(Layer.provide(at));
+
+/** The chain at the mock; a provider given a status fails every request with it. */
+const chain = (status: { readonly anthropic?: number; readonly openAi?: number }, fallbacks: ReadonlyArray<Target> = [openAi]) =>
+  chainAt(Layer.mergeAll(anthropicAtMock(mock(), status.anthropic), openAiAtMock(mock(), status.openAi)), fallbacks);
 
 /**
  * A session that starts on Anthropic and asks the model its facts name, with one turn per input:
  * the model observations recorded, how each turn ended, and how often the chain fell back.
  */
-const oneTurn = async (
+const oneTurn = (
   status: { readonly anthropic?: number; readonly openAi?: number },
   inputs: ReadonlyArray<string> = ["hello"],
   fallbacks?: ReadonlyArray<Target>,
-) => {
+) => turnsThrough(chain(status, fallbacks), inputs);
+
+/** As `oneTurn`, with the model client `client`. */
+const turnsThrough = async (client: ReturnType<typeof chainAt>, inputs: ReadonlyArray<string>) => {
   const logged: Array<unknown> = [];
   const facts: ReadonlyArray<Fact> = await runTest(
     Effect.gen(function* () {
@@ -85,7 +95,7 @@ const oneTurn = async (
       Effect.provide(
         Layer.mergeAll(
           ModelFromFacts,
-          chain(status, fallbacks),
+          client,
           BoringContextAssembler,
           CountingTurns,
           SmolToolRunner,
@@ -175,6 +185,63 @@ test("both providers are down, so the turn fails with OpenAI's error; Anthropic'
   expect(attempt?._tag === "ModelAttemptFailed" ? reasonIn(attempt.error) : undefined).toBe("InternalProviderError");
   expect(failed?._tag === "ModelFailed" ? reasonIn(failed.error) : undefined).toBe("RateLimitError");
   expect(ended).toEqual(["Failed"]);
+});
+
+/** Anthropic answers each request with HTTP 200 and `events` as its stream, and OpenAI with "Hello."; one turn through the chain, and how often each was asked. */
+const streamedThenFailed = async (events: ReadonlyArray<Record<string, unknown>>) => {
+  const stream = events.map((data) => `event: ${String(data["type"])}\ndata: ${JSON.stringify(data)}\n\n`).join("");
+  let anthropicAsked = 0;
+  const anthropicServer = Bun.serve({
+    port: 0,
+    fetch() {
+      anthropicAsked++;
+      return new Response(stream, { headers: { "content-type": "text/event-stream" } });
+    },
+  });
+  const openAiServer = recordingServer([
+    { status: "completed", output: [{ type: "message", id: "m_1", role: "assistant", content: [{ type: "output_text", text: "Hello." }] }] },
+  ]);
+  const turn = await turnsThrough(chainAt(Layer.mergeAll(anthropicAt(anthropicServer.url), openAiAt(openAiServer.url))), ["hello"]).finally(() => {
+    void anthropicServer.stop(true);
+    void openAiServer.stop();
+  });
+  return { ...turn, anthropicAsked, openAiAsked: openAiServer.bodies.length };
+};
+
+const messageStart = { type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", content: [], model: "claude-sonnet-5" } };
+const overloaded = { type: "error", error: { type: "overloaded_error", message: "Overloaded" } };
+
+test("Anthropic's stream passes on text, then reports overloaded_error: the turn fails with it, and OpenAI is not asked", async () => {
+  const { model, ended, fellBack, anthropicAsked, openAiAsked } = await streamedThenFailed([
+    messageStart,
+    { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hel" } },
+    overloaded,
+  ]);
+  expect(model.map((observation) => observation._tag)).toEqual(["ModelRequestDispatched", "ModelFailed"]);
+  const [, failed] = model;
+  expect(failed).toMatchObject({ failure: expect.stringContaining("overloaded_error") });
+  // A reason in fallsBackOn: had the stream passed nothing on, the chain would have moved on.
+  expect(failed?._tag === "ModelFailed" ? reasonIn(failed.error) : undefined).toBe("InternalProviderError");
+  expect(ended).toEqual(["Failed"]);
+  expect(fellBack).toBe(0);
+  expect(anthropicAsked).toBe(1);
+  expect(openAiAsked).toBe(0);
+});
+
+test("Anthropic answers HTTP 200, then its stream reports overloaded_error before it passes anything on: OpenAI answers", async () => {
+  const { model, ended, fellBack, anthropicAsked, openAiAsked } = await streamedThenFailed([messageStart, overloaded]);
+  expect(model.map((observation) => observation._tag)).toEqual([
+    "ModelRequestDispatched",
+    "ModelAttemptFailed",
+    "ModelRequestDispatched",
+    "ModelChangeArrived",
+    "ModelResponded",
+  ]);
+  expect(ended).toEqual(["Completed"]);
+  expect(fellBack).toBe(1);
+  expect(anthropicAsked).toBe(1);
+  expect(openAiAsked).toBe(1);
 });
 
 test("Anthropic rejects the key (HTTP 401): the turn fails with it, and OpenAI is not asked", async () => {
